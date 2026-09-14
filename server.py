@@ -48,7 +48,17 @@ from urllib.request import Request, urlopen
 from backend.db import row_factory as database_row_factory
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db.manager import DatabaseManager
+from backend.db.schema import (
+    CURRENT_DATABASE_INDEXES,
+    CURRENT_DATABASE_SCHEMA,
+    configure_cipher,
+    database_index_names,
+    database_schema_is_current,
+    database_table_names,
+)
+from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config, load_local_env as load_config_env
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
+from backend.providers.gemini import function_tools as gemini_function_tools, response_text as gemini_response_text
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
@@ -197,7 +207,6 @@ STALE_PLANNING_REVISION_ERROR = "Die lokale Planrevision ist inzwischen veraltet
 UNSUPPORTED_BYDAY_ERROR = "BYDAY der Kalender-Wiederholung wird nicht unterstützt."
 STATIC_IMMUTABLE_MAX_AGE = 31536000
 APP_VERSION = "1.11.1"
-DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -469,86 +478,12 @@ def garmin_operation(function: Any) -> Any:
     return guarded
 
 
-def _read_local_env(path: Path) -> list[str]:
-    try:
-        return path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-
-
-def _parse_local_env_line(raw_line: str) -> tuple[str, str] | None:
-    line = raw_line.strip()
-    if not line or line.startswith("#"):
-        return None
-    if line.startswith("export "):
-        line = line[7:].lstrip()
-    key, separator, value = line.partition("=")
-    key = key.strip()
-    if not separator or not re.fullmatch(r"(?a:(?!\d)\w+)", key):
-        return None
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        value = value[1:-1]
-    return key, value
-
-
 def load_local_env() -> None:
-    """Load local and persistent settings while preserving non-empty process env values."""
-    for env_path in (ROOT / ".env", DATA_DIR / ".env"):
-        for raw_line in _read_local_env(env_path):
-            parsed = _parse_local_env_line(raw_line)
-            if parsed and not os.environ.get(parsed[0]):
-                # Docker/Unraid values supplied with -e are authoritative. Empty
-                # process values still allow a persisted local setting to fill in.
-                os.environ[parsed[0]] = parsed[1]
+    """Compatibility entrypoint for tests and settings persistence."""
+    load_config_env(ROOT, DATA_DIR)
 
 
-load_local_env()
-
-
-def env_int(name: str, default: int) -> int:
-    try:
-        return int(os.environ.get(name, str(default)))
-    except (TypeError, ValueError):
-        return default
-
-
-def env_bool(name: str, default: bool = False) -> bool:
-    value = str(os.environ.get(name, "")).strip().casefold()
-    if not value:
-        return default
-    return value in {"1", "true", "yes", "on"}
-
-
-@dataclass(frozen=True)
-class Config:
-    port: int = int(os.environ.get("PORT", "8090"))
-    openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
-    openai_base_url: str = os.environ.get("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL)
-    openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna")
-    gemini_api_key: str = os.environ.get("GEMINI_API_KEY", "")
-    gemini_model: str = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
-    ai_provider: str = os.environ.get("AI_PROVIDER", "").strip().casefold()
-    intervals_api_key: str = os.environ.get("INTERVALS_API_KEY", "")
-    intervals_athlete_id: str = os.environ.get("INTERVALS_ATHLETE_ID", "0")
-    garmin_email: str = os.environ.get("GARMIN_EMAIL", "")
-    garmin_password: str = os.environ.get("GARMIN_PASSWORD", "")
-    garmin_tokenstore: str = os.environ.get("GARMINTOKENS", str(DATA_DIR / "garmin_tokens"))
-    # Optional local fixture for testing the Garmin UI/context without a Garmin
-    # login or the optional third-party package.
-    garmin_fixture_path: str = os.environ.get("GARMIN_FIXTURE_PATH", "")
-    # Read-only access via a shared calendar's private iCal address.
-    # The address is a credential and must remain server-side.
-    calendar_ical_url: str = os.environ.get("CALENDAR_ICAL_URL", "")
-    app_password: str = os.environ.get("APP_PASSWORD", "")
-    # Set COOKIE_SECURE=true when TLS is terminated before this application.
-    # It stays opt-in so the documented local HTTP development flow works.
-    secure_cookies: bool = env_bool("COOKIE_SECURE", False)
-    # -1 disables automatic deletion; this is the safe default for an athlete's history.
-    data_retention_days: int = env_int("DATA_RETENTION_DAYS", -1)
-
-
-CONFIG = Config()
+CONFIG = load_config(ROOT, DATA_DIR)
 LOGGER = logging.getLogger("intervals_coach")
 MODEL_OPTIONS = (
     {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "description": "Effizient für kostenbewusste Nutzung"},
@@ -1139,21 +1074,6 @@ def security_configuration_error() -> str | None:
     return None
 
 
-def _sqlcipher_key(password: str) -> str:
-    # PRAGMA values cannot be bound with sqlite parameters. Escaping the
-    # single quote keeps the value inside the literal and never logs it.
-    return password.replace("'", "''")
-
-
-def _configure_cipher(db: Any, password: str) -> None:
-    db.execute(f"PRAGMA key='{_sqlcipher_key(password)}'")
-    db.execute("PRAGMA cipher_compatibility = 4")
-    db.execute("PRAGMA cipher_memory_security = ON")
-
-
-# A request-scoped connection lets composite reads reuse one SQLCipher setup.
-# The outer caller still owns DB_LOCK; nested database() calls only reuse it.
-DATABASE_CONTEXT: ContextVar[Any | None] = ContextVar("database_context", default=None)
 OPERATION_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar("operation_context", default=None)
 DATABASE_MANAGER: DatabaseManager | None = None
 DATABASE_MANAGER_SIGNATURE: tuple[str, str, bool] | None = None
@@ -1367,7 +1287,7 @@ def database_manager() -> DatabaseManager:
             DB_PATH,
             sqlite_backend if CONFIG.app_password else sqlite3,
             password=CONFIG.app_password,
-            configure=_configure_cipher,
+            configure=configure_cipher,
             row_factory=database_row_factory,
             reader_count=4,
             timeout=20,
@@ -1379,16 +1299,9 @@ def database_manager() -> DatabaseManager:
 
 @contextmanager
 def database():
-    existing = DATABASE_CONTEXT.get()
-    if existing is not None:
-        yield existing
-        return
+    """Use the database manager as the sole nested transaction owner."""
     with database_manager().unit_of_work() as db:
-        context_token = DATABASE_CONTEXT.set(db)
-        try:
-            yield db
-        finally:
-            DATABASE_CONTEXT.reset(context_token)
+        yield db
 
 
 def initialise_database() -> None:
@@ -9068,20 +8981,24 @@ def training_calendar_items(planned: list[Any], activities: list[Any]) -> list[d
 
 
 class IntervalsClient:
-    def __init__(self, config: Config = CONFIG):
-        self.config = config
-        credentials = base64.b64encode(f"API_KEY:{config.intervals_api_key}".encode()).decode()
+    def __init__(self, config: Config | None = None, *, request: Callable[..., Any] | None = None):
+        # Resolve the application snapshot at construction time.  A default
+        # argument would permanently capture the import-time configuration and
+        # make isolated callers/tests unable to supply a replacement.
+        self.config = config if config is not None else CONFIG
+        request_fn = request or http_json
+        credentials = base64.b64encode(f"API_KEY:{self.config.intervals_api_key}".encode()).decode()
         self.headers = {"Authorization": f"Basic {credentials}"}
         self.base = "https://intervals.icu/api/v1"
         self._read_transport = IntervalsReadTransport(
             self.base,
             self.headers,
-            lambda *args, **kwargs: http_json(*args, **kwargs),
+            lambda *args, **kwargs: request_fn(*args, **kwargs),
         )
         self._write_transport = IntervalsWriteTransport(
             self.base,
             self.headers,
-            lambda *args, **kwargs: http_json(*args, **kwargs),
+            lambda *args, **kwargs: request_fn(*args, **kwargs),
         )
         self.pagination: dict[str, dict[str, Any]] = {}
         self._workout_folder_id: int | None = None
@@ -15492,21 +15409,11 @@ def _gemini_local_chat_history() -> list[dict[str, Any]]:
 
 
 def _gemini_text(result: Any) -> str:
-    candidates = result.get("candidates") if isinstance(result, dict) else []
-    candidate = candidates[0] if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict) else {}
-    content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
-    parts = content.get("parts") if isinstance(content.get("parts"), list) else []
-    return "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict) and part.get("text")).strip()
+    return gemini_response_text(result)
 
 
 def _gemini_tools(tools: Any) -> list[dict[str, Any]]:
-    declarations = []
-    for tool in tools if isinstance(tools, list) else []:
-        if not isinstance(tool, dict) or tool.get("type") != "function" or not tool.get("name"):
-            continue
-        declarations.append({"name": str(tool["name"]), "description": str(tool.get("description") or ""),
-                             "parametersJsonSchema": tool.get("parameters") if isinstance(tool.get("parameters"), dict) else {"type": "object", "properties": {}}})
-    return [{"functionDeclarations": declarations}] if declarations else []
+    return gemini_function_tools(tools)
 
 
 def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:  # NOSONAR - provider payload assembly is intentionally kept atomic
@@ -20914,7 +20821,7 @@ def public_bootstrap() -> dict[str, Any]:
     """Return bounded local state without waiting for any provider network call."""
     # The startup screen waits for this response. Keep all of its local reads
     # on one connection so SQLCipher is keyed once instead of once per helper.
-    # The nested helpers reuse the active DATABASE_CONTEXT connection.
+    # The nested helpers reuse the active DatabaseManager unit of work.
     with DB_LOCK, database():
         snapshot = latest_snapshot()
         local_planned = list_dated_local_planned_workouts(limit=250)
@@ -21615,75 +21522,9 @@ def _privacy_export_file() -> Path:
         raise
 
 
-CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
-    "kv": {"key", "value", "updated_at"},
-    "messages": {"id", "role", "content", "client_turn_id", "created_at", "attachments"},
-    "snapshots": {"id", "payload", "created_at"},
-    "workout_library": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "last_synced_at", "updated_at"},
-    "planned_units": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "sync_conflict", "baseline_hash", "last_synced_at", "plan_id", "revision", "tombstone", "command_id", "created_at", "updated_at"},
-    "planning_state": {"id", "revision", "updated_at"},
-    "coach_plan_artifacts": {"id", "conversation_id", "client_turn_id", "base_revision", "status", "payload", "created_at", "updated_at"},
-    "coach_commands": {"id", "client_turn_id", "conversation_id", "intent", "target_system", "artifact_id", "status", "receipt", "error_class", "created_at", "updated_at"},
-    "sync_jobs": {"id", "provider", "type", "status", "payload", "requested_by", "attempts", "progress_total", "progress_completed", "error_class", "available_at", "started_at", "finished_at", "created_at", "updated_at"},
-    "sync_job_items": {"id", "job_id", "item_key", "operation", "payload_hash", "remote_id", "status", "attempts", "error_class", "error_detail", "created_at", "updated_at"},
-    "provider_sync_cursors": {"provider", "stream", "cursor", "high_water_mark", "updated_at"},
-    "competitions": {"id", "name", "event_date", "sport", "priority", "distance", "target", "course_profile", "notes", "category", "start_date_local", "description", "moving_time", "intervals_event_id", "external_id", "sync_dirty", "sync_state", "sync_conflict", "last_synced_at", "created_at", "updated_at"},
-    "competition_sync_tombstones": {"id", "intervals_event_id", "external_id", "created_at"},
-    "training_plans": {"id", "name", "goal", "start_date", "end_date", "status", "created_at", "updated_at"},
-    "athlete_checkins": {"checkin_date", "soreness", "stress", "motivation", "session_rpe", "day_form", "illness", "pain", "available_minutes", "availability_notes", "notes", "created_at", "updated_at"},
-    "activity_feedback": {"activity_id", "activity_name", "activity_date", "notes", "created_at", "updated_at"},
-    "plan_adjustments": {"id", "payload", "status", "created_at", "applied_at"},
-    "coach_action_proposals": {"id", "session_csrf_hash", "action_type", "target_system", "object_ids", "diff", "payload", "payload_hash", "action_token_hash", "status", "expires_at", "created_at", "used_at"},
-    "change_history": {"id", "entity_type", "entity_id", "action", "source", "created_at", "before_hash", "after_hash", "diff"},
-    "provider_refresh_history": {"id", "provider", "area", "operation_id", "trigger", "started_at", "finished_at", "phase", "status", "error_code", "next_retry_at"},
-    "public_event_sources": {"id", "name", "url", "last_sync_at", "last_error", "created_at", "updated_at"},
-    "public_event_candidates": {"id", "source_id", "uid", "name", "event_date", "sport", "distance", "location", "url", "description", "imported_competition_id", "created_at", "updated_at"},
-    "external_calendar_events": {"id", "uid", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day", "training_relevant", "no_intensity", "short_only", "updated_at"},
-    "sessions": {"token_hash", "csrf_hash", "expires_at", "created_at", "last_seen"},
-}
-CURRENT_DATABASE_INDEXES = {
-    "idx_change_history_created_at",
-    "idx_change_history_entity",
-    "idx_coach_plan_artifacts_conversation",
-    "idx_planned_units_date",
-    "idx_planned_units_external_id",
-    "idx_planned_units_local_id",
-    "idx_provider_refresh_area",
-    "idx_provider_refresh_created_at",
-    "idx_sync_job_items_status",
-    "idx_sync_jobs_status_available",
-    "idx_workout_library_external_id",
-}
-
-
-def database_table_names(db: Any) -> set[str]:
-    return {
-        str(row["name"])
-        for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        if not str(row["name"]).startswith("sqlite_")
-    }
-
-
-def database_index_names(db: Any) -> set[str]:
-    return {
-        str(row["name"])
-        for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
-        if not str(row["name"]).startswith("sqlite_")
-}
-
-
-def database_schema_is_current(db: Any) -> bool:
-    if database_table_names(db) != set(CURRENT_DATABASE_SCHEMA):
-        return False
-    if database_index_names(db) != CURRENT_DATABASE_INDEXES:
-        return False
-    return all(
-        columns == {
-            row["name"]
-            for row in db.execute(f"PRAGMA table_info({table})").fetchall()
-        }
-        for table, columns in CURRENT_DATABASE_SCHEMA.items()
-    )
+# Transitional names for restore/test consumers; implementation ownership is
+# in backend.db.schema.
+_configure_cipher = configure_cipher
 
 
 def _checkpoint_database_locked() -> None:
