@@ -9395,26 +9395,36 @@ def _save_local_plan_entries(
     return created
 
 
+def _save_workout_library_entries_in_db(
+    db: Any, normalized_workouts: list[dict[str, Any]], plan_name: str, goal: str,
+) -> list[dict[str, Any]]:
+    plan_id = str(uuid.uuid4()) if plan_name.strip() else ""
+    now = utc_now()
+    templates = [item for item in list_workout_library(db=db) if not item.get("date")]
+    if plan_id:
+        _create_training_plan_record(db, plan_id, normalized_workouts, plan_name, goal, now)
+    _validate_plan_calendar(normalized_workouts)
+    created = _save_local_plan_entries(db, normalized_workouts, templates, plan_id, plan_name, now)
+    if created:
+        _bump_planning_revision(db)
+    return created
+
+
 def save_workout_library_entries(
     workouts: list[dict[str, Any]],
     plan_name: str = "",
     goal: str = "",
+    *,
+    db: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Store planned coach sessions locally, reusing cached templates first."""
     if not isinstance(workouts, list) or not workouts:
         raise AppError(400, "Mindestens eine Einheit ist erforderlich.")
     normalized_workouts = [normalize_workout(item) for item in workouts]
-    plan_id = str(uuid.uuid4()) if plan_name.strip() else ""
-    now = utc_now()
+    if db is not None:
+        return _save_workout_library_entries_in_db(db, normalized_workouts, plan_name, goal)
     with DB_LOCK, database() as db:
-        templates = [item for item in list_workout_library() if not item.get("date")]
-        if plan_id:
-            _create_training_plan_record(db, plan_id, normalized_workouts, plan_name, goal, now)
-        _validate_plan_calendar(normalized_workouts)
-        created = _save_local_plan_entries(db, normalized_workouts, templates, plan_id, plan_name, now)
-        if created:
-            _bump_planning_revision(db)
-    return created
+        return _save_workout_library_entries_in_db(db, normalized_workouts, plan_name, goal)
 
 
 def list_training_plans(limit: int = 30) -> list[dict[str, Any]]:
@@ -10681,13 +10691,19 @@ def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool 
     return normalized
 
 
-def list_workout_library(limit: int = 500, include_archived: bool = False) -> list[dict[str, Any]]:
+def list_workout_library(limit: int = 500, include_archived: bool = False, *, db: Any | None = None) -> list[dict[str, Any]]:
+    if db is not None:
+        return _list_workout_library_in_db(db, limit, include_archived)
     with DB_LOCK, database() as db:
-        rows = db.execute(
-            "SELECT payload FROM workout_library WHERE json_extract(payload, '$.date') IS NULL "
-            "ORDER BY lower(json_extract(payload, '$.type')), lower(json_extract(payload, '$.name')) LIMIT ?",
-            (max(1, min(int(limit) * (2 if include_archived else 1), 1000)),),
-        ).fetchall()
+        return _list_workout_library_in_db(db, limit, include_archived)
+
+
+def _list_workout_library_in_db(db: Any, limit: int, include_archived: bool) -> list[dict[str, Any]]:
+    rows = db.execute(
+        "SELECT payload FROM workout_library WHERE json_extract(payload, '$.date') IS NULL "
+        "ORDER BY lower(json_extract(payload, '$.type')), lower(json_extract(payload, '$.name')) LIMIT ?",
+        (max(1, min(int(limit) * (2 if include_archived else 1), 1000)),),
+    ).fetchall()
     result = []
     for row in rows:
         try:
@@ -12515,38 +12531,54 @@ def _save_local_planned_workout_update(
         _bump_planning_revision(db)
 
 
-def update_local_planned_workout(
+def _update_local_planned_workout_in_db(
+    db: Any,
     local_id: str,
     values: Any,
     *,
     skip_calendar_conflict: bool = False,
     bump_planning_revision: bool = True,
 ) -> dict[str, Any]:
-    """Edit or remove a dated local plan without writing to a provider."""
     normalized_id, values, action = _planned_workout_update_request(local_id, values)
-    with DB_LOCK, database() as db:
-        row, current, before = _load_local_planned_workout(db, normalized_id)
-        if action == "delete":
-            _delete_local_planned_workout(
-                db, normalized_id, current, before, bump_planning_revision=bump_planning_revision
-            )
-            updated = None
-        else:
-            candidate = _planned_workout_update_candidate(current, action, values)
-            _validate_planned_workout_date(
-                candidate, current, normalized_id, skip_calendar_conflict=skip_calendar_conflict
-            )
-            updated = _normalized_planned_workout_update(
-                candidate, current, row, normalized_id, action, values
-            )
-            _save_local_planned_workout_update(
-                db, normalized_id, updated, before, bump_planning_revision=bump_planning_revision
-            )
+    row, current, before = _load_local_planned_workout(db, normalized_id)
     if action == "delete":
-        publish_state_event("coach", {"status": "changed"})
+        _delete_local_planned_workout(
+            db, normalized_id, current, before, bump_planning_revision=bump_planning_revision
+        )
         return {"status": "deleted", "local_id": normalized_id}
-    publish_state_event("coach", {"status": "changed"})
+    candidate = _planned_workout_update_candidate(current, action, values)
+    _validate_planned_workout_date(candidate, current, normalized_id, skip_calendar_conflict=skip_calendar_conflict)
+    updated = _normalized_planned_workout_update(candidate, current, row, normalized_id, action, values)
+    _save_local_planned_workout_update(
+        db, normalized_id, updated, before, bump_planning_revision=bump_planning_revision
+    )
     return {"status": "local", "local_id": normalized_id, "library_entry": updated}
+
+
+def update_local_planned_workout(
+    local_id: str,
+    values: Any,
+    *,
+    skip_calendar_conflict: bool = False,
+    bump_planning_revision: bool = True,
+    db: Any | None = None,
+) -> dict[str, Any]:
+    """Edit or remove a dated local plan without writing to a provider."""
+    if db is not None:
+        return _update_local_planned_workout_in_db(
+            db, local_id, values, skip_calendar_conflict=skip_calendar_conflict,
+            bump_planning_revision=bump_planning_revision,
+        )
+    with DB_LOCK, database() as db:
+        result = _update_local_planned_workout_in_db(
+            db, local_id, values, skip_calendar_conflict=skip_calendar_conflict,
+            bump_planning_revision=bump_planning_revision,
+        )
+    if result["status"] == "deleted":
+        publish_state_event("coach", {"status": "changed"})
+        return result
+    publish_state_event("coach", {"status": "changed"})
+    return result
 
 
 def _planned_conflict_resolution_request(local_id: Any, strategy: Any) -> tuple[str, str]:
@@ -17097,7 +17129,7 @@ def _apply_structured_training_change_rows(
             applied.append({"local_id": create_local_planned_unit(entry_payload, db=db, bump_planning_revision=False)["id"], "status": "local"})
         else:
             applied.append(update_local_planned_workout(
-                change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False
+                change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False, db=db
             ))
     return applied
 
@@ -17143,20 +17175,21 @@ def _update_structured_training_plan_bounds(plans_needing_bounds: set[str], db: 
         _update_structured_training_plan_bound(plan_id, db)
 
 
-def _apply_structured_training_changes(
-    arguments: dict[str, Any], *, require_revision: bool = False, authorized_plan_id: str | None = None,
+def _apply_structured_training_changes_in_db(
+    db: Any,
+    arguments: dict[str, Any], *,
+    require_revision: bool = False,
+    authorized_plan_id: str | None = None,
 ) -> dict[str, Any]:
     changes = _prepare_structured_training_changes(arguments)
-    with DB_LOCK, database() as db:
-        current_revision = _validate_structured_training_change_revisions(
-            changes, arguments, require_revision=require_revision, db=db,
-        )
-        derived_plan, plans_needing_bounds = _derive_structured_training_plan(changes, authorized_plan_id, db)
-        applied = _apply_structured_training_change_rows(changes, derived_plan, db)
-        _bump_planning_revision(db)
-        _update_structured_training_plan_bounds(plans_needing_bounds, db)
-        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
-    publish_state_event("planning", {"status": "changed"})
+    current_revision = _validate_structured_training_change_revisions(
+        changes, arguments, require_revision=require_revision, db=db,
+    )
+    derived_plan, plans_needing_bounds = _derive_structured_training_plan(changes, authorized_plan_id, db)
+    applied = _apply_structured_training_change_rows(changes, derived_plan, db)
+    _bump_planning_revision(db)
+    _update_structured_training_plan_bounds(plans_needing_bounds, db)
+    revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
     result_changes = [{"local_id": item.get("local_id"), "status": item.get("status")} for item in applied]
     return {
         "ok": True,
@@ -17165,6 +17198,17 @@ def _apply_structured_training_changes(
         "changes": result_changes,
         "library_entry_ids": list(dict.fromkeys(item["local_id"] for item in result_changes if item.get("local_id"))),
     }
+
+
+def _apply_structured_training_changes(
+    arguments: dict[str, Any], *, require_revision: bool = False, authorized_plan_id: str | None = None,
+) -> dict[str, Any]:
+    with DB_LOCK, database() as db:
+        result = _apply_structured_training_changes_in_db(
+            db, arguments, require_revision=require_revision, authorized_plan_id=authorized_plan_id,
+        )
+    publish_state_event("planning", {"status": "changed"})
+    return result
 
 
 def _prepare_structured_plan_replacement(arguments: dict[str, Any]) -> tuple[dict[str, Any], int, list[dict[str, Any]], str, str, dict[str, str]]:
@@ -18428,11 +18472,14 @@ def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> 
         if type(arguments.get("expected_revision")) is not int or arguments["expected_revision"] != revision:
             raise AppError(409, "Der Plan wurde inzwischen geändert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
         _validate_training_patch_schedule(changes, workouts, ids, db)
-        changed = _apply_structured_training_changes(arguments, require_revision=True) if changes else {"changes": []}
+        changed = _apply_structured_training_changes_in_db(db, arguments, require_revision=True) if changes else {"changes": []}
         plan_name = str(arguments.get("plan_name") or ("Coach-Plan" if action["request"]["constraints"] else ""))
-        created = save_workout_library_entries(workouts, plan_name, str(arguments.get("goal") or "")) if workouts else []
+        created = save_workout_library_entries(
+            workouts, plan_name, str(arguments.get("goal") or ""), db=db,
+        ) if workouts else []
         _store_training_patch_constraints(created, ids, action["request"]["constraints"], db)
         revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
+    publish_state_event("planning", {"status": "changed"})
     return {"ok": True, "status": "applied", "planning_revision": revision, "changes": changed["changes"], "library_entry_ids": [item["id"] for item in created]}
 
 
