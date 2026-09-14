@@ -73,6 +73,12 @@ async function run(script, data, context = {}) {
         listFiles: async () => data.files,
         listCommits: async () => data.commitsList,
       },
+      issues: {
+        listComments: async () => [],
+      },
+      reactions: {
+        listForIssue: async () => [],
+      },
       git: {
         getCommit: async ({ commit_sha }) => {
           calls.push(['commit', commit_sha]);
