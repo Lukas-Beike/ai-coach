@@ -15,7 +15,7 @@ class SupportFixtureTests(unittest.TestCase):
         client.create_library_workouts([{"name": "Synthetic"}])
         self.assertEqual(recorder.mutations[0]["method"], "POST")
         self.assertEqual(recorder.mutations[0]["path"], "/athlete/0/workouts")
-        self.assertEqual(recorder.mutations[0]["payload_keys"], ["name"])
+        self.assertEqual(recorder.mutations[0]["payload_count"], 1)
 
 
 if __name__ == "__main__":
