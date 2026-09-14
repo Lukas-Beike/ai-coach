@@ -72,23 +72,25 @@ def read_bounded_response(response: Any, max_bytes: int, *, before_read: Any = N
     return raw
 
 
-def error_detail(raw_body: bytes, *, limit: int = 500, redact: Any = redact_provider_text) -> str:
-    """Extract a bounded, redacted detail from a JSON provider error body."""
+def _decoded_error_payload(raw_body: bytes) -> dict[str, Any]:
     try:
         payload = json.loads(raw_body.decode("utf-8", errors="replace")) if raw_body else None
     except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
-        return ""
-    top_level = payload if isinstance(payload, dict) else {}
-    error = top_level.get("error")
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _first_error_field(payload: dict[str, Any], keys: tuple[str, ...] = ("message", "detail", "title")) -> Any:
+    return next((payload[key] for key in keys if payload.get(key)), "")
+
+
+def error_detail(raw_body: bytes, *, limit: int = 500, redact: Any = redact_provider_text) -> str:
+    """Extract a bounded, redacted detail from a JSON provider error body."""
+    payload = _decoded_error_payload(raw_body)
+    error = payload.get("error")
     if isinstance(error, str) and error:
         return redact(error, limit=limit)
-    candidate = error if isinstance(error, dict) else top_level
-    if isinstance(candidate, dict):
-        for key in ("message", "detail", "title"):
-            if candidate.get(key):
-                return redact(candidate[key], limit=limit)
-        if candidate is not top_level:
-            for key in ("message", "detail", "title"):
-                if top_level.get(key):
-                    return redact(top_level[key], limit=limit)
-    return redact("", limit=limit)
+    detail = _first_error_field(error) if isinstance(error, dict) else _first_error_field(payload)
+    if not detail and isinstance(error, dict):
+        detail = _first_error_field(payload)
+    return redact(detail, limit=limit)
