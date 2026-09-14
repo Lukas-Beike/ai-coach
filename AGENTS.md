@@ -77,10 +77,10 @@ status. Treat all of it as durable athlete data.
 
 ## Behaviour requirements
 
-- On startup, initialise the database and start one asynchronous Intervals.icu
-  sync. If configured, Garmin sync also starts. A background loop checks for a
-  daily automatic sync. Manual refreshes remain available from the UI; the
-  browser may poll local state while a sync is running.
+- On startup, initialise the database, start the sync and Coach job workers,
+  and enqueue configured refreshes for calendar, Intervals.icu, Garmin, and
+  weather. A background loop schedules daily sync jobs. Manual refreshes remain
+  available from the UI; the browser may poll local state while a sync runs.
 - A chat request uses the saved local profile and competitions, current
   performance context, recent local feedback, workout library, and latest
   provider snapshots. Current performance is not Intervals.icu-only: Garmin,
@@ -126,14 +126,16 @@ also run:
 docker build -t ai-coach:local .
 ```
 
-The CI test job currently uses Python 3.13; the container image currently uses
-Python 3.14. Keep code compatible with both unless intentionally changing the
-toolchain and CI together.
+CI and the container image use Python 3.14. Keep code compatible with that
+toolchain unless intentionally changing the toolchain and CI together.
 
-There is no frontend test runner in this repository. For browser-facing
-changes, manually verify login, fresh PWA installation/offline assets, safe Markdown rendering,
-Enter-to-send versus Shift+Enter, microphone permissions, notifications, and
-the affected UI flow when a browser is available.
+Browser tests use Playwright through `npm run test:e2e`, with projects for
+mobile-small, mobile, tablet, tablet-landscape, and desktop. There is no
+frontend unit-test runner. For browser-facing changes, run the affected
+Playwright project and manually verify login, fresh PWA installation/offline
+assets, safe Markdown rendering, Enter-to-send versus Shift+Enter, microphone
+permissions, notifications, and the affected UI flow when a browser is
+available.
 
 ### Local Docker workflow (Windows)
 
@@ -251,8 +253,9 @@ README. The container runs as a non-root user and `/data` must be writable.
 For Garmin's first MFA login, use the documented one-time
 `garmin-login.py` helper with the persistent `/data` mount.
 
-Do not expose port 8090 directly to the public internet. Voice input requires
-the PWA to be opened through a trusted HTTPS reverse proxy.
+Do not expose port 8090 directly to the public internet. Voice input requires a
+secure context; local `localhost` testing is allowed, while deployed use needs
+a trusted HTTPS reverse proxy.
 
 ## Code Review Rules
 
