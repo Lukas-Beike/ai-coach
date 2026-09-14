@@ -38,12 +38,9 @@ def provider_operation(function: Callable[..., Any]) -> Callable[..., Any]:
 
 
 class IntervalsClient:
-    def __init__(self, config: Config | None = None, *, request: Callable[..., Any] | None = None):
-        # Resolve the application snapshot at construction time.  A default
-        # argument would permanently capture the import-time configuration and
-        # make isolated callers/tests unable to supply a replacement.
-        self.config = config if config is not None else _app().CONFIG
-        request_fn = request or _app().http_json
+    def __init__(self, config: Config, *, request: Callable[..., Any]):
+        self.config = config
+        request_fn = request
         credentials = base64.b64encode(f"API_KEY:{self.config.intervals_api_key}".encode()).decode()
         self.headers = {"Authorization": f"Basic {credentials}"}
         self.base = "https://intervals.icu/api/v1"
@@ -340,4 +337,3 @@ class IntervalsClient:
 
     def delete_activity(self, activity_id: str) -> Any:
         return self.delete(f"/activity/{quote(activity_id, safe='')}")
-
