@@ -71,6 +71,7 @@ from backend.sync.status import persist_sync_operation_state, project_sync_statu
 from backend.sync.daily import daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
 from backend.sync.refresh import cleanup_refresh_history, create_refresh_record, finish_refresh_record
 from backend.sync.snapshots import latest_snapshot as latest_snapshot_in_transaction, save_snapshot as save_snapshot_in_transaction
+from backend.sync.reconcile import persist_planned_unit_state
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
 from backend.planning.service import update_plan_bounds
 from backend.planning.service import TRAINING_PLAN_STATUSES, update_plan_metadata
@@ -10670,73 +10671,13 @@ def local_calendar_events(
     return sorted(result, key=_local_calendar_sort_key)
 
 
-def _planned_unit_sync_payload(raw_payload: Any, state: str) -> dict[str, Any]:
-    try:
-        payload = json.loads(raw_payload or "{}")
-    except (TypeError, ValueError):
-        payload = {}
-    payload = payload if isinstance(payload, dict) else {}
-    payload["sync_status"] = state
-    return payload
-
-
-def _merge_planned_unit_remote_event(payload: dict[str, Any], state: str, remote_event: dict[str, Any] | None) -> None:
-    if not isinstance(remote_event, dict):
-        return
-    if remote_event.get("id") not in (None, ""):
-        payload["remote_event_id"] = str(remote_event["id"])
-    if remote_event.get("external_id") not in (None, ""):
-        external_id = str(remote_event["external_id"])
-        payload["remote_event_external_id"] = external_id
-        payload["external_id"] = external_id
-    if state != "synced":
-        return
-    for key in ("moving_time", "workout_doc", "icu_training_load", "icu_intensity"):
-        if remote_event.get(key) is not None:
-            payload[key] = remote_event[key]
-        elif key != "moving_time":
-            payload.pop(key, None)
-
-
-def _planned_unit_sync_update_values(
-    payload: dict[str, Any], state: str, error: str | None, remote_event: dict[str, Any] | None, now: str,
-) -> tuple[str, int, str, str | None, str | None, str | None, str | None]:
-    synced = state == "synced"
-    remote_external_id = str(remote_event.get("external_id") or "").strip() if isinstance(remote_event, dict) else ""
-    return (
-        json.dumps(payload, ensure_ascii=False),
-        0 if state in {"synced", "remote_missing"} else 1,
-        state,
-        redact_text(str(error))[:1000] if error else None,
-        remote_external_id or None,
-        _planned_unit_payload_hash(payload) if synced else None,
-        now if synced else None,
-    )
-
-
 def update_planned_unit_sync_state(local_id: str, state: str, error: str | None = None, *, remote_event: dict[str, Any] | None = None) -> None:
     """Persist planning sync state without changing the canonical workout data."""
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT payload FROM planned_units WHERE local_id = ?", (local_id,)).fetchone()
-        if not row:
-            return
-        payload = _planned_unit_sync_payload(row["payload"], state)
-        _merge_planned_unit_remote_event(payload, state, remote_event)
-        now = utc_now()
-        values = _planned_unit_sync_update_values(payload, state, error, remote_event, now)
-        db.execute(
-            "UPDATE planned_units SET payload=?, sync_dirty=?, sync_state=?, sync_error=?, "
-            "sync_conflict=?, external_id=COALESCE(?, external_id), baseline_hash=COALESCE(?, baseline_hash), last_synced_at=COALESCE(?, last_synced_at), updated_at=? "
-            "WHERE local_id=?",
-            (
-                *values[:4],
-                "" if state != "conflict" else None,
-                *values[4:],
-                now,
-                local_id,
-            ),
+        persist_planned_unit_state(
+            db, local_id, state, error, remote_event, redact=redact_text,
+            payload_hash=_planned_unit_payload_hash, now=utc_now(), bump_revision=_bump_planning_revision,
         )
-        _bump_planning_revision(db)
 
 
 @contextmanager
