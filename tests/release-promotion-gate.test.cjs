@@ -68,6 +68,8 @@ async function run(script, data, context = {}) {
       pulls: {
         get: async () => ({ data: structuredClone(prReads++ && data.latestPr ? data.latestPr : data.pr) }),
         list: async () => [structuredClone(data.pr)],
+        listReviews: async () => [],
+        listReviewComments: async () => [],
         listFiles: async () => data.files,
         listCommits: async () => data.commitsList,
       },
@@ -241,14 +243,19 @@ test('a manual request persists through synchronize, reopen and title edit event
       action, changes: { title: { from: 'old title' } }, pull_request: data.pr,
     } }));
     assert.equal(result.skipCodexReview, false);
-    assert.equal(result.reviewRequestedAt, action === 'synchronize' ? manualMarker.completed_at : data.pr.updated_at);
+    assert.equal(result.reviewRequestedAt, '');
+    assert.equal(result.runCodexReview, false);
+    assert.equal(result.reviewRequired, true);
   }
 });
 
 test('a main push keeps explicit manual review mandatory', async () => {
   const data = fixture();
   data.checks = [manualMarker];
-  assert.equal(matrix(await run(discover, data, { eventName: 'push' })).skipCodexReview, false);
+    const entry = matrix(await run(discover, data, { eventName: 'push' }));
+    assert.equal(entry.skipCodexReview, false);
+    assert.equal(entry.runCodexReview, false);
+    assert.equal(entry.reviewRequired, true);
 });
 
 test('protected develop dispatch can re-evaluate an exact main promotion', async () => {
@@ -296,7 +303,7 @@ test('manual events use the current protected action without checking out pull-r
     const step = workflow.split(`- name: ${stepName}\n`)[1].split('\n      - name:', 1)[0];
     const condition = step.match(/^        if: (.+)$/m)[1];
     return new Function('matrix', 'github', `return (${condition});`)(
-      { baseRef, skipCodexReview: exempt }, {
+      { baseRef, skipCodexReview: exempt, runCodexReview: ['workflow_dispatch', 'issue_comment'].includes(eventName) }, {
         event_name: eventName,
         repository: 'Lukas-Beike/ai-coach',
         event: eventName === 'pull_request_target'
@@ -308,9 +315,10 @@ test('manual events use the current protected action without checking out pull-r
   for (const event of ['workflow_dispatch', 'issue_comment', 'pull_request_target', 'push']) {
     const fromDevelop = ['workflow_dispatch', 'issue_comment'].includes(event);
     const pushEvent = event === 'push';
-    assert.equal(actionEnabled('Run trusted develop Codex gate', 'main', event), !pushEvent && fromDevelop);
-    assert.equal(actionEnabled('Run trusted main Codex gate', 'main', event), !pushEvent && !fromDevelop);
-    assert.equal(actionEnabled('Run trusted develop Codex gate', 'develop', event), !pushEvent);
+    const runCodexReview = fromDevelop;
+    assert.equal(actionEnabled('Run trusted develop Codex gate', 'main', event), runCodexReview && fromDevelop);
+    assert.equal(actionEnabled('Run trusted main Codex gate', 'main', event), runCodexReview && !fromDevelop);
+    assert.equal(actionEnabled('Run trusted develop Codex gate', 'develop', event), runCodexReview);
     assert.equal(actionEnabled('Run trusted main Codex gate', 'develop', event), false);
     assert.equal(actionEnabled('Run trusted develop Codex gate', 'main', event, true), false);
     assert.equal(actionEnabled('Run trusted main Codex gate', 'main', event, true), false);

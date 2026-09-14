@@ -143,15 +143,16 @@ jobs:
                 .filter((pullRequest) => pullRequest.draft !== true)
                 .map(async (pullRequest) => {
                   const manualReviewRequestedAt = await getManualReviewRequest(pullRequest);
+                  const skipCodexReview = shouldSkipCodexReview(pullRequest) && !manualReviewRequestedAt;
                   const manualReviewRequested = Boolean(manualReviewRequestedAt);
                   return {
                     pullRequestNumber: pullRequest.number,
                     baseRef: base,
                     checkName: base === 'main' ? 'Codex code review (main)' : 'Codex code review',
                     reviewRequestedAt: manualReviewRequested ? pushReviewRequestedAt : '',
-                    skipCodexReview: shouldSkipCodexReview(pullRequest) && !manualReviewRequested,
+                    skipCodexReview,
                     runCodexReview: false,
-                    reviewRequired: (await getReviewRequirement(pullRequest)) !== 'none',
+                    reviewRequired: !skipCodexReview && (await getReviewRequirement(pullRequest)) !== 'none',
                   };
                 }));
             } else if (context.eventName === 'pull_request_target') {
@@ -167,14 +168,15 @@ jobs:
                 (context.payload.action !== 'edited' || reviewBaselineChanged)
               ) {
                 const manualReviewRequestedAt = await getManualReviewRequest(pullRequest);
+                const skipCodexReview = shouldSkipCodexReview(pullRequest) && !manualReviewRequestedAt;
                 affectedPullRequests = [{
                   pullRequestNumber: pullRequest.number,
                   baseRef: pullRequest.base.ref,
                   checkName: pullRequest.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
-                  reviewRequestedAt: manualReviewRequestedAt,
-                  skipCodexReview: shouldSkipCodexReview(pullRequest) && !manualReviewRequestedAt,
+                  reviewRequestedAt: '',
+                  skipCodexReview,
                   runCodexReview: false,
-                  reviewRequired: (await getReviewRequirement(pullRequest)) !== 'none',
+                  reviewRequired: !skipCodexReview && (await getReviewRequirement(pullRequest)) !== 'none',
                 }];
               }
             } else if (
@@ -571,7 +573,7 @@ jobs:
 
       - name: Run trusted main Codex gate
         # Explicit @codex requests use the protected main action revision.
-        if: matrix.skipCodexReview != true && matrix.runCodexReview == true && matrix.baseRef == 'main'
+        if: matrix.skipCodexReview != true && matrix.runCodexReview == true && matrix.baseRef == 'main' && github.event_name != 'workflow_dispatch' && github.event_name != 'issue_comment'
         uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@81184e6f2137aa6365724a1ce57968bd1a3f1965
         with:
           github-token: ${{ github.token }}
