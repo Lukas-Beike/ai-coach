@@ -8,6 +8,7 @@ an application error by their caller.
 from __future__ import annotations
 
 import re
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -50,3 +51,35 @@ def classify_provider_status(status: int, service: str, detail: Any = "") -> Pro
     """Classify an HTTP response without leaking its body to callers."""
     category = {429: "rate_limited", 401: "authentication", 403: "authentication"}.get(status, "http")
     return ProviderHTTPError(service, category, status, redact_provider_text(detail))
+
+
+def read_bounded_response(response: Any, max_bytes: int, *, before_read: Any = None) -> bytes:
+    """Read a provider response without accepting oversized bodies."""
+    if before_read is not None:
+        before_read()
+    try:
+        try:
+            raw = response.read(max_bytes + 1)
+        except TypeError:
+            raw = response.read()
+    finally:
+        if before_read is not None:
+            before_read()
+    if len(raw) > max_bytes:
+        raise ValueError("provider response exceeds configured size limit")
+    return raw
+
+
+def error_detail(raw_body: bytes, *, limit: int = 500) -> str:
+    """Extract a bounded, redacted detail from a JSON provider error body."""
+    try:
+        payload = json.loads(raw_body.decode("utf-8", errors="replace")) if raw_body else None
+    except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        return ""
+    error = payload.get("error") if isinstance(payload, dict) else None
+    candidate = error if isinstance(error, dict) else payload
+    if isinstance(candidate, dict):
+        for key in ("message", "detail", "title"):
+            if candidate.get(key):
+                return redact_provider_text(candidate[key], limit=limit)
+    return redact_provider_text(candidate if isinstance(candidate, str) else "", limit=limit)

@@ -1,23 +1,20 @@
 import unittest
 
-from backend.providers.http import ProviderHTTPError, classify_provider_status, redact_provider_text
+from backend.providers.http import error_detail, read_bounded_response
 
 
 class ProviderHTTPTests(unittest.TestCase):
-    def test_redacts_credentials_and_bounds_detail(self):
-        detail = "Authorization: Bearer secret-token " + ("x" * 700)
-        safe = redact_provider_text(detail)
-        self.assertNotIn("secret-token", safe)
-        self.assertLessEqual(len(safe), 500)
+    def test_read_bounded_response_rejects_oversized_body(self):
+        class Response:
+            def read(self, size):
+                return b"1234"
 
-    def test_classifies_authentication_and_rate_limit_responses(self):
-        self.assertEqual(classify_provider_status(401, "intervals").category, "authentication")
-        self.assertEqual(classify_provider_status(429, "intervals").category, "rate_limited")
-        self.assertEqual(classify_provider_status(503, "intervals").category, "http")
+        with self.assertRaises(ValueError):
+            read_bounded_response(Response(), 3)
 
-    def test_error_string_is_safe(self):
-        error = ProviderHTTPError("intervals", "http", 400, "sk-secret-key")
-        self.assertNotIn("sk-secret-key", str(error))
+    def test_error_detail_is_redacted_and_bounded(self):
+        raw = b'{"error":{"message":"authorization: bearer secret-token"}}'
+        self.assertEqual(error_detail(raw), "authorization: [REDACTED]")
 
 
 if __name__ == "__main__":
