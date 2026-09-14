@@ -48,7 +48,12 @@ from urllib.request import Request, urlopen
 from backend.db import row_factory as database_row_factory
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db.manager import DatabaseManager
-from backend.db.schema import configure_cipher, database_schema_is_current, database_table_names
+from backend.db.schema import (
+    configure_cipher,
+    database_index_names,
+    database_schema_is_current,
+    database_table_names,
+)
 from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config, load_local_env as load_config_env
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
@@ -21593,6 +21598,11 @@ def _legacy_database_schema_is_current(db: Any) -> bool:
         }
         for table, columns in CURRENT_DATABASE_SCHEMA.items()
     )
+
+
+# Transitional names for restore/test consumers; implementation ownership is
+# in backend.db.schema.
+_configure_cipher = configure_cipher
 
 
 def _checkpoint_database_locked() -> None:
