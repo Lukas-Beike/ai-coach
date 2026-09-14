@@ -62,6 +62,14 @@ class SyncJobContractTests(unittest.TestCase):
         self.assertTrue(has_active_job(db, "garmin", "refresh"))
         db.close()
 
+    def test_projection_tolerates_malformed_persisted_payload(self):
+        result = job_dto(
+            {"id": "job-2", "provider": "weather", "type": "refresh", "payload": "not-json"},
+            [],
+        )
+        self.assertEqual(result["payload"], {})
+        self.assertEqual(result["status"], "completed")
+
 
 if __name__ == "__main__":
     unittest.main()
