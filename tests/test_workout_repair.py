@@ -8,7 +8,7 @@ import threading
 from unittest.mock import patch
 
 from test_coach_dialogue import DialogueHarness, server
-from test_server import parsed_workout_fixture
+from support import parsed_workout_fixture
 
 
 class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
