@@ -194,3 +194,71 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   verbindlich.
 - Offen in P1: Konfiguration/Settings/Logging, DB-Initialisierung versus
   Job-Recovery und der Releasevertrag für `APP_VERSION`/statische Pfade.
+
+### Veröffentlichungsstand
+
+- PR #666 wurde am `2026-09-15T19:51:52Z` als Squash gemergt; Merge-Commit
+  `99afb2a40edb36505831d07c6be8bf9342599a97` ist auf `origin/develop`
+  erreichbar.
+- Browser-/Accessibility-, SonarCloud-, CodeQL-, Container- und Testchecks
+  sind PASS. Der zeitgebundene Koordinator-Job lief vor Abschluss des
+  eigentlichen Codex-Review-Checks aus; der Codex-Review-Check selbst ist PASS.
+
+## P1.3 — Settings-Auswahl und Redaction/Logging
+
+- Basis: bestätigter Merge-Commit
+  `99afb2a40edb36505831d07c6be8bf9342599a97` von PR #666.
+- Settings-Worker: geprüfter lokaler Commit
+  `8e1c5ac7661fa8a967669e989036b1eedcf5b572`; Schreibbereich ausschließlich
+  `backend/settings.py` und `tests/test_settings.py`.
+- Settings-Review: **PASS** — `SettingsService` besitzt Anbieter-, Modell-,
+  Thinking- und Kalenderauswahl vollständig, liest die Konfiguration pro
+  Aufruf dynamisch, verwendet die unveränderten KV-Schlüssel und besitzt keine
+  Importaktivität oder Rückabhängigkeit auf `server.py`.
+- Observability-Worker: korrigierter lokaler Commit
+  `1e5e5344bf723e8d3142cb4ff0c82bffa12f034c`; Schreibbereich ausschließlich
+  `backend/observability.py` und `tests/test_observability.py`.
+- Erstes Observability-Review: **FAIL** — das neue Logging-Setup hätte bei
+  bereits vorhandenen fremden Handlern zusätzliche Handler und Verzeichnisse
+  erzeugt, statt den bisherigen Early-return-Vertrag zu bewahren.
+- Korrekturreview: **PASS** — beliebige vorhandene Handler bleiben unverändert,
+  und der negative Dateisystemvertrag ist durch einen Regressionstest belegt.
+- Erstes Integrationsreview: **FAIL** — vier HTTP-Diagnostikaufrufer benötigten
+  weiterhin den aus `server.py` entfernten sicheren Netloc-Helfer.
+- Geprüfter integrierter Commit:
+  `5698db5d5f51341825081c6e679e184ff021bd14`.
+- Integrations-Re-Review: **PASS** — `safe_url_netloc` ist eine kleine
+  öffentliche Observability-Schnittstelle, sämtliche vier Aufrufer verwenden
+  sie direkt. Settings- und Redaction-Aufrufer sowie Test-Patchziele wurden auf
+  die konkreten Eigentümer migriert; es gibt keine Kompatibilitätswrapper oder
+  `server.py`-Rückimporte.
+- `server.py`: 21.525 physische Zeilen, 1.204 verbleibende
+  Funktionen/Klassen; das Inventar enthält 1.685 Einträge und wieder exakt
+  null unzugeordnete P0-Einträge. Maßgeblich ist die Eigentumsverlagerung, nicht
+  die Reduktion um 310 Zeilen gegenüber P1.2.
+
+### Prüfungen
+
+- `python -m unittest discover -s tests -v` — 825 Tests, 12 übersprungen,
+  PASS in 121,405 s.
+- Gezielte Settings-/Redaction-/HTTP-/Provider-/Coach-Regressionen — PASS;
+  insbesondere dynamische Config, persistente Auswahl, Secret-/URL-/Traceback-
+  Redaktion, fremde Logging-Handler und sichere HTTP-Host-/Pfadprojektion.
+- `ruff check scripts/server_extraction_inventory.py backend/settings.py backend/observability.py tests/test_settings.py tests/test_observability.py`
+  — PASS.
+- `python -m compileall -q server.py backend tests` — PASS.
+- `python scripts/server_extraction_inventory.py --check` — PASS.
+- `git diff --check` — PASS.
+- Der repositoryweite Ruff-Aufruf meldet ausschließlich bereits vorhandene
+  Import-/Simplify-Befunde in `server.py` und älteren Tests; neue Module,
+  neue Tests und der Inventargenerator sind sauber.
+
+### Verbleibende Risiken und nächster Schritt
+
+- Der P1-Punkt bleibt bewusst offen: Konfigurationsvalidierung,
+  Settings-Dateischreibpfade, Provider-Freshness und die übrige diagnostische
+  Observability sind noch fachlich in `server.py`.
+- Als nächste abhängige P1-Arbeit folgen die Trennung von Schema-Initialisierung
+  und Job-Recovery sowie danach die verbleibenden Config-/Observability-
+  Teilpakete. Docker-/E2E bleibt lokal extern blockiert; das PR-CI-Gate ist
+  verbindlich.
