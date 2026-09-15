@@ -2,10 +2,14 @@ import threading
 import unittest
 
 from backend.errors import AppError
+from backend.runtime import events
 from backend.runtime.events import StateEventBuffer
 
 
 class StateEventBufferTests(unittest.TestCase):
+    def test_module_owns_the_concrete_buffer(self):
+        self.assertIsInstance(events.STATE_EVENT_BUFFER, StateEventBuffer)
+
     def test_publish_validates_events_and_copies_payload(self):
         buffer = StateEventBuffer()
         payload = {"status": "ready", "nested": {"value": 1}}

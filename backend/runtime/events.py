@@ -59,3 +59,6 @@ class StateEventBuffer:
         with self._condition:
             self._events.clear()
             self._next_id = 0
+
+
+STATE_EVENT_BUFFER = StateEventBuffer()

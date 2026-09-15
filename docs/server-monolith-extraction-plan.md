@@ -166,7 +166,7 @@ Abhängigkeit: P0.
 - [ ] Konfiguration, Settings-Zugriff und Logging/Redaktion auslagern.
 - [ ] DB-Initialisierung vervollständigen; Job-Recovery von Schema-Initialisierung
   trennen und aus der Startverdrahtung explizit aufrufen.
-- [ ] Maintenance-Gate und State-Event-Puffer mit konkreten Instanzen auslagern.
+- [x] Maintenance-Gate und State-Event-Puffer mit konkreten Instanzen auslagern.
 - [ ] Release-Verwendung von `APP_VERSION` und statischen Pfaden erfassen;
   den bestehenden Releasevertrag bei einer Verlagerung gleichzeitig anpassen.
 

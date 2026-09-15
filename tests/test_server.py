@@ -40,6 +40,9 @@ os.environ.update({
 })
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from backend.runtime import events as runtime_events
+from backend.runtime import maintenance as runtime_maintenance
+
 # Deny dotenv access before importing the application, including optional values.
 _original_read_text = Path.read_text
 def _isolated_read_text(path, *args, **kwargs):
@@ -1737,25 +1740,23 @@ class CoachTests(unittest.TestCase):
         self.assertIn(bootstrap["provider_states"]["intervals"]["status"], {"not_configured", "loading", "ready", "stale", "degraded", "error"})
 
     def test_state_events_report_missed_retention_and_redact_content(self):
-        with server.STATE_EVENT_CONDITION:
-            server.STATE_EVENTS.clear()
-            server.STATE_EVENT_NEXT_ID = 0
+        runtime_events.STATE_EVENT_BUFFER.clear()
         for index in range(501):
-            server.publish_state_event("job", {"job_id": f"job-{index}", "status": "running", "progress": {"completed": index, "total": 501}})
-        gap = server.state_events_since(0)
+            runtime_events.STATE_EVENT_BUFFER.publish("job", {"job_id": f"job-{index}", "status": "running", "progress": {"completed": index, "total": 501}})
+        gap = runtime_events.STATE_EVENT_BUFFER.since(0)
         self.assertTrue(gap["gap"])
         self.assertEqual(gap["events"], [])
-        current = server.state_events_since(gap["latest_event_id"] - 1)
+        current = runtime_events.STATE_EVENT_BUFFER.since(gap["latest_event_id"] - 1)
         self.assertFalse(current["gap"])
         self.assertEqual(len(current["events"]), 1)
         self.assertNotIn("athlete content", json.dumps(current))
 
     def test_state_events_validate_cursor_and_publish_job_progress(self):
         with self.assertRaises(server.AppError) as raised:
-            server.state_events_since("not-a-number")
+            runtime_events.STATE_EVENT_BUFFER.since("not-a-number")
         self.assertEqual(raised.exception.reason, "invalid_event_cursor")
-        event = server.publish_state_event("job", {"job_id": "job-1", "status": "completed", "progress": {"completed": 1, "total": 1}})
-        self.assertEqual(server.state_events_since(event["event_id"] - 1)["events"][0]["data"]["progress"]["completed"], 1)
+        event = runtime_events.STATE_EVENT_BUFFER.publish("job", {"job_id": "job-1", "status": "completed", "progress": {"completed": 1, "total": 1}})
+        self.assertEqual(runtime_events.STATE_EVENT_BUFFER.since(event["event_id"] - 1)["events"][0]["data"]["progress"]["completed"], 1)
 
     def test_state_event_batch_sends_events_and_resets_for_gaps(self):
         handler = object.__new__(server.RequestHandler)
@@ -2062,7 +2063,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(incomplete.exception.status, 400)
 
     def test_maintenance_gate_blocks_new_operations_and_waits_for_running_one(self):
-        gate = server.MaintenanceGate()
+        gate = runtime_maintenance.MaintenanceGate()
         started = threading.Event()
         release = threading.Event()
         restore_entered = threading.Event()
@@ -2093,7 +2094,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(gate.state(), {"active": False, "running_operations": 0})
 
     def test_maintenance_gate_clears_after_restore_exception(self):
-        gate = server.MaintenanceGate()
+        gate = runtime_maintenance.MaintenanceGate()
         with self.assertRaises(RuntimeError):
             with gate.restore():
                 raise RuntimeError("restore failed")
@@ -4153,7 +4154,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "garmin_fixture_path", return_value="fixture.json"), \
              patch.object(server, "sync_garmin") as sync_garmin, \
              patch.object(server, "garmin_sleep_ready_for_checkin", return_value=False), \
-             patch.object(server, "publish_state_event", side_effect=lambda *args: events.append(args)):
+             patch.object(runtime_events.STATE_EVENT_BUFFER, "publish", side_effect=lambda *args: events.append(args)):
             ready = server._morning_checkin_garmin_ready(date(2026, 9, 4))
         self.assertIsNone(ready)
         sync_garmin.assert_called_once_with(days=server.MORNING_GARMIN_SYNC_DAYS, reason="Morgen-Check-in", wait_for_existing=True)
@@ -4927,7 +4928,7 @@ class CoachTests(unittest.TestCase):
             "date": wednesday, "sport": "WeightTraining", "name": "Oberkörper Einheit",
             "description": "Krafttraining", "duration_minutes": 45, "target": "AUTO",
         })
-        with patch.object(server, "publish_state_event") as publish:
+        with patch.object(runtime_events.STATE_EVENT_BUFFER, "publish") as publish:
             result = server._apply_structured_training_changes({
                 "changes": [
                     {"local_id": upper_body["id"], "action": "update", "date": tuesday},
@@ -7982,7 +7983,7 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(readiness["checks"]["data_directory"])
 
     def test_readiness_fails_during_database_maintenance(self):
-        with server.MAINTENANCE_GATE.restore():
+        with runtime_maintenance.MAINTENANCE_GATE.restore():
             readiness = server.readiness_state()
         self.assertEqual(readiness["status"], "not_ready")
         self.assertFalse(readiness["ready"])
