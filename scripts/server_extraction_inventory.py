@@ -12,15 +12,60 @@ import hashlib
 import re
 import sys
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
-SERVER_PATH = ROOT / "server.py"
+SERVER_MODULE = "server.py"
+SERVER_PATH = ROOT / SERVER_MODULE
 PLAN_PATH = ROOT / "docs" / "server-monolith-extraction-plan.md"
 DOC_PATH = ROOT / "docs" / "server-extraction-inventory.md"
 P0_BASE_COMMIT = "362d6caa4c27951af86b82b11b3a43d48dadceee"
+COMPOSITION_ROOT = "server.py / Composition Root"
+RUNTIME_PACKAGE = "runtime/"
+RUNTIME_EVENTS = "runtime/events.py"
+RUNTIME_MAINTENANCE = "runtime/maintenance.py"
+SYNC_PACKAGE = "sync/"
+SYNC_GARMIN = "sync/garmin.py"
+SYNC_SCHEDULER = "sync/scheduler.py"
+COACH_PACKAGE = "coach/"
+COACH_CONVERSATION = "coach/conversation.py"
+COACH_JOBS = "coach/jobs.py"
+COACH_MORNING = "coach/morning.py"
+COACH_PROPOSALS = "coach/proposals.py"
+COACH_STREAMS = "coach/streams.py"
+HTTP_API_PACKAGE = "http_api/"
+HTTP_AUTH = "http_api/auth.py"
+CONFIG_MODULE = "config.py"
+ERRORS_MODULE = "errors.py"
+OBSERVABILITY_MODULE = "observability.py"
+DB_MANAGER = "db/manager.py"
+DB_PACKAGE = "db/"
+PROVIDERS_PACKAGE = "providers/"
+PROVIDER_HTTP = "providers/http.py"
+PROVIDER_CALENDAR = "providers/calendar.py"
+SETTINGS_MODULE = "settings.py"
+ACTIVITIES_PACKAGE = "activities/"
+ATHLETE_PACKAGE = "athlete/"
+PERFORMANCE_PACKAGE = "performance/"
+WEATHER_PACKAGE = "weather/"
+HISTORY_PACKAGE = "history/"
+PLANNING_PACKAGE = "planning/"
+PLANNING_COMPETITIONS = "planning/competitions.py"
+BACKUP_PACKAGE = "backup/"
+CALENDAR_PACKAGE = "calendar/"
+PRIVACY_MODULE = "privacy.py"
+KIND_FUNCTION = "Funktion"
+KIND_CLASS = "Klasse"
+KIND_GLOBAL = "Globale Bindung"
+KIND_IMPORT = "Importbindung"
+GITHUB_DIR = ".github"
+BACKEND_DIR = "backend"
+SCRIPTS_DIR = "scripts"
+ENCODING_UTF8 = "utf-8"
+END_LINE_ATTRIBUTE = "end_lineno"
+CALENDAR_TOKEN = "calendar"
+STATUS_OPEN = "offen"
 
 
 @dataclass(frozen=True)
@@ -51,8 +96,8 @@ def _number(value: str) -> int:
 
 def read_plan_ranges() -> tuple[PlanRange, ...]:
     ranges: list[PlanRange] = []
-    pattern = re.compile(r"^\|\s*([0-9][0-9.]*)\s*[–-]\s*([0-9][0-9.]*)\s*\|")
-    for line in PLAN_PATH.read_text(encoding="utf-8").splitlines():
+    pattern = re.compile(r"^\|\s*(\d[\d.]*)\s*[-–]\s*(\d[\d.]*)\s*\|")
+    for line in PLAN_PATH.read_text(encoding=ENCODING_UTF8).splitlines():
         match = pattern.match(line)
         if not match:
             continue
@@ -123,443 +168,528 @@ def _module_scope_nodes(statements: list[ast.stmt]) -> list[ast.stmt]:
     return result
 
 
-def _candidate_for_name(name: str, candidates: tuple[str, ...]) -> str:
-    """Choose a concrete plan target, or preserve ambiguity explicitly."""
-
-    lowered = name.lower()
+def _explicit_owner(name: str) -> str | None:
     explicit = {
-        "publish_state_event": "runtime/events.py",
-        "state_events_since": "runtime/events.py",
-        "maintenance_operation": "runtime/maintenance.py",
-        "claimed_maintenance_operation": "runtime/maintenance.py",
-        "MaintenanceGate": "runtime/maintenance.py",
-        "ProviderResyncGate": "sync/",
-        "provider_operation": "sync/",
-        "intervals_operation": "sync/",
-        "garmin_operation": "sync/garmin.py",
-        "IntervalsClient": "providers/intervals_client.py",
-        "serialise_conversation": "coach/conversation.py",
-        "utc_now": "runtime/",
-        "AppError": "errors.py",
-        "public_app_error_status": "errors.py",
-        "ClientDisconnected": "errors.py",
-        "security_configuration_error": "config.py",
-        "database_manager": "db/manager.py",
-        "database": "db/manager.py",
-        "initialise_database": "db/schema.py",
-        "external_call": "providers/http.py",
-        "external_result_context": "observability.py",
-        "provider_error": "errors.py",
-        "CoachHTTPServer": "http_api/",
-        "VERSIONED_STATIC_ASSETS": "http_api/",
-        "UTC_OFFSET_SUFFIX": "config.py",
-        "ISO_MIDNIGHT_SUFFIX": "config.py",
-        "JSON_MEDIA_TYPE": "http_api/",
-        "OCTET_STREAM_MIME": "http_api/",
-        "VO2MAX_UNIT": "performance/",
-        "LOCAL_INTERVALS_SCOPE": "coach/authorization.py",
-        "WORKDAY_TIME_LABEL": "coach/context.py",
-        "APP_NAME": "config.py",
-        "UUID_PATTERN": "http_api/",
-        "PAYLOAD_HASH_PATTERN": "planning/",
-        "DATE_ONLY_PATTERN": "planning/",
-        "MAX_BODY_BYTES": "http_api/",
-        "MAX_AUDIO_BODY_BYTES": "http_api/",
-        "MAX_BACKUP_BYTES": "backup/",
-        "MAX_PRIVACY_EXPORT_BYTES": "privacy.py",
-        "MIN_EXPORT_FREE_BYTES": "backup/",
-        "EXPORT_TIME_LIMIT_SECONDS": "backup/",
-        "STREAM_CHUNK_BYTES": "coach/streams.py",
-        "MAX_EXTERNAL_CALENDAR_BYTES": "providers/calendar.py",
-        "CALENDAR_FETCH_TIMEOUT_SECONDS": "providers/calendar.py",
-        "CALENDAR_CONNECTION_TIMEOUT_SECONDS": "providers/calendar.py",
-        "MAX_EXTERNAL_RESPONSE_BYTES": "providers/http.py",
-        "MESSAGE_ATTACHMENTS_QUERY": "coach/conversation.py",
-        "SESSIONS": "http_api/auth.py",
-        "RATE_LIMITS": "http_api/auth.py",
-        "COMPETITION_EXTERNAL_PREFIX": "planning/competitions.py",
-        "CALENDAR_DISPLAY_DEFAULTS": "settings.py",
-        "CALENDAR_DISPLAY_MAX_WEEKS": "settings.py",
-        "URL_VALUE_RE": "observability.py",
-        "DEFAULT_PROFILE": "athlete/",
-        "NRW_LATITUDE_BOUNDS": "weather/",
-        "NRW_LONGITUDE_BOUNDS": "weather/",
-        "MORNING_RETRY_SECONDS": "coach/morning.py",
-        "MORNING_MAX_ATTEMPTS": "coach/morning.py",
-        "LIBRARY_BULK_MAX_ENTRIES": "planning/",
-        "LIBRARY_BULK_PREVIEW_TTL_SECONDS": "coach/proposals.py",
-        "LIBRARY_BULK_LOCAL_ACTIONS": "planning/",
-        "DEFAULT_TIMEZONE": "config.py",
-        "ATHLETE_RECORD_HANDLERS": "athlete/",
-        "DB_LOCK": "db/manager.py",
-        "DATABASE_MANAGER": "db/manager.py",
-        "DATABASE_MANAGER_SIGNATURE": "db/manager.py",
-        "SYNC_LOCK": "sync/",
-        "WORKOUT_LIBRARY_SYNC_LOCK": "sync/",
-        "COMPETITION_SYNC_LOCK": "sync/competitions.py",
-        "PERFORMANCE_LOCK": "performance/",
-        "OPENAI_CONVERSATION_LOCK": "coach/conversation.py",
-        "CHAT_QUEUE": "coach/conversation.py",
-        "CHAT_QUEUE_LIMIT": "coach/conversation.py",
-        "CHAT_LOCK_TIMEOUT_SECONDS": "coach/conversation.py",
-        "DIAGNOSTIC_CAPTURE_LOCK": "observability.py",
-        "EXTERNAL_HTTP_STARTED_EVENT": "observability.py",
-        "EXTERNAL_HTTP_COMPLETED_EVENT": "observability.py",
-        "CHAT_STREAM_LOCK": "coach/streams.py",
-        "CHAT_STREAMS": "coach/streams.py",
-        "STREAM_CHUNK_BYTES": "coach/streams.py",
-        "COACH_JOB_WORKER_LOCK": "coach/jobs.py",
-        "COACH_JOB_WAKE": "coach/jobs.py",
-        "COACH_JOB_STOP": "coach/jobs.py",
-        "COACH_JOB_WORKER": "coach/jobs.py",
-        "COACH_JOB_CANCEL_EVENTS": "coach/jobs.py",
-        "MORNING_CHECKIN_LOCK": "coach/morning.py",
-        "EXTERNAL_CALENDAR_LOCK": "calendar/",
-        "SYNC_JOB_WORKER_LOCK": "sync/",
-        "SYNC_JOB_WAKE": "sync/",
-        "SYNC_JOB_STOP": "sync/",
-        "SYNC_JOB_WORKER": "sync/",
-        "SESSION_LOCK": "http_api/auth.py",
-        "RATE_LIMIT_LOCK": "http_api/auth.py",
-        "STATE_EVENT_CONDITION": "runtime/events.py",
-        "STATE_EVENTS": "runtime/events.py",
-        "STATE_EVENT_NEXT_ID": "runtime/events.py",
-        "MAINTENANCE_GATE": "runtime/maintenance.py",
-        "_configure_cipher": "db/manager.py",
-        "RATE_LIMIT_CLEANUP_INTERVAL_SECONDS": "http_api/auth.py",
-        "RATE_LIMIT_CLEANUP_BATCH_SIZE": "http_api/auth.py",
-        "RATE_LIMIT_BUCKET_MAX_AGE_SECONDS": "http_api/auth.py",
-        "RATE_LIMIT_LAST_CLEANUP_MONOTONIC": "http_api/auth.py",
-    }
-    if name in explicit:
-        return explicit[name]
+            "publish_state_event": RUNTIME_EVENTS,
+            "state_events_since": RUNTIME_EVENTS,
+            "maintenance_operation": RUNTIME_MAINTENANCE,
+            "claimed_maintenance_operation": RUNTIME_MAINTENANCE,
+            "MaintenanceGate": RUNTIME_MAINTENANCE,
+            "ProviderResyncGate": SYNC_PACKAGE,
+            "provider_operation": SYNC_PACKAGE,
+            "intervals_operation": SYNC_PACKAGE,
+            "garmin_operation": SYNC_GARMIN,
+            "IntervalsClient": "providers/intervals_client.py",
+            "serialise_conversation": COACH_CONVERSATION,
+            "utc_now": RUNTIME_PACKAGE,
+            "AppError": ERRORS_MODULE,
+            "public_app_error_status": ERRORS_MODULE,
+            "ClientDisconnected": ERRORS_MODULE,
+            "security_configuration_error": CONFIG_MODULE,
+            "database_manager": DB_MANAGER,
+            "database": DB_MANAGER,
+            "initialise_database": "db/schema.py",
+            "external_call": PROVIDER_HTTP,
+            "external_result_context": OBSERVABILITY_MODULE,
+            "provider_error": ERRORS_MODULE,
+            "CoachHTTPServer": HTTP_API_PACKAGE,
+            "VERSIONED_STATIC_ASSETS": HTTP_API_PACKAGE,
+            "UTC_OFFSET_SUFFIX": CONFIG_MODULE,
+            "ISO_MIDNIGHT_SUFFIX": CONFIG_MODULE,
+            "JSON_MEDIA_TYPE": HTTP_API_PACKAGE,
+            "OCTET_STREAM_MIME": HTTP_API_PACKAGE,
+            "VO2MAX_UNIT": PERFORMANCE_PACKAGE,
+            "LOCAL_INTERVALS_SCOPE": "coach/authorization.py",
+            "WORKDAY_TIME_LABEL": "coach/context.py",
+            "APP_NAME": CONFIG_MODULE,
+            "UUID_PATTERN": HTTP_API_PACKAGE,
+            "PAYLOAD_HASH_PATTERN": PLANNING_PACKAGE,
+            "DATE_ONLY_PATTERN": PLANNING_PACKAGE,
+            "MAX_BODY_BYTES": HTTP_API_PACKAGE,
+            "MAX_AUDIO_BODY_BYTES": HTTP_API_PACKAGE,
+            "MAX_BACKUP_BYTES": BACKUP_PACKAGE,
+            "MAX_PRIVACY_EXPORT_BYTES": PRIVACY_MODULE,
+            "MIN_EXPORT_FREE_BYTES": BACKUP_PACKAGE,
+            "EXPORT_TIME_LIMIT_SECONDS": BACKUP_PACKAGE,
+            "STREAM_CHUNK_BYTES": COACH_STREAMS,
+            "MAX_EXTERNAL_CALENDAR_BYTES": PROVIDER_CALENDAR,
+            "CALENDAR_FETCH_TIMEOUT_SECONDS": PROVIDER_CALENDAR,
+            "CALENDAR_CONNECTION_TIMEOUT_SECONDS": PROVIDER_CALENDAR,
+            "MAX_EXTERNAL_RESPONSE_BYTES": PROVIDER_HTTP,
+            "MESSAGE_ATTACHMENTS_QUERY": COACH_CONVERSATION,
+            "SESSIONS": HTTP_AUTH,
+            "RATE_LIMITS": HTTP_AUTH,
+            "COMPETITION_EXTERNAL_PREFIX": PLANNING_COMPETITIONS,
+            "CALENDAR_DISPLAY_DEFAULTS": SETTINGS_MODULE,
+            "CALENDAR_DISPLAY_MAX_WEEKS": SETTINGS_MODULE,
+            "URL_VALUE_RE": OBSERVABILITY_MODULE,
+            "DEFAULT_PROFILE": ATHLETE_PACKAGE,
+            "NRW_LATITUDE_BOUNDS": WEATHER_PACKAGE,
+            "NRW_LONGITUDE_BOUNDS": WEATHER_PACKAGE,
+            "MORNING_RETRY_SECONDS": COACH_MORNING,
+            "MORNING_MAX_ATTEMPTS": COACH_MORNING,
+            "LIBRARY_BULK_MAX_ENTRIES": PLANNING_PACKAGE,
+            "LIBRARY_BULK_PREVIEW_TTL_SECONDS": COACH_PROPOSALS,
+            "LIBRARY_BULK_LOCAL_ACTIONS": PLANNING_PACKAGE,
+            "DEFAULT_TIMEZONE": CONFIG_MODULE,
+            "ATHLETE_RECORD_HANDLERS": ATHLETE_PACKAGE,
+            "DB_LOCK": DB_MANAGER,
+            "DATABASE_MANAGER": DB_MANAGER,
+            "DATABASE_MANAGER_SIGNATURE": DB_MANAGER,
+            "SYNC_LOCK": SYNC_PACKAGE,
+            "WORKOUT_LIBRARY_SYNC_LOCK": SYNC_PACKAGE,
+            "COMPETITION_SYNC_LOCK": "sync/competitions.py",
+            "PERFORMANCE_LOCK": PERFORMANCE_PACKAGE,
+            "OPENAI_CONVERSATION_LOCK": COACH_CONVERSATION,
+            "CHAT_QUEUE": COACH_CONVERSATION,
+            "CHAT_QUEUE_LIMIT": COACH_CONVERSATION,
+            "CHAT_LOCK_TIMEOUT_SECONDS": COACH_CONVERSATION,
+            "DIAGNOSTIC_CAPTURE_LOCK": OBSERVABILITY_MODULE,
+            "EXTERNAL_HTTP_STARTED_EVENT": OBSERVABILITY_MODULE,
+            "EXTERNAL_HTTP_COMPLETED_EVENT": OBSERVABILITY_MODULE,
+            "CHAT_STREAM_LOCK": COACH_STREAMS,
+            "CHAT_STREAMS": COACH_STREAMS,
+            "COACH_JOB_WORKER_LOCK": COACH_JOBS,
+            "COACH_JOB_WAKE": COACH_JOBS,
+            "COACH_JOB_STOP": COACH_JOBS,
+            "COACH_JOB_WORKER": COACH_JOBS,
+            "COACH_JOB_CANCEL_EVENTS": COACH_JOBS,
+            "MORNING_CHECKIN_LOCK": COACH_MORNING,
+            "EXTERNAL_CALENDAR_LOCK": CALENDAR_PACKAGE,
+            "SYNC_JOB_WORKER_LOCK": SYNC_PACKAGE,
+            "SYNC_JOB_WAKE": SYNC_PACKAGE,
+            "SYNC_JOB_STOP": SYNC_PACKAGE,
+            "SYNC_JOB_WORKER": SYNC_PACKAGE,
+            "SESSION_LOCK": HTTP_AUTH,
+            "RATE_LIMIT_LOCK": HTTP_AUTH,
+            "STATE_EVENT_CONDITION": RUNTIME_EVENTS,
+            "STATE_EVENTS": RUNTIME_EVENTS,
+            "STATE_EVENT_NEXT_ID": RUNTIME_EVENTS,
+            "MAINTENANCE_GATE": RUNTIME_MAINTENANCE,
+            "_configure_cipher": DB_MANAGER,
+            "RATE_LIMIT_CLEANUP_INTERVAL_SECONDS": HTTP_AUTH,
+            "RATE_LIMIT_CLEANUP_BATCH_SIZE": HTTP_AUTH,
+            "RATE_LIMIT_BUCKET_MAX_AGE_SECONDS": HTTP_AUTH,
+            "RATE_LIMIT_LAST_CLEANUP_MONOTONIC": HTTP_AUTH,
+            "DATA_DIR": "db/",
+            "timezone_name": CONFIG_MODULE,
+            "list_public_event_candidates": CALENDAR_PACKAGE,
+            "_save_athlete_profile": ATHLETE_PACKAGE,
+            "metric": PROVIDERS_PACKAGE,
+            "local_now": RUNTIME_PACKAGE,
+            "_require_command_owner": "coach/authorization.py",
+            "_prepare_structured_plan_sync": SYNC_PACKAGE,
+            "sync_weather": SYNC_PACKAGE,
+            "sync_illness_pause_to_intervals": SYNC_PACKAGE,
+            "activity_page_key": ACTIVITIES_PACKAGE,
+            "sync_intervals": SYNC_PACKAGE,
+            "_safe_diagnostic_context": OBSERVABILITY_MODULE,
+            "_safe_diagnostic_error": OBSERVABILITY_MODULE,
+            "_coach_error_metadata": OBSERVABILITY_MODULE,
+            "openai_error_diagnostic_details": OBSERVABILITY_MODULE,
+            "safe_openai_log_reason": OBSERVABILITY_MODULE,
+            "_log_openai_stream_failure": OBSERVABILITY_MODULE,
+            "SETTINGS_SECRET_KEYS": OBSERVABILITY_MODULE,
+            "coach_diagnostic_history": OBSERVABILITY_MODULE,
+            "_safe_response_headers": OBSERVABILITY_MODULE,
+            "set_diagnostic_capture": OBSERVABILITY_MODULE,
+            "capture_diagnostic_event": OBSERVABILITY_MODULE,
+            "measurement_age": PERFORMANCE_PACKAGE,
+            "add_message": COACH_CONVERSATION,
+            "list_messages": COACH_CONVERSATION,
+            "bounded_score": PERFORMANCE_PACKAGE,
+            "bounded_minutes": PERFORMANCE_PACKAGE,
+        }
+    return explicit.get(name)
+
+
+_OWNER_PREFIX_RULES = (
+    (("public_",), HTTP_API_PACKAGE),
+    (("_diagnostic", "diagnostic_", "_log_http_request_started"), OBSERVABILITY_MODULE),
+    (("_audit_", "audit_", "_history", "history_", "_undo", "undo", "list_change", "_change"), HISTORY_PACKAGE),
+    (("_safe_url", "_unguessable_url", "_safe_calendar_url", "operation_", "observed_"), OBSERVABILITY_MODULE),
+    (("_weather", "weather_", "fetch_weather", "_fetch_weather", "_record_weather", "_refresh_weather", "_invalidate_weather_cache"), WEATHER_PACKAGE),
+    (("daily_sync", "schedule_daily", "_schedule_daily", "_enqueue_startup", "_scheduler_"), SYNC_SCHEDULER),
+    (("_normalized_", "_pending_", "_existing_", "_historical_", "_execute_", "_queue_next_"), SYNC_PACKAGE),
+    (("_cycling_", "parallel_cycling", "intervals_cycling", "is_outdoor", "is_cycling", "_activities_by_", "deduplicate_api", "list_recent_activities"), ACTIVITIES_PACKAGE),
+    (("get_activity_details", "duplicate_activity_delete_preview", "_remove_intervals_activity"), ACTIVITIES_PACKAGE),
+    (("wellness_", "_atl_", "_wellness_", "actual_atl", "eftp_", "comparison_value", "first_present", "readiness_", "as_number", "sport_setting", "sport_info", "intervals_eftp", "intervals_max_hr", "threshold_pace", "zone2_pace", "height_in_cm"), PERFORMANCE_PACKAGE),
+    (("_normalize_fixture_sleep", "_fixture_sleep", "_shift_fixture_sleep", "garmin_"), SYNC_GARMIN),
+    (("_retry_after", "_read_http", "_urlopen_", "_http_", "http_json", "_capture_http", "_handle_http", "multipart_form_data"), PROVIDER_HTTP),
+    (("_provider_error", "_intervals_error", "_safe_interval_error", "request_ai_provider", "responses_background_request", "output_text"), PROVIDERS_PACKAGE),
+    (("_adaptive_", "adaptive_", "_illness_", "illness_", "latest_illness", "_upsert_illness", "_fill_illness", "check_adaptive", "apply_adaptive", "_apply_adaptive", "_record_date", "_weekly_compliance", "compact_", "_is_composite_duration"), PLANNING_PACKAGE),
+    (("api_page", "encode_page", "decode_page", "paged_", "state_versions"), "http_api/pagination.py"),
+    (("_canonical_", "_local_calendar", "local_calendar", "_repair_calendar", "_repaircalendar", "repaircalendar", "_require_intervals_calendar", "_intervals_calendar", "_intervals_connection", "intervals_public", "_adopt_remote", "_remote_calendar"), CALENDAR_PACKAGE),
+    (("delete_duplicate", "assert_duplicate"), COACH_PROPOSALS),
+    (("_structured_training", "_structured_adaptive", "_apply_structured_adaptive", "_validated_training", "_record_created_training", "_record_existing_training", "_validate_training_change", "_prepare_structured_training", "_validate_structured_training", "_collect_structured_training", "_apply_structured_training", "_replacement_", "_create_replacement", "_copy_replacement", "_archive_replacement", "_validate_replacement"), PLANNING_PACKAGE),
+    (("_structured_artifact", "_structured_action"), "coach/tool_execution.py"),
+    (("_repair_manifest", "_validate_repair_manifest", "_refresh_repair_manifest", "_structured_bounded"), COACH_PROPOSALS),
+    (("_start_structured_provider", "_run_structured_intervals", "_retry_structured_intervals", "_resolve_structured_sync", "_record_intervals_sync", "_finish_intervals_sync", "_validate_selected_plan_sync", "_persist_selected_plan_sync"), SYNC_PACKAGE),
+    (("_dialogue_", "_check_dialogue", "_validate_dialogue", "_alternative_planning_steps", "_profile_repair", "_profile_steps", "_apply_training_patch", "_store_training_patch"), "coach/dialogue.py"),
+    (("_planning_command", "_prepare_planning_command", "_execute_planning_command", "execute_planning_command", "_claim_planning_command", "_prepare_commit_planning", "_validate_training_patch"), "coach/tool_execution.py"),
+    (("_structured_command_failure", "_persist_structured_command_failure"), "coach/service.py"),
+    (("_provider_usage", "_response_retry"), PROVIDERS_PACKAGE),
+    (("provider_refresh", "sync_job", "_sync", "sync_", "enqueue_", "resume_interrupted", "start_sync", "resolve_sync", "garmin_snapshot"), SYNC_PACKAGE),
+    (("activity_", "_activity"), ACTIVITIES_PACKAGE),
+    (("_checkpoint_database", "client_ip", "allow_rate", "cookie_value", "readiness_state"), HTTP_API_PACKAGE),
+    (("_startup_historical",), SYNC_SCHEDULER),
+)
+
+_NAME_PREFIX_RULES = (
+    (("ASSET_", "STATIC_"), HTTP_API_PACKAGE),
+    (("SESSION_", "RATE_LIMIT_"), HTTP_AUTH),
+)
+_NAME_CONTAINS_RULES = (
+    (("OPENAI", "GEMINI"), PROVIDERS_PACKAGE),
+    (("GARMIN",), SYNC_GARMIN),
+    (("WEATHER",), WEATHER_PACKAGE),
+    (("SYNC", "RESYNC"), SYNC_PACKAGE),
+    (("COACH", "CHAT"), COACH_PACKAGE),
+    (("PLAN", "WORKOUT"), PLANNING_PACKAGE),
+)
+
+_PREFERENCE_RULES = (
+    (("load_local_env", "config"), CONFIG_MODULE),
+    (("setting", "model", "provider", "thinking"), SETTINGS_MODULE),
+    (("log", "redact", "sanitize", "secret", "external_call"), OBSERVABILITY_MODULE),
+    (("maintenance", "event", "generation"), RUNTIME_PACKAGE),
+    (("db", "sql", "repository", "schema", "database"), DB_PACKAGE),
+    (("history", "undo"), HISTORY_PACKAGE),
+    (("garmin",), SYNC_GARMIN),
+    (("activity",), ACTIVITIES_PACKAGE),
+    (("performance", "recovery", "vo2", "battery", "fitness"), PERFORMANCE_PACKAGE),
+    (("profile", "checkin", "feedback", "athlete"), ATHLETE_PACKAGE),
+    (("competition", "race"), PLANNING_COMPETITIONS),
+    (("ical", CALENDAR_TOKEN, "byday", "recurrence"), PROVIDER_CALENDAR),
+    (("weather",), WEATHER_PACKAGE),
+    (("workout", "library", "planned", "training_plan", "plan_", "planning"), PLANNING_PACKAGE),
+    (("openai", "gemini", "transcri", "responses_request", "audio"), PROVIDERS_PACKAGE),
+    (("context", "prompt", "coach", "conversation", "chat"), COACH_PACKAGE),
+    (("proposal", "authoriz", "scope", "tool"), COACH_PACKAGE),
+    (("stream",), COACH_STREAMS),
+    (("job", "queue", "worker"), COACH_JOBS),
+    (("morning",), COACH_MORNING),
+    (("backup", "restore", "export"), BACKUP_PACKAGE),
+    (("privacy", "delete"), PRIVACY_MODULE),
+    (("http", "request", "response", "handler", "session", "csrf", "auth", "pagination"), HTTP_API_PACKAGE),
+    (("scheduler", "daily"), SYNC_SCHEDULER),
+    (("sync", "resync", "refresh", "cursor", "snapshot", "reconcile"), SYNC_PACKAGE),
+)
+
+def _owner_from_exact_names(name: str, lowered: str) -> str | None:
     if name.startswith(("SESSION_", "RATE_LIMIT_")):
-        return "http_api/auth.py"
-    if lowered.startswith(("_safe_url", "_unguessable_url", "_safe_calendar_url", "operation_", "observed_")):
-        return "observability.py"
-    if lowered.startswith(("_weather", "weather_", "fetch_weather", "_fetch_weather", "_record_weather", "_refresh_weather")) or lowered == "weather_state":
-        return "weather/"
-    if lowered.startswith(("daily_sync", "schedule_daily", "_schedule_daily", "_enqueue_startup", "_scheduler_")):
-        return "sync/scheduler.py"
-    if lowered.startswith(("_normalized_", "_pending_", "_existing_", "_historical_", "_execute_", "_queue_next_")):
-        return "sync/"
-    if lowered in {"_record_change", "list_change_history", "get_kv", "set_kv"}:
-        return "history/" if "change" in lowered else "settings.py"
-    if lowered == "_coach_error_metadata":
-        return "observability.py"
-    if lowered.startswith(("_cycling_", "parallel_cycling", "intervals_cycling", "is_outdoor", "is_cycling", "_activities_by_", "deduplicate_api", "list_recent_activities")):
-        return "activities/"
-    if lowered in {"get_activity_details", "duplicate_activity_delete_preview"} or lowered.startswith("_remove_intervals_activity"):
-        return "activities/"
-    if lowered in {"measurement_age", "bounded_score", "bounded_minutes"} or lowered.startswith(("wellness_", "_atl_", "_wellness_", "actual_atl", "eftp_", "comparison_value", "first_present", "readiness_", "as_number", "sport_setting", "sport_info", "intervals_eftp", "intervals_max_hr", "threshold_pace", "zone2_pace", "height_in_cm")):
-        return "performance/"
-    if lowered.startswith(("_normalize_fixture_sleep", "_fixture_sleep", "_shift_fixture_sleep", "garmin_")):
-        return "sync/garmin.py"
-    if lowered in {"add_message", "list_messages"}:
-        return "coach/conversation.py"
-    if lowered == "_invalidate_weather_cache_if_location_changed":
-        return "weather/"
-    if lowered in {"timezone_name"}:
-        return "config.py"
-    if lowered in {"list_public_event_candidates"}:
-        return "calendar/"
-    if lowered == "_save_athlete_profile":
-        return "athlete/"
-    if lowered.startswith(("_retry_after", "_provider_error", "_intervals_error", "_safe_interval_error", "_read_http", "_urlopen_", "_http_", "http_json", "_capture_http", "_handle_http", "multipart_form_data", "request_ai_provider", "responses_background_request", "output_text")):
-        return "providers/http.py" if any(token in lowered for token in ("http", "urlopen", "multipart", "retry_after")) else "providers/"
-    if lowered.startswith(("_adaptive_", "adaptive_", "_illness_", "illness_", "latest_illness", "_upsert_illness", "_fill_illness", "check_adaptive", "apply_adaptive", "_apply_adaptive", "_record_date", "_weekly_compliance", "compact_", "_is_composite_duration")):
-        return "planning/"
+        return HTTP_AUTH
+    if lowered in {"_record_change", "list_change_history"}:
+        return HISTORY_PACKAGE
+    if lowered in {"get_kv", "set_kv"}:
+        return SETTINGS_MODULE
     if lowered in {"selected", "coach_quick_actions_state"}:
-        return "coach/context.py" if lowered != "selected" else "planning/"
-    if lowered.startswith(("api_page", "encode_page", "decode_page", "paged_", "state_versions")):
-        return "http_api/pagination.py"
-    if lowered.startswith(("_canonical_", "_local_calendar", "local_calendar", "_repair_calendar", "_repaircalendar", "repaircalendar", "_require_intervals_calendar", "_intervals_calendar", "_intervals_connection", "intervals_public", "_adopt_remote", "_remote_calendar")):
-        return "calendar/"
-    if lowered.startswith(("delete_duplicate", "assert_duplicate")):
-        return "activities/" if lowered.startswith("delete") else "coach/proposals.py"
-    if lowered.startswith(("_structured_training", "_structured_adaptive", "_apply_structured_adaptive", "_validated_training", "_record_created_training", "_record_existing_training", "_validate_training_change", "_prepare_structured_training", "_validate_structured_training", "_collect_structured_training", "_apply_structured_training", "_replacement_", "_create_replacement", "_copy_replacement", "_archive_replacement", "_validate_replacement")):
-        return "planning/"
-    if lowered.startswith(("_structured_artifact", "_structured_action")):
-        return "coach/tool_execution.py"
-    if lowered.startswith(("_repair_manifest", "_validate_repair_manifest", "_refresh_repair_manifest", "_structured_bounded")):
-        return "coach/proposals.py"
-    if lowered.startswith(("_start_structured_provider", "_run_structured_intervals", "_retry_structured_intervals", "_resolve_structured_sync")):
-        return "sync/"
-    if lowered.startswith(("_record_intervals_sync", "_finish_intervals_sync", "_validate_selected_plan_sync", "_persist_selected_plan_sync")):
-        return "sync/"
-    if lowered.startswith(("_dialogue_", "_check_dialogue", "_validate_dialogue", "_alternative_planning_steps", "_profile_repair", "_profile_steps", "_apply_training_patch", "_store_training_patch")):
-        return "coach/dialogue.py"
-    if lowered.startswith(("_planning_command", "_prepare_planning_command", "_execute_planning_command", "execute_planning_command", "_claim_planning_command", "_prepare_commit_planning", "_validate_training_patch")):
-        return "coach/tool_execution.py"
-    if lowered == "_require_command_owner":
-        return "coach/authorization.py"
-    if lowered.startswith("_structured_command_failure") or lowered.startswith("_persist_structured_command_failure"):
-        return "coach/service.py"
-    if lowered in {"metric"} or lowered.startswith(("_provider_usage", "_response_retry")):
-        return "providers/"
-    if lowered == "_prepare_structured_plan_sync":
-        return "sync/"
-    if lowered in {"local_now"}:
-        return "runtime/"
-    if lowered.startswith("public_"):
-        return "http_api/"
-    if lowered.startswith(("_checkpoint_database", "client_ip", "allow_rate", "cookie_value", "readiness_state")):
-        return "http_api/"
-    if lowered.startswith("_startup_historical") or lowered == "main":
-        return "sync/scheduler.py" if lowered != "main" else "server.py / Composition Root"
-    if name.startswith(("ASSET_", "STATIC_")):
-        return "http_api/"
-    if name.endswith("_SQL") or name in {"DB_PATH", "DATA_DIR"}:
-        return "db/"
-    if name.endswith("_ERROR") or name.endswith("_ERRORS"):
-        return "errors.py"
-    if any(token in name for token in ("OPENAI", "GEMINI")):
-        return "providers/"
-    if "GARMIN" in name:
-        return "sync/garmin.py"
-    if "WEATHER" in name:
-        return "weather/"
-    if "SYNC" in name or "RESYNC" in name:
-        return "sync/"
-    if "COACH" in name or "CHAT" in name:
-        return "coach/"
-    if "PLAN" in name or "WORKOUT" in name:
-        return "planning/"
-    if name.startswith(("available_", "selected_", "save_")) and any(
-        token in lowered for token in ("ai", "model", "thinking", "calendar")
-    ):
-        return "settings.py"
-    if any(token in lowered for token in ("diagnostic", "redact", "sanitize", "secret", "logging", "log_", "safe_response_headers")):
-        return "observability.py"
-    if lowered.startswith(("provider_refresh", "sync_job", "_sync", "sync_", "enqueue_", "resume_interrupted", "start_sync", "resolve_sync", "garmin_snapshot")):
-        return "sync/"
-    if lowered.startswith(("_history", "history_", "undo", "_undo", "list_change", "_change", "_audit", "audit_")):
-        return "history/"
-    if lowered.startswith(("activity_", "_activity")):
-        return "activities/"
-    preferences = (
-        (("load_local_env", "config"), "config.py"),
-        (("setting", "model", "provider", "thinking"), "settings.py"),
-        (("log", "redact", "sanitize", "secret", "external_call"), "observability.py"),
-        (("maintenance", "event", "generation"), "runtime/"),
-        (("db", "sql", "repository", "schema", "database"), "db/"),
-        (("history", "undo"), "history/"),
-        (("garmin",), "sync/garmin.py"),
-        (("activity",), "activities/"),
-        (("performance", "recovery", "vo2", "battery", "fitness"), "performance/"),
-        (("profile", "checkin", "feedback", "athlete"), "athlete/"),
-        (("competition", "race"), "planning/competitions.py"),
-        (("ical", "calendar", "byday", "recurrence"), "providers/calendar.py"),
-        (("weather",), "weather/"),
-        (("workout", "library", "planned", "training_plan", "plan_", "planning"), "planning/"),
-        (("openai", "gemini", "transcri", "responses_request", "audio"), "providers/"),
-        (("context", "prompt", "coach", "conversation", "chat"), "coach/"),
-        (("proposal", "authoriz", "scope", "tool"), "coach/"),
-        (("stream",), "coach/streams.py"),
-        (("job", "queue", "worker"), "coach/jobs.py"),
-        (("morning",), "coach/morning.py"),
-        (("backup", "restore", "export"), "backup/"),
-        (("privacy", "delete"), "privacy.py"),
-        (("http", "request", "response", "handler", "session", "csrf", "auth", "pagination"), "http_api/"),
-        (("scheduler", "daily"), "sync/scheduler.py"),
-        (("sync", "resync", "refresh", "cursor", "snapshot", "reconcile"), "sync/"),
-    )
-    for words, preferred in preferences:
+        return PLANNING_PACKAGE if lowered == "selected" else "coach/context.py"
+    if lowered in {"delete_duplicate_activity", "duplicate_activity_delete_preview"}:
+        return ACTIVITIES_PACKAGE
+    if lowered.startswith("_retry_after"):
+        return PROVIDER_HTTP
+    if lowered == "main":
+        return COMPOSITION_ROOT
+    return None
+
+
+def _owner_from_prefixes(lowered: str) -> str | None:
+    for prefixes, target in _OWNER_PREFIX_RULES:
+        if lowered.startswith(prefixes):
+            if prefixes == ("delete_duplicate", "assert_duplicate"):
+                return ACTIVITIES_PACKAGE if lowered.startswith("delete") else COACH_PROPOSALS
+            return target
+    return None
+
+
+def _owner_from_uppercase(name: str) -> str | None:
+    if name.endswith(("_SQL", "_ERROR", "_ERRORS")):
+        return DB_PACKAGE if name.endswith("_SQL") else ERRORS_MODULE
+    for prefixes, target in _NAME_PREFIX_RULES:
+        if name.startswith(prefixes):
+            return target
+    for fragments, target in _NAME_CONTAINS_RULES:
+        if any(fragment in name for fragment in fragments):
+            return target
+    return None
+
+
+def _owner_from_candidates(lowered: str, candidates: tuple[str, ...]) -> str | None:
+    for words, preferred in _PREFERENCE_RULES:
         if not any(word in lowered for word in words):
             continue
         exact = next((candidate for candidate in candidates if candidate == preferred), None)
         if exact:
             return exact
-        compatible = next(
-            (candidate for candidate in candidates if preferred.rstrip("/").split("/")[0] in candidate),
-            None,
-        )
+        compatible = next((candidate for candidate in candidates if preferred.rstrip("/").split("/")[0] in candidate), None)
         if compatible:
             return compatible
-    if len(candidates) == 1:
-        return candidates[0]
-    return "unklar: " + ", ".join(candidates)
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _candidate_for_name(name: str, candidates: tuple[str, ...]) -> str:
+    lowered = name.lower()
+    resolvers = (
+        _explicit_owner,
+        lambda value: _owner_from_exact_names(value, lowered),
+        lambda value: _owner_from_prefixes(lowered),
+        _owner_from_uppercase,
+    )
+    for resolver in resolvers:
+        target = resolver(name)
+        if target:
+            return target
+    target = _owner_from_candidates(lowered, candidates)
+    return target or "unklar: " + ", ".join(candidates)
+
+
+_PHASE_RULES = (
+    (("config", "errors", "observability", "runtime", "settings", "db"), "P1"),
+    (("providers",), "P2"),
+    (("activities", "performance", "athlete", CALENDAR_TOKEN, "weather"), "P3"),
+    (("planning",), "P4"),
+    (("history",), "P5"),
+    (("scheduler", "coach/jobs", "coach/streams", "coach/morning"), "P8"),
+    (("sync",), "P6"),
+    (("coach",), "P7"),
+    (("backup", "privacy"), "P9"),
+    (("http_api",), "P10"),
+)
 
 
 def phase_for_target(target: str) -> str:
-    lowered = target.lower()
     if target.startswith("unklar"):
         return "P0 (Zuordnung offen)"
-    if "config" in lowered or "errors" in lowered or "observability" in lowered or "runtime" in lowered or "settings" in lowered or "db" in lowered:
-        return "P1"
-    if "providers" in lowered:
-        return "P2"
-    if any(value in lowered for value in ("activities", "performance", "athlete", "calendar", "weather")):
-        return "P3"
-    if "planning" in lowered:
-        return "P4"
-    if "history" in lowered:
-        return "P5"
-    if "scheduler" in lowered:
-        return "P8"
-    if "sync" in lowered:
-        return "P6"
-    if "coach" in lowered:
-        if any(value in lowered for value in ("jobs", "streams", "morning")):
-            return "P8"
-        return "P7"
-    if "backup" in lowered or "privacy" in lowered:
-        return "P9"
-    if "http_api" in lowered:
-        return "P10"
+    lowered = target.lower()
+    for fragments, phase in _PHASE_RULES:
+        if any(fragment in lowered for fragment in fragments):
+            return phase
     return "P11"
+
+
+def _node_end(node: ast.AST) -> int:
+    return getattr(node, END_LINE_ATTRIBUTE, node.lineno)
+
+
+def _candidates_for_line(line: int, ranges: tuple[PlanRange, ...]) -> tuple[str, ...]:
+    plan_range = range_for(line, ranges)
+    return plan_range.targets if plan_range else ()
+
+
+def _import_item(
+    node: ast.Import | ast.ImportFrom,
+    name: str,
+    imported_module: str,
+    candidates: tuple[str, ...],
+    nested: bool,
+) -> InventoryItem:
+    if nested:
+        target = _candidate_for_name(name, candidates)
+        return InventoryItem(
+            KIND_GLOBAL, name, node.lineno, _node_end(node), imported_module, target,
+            phase_for_target(target), STATUS_OPEN, node, imported_module,
+        )
+    target = imported_module.split(":", 1)[0]
+    if target.startswith(BACKEND_DIR):
+        target = target.replace(".", "/")
+        status = "bereits ausgelagert (Importbindung)"
+    else:
+        target = COMPOSITION_ROOT
+        status = "bestehende Infrastrukturbindung"
+    phase = "P1" if target.startswith(BACKEND_DIR) else "P11"
+    return InventoryItem(
+        KIND_IMPORT, name, node.lineno, _node_end(node), imported_module, target,
+        phase, status, node, imported_module,
+    )
+
+
+def _import_items(
+    node: ast.Import | ast.ImportFrom,
+    candidates: tuple[str, ...],
+    nested: bool,
+    seen: set[str],
+) -> list[InventoryItem]:
+    items: list[InventoryItem] = []
+    for name, imported_module in _import_bindings(node):
+        if nested and name in seen:
+            continue
+        seen.add(name)
+        items.append(_import_item(node, name, imported_module, candidates, nested))
+    return items
+
+
+def _definition_item(
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef,
+    candidates: tuple[str, ...],
+) -> InventoryItem:
+    kind = KIND_CLASS if isinstance(node, ast.ClassDef) else KIND_FUNCTION
+    target = _candidate_for_name(node.name, candidates)
+    return InventoryItem(
+        kind, node.name, node.lineno, _node_end(node), SERVER_MODULE, target,
+        phase_for_target(target), STATUS_OPEN, node,
+    )
+
+
+def _assignment_items(
+    node: ast.Assign | ast.AnnAssign | ast.AugAssign,
+    candidates: tuple[str, ...],
+    seen: set[str],
+) -> list[InventoryItem]:
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    items: list[InventoryItem] = []
+    for target_node in targets:
+        for name in _bound_names(target_node):
+            if name in seen:
+                continue
+            seen.add(name)
+            target = _candidate_for_name(name, candidates)
+            status = STATUS_OPEN
+            if name in {"ROOT", "PUBLIC_DIR", "APP_VERSION"}:
+                target = COMPOSITION_ROOT
+                status = "verbleibt bis P11 (prüfen)"
+            items.append(
+                InventoryItem(
+                    KIND_GLOBAL, name, node.lineno, _node_end(node), SERVER_MODULE, target,
+                    phase_for_target(target), status, node,
+                )
+            )
+    return items
 
 
 def make_items(tree: ast.Module, ranges: tuple[PlanRange, ...]) -> list[InventoryItem]:
     items: list[InventoryItem] = []
     direct_nodes = {id(node) for node in tree.body}
     seen_global_names: set[str] = set()
-    for node in sorted(_module_scope_nodes(tree.body), key=lambda item: (item.lineno, item.col_offset)):
+    nodes = sorted(_module_scope_nodes(tree.body), key=lambda item: (item.lineno, item.col_offset))
+    for node in nodes:
+        candidates = _candidates_for_line(node.lineno, ranges)
         if isinstance(node, (ast.Import, ast.ImportFrom)):
-            # Keep the historical import count stable. Control-flow imports
-            # still bind a module-global name and are represented once below.
-            if id(node) not in direct_nodes:
-                for name, imported_module in _import_bindings(node):
-                    if name in seen_global_names:
-                        continue
-                    seen_global_names.add(name)
-                    plan_range = range_for(node.lineno, ranges)
-                    candidates = plan_range.targets if plan_range else ()
-                    target = _candidate_for_name(name, candidates)
-                    items.append(
-                        InventoryItem(
-                            "Globale Bindung", name, node.lineno, getattr(node, "end_lineno", node.lineno),
-                            imported_module, target, phase_for_target(target), "offen", node, imported_module,
-                        )
-                    )
-                continue
-            for name, imported_module in _import_bindings(node):
-                seen_global_names.add(name)
-                target = imported_module.split(":", 1)[0]
-                if target.startswith("backend"):
-                    target = target.replace(".", "/")
-                    status = "bereits ausgelagert (Importbindung)"
-                else:
-                    target = "server.py / Composition Root"
-                    status = "bestehende Infrastrukturbindung"
-                items.append(
-                    InventoryItem(
-                        "Importbindung", name, node.lineno, getattr(node, "end_lineno", node.lineno),
-                        imported_module, target, "P1" if target.startswith("backend") else "P11", status,
-                        node, imported_module,
-                    )
-                )
-            continue
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            kind = "Klasse" if isinstance(node, ast.ClassDef) else "Funktion"
-            plan_range = range_for(node.lineno, ranges)
-            candidates = plan_range.targets if plan_range else ()
-            target = _candidate_for_name(node.name, candidates)
-            items.append(
-                InventoryItem(
-                    kind, node.name, node.lineno, getattr(node, "end_lineno", node.lineno),
-                    "server.py", target, phase_for_target(target), "offen", node,
-                )
-            )
-            continue
-        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target_node in targets:
-                for name in _bound_names(target_node):
-                    if name in seen_global_names:
-                        continue
-                    seen_global_names.add(name)
-                    plan_range = range_for(node.lineno, ranges)
-                    candidates = plan_range.targets if plan_range else ()
-                    target = _candidate_for_name(name, candidates)
-                    status = "offen"
-                    if name in {"ROOT", "PUBLIC_DIR", "APP_VERSION"}:
-                        target = "server.py / Composition Root"
-                        status = "verbleibt bis P11 (prüfen)"
-                    items.append(
-                        InventoryItem(
-                            "Globale Bindung", name, node.lineno, getattr(node, "end_lineno", node.lineno),
-                            "server.py", target, phase_for_target(target), status, node,
-                        )
-                    )
+            items.extend(_import_items(node, candidates, id(node) not in direct_nodes, seen_global_names))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            items.append(_definition_item(node, candidates))
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            items.extend(_assignment_items(node, candidates, seen_global_names))
     return items
 
 
+def _reference_roots() -> tuple[Path, ...]:
+    return tuple(ROOT / directory for directory in (BACKEND_DIR, "tests", "e2e", SCRIPTS_DIR, GITHUB_DIR))
+
+
+def _is_reference_file(path: Path) -> bool:
+    excluded_parts = {"__pycache__", ".git", "data"}
+    if not path.is_file() or any(part in excluded_parts for part in path.parts):
+        return False
+    if path.resolve() == (ROOT / SCRIPTS_DIR / "server_extraction_inventory.py").resolve():
+        return False
+    return not path.name.startswith(".env") and path.suffix.lower() not in {".db", ".log"}
+
+
+def _files_under_root(directory: Path) -> list[Path]:
+    if not directory.exists():
+        return []
+    return [path for path in directory.rglob("*") if _is_reference_file(path)]
+
+
 def reference_files() -> tuple[Path, ...]:
-    result: list[Path] = []
-    roots = {
-        ROOT / "backend": "backend",
-        ROOT / "tests": "tests",
-        ROOT / "e2e": "e2e",
-        ROOT / "scripts": "scripts",
-        ROOT / ".github": "workflows",
-    }
-    for directory, _ in roots.items():
-        if not directory.exists():
-            continue
-        for path in directory.rglob("*"):
-            if not path.is_file() or any(part in {"__pycache__", ".git", "data"} for part in path.parts):
-                continue
-            if path.resolve() == (ROOT / "scripts" / "server_extraction_inventory.py").resolve():
-                continue
-            if path.name.startswith(".env") or path.suffix.lower() in {".db", ".log"}:
-                continue
-            result.append(path)
-    for path in (ROOT / "Dockerfile", ROOT / "docker-compose.yml"):
-        if path.exists():
-            result.append(path)
+    result = [path for root in _reference_roots() for path in _files_under_root(root)]
+    result.extend(path for path in (ROOT / "Dockerfile", ROOT / "docker-compose.yml") if path.exists())
     return tuple(sorted(set(result)))
 
 
 def _category(path: Path) -> str:
     relative = path.relative_to(ROOT)
-    if relative.parts[0] == ".github":
+    if relative.parts[0] == GITHUB_DIR:
         return "Workflows/CI"
     return relative.parts[0] if relative.parts else "Repository"
 
 
 def _location(path: Path, line: int) -> str:
     parts = path.relative_to(ROOT).parts
-    display = "/".join(parts[2:]) if parts[:2] == (".github", "workflows") else "/".join(parts[1:])
+    display = "/".join(parts[2:]) if parts[:2] == (GITHUB_DIR, "workflows") else "/".join(parts[1:])
     if not display:
         display = parts[0]
     return f"{_category(path)}/{display}:{line}"
 
 
+SERVER_ALIAS_PATTERN = re.compile(r"^\s*import\s+server\s+as\s+(\w+)")
+MEMBER_PATTERN = re.compile(r"\b([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\b")
+LITERAL_PATTERN = re.compile(r"[\"']([A-Za-z_]\w*)[\"']")
+IMPORT_PATTERN = re.compile(r"\bfrom\s+server\s+import\b")
+IMPORT_NAME_PATTERN = re.compile(r"\b[A-Za-z_]\w*\b")
+DYNAMIC_TOKENS = ("getattr", "sys.modules", "monkeypatch", "patch.object", "patch(")
+
+
+def _line_mentions_alias(line: str, aliases: set[str]) -> bool:
+    return "server" in line or any(alias in line for alias in aliases)
+
+
+def _member_references(line: str, path: Path, number: int, names: set[str], aliases: set[str]) -> list[tuple[str, str]]:
+    location = _location(path, number)
+    return [
+        (name, f"{location} (direkt/dynamisch unklar)")
+        for receiver, name in MEMBER_PATTERN.findall(line)
+        if receiver in aliases and name in names
+    ]
+
+
+def _dynamic_references(line: str, path: Path, number: int, names: set[str]) -> tuple[str | None, list[tuple[str, str]]]:
+    if not any(token in line for token in DYNAMIC_TOKENS):
+        return None, []
+    location = _location(path, number)
+    dynamic = f"{location}: {line.strip()}"
+    references = [
+        (name, f"{location} (Monkeypatch/getattr/sys.modules)")
+        for name in LITERAL_PATTERN.findall(line)
+        if name in names
+    ]
+    return dynamic, references
+
+
+def _import_references(line: str, path: Path, number: int, names: set[str]) -> list[tuple[str, str]]:
+    if not IMPORT_PATTERN.search(line):
+        return []
+    location = _location(path, number)
+    imported = line.split("import", 1)[1]
+    return [(name, f"{location} (Import)") for name in IMPORT_NAME_PATTERN.findall(imported) if name in names]
+
+
+def _scan_reference_file(path: Path, names: set[str], aliases: set[str]) -> tuple[list[tuple[str, str]], list[str]]:
+    try:
+        lines = path.read_text(encoding=ENCODING_UTF8, errors="replace").splitlines()
+    except OSError:
+        return [], []
+    references: list[tuple[str, str]] = []
+    dynamic: list[str] = []
+    for number, line in enumerate(lines, 1):
+        alias_match = SERVER_ALIAS_PATTERN.match(line)
+        if alias_match:
+            aliases.add(alias_match.group(1))
+        if not _line_mentions_alias(line, aliases):
+            continue
+        references.extend(_member_references(line, path, number, names, aliases))
+        dynamic_entry, dynamic_references = _dynamic_references(line, path, number, names)
+        if dynamic_entry:
+            dynamic.append(dynamic_entry)
+            references.extend(dynamic_references)
+        references.extend(_import_references(line, path, number, names))
+    return references, dynamic
+
+
 def collect_references(items: list[InventoryItem]) -> tuple[dict[str, list[str]], list[str]]:
     names = {item.name for item in items}
-    references: dict[str, list[str]] = defaultdict(list)
-    dynamic: list[str] = []
     aliases = {"server"}
-    server_alias_pattern = re.compile(r"^\s*import\s+server\s+as\s+(\w+)")
-    member_pattern = re.compile(r"\b(server|[A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\b")
-    literal_pattern = re.compile(r"[\"']([A-Za-z_]\w*)[\"']")
+    collected: list[tuple[str, str]] = []
+    dynamic: list[str] = []
     for path in reference_files():
-        try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        for number, line in enumerate(lines, 1):
-            alias_match = server_alias_pattern.match(line)
-            if alias_match:
-                aliases.add(alias_match.group(1))
-            if "server" not in line and not any(alias in line for alias in aliases):
-                continue
-            for receiver, name in member_pattern.findall(line):
-                if receiver in aliases and name in names:
-                    location = _location(path, number)
-                    references[name].append(f"{location} (direkt/dynamisch unklar)")
-            if any(token in line for token in ("getattr", "sys.modules", "monkeypatch", "patch.object", "patch(")):
-                dynamic.append(f"{_location(path, number)}: {line.strip()}")
-                for name in literal_pattern.findall(line):
-                    if name in names:
-                        location = _location(path, number)
-                        references[name].append(f"{location} (Monkeypatch/getattr/sys.modules)")
-            if re.search(r"\bfrom\s+server\s+import\b", line):
-                for name in re.findall(r"\b[A-Za-z_]\w*\b", line.split("import", 1)[1]):
-                    if name in names:
-                        references[name].append(f"{_location(path, number)} (Import)")
-    return {name: sorted(set(values)) for name, values in references.items()}, sorted(set(dynamic))
+        references, dynamic_entries = _scan_reference_file(path, names, aliases)
+        collected.extend(references)
+        dynamic.extend(dynamic_entries)
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for name, location in collected:
+        grouped[name].append(location)
+    return {name: sorted(set(values)) for name, values in grouped.items()}, sorted(set(dynamic))
 
 
 class DependencyVisitor(ast.NodeVisitor):
@@ -596,12 +726,12 @@ class DependencyVisitor(ast.NodeVisitor):
         self.imports.add("." * node.level + (node.module or ""))
 
 
-def dependencies(items: list[InventoryItem], tree: ast.Module) -> dict[str, tuple[set[str], set[str], set[str], set[str]]]:
-    definitions = {item.name for item in items if item.kind in {"Funktion", "Klasse"}}
+def dependencies(items: list[InventoryItem]) -> dict[str, tuple[set[str], set[str], set[str], set[str]]]:
+    definitions = {item.name for item in items if item.kind in {KIND_FUNCTION, KIND_CLASS}}
     globals_ = {item.name for item in items}
     result: dict[str, tuple[set[str], set[str], set[str], set[str]]] = {}
     for item in items:
-        if item.kind not in {"Funktion", "Klasse"} or item.node is None:
+        if item.kind not in {KIND_FUNCTION, KIND_CLASS} or item.node is None:
             continue
         visitor = DependencyVisitor(globals_, definitions)
         visitor.visit(item.node)
@@ -619,41 +749,49 @@ def dependencies(items: list[InventoryItem], tree: ast.Module) -> dict[str, tupl
     return result
 
 
+@dataclass
+class _SccState:
+    next_index: int = 0
+    indices: dict[str, int] = field(default_factory=dict)
+    lowlinks: dict[str, int] = field(default_factory=dict)
+    stack: list[str] = field(default_factory=list)
+    on_stack: set[str] = field(default_factory=set)
+    components: list[tuple[str, ...]] = field(default_factory=list)
+
+
+def _pop_component(name: str, graph: dict[str, set[str]], state: _SccState) -> None:
+    component: list[str] = []
+    while True:
+        successor = state.stack.pop()
+        state.on_stack.remove(successor)
+        component.append(successor)
+        if successor == name:
+            break
+    if len(component) > 1 or name in graph.get(name, set()):
+        state.components.append(tuple(sorted(component)))
+
+
+def _visit_scc(name: str, graph: dict[str, set[str]], state: _SccState) -> None:
+    state.indices[name] = state.lowlinks[name] = state.next_index
+    state.next_index += 1
+    state.stack.append(name)
+    state.on_stack.add(name)
+    for successor in sorted(graph.get(name, ())):
+        if successor not in state.indices:
+            _visit_scc(successor, graph, state)
+            state.lowlinks[name] = min(state.lowlinks[name], state.lowlinks[successor])
+        elif successor in state.on_stack:
+            state.lowlinks[name] = min(state.lowlinks[name], state.indices[successor])
+    if state.lowlinks[name] == state.indices[name]:
+        _pop_component(name, graph, state)
+
+
 def strongly_connected_components(graph: dict[str, set[str]]) -> list[tuple[str, ...]]:
-    index = 0
-    indices: dict[str, int] = {}
-    lowlinks: dict[str, int] = {}
-    stack: list[str] = []
-    on_stack: set[str] = set()
-    components: list[tuple[str, ...]] = []
-
-    def visit(name: str) -> None:
-        nonlocal index
-        indices[name] = lowlinks[name] = index
-        index += 1
-        stack.append(name)
-        on_stack.add(name)
-        for successor in sorted(graph.get(name, ())):
-            if successor not in indices:
-                visit(successor)
-                lowlinks[name] = min(lowlinks[name], lowlinks[successor])
-            elif successor in on_stack:
-                lowlinks[name] = min(lowlinks[name], indices[successor])
-        if lowlinks[name] == indices[name]:
-            component: list[str] = []
-            while True:
-                successor = stack.pop()
-                on_stack.remove(successor)
-                component.append(successor)
-                if successor == name:
-                    break
-            if len(component) > 1 or name in graph.get(name, set()):
-                components.append(tuple(sorted(component)))
-
+    state = _SccState()
     for name in sorted(graph):
-        if name not in indices:
-            visit(name)
-    return sorted(components)
+        if name not in state.indices:
+            _visit_scc(name, graph, state)
+    return sorted(state.components)
 
 
 def _format_names(values: set[str] | list[str], limit: int = 12) -> str:
@@ -665,14 +803,92 @@ def _format_names(values: set[str] | list[str], limit: int = 12) -> str:
     return ", ".join(f"`{value}`" for value in ordered)
 
 
+def _phase_distribution_lines(counts: Counter[tuple[str, str]]) -> list[str]:
+    lines: list[str] = []
+    for phase_number in range(12):
+        phase = f"P{phase_number}" if phase_number else "P0 (Zuordnung offen)"
+        definitions = counts[(KIND_FUNCTION, phase)] + counts[(KIND_CLASS, phase)]
+        lines.append(
+            f"| {phase} | {definitions} | {counts[(KIND_GLOBAL, phase)]} | "
+            f"{counts[(KIND_IMPORT, phase)]} |"
+        )
+    return lines
+
+
+def _reference_analysis_lines(dynamic: list[str]) -> list[str]:
+    if not dynamic:
+        return [
+            (
+                "Keine dynamischen Zugriffe, Monkeypatches oder `sys.modules`-Stellen "
+                "außerhalb von `server.py` gefunden."
+            ),
+            "",
+        ]
+    return [
+        "### Dynamische Zugriffe und Monkeypatches",
+        "",
+        "Diese Stellen benötigen bei jeder Migration eine manuelle Prüfung des Lookup-Ortes:",
+        "",
+        *(f"- `{entry}`" for entry in dynamic),
+        "",
+    ]
+
+
+def _p1_dependency_lines(
+    items: list[InventoryItem],
+    deps: dict[str, tuple[set[str], set[str], set[str], set[str]]],
+) -> list[str]:
+    lines: list[str] = []
+    for item in items:
+        if item.kind not in {KIND_FUNCTION, KIND_CLASS} or item.line > 2999:
+            continue
+        calls, reads, writes, imports = deps.get(item.name, (set(), set(), set(), set()))
+        lines.append(
+            f"| `{item.name}` | {item.line} | {_format_names(calls)} | "
+            f"{_format_names(reads)} | {_format_names(writes)} | {_format_names(imports)} |"
+        )
+    return lines
+
+
+def _cycle_lines(cycles: list[tuple[str, ...]]) -> list[str]:
+    if not cycles:
+        return [
+            (
+                "Keine zyklische Gruppe im direkten lokalen Aufrufgraphen erkannt; "
+                "dynamische Rückrufe sind damit nicht ausgeschlossen."
+            )
+        ]
+    return [
+        (
+            f"Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: {len(cycles)}. "
+            "Jede Gruppe ist als gemeinsame Umzugseinheit zu prüfen."
+        ),
+        "",
+        *(f"- {', '.join(f'`{name}`' for name in component)}" for component in cycles),
+    ]
+
+
+def _inventory_table_lines(
+    items: list[InventoryItem], references: dict[str, list[str]]
+) -> list[str]:
+    lines: list[str] = []
+    for item in items:
+        refs = "; ".join(references.get(item.name, [])) or "keine statisch gefunden"
+        lines.append(
+            f"| {item.kind} | `{item.name}` | {item.line} | `{item.target}` | "
+            f"{item.phase} | {item.status} | {refs} |"
+        )
+    return lines
+
+
 def build_document() -> str:
-    source = SERVER_PATH.read_text(encoding="utf-8")
+    source = SERVER_PATH.read_text(encoding=ENCODING_UTF8)
     tree = ast.parse(source, filename=str(SERVER_PATH))
     ranges = read_plan_ranges()
     items = make_items(tree, ranges)
     references, dynamic = collect_references(items)
-    deps = dependencies(items, tree)
-    definition_names = {item.name for item in items if item.kind in {"Funktion", "Klasse"}}
+    deps = dependencies(items)
+    definition_names = {item.name for item in items if item.kind in {KIND_FUNCTION, KIND_CLASS}}
     graph = {name: set(deps.get(name, (set(), set(), set(), set()))[0]) & definition_names for name in definition_names}
     cycles = strongly_connected_components(graph)
     counts = Counter((item.kind, item.phase) for item in items)
@@ -680,7 +896,7 @@ def build_document() -> str:
     source_lines = len(source.splitlines())
     plan_end = max(item.end for item in ranges)
     outside_plan = [item for item in items if item.line > plan_end]
-    source_fingerprint = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    source_fingerprint = hashlib.sha256(source.encode(ENCODING_UTF8)).hexdigest()
 
     lines = [
         "# Statisches Inventar für die server.py-Auslagerung",
@@ -691,10 +907,10 @@ def build_document() -> str:
         "",
         f"- Geprüfter P0-Basiscommit: `{P0_BASE_COMMIT}`",
         f"- Inventarisierter `server.py`-Quelltext (SHA-256): `{source_fingerprint}`; dieser Fingerprint ist unabhängig von HEAD und Arbeitsbaum stabil.",
-        f"- `server.py`: {source_lines:,} physische Zeilen".replace(",", "."),
+        f"- `{SERVER_MODULE}`: {source_lines:,} physische Zeilen".replace(",", "."),
         f"- Inventareinträge: {len(items):,}".replace(",", "."),
         f"- Definitionen (Funktionen/Klassen): {len(definition_names):,}".replace(",", "."),
-        f"- Globale Bindungen einschließlich Imports: {sum(item.kind == 'Globale Bindung' for item in items):,} Zuweisungen, {sum(item.kind == 'Importbindung' for item in items):,} Imports".replace(",", "."),
+        f"- Globale Bindungen einschließlich Imports: {sum(item.kind == KIND_GLOBAL for item in items):,} Zuweisungen, {sum(item.kind == KIND_IMPORT for item in items):,} Imports".replace(",", "."),
         f"- Planbereich: bis Zeile {plan_end:,}; Einträge dahinter: {len(outside_plan):,} (zielbestimmt über Symbol-/Verantwortungsanalyse)".replace(",", "."),
         "- Status dieses Stands: P0/Intervals-Reabsorption integriert; P1 hat noch nicht begonnen. `offen` bedeutet, dass die fachliche Eigentümerschaft noch migriert werden muss.",
         "",
@@ -716,36 +932,15 @@ def build_document() -> str:
         "| Phase | Funktionen/Klassen | Globale Bindungen | Importbindungen |",
         "| --- | ---: | ---: | ---: |",
     ]
-    for phase_number in range(0, 12):
-        phase = f"P{phase_number}" if phase_number else "P0 (Zuordnung offen)"
-        definitions = counts[("Funktion", phase)] + counts[("Klasse", phase)]
-        bindings = counts[("Globale Bindung", phase)]
-        imports = counts[("Importbindung", phase)]
-        lines.append(f"| {phase} | {definitions} | {bindings} | {imports} |")
+    lines.extend(_phase_distribution_lines(counts))
     lines += ["", "## Referenzanalyse außerhalb von server.py", "", "Direkte `server.<name>`-Zugriffe und erkennbare Import-/Patchstellen sind pro Eintrag in der Tabelle vermerkt. Die Ortsangaben decken `backend/`, `tests/`, `e2e/`, `scripts/`, Docker und GitHub-Workflows ab.", ""]
-    if dynamic:
-        lines += ["### Dynamische Zugriffe und Monkeypatches", "", "Diese Stellen benötigen bei jeder Migration eine manuelle Prüfung des Lookup-Ortes:", ""]
-        lines.extend(f"- `{entry}`" for entry in dynamic)
-        lines.append("")
-    else:
-        lines += ["Keine dynamischen Zugriffe, Monkeypatches oder `sys.modules`-Stellen außerhalb von `server.py` gefunden.", ""]
+    lines.extend(_reference_analysis_lines(dynamic))
     lines += ["## P1-Aufruf- und Zustandsabhängigkeiten", "", "Die folgende Tabelle ist die statische Grundlage für P1. Reads/Writes sind nur Namen, die im globalen Modulnamespace gebunden werden; lokale Variablen werden soweit AST-statisch erkennbar ausgefiltert. Dynamische Attribute, Closure-Zustand und indirekte Callbacks bleiben unsicher.", "", "| Definition | Zeile | Direkte lokale Aufrufe | Globale Reads | Globale Writes | Imports im Body |", "| --- | ---: | --- | --- | --- | --- |"]
-    p1_items = [item for item in items if item.kind in {"Funktion", "Klasse"} and item.line <= 2999]
-    for item in p1_items:
-        calls, reads, writes, imports = deps.get(item.name, (set(), set(), set(), set()))
-        lines.append(f"| `{item.name}` | {item.line} | {_format_names(calls)} | {_format_names(reads)} | {_format_names(writes)} | {_format_names(imports)} |")
+    lines.extend(_p1_dependency_lines(items, deps))
     lines += ["", "### Zyklische Gruppen", ""]
-    if cycles:
-        lines.append(f"Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: {len(cycles)}. Jede Gruppe ist als gemeinsame Umzugseinheit zu prüfen.")
-        lines.append("")
-        for component in cycles:
-            lines.append(f"- {', '.join(f'`{name}`' for name in component)}")
-    else:
-        lines.append("Keine zyklische Gruppe im direkten lokalen Aufrufgraphen erkannt; dynamische Rückrufe sind damit nicht ausgeschlossen.")
+    lines.extend(_cycle_lines(cycles))
     lines += ["", "## Vollständiges Inventar", "", "`Zielmodul` und `Phase` folgen der Bereichstabelle des vollständigen Plans. Jede Zuordnung ist konkret; eine künftig neu hinzukommende nicht auflösbare Bindung wird als offen markiert und darf nicht stillschweigend erfunden werden. `Status` beschreibt ausschließlich den Stand vor P1.", "", "| Art | Quellname | Ausgangszeile | Zielmodul | Phase | Status | Referenzen außerhalb von server.py |", "| --- | --- | ---: | --- | --- | --- | --- |"]
-    for item in items:
-        refs = "; ".join(references.get(item.name, [])) or "keine statisch gefunden"
-        lines.append(f"| {item.kind} | `{item.name}` | {item.line} | `{item.target}` | {item.phase} | {item.status} | {refs} |")
+    lines.extend(_inventory_table_lines(items, references))
     lines += ["", "## Zielverteilung", "", "| Zielmodul | Einträge |", "| --- | ---: |"]
     lines.extend(f"| `{target}` | {count} |" for target, count in sorted(target_counts.items()))
     lines += ["", "## Grenzen und offene Unsicherheiten", "", "- AST-Aufrufauflösung erfasst nur direkte lokale Aufrufe; `getattr`, `globals()`, `sys.modules`, dekoratorbasierte Registrierung und Callback-Injektion benötigen eine manuelle Nachprüfung.", "- Ein Name kann in mehreren Kategorien mit derselben Schreibweise vorkommen; Referenzzählungen sind deshalb namensbasiert und zeigen Ortsangaben, nicht vermeintliche Laufzeitidentität.", "- Die Tabelle enthält bewusst auch Importbindungen, damit Rückimporte, spätere Re-Exports und der endgültige Composition-Root-Inhalt überprüfbar bleiben.", "- Offene Zielzuordnungen müssen vor dem jeweiligen Umzug fachlich entschieden werden; sie gelten nicht als erledigt.", ""]
@@ -758,11 +953,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     document = build_document()
     if args.check:
-        if not DOC_PATH.exists() or DOC_PATH.read_text(encoding="utf-8") != document:
+        if not DOC_PATH.exists() or DOC_PATH.read_text(encoding=ENCODING_UTF8) != document:
             print(f"{DOC_PATH} is stale; run python scripts/server_extraction_inventory.py", file=sys.stderr)
             return 1
         return 0
-    DOC_PATH.write_text(document, encoding="utf-8")
+    DOC_PATH.write_text(document, encoding=ENCODING_UTF8)
     print(f"wrote {DOC_PATH} ({len(document.splitlines())} lines)")
     return 0
 
