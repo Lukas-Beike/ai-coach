@@ -168,7 +168,7 @@ Abhängigkeit: P0.
     Redaktion, JSON-Formatter und Logging-Setup verlagern.
   - [ ] Verbleibende Konfigurationsvalidierung, Settings-Dateischreibpfade,
     Provider-Freshness und diagnostische Observability verlagern.
-- [ ] DB-Initialisierung vervollständigen; Job-Recovery von Schema-Initialisierung
+- [x] DB-Initialisierung vervollständigen; Job-Recovery von Schema-Initialisierung
   trennen und aus der Startverdrahtung explizit aufrufen.
 - [x] Maintenance-Gate und State-Event-Puffer mit konkreten Instanzen auslagern.
 - [ ] Release-Verwendung von `APP_VERSION` und statischen Pfaden erfassen;

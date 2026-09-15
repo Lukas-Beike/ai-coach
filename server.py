@@ -69,6 +69,7 @@ from backend import observability
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 from backend.settings import SettingsService
+from backend.db.bootstrap import initialize_application_database
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db.manager import DatabaseManager
 from backend.db.schema import (
@@ -77,8 +78,6 @@ from backend.db.schema import (
     configure_cipher,
     database_index_names,
     database_schema_is_current,
-    database_table_names,
-    initialize_schema,
 )
 from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config, load_local_env as load_config_env
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
@@ -1164,43 +1163,16 @@ def database():
 
 def initialise_database() -> None:
     with DB_LOCK, database() as db:
-        existing_tables = database_table_names(db)
-        if existing_tables and not database_schema_is_current(db):
-            raise RuntimeError(
-                "Die vorhandene Datenbank entspricht nicht exakt dem aktuellen Schema. "
-                "Für diesen Release ist ein leerer Datenbestand erforderlich."
-            )
-        if not existing_tables:
-            initialize_schema(db)
-        db.execute(
-            "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
-            (utc_now(),),
+        initialize_application_database(
+            db,
+            key_values=KEY_VALUE_REPOSITORY,
+            now=utc_now(),
+            current_time=datetime.now(timezone.utc),
+            default_profile_json=json.dumps(DEFAULT_PROFILE),
+            provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
+            retention_days=int(getattr(CONFIG, "data_retention_days", -1)),
+            all_sync_days=ALL_SYNC_DAYS,
         )
-        if not database_schema_is_current(db):
-            raise RuntimeError("Die neue Datenbank konnte nicht mit dem aktuellen Schema initialisiert werden.")
-        if get_kv("profile", db) is None:
-            set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
-        # A process cannot continue a reset after a restart. Clear only the
-        # transient marker; the last result/error remains useful to the UI.
-        for provider_keys in PROVIDER_RESYNC_KEYS.values():
-            set_kv(provider_keys["running"], "0", db)
-            set_kv(provider_keys["status"], "", db)
-        # A process cannot continue a morning check-in after a restart. Clear
-        # its transient marker so an interrupted run is not shown as active.
-        set_kv("morning_checkin_running", "0", db)
-        if get_kv("morning_checkin_status", db) == "working":
-            set_kv("morning_checkin_status", "waiting", db)
-            set_kv("morning_checkin_attempted", "", db)
-        retention_setting = int(getattr(CONFIG, "data_retention_days", -1))
-        if retention_setting != ALL_SYNC_DAYS:
-            retention_days = max(30, min(retention_setting, 3650))
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
-            db.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
-            db.execute("DELETE FROM snapshots WHERE created_at < ?", (cutoff,))
-            # Gemini history has no per-entry timestamp. Rebuild it from the
-            # retained messages after startup instead of keeping stale content.
-            set_kv("gemini_conversation_history", "[]", db)
-            set_kv("gemini_call_names", "{}", db)
 def _provider_refresh_cleanup(db: Any) -> None:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=PROVIDER_REFRESH_RETENTION_DAYS)).isoformat()
     cleanup_refresh_history(db, cutoff=cutoff, max_rows=PROVIDER_REFRESH_MAX_ROWS)

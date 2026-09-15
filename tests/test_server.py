@@ -40,6 +40,7 @@ os.environ.update({
 })
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from backend.db.schema import database_schema_is_current, database_table_names
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 
@@ -155,8 +156,8 @@ class CoachTests(unittest.TestCase):
         server.initialise_database()
         with server.DB_LOCK, server.database() as db:
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"], 1)
-            self.assertTrue(server.database_schema_is_current(db))
-            self.assertEqual(server.database_table_names(db), set(server.CURRENT_DATABASE_SCHEMA))
+            self.assertTrue(database_schema_is_current(db))
+            self.assertEqual(database_table_names(db), set(server.CURRENT_DATABASE_SCHEMA))
             self.assertEqual(server.database_index_names(db), server.CURRENT_DATABASE_INDEXES)
 
     def test_initialise_database_rejects_a_non_current_schema_without_modifying_it(self):
