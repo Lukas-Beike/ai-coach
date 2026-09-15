@@ -41,7 +41,7 @@ def _secret_variants(value: Any) -> set[str]:
     return {item for item in variants if len(item) >= 4}
 
 
-def _safe_url_netloc(parsed: Any) -> str:
+def safe_url_netloc(parsed: Any) -> str:
     """Keep a provider host for diagnostics while dropping URL userinfo."""
     try:
         hostname = str(parsed.hostname or "")
@@ -105,7 +105,7 @@ def _redact_url(match: re.Match[str]) -> str:
         for key, item in parse_qsl(parsed.query, keep_blank_values=True):
             safe_item = "[REDACTED]" if key.casefold().replace("-", "_") in REDACTED_URL_QUERY_KEYS else item
             query_pairs.append((key, safe_item))
-        safe = urlunparse((parsed.scheme.casefold(), _safe_url_netloc(parsed), path, "", urlencode(query_pairs), ""))
+        safe = urlunparse((parsed.scheme.casefold(), safe_url_netloc(parsed), path, "", urlencode(query_pairs), ""))
         return safe + trailing
     except (TypeError, ValueError):
         return "[REDACTED_URL]" + trailing
@@ -126,7 +126,7 @@ class Redactor:
         try:
             parsed = urlparse(str(getattr(config, "calendar_ical_url", "") or ""))
             if parsed.scheme.casefold() in {"http", "https"} and parsed.netloc:
-                return urlunparse((parsed.scheme.casefold(), _safe_url_netloc(parsed), "/redacted", "", "", ""))
+                return urlunparse((parsed.scheme.casefold(), safe_url_netloc(parsed), "/redacted", "", "", ""))
         except (TypeError, ValueError):
             pass
         return "[REDACTED_CALENDAR_URL]"

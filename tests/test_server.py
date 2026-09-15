@@ -4587,21 +4587,21 @@ class CoachTests(unittest.TestCase):
     def test_ai_provider_selection_keeps_models_separate(self):
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
         with patch.object(server, "CONFIG", config):
-            self.assertEqual(server.selected_ai_provider(), "openai")
-            server.save_model("gpt-5.6-luna")
-            provider_state = server.save_ai_provider("gemini")
+            self.assertEqual(server.SETTINGS.selected_ai_provider(), "openai")
+            server.SETTINGS.save_model("gpt-5.6-luna")
+            provider_state = server.SETTINGS.save_ai_provider("gemini")
             self.assertEqual(provider_state["provider"], "gemini")
             self.assertEqual(provider_state["model"], "gemini-3.8-flash")
             self.assertEqual([option["id"] for option in provider_state["model_options"]], ["gemini-3.8-flash", "gemini-2.5-pro"])
-            self.assertEqual(server.selected_model(), "gemini-3.8-flash")
-            server.save_model("gemini-2.5-pro")
-            server.save_ai_provider("openai")
-            self.assertEqual(server.selected_model(), "gpt-5.6-luna")
+            self.assertEqual(server.SETTINGS.selected_model(), "gemini-3.8-flash")
+            server.SETTINGS.save_model("gemini-2.5-pro")
+            server.SETTINGS.save_ai_provider("openai")
+            self.assertEqual(server.SETTINGS.selected_model(), "gpt-5.6-luna")
 
     def test_gemini_key_is_redacted_from_diagnostics_text(self):
         key = "AIza" + "a" * 35
         with patch.object(server, "CONFIG", replace(server.CONFIG, gemini_api_key=key)):
-            self.assertNotIn(key, server.redact_text(f"Gemini request failed: {key}"))
+            self.assertNotIn(key, server.REDACTOR.redact_text(f"Gemini request failed: {key}"))
 
     def test_gemini_turn_uses_its_captured_provider_and_reasoning_level(self):
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
@@ -5425,35 +5425,35 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("vendor_payload", context)
 
     def test_model_selection_is_persisted_and_validated(self):
-        self.assertEqual(server.selected_model(), "gpt-5.6-luna")
-        self.assertEqual(server.save_model("gpt-5.6-terra"), {"model": "gpt-5.6-terra"})
-        self.assertEqual(server.selected_model(), "gpt-5.6-terra")
+        self.assertEqual(server.SETTINGS.selected_model(), "gpt-5.6-luna")
+        self.assertEqual(server.SETTINGS.save_model("gpt-5.6-terra"), {"model": "gpt-5.6-terra"})
+        self.assertEqual(server.SETTINGS.selected_model(), "gpt-5.6-terra")
         with self.assertRaises(server.AppError):
-            server.save_model("not-a-model")
+            server.SETTINGS.save_model("not-a-model")
 
     def test_thinking_level_is_persisted_and_validated(self):
-        self.assertEqual(server.selected_thinking_level(), "medium")
-        self.assertEqual(server.save_thinking_level("high"), {"thinking_level": "high"})
-        self.assertEqual(server.selected_thinking_level(), "high")
+        self.assertEqual(server.SETTINGS.selected_thinking_level(), "medium")
+        self.assertEqual(server.SETTINGS.save_thinking_level("high"), {"thinking_level": "high"})
+        self.assertEqual(server.SETTINGS.selected_thinking_level(), "high")
         with self.assertRaises(server.AppError):
-            server.save_thinking_level("extreme")
+            server.SETTINGS.save_thinking_level("extreme")
 
     def test_calendar_display_settings_are_persisted_and_validated(self):
-        self.assertEqual(server.calendar_display_settings(), {"past_weeks": 1, "future_weeks": 4})
+        self.assertEqual(server.SETTINGS.calendar_display_settings(), {"past_weeks": 1, "future_weeks": 4})
         self.assertEqual(
-            server.save_calendar_display_settings({"past_weeks": 3, "future_weeks": 12}),
+            server.SETTINGS.save_calendar_display_settings({"past_weeks": 3, "future_weeks": 12}),
             {"status": "ok", "past_weeks": 3, "future_weeks": 12},
         )
-        self.assertEqual(server.calendar_display_settings(), {"past_weeks": 3, "future_weeks": 12})
+        self.assertEqual(server.SETTINGS.calendar_display_settings(), {"past_weeks": 3, "future_weeks": 12})
         with self.assertRaises(server.AppError):
-            server.save_calendar_display_settings({"past_weeks": -1})
+            server.SETTINGS.save_calendar_display_settings({"past_weeks": -1})
         with self.assertRaises(server.AppError):
-            server.save_calendar_display_settings({"future_weeks": 53})
+            server.SETTINGS.save_calendar_display_settings({"future_weeks": 53})
         server.set_kv("calendar_display_past_weeks", "invalid")
-        self.assertEqual(server.calendar_display_settings()["past_weeks"], 1)
+        self.assertEqual(server.SETTINGS.calendar_display_settings()["past_weeks"], 1)
 
     def test_responses_request_uses_selected_thinking_level(self):
-        server.save_thinking_level("low")
+        server.SETTINGS.save_thinking_level("low")
         captured = {}
 
         def fake_openai(path, payload):
@@ -7775,7 +7775,7 @@ class CoachTests(unittest.TestCase):
 
 
     def test_diagnostics_redact_credentials_from_logs(self):
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         server.LOGGER.error("failed request with sk-test-secret-value")
         for handler in server.LOGGER.handlers:
             handler.flush()
@@ -7802,7 +7802,7 @@ class CoachTests(unittest.TestCase):
                 token_url,
                 long_path_url,
             ))
-            redacted = server.redact_text(samples)
+            redacted = server.REDACTOR.redact_text(samples)
         for secret in (email, calendar_url, quote(email, safe=""), quote(calendar_url, safe=""), "calendar-password", "query-secret"):
             self.assertNotIn(secret.casefold(), redacted.casefold())
         self.assertIn("calendar.example.invalid", redacted)
@@ -7840,7 +7840,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, garmin_email=email, calendar_ical_url=calendar_url)
         error_body = json.dumps({"error": {"message": f"rejected {email} {calendar_url}"}}).encode("utf-8")
         upstream_error = server.HTTPError("https://intervals.icu/api/v1/athlete/0", 422, "Unprocessable Entity", {}, BytesIO(error_body))
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=upstream_error):
             with self.assertRaises(server.AppError) as raised:
                 server.http_json("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
@@ -7910,7 +7910,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("not captured", json.dumps(server.diagnostic_report(), ensure_ascii=False))
 
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         with patch.object(server, "urlopen", side_effect=server.URLError("offline")):
             with self.assertRaises(server.AppError):
                 server.http_json("GET", "https://intervals.icu/api/v1/athlete/0")
@@ -8023,7 +8023,7 @@ class CoachTests(unittest.TestCase):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
         operation_id = "operation-test-026"
         config = replace(server.CONFIG, intervals_api_key="test-key")
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         with patch.object(server, "CONFIG", config), patch.object(
             server.IntervalsClient, "fetch_snapshot", return_value=snapshot
         ), patch.object(server.IntervalsClient, "get_workout_library", return_value=[]):
@@ -8052,7 +8052,7 @@ class CoachTests(unittest.TestCase):
             def read(self):
                 return b'{"activities": [1, 2]}'
 
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         with patch.object(server, "urlopen", return_value=FakeResponse()):
             result = server.http_json(
                 "GET",
@@ -8326,7 +8326,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.openai_usage_summary()["last_operation"], "responses_stream_cancelled")
 
     def test_openai_stream_request_timeout_is_safe_and_records_provider_failure(self):
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
 
         class TimeoutResponse:
             headers = {}
@@ -8588,7 +8588,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.diagnostic_response_shape([{"token": "hidden"}])["item_shape"]["fields"], ["token"])
 
     def test_garmin_sdk_calls_log_operation_and_result_summary(self):
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         result = server.external_call(
             "garmin",
             "get_sleep_daily",

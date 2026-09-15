@@ -29,7 +29,7 @@ class ProviderReviewTests(unittest.TestCase):
             patch.object(server, "DB_PATH", root / "fresh.db"),
             patch.object(server, "LOG_PATH", root / "synthetic.log"),
             patch.object(server.LOGGER, "disabled", True),
-            patch.object(server, "initialise_logging"),
+            patch.object(server.observability, "configure_logging"),
             patch.object(runtime_maintenance, "MAINTENANCE_GATE", runtime_maintenance.MaintenanceGate()),
         ]
         for item in self.patches:

@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import urlparse
 
 from backend.config import Config
 from backend.observability import (
@@ -13,6 +14,7 @@ from backend.observability import (
     configure_logging,
     external_result_context,
     safe_provider_path,
+    safe_url_netloc,
 )
 
 
@@ -180,6 +182,10 @@ class ObservabilityTests(unittest.TestCase):
             "/api/v1/athlete/[REDACTED_PATH]/activities/[REDACTED_PATH]",
         )
         self.assertEqual(safe_provider_path("/api/v3/profile"), "/api/v3/profile")
+
+    def test_safe_url_netloc_removes_userinfo_and_keeps_host_and_port(self):
+        parsed = urlparse("https://synthetic-user:synthetic-password@example.invalid:8443/path")
+        self.assertEqual(safe_url_netloc(parsed), "example.invalid:8443")
 
     def test_external_result_context_contains_shape_only(self):
         self.assertEqual(external_result_context(None), {"result_type": "null"})
