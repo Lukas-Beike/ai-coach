@@ -313,6 +313,7 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - CI-Korrektur: Der Smoke-Test leitet den Paket-Root nun vom tatsächlich
   importierten `backend.__file__` ab und bleibt damit im Worktree wie im
   Container unabhängig vom Test-Mount.
+- Geprüfter Korrekturcommit: `27dd500c38860884c43e3efe1233dc63f5a85766`.
 
 ## P1 — Release- und statischer Assetvertrag
 
