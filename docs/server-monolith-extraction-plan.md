@@ -141,17 +141,17 @@ Datei als fertig.
 
 ### P0 — Inventar, Baseline und Architekturprüfung
 
-- [ ] Mit Python-AST sämtliche Top-Level-Definitionen und globale Bindungen
+- [x] Mit Python-AST sämtliche Top-Level-Definitionen und globale Bindungen
   erfassen. Pro Eintrag Quellname, Ausgangszeile, Zielmodul, Phase und Status
   in `docs/server-extraction-inventory.md` festhalten.
-- [ ] Referenzen in Backend, Tests, E2E-Fixtures, Skripten, Docker und Workflows
+- [x] Referenzen in Backend, Tests, E2E-Fixtures, Skripten, Docker und Workflows
   erfassen; dynamische Zugriffe/Monkeypatches manuell ergänzen.
-- [ ] Direkte Aufruf-/Importabhängigkeiten und globale Reads/Writes für den
+- [x] Direkte Aufruf-/Importabhängigkeiten und globale Reads/Writes für den
   nächsten Schritt prüfen; zyklische Gruppen als gemeinsame Umzugseinheit
   identifizieren oder an einer konkreten Verantwortungsgrenze auflösen.
-- [ ] Ausgangstests mit synthetischen Daten ausführen und vorhandene Fehler
+- [x] Ausgangstests mit synthetischen Daten ausführen und vorhandene Fehler
   dokumentieren. Keine späteren Regressionen als Altfehler deklarieren.
-- [ ] Kleine Architekturprüfung mit stdlib `ast` in die bestehenden Tests
+- [x] Kleine Architekturprüfung mit stdlib `ast` in die bestehenden Tests
   aufnehmen: kein Backend-Import von `server`; bereits ausgelagerte Namen
   dürfen dort nicht wieder als Implementierung auftauchen.
 Abnahme: Jeder Inventareintrag ist zugeordnet, Baseline und reproduzierbare
