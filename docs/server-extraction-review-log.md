@@ -94,3 +94,49 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - `git diff --check` — PASS.
 - Lokale Vortex-Dateianalyse — nicht verfügbar (`403 Forbidden`); der neue
   PR-spezifische SonarCloud-Lauf ist deshalb das verbindliche externe Gate.
+
+## P1.1 — Fehlervertrag
+
+- Basis: Merge-Commit `a081e013352eb52e020e934c3d5ccf0dc8312573`
+  von PR #664, auf `origin/develop` als Vorfahr bestätigt.
+- Delegation: eigenständiger Luna-Worker-Diff mit Schreibbereich ausschließlich
+  `backend/errors.py` und `tests/test_errors.py`; keine Änderung an `server.py`.
+- Worker-Diff: `AppError`, `ClientDisconnected`, öffentliche HTTP-Statusabbildung,
+  redigierte Providerfehler und die zugehörigen Fehlerkonstanten nach
+  `backend/errors.py` verlagert.
+- Erstes Orchestrator-Review des tatsächlichen Worker-Codes: **PASS** — keine
+  Rückimporte, kein Zustand, keine Providertexte in öffentlichen Meldungen und
+  identische Status-/Reason-Semantik.
+- Integrierter Diff-Stand vor Commit: SHA-256
+  `d19977a28fa2e4af254e2c391293a83ab1811b75edde5c91eaacca002e1762d2`.
+- Integriertes Orchestrator-Review: **PASS** — `server.py` importiert die
+  Symbole nur noch als Composition Root; sämtliche Implementierungen und
+  Konstantendefinitionen wurden entfernt. Die Architekturprüfung erfasst nun
+  zusätzlich top-level Zuweisungen und verhindert damit Rückverlagerungen von
+  Konstanten.
+- `server.py`: 21.962 physische Zeilen; gegenüber dem geprüften P0-Stand 36
+  Zeilen weniger. Erfolgskriterium ist die vollständige Eigentumsverlagerung,
+  nicht die Zeilenreduktion.
+
+### Prüfungen
+
+- `python -m unittest tests.test_errors tests.test_server_architecture -v` —
+  12 Tests, PASS.
+- `python -m unittest discover -s tests -v` — 790 Tests, 12 übersprungen,
+  PASS in 121,964 s.
+- `ruff check backend/errors.py tests/test_errors.py` — PASS.
+- `python -m compileall -q server.py backend` — PASS.
+- `python scripts/server_extraction_inventory.py --check` — PASS.
+- `git diff --check` — PASS.
+- Repositoryweiter Ruff-Lauf: bestehende Monolith-/Architekturtest-Befunde;
+  keine als P1.1 eingeführte Fachlogikverletzung. Das neue Modul und sein
+  fokussierter Testbestand sind vollständig sauber.
+
+### Verbleibende Risiken und nächster Schritt
+
+- Docker-/E2E-Ausführung bleibt wegen des bereits dokumentierten nicht
+  erreichbaren lokalen Docker-Desktop-Daemons extern blockiert; das CI-Gate
+  darf nicht umgangen werden.
+- Die übrigen vier P1-Arbeitspakete bleiben offen. Als Nächstes folgen die
+  voneinander trennbaren Ressourcen `runtime/events.py` und
+  `runtime/maintenance.py` in neuen, abgegrenzten Delegationen.

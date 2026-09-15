@@ -161,7 +161,7 @@ Testbefehle sind erfasst. Reale Secrets oder Athletendaten werden nicht gelesen.
 
 Abhängigkeit: P0.
 
-- [ ] `AppError`, Disconnect-Signal und Fehlerabbildung passend zwischen
+- [x] `AppError`, Disconnect-Signal und Fehlerabbildung passend zwischen
   `errors.py` und HTTP aufteilen; Konstanten zum jeweiligen Eigentümer ziehen.
 - [ ] Konfiguration, Settings-Zugriff und Logging/Redaktion auslagern.
 - [ ] DB-Initialisierung vervollständigen; Job-Recovery von Schema-Initialisierung

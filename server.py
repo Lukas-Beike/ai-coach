@@ -46,6 +46,28 @@ from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlpars
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
+from backend.errors import (
+    COACH_ABORTED_ERROR,
+    COMPETITION_NOT_FOUND_ERROR,
+    CORRUPT_LIBRARY_ERROR,
+    CORRUPT_PLANNING_ERROR,
+    GEMINI_API_KEY_ERROR,
+    INTERNAL_SERVER_ERROR,
+    INTERVALS_API_KEY_ERROR,
+    INVALID_LIBRARY_ID_ERROR,
+    INVALID_PLANNING_DATE_ERROR,
+    INVALID_PLANNING_ID_ERROR,
+    NOT_FOUND_ERROR,
+    OPENAI_API_KEY_ERROR,
+    PLANNED_CALENDAR_RECHECK_ERROR,
+    STALE_PLANNING_REVISION_ERROR,
+    STRUCTURED_AUTHORIZATION_ERROR,
+    UNSUPPORTED_BYDAY_ERROR,
+    AppError,
+    ClientDisconnected,
+    provider_error,
+    public_app_error_status,
+)
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db.manager import DatabaseManager
 from backend.db.schema import (
@@ -188,9 +210,6 @@ ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 JSON_MEDIA_TYPE = "application/json"
 OCTET_STREAM_MIME = "application/octet-stream"
 OPENAI_RESPONSES_PATH = "/responses"
-INTERVALS_API_KEY_ERROR = "INTERVALS_API_KEY ist nicht konfiguriert."
-OPENAI_API_KEY_ERROR = "OPENAI_API_KEY ist nicht konfiguriert."
-GEMINI_API_KEY_ERROR = "GEMINI_API_KEY ist nicht konfiguriert."
 VO2MAX_UNIT = "ml/kg/min"
 GARMIN_RUN_PREDICTION_SOURCE = "Garmin Connect Laufprognose"
 EXTERNAL_HTTP_STARTED_EVENT = "External HTTP request started"
@@ -201,11 +220,7 @@ LOCAL_INTERVALS_SCOPE = "local+intervals"
 WORKDAY_TIME_LABEL = "vor der Arbeit"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 FULL_RESYNC_LABEL = "Vollständiger Resync"
-NOT_FOUND_ERROR = "Nicht gefunden."
-INTERNAL_SERVER_ERROR = "Interner Serverfehler."
 DAILY_AUTO_UPDATE_LABEL = "tägliche automatische Aktualisierung"
-COMPETITION_NOT_FOUND_ERROR = "Wettkampf nicht gefunden."
-COACH_ABORTED_ERROR = "Die Coach-Anfrage wurde abgebrochen."
 APP_NAME = "Intervals Coach"
 REDACTED_PATH = "[REDACTED_PATH]"
 UUID_PATTERN = r"[0-9a-f-]{36}"
@@ -222,14 +237,6 @@ UPDATE_COMMAND_RECEIPT_SQL = "UPDATE coach_commands SET status='completed', rece
 SELECT_COMMAND_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
 SELECT_PLANNING_REVISION_SQL = "SELECT revision FROM planning_state WHERE id=1"
 SELECT_USER_MESSAGE_SQL = "SELECT id FROM messages WHERE client_turn_id=? AND role='user'"
-STRUCTURED_AUTHORIZATION_ERROR = "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht."
-INVALID_PLANNING_ID_ERROR = "Ungültige lokale Planungs-ID."
-CORRUPT_PLANNING_ERROR = "Die lokale Planung ist beschädigt."
-INVALID_LIBRARY_ID_ERROR = "Ungültige lokale Bibliothekseinheiten-ID."
-CORRUPT_LIBRARY_ERROR = "Die lokale Bibliothekseinheit ist beschädigt."
-INVALID_PLANNING_DATE_ERROR = "Das Planungsdatum muss das Format JJJJ-MM-TT haben."
-STALE_PLANNING_REVISION_ERROR = "Die lokale Planrevision ist inzwischen veraltet."
-UNSUPPORTED_BYDAY_ERROR = "BYDAY der Kalender-Wiederholung wird nicht unterstützt."
 STATIC_IMMUTABLE_MAX_AGE = 31536000
 APP_VERSION = "1.11.4"
 MAX_BODY_BYTES = 1_000_000
@@ -1130,27 +1137,6 @@ def external_result_context(result: Any) -> dict[str, Any]:
     return {"result_type": type(result).__name__}
 
 
-def provider_error(service: str | None, category: str, *, status: int | None = None) -> AppError:
-    """Create a short, classified provider error without forwarding exception text."""
-    label = {
-        "garmin": "Garmin",
-        "intervals": PROVIDER_INTERVALS_NAME,
-        "openai": "OpenAI",
-        "calendar": "Der externe Kalender",
-    }.get(str(service or "").casefold(), "Der externe Dienst")
-    if category == "network":
-        message = f"{label} ist nicht erreichbar."
-        reason = "network_error" if str(service or "").casefold() == "openai" else "provider_network_error"
-    elif category == "http":
-        suffix = f" (HTTP {status})" if status else ""
-        message = f"{label} konnte die Anfrage nicht verarbeiten{suffix}."
-        reason = "http_error" if str(service or "").casefold() == "openai" else "provider_http_error"
-    else:
-        message = f"Die Antwort von {label} konnte nicht verarbeitet werden."
-        reason = "client_error" if str(service or "").casefold() == "openai" else "provider_client_error"
-    return AppError(502, message, reason=reason)
-
-
 def external_call(
     service: str,
     operation: str,
@@ -1341,25 +1327,6 @@ Priorities:
 9. Never silently change durable athlete facts, target events, constraints, or preferences based only on chat. Explain the proposed change and ask the athlete to confirm it in the Profile screen.
 10. Reply in German unless the athlete explicitly asks for another language. Use metric units and German date conventions.
 """
-
-
-class AppError(Exception):
-    def __init__(self, status: int, message: str, *, reason: str | None = None):
-        super().__init__(message)
-        self.status = status
-        self.message = message
-        self.reason = reason
-
-
-def public_app_error_status(error: AppError) -> int:
-    """Keep upstream authentication failures separate from local sessions."""
-    if error.status == 401 and error.reason == "authentication_or_permission":
-        return 502
-    return error.status
-
-
-class ClientDisconnected(Exception):
-    pass
 
 
 def serialise_conversation(function):
@@ -11062,9 +11029,6 @@ class _RepairCalendarContext:
     other_remote_ids: set[str]
     other_external_ids: set[str]
     newest: str
-
-
-PLANNED_CALENDAR_RECHECK_ERROR = "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen."
 
 
 def _repair_calendar_context(local_id: str, expected_hash: str, batch: _RepairCalendarBatch | None) -> _RepairCalendarContext:
