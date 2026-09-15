@@ -62,3 +62,35 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - Nächster Schritt ist P1 in einem neuen Worktree auf dem gemergten P0-Stand:
   zuerst `errors.py`, danach die voneinander trennbaren konkreten Ressourcen
   `runtime/events.py` und `runtime/maintenance.py`.
+
+## P0-Follow-up — Sonar-Korrektur
+
+- Basis: Merge-Commit `25e92f2e6c592a756103d77680c75a447ebe744d`
+  von PR #663, auf `origin/develop` als Vorfahr bestätigt.
+- Auslöser: Der PR-spezifische SonarCloud-Scan meldete 43 neue Befunde nur in
+  `scripts/server_extraction_inventory.py`, darunter fünf überkomplexe
+  Funktionen, duplizierte Zielmodul-Literale, ein redundantes Regex-
+  Muster, einen ungenutzten Parameter und einen doppelten Dictionary-Key.
+- Erste Worker-Korrektur: **FAIL** — nur Literale waren bereinigt; die fünf
+  Komplexitätsbefunde blieben im tatsächlichen Diff unverändert.
+- Zweite Worker-Korrektur: **FAIL** — die Funktionen waren zerlegt, aber elf
+  fachliche Eigentümer wurden durch geänderte Regelprioritäten umklassifiziert.
+- Erster Follow-up-PR-Scan: **FAIL** — von 43 Befunden blieb ausschließlich
+  `python:S1172` für einen ungenutzten Parameter in der Owner-Auflösung übrig;
+  der Parameter wurde ohne Verhaltensänderung entfernt.
+- Integrierter Korrekturstand: **PASS (lokal)** — Owner-Auflösung,
+  Inventareinträge, Referenzscanner, Abhängigkeitsanalyse, SCC-Ermittlung und
+  Dokumentaufbau sind fokussiert getrennt; das erzeugte Inventar ist bytegleich
+  zum bereits geprüften P0-Inventar.
+
+### Prüfungen
+
+- `ruff check scripts/server_extraction_inventory.py` — PASS.
+- `python scripts/server_extraction_inventory.py` und anschließender
+  bytegleicher Git-Vergleich des Inventars — PASS.
+- `python scripts/server_extraction_inventory.py --check` — PASS.
+- `python -m py_compile scripts/server_extraction_inventory.py` — PASS.
+- `python -m unittest tests.test_server_architecture -v` — 2 Tests, PASS.
+- `git diff --check` — PASS.
+- Lokale Vortex-Dateianalyse — nicht verfügbar (`403 Forbidden`); der neue
+  PR-spezifische SonarCloud-Lauf ist deshalb das verbindliche externe Gate.
