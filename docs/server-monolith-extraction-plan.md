@@ -168,11 +168,17 @@ Abhängigkeit: P0.
     Redaktion, JSON-Formatter und Logging-Setup verlagern.
   - [ ] Verbleibende Konfigurationsvalidierung, Settings-Dateischreibpfade,
     Provider-Freshness und diagnostische Observability verlagern.
-- [ ] DB-Initialisierung vervollständigen; Job-Recovery von Schema-Initialisierung
+- [x] DB-Initialisierung vervollständigen; Job-Recovery von Schema-Initialisierung
   trennen und aus der Startverdrahtung explizit aufrufen.
 - [x] Maintenance-Gate und State-Event-Puffer mit konkreten Instanzen auslagern.
-- [ ] Release-Verwendung von `APP_VERSION` und statischen Pfaden erfassen;
+- [x] Release-Verwendung von `APP_VERSION` und statischen Pfaden erfassen;
   den bestehenden Releasevertrag bei einer Verlagerung gleichzeitig anpassen.
+  - `APP_VERSION` bleibt bis zu einer gemeinsamen Migration der Release-Quelle,
+    des Review-Gates und des Release-Workflows als exakte Zuweisung in
+    `server.py`.
+  - `PUBLIC_DIR`, die versionierte Asset-Allowlist und `send_static` bleiben bis
+    P10 zusammen; Änderungen am PWA-Assetset aktualisieren weiterhin
+    `index.html`, Cache-Name und Asset-URLs in `service-worker.js` gemeinsam.
 
 Abnahme: Fachmodule können Fehler, Ressourcen und Events verwenden, ohne
 `server` zu importieren. Import-Smoke-Test erzeugt keine Laufzeitaktivitäten.

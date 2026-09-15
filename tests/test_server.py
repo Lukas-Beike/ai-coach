@@ -40,6 +40,7 @@ os.environ.update({
 })
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from backend.db.schema import database_schema_is_current, database_table_names
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 
@@ -155,8 +156,8 @@ class CoachTests(unittest.TestCase):
         server.initialise_database()
         with server.DB_LOCK, server.database() as db:
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"], 1)
-            self.assertTrue(server.database_schema_is_current(db))
-            self.assertEqual(server.database_table_names(db), set(server.CURRENT_DATABASE_SCHEMA))
+            self.assertTrue(database_schema_is_current(db))
+            self.assertEqual(database_table_names(db), set(server.CURRENT_DATABASE_SCHEMA))
             self.assertEqual(server.database_index_names(db), server.CURRENT_DATABASE_INDEXES)
 
     def test_initialise_database_rejects_a_non_current_schema_without_modifying_it(self):
@@ -198,6 +199,48 @@ class CoachTests(unittest.TestCase):
         server.initialise_database()
         self.assertEqual(server.get_kv("morning_checkin_running"), "0")
         self.assertEqual(server.get_kv("morning_checkin_status"), "waiting")
+
+    def test_database_initialization_does_not_recover_jobs(self):
+        with patch.object(server, "resume_interrupted_sync_jobs") as sync_recovery, patch.object(
+            server, "resume_interrupted_coach_jobs"
+        ) as coach_recovery:
+            server.initialise_database()
+        sync_recovery.assert_not_called()
+        coach_recovery.assert_not_called()
+
+    def test_startup_explicitly_recovers_jobs_before_starting_workers(self):
+        order = []
+        http_server = Mock()
+        with patch.object(server.observability, "configure_logging"), patch.object(
+            server, "security_configuration_error", return_value=None
+        ), patch.object(server, "initialise_database", side_effect=lambda: order.append("schema")), patch.object(
+            server, "resume_interrupted_sync_jobs", side_effect=lambda: order.append("sync-recovery")
+        ), patch.object(
+            server, "resume_interrupted_coach_jobs", side_effect=lambda: order.append("coach-recovery")
+        ), patch.object(server, "CoachHTTPServer", return_value=http_server), patch.object(
+            server, "start_sync_job_worker", side_effect=lambda: order.append("sync-worker")
+        ), patch.object(
+            server, "start_coach_job_worker", side_effect=lambda: order.append("coach-worker")
+        ), patch.object(server, "enqueue_startup_sync_jobs"), patch.object(
+            server, "schedule_morning_checkin"
+        ), patch.object(server.threading, "Thread"):
+            server.main()
+        self.assertEqual(
+            order,
+            ["schema", "sync-recovery", "coach-recovery", "sync-worker", "coach-worker"],
+        )
+
+    def test_worker_start_functions_do_not_repeat_recovery(self):
+        with patch.object(server, "resume_interrupted_sync_jobs") as sync_recovery, patch.object(
+            server, "resume_interrupted_coach_jobs"
+        ) as coach_recovery, patch.object(server.threading, "Thread") as thread, patch.object(
+            server, "SYNC_JOB_WORKER", None
+        ), patch.object(server, "COACH_JOB_WORKER", None):
+            server.start_sync_job_worker()
+            server.start_coach_job_worker()
+        self.assertEqual(thread.call_count, 2)
+        sync_recovery.assert_not_called()
+        coach_recovery.assert_not_called()
 
     def test_persistent_sync_job_claim_resume_retry_and_completion(self):
         job = server.enqueue_sync_job("intervals", "refresh", {"days": 7}, requested_by="user")

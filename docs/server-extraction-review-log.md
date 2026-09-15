@@ -262,3 +262,77 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   und Job-Recovery sowie danach die verbleibenden Config-/Observability-
   Teilpakete. Docker-/E2E bleibt lokal extern blockiert; das PR-CI-Gate ist
   verbindlich.
+
+## P1.4 — Datenbank-Bootstrap und explizite Recovery
+
+- Basis: bestätigter Merge-Commit
+  `9d6101c0d1fe2a7a4c5259550758c663a6ff2b5b` von PR #667; der Commit ist auf
+  `origin/develop` erreichbar und sein Tree stimmt mit dem geprüften PR-Head
+  `c4549bcec1c4b8a3e71db95a7f858f45ff964c9a` überein.
+- Bootstrap-Worker: korrigierter lokaler Commit
+  `7669b8af4f25df5d40b91586bee6e32d36ddcfc6`; Schreibbereich ausschließlich
+  `backend/db/bootstrap.py` und `tests/test_db_bootstrap.py`.
+- Erstes Worker-Review: **FAIL** — der Retention-Test prüfte zunächst keinen
+  echten Clamp, und der Import-Smoke-Test verwendete den bereits gefüllten
+  Modulcache.
+- Korrekturreview: **PASS** — Unter- und Obergrenze werden mit 1 und 9.999 Tagen
+  tatsächlich geprüft; ein frischer Subprozess importiert das Modul aus einem
+  leeren temporären Arbeitsverzeichnis ohne Seiteneffekt.
+- Geprüfter integrierter Commit nach Rebase:
+  `01f5fd00abb88700e52c9c9eab20fe81eb1f4ebb`.
+- Erstes Integrations-Gate: **FAIL** — der gezielte Testaufruf verwendete nicht
+  den bestehenden `tests/support.py`-Importpfad, und das nach der Verlagerung
+  veraltete Inventar enthielt einen unklaren P0-Eintrag.
+- Integrations-Re-Review: **PASS** — `initialize_application_database` besitzt
+  Schemaanlage und -validierung, Defaultprofil, transiente Startmarker sowie
+  begrenzte Retention vollständig. `server.initialise_database` verdrahtet nur
+  den bestehenden DB-Lock, die Unit-of-Work und konkrete Abhängigkeiten.
+  Recovery wird in `main()` vor beiden Workern explizit ausgeführt; Restore
+  behält seinen notwendigen eigenen Recovery-Pfad. Es gibt keine Rückimporte,
+  Kompatibilitätswrapper oder Provider-/Worker-Aktivität beim Modulimport.
+- `server.py`: 21.494 physische Zeilen, 1.204 verbleibende
+  Funktionen/Klassen. Das Inventar enthält wieder null unzugeordnete
+  P0-Einträge; `bootstrap_provider_states` ist als P10-Projektion nach
+  `http_api/bootstrap.py` zugeordnet.
+
+### Prüfungen
+
+- `python -m unittest discover -s tests -v` — 834 Tests, 12 übersprungen,
+  PASS in 168,902 s.
+- Gezielte Bootstrap-/Schema-/Retention-/Recovery-/Architekturtests — PASS;
+  insbesondere mutationsfreie Ablehnung eines Fremdschemas, Transaktions- und
+  Lock-Erhalt sowie Recovery vor Workerstart ohne Doppelaufruf.
+- `ruff check backend/db/bootstrap.py tests/test_db_bootstrap.py scripts/server_extraction_inventory.py`
+  — PASS.
+- `python -m compileall -q server.py backend tests` — PASS.
+- `python scripts/server_extraction_inventory.py --check` — PASS.
+- `git diff --check` — PASS.
+- PR-CI-Erstlauf: **FAIL** — im Container liegt das importierte `backend`
+  unter `/app`, während die Tests separat unter `/review/tests` gemountet sind;
+  der Import-Smoke-Test leitete `PYTHONPATH` fälschlich vom Testdateipfad ab.
+- CI-Korrektur: Der Smoke-Test leitet den Paket-Root nun vom tatsächlich
+  importierten `backend.__file__` ab und bleibt damit im Worktree wie im
+  Container unabhängig vom Test-Mount.
+- Geprüfter Korrekturcommit: `27dd500c38860884c43e3efe1233dc63f5a85766`.
+
+## P1 — Release- und statischer Assetvertrag
+
+- Review: **PASS** — `APP_VERSION` bleibt bewusst als exakt formatierte
+  Zuweisung in `server.py`. `.github/scripts/release_source.py`, das
+  Codex-Review-Gate und `.github/workflows/weekly-release.yml` lesen oder
+  ändern genau diesen Pfad und dieses Format; eine spätere Verlagerung muss
+  diese drei Verbraucher samt ihren Vertragstests atomar migrieren.
+- `PUBLIC_DIR`, Asset-Mapping, `VERSIONED_STATIC_ASSETS` und `send_static`
+  bilden bis P10 eine gemeinsame Transportgrenze. Traversal-/Absolutpfad-,
+  ETag-/Cache-Control- und Service-Worker-Tests sichern sie ab.
+- Der PWA-Cachevertrag bleibt unverändert: Bei Assetänderungen werden die
+  Query-Versionen in `public/index.html` sowie Cache-Name und URLs in
+  `public/service-worker.js` gemeinsam aktualisiert.
+
+### Verbleibende Risiken und nächster Schritt
+
+- Lokal bleibt Docker/E2E wegen des nicht verfügbaren Docker-Daemons extern
+  blockiert; das PR-CI-Gate ist verbindlich.
+- Offen in P1 sind Konfigurationsvalidierung, Settings-Dateischreibpfade,
+  Provider-Freshness und die übrige diagnostische Observability. Diese werden
+  vor P2 in kleinen, getrennten Schreibbereichen abgeschlossen.
