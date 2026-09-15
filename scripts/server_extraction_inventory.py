@@ -299,6 +299,14 @@ def _explicit_owner(name: str) -> str | None:
             "list_messages": COACH_CONVERSATION,
             "bounded_score": PERFORMANCE_PACKAGE,
             "bounded_minutes": PERFORMANCE_PACKAGE,
+            "EXTERNAL_CALENDAR_WINDOW_DAYS": PROVIDER_CALENDAR,
+            "ICAL_MAX_RECURRENCE_COUNT": PROVIDER_CALENDAR,
+            "ICAL_MAX_RECURRENCE_PERIODS": PROVIDER_CALENDAR,
+            "intervals_activity_device_source": ACTIVITIES_PACKAGE,
+            "_latest_activity_id": ACTIVITIES_PACKAGE,
+            "_paired_activity_match": ACTIVITIES_PACKAGE,
+            "_unpaired_activity_match": ACTIVITIES_PACKAGE,
+            "mark_daily_sync": "sync/daily.py",
         }
     return explicit.get(name)
 

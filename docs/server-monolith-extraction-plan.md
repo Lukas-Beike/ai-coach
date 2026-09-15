@@ -164,6 +164,10 @@ Abhängigkeit: P0.
 - [x] `AppError`, Disconnect-Signal und Fehlerabbildung passend zwischen
   `errors.py` und HTTP aufteilen; Konstanten zum jeweiligen Eigentümer ziehen.
 - [ ] Konfiguration, Settings-Zugriff und Logging/Redaktion auslagern.
+  - [x] Anbieter-/Modell-/Thinking-/Kalenderauswahl sowie Secret-/URL-
+    Redaktion, JSON-Formatter und Logging-Setup verlagern.
+  - [ ] Verbleibende Konfigurationsvalidierung, Settings-Dateischreibpfade,
+    Provider-Freshness und diagnostische Observability verlagern.
 - [ ] DB-Initialisierung vervollständigen; Job-Recovery von Schema-Initialisierung
   trennen und aus der Startverdrahtung explizit aufrufen.
 - [x] Maintenance-Gate und State-Event-Puffer mit konkreten Instanzen auslagern.
