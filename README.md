@@ -925,23 +925,15 @@ merge successful update pull requests.
 ### Codex pull-request review
 
 The required `Codex code review` check on `develop` and `Codex code review
-(main)` on `main` are merge gates for the native,
-subscription-backed Codex GitHub review. Enable automatic Code Review for this
-repository in Codex Cloud, or request one with `@codex review` in the pull
-request. The gate follows the Codex summary comment that is posted as soon as a
-review starts and edited as its status changes. It passes only after that
-comment's Code Review row reports completion for a commit in the current
-pull-request history and Codex has either published a matching submitted review or added its
-post-completion thumbs-up reaction. A submitted review with inline findings is
-associated by review ID and fails the gate until all of its Codex review
-threads are resolved; the reaction is the connector's clean-review result when
-it intentionally creates no submitted review. A new push retains this initial
-review as long as its reviewed commit remains an ancestor of the current PR
-head, so ordinary follow-up commits do not require another review. A manual human
-`@codex review` request requires a summary and result created or updated after
-that request, so an older result cannot satisfy an explicitly requested fresh
-review. Normal pull-request events use the connector's native automatic
-trigger; a human can still manually request a fresh review with `@codex review`.
+(main)` on `main` are merge gates for the native, subscription-backed Codex
+GitHub review. Automatic Code Review is disabled for this repository. Request
+the initial review with exactly `@codex review` in the pull request. After that,
+fix the findings, reply to them, and resolve their threads. Ordinary follow-up
+commits do not trigger another review. A second request is allowed only when
+the latest completed Codex review contains a P1 finding; a clean follow-up
+review clears that P1 requirement. The gate requires a completed Codex result
+for the current head, with all Codex review threads resolved. Dependabot and
+trusted release-bot exemptions remain governed by the rules below.
 Same-repository dependency-update PRs from
 the trusted `dependabot[bot]` are exempt on `develop` when all current commits
 are Dependabot-authored and the changed files are limited to dependency

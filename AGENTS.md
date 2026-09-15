@@ -49,10 +49,28 @@ private VPN; it must not be exposed directly to the public internet.
 
 ## Architecture and durable state
 
-- `server.py`: HTTP API, authentication, SQLite/SQLCipher persistence,
-  Intervals.icu and Garmin clients, synchronization, performance derivation,
-  OpenAI client, voice transcription, logs, morning check-in, planning,
-  competition/calendar handling, backups, and workout library/planning.
+- `server.py`: application entry point and composition root for configuration,
+  dependency wiring, startup and shutdown. Existing HTTP and domain logic is
+  legacy code to extract incrementally; it is not a precedent for new logic.
+- `backend/`: owns application logic. New business logic and use-case
+  orchestration must live in the appropriate domain module here, never in
+  `server.py`. Use `coach/` for Coach workflows, `planning/` for training-plan
+  changes, `sync/` for synchronization and scheduling, `providers/` for external
+  service adapters, `db/` for persistence, `http_api/` for HTTP handling, and
+  `backup/` for backup/export workflows. Extend an existing cohesive module
+  first; add a focused module only when the responsibility needs its own home.
+- When a feature extends logic still in `server.py`, extract the affected
+  cohesive responsibility into `backend/` as part of that change. Keep the
+  extraction scoped to the feature. A localized corrective fix may remain in
+  legacy code, but must not add a new responsibility or workflow there.
+- Backend modules must not import `server.py` or access its globals indirectly.
+  Pass required dependencies explicitly and keep transaction boundaries with
+  the use case that owns them. Moving helpers while leaving all orchestration
+  in `server.py` does not complete an extraction.
+- Review backend changes for this ownership rule. Preserve behavior and
+  security/data-integrity contracts, and verify extracted logic with focused
+  tests using temporary storage and mocked providers. Reduce `server.py`
+  through clear ownership, not compressed formatting or arbitrary line limits.
 - `public/`: browser/PWA client. Its scoped instructions are in
   `public/AGENTS.md`.
 - `tests/`: standard-library unit tests. Its scoped instructions are in
@@ -77,10 +95,10 @@ status. Treat all of it as durable athlete data.
 
 ## Behaviour requirements
 
-- On startup, initialise the database and start one asynchronous Intervals.icu
-  sync. If configured, Garmin sync also starts. A background loop checks for a
-  daily automatic sync. Manual refreshes remain available from the UI; the
-  browser may poll local state while a sync is running.
+- On startup, initialise the database, start the sync and Coach job workers,
+  and enqueue configured refreshes for calendar, Intervals.icu, Garmin, and
+  weather. A background loop schedules daily sync jobs. Manual refreshes remain
+  available from the UI; the browser may poll local state while a sync runs.
 - A chat request uses the saved local profile and competitions, current
   performance context, recent local feedback, workout library, and latest
   provider snapshots. Current performance is not Intervals.icu-only: Garmin,
@@ -126,14 +144,16 @@ also run:
 docker build -t ai-coach:local .
 ```
 
-The CI test job currently uses Python 3.13; the container image currently uses
-Python 3.14. Keep code compatible with both unless intentionally changing the
-toolchain and CI together.
+CI and the container image use Python 3.14. Keep code compatible with that
+toolchain unless intentionally changing the toolchain and CI together.
 
-There is no frontend test runner in this repository. For browser-facing
-changes, manually verify login, fresh PWA installation/offline assets, safe Markdown rendering,
-Enter-to-send versus Shift+Enter, microphone permissions, notifications, and
-the affected UI flow when a browser is available.
+Browser tests use Playwright through `npm run test:e2e`, with projects for
+mobile-small, mobile, tablet, tablet-landscape, and desktop. There is no
+frontend unit-test runner. For browser-facing changes, run the affected
+Playwright project and manually verify login, fresh PWA installation/offline
+assets, safe Markdown rendering, Enter-to-send versus Shift+Enter, microphone
+permissions, notifications, and the affected UI flow when a browser is
+available.
 
 ### Local Docker workflow (Windows)
 
@@ -251,8 +271,9 @@ README. The container runs as a non-root user and `/data` must be writable.
 For Garmin's first MFA login, use the documented one-time
 `garmin-login.py` helper with the persistent `/data` mount.
 
-Do not expose port 8090 directly to the public internet. Voice input requires
-the PWA to be opened through a trusted HTTPS reverse proxy.
+Do not expose port 8090 directly to the public internet. Voice input requires a
+secure context; local `localhost` testing is allowed, while deployed use needs
+a trusted HTTPS reverse proxy.
 
 ## Code Review Rules
 

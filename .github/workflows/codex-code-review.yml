@@ -7,8 +7,8 @@ on:
         description: Re-evaluate a trusted release promotion from protected develop
         required: true
         type: string
-  # Re-evaluate open pull requests when their target branch advances. The
-  # resulting check remains blocking until a fresh review is requested.
+  # Re-evaluate the policy when the target branch advances. This never starts
+  # Codex automatically; it only requires a new @codex review after P1.
   push:
     branches: [develop, main]
   # pull_request_target runs the workflow from the trusted target branch. This
@@ -16,7 +16,7 @@ on:
   pull_request_target:
     branches: [develop, main]
     types: [opened, synchronize, reopened, ready_for_review, edited]
-  # Allow a manually requested @codex review to start or restart the gate.
+  # A trusted human must explicitly request the review in a PR comment.
   issue_comment:
     types: [created]
 
@@ -42,6 +42,7 @@ jobs:
             const dependabotLogin = 'dependabot[bot]';
             const releaseBotLogin = 'ai-coach-release-bot[bot]';
             const manualReviewCheckName = 'Codex manual review request';
+            const codexBotLogins = new Set(['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector']);
             const releaseVersionPattern = /^chore\/release-version-(\d+\.\d+\.\d+)$/;
             const releasePromotionPattern = /^chore\/release-promotion-(\d+\.\d+\.\d+)$/;
             const isReleasePromotion = (pullRequest) => {
@@ -83,6 +84,85 @@ jobs:
                 .map((run) => run.completed_at || run.started_at)
                 .find(Boolean) || '';
             };
+            const getUnresolvedCodexReviewIds = async (pullRequest) => {
+              const response = await github.graphql(`
+                query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $number) {
+                      reviewThreads(first: 100, after: $cursor) {
+                        nodes {
+                          isResolved
+                          comments(first: 1) {
+                            nodes {
+                              author { login }
+                              pullRequestReview { databaseId }
+                            }
+                          }
+                        }
+                        pageInfo { hasNextPage endCursor }
+                      }
+                    }
+                  }
+                }
+              `, { owner: context.repo.owner, repo: context.repo.repo, number: pullRequest.number, cursor: null });
+              const unresolvedReviewIds = new Set();
+              const threads = response.repository.pullRequest.reviewThreads;
+              for (const thread of threads.nodes) {
+                const comment = thread.comments.nodes[0];
+                if (!thread.isResolved && codexBotLogins.has(comment?.author?.login)) {
+                  unresolvedReviewIds.add(comment.pullRequestReview?.databaseId);
+                }
+              }
+              return unresolvedReviewIds;
+            };
+            const hasCompletedCleanReaction = async (pullRequest) => {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: pullRequest.number, per_page: 100,
+              });
+              const summaries = comments
+                .filter((comment) => codexBotLogins.has(comment.user?.login) &&
+                  (comment.body || '').includes('<!-- codex-pull-request-review-summary -->'))
+                .sort((left, right) => Date.parse(right.updated_at || right.created_at) -
+                  Date.parse(left.updated_at || left.created_at));
+              const latestSummary = summaries[0];
+              if (!latestSummary || !/\*\*Code Review\*\*/i.test(latestSummary.body || '') ||
+                !/\*\*Completed\*\*/i.test(latestSummary.body || '') ||
+                !new RegExp('`' + pullRequest.head.sha.slice(0, 7) + '[0-9a-f]*`', 'i').test(latestSummary.body || '')) {
+                return false;
+              }
+              const reactions = await github.paginate(github.rest.reactions.listForIssue, {
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: pullRequest.number, per_page: 100,
+              });
+              const summaryUpdatedAt = Date.parse(latestSummary.updated_at || latestSummary.created_at);
+              return reactions.some((reaction) => codexBotLogins.has(reaction.user?.login) &&
+                reaction.content === '+1' && Date.parse(reaction.created_at) >= summaryUpdatedAt);
+            };
+            const getReviewRequirement = async (pullRequest) => {
+              const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                owner: context.repo.owner, repo: context.repo.repo,
+                pull_number: pullRequest.number, per_page: 100,
+              });
+              const codexReviews = reviews.filter((review) => codexBotLogins.has(review.user?.login) && review.submitted_at);
+              const comments = await github.paginate(github.rest.pulls.listReviewComments, {
+                owner: context.repo.owner, repo: context.repo.repo,
+                pull_number: pullRequest.number, per_page: 100,
+              });
+              if (codexReviews.length === 0) {
+                return await hasCompletedCleanReaction(pullRequest) ? 'none' : 'initial';
+              }
+              const latestReview = [...codexReviews]
+                .sort((left, right) => Date.parse(right.submitted_at) - Date.parse(left.submitted_at))[0];
+              const latestReviewHasP1 = /\[P1\]/i.test(latestReview.body || '') || comments.some((comment) => (
+                codexBotLogins.has(comment.user?.login) &&
+                comment.pull_request_review_id === latestReview.id &&
+                /\[P1\]/i.test(comment.body || '')
+              ));
+              if (latestReviewHasP1) return 'p1';
+              const unresolvedReviewIds = await getUnresolvedCodexReviewIds(pullRequest);
+              return unresolvedReviewIds.size > 0 ? 'unresolved' : 'none';
+            };
             if (context.eventName === 'workflow_dispatch') {
               const pullRequestNumber = Number(context.payload.inputs?.pull_request_number);
               if (context.ref !== 'refs/heads/develop' || !Number.isSafeInteger(pullRequestNumber) || pullRequestNumber < 1) {
@@ -105,6 +185,8 @@ jobs:
                 checkName: 'Codex code review (main)',
                 reviewRequestedAt: manualReviewRequestedAt,
                 skipCodexReview: !manualReviewRequestedAt,
+                runCodexReview: Boolean(manualReviewRequestedAt),
+                reviewRequired: Boolean(manualReviewRequestedAt),
               }];
             } else if (context.eventName === 'push') {
               const base = context.ref.replace(/^refs\/heads\//, '');
@@ -120,13 +202,16 @@ jobs:
                 .filter((pullRequest) => pullRequest.draft !== true)
                 .map(async (pullRequest) => {
                   const manualReviewRequestedAt = await getManualReviewRequest(pullRequest);
+                  const skipCodexReview = shouldSkipCodexReview(pullRequest) && !manualReviewRequestedAt;
                   const manualReviewRequested = Boolean(manualReviewRequestedAt);
                   return {
                     pullRequestNumber: pullRequest.number,
                     baseRef: base,
                     checkName: base === 'main' ? 'Codex code review (main)' : 'Codex code review',
                     reviewRequestedAt: manualReviewRequested ? pushReviewRequestedAt : '',
-                    skipCodexReview: shouldSkipCodexReview(pullRequest) && !manualReviewRequested,
+                    skipCodexReview,
+                    runCodexReview: false,
+                    reviewRequired: !skipCodexReview && (await getReviewRequirement(pullRequest)) !== 'none',
                   };
                 }));
             } else if (context.eventName === 'pull_request_target') {
@@ -142,14 +227,15 @@ jobs:
                 (context.payload.action !== 'edited' || reviewBaselineChanged)
               ) {
                 const manualReviewRequestedAt = await getManualReviewRequest(pullRequest);
+                const skipCodexReview = shouldSkipCodexReview(pullRequest) && !manualReviewRequestedAt;
                 affectedPullRequests = [{
                   pullRequestNumber: pullRequest.number,
                   baseRef: pullRequest.base.ref,
                   checkName: pullRequest.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
-                  reviewRequestedAt: reviewBaselineChanged
-                    ? pullRequest.updated_at
-                    : manualReviewRequestedAt,
-                  skipCodexReview: shouldSkipCodexReview(pullRequest) && !manualReviewRequestedAt,
+                  reviewRequestedAt: '',
+                  skipCodexReview,
+                  runCodexReview: false,
+                  reviewRequired: !skipCodexReview && (await getReviewRequirement(pullRequest)) !== 'none',
                 }];
               }
             } else if (
@@ -167,26 +253,32 @@ jobs:
               });
               if (['develop', 'main'].includes(response.data.base.ref) && response.data.draft !== true) {
                 const headSha = response.data.head.sha;
-                const now = new Date().toISOString();
-                await github.rest.checks.create({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name: manualReviewCheckName,
-                  head_sha: headSha,
-                  status: 'completed',
-                  conclusion: 'success',
-                  started_at: now,
-                  completed_at: now,
-                  output: {
-                    title: 'Manual Codex review requested',
-                    summary: `A trusted human requested a Codex review for commit ${headSha}.`,
-                  },
-                });
+                const reviewRequirement = await getReviewRequirement(response.data);
+                const reviewAllowed = ['initial', 'p1'].includes(reviewRequirement);
+                if (reviewAllowed) {
+                  const now = new Date().toISOString();
+                  await github.rest.checks.create({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: manualReviewCheckName,
+                    head_sha: headSha,
+                    status: 'completed',
+                    conclusion: 'success',
+                    started_at: now,
+                    completed_at: now,
+                    output: {
+                      title: 'Manual Codex review requested',
+                      summary: `A trusted human requested a Codex review for commit ${headSha}.`,
+                    },
+                  });
+                }
                 affectedPullRequests = [{
                   pullRequestNumber: response.data.number,
                   baseRef: response.data.base.ref,
                   checkName: response.data.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
                   reviewRequestedAt: context.payload.comment.created_at,
+                  runCodexReview: reviewAllowed,
+                  reviewRequired: reviewAllowed,
                   // An explicit human request must review even an otherwise
                   // exempt Dependabot or release-bot PR.
                   skipCodexReview: false,
@@ -201,6 +293,8 @@ jobs:
                 checkName: 'Codex code review',
                 reviewRequestedAt: '',
                 skipCodexReview: false,
+                runCodexReview: false,
+                reviewRequired: false,
                 skip: true,
               }];
             }
@@ -525,7 +619,7 @@ jobs:
         # Dispatch and manual-comment workflows already run from protected
         # develop. Invoke the action directly from that protected ref so no
         # pull-request repository is checked out in this privileged workflow.
-        if: matrix.skipCodexReview != true && github.event_name != 'push' && (matrix.baseRef == 'develop' || github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment')
+        if: matrix.skipCodexReview != true && matrix.runCodexReview == true && (matrix.baseRef == 'develop' || github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment')
         uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@81184e6f2137aa6365724a1ce57968bd1a3f1965
         with:
           github-token: ${{ github.token }}
@@ -537,8 +631,8 @@ jobs:
           poll-seconds: 30
 
       - name: Run trusted main Codex gate
-        # Main pull-request events use the protected main action revision.
-        if: matrix.skipCodexReview != true && github.event_name != 'push' && matrix.baseRef == 'main' && github.event_name != 'workflow_dispatch' && github.event_name != 'issue_comment'
+        # Explicit @codex requests use the protected main action revision.
+        if: matrix.skipCodexReview != true && matrix.runCodexReview == true && matrix.baseRef == 'main' && github.event_name != 'workflow_dispatch' && github.event_name != 'issue_comment'
         uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@81184e6f2137aa6365724a1ce57968bd1a3f1965
         with:
           github-token: ${{ github.token }}
@@ -549,12 +643,13 @@ jobs:
           timeout-seconds: 2400
           poll-seconds: 30
 
-      - name: Block until a fresh Codex review is requested
-        if: matrix.skipCodexReview != true && github.event_name == 'push'
+      - name: Enforce explicit Codex review policy
+        if: matrix.skipCodexReview != true && matrix.runCodexReview != true
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ matrix.pullRequestNumber }}
           CHECK_NAME: ${{ matrix.checkName }}
+          REVIEW_REQUIRED: ${{ matrix.reviewRequired }}
         with:
           github-token: ${{ github.token }}
           script: |
@@ -570,11 +665,15 @@ jobs:
               name: process.env.CHECK_NAME,
               head_sha: headSha,
               status: 'completed',
-              conclusion: 'failure',
+              conclusion: process.env.REVIEW_REQUIRED === 'true' ? 'failure' : 'success',
               started_at: new Date().toISOString(),
               completed_at: new Date().toISOString(),
               output: {
-                title: 'Fresh Codex review required',
-                summary: `The target branch advanced. Comment @codex review on PR #${pullRequest.data.number} to obtain a review against the current base.`,
+                title: process.env.REVIEW_REQUIRED === 'true'
+                  ? 'Explicit Codex review required'
+                  : 'No additional Codex review required',
+                summary: process.env.REVIEW_REQUIRED === 'true'
+                  ? `Comment @codex review on PR #${pullRequest.data.number}. A review is required initially or because the previous Codex review had a P1 finding.`
+                  : 'The previous Codex review had no P1 finding. Fix the existing findings and close their comments; do not request another review.',
               },
             });
