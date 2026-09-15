@@ -139,3 +139,58 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - Die übrigen vier P1-Arbeitspakete bleiben offen. Als Nächstes folgen die
   voneinander trennbaren Ressourcen `runtime/events.py` und
   `runtime/maintenance.py` in neuen, abgegrenzten Delegationen.
+
+## P1.2 — Runtime-Events und Maintenance-Gate
+
+- Basis: bestätigter Merge-Commit
+  `f658d4159b156ca1695b35c39722ecfbc1012299` von PR #665; `mergedAt`
+  `2026-09-15T19:35:47Z` und Erreichbarkeit auf `origin/develop` bestätigt.
+- Events-Worker: lokaler Commit
+  `fad5ab86ebfc6e9b585c1c01e1a381040b9d9945`, im Integrations-Worktree als
+  `ef88f81` sequenziell übernommen.
+- Erstes Events-Review: **FAIL** — `OverflowError` wurde entgegen dem
+  Ausgangsvertrag neu in `AppError` übersetzt, und der gemeldete Ruff-Lauf
+  hatte die Testdatei mit einem `BaseException`-Befund ausgelassen.
+- Events-Korrekturreview: **PASS** — ursprüngliche Cursor-Ausnahmen
+  wiederhergestellt; Modul, Paketdatei und Tests gemeinsam Ruff-clean; der
+  konkrete `StateEventBuffer` besitzt Condition, Ringpuffer und Cursor.
+- Maintenance-Worker: lokaler Commit
+  `91b738d8d1ecdd0d9861bdcb31a70fc14ec84f37`, im Integrations-Worktree als
+  `26842d6` sequenziell übernommen.
+- Maintenance-Review: **PASS** — Modul-Singleton ist alleiniger
+  Zustandseigentümer; Nested-Operation, Restore-Drain, Generation,
+  Invalidierung und selektives Schlucken erwarteter Claim-Abbrüche entsprechen
+  dem bisherigen Vertrag. Keine Rückabhängigkeit auf `server.py`.
+- Geprüfter integrierter Commit:
+  `23802ecf1a85a0d1965b5b5173998b7f8e9143e5`.
+- Integrationsreview: **PASS** — sämtliche Produktionsaufrufer und
+  Test-Patchziele verwenden die Runtime-Eigentümer direkt; `server.py` enthält
+  weder Callback-Wrapper noch Event-/Maintenance-Implementierungen. Die
+  Architekturprüfung schützt Klassen, Funktionen, Singleton-Namen und globale
+  Zuweisungen vor Rückverlagerung.
+- `server.py`: 21.835 physische Zeilen, 1.226 verbleibende Funktionen/Klassen;
+  gegenüber P1.1 127 Zeilen weniger. Maßgeblich ist die vollständige
+  Verlagerung von Zustand und Orchestrierung.
+
+### Prüfungen
+
+- `python -m unittest tests.test_runtime_events tests.test_runtime_maintenance tests.test_server_architecture -v`
+  — 19 Tests, PASS.
+- Gezielte Discovery-Regressionen: State-Event-Retention/HTTP-Batch 3 Tests,
+  Maintenance-Gate 2 Tests, Privacy-Delete-Races 3 Tests und Audit-Maintenance
+  1 Test — alle PASS.
+- `python -m unittest discover -s tests -v` — 807 Tests, 12 übersprungen,
+  PASS in 122,617 s.
+- `ruff check backend/runtime/events.py backend/runtime/maintenance.py tests/test_runtime_events.py tests/test_runtime_maintenance.py`
+  — PASS.
+- `python -m compileall -q server.py backend` — PASS.
+- `python scripts/server_extraction_inventory.py --check` — PASS.
+- `git diff --check` — PASS.
+
+### Verbleibende Risiken und nächster Schritt
+
+- Docker-/E2E-Ausführung bleibt lokal durch den nicht erreichbaren
+  Docker-Desktop-Daemon blockiert; der externe PR-Browserlauf bleibt
+  verbindlich.
+- Offen in P1: Konfiguration/Settings/Logging, DB-Initialisierung versus
+  Job-Recovery und der Releasevertrag für `APP_VERSION`/statische Pfade.
