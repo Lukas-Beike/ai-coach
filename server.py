@@ -6,7 +6,6 @@ from backend.coach.attachments import (MAX_ATTACHMENT_STORAGE_BYTES, MAX_GEMINI_
 
 import base64
 import calendar as calendar_module
-from collections import deque
 import difflib
 import hashlib
 import hmac
@@ -68,6 +67,8 @@ from backend.errors import (
     provider_error,
     public_app_error_status,
 )
+from backend.runtime import events as runtime_events
+from backend.runtime import maintenance as runtime_maintenance
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db.manager import DatabaseManager
 from backend.db.schema import (
@@ -303,139 +304,12 @@ SYNC_JOB_STOP = threading.Event()
 SYNC_JOB_WORKER: threading.Thread | None = None
 SESSION_LOCK = threading.RLock()
 SESSIONS: dict[str, dict[str, Any]] = {}
-STATE_EVENT_CONDITION = threading.Condition()
-STATE_EVENTS: deque[dict[str, Any]] = deque(maxlen=500)
-STATE_EVENT_NEXT_ID = 0
 RATE_LIMIT_LOCK = threading.Lock()
 RATE_LIMITS: dict[str, list[float]] = {}
 SYNC_JOB_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)$")
 SYNC_JOB_RESOLVE_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)/resolve$")
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
 COACH_EVENT_EXTERNAL_PREFIX = "intervals-coach-"
-
-
-def publish_state_event(event: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Publish a bounded, non-athlete-facing state notification.
-
-    The event stream is only a wake-up and reconciliation signal. It must not
-    carry chat text, provider payloads, credentials, or other durable content.
-    """
-    allowed_events = {"provider", "job", "planning", "coach", "sync"}
-    if event not in allowed_events:
-        raise ValueError("invalid state event")
-    safe_payload = payload if isinstance(payload, dict) else {}
-    with STATE_EVENT_CONDITION:
-        global STATE_EVENT_NEXT_ID
-        STATE_EVENT_NEXT_ID += 1
-        item = {
-            "event_id": STATE_EVENT_NEXT_ID,
-            "event": event,
-            "data": dict(safe_payload),
-        }
-        STATE_EVENTS.append(item)
-        STATE_EVENT_CONDITION.notify_all()
-        return dict(item)
-
-
-def state_events_since(since: int = 0) -> dict[str, Any]:
-    """Return retained state events and explicitly report a retention gap."""
-    try:
-        cursor = max(0, int(since))
-    except (TypeError, ValueError) as exc:
-        raise AppError(400, "Die Event-ID ist ungültig.", reason="invalid_event_cursor") from exc
-    with STATE_EVENT_CONDITION:
-        latest = STATE_EVENT_NEXT_ID
-        retained = list(STATE_EVENTS)
-    if not retained:
-        return {"events": [], "latest_event_id": latest, "gap": False}
-    oldest = int(retained[0]["event_id"])
-    gap = cursor < oldest - 1
-    events = [] if gap else [item for item in retained if int(item["event_id"]) > cursor]
-    return {"events": events, "latest_event_id": latest, "gap": gap}
-
-
-class MaintenanceGate:
-    """Drain complete operations and invalidate work across destructive maintenance."""
-
-    def __init__(self):
-        self.condition = threading.Condition()
-        self.active = 0
-        self.restoring = False
-        self.generation = 0
-        self.local = threading.local()
-
-    @contextmanager
-    def operation(self, expected_generation: int | None = None):
-        with self.condition:
-            depth = getattr(self.local, "depth", 0)
-            if expected_generation is not None and expected_generation != self.generation:
-                raise AppError(409, "Der Auftrag wurde durch eine Datenlöschung verworfen.", reason="operation_invalidated")
-            if not depth:
-                if self.restoring:
-                    raise AppError(503, "Die Anwendung befindet sich gerade im Wartungsmodus. Bitte später erneut versuchen.", reason="maintenance")
-                self.active += 1
-            self.local.depth = depth + 1
-        try:
-            yield
-        finally:
-            with self.condition:
-                self.local.depth -= 1
-                if not self.local.depth:
-                    self.active -= 1
-                self.condition.notify_all()
-
-    @contextmanager
-    def restore(self):
-        with self.condition:
-            if self.restoring:
-                raise AppError(409, "Eine Datenbankwiederherstellung läuft bereits.")
-            self.restoring = True
-            nested = bool(getattr(self.local, "depth", 0))
-            if nested:
-                self.active -= 1
-            while self.active:
-                self.condition.wait()
-            self.generation += 1
-        try:
-            yield
-        finally:
-            with self.condition:
-                self.restoring = False
-                if nested:
-                    self.active += 1
-                self.condition.notify_all()
-
-    def current_generation(self) -> int:
-        with self.condition:
-            return self.generation
-
-    def state(self) -> dict[str, Any]:
-        with self.condition:
-            return {"active": self.restoring, "running_operations": self.active}
-
-
-MAINTENANCE_GATE = MaintenanceGate()
-
-
-def maintenance_operation(function: Any) -> Any:
-    @wraps(function)
-    def guarded(*args: Any, **kwargs: Any) -> Any:
-        with MAINTENANCE_GATE.operation():
-            return function(*args, **kwargs)
-    return guarded
-
-
-def claimed_maintenance_operation(function: Any) -> Any:
-    """Keep claimed payloads and their success/failure writes in one generation."""
-    @wraps(function)
-    def guarded(job: dict[str, Any]) -> Any:
-        try:
-            with MAINTENANCE_GATE.operation(job["_maintenance_generation"]):
-                return function(job)
-        except AppError as exc:
-            if exc.reason not in {"operation_invalidated", "maintenance"}:
-                raise
-    return guarded
 
 
 class ProviderResyncGate:
@@ -1545,7 +1419,7 @@ def observed_sync(provider: str, area: str = "default"):
 
     def decorator(function: Any) -> Any:
         @wraps(function)
-        @maintenance_operation
+        @runtime_maintenance.maintenance_operation
         def wrapped(*args: Any, **kwargs: Any) -> Any:
             reason = kwargs.get("reason")
             if reason is None and args:
@@ -1656,7 +1530,7 @@ def _provider_refresh_start(provider: str, area: str, operation_id: str, trigger
             db, refresh_id=refresh_id, provider=provider, area=area,
             operation_id=operation_id, trigger=trigger, started_at=utc_now(),
         )
-    publish_state_event("provider", {"provider": provider, "area": area, "status": "loading", "refresh_id": refresh_id})
+    runtime_events.STATE_EVENT_BUFFER.publish("provider", {"provider": provider, "area": area, "status": "loading", "refresh_id": refresh_id})
     return refresh_id
 
 
@@ -1691,7 +1565,7 @@ def _provider_refresh_finish(
             public_status = "degraded"
         else:
             public_status = "error"
-        publish_state_event("provider", {"provider": provider, "area": area, "status": public_status})
+        runtime_events.STATE_EVENT_BUFFER.publish("provider", {"provider": provider, "area": area, "status": public_status})
 
 
 def _provider_refresh_error_code(error: BaseException) -> str:
@@ -1977,7 +1851,7 @@ def _insert_sync_job(db: Any, job_id: str, envelope: dict[str, Any], requested: 
 
 
 def _publish_created_sync_job(job_id: str, result: dict[str, Any]) -> None:
-    publish_state_event(
+    runtime_events.STATE_EVENT_BUFFER.publish(
         "job",
         {
             "job_id": job_id,
@@ -1989,7 +1863,7 @@ def _publish_created_sync_job(job_id: str, result: dict[str, Any]) -> None:
     )
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def enqueue_sync_job(
     provider: str,
     job_type: str = "refresh",
@@ -2036,7 +1910,7 @@ def resume_interrupted_sync_jobs() -> int:
     return len(jobs)
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def _claim_sync_job() -> dict[str, Any] | None:
     now = utc_now()
     with DB_LOCK, database() as db:
@@ -2055,7 +1929,7 @@ def _claim_sync_job() -> dict[str, Any] | None:
             (now, job["id"]),
         )
         return {**dict(job), "attempts": int(job.get("attempts") or 0) + 1,
-                "_maintenance_generation": MAINTENANCE_GATE.current_generation()}
+                "_maintenance_generation": runtime_maintenance.MAINTENANCE_GATE.current_generation()}
 
 
 def _sync_job_update(job_id: str, item_status: str, *, error_class: str | None = None, error_detail: str | None = None) -> None:
@@ -2083,7 +1957,7 @@ def _sync_job_update(job_id: str, item_status: str, *, error_class: str | None =
             (status, total, completed, finished, error_class, now, job_id),
         )
     if provider and job_type:
-        publish_state_event(
+        runtime_events.STATE_EVENT_BUFFER.publish(
             "job",
             {
                 "job_id": job_id,
@@ -2152,7 +2026,7 @@ def _publish_sync_job_result_event(
     job_id: str, provider: str | None, job_type: str | None, status: str, completed: int, total: int,
 ) -> None:
     if provider and job_type:
-        publish_state_event(
+        runtime_events.STATE_EVENT_BUFFER.publish(
             "job",
             {
                 "job_id": job_id,
@@ -2324,7 +2198,7 @@ def _record_claimed_sync_job_failure(job: dict[str, Any], exc: BaseException) ->
     )
 
 
-@claimed_maintenance_operation
+@runtime_maintenance.claimed_maintenance_operation
 def _run_claimed_sync_job(job: dict[str, Any]) -> None:
     try:
         result = _execute_sync_job(job)
@@ -2338,7 +2212,7 @@ def _run_claimed_sync_job(job: dict[str, Any]) -> None:
 def _sync_job_worker_loop() -> None:
     while not SYNC_JOB_STOP.is_set():
         try:
-            with MAINTENANCE_GATE.operation():
+            with runtime_maintenance.MAINTENANCE_GATE.operation():
                 job = _claim_sync_job()
                 if job:
                     _run_claimed_sync_job(job)
@@ -4522,7 +4396,7 @@ def _persist_morning_body_battery(
                 history[saved["sleep_date"]] = saved.get("morning", {}).get("value")
         set_kv(MORNING_BATTERY_HISTORY_KEY, json.dumps(history), db)
     _set_garmin_error_entries(_garmin_core_error_entries())
-    publish_state_event("provider", {"provider": "garmin", "area": "performance", "status": "ready" if record["status"] == "ready" else "degraded"})
+    runtime_events.STATE_EVENT_BUFFER.publish("provider", {"provider": "garmin", "area": "performance", "status": "ready" if record["status"] == "ready" else "degraded"})
     return {"status": record["status"], "sleep_date": record["sleep_date"], "records": len(records) if isinstance(records, list) else 0}
 
 
@@ -4577,7 +4451,7 @@ def _sync_morning_body_battery_locked(checkin_date: date) -> dict[str, Any]:
     return _persist_morning_body_battery(checkin_date, existing, record, records)
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @garmin_operation
 def sync_garmin_morning_body_battery(checkin_date: date) -> dict[str, Any]:
     """Keep a successful pair; retry unavailable readings with a bounded cooldown."""
@@ -4750,7 +4624,7 @@ def _wait_for_existing_garmin_sync() -> dict[str, Any]:
 
 
 @observed_sync("garmin", "data")
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @garmin_operation
 def sync_garmin(
     days: int = 30,
@@ -4878,7 +4752,7 @@ def garmin_coach_context(include_performance: bool = False) -> dict[str, Any]:
 def add_message(role: str, content: str) -> dict[str, Any]:
     with DB_LOCK, database() as db:
         result = CHAT_REPOSITORY.add(db, role, content)
-    publish_state_event("coach", {"message_id": result.get("id"), "role": str(role)[:20]})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"message_id": result.get("id"), "role": str(role)[:20]})
     return result
 
 
@@ -6028,7 +5902,7 @@ def external_calendar_state() -> dict[str, Any]:
 
 
 @observed_sync("calendar", "events")
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def sync_external_calendar(reason: str = "manual", operation_id: str | None = None) -> dict[str, Any]:
     if not CONFIG.calendar_ical_url:
         raise AppError(503, "CALENDAR_ICAL_URL ist nicht konfiguriert.")
@@ -6058,7 +5932,7 @@ def sync_external_calendar(reason: str = "manual", operation_id: str | None = No
         set_kv("last_external_calendar_sync_at", now)
         mark_daily_sync("calendar")
         set_kv("last_external_calendar_sync_error", "")
-        publish_state_event("coach", {"status": "changed"})
+        runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
         replan = check_adaptive_replan("external calendar")
         return {"status": "ok", "synced_at": now, "events": len(events), "window_days": EXTERNAL_CALENDAR_WINDOW_DAYS, **replan}
     except AppError as exc:
@@ -7271,7 +7145,7 @@ def _import_remote_competitions(
 
 
 @observed_sync("intervals", "competitions")
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @intervals_operation
 def sync_competitions(
     reason: str = "manual",
@@ -7303,7 +7177,7 @@ def sync_competitions(
             imported = _import_remote_competitions(db, indexes["remote_events"], tombstones, now)
         set_kv("last_competition_sync_at", now)
         set_kv("last_competition_sync_error", "")
-        publish_state_event("coach", {"status": "changed"})
+        runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
         return {
             "status": "ok",
             "synced_at": now,
@@ -8419,7 +8293,7 @@ def _weather_ready_state(state: _WeatherCacheState, planned: list[dict[str, Any]
     return result
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def weather_state(
     planned: list[dict[str, Any]] | None = None,
     refresh: bool = True,
@@ -8554,7 +8428,7 @@ def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict
 
 
 @observed_sync("weather", "forecast")
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def sync_weather(reason: str = "background", force: bool = False, operation_id: str | None = None) -> dict[str, Any]:
     """Refresh the configured location's forecast without creating a chat event."""
     if not get_profile().get("weather_location", "").strip():
@@ -9371,7 +9245,7 @@ def update_training_plan(plan_id: Any, values: Any) -> dict[str, Any]:
         raise AppError(404, str(exc)) from exc
     except ValueError as exc:
         raise AppError(400, str(exc)) from exc
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
     return result
 
 
@@ -11407,7 +11281,7 @@ def _workout_library_sync_snapshot() -> tuple[dict[str, int], list[dict[str, Any
     return summary, entries, fingerprint
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @intervals_operation
 def refresh_workout_library(
     reason: str = "manual",
@@ -11438,7 +11312,7 @@ def refresh_workout_library(
     synced_at = utc_now()
     set_kv("last_library_sync_at", synced_at)
     set_kv("last_library_sync_error", "")
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
     return {
         "status": "ok",
         "workouts": len(normalized),
@@ -11592,7 +11466,7 @@ def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
             )
             _record_change(db, "workout_library", normalized_id, "update", before, {**normalized, "sync_status": "local"})
             result = {"status": "local", "local_id": normalized_id, "library_entry": normalized}
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
     return result
 
 
@@ -11711,7 +11585,7 @@ def set_sync_operation_state(
         set_value=set_kv,
         redact=redact_text,
     )
-    publish_state_event(
+    runtime_events.STATE_EVENT_BUFFER.publish(
         "sync",
         {
             "operation_id": str(operation_id)[:80],
@@ -11734,7 +11608,7 @@ def sync_public_state(
         get_value=get_kv,
         state_versions=state_versions(),
         provider_freshness=freshness if freshness is not None else provider_freshness_state(),
-        maintenance=MAINTENANCE_GATE.state(),
+        maintenance=runtime_maintenance.MAINTENANCE_GATE.state(),
     )
     result["jobs"] = jobs if jobs is not None else sync_jobs_state()
     return result
@@ -11835,7 +11709,7 @@ def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
     return _finish_library_workout_sync(normalized_id, external_id, local_workout, remote_workout or {})
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @intervals_operation
 def sync_local_workout_library_entry(local_id: str) -> dict[str, Any]:
     try:
@@ -11950,7 +11824,7 @@ def apply_workout_library_plan(entries: list[dict[str, Any]]) -> dict[str, Any]:
     _raise_library_plan_conflicts(_library_plan_conflicts(requested))
     planned = [_apply_library_plan_request(request) for request in requested]
 
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
     return {
         "status": "local",
         "planned": planned,
@@ -12335,9 +12209,9 @@ def update_local_planned_workout(
             bump_planning_revision=bump_planning_revision,
         )
     if result["status"] == "deleted":
-        publish_state_event("coach", {"status": "changed"})
+        runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
         return result
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
     return result
 
 
@@ -13029,7 +12903,7 @@ def _finish_intervals_sync() -> None:
 
 
 @observed_sync("intervals", "activities")
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @intervals_operation
 def sync_intervals(
     reason: str = "manual",
@@ -13063,7 +12937,7 @@ def sync_intervals(
 
 
 @observed_sync("intervals", "performance")
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @intervals_operation
 def refresh_current_performance() -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
@@ -13077,7 +12951,7 @@ def refresh_current_performance() -> dict[str, Any]:
             snapshot = merge_performance_snapshot(latest_snapshot(), snapshot)
             save_snapshot(snapshot, update_full_sync=False)
         set_kv("last_performance_error", "")
-        publish_state_event("provider", {"provider": "intervals", "area": "performance", "status": "ready"})
+        runtime_events.STATE_EVENT_BUFFER.publish("provider", {"provider": "intervals", "area": "performance", "status": "ready"})
         return {"status": "ok", "refreshed_at": snapshot["synced_at"]}
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
@@ -15770,7 +15644,7 @@ def delete_duplicate_intervals_activity(payload: dict[str, Any]) -> dict[str, An
     duplicate_id = str(current["duplicate_id"])
     IntervalsClient().delete_activity(duplicate_id)
     _remove_intervals_activity_from_local_snapshot(duplicate_id)
-    publish_state_event("provider", {"provider": "intervals", "status": "duplicate_deleted"})
+    runtime_events.STATE_EVENT_BUFFER.publish("provider", {"provider": "intervals", "status": "duplicate_deleted"})
     return {
         "status": "deleted",
         "deleted_activity_id": duplicate_id,
@@ -15864,7 +15738,7 @@ def _execute_coach_action(action_type: str, payload: dict[str, Any]) -> dict[str
     raise AppError(400, "Unbekannte Coach-Aktion.")
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def execute_coach_action(token: Any, session_csrf_hash: str, payload_hash: Any = None) -> dict[str, Any]:
     raw_token = str(token or "").strip()
     if len(raw_token) < 32:
@@ -16079,7 +15953,7 @@ def enqueue_background_coach_job(
     )
     if existing_response:
         return existing_response
-    publish_state_event("coach", {"message_id": user_message_id, "role": "user", "client_turn_id": client_turn_id})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"message_id": user_message_id, "role": "user", "client_turn_id": client_turn_id})
     with CHAT_STREAM_LOCK:
         COACH_JOB_CANCEL_EVENTS[operation_id] = cancel_event or threading.Event()
     COACH_JOB_WAKE.set()
@@ -16679,7 +16553,7 @@ def _apply_structured_training_changes(
         arguments, _planning_change_dependencies(),
         require_revision=require_revision, authorized_plan_id=authorized_plan_id,
     )
-    publish_state_event("planning", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("planning", {"status": "changed"})
     return result
 
 
@@ -17953,7 +17827,7 @@ def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> 
         ) if workouts else []
         _store_training_patch_constraints(created, ids, action["request"]["constraints"], db)
         revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
-    publish_state_event("planning", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("planning", {"status": "changed"})
     return {"ok": True, "status": "applied", "planning_revision": revision, "changes": changed["changes"], "library_entry_ids": [item["id"] for item in created]}
 
 
@@ -19095,7 +18969,7 @@ def _persist_structured_coach_final_receipt(
         set_kv("last_coach_ai_provider", ai_provider, db)
         db.execute(UPDATE_COMMAND_RECEIPT_SQL, (json.dumps({key: value for key, value in final_receipt.items() if key != "text"}, ensure_ascii=False), utc_now(), client_turn_id))
     final_receipt.pop("text", None)
-    publish_state_event("coach", {"message_id": final_receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"message_id": final_receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
     return final_receipt
 
 
@@ -19340,7 +19214,7 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", text, client_turn_id=client_turn_id)
         db.execute(UPDATE_COMMAND_RECEIPT_SQL,
                    (json.dumps(receipt, ensure_ascii=False), utc_now(), client_turn_id))
-    publish_state_event("coach", {"message_id": receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"message_id": receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
     return receipt
 
 
@@ -19469,7 +19343,7 @@ def _resume_background_chat_command(
         )
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @serialise_conversation
 def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "", client_turn_id: str, background_job: bool = False) -> dict[str, Any]:
     message, client_turn_id = _validated_chat_request(message, client_turn_id, cancel_event)
@@ -19535,7 +19409,7 @@ def resume_interrupted_coach_jobs() -> int:
     return resumed
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def _claim_background_coach_job() -> dict[str, Any] | None:
     with DB_LOCK, database() as db:
         rows = db.execute(
@@ -19557,7 +19431,7 @@ def _claim_background_coach_job() -> dict[str, Any] | None:
             ).rowcount
             if claimed == 1:
                 return {**dict(row), "status": "running", "receipt": receipt,
-                        "_maintenance_generation": MAINTENANCE_GATE.current_generation()}
+                        "_maintenance_generation": runtime_maintenance.MAINTENANCE_GATE.current_generation()}
     return None
 
 
@@ -19709,7 +19583,7 @@ def _handle_background_coach_exception(client_turn_id: str, operation_id: str, e
     )
 
 
-@claimed_maintenance_operation
+@runtime_maintenance.claimed_maintenance_operation
 def _run_background_coach_job(job: dict[str, Any]) -> None:
     receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
     operation_id = str(receipt.get("operation_id") or "")
@@ -19734,7 +19608,7 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
 def _coach_job_worker_loop() -> None:
     while not COACH_JOB_STOP.is_set():
         try:
-            with MAINTENANCE_GATE.operation():
+            with runtime_maintenance.MAINTENANCE_GATE.operation():
                 job = _claim_background_coach_job()
                 if job:
                     _run_background_coach_job(job)
@@ -19818,7 +19692,7 @@ def _start_morning_checkin() -> None:
     set_kv("morning_checkin_running", "1")
     set_kv("morning_checkin_status", "working")
     set_kv("morning_checkin_error", "")
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
 
 
 def _morning_checkin_garmin_ready(checkin_day: date) -> bool | None:
@@ -19834,7 +19708,7 @@ def _morning_checkin_garmin_ready(checkin_day: date) -> bool | None:
     set_kv("morning_checkin_status", "waiting")
     if not get_kv("morning_checkin_attempt_count"):
         set_kv("morning_checkin_attempt_count", "0")
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
     return None
 
 
@@ -19863,7 +19737,7 @@ def _complete_morning_checkin(checkin_date: str, attempt: int) -> None:
     set_kv("morning_checkin_status", "ready")
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def run_morning_checkin(checkin_date: str) -> None:
     try:
         _start_morning_checkin()
@@ -19885,7 +19759,7 @@ def run_morning_checkin(checkin_date: str) -> None:
         error = redact_text(str(exc))[:1000]
         set_kv("morning_checkin_status", "error")
         set_kv("morning_checkin_error", error)
-        publish_state_event("coach", {"status": "changed"})
+        runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
         LOGGER.exception(
             "Morning check-in failed",
             extra={"event": "morning_checkin_failed", "context": {"date": checkin_date}},
@@ -19920,7 +19794,7 @@ def _reserve_morning_checkin(checkin_date: str) -> bool:
 def _run_scheduled_morning_checkin(checkin_date: str, generation: int) -> None:
     admitted = False
     try:
-        with MAINTENANCE_GATE.operation(generation):
+        with runtime_maintenance.MAINTENANCE_GATE.operation(generation):
             admitted = True
             run_morning_checkin(checkin_date)
     except AppError as exc:
@@ -19932,7 +19806,7 @@ def _run_scheduled_morning_checkin(checkin_date: str, generation: int) -> None:
 
 
 def _start_scheduled_morning_checkin(checkin_date: str) -> None:
-    generation = MAINTENANCE_GATE.current_generation()
+    generation = runtime_maintenance.MAINTENANCE_GATE.current_generation()
     try:
         threading.Thread(
             target=lambda: _run_scheduled_morning_checkin(checkin_date, generation),
@@ -19943,7 +19817,7 @@ def _start_scheduled_morning_checkin(checkin_date: str) -> None:
         raise
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def schedule_morning_checkin() -> None:
     checkin_date = morning_checkin_date()
     if not checkin_date or not selected_ai_provider() or not CONFIG.intervals_api_key:
@@ -20762,7 +20636,7 @@ def stream_privacy_export(handler: Any) -> None:
 
 
 def restore_database_backup(payload: bytes) -> dict[str, Any]:
-    with MAINTENANCE_GATE.restore():
+    with runtime_maintenance.MAINTENANCE_GATE.restore():
         return _restore_database_backup(payload)
 
 
@@ -20909,7 +20783,7 @@ def privacy_delete_preview() -> dict[str, Any]:
 
 def delete_local_data() -> dict[str, Any]:
     global _PLANNING_STATE_RESET_PENDING
-    with MAINTENANCE_GATE.restore():
+    with runtime_maintenance.MAINTENANCE_GATE.restore():
         conversation_id = get_kv("openai_conversation_id") or ""
         remote_delete_attempted = bool(conversation_id)
         remote_deleted = False
@@ -21047,7 +20921,7 @@ def readiness_state() -> dict[str, Any]:
                 probe.unlink(missing_ok=True)
             except OSError:
                 pass
-    maintenance = MAINTENANCE_GATE.state()
+    maintenance = runtime_maintenance.MAINTENANCE_GATE.state()
     checks["maintenance"] = not bool(maintenance.get("active"))
     ready = all(checks.values())
     return {
@@ -21182,13 +21056,13 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_public_get(self, path: str) -> bool:
         if path == "/api/health":
-            self.send_json(200, {"status": "ok", "maintenance": MAINTENANCE_GATE.state()})
+            self.send_json(200, {"status": "ok", "maintenance": runtime_maintenance.MAINTENANCE_GATE.state()})
         elif path == "/api/readiness":
             readiness = readiness_state()
             self.send_json(200 if readiness["ready"] else 503, readiness)
         elif path == "/api/auth/status":
             session = authenticated_session(self)
-            result = {"authenticated": bool(session), "maintenance": MAINTENANCE_GATE.state()}
+            result = {"authenticated": bool(session), "maintenance": runtime_maintenance.MAINTENANCE_GATE.state()}
             if session:
                 schedule_morning_checkin()
             self.send_json(200, result)
@@ -21360,7 +21234,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/logout":
                 session = require_auth(self)
                 require_csrf(self, session)
-                with MAINTENANCE_GATE.operation():
+                with runtime_maintenance.MAINTENANCE_GATE.operation():
                     logout_user(self)
                 self.send_json(200, {"status": "ok"}, {"Set-Cookie": [
                     session_cookie_headers(clear=True)[0], session_cookie_headers(clear=True)[1],
@@ -21374,7 +21248,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     payload = self.read_json()
                     self.send_json(200, cancel_chat_stream(session["csrf_hash"], payload.get("operation_id")))
                 else:
-                    with MAINTENANCE_GATE.operation():
+                    with runtime_maintenance.MAINTENANCE_GATE.operation():
                         self.handle_authenticated_post(path, session)
         except AppError as exc:
             if exc.status >= 500:
@@ -21438,13 +21312,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.connection.settimeout(None)
         try:
             self.send_sse_headers()
-            initial = state_events_since(since)
+            initial = runtime_events.STATE_EVENT_BUFFER.since(since)
             since, _ = self.send_state_event_batch(initial, since)
             self.send_sse_event("ready", {"latest_event_id": since}, since or None)
             while True:
-                with STATE_EVENT_CONDITION:
-                    STATE_EVENT_CONDITION.wait(timeout=15)
-                pending = state_events_since(since)
+                runtime_events.STATE_EVENT_BUFFER.wait(timeout=15)
+                pending = runtime_events.STATE_EVENT_BUFFER.since(since)
                 since, gap = self.send_state_event_batch(pending, since)
                 if gap:
                     continue
@@ -21637,7 +21510,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         try:
-            with MAINTENANCE_GATE.operation():
+            with runtime_maintenance.MAINTENANCE_GATE.operation():
                 self._do_PUT()
         except AppError as exc:
             self.send_json(public_app_error_status(exc), {"error": redact_text(exc.message)[:1000]})
@@ -21869,7 +21742,7 @@ def _schedule_daily_intervals_job() -> None:
         enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def schedule_daily_sync_jobs() -> None:
     _schedule_daily_weather_job()
     _schedule_daily_calendar_job()

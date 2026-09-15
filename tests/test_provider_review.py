@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 import test_server as fixtures
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data, normalize_range_records
+from backend.runtime import maintenance as runtime_maintenance
 
 server = fixtures.server
 
@@ -29,7 +30,7 @@ class ProviderReviewTests(unittest.TestCase):
             patch.object(server, "LOG_PATH", root / "synthetic.log"),
             patch.object(server.LOGGER, "disabled", True),
             patch.object(server, "initialise_logging"),
-            patch.object(server, "MAINTENANCE_GATE", server.MaintenanceGate()),
+            patch.object(runtime_maintenance, "MAINTENANCE_GATE", runtime_maintenance.MaintenanceGate()),
         ]
         for item in self.patches:
             item.start()
@@ -100,18 +101,18 @@ class ProviderReviewTests(unittest.TestCase):
         entered, release, deleted = threading.Event(), threading.Event(), threading.Event()
         errors = []
 
-        @server.maintenance_operation
+        @runtime_maintenance.maintenance_operation
         def writer():
             try:
                 entered.set()
                 release.wait(5)
-                with server.MAINTENANCE_GATE.operation():
+                with runtime_maintenance.MAINTENANCE_GATE.operation():
                     server.save_snapshot({"synced_at": "synthetic", "recent_activities": [{"id": "private"}]})
             except Exception as exc:
                 errors.append(exc)
 
         def erase():
-            with server.MAINTENANCE_GATE.operation():
+            with runtime_maintenance.MAINTENANCE_GATE.operation():
                 server.delete_local_data()
             deleted.set()
 
@@ -127,7 +128,7 @@ class ProviderReviewTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertTrue(deleted.is_set())
         self.assertIsNone(server.latest_snapshot())
-        self.assertEqual(server.MAINTENANCE_GATE.state(), {"active": False, "running_operations": 0})
+        self.assertEqual(runtime_maintenance.MAINTENANCE_GATE.state(), {"active": False, "running_operations": 0})
 
     def test_privacy_delete_discards_queued_and_claimed_provider_payloads(self):
         server.enqueue_sync_job("intervals", "refresh", {"days": 7})
@@ -141,7 +142,7 @@ class ProviderReviewTests(unittest.TestCase):
         self.assertEqual(server.sync_jobs_state(), [])
 
     def test_privacy_delete_discards_claimed_coach_payload_without_failure_write(self):
-        job = {"_maintenance_generation": server.MAINTENANCE_GATE.current_generation()}
+        job = {"_maintenance_generation": runtime_maintenance.MAINTENANCE_GATE.current_generation()}
         server.delete_local_data()
         with patch.object(server, "chat_with_coach") as coach, patch.object(server, "_persist_structured_command_failure") as failure:
             server._run_background_coach_job(job)

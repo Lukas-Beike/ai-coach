@@ -47,6 +47,16 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "PLANNED_CALENDAR_RECHECK_ERROR",
         ),
     ),
+    ("backend.runtime.events", ("StateEventBuffer", "STATE_EVENT_BUFFER")),
+    (
+        "backend.runtime.maintenance",
+        (
+            "MaintenanceGate",
+            "MAINTENANCE_GATE",
+            "maintenance_operation",
+            "claimed_maintenance_operation",
+        ),
+    ),
     ("backend.providers.http", ("ProviderHTTPError",)),
     ("backend.http_api.responses", ("json_bytes",)),
     ("backend.sync.windows", ("split_date_windows",)),
