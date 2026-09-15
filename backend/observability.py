@@ -11,14 +11,16 @@ import json
 import logging
 import re
 import sys
+import threading
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, TextIO
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
 
 from backend.config import Config
+from backend.errors import AppError
 
 REDACTED_PATH = "[REDACTED_PATH]"
 REDACTED_URL_QUERY_KEYS = frozenset({
@@ -26,6 +28,20 @@ REDACTED_URL_QUERY_KEYS = frozenset({
     "password", "refresh_token", "secret", "signature", "sig", "token",
 })
 URL_VALUE_RE = re.compile(r"(?i)https?://[^\s<>\"'`]+")
+OPENAI_RESPONSE_ERROR_CODES = frozenset({
+    "server_error", "rate_limit_exceeded", "invalid_prompt", "data_residency_mismatch",
+    "bio_policy", "misalignment_policy_violation", "vector_store_timeout", "invalid_image",
+    "invalid_image_format", "invalid_base64_image", "invalid_image_url", "image_too_large",
+    "image_too_small", "image_parse_error", "image_content_policy_violation", "invalid_image_mode",
+    "image_file_too_large", "unsupported_image_media_type", "empty_image_file",
+    "failed_to_download_image", "image_file_not_found",
+})
+
+DIAGNOSTIC_CAPTURE_DURATION_SECONDS = 60 * 60
+DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 1500
+DIAGNOSTIC_CAPTURE_STATE_KEY = "diagnostic_capture_state"
+DIAGNOSTIC_CAPTURE_ENTRIES_KEY = "diagnostic_capture_entries"
+DIAGNOSTIC_CAPTURE_VALIDATION_ERROR = "Die Diagnoseaufzeichnung erwartet enabled=true oder enabled=false."
 
 
 def _secret_variants(value: Any) -> set[str]:
@@ -229,3 +245,200 @@ def external_result_context(result: Any) -> dict[str, Any]:
     if isinstance(result, (list, tuple)):
         return {"result_type": "array", "result_items": len(result)}
     return {"result_type": type(result).__name__}
+
+
+def safe_diagnostic_context(value: Any) -> dict[str, Any]:
+    """Keep selected request metadata useful without retaining request contents."""
+    if not isinstance(value, dict):
+        return {}
+    safe: dict[str, Any] = {}
+    allowed = {"window_start", "window_end", "date", "latest", "range_supported", "email_configured", "tokenstore_exists"}
+    for key, item in value.items():
+        key_text = str(key)[:80]
+        if key_text in allowed:
+            safe[key_text] = item if item is None or isinstance(item, (bool, int, float)) else str(item)[:40]
+    return safe
+
+
+def diagnostic_mapping_shape(value: dict[Any, Any], depth: int) -> dict[str, Any]:
+    fields = [
+        text[:80] if re.fullmatch(r"(?a:[A-Za-z][\w-]{0,79})", text) else "[nonstandard]"
+        for key in list(value)[:50]
+        for text in (str(key),)
+    ]
+    result: dict[str, Any] = {"type": "object", "field_count": len(value), "fields": fields}
+    if depth < 1 and value:
+        result["sample"] = diagnostic_response_shape(next(iter(value.values())), depth + 1)
+    return result
+
+
+def diagnostic_sequence_shape(value: list[Any] | tuple[Any, ...], depth: int) -> dict[str, Any]:
+    result: dict[str, Any] = {"type": "array", "items": len(value)}
+    if depth < 1 and value:
+        result["item_shape"] = diagnostic_response_shape(value[0], depth + 1)
+    return result
+
+
+def diagnostic_response_shape(value: Any, depth: int = 0) -> dict[str, Any]:
+    """Describe a response without retaining athlete or provider payload values."""
+    if value is None:
+        return {"type": "null"}
+    if isinstance(value, dict):
+        return diagnostic_mapping_shape(value, depth)
+    if isinstance(value, (list, tuple)):
+        return diagnostic_sequence_shape(value, depth)
+    if isinstance(value, bool):
+        return {"type": "boolean"}
+    if isinstance(value, (int, float)):
+        return {"type": "number"}
+    if isinstance(value, str):
+        return {"type": "string", "length": len(value)}
+    return {"type": type(value).__name__}
+
+
+def diagnostic_capture_response(value: Any) -> dict[str, Any]:
+    """Return response shape metadata without retaining response contents."""
+    return {"shape": diagnostic_response_shape(value)}
+
+
+def safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
+    """Expose only classified technical exception metadata during user debugging."""
+    status = getattr(exc, "status", None) or getattr(exc, "code", None)
+    result: dict[str, Any] = {"type": type(exc).__name__}
+    if isinstance(status, int) and not isinstance(status, bool):
+        result["status"] = status
+    reason = str(getattr(exc, "reason", "") or "").strip()
+    if reason and re.fullmatch(r"[a-z_]{1,80}", reason):
+        result["reason"] = reason
+    validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
+    if validation_reason and re.fullmatch(r"[a-z_]{1,80}", validation_reason):
+        result["validation_reason"] = validation_reason
+    provider_code = getattr(exc, "provider_error_code", None)
+    if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
+        result["provider_error_code"] = provider_code
+    return result
+
+
+def _utc_datetime(clock: Callable[[], datetime | str]) -> datetime:
+    value = clock()
+    if isinstance(value, datetime):
+        current = value
+    else:
+        current = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if current.tzinfo is None:
+        return current.replace(tzinfo=timezone.utc)
+    return current.astimezone(timezone.utc)
+
+
+class DiagnosticCapture:
+    """Own user-enabled, bounded diagnostic capture state and synchronization."""
+
+    def __init__(
+        self,
+        get_kv: Callable[[str], str | None],
+        set_kv: Callable[[str, str], None],
+        redactor: Redactor,
+        clock: Callable[[], datetime | str],
+        *,
+        duration_seconds: int = DIAGNOSTIC_CAPTURE_DURATION_SECONDS,
+        max_entries: int = DIAGNOSTIC_CAPTURE_MAX_ENTRIES,
+        state_key: str = DIAGNOSTIC_CAPTURE_STATE_KEY,
+        entries_key: str = DIAGNOSTIC_CAPTURE_ENTRIES_KEY,
+    ) -> None:
+        self._get_kv = get_kv
+        self._set_kv = set_kv
+        self._redactor = redactor
+        self._clock = clock
+        self._duration_seconds = duration_seconds
+        self._max_entries = max_entries
+        self._state_key = state_key
+        self._entries_key = entries_key
+        self._lock = threading.RLock()
+
+    def _state(self) -> dict[str, Any]:
+        try:
+            value = json.loads(self._get_kv(self._state_key) or "{}")
+        except (TypeError, ValueError):
+            value = {}
+        return value if isinstance(value, dict) else {}
+
+    def _entries(self) -> list[dict[str, Any]]:
+        try:
+            entries = json.loads(self._get_kv(self._entries_key) or "[]")
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(entries, list):
+            return []
+        return [
+            self._redactor.sanitize_log_value(entry)
+            for entry in entries
+            if isinstance(entry, dict)
+        ][-self._max_entries:]
+
+    def _active(self, state: dict[str, Any], now: datetime) -> bool:
+        expires_at = str(state.get("expires_at") or "")
+        try:
+            expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if expiry.tzinfo is None:
+                return False
+            return expiry.astimezone(timezone.utc) > now
+        except (TypeError, ValueError):
+            return False
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            state = self._state()
+            now = _utc_datetime(self._clock)
+            active = self._active(state, now)
+            if not active and state:
+                self._set_kv(self._state_key, "")
+            expires_at = str(state.get("expires_at") or "")
+            entries = self._entries()
+            return {
+                "active": active,
+                "started_at": state.get("started_at") if active else None,
+                "expires_at": expires_at if active else None,
+                "entries": len(entries),
+                "maximum_entries": self._max_entries,
+            }
+
+    def entries(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return self._entries()
+
+    def set_enabled(self, enabled: Any) -> dict[str, Any]:
+        """Enable a one-hour, user-initiated technical capture or stop it early."""
+        if enabled is not True and enabled is not False:
+            raise AppError(400, DIAGNOSTIC_CAPTURE_VALIDATION_ERROR)
+        with self._lock:
+            if enabled:
+                now = _utc_datetime(self._clock)
+                expires_at = (now + timedelta(seconds=self._duration_seconds)).isoformat()
+                self._set_kv(
+                    self._state_key,
+                    json.dumps({"started_at": now.isoformat(), "expires_at": expires_at}, separators=(",", ":")),
+                )
+                self._set_kv(self._entries_key, "[]")
+            else:
+                self._set_kv(self._state_key, "")
+            return self.status()
+
+    def capture(self, event: str, details: dict[str, Any]) -> None:
+        """Persist bounded metadata only while the athlete enabled capture."""
+        with self._lock:
+            state = self._state()
+            now = _utc_datetime(self._clock)
+            if not self._active(state, now):
+                if state:
+                    self._set_kv(self._state_key, "")
+                return
+            entries = self._entries()
+            entries.append({
+                "timestamp": now.isoformat(),
+                "event": self._redactor.sanitize_log_value(str(event)[:80]),
+                "details": self._redactor.sanitize_log_value(details),
+            })
+            self._set_kv(
+                self._entries_key,
+                json.dumps(entries[-self._max_entries:], ensure_ascii=False, separators=(",", ":")),
+            )

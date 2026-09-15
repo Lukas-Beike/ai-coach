@@ -1,18 +1,29 @@
 import io
 import json
 import logging
+import os
+import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+import backend
 from backend.config import Config
+from backend.errors import AppError
 from backend.observability import (
+    DiagnosticCapture,
     JsonLogFormatter,
     Redactor,
     configure_logging,
+    diagnostic_capture_response,
+    diagnostic_response_shape,
     external_result_context,
+    safe_diagnostic_context,
+    safe_diagnostic_error,
     safe_provider_path,
     safe_url_netloc,
 )
@@ -40,6 +51,28 @@ def _config(**updates: str) -> Config:
     }
     values.update(updates)
     return Config(**values)
+
+
+class _KeyValueStore:
+    def __init__(self):
+        self.values: dict[str, str] = {}
+        self.lock = threading.Lock()
+
+    def get(self, key: str) -> str | None:
+        with self.lock:
+            return self.values.get(key)
+
+    def set(self, key: str, value: str) -> None:
+        with self.lock:
+            self.values[key] = value
+
+
+class _Clock:
+    def __init__(self, value: datetime):
+        self.value = value
+
+    def __call__(self) -> datetime:
+        return self.value
 
 
 class ObservabilityTests(unittest.TestCase):
@@ -192,6 +225,111 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(external_result_context({"secret": "synthetic-value"}), {"result_type": "object", "result_fields": 1})
         self.assertEqual(external_result_context((1, 2)), {"result_type": "array", "result_items": 2})
         self.assertEqual(external_result_context("synthetic-value"), {"result_type": "str"})
+
+    def test_diagnostic_shapes_are_bounded_and_keep_only_structure(self):
+        value = {"athlete_name": "Ada", "nested": [{"token": "hidden"}], "invalid key": "secret"}
+        shape = diagnostic_response_shape(value)
+        self.assertEqual(shape["field_count"], 3)
+        self.assertEqual(shape["fields"], ["athlete_name", "nested", "[nonstandard]"])
+        self.assertEqual(shape["sample"], {"type": "string", "length": 3})
+        self.assertEqual(diagnostic_response_shape([{"token": "hidden"}])["item_shape"]["fields"], ["token"])
+        self.assertEqual(diagnostic_response_shape({"nested": [{"token": "hidden"}]}, depth=1), {"type": "object", "field_count": 1, "fields": ["nested"]})
+        self.assertEqual(diagnostic_capture_response("synthetic-response"), {"shape": {"type": "string", "length": 18}})
+
+    def test_safe_diagnostic_context_and_error_never_retain_values_or_text(self):
+        context = safe_diagnostic_context({"date": "2026-09-15", "secret": "synthetic-secret", "latest": True, 1: "ignored"})
+        self.assertEqual(context, {"date": "2026-09-15", "latest": True})
+        error = RuntimeError("synthetic exception text")
+        error.status = 502
+        error.reason = "provider_error"
+        error.validation_reason = "invalid_request"
+        error.provider_error_code = "server_error"
+        safe = safe_diagnostic_error(error)
+        self.assertEqual(safe, {"type": "RuntimeError", "status": 502, "reason": "provider_error", "validation_reason": "invalid_request", "provider_error_code": "server_error"})
+        self.assertNotIn("synthetic", json.dumps(safe))
+        error.provider_error_code = "synthetic-secret"
+        error.reason = "not safe"
+        self.assertNotIn("provider_error_code", safe_diagnostic_error(error))
+        self.assertNotIn("reason", safe_diagnostic_error(error))
+
+    def test_diagnostic_capture_requires_exact_bool_and_expires_state(self):
+        store = _KeyValueStore()
+        clock = _Clock(datetime(2026, 9, 15, 12, tzinfo=timezone.utc))
+        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), clock, duration_seconds=60, max_entries=2)
+        with self.assertRaisesRegex(AppError, "Die Diagnoseaufzeichnung erwartet enabled=true oder enabled=false"):
+            capture.set_enabled(1)
+        self.assertFalse(capture.status()["active"])
+        enabled = capture.set_enabled(True)
+        self.assertTrue(enabled["active"])
+        self.assertEqual(enabled["entries"], 0)
+        capture.capture("synthetic-event", {"secret": "synthetic-openai-value", "shape": {"type": "string"}})
+        self.assertEqual(capture.status()["entries"], 1)
+        clock.value += timedelta(seconds=61)
+        self.assertFalse(capture.status()["active"])
+        self.assertEqual(store.get("diagnostic_capture_state"), "")
+        self.assertEqual(capture.entries(), [{"timestamp": "2026-09-15T12:00:00+00:00", "event": "synthetic-event", "details": {"secret": "[REDACTED]", "shape": {"type": "string"}}}])
+
+    def test_diagnostic_capture_rejects_naive_expiry_and_cleans_state(self):
+        store = _KeyValueStore()
+        clock = _Clock(datetime(2026, 9, 15, 12, tzinfo=timezone.utc))
+        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), clock)
+        store.set("diagnostic_capture_state", '{"started_at":"2026-09-15T11:00:00","expires_at":"2026-09-15T13:00:00"}')
+        self.assertFalse(capture.status()["active"])
+        self.assertEqual(store.get("diagnostic_capture_state"), "")
+
+    def test_diagnostic_capture_bounds_and_disable(self):
+        store = _KeyValueStore()
+        clock = _Clock(datetime(2026, 9, 15, 12, tzinfo=timezone.utc))
+        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), clock, max_entries=2)
+        capture.set_enabled(True)
+        for index in range(4):
+            capture.capture("event", {"index": index, "token": "synthetic-openai-value"})
+        entries = capture.entries()
+        self.assertEqual(len(entries), 2)
+        self.assertEqual([entry["details"]["index"] for entry in entries], [2, 3])
+        self.assertTrue(all("synthetic-openai-value" not in json.dumps(entry) for entry in entries))
+        capture.set_enabled(False)
+        capture.capture("ignored", {"value": "not stored"})
+        self.assertFalse(capture.status()["active"])
+        self.assertEqual(len(capture.entries()), 2)
+
+    def test_diagnostic_capture_concurrent_writes_do_not_lose_updates(self):
+        store = _KeyValueStore()
+        clock = _Clock(datetime(2026, 9, 15, 12, tzinfo=timezone.utc))
+        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), clock, max_entries=32)
+        capture.set_enabled(True)
+        barrier = threading.Barrier(8)
+
+        def write(index: int) -> None:
+            barrier.wait()
+            capture.capture(f"event-{index}", {"index": index})
+
+        threads = [threading.Thread(target=write, args=(index,)) for index in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        entries = capture.entries()
+        self.assertEqual(len(entries), 8)
+        self.assertEqual({entry["details"]["index"] for entry in entries}, set(range(8)))
+
+    def test_observability_import_has_no_side_effect(self):
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(Path(backend.__file__).resolve().parent.parent)
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "-c", "import backend.observability; print('imported')"],
+                cwd=directory,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(list(Path(directory).iterdir()), [])
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "imported")
+        self.assertEqual(result.stderr, "")
 
 
 if __name__ == "__main__":
