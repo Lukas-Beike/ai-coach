@@ -8,6 +8,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import backend
 from backend.db.bootstrap import initialize_application_database
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import database_schema_is_current
@@ -145,7 +146,7 @@ class DatabaseBootstrapTests(unittest.TestCase):
 
     def test_import_has_no_database_side_effects(self):
         with tempfile.TemporaryDirectory() as root:
-            repository_root = Path(__file__).resolve().parents[1]
+            repository_root = Path(backend.__file__).resolve().parents[1]
             environment = os.environ.copy()
             environment["PYTHONPATH"] = str(repository_root)
             environment["PYTHONDONTWRITEBYTECODE"] = "1"

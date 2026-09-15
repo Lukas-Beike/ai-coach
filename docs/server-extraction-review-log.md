@@ -307,6 +307,12 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - `python -m compileall -q server.py backend tests` — PASS.
 - `python scripts/server_extraction_inventory.py --check` — PASS.
 - `git diff --check` — PASS.
+- PR-CI-Erstlauf: **FAIL** — im Container liegt das importierte `backend`
+  unter `/app`, während die Tests separat unter `/review/tests` gemountet sind;
+  der Import-Smoke-Test leitete `PYTHONPATH` fälschlich vom Testdateipfad ab.
+- CI-Korrektur: Der Smoke-Test leitet den Paket-Root nun vom tatsächlich
+  importierten `backend.__file__` ab und bleibt damit im Worktree wie im
+  Container unabhängig vom Test-Mount.
 
 ## P1 — Release- und statischer Assetvertrag
 
