@@ -1201,9 +1201,6 @@ def initialise_database() -> None:
             # retained messages after startup instead of keeping stale content.
             set_kv("gemini_conversation_history", "[]", db)
             set_kv("gemini_call_names", "{}", db)
-    resume_interrupted_sync_jobs()
-
-
 def _provider_refresh_cleanup(db: Any) -> None:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=PROVIDER_REFRESH_RETENTION_DAYS)).isoformat()
     cleanup_refresh_history(db, cutoff=cutoff, max_rows=PROVIDER_REFRESH_MAX_ROWS)
@@ -1917,7 +1914,6 @@ def start_sync_job_worker() -> None:
     with SYNC_JOB_WORKER_LOCK:
         if SYNC_JOB_WORKER is not None and SYNC_JOB_WORKER.is_alive():
             return
-        resume_interrupted_sync_jobs()
         SYNC_JOB_STOP.clear()
         SYNC_JOB_WORKER = threading.Thread(target=_sync_job_worker_loop, name="sync-job-worker", daemon=True)
         SYNC_JOB_WORKER.start()
@@ -19316,7 +19312,6 @@ def start_coach_job_worker() -> None:
     with COACH_JOB_WORKER_LOCK:
         if COACH_JOB_WORKER is not None and COACH_JOB_WORKER.is_alive():
             return
-        resume_interrupted_coach_jobs()
         COACH_JOB_STOP.clear()
         COACH_JOB_WORKER = threading.Thread(target=_coach_job_worker_loop, name="coach-job-worker", daemon=True)
         COACH_JOB_WORKER.start()
@@ -21504,6 +21499,8 @@ def main() -> None:
         raise SystemExit(configuration_error)
     LOGGER.info(f"{APP_NAME} starting", extra={"event": "server_start", "context": {"version": APP_VERSION, "port": CONFIG.port}})
     initialise_database()
+    resume_interrupted_sync_jobs()
+    resume_interrupted_coach_jobs()
     server = CoachHTTPServer(("0.0.0.0", CONFIG.port), RequestHandler)
     server.allow_reuse_address = True
     start_sync_job_worker()
