@@ -6181,7 +6181,7 @@ class CoachTests(unittest.TestCase):
                 server.sync_intervals("cancelled", activity_days=42, cancel_event=cancel_event)
             freshness = {
                 (item["provider"], item["area"]): item
-                for item in server.provider_freshness_state()
+                for item in server._current_provider_freshness()
             }
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         with server.DB_LOCK, server.database() as db:
@@ -8719,24 +8719,24 @@ class CoachTests(unittest.TestCase):
         )
         with patch.object(server, "CONFIG", config):
             server.save_profile({"weather_location": "Berlin"})
-            initial = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            initial = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertEqual(initial[("intervals", "activities")]["state"], "never_loaded")
             self.assertEqual(initial[("weather", "forecast")]["state"], "never_loaded")
             refresh_id = server._provider_refresh_start("intervals", "activities", "operation-test", "manual")
             server._provider_refresh_finish(refresh_id, "error", "failed", error_code="network_error")
-            failed = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            failed = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertEqual(failed[("intervals", "activities")]["state"], "error")
             self.assertEqual(failed[("intervals", "activities")]["error_code"], "network_error")
             self.assertIsNone(failed[("intervals", "activities")]["next_retry_at"])
             with patch.object(server, "CONFIG", replace(config, intervals_api_key="")):
-                unconfigured = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+                unconfigured = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertEqual(unconfigured[("intervals", "activities")]["state"], "not_configured")
             self.assertEqual(unconfigured[("intervals", "activities")]["error_code"], "network_error")
             server.enqueue_sync_job(
                 "intervals", "refresh", {"days": 1},
                 requested_by="test", available_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
             )
-            scheduled = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            scheduled = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertTrue(scheduled[("intervals", "activities")]["next_retry_at"])
             refresh_id = server._provider_refresh_start("intervals", "activities", "operation-test-2", "manual")
             server._provider_refresh_finish(refresh_id, "success", "complete")
@@ -8746,17 +8746,17 @@ class CoachTests(unittest.TestCase):
                     "UPDATE provider_refresh_history SET started_at=?, finished_at=? WHERE id=?",
                     (stale_at, stale_at, refresh_id),
                 )
-            stale = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            stale = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertEqual(stale[("intervals", "activities")]["state"], "stale")
             self.assertTrue(stale[("intervals", "activities")]["has_last_good"])
 
     def test_provider_refresh_history_is_bounded_and_diagnostic_safe(self):
-        for index in range(server.PROVIDER_REFRESH_MAX_ROWS + 5):
+        for index in range(server.sync_freshness.PROVIDER_REFRESH_MAX_ROWS + 5):
             refresh_id = server._provider_refresh_start("garmin", "data", f"operation-{index}", "manual")
             server._provider_refresh_finish(refresh_id, "success", "complete")
         with server.DB_LOCK, server.database() as db:
             count = db.execute("SELECT COUNT(*) AS count FROM provider_refresh_history").fetchone()["count"]
-        self.assertEqual(count, server.PROVIDER_REFRESH_MAX_ROWS)
+        self.assertEqual(count, server.sync_freshness.PROVIDER_REFRESH_MAX_ROWS)
         report = server.diagnostic_report()
         self.assertIn("provider_freshness", report)
         self.assertNotIn("operation-", json.dumps(report))

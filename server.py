@@ -69,6 +69,7 @@ from backend import config as app_config
 from backend import observability
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
+from backend.sync import freshness as sync_freshness
 from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
@@ -911,26 +912,8 @@ OPERATION_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar("operation_con
 DATABASE_MANAGER: DatabaseManager | None = None
 DATABASE_MANAGER_SIGNATURE: tuple[str, str, bool] | None = None
 
-PROVIDER_REFRESH_RETENTION_DAYS = 30
-PROVIDER_REFRESH_MAX_ROWS = 200
 PROVIDER_REFRESH_RETRY_BASE_SECONDS = 15 * 60
 PROVIDER_REFRESH_RETRY_MAX_SECONDS = 6 * 60 * 60
-PROVIDER_REFRESH_STALE_SECONDS = {
-    ("intervals", "activities"): 48 * 60 * 60,
-    ("intervals", "competitions"): 48 * 60 * 60,
-    ("intervals", "performance"): 48 * 60 * 60,
-    ("garmin", "data"): 48 * 60 * 60,
-    ("weather", "forecast"): WEATHER_CACHE_SECONDS if "WEATHER_CACHE_SECONDS" in globals() else 3 * 60 * 60,
-    ("calendar", "events"): 48 * 60 * 60,
-}
-PROVIDER_REFRESH_LABELS = {
-    ("intervals", "activities"): "Intervals.icu · Training",
-    ("intervals", "competitions"): "Intervals.icu · Wettkämpfe",
-    ("intervals", "performance"): "Intervals.icu · Leistung",
-    ("garmin", "data"): "Garmin",
-    ("weather", "forecast"): "Open-Meteo",
-    ("calendar", "events"): "Gemeinsamer Kalender",
-}
 SYNC_JOB_MAX_ATTEMPTS = 3
 SYNC_JOB_RETRY_BASE_SECONDS = 15 * 60
 SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
@@ -1145,8 +1128,11 @@ def initialise_database() -> None:
             all_sync_days=ALL_SYNC_DAYS,
         )
 def _provider_refresh_cleanup(db: Any) -> None:
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=PROVIDER_REFRESH_RETENTION_DAYS)).isoformat()
-    cleanup_refresh_history(db, cutoff=cutoff, max_rows=PROVIDER_REFRESH_MAX_ROWS)
+    cutoff = (
+        datetime.now(timezone.utc)
+        - timedelta(days=sync_freshness.PROVIDER_REFRESH_RETENTION_DAYS)
+    ).isoformat()
+    cleanup_refresh_history(db, cutoff=cutoff, max_rows=sync_freshness.PROVIDER_REFRESH_MAX_ROWS)
 
 
 def _provider_refresh_start(provider: str, area: str, operation_id: str, trigger: str) -> str:
@@ -1885,141 +1871,18 @@ def resolve_sync_job(job_id: str, payload: Any) -> dict[str, Any]:
     return sync_job_state(job_id)
 
 
-def _scheduled_provider_retry_at(db: Any, provider: str) -> str | None:
-    """Return only a future queued retry, never an advisory history timestamp."""
-    now = datetime.now(timezone.utc)
-    rows = db.execute(
-        "SELECT available_at FROM sync_jobs "
-        "WHERE provider=? AND type='refresh' "
-        "AND status='queued' AND available_at IS NOT NULL ORDER BY available_at",
-        (provider,),
-    ).fetchall()
-    for row in rows:
-        try:
-            available_at = datetime.fromisoformat(str(row["available_at"]).replace("Z", UTC_OFFSET_SUFFIX)).astimezone(timezone.utc)
-        except (TypeError, ValueError):
-            continue
-        if available_at > now:
-            return available_at.isoformat()
-    return None
-
-
-def _provider_freshness_inputs() -> tuple[dict[tuple[str, str], Any], dict[tuple[str, str], Any], dict[tuple[str, str], bool]]:
-    fallbacks = {
-        ("intervals", "activities"): get_kv("last_sync_at"),
-        ("intervals", "competitions"): get_kv("last_competition_sync_at"),
-        ("intervals", "performance"): get_kv("last_performance_refresh_at"),
-        ("garmin", "data"): get_kv("last_garmin_sync_at"),
-        ("weather", "forecast"): None,
-        ("calendar", "events"): get_kv("last_external_calendar_sync_at"),
-    }
-    fallback_errors = {
-        ("intervals", "activities"): get_kv("last_sync_error"),
-        ("intervals", "competitions"): get_kv("last_competition_sync_error"),
-        ("intervals", "performance"): get_kv("last_performance_error"),
-        ("garmin", "data"): bool(_garmin_core_error_entries()),
-        ("weather", "forecast"): get_kv(WEATHER_FAILURE_KEY),
-        ("calendar", "events"): get_kv("last_external_calendar_sync_error"),
-    }
-    try:
-        cached_weather = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
-        if isinstance(cached_weather, dict):
-            fallbacks[("weather", "forecast")] = cached_weather.get("fetched_at")
-    except (TypeError, ValueError):
-        pass
-    configured = {
-        ("intervals", "activities"): bool(CONFIG.intervals_api_key),
-        ("intervals", "competitions"): bool(CONFIG.intervals_api_key),
-        ("intervals", "performance"): bool(CONFIG.intervals_api_key),
-        ("garmin", "data"): bool(CONFIG.garmin_fixture_path or CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()),
-        ("weather", "forecast"): bool(get_profile().get("weather_location")),
-        ("calendar", "events"): bool(CONFIG.calendar_ical_url),
-    }
-    return fallbacks, fallback_errors, configured
-
-
-def _provider_freshness_last_good_state(key: tuple[str, str], last_good: Any) -> str:
-    if last_good:
-        try:
-            age = (datetime.now(timezone.utc) - datetime.fromisoformat(last_good.replace("Z", UTC_OFFSET_SUFFIX))).total_seconds()
-        except (TypeError, ValueError):
-            age = float("inf")
-        return "stale" if age > PROVIDER_REFRESH_STALE_SECONDS[key] else "fresh"
-    return "error"
-
-
-def _provider_fallback_error_code(fallback_error: bool) -> str | None:
-    return "provider_error" if fallback_error else None
-
-
-def _provider_freshness_error_code(row: dict[str, Any] | None, fallback_error: bool) -> str | None:
-    if row:
-        error_code = str(row.get("error_code") or "")
-        if error_code:
-            return error_code
-    return _provider_fallback_error_code(fallback_error)
-
-
-def _provider_freshness_status(
-    key: tuple[str, str], configured: bool, row: dict[str, Any] | None, last_good: Any, fallback_error: bool,
-) -> tuple[str, str | None]:
-    if not configured:
-        return "not_configured", _provider_freshness_error_code(row, fallback_error)
-    if row:
-        status = row["status"]
-        if status == "running":
-            return "syncing", _provider_fallback_error_code(fallback_error)
-        if status == "error":
-            state = "stale" if last_good else "error"
-            return state, row.get("error_code")
-        if status == "partial":
-            return "partial", _provider_fallback_error_code(fallback_error)
-    if last_good:
-        return _provider_freshness_last_good_state(key, last_good), _provider_fallback_error_code(fallback_error)
-    if fallback_error:
-        return "error", "provider_error"
-    return "never_loaded", None
-
-
-def provider_freshness_state() -> list[dict[str, Any]]:
-    fallbacks, fallback_errors, configured = _provider_freshness_inputs()
-    result: list[dict[str, Any]] = []
+def _current_provider_freshness() -> list[dict[str, Any]]:
+    """Wire runtime state into the backend-owned freshness projection."""
     with DB_LOCK, database() as db:
-        _provider_refresh_cleanup(db)
-        for key, label in PROVIDER_REFRESH_LABELS.items():
-            provider, area = key
-            row = db.execute(
-                "SELECT * FROM provider_refresh_history WHERE provider=? AND area=? ORDER BY started_at DESC LIMIT 1",
-                (provider, area),
-            ).fetchone()
-            last_success = db.execute(
-                "SELECT finished_at FROM provider_refresh_history WHERE provider=? AND area=? AND status IN ('success','partial') "
-                "ORDER BY finished_at DESC LIMIT 1",
-                (provider, area),
-            ).fetchone()
-            row = dict(row) if row else None
-            fallback = fallbacks[key]
-            fallback_error = bool(fallback_errors[key])
-            last_attempt = row.get("started_at") if row else fallback
-            last_good = (last_success["finished_at"] if last_success else None) or fallback
-            scheduled_retry = _scheduled_provider_retry_at(db, provider)
-            state, error_code = _provider_freshness_status(key, configured[key], row, last_good, fallback_error)
-            result.append({
-                "provider": provider,
-                "area": area,
-                "label": label,
-                "configured": configured[key],
-                "read_only": key != ("intervals", "competitions"),
-                "state": state,
-                "phase": row.get("phase") if row else None,
-                "last_attempt_at": last_attempt,
-                "last_success_at": last_good,
-                "error_code": error_code,
-                "next_retry_at": scheduled_retry,
-                "stale": state == "stale",
-                "has_last_good": bool(last_good),
-            })
-    return result
+        return sync_freshness.provider_freshness_state(
+            db,
+            config=CONFIG,
+            get_value=get_kv,
+            profile=get_profile(),
+            garmin_has_core_error=bool(_garmin_core_error_entries()),
+            garmin_tokenstore_exists=Path(CONFIG.garmin_tokenstore).exists(),
+            now=datetime.now(timezone.utc),
+        )
 
 
 def _audit_projection_fields(entity_type: str) -> set[str]:
@@ -11097,7 +10960,7 @@ def sync_public_state(
         running=running,
         get_value=get_kv,
         state_versions=state_versions(),
-        provider_freshness=freshness if freshness is not None else provider_freshness_state(),
+        provider_freshness=freshness if freshness is not None else _current_provider_freshness(),
         maintenance=runtime_maintenance.MAINTENANCE_GATE.state(),
     )
     result["jobs"] = jobs if jobs is not None else sync_jobs_state()
@@ -19371,7 +19234,7 @@ def public_bootstrap() -> dict[str, Any]:
         competitions = list_competitions(limit=100)
         relevant_external = list_external_calendar_events(250, training_relevant_only=True)
         profile = get_profile()
-        freshness = provider_freshness_state()
+        freshness = _current_provider_freshness()
         jobs = sync_jobs_state()
         state_version_values = state_versions()
         return {
@@ -19519,7 +19382,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
         checkins = list_checkins(30)
         external_calendar = external_calendar_state()
         daily_context = daily_planning_context(snapshot, planned, weather, checkins, list_external_calendar_events(50, training_relevant_only=True))
-        freshness = provider_freshness_state()
+        freshness = _current_provider_freshness()
         sync = sync_browser_state(freshness=freshness)
         return {
             "app": {
@@ -19738,7 +19601,7 @@ def diagnostic_report() -> dict[str, Any]:
             "running": get_kv("performance_refresh_running") == "1",
         },
         "garmin": garmin_status,
-        "provider_freshness": provider_freshness_state(),
+        "provider_freshness": _current_provider_freshness(),
         "external_calendar": {
             "configured": bool(CONFIG.calendar_ical_url),
             "last_sync_at": get_kv("last_external_calendar_sync_at"),

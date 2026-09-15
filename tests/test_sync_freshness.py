@@ -65,8 +65,12 @@ def _item(result, provider: str, area: str) -> dict:
 
 
 class ProviderFreshnessTests(unittest.TestCase):
+    def setUp(self):
+        self.db = _db()
+        self.addCleanup(self.db.close)
+
     def test_order_labels_configuration_and_read_only_contract(self):
-        db = _db()
+        db = self.db
         result = provider_freshness_state(
             db, config=_config(intervals_api_key="intervals", garmin_email="athlete@example.test", calendar_ical_url="https://calendar.test/i.ics"),
             get_value=_values({}), profile={"weather_location": ""}, garmin_has_core_error=False,
@@ -84,7 +88,7 @@ class ProviderFreshnessTests(unittest.TestCase):
         self.assertEqual(_item(result, "weather", "forecast")["state"], "not_configured")
 
     def test_central_states_and_last_error_are_preserved(self):
-        db = _db()
+        db = self.db
         rows = [
             ("running", "intervals", "activities", NOW - timedelta(minutes=2), None, "loading", None),
             ("partial", "intervals", "competitions", NOW - timedelta(hours=1), NOW - timedelta(minutes=59), "complete", None),
@@ -118,7 +122,7 @@ class ProviderFreshnessTests(unittest.TestCase):
         self.assertEqual(_item(unconfigured, "intervals", "activities")["error_code"], "provider_error")
 
     def test_fresh_stale_malformed_and_z_timestamps(self):
-        db = _db()
+        db = self.db
         for row_id, area, finished in (
             ("fresh", "activities", "2026-09-15T10:00:00Z"),
             ("stale", "competitions", "2026-09-12T10:00:00+00:00"),
@@ -138,7 +142,7 @@ class ProviderFreshnessTests(unittest.TestCase):
         self.assertTrue(_item(result, "intervals", "performance")["has_last_good"])
 
     def test_only_future_queued_retry_is_projected_and_fallbacks_configure(self):
-        db = _db()
+        db = self.db
         db.executemany(
             "INSERT INTO sync_jobs VALUES (?, ?, 'refresh', 'queued', '{}', NULL, 0, 0, 0, NULL, ?, NULL, NULL, ?, ?)",
             [("past", "intervals", "2026-09-15T11:00:00+00:00", NOW.isoformat(), NOW.isoformat()),
@@ -155,7 +159,7 @@ class ProviderFreshnessTests(unittest.TestCase):
         self.assertEqual(_item(result, "garmin", "data")["error_code"], "provider_error")
 
     def test_cleanup_is_bounded_and_uses_caller_transaction(self):
-        db = _db()
+        db = self.db
         old = NOW - timedelta(days=31)
         db.execute(
             "INSERT INTO provider_refresh_history VALUES ('old', 'intervals', 'activities', 'op', 'test', ?, ?, 'complete', 'success', NULL, NULL)",

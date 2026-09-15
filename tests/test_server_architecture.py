@@ -107,6 +107,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.providers.http", ("ProviderHTTPError",)),
     ("backend.http_api.responses", ("json_bytes",)),
     ("backend.sync.windows", ("split_date_windows",)),
+    ("backend.sync.freshness", ("provider_freshness_state",)),
     ("backend.db.schema", ("database_table_names",)),
     ("backend.db.bootstrap", ("initialize_application_database",)),
 )
