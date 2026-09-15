@@ -107,8 +107,7 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - Erstes Orchestrator-Review des tatsächlichen Worker-Codes: **PASS** — keine
   Rückimporte, kein Zustand, keine Providertexte in öffentlichen Meldungen und
   identische Status-/Reason-Semantik.
-- Integrierter Diff-Stand vor Commit: SHA-256
-  `d19977a28fa2e4af254e2c391293a83ab1811b75edde5c91eaacca002e1762d2`.
+- Geprüfter integrierter Commit: `2820e8514eee2d4c37353bc4a5bee8de282f1226`.
 - Integriertes Orchestrator-Review: **PASS** — `server.py` importiert die
   Symbole nur noch als Composition Root; sämtliche Implementierungen und
   Konstantendefinitionen wurden entfernt. Die Architekturprüfung erfasst nun
