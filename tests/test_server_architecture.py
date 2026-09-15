@@ -22,6 +22,31 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 # backend-owned implementations, not server callbacks or compatibility
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "backend.errors",
+        (
+            "AppError",
+            "ClientDisconnected",
+            "provider_error",
+            "public_app_error_status",
+            "INTERVALS_API_KEY_ERROR",
+            "OPENAI_API_KEY_ERROR",
+            "GEMINI_API_KEY_ERROR",
+            "NOT_FOUND_ERROR",
+            "INTERNAL_SERVER_ERROR",
+            "COMPETITION_NOT_FOUND_ERROR",
+            "COACH_ABORTED_ERROR",
+            "STRUCTURED_AUTHORIZATION_ERROR",
+            "INVALID_PLANNING_ID_ERROR",
+            "CORRUPT_PLANNING_ERROR",
+            "INVALID_LIBRARY_ID_ERROR",
+            "CORRUPT_LIBRARY_ERROR",
+            "INVALID_PLANNING_DATE_ERROR",
+            "STALE_PLANNING_REVISION_ERROR",
+            "UNSUPPORTED_BYDAY_ERROR",
+            "PLANNED_CALENDAR_RECHECK_ERROR",
+        ),
+    ),
     ("backend.providers.http", ("ProviderHTTPError",)),
     ("backend.http_api.responses", ("json_bytes",)),
     ("backend.sync.windows", ("split_date_windows",)),
@@ -168,12 +193,17 @@ def _server_import_violations(path: Path, tree: ast.AST) -> list[str]:
 
 
 def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
-    return {
-        node.name: node.lineno
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-        and not node.name.startswith("_")
-    }
+    implementations: dict[str, int] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if not node.name.startswith("_"):
+                implementations[node.name] = node.lineno
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
+            for target in targets:
+                if isinstance(target, ast.Name) and not target.id.startswith("_"):
+                    implementations[target.id] = node.lineno
+    return implementations
 
 
 class ServerArchitectureTests(unittest.TestCase):

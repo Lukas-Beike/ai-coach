@@ -912,7 +912,7 @@ def build_document() -> str:
         f"- Definitionen (Funktionen/Klassen): {len(definition_names):,}".replace(",", "."),
         f"- Globale Bindungen einschließlich Imports: {sum(item.kind == KIND_GLOBAL for item in items):,} Zuweisungen, {sum(item.kind == KIND_IMPORT for item in items):,} Imports".replace(",", "."),
         f"- Planbereich: bis Zeile {plan_end:,}; Einträge dahinter: {len(outside_plan):,} (zielbestimmt über Symbol-/Verantwortungsanalyse)".replace(",", "."),
-        "- Status dieses Stands: P0/Intervals-Reabsorption integriert; P1 hat noch nicht begonnen. `offen` bedeutet, dass die fachliche Eigentümerschaft noch migriert werden muss.",
+        "- Status dieses Stands: P0 ist integriert; bereits ausgelagerte Namen erscheinen als Importbindungen. `offen` bedeutet, dass die fachliche Eigentümerschaft noch migriert werden muss.",
         "",
         "## Reproduzierbare Prüfungen",
         "",
@@ -939,7 +939,7 @@ def build_document() -> str:
     lines.extend(_p1_dependency_lines(items, deps))
     lines += ["", "### Zyklische Gruppen", ""]
     lines.extend(_cycle_lines(cycles))
-    lines += ["", "## Vollständiges Inventar", "", "`Zielmodul` und `Phase` folgen der Bereichstabelle des vollständigen Plans. Jede Zuordnung ist konkret; eine künftig neu hinzukommende nicht auflösbare Bindung wird als offen markiert und darf nicht stillschweigend erfunden werden. `Status` beschreibt ausschließlich den Stand vor P1.", "", "| Art | Quellname | Ausgangszeile | Zielmodul | Phase | Status | Referenzen außerhalb von server.py |", "| --- | --- | ---: | --- | --- | --- | --- |"]
+    lines += ["", "## Vollständiges Inventar", "", "`Zielmodul` und `Phase` folgen der Bereichstabelle des vollständigen Plans. Jede Zuordnung ist konkret; eine künftig neu hinzukommende nicht auflösbare Bindung wird als offen markiert und darf nicht stillschweigend erfunden werden. `Status` beschreibt den jeweils inventarisierten Stand.", "", "| Art | Quellname | Ausgangszeile | Zielmodul | Phase | Status | Referenzen außerhalb von server.py |", "| --- | --- | ---: | --- | --- | --- | --- |"]
     lines.extend(_inventory_table_lines(items, references))
     lines += ["", "## Zielverteilung", "", "| Zielmodul | Einträge |", "| --- | ---: |"]
     lines.extend(f"| `{target}` | {count} |" for target, count in sorted(target_counts.items()))
