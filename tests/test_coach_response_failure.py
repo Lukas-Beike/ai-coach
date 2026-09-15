@@ -101,7 +101,7 @@ class CoachResponseFailureTests(unittest.TestCase):
                     "code": code, "message": "DO_NOT_EXPORT_PROVIDER_CONTENT",
                 }})
             self.assertEqual(raised.exception.reason, "response_error")
-            metadata = server._safe_diagnostic_error(raised.exception)
+            metadata = server.observability.safe_diagnostic_error(raised.exception)
             self.assertNotIn("provider_error_code", metadata)
             status = json.loads(server.get_kv(server.OPENAI_STATUS_KEY))
             self.assertNotIn("provider_error_code", status)

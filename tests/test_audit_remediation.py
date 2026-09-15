@@ -187,7 +187,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
         token = create_test_session(server)
         # This temporary SQLite fixture exercises pagination and real session
         # authentication; secure startup has separate SQLCipher integration tests.
-        startup = patch.object(server, "security_configuration_error", return_value=None)
+        startup = patch.object(server.app_config, "security_configuration_error", return_value=None)
         startup.start()
         self.addCleanup(startup.stop)
         httpd = server.CoachHTTPServer(("127.0.0.1", 0), server.RequestHandler)
