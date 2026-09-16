@@ -40,6 +40,10 @@ os.environ.update({
 })
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from backend.db.schema import database_schema_is_current, database_table_names
+from backend.runtime import events as runtime_events
+from backend.runtime import maintenance as runtime_maintenance
+
 # Deny dotenv access before importing the application, including optional values.
 _original_read_text = Path.read_text
 def _isolated_read_text(path, *args, **kwargs):
@@ -152,8 +156,8 @@ class CoachTests(unittest.TestCase):
         server.initialise_database()
         with server.DB_LOCK, server.database() as db:
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"], 1)
-            self.assertTrue(server.database_schema_is_current(db))
-            self.assertEqual(server.database_table_names(db), set(server.CURRENT_DATABASE_SCHEMA))
+            self.assertTrue(database_schema_is_current(db))
+            self.assertEqual(database_table_names(db), set(server.CURRENT_DATABASE_SCHEMA))
             self.assertEqual(server.database_index_names(db), server.CURRENT_DATABASE_INDEXES)
 
     def test_initialise_database_rejects_a_non_current_schema_without_modifying_it(self):
@@ -195,6 +199,48 @@ class CoachTests(unittest.TestCase):
         server.initialise_database()
         self.assertEqual(server.get_kv("morning_checkin_running"), "0")
         self.assertEqual(server.get_kv("morning_checkin_status"), "waiting")
+
+    def test_database_initialization_does_not_recover_jobs(self):
+        with patch.object(server, "resume_interrupted_sync_jobs") as sync_recovery, patch.object(
+            server, "resume_interrupted_coach_jobs"
+        ) as coach_recovery:
+            server.initialise_database()
+        sync_recovery.assert_not_called()
+        coach_recovery.assert_not_called()
+
+    def test_startup_explicitly_recovers_jobs_before_starting_workers(self):
+        order = []
+        http_server = Mock()
+        with patch.object(server.observability, "configure_logging"), patch.object(
+            server, "security_configuration_error", return_value=None
+        ), patch.object(server, "initialise_database", side_effect=lambda: order.append("schema")), patch.object(
+            server, "resume_interrupted_sync_jobs", side_effect=lambda: order.append("sync-recovery")
+        ), patch.object(
+            server, "resume_interrupted_coach_jobs", side_effect=lambda: order.append("coach-recovery")
+        ), patch.object(server, "CoachHTTPServer", return_value=http_server), patch.object(
+            server, "start_sync_job_worker", side_effect=lambda: order.append("sync-worker")
+        ), patch.object(
+            server, "start_coach_job_worker", side_effect=lambda: order.append("coach-worker")
+        ), patch.object(server, "enqueue_startup_sync_jobs"), patch.object(
+            server, "schedule_morning_checkin"
+        ), patch.object(server.threading, "Thread"):
+            server.main()
+        self.assertEqual(
+            order,
+            ["schema", "sync-recovery", "coach-recovery", "sync-worker", "coach-worker"],
+        )
+
+    def test_worker_start_functions_do_not_repeat_recovery(self):
+        with patch.object(server, "resume_interrupted_sync_jobs") as sync_recovery, patch.object(
+            server, "resume_interrupted_coach_jobs"
+        ) as coach_recovery, patch.object(server.threading, "Thread") as thread, patch.object(
+            server, "SYNC_JOB_WORKER", None
+        ), patch.object(server, "COACH_JOB_WORKER", None):
+            server.start_sync_job_worker()
+            server.start_coach_job_worker()
+        self.assertEqual(thread.call_count, 2)
+        sync_recovery.assert_not_called()
+        coach_recovery.assert_not_called()
 
     def test_persistent_sync_job_claim_resume_retry_and_completion(self):
         job = server.enqueue_sync_job("intervals", "refresh", {"days": 7}, requested_by="user")
@@ -1737,25 +1783,23 @@ class CoachTests(unittest.TestCase):
         self.assertIn(bootstrap["provider_states"]["intervals"]["status"], {"not_configured", "loading", "ready", "stale", "degraded", "error"})
 
     def test_state_events_report_missed_retention_and_redact_content(self):
-        with server.STATE_EVENT_CONDITION:
-            server.STATE_EVENTS.clear()
-            server.STATE_EVENT_NEXT_ID = 0
+        runtime_events.STATE_EVENT_BUFFER.clear()
         for index in range(501):
-            server.publish_state_event("job", {"job_id": f"job-{index}", "status": "running", "progress": {"completed": index, "total": 501}})
-        gap = server.state_events_since(0)
+            runtime_events.STATE_EVENT_BUFFER.publish("job", {"job_id": f"job-{index}", "status": "running", "progress": {"completed": index, "total": 501}})
+        gap = runtime_events.STATE_EVENT_BUFFER.since(0)
         self.assertTrue(gap["gap"])
         self.assertEqual(gap["events"], [])
-        current = server.state_events_since(gap["latest_event_id"] - 1)
+        current = runtime_events.STATE_EVENT_BUFFER.since(gap["latest_event_id"] - 1)
         self.assertFalse(current["gap"])
         self.assertEqual(len(current["events"]), 1)
         self.assertNotIn("athlete content", json.dumps(current))
 
     def test_state_events_validate_cursor_and_publish_job_progress(self):
         with self.assertRaises(server.AppError) as raised:
-            server.state_events_since("not-a-number")
+            runtime_events.STATE_EVENT_BUFFER.since("not-a-number")
         self.assertEqual(raised.exception.reason, "invalid_event_cursor")
-        event = server.publish_state_event("job", {"job_id": "job-1", "status": "completed", "progress": {"completed": 1, "total": 1}})
-        self.assertEqual(server.state_events_since(event["event_id"] - 1)["events"][0]["data"]["progress"]["completed"], 1)
+        event = runtime_events.STATE_EVENT_BUFFER.publish("job", {"job_id": "job-1", "status": "completed", "progress": {"completed": 1, "total": 1}})
+        self.assertEqual(runtime_events.STATE_EVENT_BUFFER.since(event["event_id"] - 1)["events"][0]["data"]["progress"]["completed"], 1)
 
     def test_state_event_batch_sends_events_and_resets_for_gaps(self):
         handler = object.__new__(server.RequestHandler)
@@ -2062,7 +2106,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(incomplete.exception.status, 400)
 
     def test_maintenance_gate_blocks_new_operations_and_waits_for_running_one(self):
-        gate = server.MaintenanceGate()
+        gate = runtime_maintenance.MaintenanceGate()
         started = threading.Event()
         release = threading.Event()
         restore_entered = threading.Event()
@@ -2093,7 +2137,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(gate.state(), {"active": False, "running_operations": 0})
 
     def test_maintenance_gate_clears_after_restore_exception(self):
-        gate = server.MaintenanceGate()
+        gate = runtime_maintenance.MaintenanceGate()
         with self.assertRaises(RuntimeError):
             with gate.restore():
                 raise RuntimeError("restore failed")
@@ -4153,7 +4197,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "garmin_fixture_path", return_value="fixture.json"), \
              patch.object(server, "sync_garmin") as sync_garmin, \
              patch.object(server, "garmin_sleep_ready_for_checkin", return_value=False), \
-             patch.object(server, "publish_state_event", side_effect=lambda *args: events.append(args)):
+             patch.object(runtime_events.STATE_EVENT_BUFFER, "publish", side_effect=lambda *args: events.append(args)):
             ready = server._morning_checkin_garmin_ready(date(2026, 9, 4))
         self.assertIsNone(ready)
         sync_garmin.assert_called_once_with(days=server.MORNING_GARMIN_SYNC_DAYS, reason="Morgen-Check-in", wait_for_existing=True)
@@ -4586,21 +4630,21 @@ class CoachTests(unittest.TestCase):
     def test_ai_provider_selection_keeps_models_separate(self):
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
         with patch.object(server, "CONFIG", config):
-            self.assertEqual(server.selected_ai_provider(), "openai")
-            server.save_model("gpt-5.6-luna")
-            provider_state = server.save_ai_provider("gemini")
+            self.assertEqual(server.SETTINGS.selected_ai_provider(), "openai")
+            server.SETTINGS.save_model("gpt-5.6-luna")
+            provider_state = server.SETTINGS.save_ai_provider("gemini")
             self.assertEqual(provider_state["provider"], "gemini")
             self.assertEqual(provider_state["model"], "gemini-3.8-flash")
             self.assertEqual([option["id"] for option in provider_state["model_options"]], ["gemini-3.8-flash", "gemini-2.5-pro"])
-            self.assertEqual(server.selected_model(), "gemini-3.8-flash")
-            server.save_model("gemini-2.5-pro")
-            server.save_ai_provider("openai")
-            self.assertEqual(server.selected_model(), "gpt-5.6-luna")
+            self.assertEqual(server.SETTINGS.selected_model(), "gemini-3.8-flash")
+            server.SETTINGS.save_model("gemini-2.5-pro")
+            server.SETTINGS.save_ai_provider("openai")
+            self.assertEqual(server.SETTINGS.selected_model(), "gpt-5.6-luna")
 
     def test_gemini_key_is_redacted_from_diagnostics_text(self):
         key = "AIza" + "a" * 35
         with patch.object(server, "CONFIG", replace(server.CONFIG, gemini_api_key=key)):
-            self.assertNotIn(key, server.redact_text(f"Gemini request failed: {key}"))
+            self.assertNotIn(key, server.REDACTOR.redact_text(f"Gemini request failed: {key}"))
 
     def test_gemini_turn_uses_its_captured_provider_and_reasoning_level(self):
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
@@ -4927,7 +4971,7 @@ class CoachTests(unittest.TestCase):
             "date": wednesday, "sport": "WeightTraining", "name": "Oberkörper Einheit",
             "description": "Krafttraining", "duration_minutes": 45, "target": "AUTO",
         })
-        with patch.object(server, "publish_state_event") as publish:
+        with patch.object(runtime_events.STATE_EVENT_BUFFER, "publish") as publish:
             result = server._apply_structured_training_changes({
                 "changes": [
                     {"local_id": upper_body["id"], "action": "update", "date": tuesday},
@@ -5424,35 +5468,35 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("vendor_payload", context)
 
     def test_model_selection_is_persisted_and_validated(self):
-        self.assertEqual(server.selected_model(), "gpt-5.6-luna")
-        self.assertEqual(server.save_model("gpt-5.6-terra"), {"model": "gpt-5.6-terra"})
-        self.assertEqual(server.selected_model(), "gpt-5.6-terra")
+        self.assertEqual(server.SETTINGS.selected_model(), "gpt-5.6-luna")
+        self.assertEqual(server.SETTINGS.save_model("gpt-5.6-terra"), {"model": "gpt-5.6-terra"})
+        self.assertEqual(server.SETTINGS.selected_model(), "gpt-5.6-terra")
         with self.assertRaises(server.AppError):
-            server.save_model("not-a-model")
+            server.SETTINGS.save_model("not-a-model")
 
     def test_thinking_level_is_persisted_and_validated(self):
-        self.assertEqual(server.selected_thinking_level(), "medium")
-        self.assertEqual(server.save_thinking_level("high"), {"thinking_level": "high"})
-        self.assertEqual(server.selected_thinking_level(), "high")
+        self.assertEqual(server.SETTINGS.selected_thinking_level(), "medium")
+        self.assertEqual(server.SETTINGS.save_thinking_level("high"), {"thinking_level": "high"})
+        self.assertEqual(server.SETTINGS.selected_thinking_level(), "high")
         with self.assertRaises(server.AppError):
-            server.save_thinking_level("extreme")
+            server.SETTINGS.save_thinking_level("extreme")
 
     def test_calendar_display_settings_are_persisted_and_validated(self):
-        self.assertEqual(server.calendar_display_settings(), {"past_weeks": 1, "future_weeks": 4})
+        self.assertEqual(server.SETTINGS.calendar_display_settings(), {"past_weeks": 1, "future_weeks": 4})
         self.assertEqual(
-            server.save_calendar_display_settings({"past_weeks": 3, "future_weeks": 12}),
+            server.SETTINGS.save_calendar_display_settings({"past_weeks": 3, "future_weeks": 12}),
             {"status": "ok", "past_weeks": 3, "future_weeks": 12},
         )
-        self.assertEqual(server.calendar_display_settings(), {"past_weeks": 3, "future_weeks": 12})
+        self.assertEqual(server.SETTINGS.calendar_display_settings(), {"past_weeks": 3, "future_weeks": 12})
         with self.assertRaises(server.AppError):
-            server.save_calendar_display_settings({"past_weeks": -1})
+            server.SETTINGS.save_calendar_display_settings({"past_weeks": -1})
         with self.assertRaises(server.AppError):
-            server.save_calendar_display_settings({"future_weeks": 53})
+            server.SETTINGS.save_calendar_display_settings({"future_weeks": 53})
         server.set_kv("calendar_display_past_weeks", "invalid")
-        self.assertEqual(server.calendar_display_settings()["past_weeks"], 1)
+        self.assertEqual(server.SETTINGS.calendar_display_settings()["past_weeks"], 1)
 
     def test_responses_request_uses_selected_thinking_level(self):
-        server.save_thinking_level("low")
+        server.SETTINGS.save_thinking_level("low")
         captured = {}
 
         def fake_openai(path, payload):
@@ -7774,7 +7818,7 @@ class CoachTests(unittest.TestCase):
 
 
     def test_diagnostics_redact_credentials_from_logs(self):
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         server.LOGGER.error("failed request with sk-test-secret-value")
         for handler in server.LOGGER.handlers:
             handler.flush()
@@ -7801,7 +7845,7 @@ class CoachTests(unittest.TestCase):
                 token_url,
                 long_path_url,
             ))
-            redacted = server.redact_text(samples)
+            redacted = server.REDACTOR.redact_text(samples)
         for secret in (email, calendar_url, quote(email, safe=""), quote(calendar_url, safe=""), "calendar-password", "query-secret"):
             self.assertNotIn(secret.casefold(), redacted.casefold())
         self.assertIn("calendar.example.invalid", redacted)
@@ -7839,7 +7883,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, garmin_email=email, calendar_ical_url=calendar_url)
         error_body = json.dumps({"error": {"message": f"rejected {email} {calendar_url}"}}).encode("utf-8")
         upstream_error = server.HTTPError("https://intervals.icu/api/v1/athlete/0", 422, "Unprocessable Entity", {}, BytesIO(error_body))
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=upstream_error):
             with self.assertRaises(server.AppError) as raised:
                 server.http_json("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
@@ -7909,7 +7953,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("not captured", json.dumps(server.diagnostic_report(), ensure_ascii=False))
 
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         with patch.object(server, "urlopen", side_effect=server.URLError("offline")):
             with self.assertRaises(server.AppError):
                 server.http_json("GET", "https://intervals.icu/api/v1/athlete/0")
@@ -7982,7 +8026,7 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(readiness["checks"]["data_directory"])
 
     def test_readiness_fails_during_database_maintenance(self):
-        with server.MAINTENANCE_GATE.restore():
+        with runtime_maintenance.MAINTENANCE_GATE.restore():
             readiness = server.readiness_state()
         self.assertEqual(readiness["status"], "not_ready")
         self.assertFalse(readiness["ready"])
@@ -8022,7 +8066,7 @@ class CoachTests(unittest.TestCase):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
         operation_id = "operation-test-026"
         config = replace(server.CONFIG, intervals_api_key="test-key")
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         with patch.object(server, "CONFIG", config), patch.object(
             server.IntervalsClient, "fetch_snapshot", return_value=snapshot
         ), patch.object(server.IntervalsClient, "get_workout_library", return_value=[]):
@@ -8051,7 +8095,7 @@ class CoachTests(unittest.TestCase):
             def read(self):
                 return b'{"activities": [1, 2]}'
 
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         with patch.object(server, "urlopen", return_value=FakeResponse()):
             result = server.http_json(
                 "GET",
@@ -8325,7 +8369,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.openai_usage_summary()["last_operation"], "responses_stream_cancelled")
 
     def test_openai_stream_request_timeout_is_safe_and_records_provider_failure(self):
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
 
         class TimeoutResponse:
             headers = {}
@@ -8587,7 +8631,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.diagnostic_response_shape([{"token": "hidden"}])["item_shape"]["fields"], ["token"])
 
     def test_garmin_sdk_calls_log_operation_and_result_summary(self):
-        server.initialise_logging()
+        server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         result = server.external_call(
             "garmin",
             "get_sleep_daily",

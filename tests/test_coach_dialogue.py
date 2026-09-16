@@ -379,7 +379,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             return self.call("clarify_coach_request", {"source_message_ids": [server.list_messages()[-1]["id"]],
                 "summary": "Eine von zwei Einheiten verschieben", "question": "Die lockere oder die intensive Einheit?"})
         self.turn("Die Einheit verschieben", [question, {"output_text": "Welche Einheit?"}])
-        with patch.object(server, "selected_ai_provider", return_value="gemini"):
+        with patch.object(server.SETTINGS, "selected_ai_provider", return_value="gemini"):
             result, model = self.turn("Die zweite", [{"output_text": "Du meinst die intensive Einheit."}])
         context = json.loads(model.call_args.args[0]["input"])["dialogue"]
         self.assertIn("intensive", context["pending_request"]["question"])

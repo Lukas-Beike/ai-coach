@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
+from backend.runtime import maintenance as runtime_maintenance
 
 server = dialogue.server
 
@@ -74,7 +75,7 @@ class AuditRemediationTests(unittest.TestCase):
     def test_weather_fetch_participates_in_maintenance_and_rechecks_location(self):
         server.save_profile({"weather_location": "Synthetic city"})
         def fetch(query):
-            self.assertGreater(server.MAINTENANCE_GATE.state()["running_operations"], 0)
+            self.assertGreater(runtime_maintenance.MAINTENANCE_GATE.state()["running_operations"], 0)
             server.save_profile({"weather_location": ""})
             return {"query": query, "forecast": {}, "fetched_at": server.utc_now()}
         with patch.object(server, "_fetch_weather_forecast", side_effect=fetch):

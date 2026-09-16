@@ -6,7 +6,6 @@ from backend.coach.attachments import (MAX_ATTACHMENT_STORAGE_BYTES, MAX_GEMINI_
 
 import base64
 import calendar as calendar_module
-from collections import deque
 import difflib
 import hashlib
 import hmac
@@ -24,7 +23,6 @@ import shutil
 import socket
 import ssl
 import sqlite3
-import sys
 import threading
 import tempfile
 import time
@@ -38,14 +36,40 @@ from functools import wraps
 from http.client import HTTPResponse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Callable, Iterator, NoReturn
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
+from backend.errors import (
+    COACH_ABORTED_ERROR,
+    COMPETITION_NOT_FOUND_ERROR,
+    CORRUPT_LIBRARY_ERROR,
+    CORRUPT_PLANNING_ERROR,
+    GEMINI_API_KEY_ERROR,
+    INTERNAL_SERVER_ERROR,
+    INTERVALS_API_KEY_ERROR,
+    INVALID_LIBRARY_ID_ERROR,
+    INVALID_PLANNING_DATE_ERROR,
+    INVALID_PLANNING_ID_ERROR,
+    NOT_FOUND_ERROR,
+    OPENAI_API_KEY_ERROR,
+    PLANNED_CALENDAR_RECHECK_ERROR,
+    STALE_PLANNING_REVISION_ERROR,
+    STRUCTURED_AUTHORIZATION_ERROR,
+    UNSUPPORTED_BYDAY_ERROR,
+    AppError,
+    ClientDisconnected,
+    provider_error,
+    public_app_error_status,
+)
+from backend import observability
+from backend.runtime import events as runtime_events
+from backend.runtime import maintenance as runtime_maintenance
+from backend.settings import SettingsService
+from backend.db.bootstrap import initialize_application_database
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db.manager import DatabaseManager
 from backend.db.schema import (
@@ -54,11 +78,9 @@ from backend.db.schema import (
     configure_cipher,
     database_index_names,
     database_schema_is_current,
-    database_table_names,
-    initialize_schema,
 )
 from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config, load_local_env as load_config_env
-from backend.providers.intervals_client import IntervalsClient as _IntervalsClient
+from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
 from backend.providers.gemini import function_tools as gemini_function_tools, response_text as gemini_response_text
 from backend.providers.openai import response_failure_reason as openai_response_failure_reason, response_text as openai_response_text
 from backend.providers.http import error_detail as provider_error_detail, read_bounded_response
@@ -188,9 +210,6 @@ ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 JSON_MEDIA_TYPE = "application/json"
 OCTET_STREAM_MIME = "application/octet-stream"
 OPENAI_RESPONSES_PATH = "/responses"
-INTERVALS_API_KEY_ERROR = "INTERVALS_API_KEY ist nicht konfiguriert."
-OPENAI_API_KEY_ERROR = "OPENAI_API_KEY ist nicht konfiguriert."
-GEMINI_API_KEY_ERROR = "GEMINI_API_KEY ist nicht konfiguriert."
 VO2MAX_UNIT = "ml/kg/min"
 GARMIN_RUN_PREDICTION_SOURCE = "Garmin Connect Laufprognose"
 EXTERNAL_HTTP_STARTED_EVENT = "External HTTP request started"
@@ -201,13 +220,8 @@ LOCAL_INTERVALS_SCOPE = "local+intervals"
 WORKDAY_TIME_LABEL = "vor der Arbeit"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 FULL_RESYNC_LABEL = "Vollständiger Resync"
-NOT_FOUND_ERROR = "Nicht gefunden."
-INTERNAL_SERVER_ERROR = "Interner Serverfehler."
 DAILY_AUTO_UPDATE_LABEL = "tägliche automatische Aktualisierung"
-COMPETITION_NOT_FOUND_ERROR = "Wettkampf nicht gefunden."
-COACH_ABORTED_ERROR = "Die Coach-Anfrage wurde abgebrochen."
 APP_NAME = "Intervals Coach"
-REDACTED_PATH = "[REDACTED_PATH]"
 UUID_PATTERN = r"[0-9a-f-]{36}"
 PAYLOAD_HASH_PATTERN = r"[0-9a-f]{64}"
 DATE_ONLY_PATTERN = r"\d{4}-\d{2}-\d{2}"
@@ -222,16 +236,8 @@ UPDATE_COMMAND_RECEIPT_SQL = "UPDATE coach_commands SET status='completed', rece
 SELECT_COMMAND_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
 SELECT_PLANNING_REVISION_SQL = "SELECT revision FROM planning_state WHERE id=1"
 SELECT_USER_MESSAGE_SQL = "SELECT id FROM messages WHERE client_turn_id=? AND role='user'"
-STRUCTURED_AUTHORIZATION_ERROR = "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht."
-INVALID_PLANNING_ID_ERROR = "Ungültige lokale Planungs-ID."
-CORRUPT_PLANNING_ERROR = "Die lokale Planung ist beschädigt."
-INVALID_LIBRARY_ID_ERROR = "Ungültige lokale Bibliothekseinheiten-ID."
-CORRUPT_LIBRARY_ERROR = "Die lokale Bibliothekseinheit ist beschädigt."
-INVALID_PLANNING_DATE_ERROR = "Das Planungsdatum muss das Format JJJJ-MM-TT haben."
-STALE_PLANNING_REVISION_ERROR = "Die lokale Planrevision ist inzwischen veraltet."
-UNSUPPORTED_BYDAY_ERROR = "BYDAY der Kalender-Wiederholung wird nicht unterstützt."
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.11.4"
+APP_VERSION = "1.11.5"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -296,139 +302,12 @@ SYNC_JOB_STOP = threading.Event()
 SYNC_JOB_WORKER: threading.Thread | None = None
 SESSION_LOCK = threading.RLock()
 SESSIONS: dict[str, dict[str, Any]] = {}
-STATE_EVENT_CONDITION = threading.Condition()
-STATE_EVENTS: deque[dict[str, Any]] = deque(maxlen=500)
-STATE_EVENT_NEXT_ID = 0
 RATE_LIMIT_LOCK = threading.Lock()
 RATE_LIMITS: dict[str, list[float]] = {}
 SYNC_JOB_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)$")
 SYNC_JOB_RESOLVE_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)/resolve$")
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
 COACH_EVENT_EXTERNAL_PREFIX = "intervals-coach-"
-
-
-def publish_state_event(event: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Publish a bounded, non-athlete-facing state notification.
-
-    The event stream is only a wake-up and reconciliation signal. It must not
-    carry chat text, provider payloads, credentials, or other durable content.
-    """
-    allowed_events = {"provider", "job", "planning", "coach", "sync"}
-    if event not in allowed_events:
-        raise ValueError("invalid state event")
-    safe_payload = payload if isinstance(payload, dict) else {}
-    with STATE_EVENT_CONDITION:
-        global STATE_EVENT_NEXT_ID
-        STATE_EVENT_NEXT_ID += 1
-        item = {
-            "event_id": STATE_EVENT_NEXT_ID,
-            "event": event,
-            "data": dict(safe_payload),
-        }
-        STATE_EVENTS.append(item)
-        STATE_EVENT_CONDITION.notify_all()
-        return dict(item)
-
-
-def state_events_since(since: int = 0) -> dict[str, Any]:
-    """Return retained state events and explicitly report a retention gap."""
-    try:
-        cursor = max(0, int(since))
-    except (TypeError, ValueError) as exc:
-        raise AppError(400, "Die Event-ID ist ungültig.", reason="invalid_event_cursor") from exc
-    with STATE_EVENT_CONDITION:
-        latest = STATE_EVENT_NEXT_ID
-        retained = list(STATE_EVENTS)
-    if not retained:
-        return {"events": [], "latest_event_id": latest, "gap": False}
-    oldest = int(retained[0]["event_id"])
-    gap = cursor < oldest - 1
-    events = [] if gap else [item for item in retained if int(item["event_id"]) > cursor]
-    return {"events": events, "latest_event_id": latest, "gap": gap}
-
-
-class MaintenanceGate:
-    """Drain complete operations and invalidate work across destructive maintenance."""
-
-    def __init__(self):
-        self.condition = threading.Condition()
-        self.active = 0
-        self.restoring = False
-        self.generation = 0
-        self.local = threading.local()
-
-    @contextmanager
-    def operation(self, expected_generation: int | None = None):
-        with self.condition:
-            depth = getattr(self.local, "depth", 0)
-            if expected_generation is not None and expected_generation != self.generation:
-                raise AppError(409, "Der Auftrag wurde durch eine Datenlöschung verworfen.", reason="operation_invalidated")
-            if not depth:
-                if self.restoring:
-                    raise AppError(503, "Die Anwendung befindet sich gerade im Wartungsmodus. Bitte später erneut versuchen.", reason="maintenance")
-                self.active += 1
-            self.local.depth = depth + 1
-        try:
-            yield
-        finally:
-            with self.condition:
-                self.local.depth -= 1
-                if not self.local.depth:
-                    self.active -= 1
-                self.condition.notify_all()
-
-    @contextmanager
-    def restore(self):
-        with self.condition:
-            if self.restoring:
-                raise AppError(409, "Eine Datenbankwiederherstellung läuft bereits.")
-            self.restoring = True
-            nested = bool(getattr(self.local, "depth", 0))
-            if nested:
-                self.active -= 1
-            while self.active:
-                self.condition.wait()
-            self.generation += 1
-        try:
-            yield
-        finally:
-            with self.condition:
-                self.restoring = False
-                if nested:
-                    self.active += 1
-                self.condition.notify_all()
-
-    def current_generation(self) -> int:
-        with self.condition:
-            return self.generation
-
-    def state(self) -> dict[str, Any]:
-        with self.condition:
-            return {"active": self.restoring, "running_operations": self.active}
-
-
-MAINTENANCE_GATE = MaintenanceGate()
-
-
-def maintenance_operation(function: Any) -> Any:
-    @wraps(function)
-    def guarded(*args: Any, **kwargs: Any) -> Any:
-        with MAINTENANCE_GATE.operation():
-            return function(*args, **kwargs)
-    return guarded
-
-
-def claimed_maintenance_operation(function: Any) -> Any:
-    """Keep claimed payloads and their success/failure writes in one generation."""
-    @wraps(function)
-    def guarded(job: dict[str, Any]) -> Any:
-        try:
-            with MAINTENANCE_GATE.operation(job["_maintenance_generation"]):
-                return function(job)
-        except AppError as exc:
-            if exc.reason not in {"operation_invalidated", "maintenance"}:
-                raise
-    return guarded
 
 
 class ProviderResyncGate:
@@ -511,348 +390,311 @@ def load_local_env() -> None:
 CONFIG = load_config(ROOT, DATA_DIR)
 
 
-class IntervalsClient(_IntervalsClient):
-    """Entrypoint compatibility wrapper with explicit provider dependencies."""
-
+class IntervalsClient:
     def __init__(self, config: Config | None = None, *, request: Callable[..., Any] | None = None):
-        super().__init__(config or CONFIG, request=request or http_json)
+        self.config = config or CONFIG
+        request_fn = request or http_json
+        credentials = base64.b64encode(f"API_KEY:{self.config.intervals_api_key}".encode()).decode()
+        self.headers = {"Authorization": f"Basic {credentials}"}
+        self.base = "https://intervals.icu/api/v1"
+        self._read_transport = IntervalsReadTransport(
+            self.base,
+            self.headers,
+            lambda *args, **kwargs: request_fn(*args, **kwargs),
+        )
+        self._write_transport = IntervalsWriteTransport(
+            self.base,
+            self.headers,
+            lambda *args, **kwargs: request_fn(*args, **kwargs),
+        )
+        self.pagination: dict[str, dict[str, Any]] = {}
+        self._workout_folder_id: int | None = None
+
+    def get(self, path: str, params: dict[str, Any] | None = None, *, cancel_event: threading.Event | None = None) -> Any:
+        return self._read_transport.get(path, params, cancel_event=cancel_event)
+
+    def get_paged_collection(
+        self,
+        path: str,
+        params: dict[str, Any] | None,
+        collection: str,
+        page_size: int = 500,
+        cancel_event: threading.Event | None = None,
+    ) -> list[dict[str, Any]]:
+        rows, page_metadata = fetch_paged_collection(
+            self.get,
+            path,
+            params,
+            collection,
+            error=lambda message: AppError(502, message),
+            page_size=page_size,
+            cancel_event=cancel_event,
+        )
+        previous = self.pagination.get(collection) or {"pages": 0, "records": 0, "complete": True}
+        self.pagination[collection] = {
+            "pages": int(previous.get("pages") or 0) + int(page_metadata["pages"]),
+            "records": int(previous.get("records") or 0) + int(page_metadata["records"]),
+            "complete": bool(previous.get("complete", True)) and bool(page_metadata["complete"]),
+        }
+        return rows
+
+    @intervals_operation
+    def post(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
+        return self._write_transport.post(path, payload, params)
+
+    @intervals_operation
+    def put(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
+        return self._write_transport.put(path, payload, params)
+
+    @intervals_operation
+    def delete(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        return self._write_transport.delete(path, params)
+
+    def get_workout_library(self, *, cancel_event: threading.Event | None = None) -> list[dict[str, Any]]:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        result = self.get_paged_collection(
+            f"/athlete/{athlete}/workouts", {}, "workout_library", cancel_event=cancel_event
+        )
+        if not isinstance(result, list):
+            raise AppError(502, "Intervals.icu hat keine Trainingsbibliothek zurÃ¼ckgegeben.")
+        fields = (
+            "id", "name", "description", "type", "moving_time", "distance",
+            "target", "workout_doc", "icu_training_load", "icu_intensity", "indoor",
+            "tags", "folder_id",
+        )
+        return [selected(item, fields) for item in result if isinstance(item, dict)]
+
+    @staticmethod
+    def _folder_id(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            folder_id = int(value)
+        except (TypeError, ValueError):
+            return None
+        return folder_id if folder_id > 0 else None
+
+    def get_or_create_workout_folder(self) -> int:
+        """Return the private library folder used for coach-created templates."""
+        if self._workout_folder_id is not None:
+            return self._workout_folder_id
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        folders = self.get(f"/athlete/{athlete}/folders")
+        if isinstance(folders, dict):
+            folders = folders.get("folders") or folders.get("data") or []
+        if not isinstance(folders, list):
+            raise AppError(502, "Intervals.icu hat keine gültige Ordnerliste zurückgegeben.")
+        matching: list[dict[str, Any]] = []
+        pending = [item for item in folders if isinstance(item, dict)]
+        while pending:
+            folder = pending.pop(0)
+            if str(folder.get("name") or "").strip() == APP_NAME:
+                matching.append(folder)
+            children = folder.get("children")
+            if isinstance(children, list):
+                pending.extend(item for item in children if isinstance(item, dict))
+        for folder in matching:
+            folder_id = self._folder_id(folder.get("id"))
+            if folder_id is not None:
+                self._workout_folder_id = folder_id
+                return folder_id
+        created = self.post(f"/athlete/{athlete}/folders", {"name": APP_NAME})
+        folder_id = self._folder_id(created.get("id") if isinstance(created, dict) else None)
+        if folder_id is None:
+            raise AppError(502, "Intervals.icu hat keinen gültigen Ordner zurückgegeben.")
+        self._workout_folder_id = folder_id
+        return folder_id
+
+    def create_library_workouts(self, workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for workout in workouts:
+            validate_workout_description(workout)
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        folder_id = self.get_or_create_workout_folder()
+        created: list[dict[str, Any]] = []
+        for workout in workouts:
+            payload = {
+                "name": str(workout.get("name") or "Coach-Einheit")[:200],
+                "description": str(workout.get("description") or "")[:12000],
+                "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
+                "folder_id": folder_id,
+                "target": workout.get("target") or "AUTO",
+            }
+            result = self.post(f"/athlete/{athlete}/workouts", payload)
+            if not isinstance(result, dict):
+                raise AppError(502, "Intervals.icu hat keine Trainingsbibliotheks-Einheit zurÃ¼ckgegeben.")
+            created.append(result)
+        return created
+
+    def update_library_workout(self, workout_id: str, workout: dict[str, Any]) -> dict[str, Any]:
+        validate_workout_description(workout)
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        remote_id = quote(str(workout_id), safe="")
+        payload = {
+            "name": str(workout.get("name") or "Coach-Einheit")[:200],
+            "description": str(workout.get("description") or "")[:12000],
+            "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
+            "target": workout.get("target") or "AUTO",
+        }
+        folder_id = self._folder_id(workout.get("folder_id"))
+        # Intervals.icu requires folder_id for workout updates as well as
+        # creates. Resolve a missing folder through the private Coach folder.
+        payload["folder_id"] = folder_id if folder_id is not None else self.get_or_create_workout_folder()
+        result = self.put(f"/athlete/{athlete}/workouts/{remote_id}", payload)
+        if not isinstance(result, dict):
+            raise AppError(502, "Intervals.icu returned no updated library workout.")
+        return result
+
+    def plan_library_workout(self, workout_id: str, workout: dict[str, Any], plan_date: str) -> dict[str, Any]:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        payload = workout_event_payload(f"library-{workout_id}-{plan_date}", {
+            "date": plan_date,
+            "sport": workout.get("type") or workout.get("sport") or "Ride",
+            "name": workout.get("name") or "Bibliotheks-Einheit",
+            "description": workout.get("description") or "",
+            "duration_minutes": workout.get("duration_minutes") or max(5, round(float(workout.get("moving_time") or 3600) / 60)),
+            "target": workout.get("target") or "AUTO",
+        })
+        result = self.post(f"/athlete/{athlete}/events/bulk", [payload], {"upsert": "true"})
+        if not isinstance(result, list) or not result:
+            raise AppError(502, "Intervals.icu hat keine geplante Einheit zurÃ¼ckgegeben.")
+        validate_intervals_workout_result(workout, result[0])
+        return result[0]
+
+    def fetch_snapshot(
+        self,
+        activity_days: int = 42,
+        end_date: date | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        today = end_date or local_now().date()
+        calendar_start = today - timedelta(days=PLANNED_CALENDAR_HISTORY_DAYS)
+        calendar_end = today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)
+        existing = latest_snapshot() or {}
+        incremental = bool(existing) and activity_days != ALL_SYNC_DAYS
+        request_days = activity_days
+        activities: list[Any] = []
+        wellness: list[Any] = []
+        for window_start, window_end in sync_date_windows(request_days, today):
+            _raise_chat_cancelled(cancel_event)
+            range_params = {"oldest": window_start.isoformat(), "newest": window_end.isoformat()}
+            activities.extend(self.get_paged_collection(f"/athlete/{athlete}/activities", range_params, "activities", cancel_event=cancel_event))
+            wellness.extend(self.get_paged_collection(f"/athlete/{athlete}/wellness", range_params, "wellness", cancel_event=cancel_event))
+        activities = deduplicate_api_records(activities)
+        wellness = deduplicate_api_records(wellness)
+        _raise_chat_cancelled(cancel_event)
+        events = self.get_paged_collection(
+            f"/athlete/{athlete}/events",
+            {"oldest": calendar_start.isoformat(), "newest": calendar_end.isoformat()},
+            "events",
+            cancel_event=cancel_event,
+        )
+        _raise_chat_cancelled(cancel_event)
+        athlete_kwargs = {"cancel_event": cancel_event} if cancel_event is not None else {}
+        athlete_data = self.get(f"/athlete/{athlete}", **athlete_kwargs)
+        incoming = compact_snapshot(athlete_data, activities, wellness, events, history_days=request_days)
+        # Keep the complete provider collections in the durable snapshot. The
+        # compact fields above are the read model; Coach projection is the only
+        # layer allowed to reduce them for prompt size.
+        incoming["raw_provider_data"] = {
+            "athlete": athlete_data if isinstance(athlete_data, dict) else {},
+            "activities": activities,
+            "wellness": wellness,
+            "upcoming_calendar": events,
+        }
+        incoming["provider_sync"] = {
+            "pagination": self.pagination,
+            "calendar_window": {"start": calendar_start.isoformat(), "end": calendar_end.isoformat()},
+        }
+        if not incremental:
+            return incoming
+        merged = dict(incoming)
+        merged["recent_activities"] = deduplicate_api_records(incoming["recent_activities"] + existing.get("recent_activities", []))[:500]
+        merged["recent_wellness"] = deduplicate_api_records(incoming["recent_wellness"] + existing.get("recent_wellness", []))[-(max(42, activity_days) + 1):]
+        previous_raw = existing.get("raw_provider_data") if isinstance(existing.get("raw_provider_data"), dict) else {}
+        merged["raw_provider_data"] = {
+            "athlete": incoming["raw_provider_data"]["athlete"],
+            "activities": deduplicate_api_records(incoming["raw_provider_data"]["activities"] + (previous_raw.get("activities") or [])),
+            "wellness": deduplicate_api_records(incoming["raw_provider_data"]["wellness"] + (previous_raw.get("wellness") or [])),
+            "upcoming_calendar": incoming["raw_provider_data"]["upcoming_calendar"],
+        }
+        merged["incremental"] = True
+        merged["incremental_window_days"] = request_days
+        return merged
+
+    def fetch_competition_events(self) -> list[dict[str, Any]]:
+        """Fetch a broad calendar range for target-event synchronization."""
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        today = local_now().date()
+        result = self.get_paged_collection(
+            f"/athlete/{athlete}/events",
+            {
+                "oldest": (today - timedelta(days=365)).isoformat(),
+                "newest": (today + timedelta(days=730)).isoformat(),
+            },
+            "competition_events",
+        )
+        if not isinstance(result, list):
+            raise AppError(502, "Intervals.icu hat keine Kalenderevents zurückgegeben.")
+        return [event for event in result if isinstance(event, dict)]
+
+    def upsert_competition_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not events:
+            return []
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        result = self.post(f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"})
+        if not isinstance(result, list):
+            raise AppError(502, "Intervals.icu hat keine Zielwettkämpfe zurückgegeben.")
+        return [event for event in result if isinstance(event, dict)]
+
+    def upsert_calendar_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Upsert explicitly approved non-workout calendar events."""
+        if not events:
+            return []
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        result = self.post(f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"})
+        if not isinstance(result, list):
+            raise AppError(502, "Intervals.icu hat keine Kalendereinträge zurückgegeben.")
+        return [event for event in result if isinstance(event, dict)]
+
+    def bulk_delete_events(self, identifiers: list[dict[str, str]]) -> Any:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        return self.put(f"/athlete/{athlete}/events/bulk-delete", identifiers)
+
+    def fetch_performance_snapshot(self, existing_snapshot: dict[str, Any] | None) -> dict[str, Any]:
+        """Refresh athlete settings and wellness only; do not request activities or calendar events."""
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        today = local_now().date()
+        wellness_start = today - timedelta(days=90)
+        athlete_data = self.get(f"/athlete/{athlete}")
+        wellness = self.get_paged_collection(
+            f"/athlete/{athlete}/wellness",
+            {"oldest": wellness_start.isoformat(), "newest": today.isoformat()},
+            "performance_wellness",
+        )
+        existing_snapshot = existing_snapshot if isinstance(existing_snapshot, dict) else {}
+        snapshot = compact_snapshot(
+            athlete_data,
+            existing_snapshot.get("recent_activities", []),
+            wellness,
+            existing_snapshot.get("upcoming_calendar", []),
+            history_days=90,
+        )
+        snapshot["provider_sync"] = {"pagination": self.pagination}
+        snapshot["raw_provider_data"] = {"athlete": athlete_data, "wellness": wellness}
+        return snapshot
+
+    def delete_event(self, event_id: str) -> Any:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        return self.delete(f"/athlete/{athlete}/events/{quote(event_id, safe='')}")
+
+    def delete_activity(self, activity_id: str) -> Any:
+        return self.delete(f"/activity/{quote(activity_id, safe='')}")
+
 
 
 LOGGER = logging.getLogger("intervals_coach")
-MODEL_OPTIONS = (
-    {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "description": "Effizient für kostenbewusste Nutzung"},
-    {"id": "gpt-5.6-sol", "label": "GPT-5.6 Sol", "description": "Maximale Qualität für komplexes Coaching"},
-    {"id": "gpt-5.6-terra", "label": "GPT-5.6 Terra", "description": "Ausgewogen bei Qualität, Tempo und Kosten"},
-)
-GEMINI_MODEL_OPTIONS = (
-    {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash", "description": "Schnelle, leistungsstarke Gemini-Antworten"},
-    {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "description": "Gründlichere Gemini-Analyse für komplexe Trainingsfragen"},
-)
-THINKING_LEVEL_OPTIONS = (
-    {"id": "low", "label": "Niedrig", "description": "Schnellere Antworten mit weniger zusätzlicher Überlegung"},
-    {"id": "medium", "label": "Mittel", "description": "Ausgewogene Qualität, Geschwindigkeit und Kosten"},
-    {"id": "high", "label": "Hoch", "description": "Gründlichere Überlegung für komplexe Trainingsfragen"},
-)
-CALENDAR_DISPLAY_DEFAULTS = {"past_weeks": 1, "future_weeks": 4}
-CALENDAR_DISPLAY_MAX_WEEKS = 52
-
-
-def available_ai_providers() -> list[dict[str, str]]:
-    providers: list[dict[str, str]] = []
-    if CONFIG.openai_api_key:
-        providers.append({"id": "openai", "label": "OpenAI", "description": "GPT-5.6 über die OpenAI Responses API"})
-    if CONFIG.gemini_api_key:
-        providers.append({"id": "gemini", "label": "Gemini", "description": "Google Gemini API"})
-    return providers
-
-
-def selected_ai_provider() -> str:
-    configured = {item["id"] for item in available_ai_providers()}
-    stored = str(get_kv("selected_ai_provider") or "").casefold()
-    if stored in configured:
-        return stored
-    if CONFIG.ai_provider in configured:
-        return CONFIG.ai_provider
-    if "openai" in configured:
-        return "openai"
-    if "gemini" in configured:
-        return "gemini"
-    return ""
-
-
-def save_ai_provider(provider: Any) -> dict[str, Any]:
-    provider_id = str(provider or "").strip().casefold()
-    if provider_id not in {item["id"] for item in available_ai_providers()}:
-        raise AppError(400, "Der ausgewählte KI-Anbieter ist nicht konfiguriert.")
-    set_kv("selected_ai_provider", provider_id)
-    return {
-        "provider": provider_id,
-        "model": selected_model(provider_id),
-        "model_options": available_model_options(provider_id),
-    }
-
-
-def available_model_options(provider: str | None = None) -> list[dict[str, str]]:
-    active_provider = provider or selected_ai_provider()
-    options = list(GEMINI_MODEL_OPTIONS if active_provider == "gemini" else MODEL_OPTIONS)
-    configured_model = CONFIG.gemini_model if active_provider == "gemini" else CONFIG.openai_model
-    if configured_model not in {option["id"] for option in options}:
-        options.insert(0, {"id": configured_model, "label": f"{configured_model} (konfiguriert)", "description": "In .env konfiguriert"})
-    return options
-
-
-def selected_model(provider: str | None = None) -> str:
-    provider = provider or selected_ai_provider()
-    configured = {option["id"] for option in available_model_options(provider)}
-    stored = get_kv(f"selected_model_{provider}") if provider else None
-    default = CONFIG.gemini_model if provider == "gemini" else CONFIG.openai_model
-    return stored if stored in configured else default
-
-
-def save_model(model: Any) -> dict[str, str]:
-    model_id = str(model or "").strip()
-    if model_id not in {option["id"] for option in available_model_options()}:
-        raise AppError(400, "Nicht unterstützte Modellauswahl.")
-    set_kv(f"selected_model_{selected_ai_provider()}", model_id)
-    return {"model": model_id}
-
-
-def available_thinking_level_options() -> list[dict[str, str]]:
-    return list(THINKING_LEVEL_OPTIONS)
-
-
-def selected_thinking_level() -> str:
-    configured = {option["id"] for option in THINKING_LEVEL_OPTIONS}
-    stored = get_kv("selected_thinking_level")
-    return stored if stored in configured else "medium"
-
-
-def save_thinking_level(level: Any) -> dict[str, str]:
-    level_id = str(level or "").strip().lower()
-    if level_id not in {option["id"] for option in THINKING_LEVEL_OPTIONS}:
-        raise AppError(400, "Nicht unterstütztes Thinking Level.")
-    set_kv("selected_thinking_level", level_id)
-    return {"thinking_level": level_id}
-
-
-def calendar_display_settings() -> dict[str, int]:
-    settings: dict[str, int] = {}
-    for key, default in CALENDAR_DISPLAY_DEFAULTS.items():
-        try:
-            value = int(get_kv(f"calendar_display_{key}") or default)
-        except (TypeError, ValueError):
-            value = default
-        settings[key] = max(0, min(value, CALENDAR_DISPLAY_MAX_WEEKS))
-    return settings
-
-
-def save_calendar_display_settings(values: Any) -> dict[str, Any]:
-    if not isinstance(values, dict):
-        raise AppError(400, "Die Kalenderansicht muss als Objekt gesendet werden.")
-    updates: dict[str, int] = {}
-    for key, label in (("past_weeks", "zur\u00fcck"), ("future_weeks", "voraus")):
-        if key not in values:
-            continue
-        try:
-            value = int(values[key])
-        except (TypeError, ValueError) as exc:
-            raise AppError(400, f"Wochen {label} muss eine ganze Zahl sein.") from exc
-        if not 0 <= value <= CALENDAR_DISPLAY_MAX_WEEKS:
-            raise AppError(400, f"Wochen {label} muss zwischen 0 und {CALENDAR_DISPLAY_MAX_WEEKS} liegen.")
-        updates[key] = value
-    if not updates:
-        raise AppError(400, "Keine Kalenderansicht-Einstellungen eingegeben.")
-    for key, value in updates.items():
-        set_kv(f"calendar_display_{key}", str(value))
-    return {"status": "ok", **calendar_display_settings()}
-
-
-REDACTED_URL_QUERY_KEYS = frozenset({
-    "access_token", "api_key", "apikey", "auth", "authorization", "credential", "key",
-    "password", "refresh_token", "secret", "signature", "sig", "token",
-})
-URL_VALUE_RE = re.compile(r"(?i)https?://[^\s<>\"'`]+")
-
-
-def _secret_variants(value: Any) -> set[str]:
-    """Return raw and URL-encoded forms without ever logging the value."""
-    candidate = str(value or "")
-    if not candidate:
-        return set()
-    variants = {candidate}
-    for _ in range(2):
-        for item in tuple(variants):
-            variants.add(unquote(item))
-            variants.add(quote(item, safe=""))
-    return {item for item in variants if len(item) >= 4}
-
-
-def _safe_url_netloc(parsed: Any) -> str:
-    """Keep a provider host for diagnostics while dropping URL userinfo."""
-    try:
-        hostname = str(parsed.hostname or "")
-        port = parsed.port
-    except ValueError:
-        return "[REDACTED_HOST]"
-    if not hostname:
-        return "[REDACTED_HOST]"
-    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
-    return f"{host}:{port}" if port else host
-
-
-def _safe_provider_path(path: str) -> str:
-    """Keep route structure while removing provider resource identifiers."""
-    safe_segments = []
-    redact_next = False
-    for segment in str(path or "").split("/"):
-        if not segment:
-            continue
-        decoded = unquote(segment)
-        was_redacted = redact_next
-        if was_redacted:
-            safe_segments.append(REDACTED_PATH)
-            redact_next = False
-        elif re.fullmatch(r"(?:api|v\d+|[a-z][a-z_-]{0,31})", decoded):
-            safe_segments.append(decoded)
-        else:
-            safe_segments.append(REDACTED_PATH)
-        if not was_redacted and decoded.casefold() in {
-            "athlete", "activities", "activity", "event", "events", "profile", "user", "workout", "workouts",
-        }:
-            redact_next = True
-    return "/" + "/".join(safe_segments)
-
-
-def _unguessable_url_path_segment(segment: str) -> bool:
-    decoded = unquote(segment)
-    if len(decoded) >= 32:
-        return True
-    if len(decoded) < 16:
-        return False
-    classes = sum(bool(re.search(pattern, decoded)) for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]"))
-    return classes >= 2 and len(set(decoded)) >= 8
-
-
-def _redact_url(match: re.Match[str]) -> str:
-    raw = match.group(0)
-    trailing = ""
-    while raw and raw[-1] in ".,;:!?)]}":
-        trailing = raw[-1] + trailing
-        raw = raw[:-1]
-    try:
-        parsed = urlparse(raw)
-        if parsed.scheme.casefold() not in {"http", "https"} or not parsed.netloc:
-            return match.group(0)
-        path_segments = []
-        for segment in parsed.path.split("/"):
-            path_segments.append(REDACTED_PATH if _unguessable_url_path_segment(segment) else segment)
-        path = "/".join(path_segments)
-        query_pairs = []
-        for key, item in parse_qsl(parsed.query, keep_blank_values=True):
-            safe_item = "[REDACTED]" if key.casefold().replace("-", "_") in REDACTED_URL_QUERY_KEYS else item
-            query_pairs.append((key, safe_item))
-        safe = urlunparse((parsed.scheme.casefold(), _safe_url_netloc(parsed), path, "", urlencode(query_pairs), ""))
-        return safe + trailing
-    except (TypeError, ValueError):
-        return "[REDACTED_URL]" + trailing
-
-
-def _safe_calendar_url() -> str:
-    try:
-        parsed = urlparse(str(getattr(CONFIG, "calendar_ical_url", "") or ""))
-        if parsed.scheme.casefold() in {"http", "https"} and parsed.netloc:
-            return urlunparse((parsed.scheme.casefold(), _safe_url_netloc(parsed), "/redacted", "", "", ""))
-    except (TypeError, ValueError):
-        pass
-    return "[REDACTED_CALENDAR_URL]"
-
-
-def redact_text(value: str) -> str:
-    """Redact configured secrets and credential-bearing URLs case-insensitively."""
-    redacted = str(value or "")
-    calendar_url = str(getattr(CONFIG, "calendar_ical_url", "") or "")
-    for variant in sorted(_secret_variants(calendar_url), key=len, reverse=True):
-        redacted = re.sub(re.escape(variant), _safe_calendar_url(), redacted, flags=re.IGNORECASE)
-    redacted = URL_VALUE_RE.sub(_redact_url, redacted)
-    secret_values = (
-        CONFIG.openai_api_key,
-        CONFIG.gemini_api_key,
-        CONFIG.intervals_api_key,
-        getattr(CONFIG, "garmin_email", ""),
-        getattr(CONFIG, "garmin_password", ""),
-        getattr(CONFIG, "garmin_tokenstore", ""),
-        getattr(CONFIG, "garmin_fixture_path", ""),
-        getattr(CONFIG, "app_password", ""),
-    )
-    for secret_value in secret_values:
-        for variant in sorted(_secret_variants(secret_value), key=len, reverse=True):
-            redacted = re.sub(re.escape(variant), "[REDACTED]", redacted, flags=re.IGNORECASE)
-    redacted = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED_OPENAI_KEY]", redacted)
-    redacted = re.sub(r"\bAIza[A-Za-z0-9_-]{20,}\b", "[REDACTED_GEMINI_KEY]", redacted)
-    redacted = re.sub(r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+", r"\1[REDACTED]", redacted)
-    return redacted
-
-
-def sanitize_log_value(value: Any) -> Any:
-    if isinstance(value, str):
-        return redact_text(value)
-    if isinstance(value, dict):
-        return {str(key): sanitize_log_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [sanitize_log_value(item) for item in value]
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    return redact_text(str(value))
-
-
-class JsonLogFormatter(logging.Formatter):
-    def format(self, record: logging.LogRecord) -> str:
-        entry: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
-            "level": record.levelname,
-            "event": getattr(record, "event", "log"),
-            "message": record.getMessage(),
-        }
-        context = getattr(record, "context", None)
-        if context:
-            entry["context"] = context
-        if record.exc_info:
-            entry["traceback"] = self.formatException(record.exc_info)
-        return json.dumps(sanitize_log_value(entry), ensure_ascii=False, separators=(",", ":"))
-
-
-def initialise_logging() -> None:
-    if LOGGER.handlers:
-        return
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    LOGGER.setLevel(logging.INFO)
-    formatter = JsonLogFormatter()
-    file_handler = RotatingFileHandler(
-        LOG_PATH,
-        maxBytes=1_000_000,
-        backupCount=3,
-        encoding="utf-8",
-    )
-    file_handler.setFormatter(formatter)
-    # Keep structured records on stdout so PowerShell's native-command runner
-    # does not misclassify normal log lines as errors.
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    LOGGER.addHandler(file_handler)
-    LOGGER.addHandler(console_handler)
-    LOGGER.propagate = False
-
-
-def external_result_context(result: Any) -> dict[str, Any]:
-    """Return useful result metadata without logging response contents."""
-    if result is None:
-        return {"result_type": "null"}
-    if isinstance(result, dict):
-        return {"result_type": "object", "result_fields": len(result)}
-    if isinstance(result, (list, tuple)):
-        return {"result_type": "array", "result_items": len(result)}
-    return {"result_type": type(result).__name__}
-
-
-def provider_error(service: str | None, category: str, *, status: int | None = None) -> AppError:
-    """Create a short, classified provider error without forwarding exception text."""
-    label = {
-        "garmin": "Garmin",
-        "intervals": PROVIDER_INTERVALS_NAME,
-        "openai": "OpenAI",
-        "calendar": "Der externe Kalender",
-    }.get(str(service or "").casefold(), "Der externe Dienst")
-    if category == "network":
-        message = f"{label} ist nicht erreichbar."
-        reason = "network_error" if str(service or "").casefold() == "openai" else "provider_network_error"
-    elif category == "http":
-        suffix = f" (HTTP {status})" if status else ""
-        message = f"{label} konnte die Anfrage nicht verarbeiten{suffix}."
-        reason = "http_error" if str(service or "").casefold() == "openai" else "provider_http_error"
-    else:
-        message = f"Die Antwort von {label} konnte nicht verarbeitet werden."
-        reason = "client_error" if str(service or "").casefold() == "openai" else "provider_client_error"
-    return AppError(502, message, reason=reason)
+REDACTOR = observability.Redactor(lambda: CONFIG)
 
 
 def external_call(
@@ -862,7 +704,7 @@ def external_call(
     details: dict[str, Any] | None = None,
 ) -> Any:
     """Log a non-HTTP SDK call and return its result without exposing payloads."""
-    initialise_logging()
+    observability.configure_logging(LOGGER, DATA_DIR, LOG_PATH, REDACTOR)
     context = {"service": service, "operation": operation, **(details or {})}
     operation_context = OPERATION_CONTEXT.get()
     if operation_context:
@@ -905,7 +747,7 @@ def external_call(
             "context": {
                 **context,
                 "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                **external_result_context(result),
+                **observability.external_result_context(result),
             },
         },
     )
@@ -1045,25 +887,6 @@ Priorities:
 9. Never silently change durable athlete facts, target events, constraints, or preferences based only on chat. Explain the proposed change and ask the athlete to confirm it in the Profile screen.
 10. Reply in German unless the athlete explicitly asks for another language. Use metric units and German date conventions.
 """
-
-
-class AppError(Exception):
-    def __init__(self, status: int, message: str, *, reason: str | None = None):
-        super().__init__(message)
-        self.status = status
-        self.message = message
-        self.reason = reason
-
-
-def public_app_error_status(error: AppError) -> int:
-    """Keep upstream authentication failures separate from local sessions."""
-    if error.status == 401 and error.reason == "authentication_or_permission":
-        return 502
-    return error.status
-
-
-class ClientDisconnected(Exception):
-    pass
 
 
 def serialise_conversation(function):
@@ -1282,7 +1105,7 @@ def observed_sync(provider: str, area: str = "default"):
 
     def decorator(function: Any) -> Any:
         @wraps(function)
-        @maintenance_operation
+        @runtime_maintenance.maintenance_operation
         def wrapped(*args: Any, **kwargs: Any) -> Any:
             reason = kwargs.get("reason")
             if reason is None and args:
@@ -1340,46 +1163,16 @@ def database():
 
 def initialise_database() -> None:
     with DB_LOCK, database() as db:
-        existing_tables = database_table_names(db)
-        if existing_tables and not database_schema_is_current(db):
-            raise RuntimeError(
-                "Die vorhandene Datenbank entspricht nicht exakt dem aktuellen Schema. "
-                "Für diesen Release ist ein leerer Datenbestand erforderlich."
-            )
-        if not existing_tables:
-            initialize_schema(db)
-        db.execute(
-            "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
-            (utc_now(),),
+        initialize_application_database(
+            db,
+            key_values=KEY_VALUE_REPOSITORY,
+            now=utc_now(),
+            current_time=datetime.now(timezone.utc),
+            default_profile_json=json.dumps(DEFAULT_PROFILE),
+            provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
+            retention_days=int(getattr(CONFIG, "data_retention_days", -1)),
+            all_sync_days=ALL_SYNC_DAYS,
         )
-        if not database_schema_is_current(db):
-            raise RuntimeError("Die neue Datenbank konnte nicht mit dem aktuellen Schema initialisiert werden.")
-        if get_kv("profile", db) is None:
-            set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
-        # A process cannot continue a reset after a restart. Clear only the
-        # transient marker; the last result/error remains useful to the UI.
-        for provider_keys in PROVIDER_RESYNC_KEYS.values():
-            set_kv(provider_keys["running"], "0", db)
-            set_kv(provider_keys["status"], "", db)
-        # A process cannot continue a morning check-in after a restart. Clear
-        # its transient marker so an interrupted run is not shown as active.
-        set_kv("morning_checkin_running", "0", db)
-        if get_kv("morning_checkin_status", db) == "working":
-            set_kv("morning_checkin_status", "waiting", db)
-            set_kv("morning_checkin_attempted", "", db)
-        retention_setting = int(getattr(CONFIG, "data_retention_days", -1))
-        if retention_setting != ALL_SYNC_DAYS:
-            retention_days = max(30, min(retention_setting, 3650))
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
-            db.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
-            db.execute("DELETE FROM snapshots WHERE created_at < ?", (cutoff,))
-            # Gemini history has no per-entry timestamp. Rebuild it from the
-            # retained messages after startup instead of keeping stale content.
-            set_kv("gemini_conversation_history", "[]", db)
-            set_kv("gemini_call_names", "{}", db)
-    resume_interrupted_sync_jobs()
-
-
 def _provider_refresh_cleanup(db: Any) -> None:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=PROVIDER_REFRESH_RETENTION_DAYS)).isoformat()
     cleanup_refresh_history(db, cutoff=cutoff, max_rows=PROVIDER_REFRESH_MAX_ROWS)
@@ -1393,7 +1186,7 @@ def _provider_refresh_start(provider: str, area: str, operation_id: str, trigger
             db, refresh_id=refresh_id, provider=provider, area=area,
             operation_id=operation_id, trigger=trigger, started_at=utc_now(),
         )
-    publish_state_event("provider", {"provider": provider, "area": area, "status": "loading", "refresh_id": refresh_id})
+    runtime_events.STATE_EVENT_BUFFER.publish("provider", {"provider": provider, "area": area, "status": "loading", "refresh_id": refresh_id})
     return refresh_id
 
 
@@ -1428,7 +1221,7 @@ def _provider_refresh_finish(
             public_status = "degraded"
         else:
             public_status = "error"
-        publish_state_event("provider", {"provider": provider, "area": area, "status": public_status})
+        runtime_events.STATE_EVENT_BUFFER.publish("provider", {"provider": provider, "area": area, "status": public_status})
 
 
 def _provider_refresh_error_code(error: BaseException) -> str:
@@ -1714,7 +1507,7 @@ def _insert_sync_job(db: Any, job_id: str, envelope: dict[str, Any], requested: 
 
 
 def _publish_created_sync_job(job_id: str, result: dict[str, Any]) -> None:
-    publish_state_event(
+    runtime_events.STATE_EVENT_BUFFER.publish(
         "job",
         {
             "job_id": job_id,
@@ -1726,7 +1519,7 @@ def _publish_created_sync_job(job_id: str, result: dict[str, Any]) -> None:
     )
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def enqueue_sync_job(
     provider: str,
     job_type: str = "refresh",
@@ -1773,7 +1566,7 @@ def resume_interrupted_sync_jobs() -> int:
     return len(jobs)
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def _claim_sync_job() -> dict[str, Any] | None:
     now = utc_now()
     with DB_LOCK, database() as db:
@@ -1792,7 +1585,7 @@ def _claim_sync_job() -> dict[str, Any] | None:
             (now, job["id"]),
         )
         return {**dict(job), "attempts": int(job.get("attempts") or 0) + 1,
-                "_maintenance_generation": MAINTENANCE_GATE.current_generation()}
+                "_maintenance_generation": runtime_maintenance.MAINTENANCE_GATE.current_generation()}
 
 
 def _sync_job_update(job_id: str, item_status: str, *, error_class: str | None = None, error_detail: str | None = None) -> None:
@@ -1820,7 +1613,7 @@ def _sync_job_update(job_id: str, item_status: str, *, error_class: str | None =
             (status, total, completed, finished, error_class, now, job_id),
         )
     if provider and job_type:
-        publish_state_event(
+        runtime_events.STATE_EVENT_BUFFER.publish(
             "job",
             {
                 "job_id": job_id,
@@ -1863,7 +1656,7 @@ def _persist_sync_job_result_items(
             continue
         outcome = str(item.get("status") or "error").strip().casefold()
         item_state = "completed" if outcome in {"synced", "already_synced", "skipped"} else "failed"
-        detail = redact_text(str(item.get("error") or ""))[:500] or None
+        detail = REDACTOR.redact_text(str(item.get("error") or ""))[:500] or None
         db.execute(
             "UPDATE sync_job_items SET status=?, remote_id=COALESCE(?, remote_id), error_class=?, error_detail=?, updated_at=? WHERE id=?",
             (item_state, str(item.get("remote_id") or "").strip() or None, None if item_state == "completed" else "plan_push_error", detail, now, target["id"]),
@@ -1889,7 +1682,7 @@ def _publish_sync_job_result_event(
     job_id: str, provider: str | None, job_type: str | None, status: str, completed: int, total: int,
 ) -> None:
     if provider and job_type:
-        publish_state_event(
+        runtime_events.STATE_EVENT_BUFFER.publish(
             "job",
             {
                 "job_id": job_id,
@@ -2046,7 +1839,7 @@ def _requeue_claimed_sync_job(job: dict[str, Any], error_class: str, detail: str
 
 def _record_claimed_sync_job_failure(job: dict[str, Any], exc: BaseException) -> None:
     error_class = _sync_job_error_class(exc)
-    detail = redact_text(str(getattr(exc, "message", "") or exc))[:500]
+    detail = REDACTOR.redact_text(str(getattr(exc, "message", "") or exc))[:500]
     if _requeue_claimed_sync_job(job, error_class, detail):
         return
     _sync_job_update(job["id"], "failed", error_class=error_class, error_detail=detail)
@@ -2061,7 +1854,7 @@ def _record_claimed_sync_job_failure(job: dict[str, Any], exc: BaseException) ->
     )
 
 
-@claimed_maintenance_operation
+@runtime_maintenance.claimed_maintenance_operation
 def _run_claimed_sync_job(job: dict[str, Any]) -> None:
     try:
         result = _execute_sync_job(job)
@@ -2075,7 +1868,7 @@ def _run_claimed_sync_job(job: dict[str, Any]) -> None:
 def _sync_job_worker_loop() -> None:
     while not SYNC_JOB_STOP.is_set():
         try:
-            with MAINTENANCE_GATE.operation():
+            with runtime_maintenance.MAINTENANCE_GATE.operation():
                 job = _claim_sync_job()
                 if job:
                     _run_claimed_sync_job(job)
@@ -2093,7 +1886,6 @@ def start_sync_job_worker() -> None:
     with SYNC_JOB_WORKER_LOCK:
         if SYNC_JOB_WORKER is not None and SYNC_JOB_WORKER.is_alive():
             return
-        resume_interrupted_sync_jobs()
         SYNC_JOB_STOP.clear()
         SYNC_JOB_WORKER = threading.Thread(target=_sync_job_worker_loop, name="sync-job-worker", daemon=True)
         SYNC_JOB_WORKER.start()
@@ -2789,6 +2581,9 @@ def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:
         set_kv(key, value, owned)
 
 
+SETTINGS = SettingsService(lambda: CONFIG, get_kv, set_kv)
+
+
 def _safe_diagnostic_context(value: Any) -> dict[str, Any]:
     """Keep request metadata useful without retaining request contents."""
     if not isinstance(value, dict):
@@ -2888,7 +2683,7 @@ def _safe_response_headers(headers: Any) -> dict[str, str]:
     for key, value in items:
         name = str(key).strip().casefold()
         if name in allowed or name.startswith("x-ratelimit-"):
-            result[name] = redact_text(str(value))[:160]
+            result[name] = REDACTOR.redact_text(str(value))[:160]
     return result
 
 
@@ -2929,7 +2724,7 @@ def diagnostic_capture_entries() -> list[dict[str, Any]]:
         return []
     if not isinstance(entries, list):
         return []
-    return [sanitize_log_value(entry) for entry in entries if isinstance(entry, dict)][-DIAGNOSTIC_CAPTURE_MAX_ENTRIES:]
+    return [REDACTOR.sanitize_log_value(entry) for entry in entries if isinstance(entry, dict)][-DIAGNOSTIC_CAPTURE_MAX_ENTRIES:]
 
 
 def set_diagnostic_capture(enabled: Any) -> dict[str, Any]:
@@ -2955,7 +2750,7 @@ def capture_diagnostic_event(event: str, details: dict[str, Any]) -> None:
     with DIAGNOSTIC_CAPTURE_LOCK:
         if not diagnostic_capture_status()["active"]:
             return
-        entry = {"timestamp": utc_now(), "event": str(event)[:80], "details": sanitize_log_value(details)}
+        entry = {"timestamp": utc_now(), "event": str(event)[:80], "details": REDACTOR.sanitize_log_value(details)}
         entries = diagnostic_capture_entries()
         entries.append(entry)
         set_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY, json.dumps(entries[-DIAGNOSTIC_CAPTURE_MAX_ENTRIES:], ensure_ascii=False, separators=(",", ":")))
@@ -3925,7 +3720,7 @@ def _shift_fixture_sleep_dates(value: Any, shift: timedelta) -> Any:
 
 
 def persist_garmin_error(message: Any, source: str = "sync") -> None:
-    safe_message = redact_text(str(message or "Garmin synchronization failed."))[:1000]
+    safe_message = REDACTOR.redact_text(str(message or "Garmin synchronization failed."))[:1000]
     set_kv("last_garmin_error", json.dumps([{"source": source, "message": safe_message}], ensure_ascii=False))
 
 
@@ -4259,7 +4054,7 @@ def _persist_morning_body_battery(
                 history[saved["sleep_date"]] = saved.get("morning", {}).get("value")
         set_kv(MORNING_BATTERY_HISTORY_KEY, json.dumps(history), db)
     _set_garmin_error_entries(_garmin_core_error_entries())
-    publish_state_event("provider", {"provider": "garmin", "area": "performance", "status": "ready" if record["status"] == "ready" else "degraded"})
+    runtime_events.STATE_EVENT_BUFFER.publish("provider", {"provider": "garmin", "area": "performance", "status": "ready" if record["status"] == "ready" else "degraded"})
     return {"status": record["status"], "sleep_date": record["sleep_date"], "records": len(records) if isinstance(records, list) else 0}
 
 
@@ -4314,7 +4109,7 @@ def _sync_morning_body_battery_locked(checkin_date: date) -> dict[str, Any]:
     return _persist_morning_body_battery(checkin_date, existing, record, records)
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @garmin_operation
 def sync_garmin_morning_body_battery(checkin_date: date) -> dict[str, Any]:
     """Keep a successful pair; retry unavailable readings with a bounded cooldown."""
@@ -4393,7 +4188,7 @@ def _sync_garmin_fixture_locked(days: int, end_date: date | None) -> dict[str, A
             historical_cursor=SYNC_EARLIEST_DATE.isoformat(),
         )
     except Exception as exc:
-        error = redact_text(str(exc))[:1000]
+        error = REDACTOR.redact_text(str(exc))[:1000]
         set_kv("last_garmin_error", json.dumps([{"source": "sync", "message": error}], ensure_ascii=False))
         raise
     finally:
@@ -4433,7 +4228,7 @@ def _sync_garmin_remote_locked(days: int, end_date: date | None) -> dict[str, An
             today=today,
             synced_at=utc_now(),
             external_call=external_call,
-            redact=redact_text,
+            redact=REDACTOR.redact_text,
             warn=lambda source, _message, exc: LOGGER.warning(
                 "Garmin data request failed",
                 extra={"event": "garmin_request_failed", "context": {"source": source}},
@@ -4459,7 +4254,7 @@ def _sync_garmin_remote_locked(days: int, end_date: date | None) -> dict[str, An
             historical_cursor=windows[0][0].isoformat(),
         )
     except Exception as exc:
-        error = redact_text(str(exc))[:1000]
+        error = REDACTOR.redact_text(str(exc))[:1000]
         set_kv("last_garmin_error", json.dumps([{"source": "sync", "message": error}], ensure_ascii=False))
         raise
     finally:
@@ -4487,7 +4282,7 @@ def _wait_for_existing_garmin_sync() -> dict[str, Any]:
 
 
 @observed_sync("garmin", "data")
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @garmin_operation
 def sync_garmin(
     days: int = 30,
@@ -4555,7 +4350,7 @@ def garmin_public_state() -> dict[str, Any]:
     canonical = latest_snapshot()
     filtered_activities, skipped = filter_garmin_activities(snapshot.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
     parsed_error = _garmin_core_error_entries() or None
-    parsed_error = sanitize_log_value(parsed_error)
+    parsed_error = REDACTOR.sanitize_log_value(parsed_error)
     return {
         "available": Garmin is not None or garmin_fixture_path() is not None,
         "configured": bool(CONFIG.garmin_fixture_path or CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()),
@@ -4604,7 +4399,7 @@ def garmin_coach_context(include_performance: bool = False) -> dict[str, Any]:
             "body_battery": _garmin_morning_body_battery(snapshot) or {},
         },
         "scope": "Nur der aktuellste Garmin-Recovery-Datensatz. Leistungswerte und Aktivitäten stehen in den deduplizierten bzw. abgeleiteten Abschnitten.",
-        "errors": [redact_text(str(error))[:300] for error in snapshot.get("errors", []) if error][:20],
+        "errors": [REDACTOR.redact_text(str(error))[:300] for error in snapshot.get("errors", []) if error][:20],
     }
     if include_performance:
         context["performance"] = garmin_performance_context(snapshot)
@@ -4615,7 +4410,7 @@ def garmin_coach_context(include_performance: bool = False) -> dict[str, Any]:
 def add_message(role: str, content: str) -> dict[str, Any]:
     with DB_LOCK, database() as db:
         result = CHAT_REPOSITORY.add(db, role, content)
-    publish_state_event("coach", {"message_id": result.get("id"), "role": str(role)[:20]})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"message_id": result.get("id"), "role": str(role)[:20]})
     return result
 
 
@@ -5765,7 +5560,7 @@ def external_calendar_state() -> dict[str, Any]:
 
 
 @observed_sync("calendar", "events")
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def sync_external_calendar(reason: str = "manual", operation_id: str | None = None) -> dict[str, Any]:
     if not CONFIG.calendar_ical_url:
         raise AppError(503, "CALENDAR_ICAL_URL ist nicht konfiguriert.")
@@ -5795,11 +5590,11 @@ def sync_external_calendar(reason: str = "manual", operation_id: str | None = No
         set_kv("last_external_calendar_sync_at", now)
         mark_daily_sync("calendar")
         set_kv("last_external_calendar_sync_error", "")
-        publish_state_event("coach", {"status": "changed"})
+        runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
         replan = check_adaptive_replan("external calendar")
         return {"status": "ok", "synced_at": now, "events": len(events), "window_days": EXTERNAL_CALENDAR_WINDOW_DAYS, **replan}
     except AppError as exc:
-        set_kv("last_external_calendar_sync_error", redact_text(exc.message)[:1000])
+        set_kv("last_external_calendar_sync_error", REDACTOR.redact_text(exc.message)[:1000])
         LOGGER.exception("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason}}, exc_info=True)
         raise
     except Exception as exc:
@@ -7008,7 +6803,7 @@ def _import_remote_competitions(
 
 
 @observed_sync("intervals", "competitions")
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @intervals_operation
 def sync_competitions(
     reason: str = "manual",
@@ -7040,7 +6835,7 @@ def sync_competitions(
             imported = _import_remote_competitions(db, indexes["remote_events"], tombstones, now)
         set_kv("last_competition_sync_at", now)
         set_kv("last_competition_sync_error", "")
-        publish_state_event("coach", {"status": "changed"})
+        runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
         return {
             "status": "ok",
             "synced_at": now,
@@ -7054,7 +6849,7 @@ def sync_competitions(
             "total": len(list_competitions()),
         }
     except Exception as exc:
-        error = redact_text(str(exc))[:1000]
+        error = REDACTOR.redact_text(str(exc))[:1000]
         set_kv("last_competition_sync_error", error)
         LOGGER.exception("Competition synchronization failed", extra={"event": "competition_sync_failed", "context": {"reason": reason}}, exc_info=True)
         raise
@@ -7328,7 +7123,7 @@ def _intervals_error_detail(parsed: Any) -> str:
 
 def _safe_interval_error_detail(raw_body: bytes) -> str:
     """Redact and bound an Intervals.icu response detail before displaying it."""
-    return provider_error_detail(raw_body, redact=lambda value, *, limit: re.sub(r"\s+", " ", redact_text(value)).strip()[:limit])
+    return provider_error_detail(raw_body, redact=lambda value, *, limit: re.sub(r"\s+", " ", REDACTOR.redact_text(value)).strip()[:limit])
 
 
 def upstream_http_error_message(status: int, raw_body: bytes, service: str | None) -> str:
@@ -7405,7 +7200,7 @@ def _http_request_parts(
         "service": service or parsed_url.netloc,
         "method": method.upper(),
         "host": parsed_url.netloc,
-        "path": _safe_provider_path(parsed_url.path),
+        "path": observability.safe_provider_path(parsed_url.path),
         "timeout_seconds": timeout,
         "request_bytes": len(body or b""),
     }
@@ -7426,7 +7221,7 @@ def _log_http_request_started(request_context: dict[str, Any], parsed_url: Any, 
     capture_diagnostic_event("external_http_started", {
         "service": request_context["service"],
         "method": request_context["method"],
-        "host": _safe_url_netloc(parsed_url),
+        "host": observability.safe_url_netloc(parsed_url),
         "path": request_context["path"],
         "query_keys": request_context.get("query_keys", []),
         "request_bytes": request_context["request_bytes"],
@@ -7472,14 +7267,14 @@ def _http_success_result(
                 "status": status,
                 "duration_ms": round((time.perf_counter() - started) * 1000, 1),
                 "response_bytes": len(raw),
-                **external_result_context(result),
+                **observability.external_result_context(result),
             },
         },
     )
     capture_diagnostic_event("external_http_completed", {
         "service": request_context["service"],
         "method": request_context["method"],
-        "host": _safe_url_netloc(parsed_url),
+        "host": observability.safe_url_netloc(parsed_url),
         "path": request_context["path"],
         "status": status,
         "duration_ms": round((time.perf_counter() - started) * 1000, 1),
@@ -7497,7 +7292,7 @@ def _capture_http_failure(
     context: dict[str, Any] = {
         "service": request_context["service"],
         "method": request_context["method"],
-        "host": _safe_url_netloc(parsed_url),
+        "host": observability.safe_url_netloc(parsed_url),
         "path": request_context["path"],
         "duration_ms": round((time.perf_counter() - started) * 1000, 1),
         "error": _safe_diagnostic_error(error),
@@ -7585,7 +7380,7 @@ def _handle_http_network_error(
                 **request_context,
                 "duration_ms": round((time.perf_counter() - started) * 1000, 1),
                 "error_type": type(exc).__name__,
-                "error": redact_text(str(exc))[:500],
+                "error": REDACTOR.redact_text(str(exc))[:500],
             },
         },
         exc_info=True,
@@ -7618,7 +7413,7 @@ def _handle_http_client_error(
                 **request_context,
                 "duration_ms": round((time.perf_counter() - started) * 1000, 1),
                 "error_type": type(exc).__name__,
-                "error": redact_text(str(exc))[:500],
+                "error": REDACTOR.redact_text(str(exc))[:500],
             },
         },
         exc_info=True,
@@ -7638,7 +7433,7 @@ def http_json(
     content_type: str | None = None,
     cancel_event: threading.Event | None = None,
 ) -> Any:
-    initialise_logging()
+    observability.configure_logging(LOGGER, DATA_DIR, LOG_PATH, REDACTOR)
     body = _http_request_body(payload, raw_body)
     request, parsed_url, request_headers, request_context = _http_request_parts(
         method, url, body, headers, timeout, service,
@@ -8156,7 +7951,7 @@ def _weather_ready_state(state: _WeatherCacheState, planned: list[dict[str, Any]
     return result
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def weather_state(
     planned: list[dict[str, Any]] | None = None,
     refresh: bool = True,
@@ -8291,7 +8086,7 @@ def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict
 
 
 @observed_sync("weather", "forecast")
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def sync_weather(reason: str = "background", force: bool = False, operation_id: str | None = None) -> dict[str, Any]:
     """Refresh the configured location's forecast without creating a chat event."""
     if not get_profile().get("weather_location", "").strip():
@@ -9108,7 +8903,7 @@ def update_training_plan(plan_id: Any, values: Any) -> dict[str, Any]:
         raise AppError(404, str(exc)) from exc
     except ValueError as exc:
         raise AppError(400, str(exc)) from exc
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
     return result
 
 
@@ -9746,7 +9541,7 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
         try:
             remote_sync = sync_illness_pause_to_intervals(active_illness_pause)
         except Exception as exc:
-            remote_sync = {"status": "error", "error": redact_text(str(exc))[:1000]}
+            remote_sync = {"status": "error", "error": REDACTOR.redact_text(str(exc))[:1000]}
     return _adaptive_replan_result(status, normalized_id, updated, updated_checkins, stale, illness_pause, remote_sync)
 
 
@@ -10028,7 +9823,7 @@ def _insert_planned_unit(db: Any, entry: dict[str, Any], *, sync_dirty: int = 1,
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             entry["id"], entry["id"], entry.get("external_id"), json.dumps(entry, ensure_ascii=False),
-            int(sync_dirty), sync_state, redact_text(str(sync_error))[:1000] if sync_error else None,
+            int(sync_dirty), sync_state, REDACTOR.redact_text(str(sync_error))[:1000] if sync_error else None,
             json.dumps(entry.get("sync_conflict"), ensure_ascii=False) if entry.get("sync_conflict") else "",
             baseline_hash, last_synced_at, now, now,
         ),
@@ -10674,7 +10469,7 @@ def update_planned_unit_sync_state(local_id: str, state: str, error: str | None 
         persist_planned_unit_state(
             db, local_id, state, error, remote_event,
             dependencies=ReconcileDependencies(
-                redact=redact_text, payload_hash=_planned_unit_payload_hash,
+                redact=REDACTOR.redact_text, payload_hash=_planned_unit_payload_hash,
                 now=utc_now(), bump_revision=_bump_planning_revision,
             ),
         )
@@ -10766,9 +10561,6 @@ class _RepairCalendarContext:
     other_remote_ids: set[str]
     other_external_ids: set[str]
     newest: str
-
-
-PLANNED_CALENDAR_RECHECK_ERROR = "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen."
 
 
 def _repair_calendar_context(local_id: str, expected_hash: str, batch: _RepairCalendarBatch | None) -> _RepairCalendarContext:
@@ -11147,7 +10939,7 @@ def _workout_library_sync_snapshot() -> tuple[dict[str, int], list[dict[str, Any
     return summary, entries, fingerprint
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @intervals_operation
 def refresh_workout_library(
     reason: str = "manual",
@@ -11178,7 +10970,7 @@ def refresh_workout_library(
     synced_at = utc_now()
     set_kv("last_library_sync_at", synced_at)
     set_kv("last_library_sync_error", "")
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
     return {
         "status": "ok",
         "workouts": len(normalized),
@@ -11332,7 +11124,7 @@ def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
             )
             _record_change(db, "workout_library", normalized_id, "update", before, {**normalized, "sync_status": "local"})
             result = {"status": "local", "local_id": normalized_id, "library_entry": normalized}
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
     return result
 
 
@@ -11351,7 +11143,7 @@ def update_workout_library_sync_state(local_id: str, state: str, error: str | No
         payload["sync_status"] = state
         db.execute(
             "UPDATE workout_library SET payload=?, sync_dirty=?, sync_state=?, sync_error=?, updated_at=? WHERE local_id=?",
-            (json.dumps(payload, ensure_ascii=False), 0 if state in {"synced", "remote_missing"} else 1, state, redact_text(str(error))[:1000] if error else None, utc_now(), local_id),
+            (json.dumps(payload, ensure_ascii=False), 0 if state in {"synced", "remote_missing"} else 1, state, REDACTOR.redact_text(str(error))[:1000] if error else None, utc_now(), local_id),
         )
 
 
@@ -11449,9 +11241,9 @@ def set_sync_operation_state(
         message,
         error,
         set_value=set_kv,
-        redact=redact_text,
+        redact=REDACTOR.redact_text,
     )
-    publish_state_event(
+    runtime_events.STATE_EVENT_BUFFER.publish(
         "sync",
         {
             "operation_id": str(operation_id)[:80],
@@ -11474,7 +11266,7 @@ def sync_public_state(
         get_value=get_kv,
         state_versions=state_versions(),
         provider_freshness=freshness if freshness is not None else provider_freshness_state(),
-        maintenance=MAINTENANCE_GATE.state(),
+        maintenance=runtime_maintenance.MAINTENANCE_GATE.state(),
     )
     result["jobs"] = jobs if jobs is not None else sync_jobs_state()
     return result
@@ -11575,7 +11367,7 @@ def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
     return _finish_library_workout_sync(normalized_id, external_id, local_workout, remote_workout or {})
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @intervals_operation
 def sync_local_workout_library_entry(local_id: str) -> dict[str, Any]:
     try:
@@ -11588,7 +11380,7 @@ def sync_local_workout_library_entry(local_id: str) -> dict[str, Any]:
         try:
             return _sync_local_workout_library_entry_unlocked(normalized_id)
         except Exception as exc:
-            update_workout_library_sync_state(normalized_id, "sync_error", redact_text(str(exc))[:1000])
+            update_workout_library_sync_state(normalized_id, "sync_error", REDACTOR.redact_text(str(exc))[:1000])
             raise
 
 
@@ -11690,7 +11482,7 @@ def apply_workout_library_plan(entries: list[dict[str, Any]]) -> dict[str, Any]:
     _raise_library_plan_conflicts(_library_plan_conflicts(requested))
     planned = [_apply_library_plan_request(request) for request in requested]
 
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
     return {
         "status": "local",
         "planned": planned,
@@ -11783,7 +11575,7 @@ def _selected_library_sync_row(local_id: str) -> tuple[dict[str, Any] | None, bo
 
 
 def _library_sync_error(local_id: str, exc: Exception) -> dict[str, Any]:
-    return {"library_workout_id": local_id, "status": "error", "error": redact_text(str(exc))[:500]}
+    return {"library_workout_id": local_id, "status": "error", "error": REDACTOR.redact_text(str(exc))[:500]}
 
 
 def _sync_selected_planned_library_entry(
@@ -11861,7 +11653,7 @@ def _verify_selected_library_repair(
         error = verification.get(item["library_workout_id"])
         if error is not None:
             update_planned_unit_sync_state(item["library_workout_id"], "sync_error", str(error))
-            item.update(status="error", error=redact_text(str(error))[:500], calendar_synced=False)
+            item.update(status="error", error=REDACTOR.redact_text(str(error))[:500], calendar_synced=False)
 
 
 def _sync_selected_workout_library_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
@@ -12075,9 +11867,9 @@ def update_local_planned_workout(
             bump_planning_revision=bump_planning_revision,
         )
     if result["status"] == "deleted":
-        publish_state_event("coach", {"status": "changed"})
+        runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
         return result
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
     return result
 
 
@@ -12519,7 +12311,7 @@ def _complete_full_provider_resync(keys: dict[str, str]) -> str:
 
 def _record_full_provider_resync_failure(keys: dict[str, str], provider: str, exc: Exception) -> str:
     failure_code = operation_error_code(exc)
-    set_kv(keys["error"], redact_text(str(exc))[:1000])
+    set_kv(keys["error"], REDACTOR.redact_text(str(exc))[:1000])
     LOGGER.exception(
         "Full provider resynchronization failed",
         extra={"event": "provider_full_resync_failed", "context": {"provider": provider}},
@@ -12606,7 +12398,7 @@ def _wait_for_existing_intervals_sync(
             current_sync_at = get_kv("last_sync_at")
             if current_sync_at and current_sync_at != previous_sync_at:
                 return _completed_intervals_sync_result(current_sync_at, wait_for_performance, cancel_event)
-            last_error = redact_text(get_kv("last_sync_error") or "")
+            last_error = REDACTOR.redact_text(get_kv("last_sync_error") or "")
             detail = f" {last_error[:300]}" if last_error else ""
             raise AppError(
                 503,
@@ -12666,7 +12458,7 @@ def _seed_intervals_workout_library(
         except Exception as exc:
             if isinstance(exc, AppError) and exc.reason == "chat_cancelled":
                 raise
-            library_error = redact_text(str(exc))[:1000]
+            library_error = REDACTOR.redact_text(str(exc))[:1000]
             set_kv("last_library_sync_error", library_error)
     return library_imported, library_error, len(list_workout_library())
 
@@ -12750,7 +12542,7 @@ def _record_intervals_sync_failure(operation_id: str, reason: str, exc: Exceptio
         set_sync_operation_state(operation_id, "cancelled", "cancelled", 100, "Intervals.icu-Synchronisierung abgebrochen.")
         set_kv("sync_operation_finished_at", utc_now())
         return
-    set_kv("last_sync_error", redact_text(str(exc))[:1000])
+    set_kv("last_sync_error", REDACTOR.redact_text(str(exc))[:1000])
     set_sync_operation_state(operation_id, "error", "error", 100, "Intervals.icu-Synchronisierung fehlgeschlagen.", str(exc))
     set_kv("sync_operation_finished_at", utc_now())
     LOGGER.exception(
@@ -12769,7 +12561,7 @@ def _finish_intervals_sync() -> None:
 
 
 @observed_sync("intervals", "activities")
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @intervals_operation
 def sync_intervals(
     reason: str = "manual",
@@ -12803,7 +12595,7 @@ def sync_intervals(
 
 
 @observed_sync("intervals", "performance")
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @intervals_operation
 def refresh_current_performance() -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
@@ -12817,10 +12609,10 @@ def refresh_current_performance() -> dict[str, Any]:
             snapshot = merge_performance_snapshot(latest_snapshot(), snapshot)
             save_snapshot(snapshot, update_full_sync=False)
         set_kv("last_performance_error", "")
-        publish_state_event("provider", {"provider": "intervals", "area": "performance", "status": "ready"})
+        runtime_events.STATE_EVENT_BUFFER.publish("provider", {"provider": "intervals", "area": "performance", "status": "ready"})
         return {"status": "ok", "refreshed_at": snapshot["synced_at"]}
     except Exception as exc:
-        error = redact_text(str(exc))[:1000]
+        error = REDACTOR.redact_text(str(exc))[:1000]
         set_kv("last_performance_error", error)
         LOGGER.exception("Performance refresh failed", extra={"event": "performance_refresh_failed"}, exc_info=True)
         raise
@@ -14153,7 +13945,7 @@ def context_preview() -> dict[str, Any]:
             "KI-Anbieter-Konversation: Dialogkontinuität; nicht autoritativ für dauerhafte Athletenfakten",
         ],
         "conversation": {
-            "mode": "Gemini local conversation history" if selected_ai_provider() == "gemini" else "Bounded local dialogue with per-command Responses chain",
+            "mode": "Gemini local conversation history" if SETTINGS.selected_ai_provider() == "gemini" else "Bounded local dialogue with per-command Responses chain",
             "included_separately": True,
             "note": "Der bisherige Dialog wird für Kontinuität mitgeführt. Dauerhafte Athletenfakten stammen ausschließlich aus Profil, Wettkämpfen und aktuellem Datensnapshot.",
         },
@@ -14322,7 +14114,7 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise AppError(503, OPENAI_API_KEY_ERROR)
     request_payload = dict(payload)
     if path == OPENAI_RESPONSES_PATH:
-        request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
+        request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
     result = http_json(
         "POST",
         openai_endpoint(path),
@@ -14392,10 +14184,10 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
     suffix = VOICE_AUDIO_TYPES.get(audio_type)
     if not suffix:
         raise AppError(415, "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG, MP3 und WAV.")
-    if selected_ai_provider() == "gemini":
+    if SETTINGS.selected_ai_provider() == "gemini":
         if not CONFIG.gemini_api_key:
             raise AppError(503, GEMINI_API_KEY_ERROR)
-        result = gemini_raw_request(selected_model(), {
+        result = gemini_raw_request(SETTINGS.selected_model(), {
             "contents": [{"role": "user", "parts": [
                 {"inlineData": {"mimeType": audio_type, "data": base64.b64encode(audio).decode("ascii")}},
                 {"text": "Transkribiere diese deutsche Trainingsfrage wortgetreu. Gib ausschließlich das Transkript zurück."},
@@ -14720,9 +14512,9 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
     if format_config.get("type") == "json_schema" and isinstance(format_config.get("schema"), dict):
         request["generationConfig"].update({"responseMimeType": JSON_MEDIA_TYPE, "responseJsonSchema": format_config["schema"]})
     explicit_reasoning = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else {}
-    thinking_level = str(explicit_reasoning.get("effort") or selected_thinking_level()).casefold()
+    thinking_level = str(explicit_reasoning.get("effort") or SETTINGS.selected_thinking_level()).casefold()
     if thinking_level not in {"low", "medium", "high"}:
-        thinking_level = selected_thinking_level()
+        thinking_level = SETTINGS.selected_thinking_level()
     if model.startswith("gemini-3."):
         request["generationConfig"]["thinkingConfig"] = {"thinkingLevel": thinking_level}
     else:
@@ -14791,7 +14583,7 @@ def _gemini_responses_result(  # NOSONAR - provider response normalization must 
 
 
 def gemini_responses_request(payload: dict[str, Any], *, cancel_event: threading.Event | None = None) -> dict[str, Any]:
-    model = str(payload.get("model") or selected_model("gemini"))
+    model = str(payload.get("model") or SETTINGS.selected_model("gemini"))
     request, history, persistent = _gemini_request_payload(payload, model)
     result = gemini_raw_request(model, request, operation="generate_content", cancel_event=cancel_event)
     return _gemini_responses_result(payload, history, persistent, result)
@@ -14804,7 +14596,7 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
     """Stream Gemini GenerateContent chunks and return the aggregated response."""
     if not CONFIG.gemini_api_key:
         raise AppError(503, GEMINI_API_KEY_ERROR)
-    model = str(payload.get("model") or selected_model("gemini"))
+    model = str(payload.get("model") or SETTINGS.selected_model("gemini"))
     if not re.fullmatch(r"(?a:[\w.-]{1,128})", model):
         raise AppError(400, "Ung\\u00fcltiges Gemini-Modell.")
     request_payload, history, persistent = _gemini_request_payload(payload, model)
@@ -14824,7 +14616,7 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
     parsed_endpoint = urlparse(endpoint)
     context = {
         "service": "gemini", "method": "POST", "host": parsed_endpoint.netloc,
-        "path": _safe_provider_path(parsed_endpoint.path),
+        "path": observability.safe_provider_path(parsed_endpoint.path),
         "timeout_seconds": OPENAI_RESPONSE_TIMEOUT_SECONDS, "request_bytes": len(body),
         "query_keys": ["alt"],
     }
@@ -14940,7 +14732,7 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
 
 def request_ai_provider(payload: dict[str, Any]) -> str:
     provider = str(payload.get("_ai_provider") or "").casefold()
-    return provider if provider in {"openai", "gemini"} else selected_ai_provider()
+    return provider if provider in {"openai", "gemini"} else SETTINGS.selected_ai_provider()
 
 
 def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
@@ -14949,7 +14741,7 @@ def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
         return gemini_responses_request(payload)
     request_payload = dict(payload)
     request_payload.pop("_ai_provider", None)
-    request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
+    request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
     for attempt in range(3):
         try:
             return openai_request(OPENAI_RESPONSES_PATH, request_payload)
@@ -15246,7 +15038,7 @@ def openai_stream_request(
         raise AppError(503, OPENAI_API_KEY_ERROR)
     request_payload = {**payload, "stream": True}
     request_payload.pop("_ai_provider", None)
-    request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
+    request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
     body = json.dumps(request_payload).encode("utf-8")
     endpoint = openai_endpoint(OPENAI_RESPONSES_PATH)
     parsed_endpoint = urlparse(endpoint)
@@ -15266,7 +15058,7 @@ def openai_stream_request(
         "service": "openai",
         "method": "POST",
         "host": parsed_endpoint.netloc,
-        "path": _safe_provider_path(parsed_endpoint.path),
+        "path": observability.safe_provider_path(parsed_endpoint.path),
         "timeout_seconds": OPENAI_RESPONSE_TIMEOUT_SECONDS,
         "request_bytes": len(body),
     }
@@ -15274,7 +15066,7 @@ def openai_stream_request(
     capture_diagnostic_event("openai_stream_started", {
         "service": "openai",
         "method": "POST",
-        "host": _safe_url_netloc(parsed_endpoint),
+        "host": observability.safe_url_netloc(parsed_endpoint),
         "path": context["path"],
         "request_bytes": len(body),
     })
@@ -15325,7 +15117,7 @@ def responses_stream_request(
         _raise_chat_cancelled(cancel_event)
         return result
     request_payload = dict(payload)
-    request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
+    request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
     for attempt in range(3):
         try:
             return openai_stream_request(request_payload, on_text_delta, cancel_event, on_response_id)
@@ -15340,7 +15132,7 @@ def responses_stream_request(
 
 
 def ensure_conversation(provider: str | None = None) -> str:
-    if (provider or selected_ai_provider()) == "gemini":
+    if (provider or SETTINGS.selected_ai_provider()) == "gemini":
         existing = str(get_kv("gemini_conversation_id") or "")
         if existing:
             return existing
@@ -15510,7 +15302,7 @@ def delete_duplicate_intervals_activity(payload: dict[str, Any]) -> dict[str, An
     duplicate_id = str(current["duplicate_id"])
     IntervalsClient().delete_activity(duplicate_id)
     _remove_intervals_activity_from_local_snapshot(duplicate_id)
-    publish_state_event("provider", {"provider": "intervals", "status": "duplicate_deleted"})
+    runtime_events.STATE_EVENT_BUFFER.publish("provider", {"provider": "intervals", "status": "duplicate_deleted"})
     return {
         "status": "deleted",
         "deleted_activity_id": duplicate_id,
@@ -15604,7 +15396,7 @@ def _execute_coach_action(action_type: str, payload: dict[str, Any]) -> dict[str
     raise AppError(400, "Unbekannte Coach-Aktion.")
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def execute_coach_action(token: Any, session_csrf_hash: str, payload_hash: Any = None) -> dict[str, Any]:
     raw_token = str(token or "").strip()
     if len(raw_token) < 32:
@@ -15716,9 +15508,9 @@ def _background_coach_request(
 
 
 def _background_coach_provider_settings(attachments: list[dict[str, Any]]) -> tuple[str, str, str]:
-    ai_provider = selected_ai_provider()
-    model = selected_model(ai_provider)
-    thinking_level = selected_thinking_level()
+    ai_provider = SETTINGS.selected_ai_provider()
+    model = SETTINGS.selected_model(ai_provider)
+    thinking_level = SETTINGS.selected_thinking_level()
     if ai_provider == "gemini" and gemini_inline_image_bytes(attachments) > MAX_GEMINI_INLINE_IMAGE_BYTES:
         raise AppError(413, "Die ausgewählten Dateien sind für eine Gemini-Anfrage zusammen zu groß. Sende weniger Dateien oder wähle OpenAI.", reason="gemini_attachment_request_too_large")
     return ai_provider, model, thinking_level
@@ -15819,7 +15611,7 @@ def enqueue_background_coach_job(
     )
     if existing_response:
         return existing_response
-    publish_state_event("coach", {"message_id": user_message_id, "role": "user", "client_turn_id": client_turn_id})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"message_id": user_message_id, "role": "user", "client_turn_id": client_turn_id})
     with CHAT_STREAM_LOCK:
         COACH_JOB_CANCEL_EVENTS[operation_id] = cancel_event or threading.Event()
     COACH_JOB_WAKE.set()
@@ -16419,7 +16211,7 @@ def _apply_structured_training_changes(
         arguments, _planning_change_dependencies(),
         require_revision=require_revision, authorized_plan_id=authorized_plan_id,
     )
-    publish_state_event("planning", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("planning", {"status": "changed"})
     return result
 
 
@@ -17693,7 +17485,7 @@ def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> 
         ) if workouts else []
         _store_training_patch_constraints(created, ids, action["request"]["constraints"], db)
         revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
-    publish_state_event("planning", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("planning", {"status": "changed"})
     return {"ok": True, "status": "applied", "planning_revision": revision, "changes": changed["changes"], "library_entry_ids": [item["id"] for item in created]}
 
 
@@ -18043,8 +17835,8 @@ def _structured_coach_request_payload(
         }
     payload = {
         "_ai_provider": ai_provider,
-        "model": model or selected_model(ai_provider),
-        "reasoning": {"effort": thinking_level or selected_thinking_level()},
+        "model": model or SETTINGS.selected_model(ai_provider),
+        "reasoning": {"effort": thinking_level or SETTINGS.selected_thinking_level()},
         "conversation": conversation_id,
         "instructions": model_instructions,
         "input": json.dumps(dialogue_input, ensure_ascii=False),
@@ -18835,7 +18627,7 @@ def _persist_structured_coach_final_receipt(
         set_kv("last_coach_ai_provider", ai_provider, db)
         db.execute(UPDATE_COMMAND_RECEIPT_SQL, (json.dumps({key: value for key, value in final_receipt.items() if key != "text"}, ensure_ascii=False), utc_now(), client_turn_id))
     final_receipt.pop("text", None)
-    publish_state_event("coach", {"message_id": final_receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"message_id": final_receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
     return final_receipt
 
 
@@ -18845,7 +18637,7 @@ def _chat_with_structured_coach_impl(
     session_csrf_hash: str = "", background_job: bool = False,
     ai_provider: str | None = None, model: str | None = None, thinking_level: str | None = None,
 ) -> dict[str, Any]:
-    ai_provider = ai_provider or selected_ai_provider()
+    ai_provider = ai_provider or SETTINGS.selected_ai_provider()
     state = _structured_coach_turn_request(
         message,
         intent=intent,
@@ -19055,7 +18847,7 @@ def _persist_structured_command_failure_pending_request(
 
 def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, Any], error: BaseException) -> dict[str, Any]:
     """Report confirmed effects without claiming an unfinished request succeeded."""
-    safe_error = redact_text(error.message)[:1000] if isinstance(error, AppError) else "Die Coach-Verarbeitung wurde unterbrochen."
+    safe_error = REDACTOR.redact_text(error.message)[:1000] if isinstance(error, AppError) else "Die Coach-Verarbeitung wurde unterbrochen."
     with DB_LOCK, database() as db:
         row = db.execute("SELECT receipt, status FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
         if not row:
@@ -19080,7 +18872,7 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", text, client_turn_id=client_turn_id)
         db.execute(UPDATE_COMMAND_RECEIPT_SQL,
                    (json.dumps(receipt, ensure_ascii=False), utc_now(), client_turn_id))
-    publish_state_event("coach", {"message_id": receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"message_id": receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
     return receipt
 
 
@@ -19186,13 +18978,13 @@ def _chat_command_state(
 
 
 def _chat_provider_settings(background_receipt: dict[str, Any]) -> tuple[str, str, str]:
-    ai_provider = str(background_receipt.get("ai_provider") or selected_ai_provider()).casefold()
+    ai_provider = str(background_receipt.get("ai_provider") or SETTINGS.selected_ai_provider()).casefold()
     if ai_provider not in {"openai", "gemini"}:
-        ai_provider = selected_ai_provider()
-    model = str(background_receipt.get("model") or selected_model(ai_provider))
-    thinking_level = str(background_receipt.get("thinking_level") or selected_thinking_level()).casefold()
+        ai_provider = SETTINGS.selected_ai_provider()
+    model = str(background_receipt.get("model") or SETTINGS.selected_model(ai_provider))
+    thinking_level = str(background_receipt.get("thinking_level") or SETTINGS.selected_thinking_level()).casefold()
     if thinking_level not in {"low", "medium", "high"}:
-        thinking_level = selected_thinking_level()
+        thinking_level = SETTINGS.selected_thinking_level()
     return ai_provider, model, thinking_level
 
 
@@ -19209,7 +19001,7 @@ def _resume_background_chat_command(
         )
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 @serialise_conversation
 def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "", client_turn_id: str, background_job: bool = False) -> dict[str, Any]:
     message, client_turn_id = _validated_chat_request(message, client_turn_id, cancel_event)
@@ -19275,7 +19067,7 @@ def resume_interrupted_coach_jobs() -> int:
     return resumed
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def _claim_background_coach_job() -> dict[str, Any] | None:
     with DB_LOCK, database() as db:
         rows = db.execute(
@@ -19297,7 +19089,7 @@ def _claim_background_coach_job() -> dict[str, Any] | None:
             ).rowcount
             if claimed == 1:
                 return {**dict(row), "status": "running", "receipt": receipt,
-                        "_maintenance_generation": MAINTENANCE_GATE.current_generation()}
+                        "_maintenance_generation": runtime_maintenance.MAINTENANCE_GATE.current_generation()}
     return None
 
 
@@ -19431,7 +19223,7 @@ def _handle_background_coach_error(
         _background_coach_stream_receipt(operation_id, failed)
         return
     publish_chat_stream_event(operation_id, "error", {
-        "reason": exc.reason or "request_failed", "message": redact_text(exc.message)[:1000],
+        "reason": exc.reason or "request_failed", "message": REDACTOR.redact_text(exc.message)[:1000],
     })
 
 
@@ -19449,7 +19241,7 @@ def _handle_background_coach_exception(client_turn_id: str, operation_id: str, e
     )
 
 
-@claimed_maintenance_operation
+@runtime_maintenance.claimed_maintenance_operation
 def _run_background_coach_job(job: dict[str, Any]) -> None:
     receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
     operation_id = str(receipt.get("operation_id") or "")
@@ -19474,7 +19266,7 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
 def _coach_job_worker_loop() -> None:
     while not COACH_JOB_STOP.is_set():
         try:
-            with MAINTENANCE_GATE.operation():
+            with runtime_maintenance.MAINTENANCE_GATE.operation():
                 job = _claim_background_coach_job()
                 if job:
                     _run_background_coach_job(job)
@@ -19492,7 +19284,6 @@ def start_coach_job_worker() -> None:
     with COACH_JOB_WORKER_LOCK:
         if COACH_JOB_WORKER is not None and COACH_JOB_WORKER.is_alive():
             return
-        resume_interrupted_coach_jobs()
         COACH_JOB_STOP.clear()
         COACH_JOB_WORKER = threading.Thread(target=_coach_job_worker_loop, name="coach-job-worker", daemon=True)
         COACH_JOB_WORKER.start()
@@ -19536,7 +19327,7 @@ def morning_checkin_state() -> dict[str, Any]:
         status = "waiting"
     return {"status": status, "running": get_kv("morning_checkin_running") == "1",
             "date": completed_date, "current_for_today": current,
-            "last_error": redact_text(get_kv("morning_checkin_error") or "") or None}
+            "last_error": REDACTOR.redact_text(get_kv("morning_checkin_error") or "") or None}
 
 
 MORNING_CHECKIN_PROMPT = (
@@ -19558,7 +19349,7 @@ def _start_morning_checkin() -> None:
     set_kv("morning_checkin_running", "1")
     set_kv("morning_checkin_status", "working")
     set_kv("morning_checkin_error", "")
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
 
 
 def _morning_checkin_garmin_ready(checkin_day: date) -> bool | None:
@@ -19574,7 +19365,7 @@ def _morning_checkin_garmin_ready(checkin_day: date) -> bool | None:
     set_kv("morning_checkin_status", "waiting")
     if not get_kv("morning_checkin_attempt_count"):
         set_kv("morning_checkin_attempt_count", "0")
-    publish_state_event("coach", {"status": "changed"})
+    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
     return None
 
 
@@ -19603,7 +19394,7 @@ def _complete_morning_checkin(checkin_date: str, attempt: int) -> None:
     set_kv("morning_checkin_status", "ready")
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def run_morning_checkin(checkin_date: str) -> None:
     try:
         _start_morning_checkin()
@@ -19622,10 +19413,10 @@ def run_morning_checkin(checkin_date: str) -> None:
         _wait_for_morning_intervals_sync(sync_result)
         _complete_morning_checkin(checkin_date, attempt)
     except Exception as exc:
-        error = redact_text(str(exc))[:1000]
+        error = REDACTOR.redact_text(str(exc))[:1000]
         set_kv("morning_checkin_status", "error")
         set_kv("morning_checkin_error", error)
-        publish_state_event("coach", {"status": "changed"})
+        runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
         LOGGER.exception(
             "Morning check-in failed",
             extra={"event": "morning_checkin_failed", "context": {"date": checkin_date}},
@@ -19660,7 +19451,7 @@ def _reserve_morning_checkin(checkin_date: str) -> bool:
 def _run_scheduled_morning_checkin(checkin_date: str, generation: int) -> None:
     admitted = False
     try:
-        with MAINTENANCE_GATE.operation(generation):
+        with runtime_maintenance.MAINTENANCE_GATE.operation(generation):
             admitted = True
             run_morning_checkin(checkin_date)
     except AppError as exc:
@@ -19672,7 +19463,7 @@ def _run_scheduled_morning_checkin(checkin_date: str, generation: int) -> None:
 
 
 def _start_scheduled_morning_checkin(checkin_date: str) -> None:
-    generation = MAINTENANCE_GATE.current_generation()
+    generation = runtime_maintenance.MAINTENANCE_GATE.current_generation()
     try:
         threading.Thread(
             target=lambda: _run_scheduled_morning_checkin(checkin_date, generation),
@@ -19683,10 +19474,10 @@ def _start_scheduled_morning_checkin(checkin_date: str) -> None:
         raise
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def schedule_morning_checkin() -> None:
     checkin_date = morning_checkin_date()
-    if not checkin_date or not selected_ai_provider() or not CONFIG.intervals_api_key:
+    if not checkin_date or not SETTINGS.selected_ai_provider() or not CONFIG.intervals_api_key:
         return
     if get_kv("morning_checkin_date") == checkin_date:
         return
@@ -19789,7 +19580,7 @@ def public_bootstrap() -> dict[str, Any]:
             "running_jobs": [job for job in jobs if job.get("status") in {"queued", "running"}],
             "library_sync": {"last_sync_at": get_kv("last_library_sync_at"), "last_error": get_kv("last_library_sync_error") or None, "state": workout_library_sync_summary()},
             "sync_settings": {"intervals_days": sync_period("intervals"), "garmin_days": sync_period("garmin")},
-            "calendar_display": calendar_display_settings(),
+            "calendar_display": SETTINGS.calendar_display_settings(),
             "competition_sync": {
                 "last_sync_at": get_kv("last_competition_sync_at"), "last_error": get_kv("last_competition_sync_error") or None,
                 "running": get_kv("competition_sync_running") == "1", "status": get_kv("competition_sync_status") or None,
@@ -19800,14 +19591,14 @@ def public_bootstrap() -> dict[str, Any]:
             },
             "morning_checkin": morning_checkin_state(),
             "coach_quick_actions": coach_quick_actions_state(),
-            "ai_provider": {"selected": selected_ai_provider(), "options": available_ai_providers()},
-            "model": {"selected": selected_model(), "options": available_model_options()},
-            "thinking_level": {"selected": selected_thinking_level(), "options": available_thinking_level_options()},
+            "ai_provider": {"selected": SETTINGS.selected_ai_provider(), "options": SETTINGS.available_ai_providers()},
+            "model": {"selected": SETTINGS.selected_model(), "options": SETTINGS.available_model_options()},
+            "thinking_level": {"selected": SETTINGS.selected_thinking_level(), "options": SETTINGS.available_thinking_level_options()},
             "configured": {
                 "openai": bool(CONFIG.openai_api_key), "gemini": bool(CONFIG.gemini_api_key), "intervals": bool(CONFIG.intervals_api_key),
                 "weather": bool(get_profile().get("weather_location")), "external_calendar": bool(CONFIG.calendar_ical_url),
             },
-            "usage": openai_usage_summary() if selected_ai_provider() != "gemini" else gemini_usage_summary(),
+            "usage": openai_usage_summary() if SETTINGS.selected_ai_provider() != "gemini" else gemini_usage_summary(),
         }
 
 
@@ -19947,7 +19738,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
                 "intervals_days": sync_period("intervals"),
                 "garmin_days": sync_period("garmin"),
             },
-            "calendar_display": calendar_display_settings(),
+            "calendar_display": SETTINGS.calendar_display_settings(),
             "competition_sync": {
                 "last_sync_at": get_kv("last_competition_sync_at"),
                 "last_error": get_kv("last_competition_sync_error") or None,
@@ -19961,9 +19752,9 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             },
             "morning_checkin": morning_checkin_state(),
             "coach_quick_actions": coach_quick_actions_state(),
-            "ai_provider": {"selected": selected_ai_provider(), "options": available_ai_providers()},
-            "model": {"selected": selected_model(), "options": available_model_options()},
-            "thinking_level": {"selected": selected_thinking_level(), "options": available_thinking_level_options()},
+            "ai_provider": {"selected": SETTINGS.selected_ai_provider(), "options": SETTINGS.available_ai_providers()},
+            "model": {"selected": SETTINGS.selected_model(), "options": SETTINGS.available_model_options()},
+            "thinking_level": {"selected": SETTINGS.selected_thinking_level(), "options": SETTINGS.available_thinking_level_options()},
             "configured": {
                 "openai": bool(CONFIG.openai_api_key),
                 "gemini": bool(CONFIG.gemini_api_key),
@@ -19971,7 +19762,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
                 "weather": bool(weather.get("configured")),
                 "external_calendar": bool(CONFIG.calendar_ical_url),
             },
-            "usage": openai_usage_summary() if selected_ai_provider() != "gemini" else gemini_usage_summary(),
+            "usage": openai_usage_summary() if SETTINGS.selected_ai_provider() != "gemini" else gemini_usage_summary(),
         }
 
 
@@ -19981,14 +19772,14 @@ def recent_log_entries(limit: int = 200) -> list[dict[str, Any]]:
     try:
         lines = LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]
     except OSError as exc:
-        return [{"timestamp": utc_now(), "level": "ERROR", "event": "log_read_failed", "message": redact_text(str(exc))}]
+        return [{"timestamp": utc_now(), "level": "ERROR", "event": "log_read_failed", "message": REDACTOR.redact_text(str(exc))}]
     entries: list[dict[str, Any]] = []
     for line in lines:
         try:
             entry = json.loads(line)
         except json.JSONDecodeError:
             entry = {"level": "UNKNOWN", "event": "unparsed_log", "message": line}
-        entries.append(sanitize_log_value(entry))
+        entries.append(REDACTOR.sanitize_log_value(entry))
     return entries
 
 
@@ -20088,7 +19879,7 @@ def _diagnostic_error_metadata(value: Any) -> dict[str, Any] | None:
     ]
     if frames:
         result["frames"] = frames
-    return sanitize_log_value(result)
+    return REDACTOR.sanitize_log_value(result)
 
 
 def _diagnostic_command_steps(receipt: dict[str, Any], tools: set[str]) -> list[dict[str, Any]]:
@@ -20149,21 +19940,21 @@ def diagnostic_report() -> dict[str, Any]:
         "configuration": {
             "openai_configured": bool(CONFIG.openai_api_key),
             "gemini_configured": bool(CONFIG.gemini_api_key),
-            "ai_provider": selected_ai_provider(),
+            "ai_provider": SETTINGS.selected_ai_provider(),
             "intervals_configured": bool(CONFIG.intervals_api_key),
             "garmin_library_available": Garmin is not None,
             "garmin_configured": garmin_status["configured"],
             "garmin_fixture_configured": garmin_fixture_path() is not None,
-            "model": selected_model(),
-            "thinking_level": selected_thinking_level(),
-            "available_models": [option["id"] for option in available_model_options()],
+            "model": SETTINGS.selected_model(),
+            "thinking_level": SETTINGS.selected_thinking_level(),
+            "available_models": [option["id"] for option in SETTINGS.available_model_options()],
         },
         "openai": openai_usage_summary(),
         "gemini": gemini_usage_summary(),
         "coach_commands": coach_diagnostic_history(),
         "sync": {
             "last_success": get_kv("last_sync_at"),
-            "last_error": redact_text(get_kv("last_sync_error") or "") or None,
+            "last_error": REDACTOR.redact_text(get_kv("last_sync_error") or "") or None,
             "running": get_kv("sync_running") == "1",
             "snapshot_counts": {
                 "activities": len(snapshot.get("recent_activities", [])) if snapshot else 0,
@@ -20173,7 +19964,7 @@ def diagnostic_report() -> dict[str, Any]:
         },
         "performance_refresh": {
             "last_refresh": get_kv("last_performance_refresh_at"),
-            "last_error": redact_text(get_kv("last_performance_error") or "") or None,
+            "last_error": REDACTOR.redact_text(get_kv("last_performance_error") or "") or None,
             "running": get_kv("performance_refresh_running") == "1",
         },
         "garmin": garmin_status,
@@ -20181,7 +19972,7 @@ def diagnostic_report() -> dict[str, Any]:
         "external_calendar": {
             "configured": bool(CONFIG.calendar_ical_url),
             "last_sync_at": get_kv("last_external_calendar_sync_at"),
-            "last_error": redact_text(get_kv("last_external_calendar_sync_error") or "") or None,
+            "last_error": REDACTOR.redact_text(get_kv("last_external_calendar_sync_error") or "") or None,
             "running": EXTERNAL_CALENDAR_LOCK.locked(),
             "events": len(list_external_calendar_events()),
         },
@@ -20502,7 +20293,7 @@ def stream_privacy_export(handler: Any) -> None:
 
 
 def restore_database_backup(payload: bytes) -> dict[str, Any]:
-    with MAINTENANCE_GATE.restore():
+    with runtime_maintenance.MAINTENANCE_GATE.restore():
         return _restore_database_backup(payload)
 
 
@@ -20581,7 +20372,7 @@ def _restore_database_backup(payload: bytes) -> dict[str, Any]:
     except AppError:
         raise
     except Exception as exc:
-        raise AppError(400, f"Das Datenbank-Backup konnte nicht validiert werden: {redact_text(str(exc))[:300]}") from exc
+        raise AppError(400, f"Das Datenbank-Backup konnte nicht validiert werden: {REDACTOR.redact_text(str(exc))[:300]}") from exc
     finally:
         if temporary_path is not None:
             try:
@@ -20649,7 +20440,7 @@ def privacy_delete_preview() -> dict[str, Any]:
 
 def delete_local_data() -> dict[str, Any]:
     global _PLANNING_STATE_RESET_PENDING
-    with MAINTENANCE_GATE.restore():
+    with runtime_maintenance.MAINTENANCE_GATE.restore():
         conversation_id = get_kv("openai_conversation_id") or ""
         remote_delete_attempted = bool(conversation_id)
         remote_deleted = False
@@ -20787,7 +20578,7 @@ def readiness_state() -> dict[str, Any]:
                 probe.unlink(missing_ok=True)
             except OSError:
                 pass
-    maintenance = MAINTENANCE_GATE.state()
+    maintenance = runtime_maintenance.MAINTENANCE_GATE.state()
     checks["maintenance"] = not bool(maintenance.get("active"))
     ready = all(checks.values())
     return {
@@ -20922,13 +20713,13 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_public_get(self, path: str) -> bool:
         if path == "/api/health":
-            self.send_json(200, {"status": "ok", "maintenance": MAINTENANCE_GATE.state()})
+            self.send_json(200, {"status": "ok", "maintenance": runtime_maintenance.MAINTENANCE_GATE.state()})
         elif path == "/api/readiness":
             readiness = readiness_state()
             self.send_json(200 if readiness["ready"] else 503, readiness)
         elif path == "/api/auth/status":
             session = authenticated_session(self)
-            result = {"authenticated": bool(session), "maintenance": MAINTENANCE_GATE.state()}
+            result = {"authenticated": bool(session), "maintenance": runtime_maintenance.MAINTENANCE_GATE.state()}
             if session:
                 schedule_morning_checkin()
             self.send_json(200, result)
@@ -21069,7 +20860,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     extra={"event": "http_app_error", "context": {"method": "GET", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
-            self.send_json(public_app_error_status(exc), {"error": redact_text(exc.message)[:1000]})
+            self.send_json(public_app_error_status(exc), {"error": REDACTOR.redact_text(exc.message)[:1000]})
         except Exception:
             LOGGER.exception(
                 "Unhandled GET error",
@@ -21100,7 +20891,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/logout":
                 session = require_auth(self)
                 require_csrf(self, session)
-                with MAINTENANCE_GATE.operation():
+                with runtime_maintenance.MAINTENANCE_GATE.operation():
                     logout_user(self)
                 self.send_json(200, {"status": "ok"}, {"Set-Cookie": [
                     session_cookie_headers(clear=True)[0], session_cookie_headers(clear=True)[1],
@@ -21114,7 +20905,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     payload = self.read_json()
                     self.send_json(200, cancel_chat_stream(session["csrf_hash"], payload.get("operation_id")))
                 else:
-                    with MAINTENANCE_GATE.operation():
+                    with runtime_maintenance.MAINTENANCE_GATE.operation():
                         self.handle_authenticated_post(path, session)
         except AppError as exc:
             if exc.status >= 500:
@@ -21125,7 +20916,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
             status = public_app_error_status(exc)
             headers = {"WWW-Authenticate": "Session"} if status == 401 else None
-            self.send_json(status, {"error": redact_text(exc.message)[:1000]}, headers)
+            self.send_json(status, {"error": REDACTOR.redact_text(exc.message)[:1000]}, headers)
         except Exception:
             LOGGER.exception(
                 "Unhandled POST error",
@@ -21178,13 +20969,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.connection.settimeout(None)
         try:
             self.send_sse_headers()
-            initial = state_events_since(since)
+            initial = runtime_events.STATE_EVENT_BUFFER.since(since)
             since, _ = self.send_state_event_batch(initial, since)
             self.send_sse_event("ready", {"latest_event_id": since}, since or None)
             while True:
-                with STATE_EVENT_CONDITION:
-                    STATE_EVENT_CONDITION.wait(timeout=15)
-                pending = state_events_since(since)
+                runtime_events.STATE_EVENT_BUFFER.wait(timeout=15)
+                pending = runtime_events.STATE_EVENT_BUFFER.since(since)
                 since, gap = self.send_state_event_batch(pending, since)
                 if gap:
                     continue
@@ -21249,13 +21039,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                         try:
                             send_event("completed", coach_command_receipt(client_turn_id, session["csrf_hash"]))
                         except AppError as exc:
-                            send_event("error", {"reason": exc.reason or "request_failed", "message": redact_text(exc.message)[:1000]})
+                            send_event("error", {"reason": exc.reason or "request_failed", "message": REDACTOR.redact_text(exc.message)[:1000]})
                         break
                     send_event(event, data)
                     if event in {"completed", "error", "background"}:
                         break
         except AppError as exc:
-            send_event("error", {"reason": exc.reason or "request_failed", "message": redact_text(exc.message)[:1000]})
+            send_event("error", {"reason": exc.reason or "request_failed", "message": REDACTOR.redact_text(exc.message)[:1000]})
         except Exception:
             LOGGER.exception(
                 "Unhandled coach stream error",
@@ -21377,10 +21167,10 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         try:
-            with MAINTENANCE_GATE.operation():
+            with runtime_maintenance.MAINTENANCE_GATE.operation():
                 self._do_PUT()
         except AppError as exc:
-            self.send_json(public_app_error_status(exc), {"error": redact_text(exc.message)[:1000]})
+            self.send_json(public_app_error_status(exc), {"error": REDACTOR.redact_text(exc.message)[:1000]})
 
     def _do_PUT(self) -> None:
         self.request_id = uuid.uuid4().hex[:12]
@@ -21389,16 +21179,16 @@ class RequestHandler(BaseHTTPRequestHandler):
             session = require_auth(self)
             require_csrf(self, session)
             if path == "/api/settings/model":
-                self.send_json(200, save_model(self.read_json().get("model")))
+                self.send_json(200, SETTINGS.save_model(self.read_json().get("model")))
                 return
             if path == "/api/settings/ai-provider":
-                self.send_json(200, save_ai_provider(self.read_json().get("provider")))
+                self.send_json(200, SETTINGS.save_ai_provider(self.read_json().get("provider")))
                 return
             if path == "/api/settings/thinking-level":
-                self.send_json(200, save_thinking_level(self.read_json().get("thinking_level")))
+                self.send_json(200, SETTINGS.save_thinking_level(self.read_json().get("thinking_level")))
                 return
             if path == "/api/settings/calendar-display":
-                self.send_json(200, save_calendar_display_settings(self.read_json()))
+                self.send_json(200, SETTINGS.save_calendar_display_settings(self.read_json()))
                 return
             if path == "/api/athlete-context":
                 payload = self.read_json()
@@ -21414,7 +21204,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     extra={"event": "http_app_error", "context": {"method": "PUT", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
-            self.send_json(public_app_error_status(exc), {"error": redact_text(exc.message)[:1000]})
+            self.send_json(public_app_error_status(exc), {"error": REDACTOR.redact_text(exc.message)[:1000]})
         except Exception:
             LOGGER.exception(
                 "Unhandled PUT error",
@@ -21609,7 +21399,7 @@ def _schedule_daily_intervals_job() -> None:
         enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
 
 
-@maintenance_operation
+@runtime_maintenance.maintenance_operation
 def schedule_daily_sync_jobs() -> None:
     _schedule_daily_weather_job()
     _schedule_daily_calendar_job()
@@ -21674,13 +21464,15 @@ def enqueue_startup_sync_jobs() -> None:
 
 
 def main() -> None:
-    initialise_logging()
+    observability.configure_logging(LOGGER, DATA_DIR, LOG_PATH, REDACTOR)
     configuration_error = security_configuration_error()
     if configuration_error:
         LOGGER.critical("Secure startup refused", extra={"event": "secure_startup_refused", "context": {"reason": configuration_error}})
         raise SystemExit(configuration_error)
     LOGGER.info(f"{APP_NAME} starting", extra={"event": "server_start", "context": {"version": APP_VERSION, "port": CONFIG.port}})
     initialise_database()
+    resume_interrupted_sync_jobs()
+    resume_interrupted_coach_jobs()
     server = CoachHTTPServer(("0.0.0.0", CONFIG.port), RequestHandler)
     server.allow_reuse_address = True
     start_sync_job_worker()

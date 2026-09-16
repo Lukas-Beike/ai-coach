@@ -141,17 +141,17 @@ Datei als fertig.
 
 ### P0 — Inventar, Baseline und Architekturprüfung
 
-- [ ] Mit Python-AST sämtliche Top-Level-Definitionen und globale Bindungen
+- [x] Mit Python-AST sämtliche Top-Level-Definitionen und globale Bindungen
   erfassen. Pro Eintrag Quellname, Ausgangszeile, Zielmodul, Phase und Status
   in `docs/server-extraction-inventory.md` festhalten.
-- [ ] Referenzen in Backend, Tests, E2E-Fixtures, Skripten, Docker und Workflows
+- [x] Referenzen in Backend, Tests, E2E-Fixtures, Skripten, Docker und Workflows
   erfassen; dynamische Zugriffe/Monkeypatches manuell ergänzen.
-- [ ] Direkte Aufruf-/Importabhängigkeiten und globale Reads/Writes für den
+- [x] Direkte Aufruf-/Importabhängigkeiten und globale Reads/Writes für den
   nächsten Schritt prüfen; zyklische Gruppen als gemeinsame Umzugseinheit
   identifizieren oder an einer konkreten Verantwortungsgrenze auflösen.
-- [ ] Ausgangstests mit synthetischen Daten ausführen und vorhandene Fehler
+- [x] Ausgangstests mit synthetischen Daten ausführen und vorhandene Fehler
   dokumentieren. Keine späteren Regressionen als Altfehler deklarieren.
-- [ ] Kleine Architekturprüfung mit stdlib `ast` in die bestehenden Tests
+- [x] Kleine Architekturprüfung mit stdlib `ast` in die bestehenden Tests
   aufnehmen: kein Backend-Import von `server`; bereits ausgelagerte Namen
   dürfen dort nicht wieder als Implementierung auftauchen.
 Abnahme: Jeder Inventareintrag ist zugeordnet, Baseline und reproduzierbare
@@ -161,14 +161,24 @@ Testbefehle sind erfasst. Reale Secrets oder Athletendaten werden nicht gelesen.
 
 Abhängigkeit: P0.
 
-- [ ] `AppError`, Disconnect-Signal und Fehlerabbildung passend zwischen
+- [x] `AppError`, Disconnect-Signal und Fehlerabbildung passend zwischen
   `errors.py` und HTTP aufteilen; Konstanten zum jeweiligen Eigentümer ziehen.
 - [ ] Konfiguration, Settings-Zugriff und Logging/Redaktion auslagern.
-- [ ] DB-Initialisierung vervollständigen; Job-Recovery von Schema-Initialisierung
+  - [x] Anbieter-/Modell-/Thinking-/Kalenderauswahl sowie Secret-/URL-
+    Redaktion, JSON-Formatter und Logging-Setup verlagern.
+  - [ ] Verbleibende Konfigurationsvalidierung, Settings-Dateischreibpfade,
+    Provider-Freshness und diagnostische Observability verlagern.
+- [x] DB-Initialisierung vervollständigen; Job-Recovery von Schema-Initialisierung
   trennen und aus der Startverdrahtung explizit aufrufen.
-- [ ] Maintenance-Gate und State-Event-Puffer mit konkreten Instanzen auslagern.
-- [ ] Release-Verwendung von `APP_VERSION` und statischen Pfaden erfassen;
+- [x] Maintenance-Gate und State-Event-Puffer mit konkreten Instanzen auslagern.
+- [x] Release-Verwendung von `APP_VERSION` und statischen Pfaden erfassen;
   den bestehenden Releasevertrag bei einer Verlagerung gleichzeitig anpassen.
+  - `APP_VERSION` bleibt bis zu einer gemeinsamen Migration der Release-Quelle,
+    des Review-Gates und des Release-Workflows als exakte Zuweisung in
+    `server.py`.
+  - `PUBLIC_DIR`, die versionierte Asset-Allowlist und `send_static` bleiben bis
+    P10 zusammen; Änderungen am PWA-Assetset aktualisieren weiterhin
+    `index.html`, Cache-Name und Asset-URLs in `service-worker.js` gemeinsam.
 
 Abnahme: Fachmodule können Fehler, Ressourcen und Events verwenden, ohne
 `server` zu importieren. Import-Smoke-Test erzeugt keine Laufzeitaktivitäten.

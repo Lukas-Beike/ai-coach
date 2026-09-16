@@ -173,7 +173,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(server.list_messages(), [])
 
     def test_gemini_rejects_images_that_exceed_its_inline_request_budget(self):
-        with patch.object(server, "selected_ai_provider", return_value="gemini"), patch.object(server, "MAX_GEMINI_INLINE_IMAGE_BYTES", 1):
+        with patch.object(server.SETTINGS, "selected_ai_provider", return_value="gemini"), patch.object(server, "MAX_GEMINI_INLINE_IMAGE_BYTES", 1):
             with self.assertRaises(server.AppError) as error:
                 server.enqueue_background_coach_job("Analyze", "gemini-size-turn", "synthetic-csrf", attachments=[self.upload(FIT, "ride.fit")])
         self.assertEqual(error.exception.reason, "gemini_attachment_request_too_large")
