@@ -11,8 +11,6 @@ from urllib.parse import urlparse, urlunparse
 
 from backend.errors import AppError
 
-from backend.errors import AppError
-
 OPENAI_RATE_LIMIT_HEADERS = {
     "retry-after": "retry_after",
     "x-ratelimit-limit-requests": "limit_requests",

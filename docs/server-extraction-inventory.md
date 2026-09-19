@@ -5,10 +5,10 @@
 ## Ausgangsstand
 
 - Geprüfter P0-Basiscommit: `362d6caa4c27951af86b82b11b3a43d48dadceee`
-- Inventarisierter `server.py`-Quelltext (SHA-256): `931d10fb0d9aa4cc03a6ead0faf8f5733e35c26fd838e8434fc7a9b666b51d1d`; dieser Fingerprint ist unabhängig von HEAD und Arbeitsbaum stabil.
-- `server.py`: 20.129 physische Zeilen
-- Inventareinträge: 1.555
-- Definitionen (Funktionen/Klassen): 1.108
+- Inventarisierter `server.py`-Quelltext (SHA-256): `ec034359c3fb5a7e3c263d5f9814555bb60a99e120db4b84cc138adc0fe61c62`; dieser Fingerprint ist unabhängig von HEAD und Arbeitsbaum stabil.
+- `server.py`: 20.037 physische Zeilen
+- Inventareinträge: 1.551
+- Definitionen (Funktionen/Klassen): 1.104
 - Globale Bindungen einschließlich Imports: 258 Zuweisungen. 189 Imports
 - Planbereich: bis Zeile 21.702; Einträge dahinter: 0 (zielbestimmt über Symbol-/Verantwortungsanalyse)
 - Status dieses Stands: P0 ist integriert; bereits ausgelagerte Namen erscheinen als Importbindungen. `offen` bedeutet, dass die fachliche Eigentümerschaft noch migriert werden muss.
@@ -30,14 +30,14 @@ Der Generator führt selbst keine Tests und keine Laufzeitinitialisierung aus. S
 
 | Phase | Funktionen/Klassen | Globale Bindungen | Importbindungen |
 | --- | ---: | ---: | ---: |
-| P0 (Zuordnung offen) | 0 | 0 | 0 |
+| P0 (Zuordnung offen) | 1 | 0 | 0 |
 | P1 | 20 | 40 | 142 |
-| P2 | 103 | 10 | 0 |
+| P2 | 99 | 10 | 0 |
 | P3 | 188 | 27 | 0 |
-| P4 | 287 | 30 | 0 |
+| P4 | 284 | 30 | 0 |
 | P5 | 24 | 10 | 0 |
 | P6 | 228 | 43 | 0 |
-| P7 | 188 | 39 | 0 |
+| P7 | 190 | 39 | 0 |
 | P8 | 14 | 11 | 0 |
 | P9 | 25 | 6 | 0 |
 | P10 | 30 | 39 | 0 |
@@ -1787,371 +1787,367 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 12. Jede Gruppe ist al
 | Funktion | `_gemini_responses_result` | 13227 | `providers/` | P2 | offen | keine statisch gefunden |
 | Funktion | `gemini_responses_request` | 13266 | `providers/` | P2 | offen | tests/test_server.py:4231 (direkt/dynamisch unklar); tests/test_server.py:4233 (direkt/dynamisch unklar); tests/test_server.py:4300 (direkt/dynamisch unklar); tests/test_server.py:4303 (direkt/dynamisch unklar); tests/test_server.py:4425 (direkt/dynamisch unklar); tests/test_server.py:4469 (Monkeypatch/getattr/sys.modules) |
 | Funktion | `gemini_stream_request` | 13273 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `request_ai_provider` | 13414 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `responses_request` | 13419 | `providers/` | P2 | offen | e2e/fixture_runtime.py:60 (direkt/dynamisch unklar); tests/test_audit_remediation.py:262 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:59 (Monkeypatch/getattr/sys.modules); tests/test_coach_response_failure.py:36 (Monkeypatch/getattr/sys.modules); tests/test_coach_response_failure.py:72 (Monkeypatch/getattr/sys.modules); tests/test_server.py:4470 (direkt/dynamisch unklar); tests/test_server.py:5302 (direkt/dynamisch unklar); tests/test_server.py:5693 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8010 (direkt/dynamisch unklar) |
-| Funktion | `_openai_response_id` | 13444 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `retrieve_openai_response` | 13451 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `cancel_openai_response` | 13466 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `responses_background_request` | 13484 | `providers/` | P2 | offen | e2e/fixture_runtime.py:61 (direkt/dynamisch unklar); tests/test_coach_attachments.py:246 (Monkeypatch/getattr/sys.modules); tests/test_coach_attachments.py:260 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:59 (Monkeypatch/getattr/sys.modules); tests/test_server.py:5699 (direkt/dynamisch unklar) |
-| Funktion | `_raise_chat_cancelled` | 13521 | `coach/context.py` | P7 | offen | tests/test_server.py:5959 (direkt/dynamisch unklar) |
-| Funktion | `_notify_openai_stream_response_id` | 13526 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_forward_openai_stream_delta` | 13539 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_openai_stream_final_response` | 13547 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_consume_openai_sse_event` | 13554 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_read_openai_stream_response` | 13573 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_log_openai_stream_failure` | 13609 | `observability.py` | P1 | offen | tests/test_server.py:8118 (direkt/dynamisch unklar); tests/test_server.py:8129 (direkt/dynamisch unklar) |
-| Funktion | `_capture_openai_stream_failure` | 13628 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_handle_openai_stream_app_error` | 13642 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_handle_openai_stream_disconnect` | 13654 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_handle_openai_stream_http_error` | 13665 | `providers/` | P2 | offen | tests/test_server.py:7994 (direkt/dynamisch unklar) |
-| Funktion | `_handle_openai_stream_timeout` | 13697 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_handle_openai_stream_network_error` | 13713 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `openai_stream_request` | 13728 | `providers/` | P2 | offen | tests/test_server.py:4702 (direkt/dynamisch unklar); tests/test_server.py:8030 (direkt/dynamisch unklar); tests/test_server.py:8071 (direkt/dynamisch unklar); tests/test_server.py:8085 (direkt/dynamisch unklar); tests/test_server.py:8109 (direkt/dynamisch unklar); tests/test_server.py:8159 (direkt/dynamisch unklar); tests/test_server.py:8165 (Monkeypatch/getattr/sys.modules) |
-| Funktion | `responses_stream_request` | 13805 | `coach/context.py` | P7 | offen | e2e/fixture_runtime.py:64 (direkt/dynamisch unklar); tests/test_server.py:4275 (direkt/dynamisch unklar); tests/test_server.py:5799 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8166 (direkt/dynamisch unklar) |
-| Funktion | `ensure_conversation` | 13831 | `coach/context.py` | P7 | offen | e2e/fixture_runtime.py:29 (direkt/dynamisch unklar); tests/test_audit_remediation.py:262 (Monkeypatch/getattr/sys.modules); tests/test_coach_attachments.py:246 (Monkeypatch/getattr/sys.modules); tests/test_coach_attachments.py:260 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:57 (Monkeypatch/getattr/sys.modules); tests/test_coach_response_failure.py:34 (Monkeypatch/getattr/sys.modules); tests/test_coach_response_failure.py:70 (Monkeypatch/getattr/sys.modules); tests/test_coach_review.py:133 (Monkeypatch/getattr/sys.modules) |
-| Funktion | `_delete_reset_coach_conversation` | 13850 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_cancel_reset_coach_commands` | 13863 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_reset_local_coach_chat_state` | 13881 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_request_coach_operation_cancellation` | 13894 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_clear_coach_conversation_state` | 13900 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `reset_coach_chat` | 13908 | `coach/context.py` | P7 | offen | tests/test_audit_remediation.py:308 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:394 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:741 (direkt/dynamisch unklar); tests/test_server.py:4503 (direkt/dynamisch unklar); tests/test_server.py:5324 (direkt/dynamisch unklar) |
-| Funktion | `output_text` | 13917 | `providers/` | P2 | offen | tests/test_server.py:4215 (direkt/dynamisch unklar); tests/test_server.py:4247 (direkt/dynamisch unklar); tests/test_server.py:4281 (direkt/dynamisch unklar); tests/test_server.py:4469 (Monkeypatch/getattr/sys.modules) |
-| Globale Bindung | `COACH_ACTION_TTL_SECONDS` | 13921 | `coach/` | P7 | offen | tests/test_coach_review.py:257 (direkt/dynamisch unklar) |
-| Globale Bindung | `COACH_ACTION_TYPES` | 13922 | `coach/` | P7 | offen | keine statisch gefunden |
-| Funktion | `_coach_action_hash` | 13925 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_coach_action_view` | 13929 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `duplicate_activity_delete_preview` | 13942 | `activities/` | P3 | offen | keine statisch gefunden |
-| Funktion | `_remove_intervals_activity_from_local_snapshot` | 13967 | `activities/` | P3 | offen | keine statisch gefunden |
-| Funktion | `delete_duplicate_intervals_activity` | 13991 | `activities/` | P3 | offen | tests/test_server.py:7551 (direkt/dynamisch unklar) |
-| Funktion | `validated_coach_action_preview_input` | 14011 | `coach/context.py` | P7 | offen | tests/test_server.py:8403 (direkt/dynamisch unklar); tests/test_server.py:8414 (direkt/dynamisch unklar) |
-| Funktion | `assert_duplicate_action_preview_is_current` | 14033 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `create_coach_action_preview` | 14042 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `confirm_coach_action_preview` | 14064 | `coach/context.py` | P7 | offen | tests/test_coach_review.py:231 (direkt/dynamisch unklar); tests/test_coach_review.py:232 (direkt/dynamisch unklar); tests/test_coach_review.py:256 (direkt/dynamisch unklar); tests/test_coach_review.py:270 (direkt/dynamisch unklar); tests/test_coach_review.py:307 (direkt/dynamisch unklar); tests/test_coach_review.py:325 (direkt/dynamisch unklar); tests/test_coach_review.py:327 (direkt/dynamisch unklar); tests/test_coach_review.py:332 (direkt/dynamisch unklar); tests/test_server.py:8430 (direkt/dynamisch unklar); tests/test_server.py:8442 (direkt/dynamisch unklar) |
-| Funktion | `_execute_coach_action` | 14088 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `execute_coach_action` | 14097 | `coach/context.py` | P7 | offen | tests/test_coach_review.py:235 (direkt/dynamisch unklar); tests/test_coach_review.py:237 (direkt/dynamisch unklar); tests/test_coach_review.py:244 (direkt/dynamisch unklar); tests/test_coach_review.py:259 (direkt/dynamisch unklar); tests/test_coach_review.py:272 (direkt/dynamisch unklar); tests/test_coach_review.py:329 (direkt/dynamisch unklar); tests/test_coach_review.py:330 (direkt/dynamisch unklar); tests/test_server.py:8431 (direkt/dynamisch unklar); tests/test_server.py:8443 (direkt/dynamisch unklar) |
-| Funktion | `_coach_session_key` | 14126 | `coach/context.py` | P7 | offen | tests/test_coach_review.py:122 (direkt/dynamisch unklar); tests/test_coach_review.py:216 (direkt/dynamisch unklar) |
-| Funktion | `_restore_coach_session_csrf_hash` | 14130 | `coach/context.py` | P7 | offen | tests/test_audit_remediation.py:278 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:705 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:728 (Monkeypatch/getattr/sys.modules); tests/test_server.py:5824 (Monkeypatch/getattr/sys.modules) |
-| Funktion | `_coach_command_receipt` | 14147 | `coach/context.py` | P7 | offen | tests/test_server.py:5853 (direkt/dynamisch unklar) |
-| Funktion | `_merge_coach_command_receipt` | 14151 | `coach/context.py` | P7 | offen | tests/test_coach_dialogue.py:776 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:786 (direkt/dynamisch unklar); tests/test_coach_language_recovery.py:93 (direkt/dynamisch unklar); tests/test_server.py:5844 (direkt/dynamisch unklar) |
-| Funktion | `_active_background_coach_job` | 14163 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_background_coach_request` | 14180 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_background_coach_provider_settings` | 14207 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_existing_background_coach_job_response` | 14216 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_persist_background_coach_job` | 14233 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `enqueue_background_coach_job` | 14285 | `sync/` | P6 | offen | tests/test_audit_remediation.py:269 (direkt/dynamisch unklar); tests/test_coach_attachments.py:145 (direkt/dynamisch unklar); tests/test_coach_attachments.py:165 (direkt/dynamisch unklar); tests/test_coach_attachments.py:171 (direkt/dynamisch unklar); tests/test_coach_attachments.py:178 (direkt/dynamisch unklar); tests/test_coach_attachments.py:211 (direkt/dynamisch unklar); tests/test_coach_attachments.py:212 (direkt/dynamisch unklar); tests/test_coach_attachments.py:241 (direkt/dynamisch unklar); tests/test_coach_attachments.py:253 (direkt/dynamisch unklar); tests/test_coach_attachments.py:262 (direkt/dynamisch unklar); tests/test_coach_attachments.py:271 (direkt/dynamisch unklar); tests/test_coach_attachments.py:282 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:696 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:717 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:736 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:771 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:784 (direkt/dynamisch unklar); tests/test_coach_language_recovery.py:91 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:21 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:54 (direkt/dynamisch unklar); tests/test_coach_review.py:120 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:60 (direkt/dynamisch unklar); tests/test_server.py:4483 (direkt/dynamisch unklar); tests/test_server.py:5710 (direkt/dynamisch unklar); tests/test_server.py:5738 (direkt/dynamisch unklar); tests/test_server.py:5759 (direkt/dynamisch unklar); tests/test_server.py:5786 (direkt/dynamisch unklar); tests/test_server.py:5813 (direkt/dynamisch unklar); tests/test_server.py:5837 (direkt/dynamisch unklar) |
-| Funktion | `register_chat_stream` | 14318 | `coach/context.py` | P7 | offen | tests/test_server.py:5757 (direkt/dynamisch unklar); tests/test_server.py:8174 (direkt/dynamisch unklar); tests/test_server.py:8177 (direkt/dynamisch unklar); tests/test_server.py:8191 (direkt/dynamisch unklar); tests/test_server.py:8212 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8239 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8252 (direkt/dynamisch unklar) |
-| Funktion | `publish_chat_stream_event` | 14332 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `chat_stream_events` | 14347 | `coach/context.py` | P7 | offen | tests/test_server.py:5773 (direkt/dynamisch unklar); tests/test_server.py:8214 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8241 (Monkeypatch/getattr/sys.modules) |
-| Funktion | `_close_chat_provider_response` | 14356 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_cancel_attached_chat_stream` | 14365 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_cancel_background_chat_job` | 14377 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `cancel_chat_stream` | 14394 | `coach/context.py` | P7 | offen | tests/test_audit_remediation.py:273 (direkt/dynamisch unklar); tests/test_server.py:8180 (direkt/dynamisch unklar); tests/test_server.py:8182 (direkt/dynamisch unklar); tests/test_server.py:8256 (direkt/dynamisch unklar) |
-| Funktion | `unregister_chat_stream` | 14402 | `coach/context.py` | P7 | offen | tests/test_server.py:5781 (direkt/dynamisch unklar); tests/test_server.py:8186 (direkt/dynamisch unklar); tests/test_server.py:8197 (direkt/dynamisch unklar); tests/test_server.py:8213 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8261 (direkt/dynamisch unklar) |
-| Globale Bindung | `COACH_TOOL_MAX_ROUNDS` | 14409 | `coach/` | P7 | offen | tests/test_coach_dialogue.py:793 (Monkeypatch/getattr/sys.modules) |
-| Globale Bindung | `COACH_COMMAND_STALE_SECONDS` | 14410 | `coach/` | P7 | offen | keine statisch gefunden |
-| Globale Bindung | `COACH_CANONICAL_TOOL_NAMES` | 14411 | `coach/` | P7 | offen | keine statisch gefunden |
-| Globale Bindung | `COACH_STRUCTURED_TOOLS` | 14411 | `coach/` | P7 | offen | tests/test_server.py:399 (direkt/dynamisch unklar); tests/test_server.py:455 (direkt/dynamisch unklar); tests/test_server.py:4718 (direkt/dynamisch unklar); tests/test_server.py:4721 (direkt/dynamisch unklar); tests/test_server.py:5071 (direkt/dynamisch unklar) |
-| Globale Bindung | `STRUCTURED_READ_ONLY_TOOLS` | 14411 | `coach/context.py` | P7 | offen | tests/test_coach_dialogue.py:271 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:425 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:567 (direkt/dynamisch unklar); tests/test_coach_tool_coverage.py:401 (direkt/dynamisch unklar) |
-| Globale Bindung | `COACH_DIALOGUE_TOOLS` | 14411 | `coach/` | P7 | offen | tests/test_coach_dialogue.py:268 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:568 (direkt/dynamisch unklar); tests/test_coach_tool_coverage.py:388 (direkt/dynamisch unklar); tests/test_coach_tool_coverage.py:402 (direkt/dynamisch unklar) |
-| Funktion | `coach_execution_scope` | 14420 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_coach_scope_values` | 14428 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_require_coach_scope` | 14432 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_training_state_after_key` | 14437 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_structured_training_state_snapshot` | 14448 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_structured_training_target_ref` | 14473 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_structured_training_state_page` | 14492 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_structured_training_state` | 14504 | `planning/` | P4 | offen | tests/test_coach_dialogue.py:64 (direkt/dynamisch unklar); tests/test_server.py:2905 (direkt/dynamisch unklar); tests/test_server.py:2907 (direkt/dynamisch unklar); tests/test_server.py:5337 (direkt/dynamisch unklar); tests/test_server.py:5373 (direkt/dynamisch unklar); tests/test_server.py:5396 (direkt/dynamisch unklar); tests/test_server.py:5398 (direkt/dynamisch unklar); tests/test_server.py:5414 (direkt/dynamisch unklar); tests/test_server.py:5421 (direkt/dynamisch unklar); tests/test_server.py:5435 (direkt/dynamisch unklar); tests/test_server.py:5458 (direkt/dynamisch unklar); tests/test_server.py:5483 (direkt/dynamisch unklar); tests/test_server.py:5512 (direkt/dynamisch unklar); tests/test_server.py:5532 (direkt/dynamisch unklar); tests/test_server.py:5584 (direkt/dynamisch unklar); tests/test_server.py:5597 (direkt/dynamisch unklar); tests/test_server.py:5603 (direkt/dynamisch unklar); tests/test_server.py:5632 (direkt/dynamisch unklar); tests/test_server.py:5659 (direkt/dynamisch unklar); tests/test_server.py:5662 (direkt/dynamisch unklar); tests/test_server.py:5683 (direkt/dynamisch unklar); tests/test_server.py:736 (direkt/dynamisch unklar); tests/test_server.py:749 (direkt/dynamisch unklar); tests/test_server.py:825 (direkt/dynamisch unklar); tests/test_server.py:860 (direkt/dynamisch unklar); tests/test_workout_repair.py:372 (direkt/dynamisch unklar); tests/test_workout_repair.py:489 (direkt/dynamisch unklar); tests/test_workout_repair.py:492 (direkt/dynamisch unklar); tests/test_workout_repair.py:500 (direkt/dynamisch unklar); tests/test_workout_repair.py:505 (direkt/dynamisch unklar); tests/test_workout_repair.py:508 (direkt/dynamisch unklar); tests/test_workout_repair.py:512 (direkt/dynamisch unklar); tests/test_workout_repair.py:70 (direkt/dynamisch unklar) |
-| Funktion | `_structured_artifact_payload` | 14527 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_action_payload` | 14534 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_validate_structured_plan_limits` | 14541 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_validate_plan_calendar` | 14559 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_stage_coach_artifact` | 14569 | `coach/context.py` | P7 | offen | e2e/fixture_runtime.py:71 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:563 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:839 (direkt/dynamisch unklar); tests/test_coach_review.py:162 (direkt/dynamisch unklar); tests/test_coach_review.py:173 (direkt/dynamisch unklar); tests/test_coach_review.py:294 (direkt/dynamisch unklar); tests/test_server.py:322 (direkt/dynamisch unklar); tests/test_server.py:347 (direkt/dynamisch unklar); tests/test_server.py:4409 (direkt/dynamisch unklar); tests/test_server.py:5318 (direkt/dynamisch unklar) |
-| Funktion | `_validated_training_date` | 14582 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_record_created_training_change` | 14591 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_record_existing_training_change` | 14602 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_validate_training_change_dates` | 14634 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_validate_training_change_batch` | 14660 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_prepare_structured_training_change` | 14680 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_prepare_structured_training_changes` | 14704 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_validate_structured_training_revision` | 14716 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_validate_structured_training_change_hash` | 14729 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_validate_structured_training_change_hashes` | 14743 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_validate_structured_training_change_revisions` | 14751 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_structured_training_membership_update` | 14762 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_structured_training_change_moves_bounds` | 14784 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_collect_structured_training_memberships` | 14794 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_derived_structured_training_plan` | 14808 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_apply_authorized_structured_training_plan` | 14820 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_resolve_structured_training_plan_reference` | 14834 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_validate_structured_training_create_plan_ids` | 14842 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_derive_structured_training_plan` | 14855 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_apply_structured_training_change_rows` | 14864 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_planning_change_dependencies` | 14886 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_apply_structured_training_changes` | 14904 | `planning/` | P4 | offen | tests/test_server.py:4748 (direkt/dynamisch unklar); tests/test_server.py:4770 (direkt/dynamisch unklar); tests/test_server.py:4789 (direkt/dynamisch unklar); tests/test_server.py:4811 (direkt/dynamisch unklar); tests/test_server.py:4826 (direkt/dynamisch unklar); tests/test_server.py:4842 (direkt/dynamisch unklar); tests/test_server.py:4860 (direkt/dynamisch unklar); tests/test_server.py:4882 (direkt/dynamisch unklar); tests/test_server.py:4900 (direkt/dynamisch unklar); tests/test_server.py:4923 (direkt/dynamisch unklar); tests/test_server.py:4967 (direkt/dynamisch unklar); tests/test_server.py:4992 (direkt/dynamisch unklar); tests/test_server.py:5013 (direkt/dynamisch unklar); tests/test_server.py:5028 (direkt/dynamisch unklar); tests/test_server.py:5047 (direkt/dynamisch unklar); tests/test_server.py:5064 (direkt/dynamisch unklar) |
-| Funktion | `_apply_structured_training_changes_in_db` | 14915 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_prepare_structured_plan_replacement` | 14925 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_validate_replacement_workouts` | 14942 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_replacement_existing_state` | 14953 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_replacement_entries` | 14983 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_validate_replacement_calendar` | 15001 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_archive_replacement_entries` | 15007 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_archive_superseded_training_plans` | 15020 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_create_replacement_plan` | 15038 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_copy_replacement_constraints` | 15054 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_create_replacement_units` | 15067 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_replace_structured_training_plan` | 15081 | `planning/` | P4 | offen | tests/test_server.py:5438 (direkt/dynamisch unklar); tests/test_server.py:5485 (direkt/dynamisch unklar); tests/test_server.py:5513 (direkt/dynamisch unklar) |
-| Funktion | `_pending_plan_push_entries` | 15115 | `sync/` | P6 | offen | tests/test_coach_dialogue.py:177 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:240 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:686 (direkt/dynamisch unklar); tests/test_coach_language_recovery.py:105 (direkt/dynamisch unklar); tests/test_coach_tool_coverage.py:288 (direkt/dynamisch unklar); tests/test_server.py:1007 (direkt/dynamisch unklar); tests/test_server.py:1016 (direkt/dynamisch unklar); tests/test_server.py:380 (direkt/dynamisch unklar); tests/test_server.py:411 (direkt/dynamisch unklar); tests/test_server.py:8536 (direkt/dynamisch unklar); tests/test_server.py:929 (direkt/dynamisch unklar); tests/test_workout_repair.py:295 (direkt/dynamisch unklar); tests/test_workout_repair.py:391 (direkt/dynamisch unklar); tests/test_workout_repair.py:396 (direkt/dynamisch unklar); tests/test_workout_repair.py:413 (direkt/dynamisch unklar); tests/test_workout_repair.py:423 (direkt/dynamisch unklar) |
-| Funktion | `_local_planning_authoritative_rows` | 15128 | `sync/reconcile.py` | P6 | offen | keine statisch gefunden |
-| Funktion | `_mark_local_planning_row_authoritative` | 15140 | `sync/reconcile.py` | P6 | offen | keine statisch gefunden |
-| Funktion | `_mark_local_planning_authoritative` | 15155 | `sync/reconcile.py` | P6 | offen | tests/test_server.py:420 (Monkeypatch/getattr/sys.modules) |
-| Funktion | `_mark_local_competitions_authoritative` | 15167 | `sync/reconcile.py` | P6 | offen | tests/test_server.py:690 (direkt/dynamisch unklar); tests/test_server.py:700 (direkt/dynamisch unklar) |
-| Funktion | `_repair_manifest_rows` | 15197 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_repair_manifest_entries` | 15205 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_validate_repair_manifest_selection` | 15212 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_validate_repair_manifest_workouts` | 15234 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_refresh_repair_manifest_hashes` | 15241 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_coach_repair_manifest` | 15247 | `coach/context.py` | P7 | offen | tests/test_workout_repair.py:561 (direkt/dynamisch unklar) |
-| Funktion | `_enqueue_coach_plan_push` | 15265 | `coach/context.py` | P7 | offen | tests/test_server.py:444 (Monkeypatch/getattr/sys.modules); tests/test_workout_repair.py:173 (direkt/dynamisch unklar); tests/test_workout_repair.py:201 (direkt/dynamisch unklar) |
-| Funktion | `_structured_bounded_integer` | 15293 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_read_result` | 15302 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_profile_result` | 15329 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_authorized_coach_athlete_operation` | 15355 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_checkin_result` | 15360 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_activity_feedback_result` | 15366 | `activities/` | P3 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_delete_activity_feedback_result` | 15380 | `activities/` | P3 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_save_competition_result` | 15387 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_delete_competition_result` | 15395 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Globale Bindung | `ATHLETE_RECORD_HANDLERS` | 15402 | `athlete/` | P3 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_athlete_record_result` | 15411 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_stage_structured_training_plan` | 15418 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_training_template_result` | 15431 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_apply_library_plan_result` | 15454 | `coach/context.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_commit_structured_training_plan` | 15468 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_persist_committed_training_plan` | 15482 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_validate_committed_training_plan` | 15510 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_replace_structured_coach_training_plan` | 15526 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_validate_structured_training_change_scopes` | 15545 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_apply_structured_coach_training_changes` | 15565 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_plan_tool_result` | 15587 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_start_structured_provider_refresh` | 15603 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_run_structured_intervals_refresh` | 15620 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_retry_structured_intervals_refresh` | 15655 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_queue_structured_performance_refresh` | 15667 | `coach/jobs.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_sync_structured_plan_without_entries` | 15682 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_validate_selected_plan_sync_entries` | 15702 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_persist_selected_plan_sync_entries` | 15728 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_sync_structured_plan_entries` | 15746 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_sync_structured_training_plan` | 15754 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_resolve_structured_sync_conflict` | 15775 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_sync_tool_result` | 15802 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_misc_tool_result` | 15826 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_apply_structured_adaptive_replan` | 15853 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_tool_result` | 15874 | `coach/proposals.py` | P7 | offen | tests/test_coach_dialogue.py:777 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:97 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:97 (direkt/dynamisch unklar); tests/test_coach_review.py:104 (direkt/dynamisch unklar); tests/test_coach_review.py:165 (direkt/dynamisch unklar); tests/test_coach_review.py:166 (direkt/dynamisch unklar); tests/test_coach_review.py:176 (direkt/dynamisch unklar); tests/test_coach_review.py:186 (direkt/dynamisch unklar); tests/test_coach_review.py:202 (direkt/dynamisch unklar); tests/test_coach_review.py:209 (direkt/dynamisch unklar); tests/test_coach_review.py:210 (direkt/dynamisch unklar); tests/test_coach_review.py:212 (direkt/dynamisch unklar); tests/test_coach_review.py:82 (direkt/dynamisch unklar); tests/test_server.py:1009 (direkt/dynamisch unklar); tests/test_server.py:334 (direkt/dynamisch unklar); tests/test_server.py:366 (direkt/dynamisch unklar); tests/test_server.py:390 (direkt/dynamisch unklar); tests/test_server.py:423 (direkt/dynamisch unklar); tests/test_server.py:445 (direkt/dynamisch unklar); tests/test_server.py:470 (direkt/dynamisch unklar); tests/test_server.py:477 (direkt/dynamisch unklar); tests/test_server.py:4946 (direkt/dynamisch unklar); tests/test_server.py:517 (direkt/dynamisch unklar); tests/test_server.py:5343 (direkt/dynamisch unklar); tests/test_server.py:5379 (direkt/dynamisch unklar); tests/test_server.py:546 (direkt/dynamisch unklar); tests/test_server.py:5464 (direkt/dynamisch unklar); tests/test_server.py:552 (direkt/dynamisch unklar); tests/test_server.py:5538 (direkt/dynamisch unklar); tests/test_server.py:556 (direkt/dynamisch unklar); tests/test_server.py:5562 (direkt/dynamisch unklar); tests/test_server.py:5567 (direkt/dynamisch unklar); tests/test_server.py:5616 (direkt/dynamisch unklar); tests/test_server.py:5638 (direkt/dynamisch unklar); tests/test_server.py:573 (direkt/dynamisch unklar); tests/test_server.py:577 (direkt/dynamisch unklar); tests/test_server.py:714 (direkt/dynamisch unklar); tests/test_server.py:756 (direkt/dynamisch unklar); tests/test_server.py:785 (direkt/dynamisch unklar); tests/test_server.py:804 (direkt/dynamisch unklar); tests/test_server.py:833 (direkt/dynamisch unklar); tests/test_server.py:866 (direkt/dynamisch unklar); tests/test_server.py:886 (direkt/dynamisch unklar); tests/test_server.py:913 (direkt/dynamisch unklar); tests/test_server.py:939 (direkt/dynamisch unklar); tests/test_server.py:958 (direkt/dynamisch unklar); tests/test_server.py:984 (direkt/dynamisch unklar) |
-| Funktion | `_structured_authorized_operations` | 15916 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_coach_dialogue_pending_messages` | 15920 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_coach_dialogue_command_result` | 15933 | `coach/proposals.py` | P7 | offen | tests/test_server.py:8550 (direkt/dynamisch unklar) |
-| Funktion | `coach_dialogue_context` | 15945 | `coach/proposals.py` | P7 | offen | tests/test_coach_dialogue.py:267 (direkt/dynamisch unklar) |
-| Funktion | `_dialogue_retry_metadata` | 15964 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_validate_dialogue_request_target` | 15980 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_validate_dialogue_scope_objects` | 15991 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_validate_dialogue_repair_scope` | 16013 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_apply_dialogue_operation_scope` | 16028 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_dialogue_action` | 16046 | `coach/dialogue.py` | P7 | offen | tests/test_coach_dialogue.py:273 (direkt/dynamisch unklar) |
-| Funktion | `_check_dialogue_plan_date` | 16076 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_validate_dialogue_plan_changes` | 16082 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_validate_dialogue_plan_artifact` | 16096 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_validate_dialogue_plan_scope` | 16106 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_save_coach_question` | 16119 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_validate_training_patch_schedule` | 16132 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_store_training_patch_constraints` | 16149 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_apply_training_patch` | 16162 | `coach/dialogue.py` | P7 | offen | tests/test_coach_tool_coverage.py:436 (Monkeypatch/getattr/sys.modules); tests/test_coach_tool_coverage.py:436 (direkt/dynamisch unklar); tests/test_server.py:5676 (direkt/dynamisch unklar) |
-| Funktion | `_alternative_planning_steps_repaired` | 16189 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_profile_repair_fields` | 16206 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_profile_steps_repaired` | 16211 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_matching_coach_steps_repaired` | 16220 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_coach_steps_repaired` | 16234 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_unresolved_coach_steps` | 16247 | `coach/proposals.py` | P7 | offen | tests/test_coach_dialogue.py:230 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:232 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:510 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:522 (direkt/dynamisch unklar) |
-| Funktion | `_dialogue_scope_repair_key` | 16257 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_dialogue_request_binding_key` | 16270 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_dialogue_plan_effect_key` | 16291 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_coach_repair_key` | 16314 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_dialogue_effect_key` | 16325 | `coach/dialogue.py` | P7 | offen | tests/test_coach_dialogue.py:774 (direkt/dynamisch unklar) |
-| Funktion | `_append_template_command_scope` | 16334 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_append_planning_command_scope` | 16346 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_planning_command_intent` | 16360 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_prepare_commit_planning_command` | 16368 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_prepare_planning_command` | 16383 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_claim_planning_command` | 16403 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_execute_claimed_planning_command` | 16427 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `execute_planning_command` | 16441 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_receipt` | 16452 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_attachments` | 16477 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_add_structured_coach_attachment_evidence` | 16493 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_request_payload` | 16508 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_send_structured_coach_response` | 16565 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_recover_structured_coach_conversation` | 16593 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_resume_background_coach_response` | 16623 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_recover_invalid_structured_conversation` | 16639 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_response_retry_delay` | 16659 | `providers/` | P2 | offen | tests/test_coach_language_recovery.py:70 (direkt/dynamisch unklar); tests/test_coach_language_recovery.py:78 (direkt/dynamisch unklar) |
-| Funktion | `_wait_for_coach_response_retry` | 16673 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Klasse | `_StructuredCoachResponseAttemptContext` | 16685 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_response_attempt` | 16695 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_response` | 16746 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_mark_resolved_coach_receipts` | 16808 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_coach_effects` | 16812 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_outcome_text` | 16817 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_persist_structured_coach_pending_request` | 16835 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_outcome_status` | 16854 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_outcome` | 16864 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_tool_call_metadata` | 16890 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_cached_structured_tool_call` | 16928 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_prepare_structured_plan_sync` | 16954 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_prepare_structured_tool_execution` | 16979 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_execute_structured_coach_tool` | 17010 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_structured_tool_call_failure` | 17050 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Klasse | `_StructuredCoachRoundState` | 17080 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_execute_structured_coach_tool_call` | 17100 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_function_calls` | 17158 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_record_structured_coach_tool_output` | 17162 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_followup_response` | 17178 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_run_structured_coach_tool_rounds` | 17194 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_turn_request` | 17226 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_apply_structured_coach_replay` | 17270 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_coach_final_receipt` | 17286 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_persist_structured_coach_final_receipt` | 17305 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_chat_with_structured_coach_impl` | 17331 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_require_command_owner` | 17408 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `current_coach_proposals` | 17413 | `coach/proposals.py` | P7 | offen | tests/test_coach_review.py:316 (direkt/dynamisch unklar); tests/test_coach_review.py:326 (direkt/dynamisch unklar) |
-| Funktion | `prune_expired_coach_proposals` | 17422 | `coach/proposals.py` | P7 | offen | tests/test_coach_review.py:302 (direkt/dynamisch unklar) |
-| Funktion | `coach_command_receipt` | 17427 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_command_failure_steps` | 17454 | `coach/service.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_command_failure_base_response` | 17472 | `coach/service.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_command_failure_effect_text` | 17501 | `coach/service.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_structured_command_failure_response` | 17520 | `coach/service.py` | P7 | offen | tests/test_server.py:4311 (direkt/dynamisch unklar); tests/test_server.py:4326 (direkt/dynamisch unklar); tests/test_server.py:4340 (direkt/dynamisch unklar) |
-| Funktion | `_persist_structured_command_failure_pending_request` | 17530 | `coach/service.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_persist_structured_command_failure` | 17545 | `coach/service.py` | P7 | offen | tests/test_provider_review.py:147 (Monkeypatch/getattr/sys.modules) |
-| Funktion | `_chat_with_structured_coach` | 17577 | `coach/authorization.py` | P7 | offen | tests/test_coach_review.py:220 (direkt/dynamisch unklar) |
-| Funktion | `coach_dialogue_artifact_refs` | 17592 | `coach/authorization.py` | P7 | offen | tests/test_coach_dialogue.py:564 (direkt/dynamisch unklar); tests/test_server.py:4413 (direkt/dynamisch unklar); tests/test_server.py:5329 (direkt/dynamisch unklar) |
-| Funktion | `chat_stream_status` | 17605 | `coach/authorization.py` | P7 | offen | tests/test_server.py:5717 (direkt/dynamisch unklar); tests/test_server.py:5720 (direkt/dynamisch unklar); tests/test_server.py:8190 (direkt/dynamisch unklar); tests/test_server.py:8193 (direkt/dynamisch unklar); tests/test_server.py:8194 (direkt/dynamisch unklar) |
-| Funktion | `_validated_chat_request` | 17624 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_recover_stale_chat_command` | 17637 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_chat_command_state` | 17661 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_chat_provider_settings` | 17677 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_resume_background_chat_command` | 17688 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `chat_with_coach` | 17703 | `coach/authorization.py` | P7 | offen | tests/test_audit_remediation.py:263 (direkt/dynamisch unklar); tests/test_audit_remediation.py:278 (Monkeypatch/getattr/sys.modules); tests/test_audit_remediation.py:301 (Monkeypatch/getattr/sys.modules); tests/test_coach_attachments.py:247 (direkt/dynamisch unklar); tests/test_coach_attachments.py:261 (direkt/dynamisch unklar); tests/test_coach_attachments.py:263 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:60 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:832 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:40 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:75 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:77 (direkt/dynamisch unklar); tests/test_coach_review.py:138 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:102 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:125 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:143 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:160 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:40 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:77 (Monkeypatch/getattr/sys.modules); tests/test_provider_review.py:147 (Monkeypatch/getattr/sys.modules); tests/test_server.py:5746 (Monkeypatch/getattr/sys.modules); tests/test_server.py:5770 (Monkeypatch/getattr/sys.modules); tests/test_server.py:5802 (direkt/dynamisch unklar); tests/test_server.py:5865 (Monkeypatch/getattr/sys.modules) |
-| Funktion | `resume_interrupted_coach_jobs` | 17727 | `sync/` | P6 | offen | tests/test_server.py:4489 (direkt/dynamisch unklar) |
-| Funktion | `_claim_background_coach_job` | 17768 | `coach/authorization.py` | P7 | offen | tests/test_audit_remediation.py:270 (direkt/dynamisch unklar); tests/test_coach_attachments.py:146 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:700 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:721 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:742 (direkt/dynamisch unklar); tests/test_server.py:4488 (direkt/dynamisch unklar); tests/test_server.py:5744 (direkt/dynamisch unklar); tests/test_server.py:5763 (direkt/dynamisch unklar); tests/test_server.py:5790 (direkt/dynamisch unklar); tests/test_server.py:5819 (direkt/dynamisch unklar); tests/test_server.py:5843 (direkt/dynamisch unklar) |
-| Funktion | `_requeue_background_coach_job` | 17793 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_background_coach_message` | 17819 | `coach/authorization.py` | P7 | offen | tests/test_coach_attachments.py:147 (direkt/dynamisch unklar) |
-| Funktion | `_background_coach_stream_delta` | 17829 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_background_coach_delta_callback` | 17833 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_background_coach_stream_receipt` | 17841 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_background_coach_cancel_event` | 17847 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_persist_completed_morning_coach_job` | 17857 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_execute_background_coach_job` | 17874 | `sync/` | P6 | offen | keine statisch gefunden |
-| Funktion | `_handle_background_coach_error` | 17905 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_handle_background_coach_exception` | 17927 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_run_background_coach_job` | 17942 | `coach/authorization.py` | P7 | offen | tests/test_audit_remediation.py:279 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:708 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:731 (direkt/dynamisch unklar); tests/test_provider_review.py:148 (direkt/dynamisch unklar); tests/test_server.py:5747 (direkt/dynamisch unklar); tests/test_server.py:5771 (direkt/dynamisch unklar); tests/test_server.py:5825 (direkt/dynamisch unklar); tests/test_server.py:5868 (direkt/dynamisch unklar) |
-| Funktion | `_coach_job_worker_loop` | 17963 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `start_coach_job_worker` | 17978 | `coach/authorization.py` | P7 | offen | tests/test_server.py:242 (direkt/dynamisch unklar) |
-| Funktion | `local_now` | 17989 | `runtime/` | P1 | offen | e2e/fixture_runtime.py:70 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:28 (Monkeypatch/getattr/sys.modules); tests/test_coach_review.py:281 (direkt/dynamisch unklar); tests/test_coach_review.py:282 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:113 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:132 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:184 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:196 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:210 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:228 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:23 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:245 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:66 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:90 (direkt/dynamisch unklar); tests/test_server.py:1202 (direkt/dynamisch unklar); tests/test_server.py:1586 (direkt/dynamisch unklar); tests/test_server.py:1602 (direkt/dynamisch unklar); tests/test_server.py:1603 (direkt/dynamisch unklar); tests/test_server.py:1624 (direkt/dynamisch unklar); tests/test_server.py:1642 (direkt/dynamisch unklar); tests/test_server.py:1661 (Monkeypatch/getattr/sys.modules); tests/test_server.py:1674 (direkt/dynamisch unklar); tests/test_server.py:1711 (direkt/dynamisch unklar); tests/test_server.py:1719 (direkt/dynamisch unklar); tests/test_server.py:1759 (direkt/dynamisch unklar); tests/test_server.py:2440 (direkt/dynamisch unklar); tests/test_server.py:2506 (direkt/dynamisch unklar); tests/test_server.py:2565 (direkt/dynamisch unklar); tests/test_server.py:2575 (direkt/dynamisch unklar); tests/test_server.py:2753 (Monkeypatch/getattr/sys.modules); tests/test_server.py:2813 (Monkeypatch/getattr/sys.modules); tests/test_server.py:2843 (Monkeypatch/getattr/sys.modules); tests/test_server.py:2852 (direkt/dynamisch unklar); tests/test_server.py:3340 (direkt/dynamisch unklar); tests/test_server.py:3359 (direkt/dynamisch unklar); tests/test_server.py:3391 (direkt/dynamisch unklar); tests/test_server.py:3416 (direkt/dynamisch unklar); tests/test_server.py:3506 (direkt/dynamisch unklar); tests/test_server.py:3507 (direkt/dynamisch unklar); tests/test_server.py:3551 (direkt/dynamisch unklar); tests/test_server.py:5086 (direkt/dynamisch unklar); tests/test_server.py:5135 (direkt/dynamisch unklar); tests/test_server.py:5152 (direkt/dynamisch unklar); tests/test_server.py:5174 (direkt/dynamisch unklar); tests/test_server.py:5201 (direkt/dynamisch unklar); tests/test_server.py:5233 (direkt/dynamisch unklar); tests/test_server.py:541 (direkt/dynamisch unklar); tests/test_server.py:5908 (direkt/dynamisch unklar); tests/test_server.py:7242 (direkt/dynamisch unklar); tests/test_server.py:7560 (direkt/dynamisch unklar); tests/test_server.py:8291 (direkt/dynamisch unklar); tests/test_workout_text.py:14 (Monkeypatch/getattr/sys.modules) |
-| Funktion | `daily_sync_due` | 17998 | `sync/scheduler.py` | P8 | offen | tests/test_audit_remediation.py:154 (Monkeypatch/getattr/sys.modules); tests/test_server.py:1943 (direkt/dynamisch unklar); tests/test_server.py:1944 (direkt/dynamisch unklar); tests/test_server.py:1945 (direkt/dynamisch unklar) |
-| Funktion | `mark_daily_sync` | 18006 | `sync/daily.py` | P6 | offen | tests/test_server.py:1942 (direkt/dynamisch unklar) |
-| Funktion | `morning_checkin_date` | 18014 | `coach/authorization.py` | P7 | offen | tests/test_diagnostic_followups.py:24 (direkt/dynamisch unklar) |
-| Funktion | `morning_checkin_state` | 18019 | `coach/authorization.py` | P7 | offen | tests/test_diagnostic_followups.py:207 (direkt/dynamisch unklar) |
-| Globale Bindung | `MORNING_CHECKIN_PROMPT` | 18030 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Globale Bindung | `MORNING_GARMIN_SYNC_DAYS` | 18042 | `sync/garmin.py` | P6 | offen | tests/test_diagnostic_followups.py:107 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:129 (direkt/dynamisch unklar); tests/test_server.py:4020 (direkt/dynamisch unklar) |
-| Funktion | `_start_morning_checkin` | 18045 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_morning_checkin_garmin_ready` | 18052 | `coach/authorization.py` | P7 | offen | tests/test_server.py:4018 (direkt/dynamisch unklar) |
-| Funktion | `_morning_checkin_attempt` | 18069 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_wait_for_morning_intervals_sync` | 18075 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_complete_morning_checkin` | 18083 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `run_morning_checkin` | 18095 | `coach/authorization.py` | P7 | offen | tests/test_audit_remediation.py:302 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:104 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:127 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:145 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:162 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:79 (direkt/dynamisch unklar) |
-| Funktion | `_reserve_morning_checkin` | 18127 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_run_scheduled_morning_checkin` | 18148 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_start_scheduled_morning_checkin` | 18162 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `schedule_morning_checkin` | 18175 | `coach/authorization.py` | P7 | offen | tests/test_diagnostic_followups.py:171 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:41 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:43 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:46 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:49 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:57 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:61 (direkt/dynamisch unklar) |
-| Funktion | `bootstrap_provider_states` | 18194 | `http_api/bootstrap.py` | P10 | offen | keine statisch gefunden |
-| Funktion | `public_bootstrap` | 18228 | `http_api/` | P10 | offen | tests/test_diagnostic_followups.py:29 (direkt/dynamisch unklar); tests/test_server.py:1769 (direkt/dynamisch unklar); tests/test_server.py:1783 (direkt/dynamisch unklar); tests/test_server.py:1826 (direkt/dynamisch unklar); tests/test_server.py:1908 (direkt/dynamisch unklar); tests/test_server.py:8331 (direkt/dynamisch unklar) |
-| Funktion | `public_plan_state` | 18302 | `http_api/` | P10 | offen | tests/test_server.py:1216 (direkt/dynamisch unklar); tests/test_server.py:2845 (direkt/dynamisch unklar) |
-| Funktion | `public_performance_state` | 18338 | `http_api/` | P10 | offen | keine statisch gefunden |
-| Funktion | `public_feedback_state` | 18343 | `http_api/` | P10 | offen | keine statisch gefunden |
-| Funktion | `public_weather_state` | 18347 | `http_api/` | P10 | offen | tests/test_audit_remediation.py:98 (direkt/dynamisch unklar); tests/test_server.py:1266 (direkt/dynamisch unklar) |
-| Funktion | `public_state` | 18354 | `http_api/` | P10 | offen | tests/test_server.py:1238 (direkt/dynamisch unklar); tests/test_server.py:1246 (direkt/dynamisch unklar); tests/test_server.py:1669 (direkt/dynamisch unklar); tests/test_server.py:1714 (direkt/dynamisch unklar); tests/test_server.py:2379 (direkt/dynamisch unklar); tests/test_server.py:3556 (direkt/dynamisch unklar); tests/test_server.py:7171 (direkt/dynamisch unklar); tests/test_server.py:8331 (direkt/dynamisch unklar) |
-| Funktion | `recent_log_entries` | 18466 | `diagnostics/report.py` | P9 | offen | tests/test_server.py:7705 (direkt/dynamisch unklar); tests/test_server.py:7757 (direkt/dynamisch unklar); tests/test_server.py:7871 (direkt/dynamisch unklar); tests/test_server.py:7902 (direkt/dynamisch unklar); tests/test_server.py:8077 (direkt/dynamisch unklar); tests/test_server.py:8113 (direkt/dynamisch unklar); tests/test_server.py:8387 (direkt/dynamisch unklar) |
-| Funktion | `_diagnostic_frame` | 18483 | `diagnostics/report.py` | P9 | offen | keine statisch gefunden |
-| Funktion | `_diagnostic_error_metadata` | 18499 | `diagnostics/report.py` | P9 | offen | keine statisch gefunden |
-| Funktion | `_diagnostic_command_steps` | 18520 | `diagnostics/report.py` | P9 | offen | keine statisch gefunden |
-| Funktion | `_diagnostic_history_entry` | 18534 | `diagnostics/report.py` | P9 | offen | keine statisch gefunden |
-| Funktion | `coach_diagnostic_history` | 18550 | `diagnostics/report.py` | P9 | offen | tests/test_coach_dialogue.py:497 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:91 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:345 (direkt/dynamisch unklar) |
-| Funktion | `diagnostic_report` | 18559 | `diagnostics/report.py` | P9 | offen | tests/test_diagnostic_followups.py:32 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:332 (direkt/dynamisch unklar); tests/test_server.py:7620 (direkt/dynamisch unklar); tests/test_server.py:7622 (direkt/dynamisch unklar); tests/test_server.py:7623 (direkt/dynamisch unklar); tests/test_server.py:7670 (direkt/dynamisch unklar); tests/test_server.py:7733 (direkt/dynamisch unklar); tests/test_server.py:7748 (direkt/dynamisch unklar); tests/test_server.py:8504 (direkt/dynamisch unklar) |
-| Funktion | `privacy_export` | 18622 | `privacy.py` | P9 | offen | tests/test_coach_attachments.py:156 (direkt/dynamisch unklar); tests/test_server.py:1449 (direkt/dynamisch unklar) |
-| Globale Bindung | `PRIVACY_EXPORT_FORMAT_VERSION` | 18672 | `privacy.py` | P9 | offen | keine statisch gefunden |
-| Globale Bindung | `PRIVACY_EXPORT_JSONL_FILES` | 18673 | `privacy.py` | P9 | offen | keine statisch gefunden |
-| Funktion | `_export_payload` | 18697 | `backup/` | P9 | offen | keine statisch gefunden |
-| Funktion | `_export_jsonl_rows` | 18701 | `backup/` | P9 | offen | keine statisch gefunden |
-| Funktion | `_export_workout_library` | 18712 | `backup/` | P9 | offen | keine statisch gefunden |
-| Funktion | `_export_planned_units` | 18716 | `backup/` | P9 | offen | keine statisch gefunden |
-| Funktion | `_export_application_state` | 18726 | `backup/` | P9 | offen | keine statisch gefunden |
-| Funktion | `_privacy_export_file` | 18734 | `privacy.py` | P9 | offen | tests/test_audit_remediation.py:187 (direkt/dynamisch unklar); tests/test_server.py:1464 (direkt/dynamisch unklar) |
-| Globale Bindung | `_configure_cipher` | 18873 | `db/manager.py` | P1 | offen | tests/test_server.py:6437 (direkt/dynamisch unklar); tests/test_server.py:6450 (direkt/dynamisch unklar) |
-| Funktion | `_checkpoint_database_locked` | 18876 | `http_api/` | P10 | offen | keine statisch gefunden |
-| Funktion | `database_backup_bytes` | 18889 | `backup/` | P9 | offen | tests/test_audit_remediation.py:291 (direkt/dynamisch unklar); tests/test_server.py:6426 (direkt/dynamisch unklar) |
-| Funktion | `stream_database_backup` | 18898 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `stream_privacy_export` | 18919 | `coach/authorization.py` | P7 | offen | tests/test_server.py:1492 (direkt/dynamisch unklar) |
-| Funktion | `restore_database_backup` | 18930 | `backup/` | P9 | offen | tests/test_audit_remediation.py:293 (direkt/dynamisch unklar); tests/test_server.py:6427 (direkt/dynamisch unklar); tests/test_server.py:6443 (direkt/dynamisch unklar); tests/test_server.py:6456 (direkt/dynamisch unklar) |
-| Funktion | `_temporary_restore_database` | 18935 | `backup/` | P9 | offen | keine statisch gefunden |
-| Funktion | `_validate_restore_connection` | 18944 | `backup/` | P9 | offen | keine statisch gefunden |
-| Funktion | `_validate_restore_database` | 18961 | `backup/` | P9 | offen | keine statisch gefunden |
-| Funktion | `_replace_database_with_restore` | 18973 | `backup/` | P9 | offen | keine statisch gefunden |
-| Funktion | `_resume_after_database_restore` | 18991 | `backup/` | P9 | offen | keine statisch gefunden |
-| Funktion | `_restore_database_backup` | 18998 | `backup/` | P9 | offen | keine statisch gefunden |
-| Funktion | `delete_remote_conversation` | 19019 | `coach/authorization.py` | P7 | offen | tests/test_server.py:1532 (Monkeypatch/getattr/sys.modules); tests/test_server.py:1548 (Monkeypatch/getattr/sys.modules); tests/test_server.py:4502 (Monkeypatch/getattr/sys.modules); tests/test_server.py:5323 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8450 (Monkeypatch/getattr/sys.modules) |
-| Globale Bindung | `PRIVACY_DELETE_SCOPE` | 19032 | `coach/authorization.py` | P7 | offen | tests/test_server.py:1541 (direkt/dynamisch unklar); tests/test_server.py:1545 (direkt/dynamisch unklar); tests/test_server.py:1551 (direkt/dynamisch unklar) |
-| Globale Bindung | `PRIVACY_REMOTE_SCOPE` | 19047 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
-| Funktion | `_privacy_delete_counts` | 19054 | `privacy.py` | P9 | offen | keine statisch gefunden |
-| Funktion | `privacy_delete_preview` | 19061 | `privacy.py` | P9 | offen | tests/test_server.py:1544 (direkt/dynamisch unklar) |
-| Funktion | `delete_local_data` | 19076 | `privacy.py` | P9 | offen | tests/test_audit_remediation.py:103 (direkt/dynamisch unklar); tests/test_provider_review.py:116 (direkt/dynamisch unklar); tests/test_provider_review.py:137 (direkt/dynamisch unklar); tests/test_provider_review.py:146 (direkt/dynamisch unklar); tests/test_provider_review.py:164 (direkt/dynamisch unklar); tests/test_server.py:1533 (direkt/dynamisch unklar); tests/test_server.py:1549 (direkt/dynamisch unklar); tests/test_server.py:8451 (direkt/dynamisch unklar) |
-| Globale Bindung | `SESSION_COOKIE` | 19105 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
-| Globale Bindung | `CSRF_COOKIE` | 19106 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
-| Globale Bindung | `SESSION_TTL_SECONDS` | 19107 | `http_api/auth.py` | P10 | offen | tests/support.py:134 (direkt/dynamisch unklar) |
-| Globale Bindung | `SESSION_TOUCH_INTERVAL_SECONDS` | 19108 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
-| Globale Bindung | `SESSION_CLEANUP_INTERVAL_SECONDS` | 19109 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
-| Globale Bindung | `SESSION_CLEANUP_BATCH_SIZE` | 19110 | `http_api/auth.py` | P10 | offen | tests/test_server.py:1364 (direkt/dynamisch unklar); tests/test_server.py:1372 (direkt/dynamisch unklar) |
-| Globale Bindung | `SESSION_LAST_CLEANUP_MONOTONIC` | 19111 | `http_api/auth.py` | P10 | offen | tests/test_server.py:1369 (direkt/dynamisch unklar) |
-| Globale Bindung | `RATE_LIMIT_CLEANUP_INTERVAL_SECONDS` | 19112 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
-| Globale Bindung | `RATE_LIMIT_CLEANUP_BATCH_SIZE` | 19113 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
-| Globale Bindung | `RATE_LIMIT_BUCKET_MAX_AGE_SECONDS` | 19114 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
-| Globale Bindung | `RATE_LIMIT_LAST_CLEANUP_MONOTONIC` | 19115 | `http_api/auth.py` | P10 | offen | tests/test_server.py:7835 (direkt/dynamisch unklar) |
-| Funktion | `client_ip` | 19118 | `http_api/` | P10 | offen | keine statisch gefunden |
-| Funktion | `allow_rate` | 19122 | `http_api/` | P10 | offen | e2e/fixture_runtime.py:33 (direkt/dynamisch unklar); tests/test_provider_review.py:185 (Monkeypatch/getattr/sys.modules); tests/test_provider_review.py:329 (Monkeypatch/getattr/sys.modules); tests/test_server.py:7837 (direkt/dynamisch unklar) |
-| Funktion | `cookie_value` | 19147 | `http_api/` | P10 | offen | keine statisch gefunden |
-| Funktion | `session_token_hash` | 19156 | `http_api/auth.py` | P10 | offen | tests/support.py:134 (direkt/dynamisch unklar); tests/test_coach_review.py:116 (direkt/dynamisch unklar); tests/test_server.py:1328 (direkt/dynamisch unklar); tests/test_server.py:1357 (direkt/dynamisch unklar); tests/test_server.py:1360 (direkt/dynamisch unklar); tests/test_server.py:1409 (direkt/dynamisch unklar); tests/test_server.py:1416 (direkt/dynamisch unklar); tests/test_server.py:5732 (direkt/dynamisch unklar); tests/test_server.py:5736 (direkt/dynamisch unklar); tests/test_server.py:5751 (direkt/dynamisch unklar); tests/test_server.py:5755 (direkt/dynamisch unklar) |
-| Funktion | `session_timestamp` | 19160 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
-| Funktion | `cleanup_expired_sessions` | 19170 | `http_api/auth.py` | P10 | offen | tests/test_server.py:1370 (direkt/dynamisch unklar) |
-| Funktion | `readiness_state` | 19185 | `performance/` | P3 | offen | tests/test_server.py:7800 (direkt/dynamisch unklar); tests/test_server.py:7810 (direkt/dynamisch unklar); tests/test_server.py:7818 (direkt/dynamisch unklar); tests/test_server.py:7825 (direkt/dynamisch unklar) |
-| Funktion | `authenticated_session` | 19227 | `http_api/auth.py` | P10 | offen | tests/test_server.py:1334 (direkt/dynamisch unklar); tests/test_server.py:1337 (direkt/dynamisch unklar); tests/test_server.py:1358 (direkt/dynamisch unklar); tests/test_server.py:1391 (direkt/dynamisch unklar); tests/test_server.py:1428 (direkt/dynamisch unklar); tests/test_server.py:3252 (direkt/dynamisch unklar) |
-| Funktion | `login_user` | 19253 | `http_api/auth.py` | P10 | offen | tests/test_provider_review.py:188 (direkt/dynamisch unklar); tests/test_provider_review.py:191 (direkt/dynamisch unklar); tests/test_provider_review.py:332 (direkt/dynamisch unklar); tests/test_server.py:3249 (direkt/dynamisch unklar) |
-| Funktion | `logout_user` | 19272 | `http_api/auth.py` | P10 | offen | tests/test_server.py:1427 (direkt/dynamisch unklar) |
-| Funktion | `require_auth` | 19280 | `http_api/` | P10 | offen | e2e/fixture_runtime.py:89 (direkt/dynamisch unklar) |
-| Funktion | `require_csrf` | 19292 | `http_api/` | P10 | offen | tests/test_server.py:1409 (direkt/dynamisch unklar); tests/test_server.py:1416 (direkt/dynamisch unklar); tests/test_server.py:3254 (direkt/dynamisch unklar) |
-| Funktion | `session_cookie_headers` | 19298 | `http_api/` | P10 | offen | tests/test_server.py:1309 (direkt/dynamisch unklar); tests/test_server.py:1315 (direkt/dynamisch unklar) |
-| Klasse | `RequestHandler` | 19311 | `http_api/` | P10 | offen | e2e/fixture_runtime.py:102 (direkt/dynamisch unklar); e2e/fixture_runtime.py:85 (direkt/dynamisch unklar); tests/test_audit_remediation.py:209 (direkt/dynamisch unklar); tests/test_server.py:1512 (direkt/dynamisch unklar); tests/test_server.py:1807 (direkt/dynamisch unklar); tests/test_server.py:7348 (direkt/dynamisch unklar); tests/test_server.py:7358 (direkt/dynamisch unklar); tests/test_server.py:7364 (direkt/dynamisch unklar); tests/test_server.py:7374 (direkt/dynamisch unklar); tests/test_server.py:7386 (direkt/dynamisch unklar); tests/test_server.py:7391 (direkt/dynamisch unklar); tests/test_server.py:7395 (direkt/dynamisch unklar); tests/test_server.py:7398 (direkt/dynamisch unklar); tests/test_server.py:7404 (direkt/dynamisch unklar); tests/test_server.py:7414 (direkt/dynamisch unklar); tests/test_server.py:7421 (direkt/dynamisch unklar); tests/test_server.py:7428 (direkt/dynamisch unklar); tests/test_server.py:7435 (direkt/dynamisch unklar); tests/test_server.py:8203 (direkt/dynamisch unklar); tests/test_server.py:8226 (direkt/dynamisch unklar) |
-| Klasse | `CoachHTTPServer` | 19990 | `http_api/` | P10 | offen | tests/test_audit_remediation.py:209 (direkt/dynamisch unklar); tests/test_server.py:222 (Monkeypatch/getattr/sys.modules) |
-| Funktion | `daily_sync_loop` | 19995 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_scheduler_garmin_configured` | 20008 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_schedule_daily_weather_job` | 20012 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_schedule_daily_calendar_job` | 20018 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_schedule_daily_garmin_job` | 20024 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_schedule_daily_intervals_job` | 20030 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `schedule_daily_sync_jobs` | 20038 | `sync/scheduler.py` | P8 | offen | tests/test_audit_remediation.py:155 (direkt/dynamisch unklar) |
-| Funktion | `_startup_historical_backfill_payload` | 20045 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_enqueue_startup_calendar_job` | 20059 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_enqueue_startup_intervals_jobs` | 20064 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_enqueue_startup_garmin_jobs` | 20076 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_enqueue_startup_weather_job` | 20088 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `enqueue_startup_sync_jobs` | 20093 | `sync/` | P6 | offen | tests/test_server.py:1023 (direkt/dynamisch unklar); tests/test_server.py:1032 (direkt/dynamisch unklar); tests/test_server.py:226 (Monkeypatch/getattr/sys.modules) |
-| Funktion | `main` | 20101 | `server.py / Composition Root` | P11 | offen | e2e/fixture_runtime.py:103 (direkt/dynamisch unklar); tests/test_server.py:229 (direkt/dynamisch unklar) |
+| Funktion | `request_ai_provider` | 13367 | `providers/` | P2 | offen | keine statisch gefunden |
+| Funktion | `responses_request` | 13372 | `providers/` | P2 | offen | e2e/fixture_runtime.py:60 (direkt/dynamisch unklar); tests/test_audit_remediation.py:262 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:59 (Monkeypatch/getattr/sys.modules); tests/test_coach_response_failure.py:36 (Monkeypatch/getattr/sys.modules); tests/test_coach_response_failure.py:72 (Monkeypatch/getattr/sys.modules); tests/test_server.py:4470 (direkt/dynamisch unklar); tests/test_server.py:5302 (direkt/dynamisch unklar); tests/test_server.py:5693 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8010 (direkt/dynamisch unklar) |
+| Funktion | `_openai_response_id` | 13397 | `providers/` | P2 | offen | keine statisch gefunden |
+| Funktion | `retrieve_openai_response` | 13404 | `providers/` | P2 | offen | keine statisch gefunden |
+| Funktion | `cancel_openai_response` | 13419 | `providers/` | P2 | offen | keine statisch gefunden |
+| Funktion | `responses_background_request` | 13437 | `providers/` | P2 | offen | e2e/fixture_runtime.py:61 (direkt/dynamisch unklar); tests/test_coach_attachments.py:246 (Monkeypatch/getattr/sys.modules); tests/test_coach_attachments.py:260 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:59 (Monkeypatch/getattr/sys.modules); tests/test_server.py:5699 (direkt/dynamisch unklar) |
+| Funktion | `_raise_chat_cancelled` | 13474 | `coach/context.py` | P7 | offen | tests/test_server.py:5959 (direkt/dynamisch unklar) |
+| Funktion | `_read_openai_stream_response` | 13479 | `providers/` | P2 | offen | keine statisch gefunden |
+| Funktion | `_log_openai_stream_failure` | 13517 | `observability.py` | P1 | offen | tests/test_server.py:8118 (direkt/dynamisch unklar); tests/test_server.py:8129 (direkt/dynamisch unklar) |
+| Funktion | `_capture_openai_stream_failure` | 13536 | `providers/` | P2 | offen | keine statisch gefunden |
+| Funktion | `_handle_openai_stream_app_error` | 13550 | `providers/` | P2 | offen | keine statisch gefunden |
+| Funktion | `_handle_openai_stream_disconnect` | 13562 | `providers/` | P2 | offen | keine statisch gefunden |
+| Funktion | `_handle_openai_stream_http_error` | 13573 | `providers/` | P2 | offen | tests/test_server.py:7994 (direkt/dynamisch unklar) |
+| Funktion | `_handle_openai_stream_timeout` | 13605 | `providers/` | P2 | offen | keine statisch gefunden |
+| Funktion | `_handle_openai_stream_network_error` | 13621 | `providers/` | P2 | offen | keine statisch gefunden |
+| Funktion | `openai_stream_request` | 13636 | `providers/` | P2 | offen | tests/test_server.py:4702 (direkt/dynamisch unklar); tests/test_server.py:8030 (direkt/dynamisch unklar); tests/test_server.py:8071 (direkt/dynamisch unklar); tests/test_server.py:8085 (direkt/dynamisch unklar); tests/test_server.py:8109 (direkt/dynamisch unklar); tests/test_server.py:8159 (direkt/dynamisch unklar); tests/test_server.py:8165 (Monkeypatch/getattr/sys.modules) |
+| Funktion | `responses_stream_request` | 13713 | `coach/context.py` | P7 | offen | e2e/fixture_runtime.py:64 (direkt/dynamisch unklar); tests/test_server.py:4275 (direkt/dynamisch unklar); tests/test_server.py:5799 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8166 (direkt/dynamisch unklar) |
+| Funktion | `ensure_conversation` | 13739 | `coach/context.py` | P7 | offen | e2e/fixture_runtime.py:29 (direkt/dynamisch unklar); tests/test_audit_remediation.py:262 (Monkeypatch/getattr/sys.modules); tests/test_coach_attachments.py:246 (Monkeypatch/getattr/sys.modules); tests/test_coach_attachments.py:260 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:57 (Monkeypatch/getattr/sys.modules); tests/test_coach_response_failure.py:34 (Monkeypatch/getattr/sys.modules); tests/test_coach_response_failure.py:70 (Monkeypatch/getattr/sys.modules); tests/test_coach_review.py:133 (Monkeypatch/getattr/sys.modules) |
+| Funktion | `_delete_reset_coach_conversation` | 13758 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_cancel_reset_coach_commands` | 13771 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_reset_local_coach_chat_state` | 13789 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_request_coach_operation_cancellation` | 13802 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_clear_coach_conversation_state` | 13808 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `reset_coach_chat` | 13816 | `coach/context.py` | P7 | offen | tests/test_audit_remediation.py:308 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:394 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:741 (direkt/dynamisch unklar); tests/test_server.py:4503 (direkt/dynamisch unklar); tests/test_server.py:5324 (direkt/dynamisch unklar) |
+| Funktion | `output_text` | 13825 | `providers/` | P2 | offen | tests/test_server.py:4215 (direkt/dynamisch unklar); tests/test_server.py:4247 (direkt/dynamisch unklar); tests/test_server.py:4281 (direkt/dynamisch unklar); tests/test_server.py:4469 (Monkeypatch/getattr/sys.modules) |
+| Globale Bindung | `COACH_ACTION_TTL_SECONDS` | 13829 | `coach/` | P7 | offen | tests/test_coach_review.py:257 (direkt/dynamisch unklar) |
+| Globale Bindung | `COACH_ACTION_TYPES` | 13830 | `coach/` | P7 | offen | keine statisch gefunden |
+| Funktion | `_coach_action_hash` | 13833 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_coach_action_view` | 13837 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `duplicate_activity_delete_preview` | 13850 | `activities/` | P3 | offen | keine statisch gefunden |
+| Funktion | `_remove_intervals_activity_from_local_snapshot` | 13875 | `activities/` | P3 | offen | keine statisch gefunden |
+| Funktion | `delete_duplicate_intervals_activity` | 13899 | `activities/` | P3 | offen | tests/test_server.py:7551 (direkt/dynamisch unklar) |
+| Funktion | `validated_coach_action_preview_input` | 13919 | `coach/context.py` | P7 | offen | tests/test_server.py:8403 (direkt/dynamisch unklar); tests/test_server.py:8414 (direkt/dynamisch unklar) |
+| Funktion | `assert_duplicate_action_preview_is_current` | 13941 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `create_coach_action_preview` | 13950 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `confirm_coach_action_preview` | 13972 | `coach/context.py` | P7 | offen | tests/test_coach_review.py:231 (direkt/dynamisch unklar); tests/test_coach_review.py:232 (direkt/dynamisch unklar); tests/test_coach_review.py:256 (direkt/dynamisch unklar); tests/test_coach_review.py:270 (direkt/dynamisch unklar); tests/test_coach_review.py:307 (direkt/dynamisch unklar); tests/test_coach_review.py:325 (direkt/dynamisch unklar); tests/test_coach_review.py:327 (direkt/dynamisch unklar); tests/test_coach_review.py:332 (direkt/dynamisch unklar); tests/test_server.py:8430 (direkt/dynamisch unklar); tests/test_server.py:8442 (direkt/dynamisch unklar) |
+| Funktion | `_execute_coach_action` | 13996 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `execute_coach_action` | 14005 | `coach/context.py` | P7 | offen | tests/test_coach_review.py:235 (direkt/dynamisch unklar); tests/test_coach_review.py:237 (direkt/dynamisch unklar); tests/test_coach_review.py:244 (direkt/dynamisch unklar); tests/test_coach_review.py:259 (direkt/dynamisch unklar); tests/test_coach_review.py:272 (direkt/dynamisch unklar); tests/test_coach_review.py:329 (direkt/dynamisch unklar); tests/test_coach_review.py:330 (direkt/dynamisch unklar); tests/test_server.py:8431 (direkt/dynamisch unklar); tests/test_server.py:8443 (direkt/dynamisch unklar) |
+| Funktion | `_coach_session_key` | 14034 | `coach/context.py` | P7 | offen | tests/test_coach_review.py:122 (direkt/dynamisch unklar); tests/test_coach_review.py:216 (direkt/dynamisch unklar) |
+| Funktion | `_restore_coach_session_csrf_hash` | 14038 | `coach/context.py` | P7 | offen | tests/test_audit_remediation.py:278 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:705 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:728 (Monkeypatch/getattr/sys.modules); tests/test_server.py:5824 (Monkeypatch/getattr/sys.modules) |
+| Funktion | `_coach_command_receipt` | 14055 | `coach/context.py` | P7 | offen | tests/test_server.py:5853 (direkt/dynamisch unklar) |
+| Funktion | `_merge_coach_command_receipt` | 14059 | `coach/context.py` | P7 | offen | tests/test_coach_dialogue.py:776 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:786 (direkt/dynamisch unklar); tests/test_coach_language_recovery.py:93 (direkt/dynamisch unklar); tests/test_server.py:5844 (direkt/dynamisch unklar) |
+| Funktion | `_active_background_coach_job` | 14071 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_background_coach_request` | 14088 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_background_coach_provider_settings` | 14115 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_existing_background_coach_job_response` | 14124 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_persist_background_coach_job` | 14141 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `enqueue_background_coach_job` | 14193 | `sync/` | P6 | offen | tests/test_audit_remediation.py:269 (direkt/dynamisch unklar); tests/test_coach_attachments.py:145 (direkt/dynamisch unklar); tests/test_coach_attachments.py:165 (direkt/dynamisch unklar); tests/test_coach_attachments.py:171 (direkt/dynamisch unklar); tests/test_coach_attachments.py:178 (direkt/dynamisch unklar); tests/test_coach_attachments.py:211 (direkt/dynamisch unklar); tests/test_coach_attachments.py:212 (direkt/dynamisch unklar); tests/test_coach_attachments.py:241 (direkt/dynamisch unklar); tests/test_coach_attachments.py:253 (direkt/dynamisch unklar); tests/test_coach_attachments.py:262 (direkt/dynamisch unklar); tests/test_coach_attachments.py:271 (direkt/dynamisch unklar); tests/test_coach_attachments.py:282 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:696 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:717 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:736 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:771 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:784 (direkt/dynamisch unklar); tests/test_coach_language_recovery.py:91 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:21 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:54 (direkt/dynamisch unklar); tests/test_coach_review.py:120 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:60 (direkt/dynamisch unklar); tests/test_server.py:4483 (direkt/dynamisch unklar); tests/test_server.py:5710 (direkt/dynamisch unklar); tests/test_server.py:5738 (direkt/dynamisch unklar); tests/test_server.py:5759 (direkt/dynamisch unklar); tests/test_server.py:5786 (direkt/dynamisch unklar); tests/test_server.py:5813 (direkt/dynamisch unklar); tests/test_server.py:5837 (direkt/dynamisch unklar) |
+| Funktion | `register_chat_stream` | 14226 | `coach/context.py` | P7 | offen | tests/test_server.py:5757 (direkt/dynamisch unklar); tests/test_server.py:8174 (direkt/dynamisch unklar); tests/test_server.py:8177 (direkt/dynamisch unklar); tests/test_server.py:8191 (direkt/dynamisch unklar); tests/test_server.py:8212 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8239 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8252 (direkt/dynamisch unklar) |
+| Funktion | `publish_chat_stream_event` | 14240 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `chat_stream_events` | 14255 | `coach/context.py` | P7 | offen | tests/test_server.py:5773 (direkt/dynamisch unklar); tests/test_server.py:8214 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8241 (Monkeypatch/getattr/sys.modules) |
+| Funktion | `_close_chat_provider_response` | 14264 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_cancel_attached_chat_stream` | 14273 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_cancel_background_chat_job` | 14285 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `cancel_chat_stream` | 14302 | `coach/context.py` | P7 | offen | tests/test_audit_remediation.py:273 (direkt/dynamisch unklar); tests/test_server.py:8180 (direkt/dynamisch unklar); tests/test_server.py:8182 (direkt/dynamisch unklar); tests/test_server.py:8256 (direkt/dynamisch unklar) |
+| Funktion | `unregister_chat_stream` | 14310 | `coach/context.py` | P7 | offen | tests/test_server.py:5781 (direkt/dynamisch unklar); tests/test_server.py:8186 (direkt/dynamisch unklar); tests/test_server.py:8197 (direkt/dynamisch unklar); tests/test_server.py:8213 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8261 (direkt/dynamisch unklar) |
+| Globale Bindung | `COACH_TOOL_MAX_ROUNDS` | 14317 | `coach/` | P7 | offen | tests/test_coach_dialogue.py:793 (Monkeypatch/getattr/sys.modules) |
+| Globale Bindung | `COACH_COMMAND_STALE_SECONDS` | 14318 | `coach/` | P7 | offen | keine statisch gefunden |
+| Globale Bindung | `COACH_CANONICAL_TOOL_NAMES` | 14319 | `coach/` | P7 | offen | keine statisch gefunden |
+| Globale Bindung | `COACH_STRUCTURED_TOOLS` | 14319 | `coach/` | P7 | offen | tests/test_server.py:399 (direkt/dynamisch unklar); tests/test_server.py:455 (direkt/dynamisch unklar); tests/test_server.py:4718 (direkt/dynamisch unklar); tests/test_server.py:4721 (direkt/dynamisch unklar); tests/test_server.py:5071 (direkt/dynamisch unklar) |
+| Globale Bindung | `STRUCTURED_READ_ONLY_TOOLS` | 14319 | `coach/context.py` | P7 | offen | tests/test_coach_dialogue.py:271 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:425 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:567 (direkt/dynamisch unklar); tests/test_coach_tool_coverage.py:401 (direkt/dynamisch unklar) |
+| Globale Bindung | `COACH_DIALOGUE_TOOLS` | 14319 | `coach/` | P7 | offen | tests/test_coach_dialogue.py:268 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:568 (direkt/dynamisch unklar); tests/test_coach_tool_coverage.py:388 (direkt/dynamisch unklar); tests/test_coach_tool_coverage.py:402 (direkt/dynamisch unklar) |
+| Funktion | `coach_execution_scope` | 14328 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_coach_scope_values` | 14336 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_require_coach_scope` | 14340 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_training_state_after_key` | 14345 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_structured_training_state_snapshot` | 14356 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_structured_training_target_ref` | 14381 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_structured_training_state_page` | 14400 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_structured_training_state` | 14412 | `planning/` | P4 | offen | tests/test_coach_dialogue.py:64 (direkt/dynamisch unklar); tests/test_server.py:2905 (direkt/dynamisch unklar); tests/test_server.py:2907 (direkt/dynamisch unklar); tests/test_server.py:5337 (direkt/dynamisch unklar); tests/test_server.py:5373 (direkt/dynamisch unklar); tests/test_server.py:5396 (direkt/dynamisch unklar); tests/test_server.py:5398 (direkt/dynamisch unklar); tests/test_server.py:5414 (direkt/dynamisch unklar); tests/test_server.py:5421 (direkt/dynamisch unklar); tests/test_server.py:5435 (direkt/dynamisch unklar); tests/test_server.py:5458 (direkt/dynamisch unklar); tests/test_server.py:5483 (direkt/dynamisch unklar); tests/test_server.py:5512 (direkt/dynamisch unklar); tests/test_server.py:5532 (direkt/dynamisch unklar); tests/test_server.py:5584 (direkt/dynamisch unklar); tests/test_server.py:5597 (direkt/dynamisch unklar); tests/test_server.py:5603 (direkt/dynamisch unklar); tests/test_server.py:5632 (direkt/dynamisch unklar); tests/test_server.py:5659 (direkt/dynamisch unklar); tests/test_server.py:5662 (direkt/dynamisch unklar); tests/test_server.py:5683 (direkt/dynamisch unklar); tests/test_server.py:736 (direkt/dynamisch unklar); tests/test_server.py:749 (direkt/dynamisch unklar); tests/test_server.py:825 (direkt/dynamisch unklar); tests/test_server.py:860 (direkt/dynamisch unklar); tests/test_workout_repair.py:372 (direkt/dynamisch unklar); tests/test_workout_repair.py:489 (direkt/dynamisch unklar); tests/test_workout_repair.py:492 (direkt/dynamisch unklar); tests/test_workout_repair.py:500 (direkt/dynamisch unklar); tests/test_workout_repair.py:505 (direkt/dynamisch unklar); tests/test_workout_repair.py:508 (direkt/dynamisch unklar); tests/test_workout_repair.py:512 (direkt/dynamisch unklar); tests/test_workout_repair.py:70 (direkt/dynamisch unklar) |
+| Funktion | `_structured_artifact_payload` | 14435 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_action_payload` | 14442 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_validate_structured_plan_limits` | 14449 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_validate_plan_calendar` | 14467 | `providers/` | P2 | offen | keine statisch gefunden |
+| Funktion | `_stage_coach_artifact` | 14477 | `coach/context.py` | P7 | offen | e2e/fixture_runtime.py:71 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:563 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:839 (direkt/dynamisch unklar); tests/test_coach_review.py:162 (direkt/dynamisch unklar); tests/test_coach_review.py:173 (direkt/dynamisch unklar); tests/test_coach_review.py:294 (direkt/dynamisch unklar); tests/test_server.py:322 (direkt/dynamisch unklar); tests/test_server.py:347 (direkt/dynamisch unklar); tests/test_server.py:4409 (direkt/dynamisch unklar); tests/test_server.py:5318 (direkt/dynamisch unklar) |
+| Funktion | `_validated_training_date` | 14490 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_record_created_training_change` | 14499 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_record_existing_training_change` | 14510 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_validate_training_change_dates` | 14542 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_validate_training_change_batch` | 14568 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_prepare_structured_training_change` | 14588 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_prepare_structured_training_changes` | 14612 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_validate_structured_training_revision` | 14624 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_validate_structured_training_change_hash` | 14637 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_validate_structured_training_change_hashes` | 14651 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_validate_structured_training_change_revisions` | 14659 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_structured_training_membership_update` | 14670 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_structured_training_change_moves_bounds` | 14692 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_collect_structured_training_memberships` | 14702 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_derived_structured_training_plan` | 14716 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_apply_authorized_structured_training_plan` | 14728 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_resolve_structured_training_plan_reference` | 14742 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_validate_structured_training_create_plan_ids` | 14750 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_derive_structured_training_plan` | 14763 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_apply_structured_training_change_rows` | 14772 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_planning_change_dependencies` | 14794 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_apply_structured_training_changes` | 14812 | `planning/` | P4 | offen | tests/test_server.py:4748 (direkt/dynamisch unklar); tests/test_server.py:4770 (direkt/dynamisch unklar); tests/test_server.py:4789 (direkt/dynamisch unklar); tests/test_server.py:4811 (direkt/dynamisch unklar); tests/test_server.py:4826 (direkt/dynamisch unklar); tests/test_server.py:4842 (direkt/dynamisch unklar); tests/test_server.py:4860 (direkt/dynamisch unklar); tests/test_server.py:4882 (direkt/dynamisch unklar); tests/test_server.py:4900 (direkt/dynamisch unklar); tests/test_server.py:4923 (direkt/dynamisch unklar); tests/test_server.py:4967 (direkt/dynamisch unklar); tests/test_server.py:4992 (direkt/dynamisch unklar); tests/test_server.py:5013 (direkt/dynamisch unklar); tests/test_server.py:5028 (direkt/dynamisch unklar); tests/test_server.py:5047 (direkt/dynamisch unklar); tests/test_server.py:5064 (direkt/dynamisch unklar) |
+| Funktion | `_apply_structured_training_changes_in_db` | 14823 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_prepare_structured_plan_replacement` | 14833 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_validate_replacement_workouts` | 14850 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_replacement_existing_state` | 14861 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_replacement_entries` | 14891 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_validate_replacement_calendar` | 14909 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_archive_replacement_entries` | 14915 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_archive_superseded_training_plans` | 14928 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_create_replacement_plan` | 14946 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_copy_replacement_constraints` | 14962 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_create_replacement_units` | 14975 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_replace_structured_training_plan` | 14989 | `planning/` | P4 | offen | tests/test_server.py:5438 (direkt/dynamisch unklar); tests/test_server.py:5485 (direkt/dynamisch unklar); tests/test_server.py:5513 (direkt/dynamisch unklar) |
+| Funktion | `_pending_plan_push_entries` | 15023 | `sync/` | P6 | offen | tests/test_coach_dialogue.py:177 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:240 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:686 (direkt/dynamisch unklar); tests/test_coach_language_recovery.py:105 (direkt/dynamisch unklar); tests/test_coach_tool_coverage.py:288 (direkt/dynamisch unklar); tests/test_server.py:1007 (direkt/dynamisch unklar); tests/test_server.py:1016 (direkt/dynamisch unklar); tests/test_server.py:380 (direkt/dynamisch unklar); tests/test_server.py:411 (direkt/dynamisch unklar); tests/test_server.py:8536 (direkt/dynamisch unklar); tests/test_server.py:929 (direkt/dynamisch unklar); tests/test_workout_repair.py:295 (direkt/dynamisch unklar); tests/test_workout_repair.py:391 (direkt/dynamisch unklar); tests/test_workout_repair.py:396 (direkt/dynamisch unklar); tests/test_workout_repair.py:413 (direkt/dynamisch unklar); tests/test_workout_repair.py:423 (direkt/dynamisch unklar) |
+| Funktion | `_local_planning_authoritative_rows` | 15036 | `sync/reconcile.py` | P6 | offen | keine statisch gefunden |
+| Funktion | `_mark_local_planning_row_authoritative` | 15048 | `sync/reconcile.py` | P6 | offen | keine statisch gefunden |
+| Funktion | `_mark_local_planning_authoritative` | 15063 | `sync/reconcile.py` | P6 | offen | tests/test_server.py:420 (Monkeypatch/getattr/sys.modules) |
+| Funktion | `_mark_local_competitions_authoritative` | 15075 | `sync/reconcile.py` | P6 | offen | tests/test_server.py:690 (direkt/dynamisch unklar); tests/test_server.py:700 (direkt/dynamisch unklar) |
+| Funktion | `_repair_manifest_rows` | 15105 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_repair_manifest_entries` | 15113 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_validate_repair_manifest_selection` | 15120 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_validate_repair_manifest_workouts` | 15142 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_refresh_repair_manifest_hashes` | 15149 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_coach_repair_manifest` | 15155 | `coach/context.py` | P7 | offen | tests/test_workout_repair.py:561 (direkt/dynamisch unklar) |
+| Funktion | `_enqueue_coach_plan_push` | 15173 | `coach/context.py` | P7 | offen | tests/test_server.py:444 (Monkeypatch/getattr/sys.modules); tests/test_workout_repair.py:173 (direkt/dynamisch unklar); tests/test_workout_repair.py:201 (direkt/dynamisch unklar) |
+| Funktion | `_structured_bounded_integer` | 15201 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_read_result` | 15210 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_profile_result` | 15237 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_authorized_coach_athlete_operation` | 15263 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_checkin_result` | 15268 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_activity_feedback_result` | 15274 | `activities/` | P3 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_delete_activity_feedback_result` | 15288 | `activities/` | P3 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_save_competition_result` | 15295 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_delete_competition_result` | 15303 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Globale Bindung | `ATHLETE_RECORD_HANDLERS` | 15310 | `athlete/` | P3 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_athlete_record_result` | 15319 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_stage_structured_training_plan` | 15326 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_training_template_result` | 15339 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_apply_library_plan_result` | 15362 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_commit_structured_training_plan` | 15376 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_persist_committed_training_plan` | 15390 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_validate_committed_training_plan` | 15418 | `unklar: performance/, coach/context.py, coach/conversation.py, providers/, activities/` | P0 (Zuordnung offen) | offen | keine statisch gefunden |
+| Funktion | `_replace_structured_coach_training_plan` | 15434 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_validate_structured_training_change_scopes` | 15453 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_apply_structured_coach_training_changes` | 15473 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_plan_tool_result` | 15495 | `coach/context.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_start_structured_provider_refresh` | 15511 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_run_structured_intervals_refresh` | 15528 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_retry_structured_intervals_refresh` | 15563 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_queue_structured_performance_refresh` | 15575 | `coach/jobs.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_sync_structured_plan_without_entries` | 15590 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_validate_selected_plan_sync_entries` | 15610 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_persist_selected_plan_sync_entries` | 15636 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_sync_structured_plan_entries` | 15654 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_sync_structured_training_plan` | 15662 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_resolve_structured_sync_conflict` | 15683 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_sync_tool_result` | 15710 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_misc_tool_result` | 15734 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_apply_structured_adaptive_replan` | 15761 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_tool_result` | 15782 | `coach/proposals.py` | P7 | offen | tests/test_coach_dialogue.py:777 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:97 (Monkeypatch/getattr/sys.modules); tests/test_coach_dialogue.py:97 (direkt/dynamisch unklar); tests/test_coach_review.py:104 (direkt/dynamisch unklar); tests/test_coach_review.py:165 (direkt/dynamisch unklar); tests/test_coach_review.py:166 (direkt/dynamisch unklar); tests/test_coach_review.py:176 (direkt/dynamisch unklar); tests/test_coach_review.py:186 (direkt/dynamisch unklar); tests/test_coach_review.py:202 (direkt/dynamisch unklar); tests/test_coach_review.py:209 (direkt/dynamisch unklar); tests/test_coach_review.py:210 (direkt/dynamisch unklar); tests/test_coach_review.py:212 (direkt/dynamisch unklar); tests/test_coach_review.py:82 (direkt/dynamisch unklar); tests/test_server.py:1009 (direkt/dynamisch unklar); tests/test_server.py:334 (direkt/dynamisch unklar); tests/test_server.py:366 (direkt/dynamisch unklar); tests/test_server.py:390 (direkt/dynamisch unklar); tests/test_server.py:423 (direkt/dynamisch unklar); tests/test_server.py:445 (direkt/dynamisch unklar); tests/test_server.py:470 (direkt/dynamisch unklar); tests/test_server.py:477 (direkt/dynamisch unklar); tests/test_server.py:4946 (direkt/dynamisch unklar); tests/test_server.py:517 (direkt/dynamisch unklar); tests/test_server.py:5343 (direkt/dynamisch unklar); tests/test_server.py:5379 (direkt/dynamisch unklar); tests/test_server.py:546 (direkt/dynamisch unklar); tests/test_server.py:5464 (direkt/dynamisch unklar); tests/test_server.py:552 (direkt/dynamisch unklar); tests/test_server.py:5538 (direkt/dynamisch unklar); tests/test_server.py:556 (direkt/dynamisch unklar); tests/test_server.py:5562 (direkt/dynamisch unklar); tests/test_server.py:5567 (direkt/dynamisch unklar); tests/test_server.py:5616 (direkt/dynamisch unklar); tests/test_server.py:5638 (direkt/dynamisch unklar); tests/test_server.py:573 (direkt/dynamisch unklar); tests/test_server.py:577 (direkt/dynamisch unklar); tests/test_server.py:714 (direkt/dynamisch unklar); tests/test_server.py:756 (direkt/dynamisch unklar); tests/test_server.py:785 (direkt/dynamisch unklar); tests/test_server.py:804 (direkt/dynamisch unklar); tests/test_server.py:833 (direkt/dynamisch unklar); tests/test_server.py:866 (direkt/dynamisch unklar); tests/test_server.py:886 (direkt/dynamisch unklar); tests/test_server.py:913 (direkt/dynamisch unklar); tests/test_server.py:939 (direkt/dynamisch unklar); tests/test_server.py:958 (direkt/dynamisch unklar); tests/test_server.py:984 (direkt/dynamisch unklar) |
+| Funktion | `_structured_authorized_operations` | 15824 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_coach_dialogue_pending_messages` | 15828 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_coach_dialogue_command_result` | 15841 | `coach/proposals.py` | P7 | offen | tests/test_server.py:8550 (direkt/dynamisch unklar) |
+| Funktion | `coach_dialogue_context` | 15853 | `coach/proposals.py` | P7 | offen | tests/test_coach_dialogue.py:267 (direkt/dynamisch unklar) |
+| Funktion | `_dialogue_retry_metadata` | 15872 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_validate_dialogue_request_target` | 15888 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_validate_dialogue_scope_objects` | 15899 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_validate_dialogue_repair_scope` | 15921 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_apply_dialogue_operation_scope` | 15936 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_dialogue_action` | 15954 | `coach/dialogue.py` | P7 | offen | tests/test_coach_dialogue.py:273 (direkt/dynamisch unklar) |
+| Funktion | `_check_dialogue_plan_date` | 15984 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_validate_dialogue_plan_changes` | 15990 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_validate_dialogue_plan_artifact` | 16004 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_validate_dialogue_plan_scope` | 16014 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_save_coach_question` | 16027 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_validate_training_patch_schedule` | 16040 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_store_training_patch_constraints` | 16057 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_apply_training_patch` | 16070 | `coach/dialogue.py` | P7 | offen | tests/test_coach_tool_coverage.py:436 (Monkeypatch/getattr/sys.modules); tests/test_coach_tool_coverage.py:436 (direkt/dynamisch unklar); tests/test_server.py:5676 (direkt/dynamisch unklar) |
+| Funktion | `_alternative_planning_steps_repaired` | 16097 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_profile_repair_fields` | 16114 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_profile_steps_repaired` | 16119 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_matching_coach_steps_repaired` | 16128 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_coach_steps_repaired` | 16142 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_unresolved_coach_steps` | 16155 | `coach/proposals.py` | P7 | offen | tests/test_coach_dialogue.py:230 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:232 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:510 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:522 (direkt/dynamisch unklar) |
+| Funktion | `_dialogue_scope_repair_key` | 16165 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_dialogue_request_binding_key` | 16178 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_dialogue_plan_effect_key` | 16199 | `coach/dialogue.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_coach_repair_key` | 16222 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_dialogue_effect_key` | 16233 | `coach/dialogue.py` | P7 | offen | tests/test_coach_dialogue.py:774 (direkt/dynamisch unklar) |
+| Funktion | `_append_template_command_scope` | 16242 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_append_planning_command_scope` | 16254 | `planning/` | P4 | offen | keine statisch gefunden |
+| Funktion | `_planning_command_intent` | 16268 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_prepare_commit_planning_command` | 16276 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_prepare_planning_command` | 16291 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_claim_planning_command` | 16311 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_execute_claimed_planning_command` | 16335 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `execute_planning_command` | 16349 | `coach/tool_execution.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_receipt` | 16360 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_attachments` | 16385 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_add_structured_coach_attachment_evidence` | 16401 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_request_payload` | 16416 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_send_structured_coach_response` | 16473 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_recover_structured_coach_conversation` | 16501 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_resume_background_coach_response` | 16531 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_recover_invalid_structured_conversation` | 16547 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_response_retry_delay` | 16567 | `providers/` | P2 | offen | tests/test_coach_language_recovery.py:70 (direkt/dynamisch unklar); tests/test_coach_language_recovery.py:78 (direkt/dynamisch unklar) |
+| Funktion | `_wait_for_coach_response_retry` | 16581 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Klasse | `_StructuredCoachResponseAttemptContext` | 16593 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_response_attempt` | 16603 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_response` | 16654 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_mark_resolved_coach_receipts` | 16716 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_coach_effects` | 16720 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_outcome_text` | 16725 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_persist_structured_coach_pending_request` | 16743 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_outcome_status` | 16762 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_outcome` | 16772 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_tool_call_metadata` | 16798 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_cached_structured_tool_call` | 16836 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_prepare_structured_plan_sync` | 16862 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_prepare_structured_tool_execution` | 16887 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_execute_structured_coach_tool` | 16918 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_structured_tool_call_failure` | 16958 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Klasse | `_StructuredCoachRoundState` | 16988 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_execute_structured_coach_tool_call` | 17008 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_function_calls` | 17066 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_record_structured_coach_tool_output` | 17070 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_followup_response` | 17086 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_run_structured_coach_tool_rounds` | 17102 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_turn_request` | 17134 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_apply_structured_coach_replay` | 17178 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_coach_final_receipt` | 17194 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_persist_structured_coach_final_receipt` | 17213 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_chat_with_structured_coach_impl` | 17239 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_require_command_owner` | 17316 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `current_coach_proposals` | 17321 | `coach/proposals.py` | P7 | offen | tests/test_coach_review.py:316 (direkt/dynamisch unklar); tests/test_coach_review.py:326 (direkt/dynamisch unklar) |
+| Funktion | `prune_expired_coach_proposals` | 17330 | `coach/proposals.py` | P7 | offen | tests/test_coach_review.py:302 (direkt/dynamisch unklar) |
+| Funktion | `coach_command_receipt` | 17335 | `coach/proposals.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_command_failure_steps` | 17362 | `coach/service.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_command_failure_base_response` | 17380 | `coach/service.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_command_failure_effect_text` | 17409 | `coach/service.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_structured_command_failure_response` | 17428 | `coach/service.py` | P7 | offen | tests/test_server.py:4311 (direkt/dynamisch unklar); tests/test_server.py:4326 (direkt/dynamisch unklar); tests/test_server.py:4340 (direkt/dynamisch unklar) |
+| Funktion | `_persist_structured_command_failure_pending_request` | 17438 | `coach/service.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_persist_structured_command_failure` | 17453 | `coach/service.py` | P7 | offen | tests/test_provider_review.py:147 (Monkeypatch/getattr/sys.modules) |
+| Funktion | `_chat_with_structured_coach` | 17485 | `coach/proposals.py` | P7 | offen | tests/test_coach_review.py:220 (direkt/dynamisch unklar) |
+| Funktion | `coach_dialogue_artifact_refs` | 17500 | `coach/authorization.py` | P7 | offen | tests/test_coach_dialogue.py:564 (direkt/dynamisch unklar); tests/test_server.py:4413 (direkt/dynamisch unklar); tests/test_server.py:5329 (direkt/dynamisch unklar) |
+| Funktion | `chat_stream_status` | 17513 | `coach/authorization.py` | P7 | offen | tests/test_server.py:5717 (direkt/dynamisch unklar); tests/test_server.py:5720 (direkt/dynamisch unklar); tests/test_server.py:8190 (direkt/dynamisch unklar); tests/test_server.py:8193 (direkt/dynamisch unklar); tests/test_server.py:8194 (direkt/dynamisch unklar) |
+| Funktion | `_validated_chat_request` | 17532 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_recover_stale_chat_command` | 17545 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_chat_command_state` | 17569 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_chat_provider_settings` | 17585 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_resume_background_chat_command` | 17596 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `chat_with_coach` | 17611 | `coach/authorization.py` | P7 | offen | tests/test_audit_remediation.py:263 (direkt/dynamisch unklar); tests/test_audit_remediation.py:278 (Monkeypatch/getattr/sys.modules); tests/test_audit_remediation.py:301 (Monkeypatch/getattr/sys.modules); tests/test_coach_attachments.py:247 (direkt/dynamisch unklar); tests/test_coach_attachments.py:261 (direkt/dynamisch unklar); tests/test_coach_attachments.py:263 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:60 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:832 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:40 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:75 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:77 (direkt/dynamisch unklar); tests/test_coach_review.py:138 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:102 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:125 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:143 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:160 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:40 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:77 (Monkeypatch/getattr/sys.modules); tests/test_provider_review.py:147 (Monkeypatch/getattr/sys.modules); tests/test_server.py:5746 (Monkeypatch/getattr/sys.modules); tests/test_server.py:5770 (Monkeypatch/getattr/sys.modules); tests/test_server.py:5802 (direkt/dynamisch unklar); tests/test_server.py:5865 (Monkeypatch/getattr/sys.modules) |
+| Funktion | `resume_interrupted_coach_jobs` | 17635 | `sync/` | P6 | offen | tests/test_server.py:4489 (direkt/dynamisch unklar) |
+| Funktion | `_claim_background_coach_job` | 17676 | `coach/authorization.py` | P7 | offen | tests/test_audit_remediation.py:270 (direkt/dynamisch unklar); tests/test_coach_attachments.py:146 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:700 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:721 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:742 (direkt/dynamisch unklar); tests/test_server.py:4488 (direkt/dynamisch unklar); tests/test_server.py:5744 (direkt/dynamisch unklar); tests/test_server.py:5763 (direkt/dynamisch unklar); tests/test_server.py:5790 (direkt/dynamisch unklar); tests/test_server.py:5819 (direkt/dynamisch unklar); tests/test_server.py:5843 (direkt/dynamisch unklar) |
+| Funktion | `_requeue_background_coach_job` | 17701 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_background_coach_message` | 17727 | `coach/authorization.py` | P7 | offen | tests/test_coach_attachments.py:147 (direkt/dynamisch unklar) |
+| Funktion | `_background_coach_stream_delta` | 17737 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_background_coach_delta_callback` | 17741 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_background_coach_stream_receipt` | 17749 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_background_coach_cancel_event` | 17755 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_persist_completed_morning_coach_job` | 17765 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_execute_background_coach_job` | 17782 | `sync/` | P6 | offen | keine statisch gefunden |
+| Funktion | `_handle_background_coach_error` | 17813 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_handle_background_coach_exception` | 17835 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_run_background_coach_job` | 17850 | `coach/authorization.py` | P7 | offen | tests/test_audit_remediation.py:279 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:708 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:731 (direkt/dynamisch unklar); tests/test_provider_review.py:148 (direkt/dynamisch unklar); tests/test_server.py:5747 (direkt/dynamisch unklar); tests/test_server.py:5771 (direkt/dynamisch unklar); tests/test_server.py:5825 (direkt/dynamisch unklar); tests/test_server.py:5868 (direkt/dynamisch unklar) |
+| Funktion | `_coach_job_worker_loop` | 17871 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `start_coach_job_worker` | 17886 | `coach/authorization.py` | P7 | offen | tests/test_server.py:242 (direkt/dynamisch unklar) |
+| Funktion | `local_now` | 17897 | `runtime/` | P1 | offen | e2e/fixture_runtime.py:70 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:28 (Monkeypatch/getattr/sys.modules); tests/test_coach_review.py:281 (direkt/dynamisch unklar); tests/test_coach_review.py:282 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:113 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:132 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:184 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:196 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:210 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:228 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:23 (Monkeypatch/getattr/sys.modules); tests/test_diagnostic_followups.py:245 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:66 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:90 (direkt/dynamisch unklar); tests/test_server.py:1202 (direkt/dynamisch unklar); tests/test_server.py:1586 (direkt/dynamisch unklar); tests/test_server.py:1602 (direkt/dynamisch unklar); tests/test_server.py:1603 (direkt/dynamisch unklar); tests/test_server.py:1624 (direkt/dynamisch unklar); tests/test_server.py:1642 (direkt/dynamisch unklar); tests/test_server.py:1661 (Monkeypatch/getattr/sys.modules); tests/test_server.py:1674 (direkt/dynamisch unklar); tests/test_server.py:1711 (direkt/dynamisch unklar); tests/test_server.py:1719 (direkt/dynamisch unklar); tests/test_server.py:1759 (direkt/dynamisch unklar); tests/test_server.py:2440 (direkt/dynamisch unklar); tests/test_server.py:2506 (direkt/dynamisch unklar); tests/test_server.py:2565 (direkt/dynamisch unklar); tests/test_server.py:2575 (direkt/dynamisch unklar); tests/test_server.py:2753 (Monkeypatch/getattr/sys.modules); tests/test_server.py:2813 (Monkeypatch/getattr/sys.modules); tests/test_server.py:2843 (Monkeypatch/getattr/sys.modules); tests/test_server.py:2852 (direkt/dynamisch unklar); tests/test_server.py:3340 (direkt/dynamisch unklar); tests/test_server.py:3359 (direkt/dynamisch unklar); tests/test_server.py:3391 (direkt/dynamisch unklar); tests/test_server.py:3416 (direkt/dynamisch unklar); tests/test_server.py:3506 (direkt/dynamisch unklar); tests/test_server.py:3507 (direkt/dynamisch unklar); tests/test_server.py:3551 (direkt/dynamisch unklar); tests/test_server.py:5086 (direkt/dynamisch unklar); tests/test_server.py:5135 (direkt/dynamisch unklar); tests/test_server.py:5152 (direkt/dynamisch unklar); tests/test_server.py:5174 (direkt/dynamisch unklar); tests/test_server.py:5201 (direkt/dynamisch unklar); tests/test_server.py:5233 (direkt/dynamisch unklar); tests/test_server.py:541 (direkt/dynamisch unklar); tests/test_server.py:5908 (direkt/dynamisch unklar); tests/test_server.py:7242 (direkt/dynamisch unklar); tests/test_server.py:7560 (direkt/dynamisch unklar); tests/test_server.py:8291 (direkt/dynamisch unklar); tests/test_workout_text.py:14 (Monkeypatch/getattr/sys.modules) |
+| Funktion | `daily_sync_due` | 17906 | `sync/scheduler.py` | P8 | offen | tests/test_audit_remediation.py:154 (Monkeypatch/getattr/sys.modules); tests/test_server.py:1943 (direkt/dynamisch unklar); tests/test_server.py:1944 (direkt/dynamisch unklar); tests/test_server.py:1945 (direkt/dynamisch unklar) |
+| Funktion | `mark_daily_sync` | 17914 | `sync/daily.py` | P6 | offen | tests/test_server.py:1942 (direkt/dynamisch unklar) |
+| Funktion | `morning_checkin_date` | 17922 | `coach/authorization.py` | P7 | offen | tests/test_diagnostic_followups.py:24 (direkt/dynamisch unklar) |
+| Funktion | `morning_checkin_state` | 17927 | `coach/authorization.py` | P7 | offen | tests/test_diagnostic_followups.py:207 (direkt/dynamisch unklar) |
+| Globale Bindung | `MORNING_CHECKIN_PROMPT` | 17938 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Globale Bindung | `MORNING_GARMIN_SYNC_DAYS` | 17950 | `sync/garmin.py` | P6 | offen | tests/test_diagnostic_followups.py:107 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:129 (direkt/dynamisch unklar); tests/test_server.py:4020 (direkt/dynamisch unklar) |
+| Funktion | `_start_morning_checkin` | 17953 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_morning_checkin_garmin_ready` | 17960 | `coach/authorization.py` | P7 | offen | tests/test_server.py:4018 (direkt/dynamisch unklar) |
+| Funktion | `_morning_checkin_attempt` | 17977 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_wait_for_morning_intervals_sync` | 17983 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_complete_morning_checkin` | 17991 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `run_morning_checkin` | 18003 | `coach/authorization.py` | P7 | offen | tests/test_audit_remediation.py:302 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:104 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:127 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:145 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:162 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:79 (direkt/dynamisch unklar) |
+| Funktion | `_reserve_morning_checkin` | 18035 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_run_scheduled_morning_checkin` | 18056 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_start_scheduled_morning_checkin` | 18070 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `schedule_morning_checkin` | 18083 | `coach/authorization.py` | P7 | offen | tests/test_diagnostic_followups.py:171 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:41 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:43 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:46 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:49 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:57 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:61 (direkt/dynamisch unklar) |
+| Funktion | `bootstrap_provider_states` | 18102 | `http_api/bootstrap.py` | P10 | offen | keine statisch gefunden |
+| Funktion | `public_bootstrap` | 18136 | `http_api/` | P10 | offen | tests/test_diagnostic_followups.py:29 (direkt/dynamisch unklar); tests/test_server.py:1769 (direkt/dynamisch unklar); tests/test_server.py:1783 (direkt/dynamisch unklar); tests/test_server.py:1826 (direkt/dynamisch unklar); tests/test_server.py:1908 (direkt/dynamisch unklar); tests/test_server.py:8331 (direkt/dynamisch unklar) |
+| Funktion | `public_plan_state` | 18210 | `http_api/` | P10 | offen | tests/test_server.py:1216 (direkt/dynamisch unklar); tests/test_server.py:2845 (direkt/dynamisch unklar) |
+| Funktion | `public_performance_state` | 18246 | `http_api/` | P10 | offen | keine statisch gefunden |
+| Funktion | `public_feedback_state` | 18251 | `http_api/` | P10 | offen | keine statisch gefunden |
+| Funktion | `public_weather_state` | 18255 | `http_api/` | P10 | offen | tests/test_audit_remediation.py:98 (direkt/dynamisch unklar); tests/test_server.py:1266 (direkt/dynamisch unklar) |
+| Funktion | `public_state` | 18262 | `http_api/` | P10 | offen | tests/test_server.py:1238 (direkt/dynamisch unklar); tests/test_server.py:1246 (direkt/dynamisch unklar); tests/test_server.py:1669 (direkt/dynamisch unklar); tests/test_server.py:1714 (direkt/dynamisch unklar); tests/test_server.py:2379 (direkt/dynamisch unklar); tests/test_server.py:3556 (direkt/dynamisch unklar); tests/test_server.py:7171 (direkt/dynamisch unklar); tests/test_server.py:8331 (direkt/dynamisch unklar) |
+| Funktion | `recent_log_entries` | 18374 | `diagnostics/report.py` | P9 | offen | tests/test_server.py:7705 (direkt/dynamisch unklar); tests/test_server.py:7757 (direkt/dynamisch unklar); tests/test_server.py:7871 (direkt/dynamisch unklar); tests/test_server.py:7902 (direkt/dynamisch unklar); tests/test_server.py:8077 (direkt/dynamisch unklar); tests/test_server.py:8113 (direkt/dynamisch unklar); tests/test_server.py:8387 (direkt/dynamisch unklar) |
+| Funktion | `_diagnostic_frame` | 18391 | `diagnostics/report.py` | P9 | offen | keine statisch gefunden |
+| Funktion | `_diagnostic_error_metadata` | 18407 | `diagnostics/report.py` | P9 | offen | keine statisch gefunden |
+| Funktion | `_diagnostic_command_steps` | 18428 | `diagnostics/report.py` | P9 | offen | keine statisch gefunden |
+| Funktion | `_diagnostic_history_entry` | 18442 | `diagnostics/report.py` | P9 | offen | keine statisch gefunden |
+| Funktion | `coach_diagnostic_history` | 18458 | `diagnostics/report.py` | P9 | offen | tests/test_coach_dialogue.py:497 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:91 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:345 (direkt/dynamisch unklar) |
+| Funktion | `diagnostic_report` | 18467 | `diagnostics/report.py` | P9 | offen | tests/test_diagnostic_followups.py:32 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:332 (direkt/dynamisch unklar); tests/test_server.py:7620 (direkt/dynamisch unklar); tests/test_server.py:7622 (direkt/dynamisch unklar); tests/test_server.py:7623 (direkt/dynamisch unklar); tests/test_server.py:7670 (direkt/dynamisch unklar); tests/test_server.py:7733 (direkt/dynamisch unklar); tests/test_server.py:7748 (direkt/dynamisch unklar); tests/test_server.py:8504 (direkt/dynamisch unklar) |
+| Funktion | `privacy_export` | 18530 | `privacy.py` | P9 | offen | tests/test_coach_attachments.py:156 (direkt/dynamisch unklar); tests/test_server.py:1449 (direkt/dynamisch unklar) |
+| Globale Bindung | `PRIVACY_EXPORT_FORMAT_VERSION` | 18580 | `privacy.py` | P9 | offen | keine statisch gefunden |
+| Globale Bindung | `PRIVACY_EXPORT_JSONL_FILES` | 18581 | `privacy.py` | P9 | offen | keine statisch gefunden |
+| Funktion | `_export_payload` | 18605 | `backup/` | P9 | offen | keine statisch gefunden |
+| Funktion | `_export_jsonl_rows` | 18609 | `backup/` | P9 | offen | keine statisch gefunden |
+| Funktion | `_export_workout_library` | 18620 | `backup/` | P9 | offen | keine statisch gefunden |
+| Funktion | `_export_planned_units` | 18624 | `backup/` | P9 | offen | keine statisch gefunden |
+| Funktion | `_export_application_state` | 18634 | `backup/` | P9 | offen | keine statisch gefunden |
+| Funktion | `_privacy_export_file` | 18642 | `privacy.py` | P9 | offen | tests/test_audit_remediation.py:187 (direkt/dynamisch unklar); tests/test_server.py:1464 (direkt/dynamisch unklar) |
+| Globale Bindung | `_configure_cipher` | 18781 | `db/manager.py` | P1 | offen | tests/test_server.py:6437 (direkt/dynamisch unklar); tests/test_server.py:6450 (direkt/dynamisch unklar) |
+| Funktion | `_checkpoint_database_locked` | 18784 | `http_api/` | P10 | offen | keine statisch gefunden |
+| Funktion | `database_backup_bytes` | 18797 | `backup/` | P9 | offen | tests/test_audit_remediation.py:291 (direkt/dynamisch unklar); tests/test_server.py:6426 (direkt/dynamisch unklar) |
+| Funktion | `stream_database_backup` | 18806 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `stream_privacy_export` | 18827 | `coach/authorization.py` | P7 | offen | tests/test_server.py:1492 (direkt/dynamisch unklar) |
+| Funktion | `restore_database_backup` | 18838 | `backup/` | P9 | offen | tests/test_audit_remediation.py:293 (direkt/dynamisch unklar); tests/test_server.py:6427 (direkt/dynamisch unklar); tests/test_server.py:6443 (direkt/dynamisch unklar); tests/test_server.py:6456 (direkt/dynamisch unklar) |
+| Funktion | `_temporary_restore_database` | 18843 | `backup/` | P9 | offen | keine statisch gefunden |
+| Funktion | `_validate_restore_connection` | 18852 | `backup/` | P9 | offen | keine statisch gefunden |
+| Funktion | `_validate_restore_database` | 18869 | `backup/` | P9 | offen | keine statisch gefunden |
+| Funktion | `_replace_database_with_restore` | 18881 | `backup/` | P9 | offen | keine statisch gefunden |
+| Funktion | `_resume_after_database_restore` | 18899 | `backup/` | P9 | offen | keine statisch gefunden |
+| Funktion | `_restore_database_backup` | 18906 | `backup/` | P9 | offen | keine statisch gefunden |
+| Funktion | `delete_remote_conversation` | 18927 | `coach/authorization.py` | P7 | offen | tests/test_server.py:1532 (Monkeypatch/getattr/sys.modules); tests/test_server.py:1548 (Monkeypatch/getattr/sys.modules); tests/test_server.py:4502 (Monkeypatch/getattr/sys.modules); tests/test_server.py:5323 (Monkeypatch/getattr/sys.modules); tests/test_server.py:8450 (Monkeypatch/getattr/sys.modules) |
+| Globale Bindung | `PRIVACY_DELETE_SCOPE` | 18940 | `coach/authorization.py` | P7 | offen | tests/test_server.py:1541 (direkt/dynamisch unklar); tests/test_server.py:1545 (direkt/dynamisch unklar); tests/test_server.py:1551 (direkt/dynamisch unklar) |
+| Globale Bindung | `PRIVACY_REMOTE_SCOPE` | 18955 | `coach/authorization.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_privacy_delete_counts` | 18962 | `privacy.py` | P9 | offen | keine statisch gefunden |
+| Funktion | `privacy_delete_preview` | 18969 | `privacy.py` | P9 | offen | tests/test_server.py:1544 (direkt/dynamisch unklar) |
+| Funktion | `delete_local_data` | 18984 | `privacy.py` | P9 | offen | tests/test_audit_remediation.py:103 (direkt/dynamisch unklar); tests/test_provider_review.py:116 (direkt/dynamisch unklar); tests/test_provider_review.py:137 (direkt/dynamisch unklar); tests/test_provider_review.py:146 (direkt/dynamisch unklar); tests/test_provider_review.py:164 (direkt/dynamisch unklar); tests/test_server.py:1533 (direkt/dynamisch unklar); tests/test_server.py:1549 (direkt/dynamisch unklar); tests/test_server.py:8451 (direkt/dynamisch unklar) |
+| Globale Bindung | `SESSION_COOKIE` | 19013 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
+| Globale Bindung | `CSRF_COOKIE` | 19014 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
+| Globale Bindung | `SESSION_TTL_SECONDS` | 19015 | `http_api/auth.py` | P10 | offen | tests/support.py:134 (direkt/dynamisch unklar) |
+| Globale Bindung | `SESSION_TOUCH_INTERVAL_SECONDS` | 19016 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
+| Globale Bindung | `SESSION_CLEANUP_INTERVAL_SECONDS` | 19017 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
+| Globale Bindung | `SESSION_CLEANUP_BATCH_SIZE` | 19018 | `http_api/auth.py` | P10 | offen | tests/test_server.py:1364 (direkt/dynamisch unklar); tests/test_server.py:1372 (direkt/dynamisch unklar) |
+| Globale Bindung | `SESSION_LAST_CLEANUP_MONOTONIC` | 19019 | `http_api/auth.py` | P10 | offen | tests/test_server.py:1369 (direkt/dynamisch unklar) |
+| Globale Bindung | `RATE_LIMIT_CLEANUP_INTERVAL_SECONDS` | 19020 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
+| Globale Bindung | `RATE_LIMIT_CLEANUP_BATCH_SIZE` | 19021 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
+| Globale Bindung | `RATE_LIMIT_BUCKET_MAX_AGE_SECONDS` | 19022 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
+| Globale Bindung | `RATE_LIMIT_LAST_CLEANUP_MONOTONIC` | 19023 | `http_api/auth.py` | P10 | offen | tests/test_server.py:7835 (direkt/dynamisch unklar) |
+| Funktion | `client_ip` | 19026 | `http_api/` | P10 | offen | keine statisch gefunden |
+| Funktion | `allow_rate` | 19030 | `http_api/` | P10 | offen | e2e/fixture_runtime.py:33 (direkt/dynamisch unklar); tests/test_provider_review.py:185 (Monkeypatch/getattr/sys.modules); tests/test_provider_review.py:329 (Monkeypatch/getattr/sys.modules); tests/test_server.py:7837 (direkt/dynamisch unklar) |
+| Funktion | `cookie_value` | 19055 | `http_api/` | P10 | offen | keine statisch gefunden |
+| Funktion | `session_token_hash` | 19064 | `http_api/auth.py` | P10 | offen | tests/support.py:134 (direkt/dynamisch unklar); tests/test_coach_review.py:116 (direkt/dynamisch unklar); tests/test_server.py:1328 (direkt/dynamisch unklar); tests/test_server.py:1357 (direkt/dynamisch unklar); tests/test_server.py:1360 (direkt/dynamisch unklar); tests/test_server.py:1409 (direkt/dynamisch unklar); tests/test_server.py:1416 (direkt/dynamisch unklar); tests/test_server.py:5732 (direkt/dynamisch unklar); tests/test_server.py:5736 (direkt/dynamisch unklar); tests/test_server.py:5751 (direkt/dynamisch unklar); tests/test_server.py:5755 (direkt/dynamisch unklar) |
+| Funktion | `session_timestamp` | 19068 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
+| Funktion | `cleanup_expired_sessions` | 19078 | `http_api/auth.py` | P10 | offen | tests/test_server.py:1370 (direkt/dynamisch unklar) |
+| Funktion | `readiness_state` | 19093 | `performance/` | P3 | offen | tests/test_server.py:7800 (direkt/dynamisch unklar); tests/test_server.py:7810 (direkt/dynamisch unklar); tests/test_server.py:7818 (direkt/dynamisch unklar); tests/test_server.py:7825 (direkt/dynamisch unklar) |
+| Funktion | `authenticated_session` | 19135 | `http_api/auth.py` | P10 | offen | tests/test_server.py:1334 (direkt/dynamisch unklar); tests/test_server.py:1337 (direkt/dynamisch unklar); tests/test_server.py:1358 (direkt/dynamisch unklar); tests/test_server.py:1391 (direkt/dynamisch unklar); tests/test_server.py:1428 (direkt/dynamisch unklar); tests/test_server.py:3252 (direkt/dynamisch unklar) |
+| Funktion | `login_user` | 19161 | `http_api/auth.py` | P10 | offen | tests/test_provider_review.py:188 (direkt/dynamisch unklar); tests/test_provider_review.py:191 (direkt/dynamisch unklar); tests/test_provider_review.py:332 (direkt/dynamisch unklar); tests/test_server.py:3249 (direkt/dynamisch unklar) |
+| Funktion | `logout_user` | 19180 | `http_api/auth.py` | P10 | offen | tests/test_server.py:1427 (direkt/dynamisch unklar) |
+| Funktion | `require_auth` | 19188 | `http_api/` | P10 | offen | e2e/fixture_runtime.py:89 (direkt/dynamisch unklar) |
+| Funktion | `require_csrf` | 19200 | `http_api/` | P10 | offen | tests/test_server.py:1409 (direkt/dynamisch unklar); tests/test_server.py:1416 (direkt/dynamisch unklar); tests/test_server.py:3254 (direkt/dynamisch unklar) |
+| Funktion | `session_cookie_headers` | 19206 | `http_api/` | P10 | offen | tests/test_server.py:1309 (direkt/dynamisch unklar); tests/test_server.py:1315 (direkt/dynamisch unklar) |
+| Klasse | `RequestHandler` | 19219 | `http_api/` | P10 | offen | e2e/fixture_runtime.py:102 (direkt/dynamisch unklar); e2e/fixture_runtime.py:85 (direkt/dynamisch unklar); tests/test_audit_remediation.py:209 (direkt/dynamisch unklar); tests/test_server.py:1512 (direkt/dynamisch unklar); tests/test_server.py:1807 (direkt/dynamisch unklar); tests/test_server.py:7348 (direkt/dynamisch unklar); tests/test_server.py:7358 (direkt/dynamisch unklar); tests/test_server.py:7364 (direkt/dynamisch unklar); tests/test_server.py:7374 (direkt/dynamisch unklar); tests/test_server.py:7386 (direkt/dynamisch unklar); tests/test_server.py:7391 (direkt/dynamisch unklar); tests/test_server.py:7395 (direkt/dynamisch unklar); tests/test_server.py:7398 (direkt/dynamisch unklar); tests/test_server.py:7404 (direkt/dynamisch unklar); tests/test_server.py:7414 (direkt/dynamisch unklar); tests/test_server.py:7421 (direkt/dynamisch unklar); tests/test_server.py:7428 (direkt/dynamisch unklar); tests/test_server.py:7435 (direkt/dynamisch unklar); tests/test_server.py:8203 (direkt/dynamisch unklar); tests/test_server.py:8226 (direkt/dynamisch unklar) |
+| Klasse | `CoachHTTPServer` | 19898 | `http_api/` | P10 | offen | tests/test_audit_remediation.py:209 (direkt/dynamisch unklar); tests/test_server.py:222 (Monkeypatch/getattr/sys.modules) |
+| Funktion | `daily_sync_loop` | 19903 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_scheduler_garmin_configured` | 19916 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_schedule_daily_weather_job` | 19920 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_schedule_daily_calendar_job` | 19926 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_schedule_daily_garmin_job` | 19932 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_schedule_daily_intervals_job` | 19938 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `schedule_daily_sync_jobs` | 19946 | `sync/scheduler.py` | P8 | offen | tests/test_audit_remediation.py:155 (direkt/dynamisch unklar) |
+| Funktion | `_startup_historical_backfill_payload` | 19953 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_enqueue_startup_calendar_job` | 19967 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_enqueue_startup_intervals_jobs` | 19972 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_enqueue_startup_garmin_jobs` | 19984 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_enqueue_startup_weather_job` | 19996 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `enqueue_startup_sync_jobs` | 20001 | `sync/` | P6 | offen | tests/test_server.py:1023 (direkt/dynamisch unklar); tests/test_server.py:1032 (direkt/dynamisch unklar); tests/test_server.py:226 (Monkeypatch/getattr/sys.modules) |
+| Funktion | `main` | 20009 | `server.py / Composition Root` | P11 | offen | e2e/fixture_runtime.py:103 (direkt/dynamisch unklar); tests/test_server.py:229 (direkt/dynamisch unklar) |
 
 ## Zielverteilung
 
@@ -2200,8 +2196,8 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 12. Jede Gruppe ist al
 | `backup/` | 16 |
 | `calendar/` | 34 |
 | `coach/` | 27 |
-| `coach/authorization.py` | 42 |
-| `coach/context.py` | 60 |
+| `coach/authorization.py` | 41 |
+| `coach/context.py` | 63 |
 | `coach/conversation.py` | 8 |
 | `coach/dialogue.py` | 18 |
 | `coach/jobs.py` | 6 |
@@ -2223,11 +2219,11 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 12. Jede Gruppe ist al
 | `observability.py` | 18 |
 | `performance/` | 55 |
 | `performance/activity_validation.py` | 4 |
-| `planning/` | 223 |
+| `planning/` | 220 |
 | `planning/calendar.py` | 1 |
 | `planning/competitions.py` | 94 |
 | `privacy.py` | 8 |
-| `providers/` | 80 |
+| `providers/` | 76 |
 | `providers/calendar.py` | 6 |
 | `providers/http.py` | 14 |
 | `providers/intervals_client.py` | 1 |
@@ -2246,6 +2242,7 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 12. Jede Gruppe ist al
 | `sync/scheduler.py` | 13 |
 | `sync/snapshots.py` | 1 |
 | `sync/status.py` | 1 |
+| `unklar: performance/, coach/context.py, coach/conversation.py, providers/, activities/` | 1 |
 | `weather/` | 55 |
 
 ## Grenzen und offene Unsicherheiten
