@@ -514,3 +514,9 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   der CLI-Gesamtcode ist ausschließlich wegen nicht verfügbarer optionaler
   Vortex-Analyse ungleich null. Der aktualisierte PR-Head benötigt erneut die
   vollständigen GitHub-, Sonar- und Codex-Gates.
+- CodeQL auf `7311ca4`: erneut **FAIL** — die Allowlist gab erlaubte Werte als
+  dasselbe Eingabeobjekt zurück, sodass der Taint-Fluss formal bis zum Log
+  bestehen blieb. Korrektur: ausschließlich statische Mapping-Werte werden
+  zurückgegeben; nicht-stringartige und unbekannte Eingaben werden
+  `http_error`. Der betroffene Sicherheitsumfang wird nach dem neuen Commit
+  erneut geprüft.

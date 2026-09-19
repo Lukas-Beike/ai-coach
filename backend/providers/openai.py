@@ -17,6 +17,28 @@ OPENAI_RATE_LIMIT_HEADERS = {
     "x-ratelimit-reset-tokens": "reset_tokens",
 }
 
+_SAFE_LOG_REASONS = {
+    "chat_cancelled": "chat_cancelled",
+    "client_disconnected": "client_disconnected",
+    "conversation_locked": "conversation_locked",
+    "conversation_state_invalid": "conversation_state_invalid",
+    "credit_balance_exhausted": "credit_balance_exhausted",
+    "invalid_response": "invalid_response",
+    "provider_timeout": "provider_timeout",
+    "request_failed": "request_failed",
+    "response_error": "response_error",
+    "response_failed": "response_failed",
+    "response_too_large": "response_too_large",
+    "organization_spend_limit_exceeded": "usage_limit_exceeded",
+    "project_spend_limit_exceeded": "usage_limit_exceeded",
+    "organization_usage_limit_exceeded": "usage_limit_exceeded",
+    "insufficient_quota": "insufficient_quota",
+    "rate_limit_exceeded": "rate_limit_exceeded",
+    "authentication_or_permission": "authentication_or_permission",
+    "not_found": "not_found",
+    "provider_unavailable": "provider_unavailable",
+}
+
 
 def response_failure_reason(path: str, result: Any, responses_path: str = "/responses") -> str | None:
     """Return the normalized wire-level failure, without application side effects."""
@@ -213,31 +235,9 @@ def error_details(
 
 def safe_log_reason(reason: Any) -> str:
     """Project an OpenAI status reason onto static values safe for structured logs."""
-    if reason in {
-        "chat_cancelled",
-        "client_disconnected",
-        "conversation_locked",
-        "conversation_state_invalid",
-        "credit_balance_exhausted",
-        "invalid_response",
-        "provider_timeout",
-        "request_failed",
-        "response_error",
-        "response_failed",
-        "response_too_large",
-    }:
-        return reason
-    if reason in {"organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
-        return "usage_limit_exceeded"
-    if reason in {
-        "insufficient_quota",
-        "rate_limit_exceeded",
-        "authentication_or_permission",
-        "not_found",
-        "provider_unavailable",
-    }:
-        return reason
-    return "http_error"
+    if not isinstance(reason, str):
+        return "http_error"
+    return _SAFE_LOG_REASONS.get(reason, "http_error")
 
 
 def rate_limit_snapshot(headers: Any, *, updated_at: str) -> dict[str, Any] | None:

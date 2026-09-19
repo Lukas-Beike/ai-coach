@@ -153,6 +153,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(safe_log_reason("provider_timeout"), "provider_timeout")
         self.assertEqual(safe_log_reason("provider-private-message"), "http_error")
         self.assertEqual(safe_log_reason(None), "http_error")
+        self.assertEqual(safe_log_reason({"reason": "provider_timeout"}), "http_error")
 
     def test_rate_limit_snapshot_is_allowlisted_and_empty_is_none(self):
         self.assertIsNone(rate_limit_snapshot({}, updated_at="now"))
