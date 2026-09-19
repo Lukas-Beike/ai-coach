@@ -541,17 +541,17 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   `2026-09-19T16:53:42Z`, Erreichbarkeit auf `origin/develop` und aufgelöste
   Review-Threads bestätigt.
 - Kalendertransport-Worker: geprüfter Commit
-  `9b670cfad5d15c3c8677f79d06d857c45f581cf6`, integriert als `b50d311`.
+  `9b670cfad5d15c3c8677f79d06d857c45f581cf6`, integriert als `e6fa07e`.
   Review: **PASS** — URL-, DNS-, SSRF- und IP-Revalidierung, gepinntes
   Verbindungsziel mit ursprünglichem TLS-SNI/Host, TLS >= 1.2, Gesamtdeadline,
   5-MB-Grenze, begrenzter Retry, deterministisches Cleanup und redigiertes
   Fehlerlogging liegen vollständig in `backend/providers/calendar.py`.
 - OpenAI-/Audio-Worker: geprüfter Commit
-  `d154f111d69291db6d104fca6a7f08635e881611`, integriert als `431d9dd`.
+  `d154f111d69291db6d104fca6a7f08635e881611`, integriert als `ed23144`.
   Review: **PASS** — Endpoint-Zusammensetzung, Multipart-Encoding sowie
   Audio-MIME-/Suffix-Normalisierung sind reine Provider-Hilfen ohne Zugriff
   auf `server.py`, globale Serverzustände oder externe Provider.
-- Geprüfter integrierter Code-Commit nach Rebase: `0552b04`.
+- Geprüfter integrierter Code-Commit nach Rebase: `63283c2`.
   Integrationsreview: **PASS** — die bisherigen Kalendertransport-,
   OpenAI-Endpoint-, Multipart- und Audio-Kompatibilitätswrapper wurden aus
   `server.py` entfernt. Sämtliche Aufrufer verwenden die Eigentümermodule
