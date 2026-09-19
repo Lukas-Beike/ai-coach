@@ -83,6 +83,7 @@ from backend.providers import calendar as calendar_provider
 from backend.providers import gemini as gemini_provider
 from backend.providers import http as provider_http
 from backend.providers import openai as openai_provider
+from backend.providers import usage as provider_usage
 from backend.providers.http import error_detail as provider_error_detail, read_bounded_response
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
@@ -5878,17 +5879,6 @@ def upstream_http_error_message(status: int, raw_body: bytes, service: str | Non
     return f"Anfrage an externen Dienst fehlgeschlagen ({status})."
 
 
-def _read_http_error_body(error: HTTPError) -> bytes:
-    """Read an HTTP error body and close the provider response deterministically."""
-    try:
-        try:
-            return error.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
-        except TypeError:  # Small fake responses in unit tests may not accept a size.
-            return error.read()
-    finally:
-        error.close()
-
-
 def _urlopen_interruptibly(request: Request, timeout: int, cancel_event: threading.Event | None) -> Any:
     if cancel_event is None:
         return urlopen(request, timeout=timeout)
@@ -5914,48 +5904,6 @@ def _urlopen_interruptibly(request: Request, timeout: int, cancel_event: threadi
     if "error" in result:
         raise result["error"]
     return result["response"]
-
-
-def _http_request_body(payload: Any | None, raw_body: bytes | None) -> bytes | None:
-    if raw_body is not None and payload is not None:
-        raise ValueError("payload and raw_body are mutually exclusive")
-    if raw_body is not None:
-        return raw_body
-    return json.dumps(payload).encode("utf-8") if payload is not None else None
-
-
-def _http_request_parts(
-    method: str,
-    url: str,
-    body: bytes | None,
-    headers: dict[str, str] | None,
-    timeout: int,
-    service: str | None,
-) -> tuple[Request, Any, dict[str, str], dict[str, Any]]:
-    request_headers = {"Accept": JSON_MEDIA_TYPE, "User-Agent": f"IntervalsCoach/{APP_VERSION}"}
-    if body is not None:
-        request_headers["Content-Type"] = JSON_MEDIA_TYPE
-    request_headers.update(headers or {})
-    request = Request(url, data=body, headers=request_headers, method=method)
-    parsed_url = urlparse(url)
-    request_context: dict[str, Any] = {
-        "service": service or parsed_url.netloc,
-        "method": method.upper(),
-        "host": parsed_url.netloc,
-        "path": observability.safe_provider_path(parsed_url.path),
-        "timeout_seconds": timeout,
-        "request_bytes": len(body or b""),
-    }
-    operation_context = OPERATION_CONTEXT.get()
-    if operation_context:
-        request_context.update({
-            "operation_id": operation_context["operation_id"],
-            "trigger": operation_context["trigger"],
-            "phase": request_context["path"].rsplit("/", 1)[-1] or "request",
-        })
-    if parsed_url.query:
-        request_context["query_keys"] = sorted(parse_qs(parsed_url.query, keep_blank_values=True))
-    return request, parsed_url, request_headers, request_context
 
 
 def _log_http_request_started(request_context: dict[str, Any], parsed_url: Any, request_headers: dict[str, str]) -> None:
@@ -6053,7 +6001,7 @@ def _handle_http_error(
     parsed_url: Any,
     started: float,
 ) -> NoReturn:
-    raw_error = _read_http_error_body(exc)
+    raw_error = provider_http.read_error_body(exc, MAX_EXTERNAL_RESPONSE_BYTES)
     if service == "openai":
         _persist_openai_rate_limits(getattr(exc, "headers", None))
         error_details = openai_provider.error_details(
@@ -6181,13 +6129,19 @@ def http_json(
     cancel_event: threading.Event | None = None,
 ) -> Any:
     observability.configure_logging(LOGGER, DATA_DIR, LOG_PATH, REDACTOR)
-    body = _http_request_body(payload, raw_body)
-    request, parsed_url, request_headers, request_context = _http_request_parts(
-        method, url, body, headers, timeout, service,
+    request, parsed_url, request_headers, request_context = provider_http.json_request_parts(
+        method,
+        url,
+        payload=payload,
+        raw_body=raw_body,
+        headers=headers,
+        timeout=timeout,
+        service=service,
+        content_type=content_type,
+        app_version=APP_VERSION,
+        operation_context=OPERATION_CONTEXT.get(),
     )
-    if content_type is not None and body is not None:
-        request_headers["Content-Type"] = content_type
-        request = Request(url, data=body, headers=request_headers, method=method)
+    body = request.data
     started = time.perf_counter()
     _log_http_request_started(request_context, parsed_url, request_headers)
     try:
@@ -12751,26 +12705,12 @@ def performance_trend_average(snapshot: dict[str, Any], metrics: dict[str, dict[
 
 
 def _openai_usage_summary_unlocked() -> dict[str, Any]:
-    today = local_now().date().isoformat()
-    try:
-        usage = json.loads(get_kv("openai_usage") or "{}")
-    except (TypeError, json.JSONDecodeError):
-        usage = {}
-    if not isinstance(usage, dict) or usage.get("date") != today:
-        usage = {"date": today, "requests": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    try:
-        rate_limits = json.loads(get_kv("openai_rate_limits") or "{}")
-    except (TypeError, json.JSONDecodeError):
-        rate_limits = {}
-    try:
-        status = json.loads(get_kv(OPENAI_STATUS_KEY) or "{}")
-    except (TypeError, json.JSONDecodeError):
-        status = {}
-    return {
-        **usage,
-        "rate_limits": rate_limits if isinstance(rate_limits, dict) else {},
-        "status": status if isinstance(status, dict) else {},
-    }
+    return provider_usage.daily_summary(
+        get_kv("openai_usage"),
+        today=local_now().date(),
+        raw_status=get_kv(OPENAI_STATUS_KEY),
+        raw_rate_limits=get_kv("openai_rate_limits"),
+    )
 
 
 def openai_usage_summary() -> dict[str, Any]:
@@ -12782,31 +12722,17 @@ def openai_usage_summary() -> dict[str, Any]:
 
 
 def _record_openai_usage_unlocked(response: dict[str, Any], operation: str) -> None:
-    def safe_count(value: Any) -> int:
-        try:
-            return max(0, int(value or 0))
-        except (TypeError, ValueError, OverflowError):
-            return 0
-
-    usage = openai_usage_summary()
-    raw = response.get("usage") if isinstance(response, dict) else None
-    if not isinstance(raw, dict):
-        raw = {}
-    input_tokens = safe_count(raw.get("input_tokens") or raw.get("prompt_tokens"))
-    output_tokens = safe_count(raw.get("output_tokens") or raw.get("completion_tokens"))
-    total_tokens = safe_count(raw.get("total_tokens")) or input_tokens + output_tokens
-    usage.update({
-        "requests": safe_count(usage.get("requests")) + 1,
-        "input_tokens": safe_count(usage.get("input_tokens")) + input_tokens,
-        "output_tokens": safe_count(usage.get("output_tokens")) + output_tokens,
-        "total_tokens": safe_count(usage.get("total_tokens")) + total_tokens,
-        "last_operation": operation,
-        "last_request_at": utc_now(),
-    })
+    usage, counts = provider_usage.recorded_usage(
+        _openai_usage_summary_unlocked(),
+        response,
+        provider="openai",
+        operation=operation,
+        recorded_at=utc_now(),
+    )
     set_kv("openai_usage", json.dumps(usage, ensure_ascii=False))
     LOGGER.info(
         "OpenAI usage recorded",
-        extra={"event": "openai_usage", "context": {"operation": operation, "input_tokens": input_tokens, "output_tokens": output_tokens, "total_tokens": total_tokens}},
+        extra={"event": "openai_usage", "context": {"operation": operation, **counts}},
     )
 
 
@@ -12918,18 +12844,11 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
 def _provider_usage_summary(provider: str) -> dict[str, Any]:
     key = f"{provider}_usage"
     status_key = GEMINI_STATUS_KEY if provider == "gemini" else OPENAI_STATUS_KEY
-    today = local_now().date().isoformat()
-    try:
-        usage = json.loads(get_kv(key) or "{}")
-    except (TypeError, json.JSONDecodeError):
-        usage = {}
-    if not isinstance(usage, dict) or usage.get("date") != today:
-        usage = {"date": today, "requests": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    try:
-        status = json.loads(get_kv(status_key) or "{}")
-    except (TypeError, json.JSONDecodeError):
-        status = {}
-    return {**usage, "rate_limits": {}, "status": status if isinstance(status, dict) else {}}
+    return provider_usage.daily_summary(
+        get_kv(key),
+        today=local_now().date(),
+        raw_status=get_kv(status_key),
+    )
 
 
 def gemini_usage_summary() -> dict[str, Any]:
@@ -12944,21 +12863,14 @@ def _record_gemini_status(state: str, message: str, *, reason: str = "ok", statu
 
 
 def _record_gemini_usage(response: dict[str, Any], operation: str) -> None:
-    raw = response.get("usageMetadata") if isinstance(response, dict) else None
-    raw = raw if isinstance(raw, dict) else {}
-    def count(value: Any) -> int:
-        try:
-            return max(0, int(value or 0))
-        except (TypeError, ValueError, OverflowError):
-            return 0
     with DB_LOCK, database():
-        usage = _provider_usage_summary("gemini")
-        input_tokens = count(raw.get("promptTokenCount"))
-        output_tokens = count(raw.get("candidatesTokenCount"))
-        total_tokens = count(raw.get("totalTokenCount")) or input_tokens + output_tokens
-        usage.update({"requests": count(usage.get("requests")) + 1, "input_tokens": count(usage.get("input_tokens")) + input_tokens,
-                      "output_tokens": count(usage.get("output_tokens")) + output_tokens, "total_tokens": count(usage.get("total_tokens")) + total_tokens,
-                      "last_operation": operation, "last_request_at": utc_now()})
+        usage, _ = provider_usage.recorded_usage(
+            _provider_usage_summary("gemini"),
+            response,
+            provider="gemini",
+            operation=operation,
+            recorded_at=utc_now(),
+        )
         set_kv("gemini_usage", json.dumps(usage, ensure_ascii=False))
 
 
@@ -13345,7 +13257,7 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
         }})
         return _gemini_responses_result(payload, history, persistent, aggregate)
     except HTTPError as exc:
-        raw_error = _read_http_error_body(exc)
+        raw_error = provider_http.read_error_body(exc, MAX_EXTERNAL_RESPONSE_BYTES)
         details = gemini_provider.error_details(int(exc.code), raw_error, updated_at=utc_now())
         _record_gemini_status("error", details["message"], reason=details["reason"], status=int(exc.code))
         raise AppError(int(exc.code), details["message"], reason=details["reason"]) from exc
@@ -13573,7 +13485,7 @@ def _handle_openai_stream_disconnect(
 def _handle_openai_stream_http_error(
     exc: HTTPError, context: dict[str, Any], started: float, stream_bytes: int,
 ) -> NoReturn:
-    raw_error = _read_http_error_body(exc)
+    raw_error = provider_http.read_error_body(exc, MAX_EXTERNAL_RESPONSE_BYTES)
     status = int(getattr(exc, "code", 502) or 502)
     details = openai_provider.error_details(
         status,
