@@ -36,6 +36,23 @@ class ProviderResponseTooLarge(ValueError):
     """Transport-level signal for a response exceeding its configured limit."""
 
 
+class ProviderInvalidResponse(Exception):
+    """Transport-level signal for a response that is not UTF-8 JSON."""
+
+
+@dataclass(frozen=True)
+class JsonResponse:
+    """Bounded, decoded JSON response metadata."""
+
+    payload: Any
+    status: int
+    headers: Any
+    response_bytes: int
+
+
+_INVALID_JSON_MESSAGE = "provider response is not valid UTF-8 JSON"
+
+
 def _close_response(response: Any) -> None:
     if response is None:
         return
@@ -294,6 +311,25 @@ def read_response(response: Any, max_bytes: int, cancel_event: Any = None) -> by
         missing = object()
         if getattr(cancel_event, "_provider_response", missing) is response:
             delattr(cancel_event, "_provider_response")
+
+
+def request_json(
+    request: Any,
+    *,
+    timeout: int,
+    max_bytes: int,
+    cancel_event: Any = None,
+    opener: Any = urlopen,
+) -> JsonResponse:
+    """Execute one bounded provider request and decode its JSON response."""
+    with open_interruptibly(request, timeout, cancel_event, opener=opener) as response:
+        raw_body = read_response(response, max_bytes, cancel_event)
+        try:
+            payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise ProviderInvalidResponse(_INVALID_JSON_MESSAGE) from None
+        status = getattr(response, "status", None) or getattr(response, "code", None) or 200
+        return JsonResponse(payload, status, getattr(response, "headers", None), len(raw_body))
 
 
 def _decoded_error_payload(raw_body: bytes) -> dict[str, Any]:

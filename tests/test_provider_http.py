@@ -1,7 +1,10 @@
 import threading
 import unittest
+from urllib.error import HTTPError
 
 from backend.providers.http import (
+    JsonResponse,
+    ProviderInvalidResponse,
     ProviderRequestCancelled,
     ProviderResponseTooLarge,
     error_detail,
@@ -12,10 +15,162 @@ from backend.providers.http import (
     read_error_body,
     read_response,
     request_body,
+    request_json,
 )
 
 
+class _JSONResponse:
+    def __init__(self, body, *, status=None, code=None, headers=None):
+        self.body = body
+        self.closed = False
+        self.close_count = 0
+        if status is not None:
+            self.status = status
+        if code is not None:
+            self.code = code
+        self.headers = headers if headers is not None else {"X-Test": "yes"}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self.close()
+        return False
+
+    def read(self, _size):
+        return self.body
+
+    def close(self):
+        self.closed = True
+        self.close_count += 1
+
+
 class ProviderHTTPTests(unittest.TestCase):
+    def test_request_json_decodes_object_array_scalar_and_empty_body(self):
+        cases = (
+            (b'{"answer": 42}', {"answer": 42}),
+            (b'[1, "two"]', [1, "two"]),
+            (b'false', False),
+            (b'', {}),
+        )
+        for body, expected in cases:
+            with self.subTest(body=body):
+                response = _JSONResponse(body)
+                result = request_json(
+                    "request",
+                    timeout=12,
+                    max_bytes=100,
+                    opener=lambda _request, *, timeout, response=response: response,
+                )
+                self.assertIsInstance(result, JsonResponse)
+                self.assertEqual(result.payload, expected)
+                self.assertEqual(result.response_bytes, len(body))
+                self.assertEqual(result.headers, response.headers)
+                self.assertTrue(response.closed)
+                self.assertEqual(response.close_count, 1)
+
+    def test_request_json_normalizes_status_code_and_default(self):
+        cases = (
+            (_JSONResponse(b"{}", status=201, code=202), 201),
+            (_JSONResponse(b"{}", code=202), 202),
+            (_JSONResponse(b"{}"), 200),
+        )
+        for response, expected_status in cases:
+            with self.subTest(expected_status=expected_status):
+                result = request_json(
+                    "request",
+                    timeout=12,
+                    max_bytes=100,
+                    opener=lambda _request, *, timeout, response=response: response,
+                )
+                self.assertEqual(result.status, expected_status)
+
+    def test_request_json_rejects_invalid_utf8_and_json_with_static_message(self):
+        for body in (b"\xff", b'{"secret":"do-not-leak"} trailing'):
+            with self.subTest(body=body):
+                response = _JSONResponse(body)
+                with self.assertRaises(ProviderInvalidResponse) as context:
+                    request_json(
+                        "request",
+                        timeout=12,
+                        max_bytes=100,
+                        opener=lambda _request, *, timeout, response=response: response,
+                    )
+                self.assertEqual(str(context.exception), "provider response is not valid UTF-8 JSON")
+                self.assertNotIn("do-not-leak", str(context.exception))
+                self.assertNotIn(body.decode("utf-8", errors="replace"), str(context.exception))
+                self.assertTrue(response.closed)
+                self.assertEqual(response.close_count, 1)
+
+    def test_request_json_preserves_opener_errors(self):
+        for expected in (
+            HTTPError("https://example.test", 503, "provider failure", {}, None),
+            OSError("opener failure"),
+            TimeoutError("opener timeout"),
+            ProviderRequestCancelled(),
+        ):
+            with self.subTest(error=type(expected).__name__):
+                def opener(_request, *, timeout, error=expected):
+                    raise error
+
+                with self.assertRaises(type(expected)) as context:
+                    request_json("request", timeout=12, max_bytes=100, opener=opener)
+                self.assertIs(context.exception, expected)
+
+    def test_request_json_preserves_size_limit_and_closes_response(self):
+        response = _JSONResponse(b"1234")
+        with self.assertRaises(ProviderResponseTooLarge) as context:
+            request_json(
+                "request",
+                timeout=12,
+                max_bytes=3,
+                opener=lambda _request, *, timeout: response,
+            )
+        self.assertEqual(str(context.exception), "provider response exceeds configured size limit")
+        self.assertTrue(response.closed)
+        self.assertEqual(response.close_count, 1)
+
+    def test_request_json_preserves_replaced_response_handle(self):
+        cancel_event = threading.Event()
+        replacement = object()
+
+        class Response(_JSONResponse):
+            def read(self, _size):
+                cancel_event._provider_response = replacement
+                return b"{}"
+
+        response = Response(b"unused")
+        result = request_json(
+            "request",
+            timeout=12,
+            max_bytes=100,
+            cancel_event=cancel_event,
+            opener=lambda _request, *, timeout: response,
+        )
+        self.assertEqual(result.payload, {})
+        self.assertIs(cancel_event._provider_response, replacement)
+        self.assertTrue(response.closed)
+
+    def test_request_json_preserves_read_cancellation_and_closes_response(self):
+        cancel_event = threading.Event()
+
+        class Response(_JSONResponse):
+            def read(self, _size):
+                cancel_event.set()
+                return b"{}"
+
+        response = Response(b"unused")
+        with self.assertRaises(ProviderRequestCancelled):
+            request_json(
+                "request",
+                timeout=12,
+                max_bytes=100,
+                cancel_event=cancel_event,
+                opener=lambda _request, *, timeout: response,
+            )
+        self.assertTrue(response.closed)
+        self.assertFalse(hasattr(cancel_event, "_provider_response"))
+
     def test_open_interruptibly_without_cancellation_is_synchronous(self):
         calls = []
         response = object()
