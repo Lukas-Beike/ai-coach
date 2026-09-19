@@ -263,9 +263,10 @@ class GeminiStreamAccumulatorTests(unittest.TestCase):
 
 
 class _StreamResponse:
-    def __init__(self, lines, on_iter=None):
+    def __init__(self, lines, on_iter=None, close_event=None):
         self.lines = lines
         self.on_iter = on_iter
+        self.close_event = close_event
         self.closed = False
 
     def __enter__(self):
@@ -282,6 +283,8 @@ class _StreamResponse:
 
     def close(self):
         self.closed = True
+        if self.close_event is not None:
+            self.close_event.set()
 
 
 class GeminiStreamResponseReaderTests(unittest.TestCase):
@@ -319,13 +322,15 @@ class GeminiStreamResponseReaderTests(unittest.TestCase):
     def test_header_wait_cancellation_raises_and_late_opener_is_released(self):
         started = threading.Event()
         release = threading.Event()
+        late_response_closed = threading.Event()
         cancel_event = threading.Event()
         captured = []
+        late_response = _StreamResponse([], close_event=late_response_closed)
 
         def opener(request, timeout):
             started.set()
             release.wait(2)
-            return _StreamResponse([])
+            return late_response
 
         def read():
             try:
@@ -333,7 +338,7 @@ class GeminiStreamResponseReaderTests(unittest.TestCase):
                     object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None,
                     cancel_event=cancel_event, opener=opener,
                 )
-            except BaseException as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 captured.append(exc)
 
         worker = threading.Thread(target=read)
@@ -342,9 +347,11 @@ class GeminiStreamResponseReaderTests(unittest.TestCase):
         cancel_event.set()
         worker.join(1)
         release.set()
+        self.assertTrue(late_response_closed.wait(1))
         worker.join(1)
         self.assertEqual(len(captured), 1)
         self.assertIsInstance(captured[0], ProviderRequestCancelled)
+        self.assertTrue(late_response.closed)
 
     def test_cancellation_during_iteration_raises(self):
         cancel_event = threading.Event()
