@@ -601,9 +601,16 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   ihren bisherigen Eigentümern. Gemini-Historienauswahl und atomare Speicherung
   bleiben bis P7 in der vorhandenen Orchestrierung; es gibt keine Rückimporte,
   Kompatibilitätswrapper oder fachlichen Provider-Callbacks.
-- `server.py`: 19.905 physische Zeilen und 1.100 verbleibende
-  Funktionen/Klassen. Das Inventar enthält 1.548 Einträge; P0 bleibt bei null
-  unklaren Zuordnungen, in P2 bleiben 84 Definitionen und 10 globale Bindungen.
+- Externes Sonar-Gate auf `46fd2bc`: **FAIL** — neue Cognitive-Complexity-
+  Befunde in `_gemini_request_payload`, `gemini.input_parts` und
+  `gemini.request_payload`. Der Luna-Korrekturcommit `a007afe`, integriert als
+  `c2ecfbb`, zerlegt ausschließlich die beiden reinen Gemini-Adapter; Root-
+  Diff-Review: **PASS**. Der Root-Korrekturcommit `729ba23` zerlegt die
+  serverseitige Historien-, Last-User- und Call-Name-Vorbereitung, ohne deren
+  Persistenz oder Provider-I/O zu verschieben; Integrationsreview: **PASS**.
+- `server.py`: 19.917 physische Zeilen und 1.103 verbleibende
+  Funktionen/Klassen. Das Inventar enthält 1.551 Einträge; P0 bleibt bei null
+  unklaren Zuordnungen, in P2 bleiben 87 Definitionen und 10 globale Bindungen.
   `backend/` umfasst 51 Python-Dateien mit 7.025 physischen Zeilen; die
   Verlagerung wird damit nicht allein über entfernte Serverzeilen bewertet.
 
@@ -613,6 +620,9 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   `git diff --check`: PASS.
 - Gemini-Worker: 17 Tests, PASS; Root-Diff-Review, Ruff, Compileall und
   `git diff --check`: PASS.
+- Sonar-Korrektur: 17 Gemini-Adaptertests beim Worker sowie 41 integrierte
+  Gemini-Provider-, Anhang- und Historienregressionen beim Root, PASS. Ruff auf
+  `backend/providers/gemini.py`, Compileall und `git diff --check`: PASS.
 - Integrierte Provider-, Anhang-, Historien-, Background-, Retry- und
   Architekturregressionen: 65 Tests, PASS in 6,168 s.
 - Vollständiger integrierter Lauf: 906 Tests, 12 übersprungen, PASS in
@@ -621,6 +631,10 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   zusätzlichen Ruff-Lauf sichtbaren Befunde in `tests/test_server_architecture.py`
   bestanden bereits vor diesem Paket und wurden nicht durch sachfremde
   Formatierungsänderungen vermischt.
+- Vollständiger Wiederholungslauf nach der Sonar-Korrektur: 906 Tests, 12
+  übersprungen, PASS in 220,295 s; Architekturtest und Inventar-Check ebenfalls
+  PASS. Damit ersetzt dieser Lauf den zuvor geprüften Code-Stand als aktuelles
+  Root-Review-Gate für P2.5.
 
 ### Verbleibende Risiken und nächster Schritt
 
