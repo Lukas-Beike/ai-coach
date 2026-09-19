@@ -13839,13 +13839,14 @@ def _log_openai_stream_failure(
     context: dict[str, Any], started: float, stream_bytes: int,
     reason: str, status: int, *, level: int = logging.WARNING,
 ) -> None:
+    safe_reason = openai_provider.safe_log_reason(reason)
     LOGGER.log(
         level,
         "External HTTP request failed",
         extra={
             "event": "external_request_failed",
             "context": {
-                **context, "status": status, "reason": reason,
+                **context, "status": status, "reason": safe_reason,
                 "duration_ms": round((time.perf_counter() - started) * 1000, 1),
                 "response_bytes": stream_bytes,
             },

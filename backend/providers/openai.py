@@ -213,7 +213,19 @@ def error_details(
 
 def safe_log_reason(reason: Any) -> str:
     """Project an OpenAI status reason onto static values safe for structured logs."""
-    if reason in {"conversation_locked", "conversation_state_invalid", "credit_balance_exhausted"}:
+    if reason in {
+        "chat_cancelled",
+        "client_disconnected",
+        "conversation_locked",
+        "conversation_state_invalid",
+        "credit_balance_exhausted",
+        "invalid_response",
+        "provider_timeout",
+        "request_failed",
+        "response_error",
+        "response_failed",
+        "response_too_large",
+    }:
         return reason
     if reason in {"organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
         return "usage_limit_exceeded"

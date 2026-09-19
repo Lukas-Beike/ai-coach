@@ -8183,6 +8183,20 @@ class CoachTests(unittest.TestCase):
         failures = [entry for entry in server.recent_log_entries() if entry.get("event") == "external_request_failed"]
         self.assertEqual(failures[-1]["context"]["reason"], "provider_timeout")
 
+    def test_openai_stream_failure_log_rejects_unrecognized_reason_text(self):
+        with patch.object(server.LOGGER, "log") as log:
+            server._log_openai_stream_failure(
+                {"service": "openai"},
+                server.time.perf_counter(),
+                0,
+                "athlete-private provider failure",
+                502,
+            )
+
+        logged_context = log.call_args.kwargs["extra"]["context"]
+        self.assertEqual(logged_context["reason"], "http_error")
+        self.assertNotIn("athlete-private", json.dumps(log.call_args.kwargs))
+
     def test_openai_stream_request_client_disconnect_records_cancelled_usage(self):
         class DisconnectResponse:
             headers = {}

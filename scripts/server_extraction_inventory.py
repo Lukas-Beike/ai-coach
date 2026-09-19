@@ -27,6 +27,7 @@ RUNTIME_EVENTS = "runtime/events.py"
 RUNTIME_MAINTENANCE = "runtime/maintenance.py"
 SYNC_PACKAGE = "sync/"
 SYNC_GARMIN = "sync/garmin.py"
+SYNC_RECONCILE = "sync/reconcile.py"
 SYNC_SCHEDULER = "sync/scheduler.py"
 COACH_PACKAGE = "coach/"
 COACH_CONVERSATION = "coach/conversation.py"
@@ -356,10 +357,10 @@ def _explicit_owner(name: str) -> str | None:
             "_prepare_structured_plan_replacement": PLANNING_PACKAGE,
             "_archive_superseded_training_plans": PLANNING_PACKAGE,
             "_replace_structured_training_plan": PLANNING_PACKAGE,
-            "_local_planning_authoritative_rows": "sync/reconcile.py",
-            "_mark_local_planning_row_authoritative": "sync/reconcile.py",
-            "_mark_local_planning_authoritative": "sync/reconcile.py",
-            "_mark_local_competitions_authoritative": "sync/reconcile.py",
+            "_local_planning_authoritative_rows": SYNC_RECONCILE,
+            "_mark_local_planning_row_authoritative": SYNC_RECONCILE,
+            "_mark_local_planning_authoritative": SYNC_RECONCILE,
+            "_mark_local_competitions_authoritative": SYNC_RECONCILE,
             "privacy_export": PRIVACY_MODULE,
             "PRIVACY_EXPORT_FORMAT_VERSION": PRIVACY_MODULE,
             "PRIVACY_EXPORT_JSONL_FILES": PRIVACY_MODULE,
