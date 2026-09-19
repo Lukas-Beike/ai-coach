@@ -162,6 +162,20 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(database_table_names(db), set(server.CURRENT_DATABASE_SCHEMA))
             self.assertEqual(server.database_index_names(db), server.CURRENT_DATABASE_INDEXES)
 
+    def test_provider_state_service_is_recreated_with_database_manager(self):
+        first = server.provider_state_service()
+        server.database_manager().close()
+        server.DATABASE_MANAGER = None
+        server.DATABASE_MANAGER_SIGNATURE = None
+
+        second = server.provider_state_service()
+
+        self.assertIsNot(second, first)
+        second.record_status(
+            "openai", state="ok", reason="ok", message="OpenAI ist verfügbar.", http_status=200
+        )
+        self.assertEqual(second.summary("openai")["status"]["state"], "ok")
+
     def test_initialise_database_rejects_a_non_current_schema_without_modifying_it(self):
         with tempfile.TemporaryDirectory() as temporary:
             database_path = Path(temporary) / "partial.db"
@@ -1669,6 +1683,19 @@ class CoachTests(unittest.TestCase):
         state = server.public_state(local_only=True)
         self.assertEqual(state["checkins"][0]["checkin_date"], "2026-08-30")
         self.assertEqual(state["checkins"][0]["motivation"], 8)
+
+    def test_public_states_keep_empty_usage_when_no_ai_provider_is_configured(self):
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="")
+
+        with patch.object(server, "CONFIG", config):
+            bootstrap = server.public_bootstrap()
+            state = server.public_state(local_only=True)
+
+        for result in (bootstrap, state):
+            self.assertEqual(result["ai_provider"]["selected"], "")
+            self.assertEqual(result["usage"]["requests"], 0)
+            self.assertEqual(result["usage"]["status"], {})
+            self.assertEqual(result["usage"]["rate_limits"], {})
 
     def test_daily_planning_context_combines_checkin_recovery_weather_and_appointments(self):
         today = server.local_now().date().isoformat()
@@ -5360,7 +5387,7 @@ class CoachTests(unittest.TestCase):
     def test_openai_background_creation_defers_usage_recording(self):
         response = {"id": "resp_background_usage", "status": "queued", "usage": {}}
         with patch.object(server, "http_json", return_value=response), patch.object(
-            server, "record_openai_usage"
+            server.provider_state_service(), "record_usage"
         ) as record_usage:
             server.openai_request(
                 "/responses",
@@ -5750,7 +5777,9 @@ class CoachTests(unittest.TestCase):
                 {"id": "resp_background_1", "status": "in_progress"},
                 {"id": "resp_background_1", "status": "completed", "output_text": "fertig", "usage": {}},
             ],
-        ) as retrieve, patch.object(server, "OPENAI_BACKGROUND_POLL_SECONDS", 0), patch.object(server, "record_openai_usage"):
+        ) as retrieve, patch.object(server, "OPENAI_BACKGROUND_POLL_SECONDS", 0), patch.object(
+            server.provider_state_service(), "record_usage"
+        ):
             result = server.responses_background_request(
                 {"model": "gpt-5.6-sol", "input": "fake"}, on_response_id=checkpoints.append
             )
@@ -7984,7 +8013,7 @@ class CoachTests(unittest.TestCase):
 
         with patch.object(server, "urlopen", return_value=FakeResponse()):
             server.http_json("POST", "https://api.openai.com/v1/responses", payload={}, service="openai")
-        summary = server.openai_usage_summary()
+        summary = server.provider_state_service().summary("openai")
         self.assertNotIn("request_limit", summary)
         self.assertNotIn("token_limit", summary)
         self.assertEqual(summary["rate_limits"]["remaining_requests"], "19")
@@ -8014,7 +8043,7 @@ class CoachTests(unittest.TestCase):
                 server.http_json("POST", "https://api.openai.com/v1/responses", payload={}, service="openai")
         self.assertEqual(raised.exception.status, 429)
         self.assertIn("Guthaben", raised.exception.message)
-        summary = server.openai_usage_summary()
+        summary = server.provider_state_service().summary("openai")
         self.assertEqual(summary["status"]["reason"], "credit_balance_exhausted")
         self.assertEqual(summary["status"]["http_status"], 429)
         self.assertEqual(summary["rate_limits"]["remaining_requests"], "0")
@@ -8130,7 +8159,7 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(json.loads(request.data)["stream"])
         self.assertEqual(request.get_header("Accept"), "text/event-stream")
         self.assertNotIn("Hallo", json.dumps(server.recent_log_entries(), ensure_ascii=False))
-        self.assertEqual(server.openai_usage_summary()["total_tokens"], 6)
+        self.assertEqual(server.provider_state_service().summary("openai")["total_tokens"], 6)
 
     def test_openai_stream_request_preserves_response_too_large_contract_and_byte_count(self):
         class OversizedResponse:
@@ -8159,7 +8188,7 @@ class CoachTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status, 502)
         self.assertEqual(raised.exception.reason, "response_too_large")
-        summary = server.openai_usage_summary()
+        summary = server.provider_state_service().summary("openai")
         self.assertEqual(summary["rate_limits"]["remaining_requests"], "7")
         self.assertEqual(summary["rate_limits"]["remaining_tokens"], "9000")
         captured = server.DIAGNOSTIC_CAPTURE.entries()
@@ -8174,7 +8203,10 @@ class CoachTests(unittest.TestCase):
                 server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: None, cancel_event)
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         urlopen.assert_not_called()
-        self.assertEqual(server.openai_usage_summary()["last_operation"], "responses_stream_cancelled")
+        self.assertEqual(
+            server.provider_state_service().summary("openai")["last_operation"],
+            "responses_stream_cancelled",
+        )
 
     def test_openai_stream_request_timeout_is_safe_and_records_provider_failure(self):
         server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
@@ -8198,7 +8230,10 @@ class CoachTests(unittest.TestCase):
                 server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "provider_timeout")
         self.assertEqual(raised.exception.status, 504)
-        self.assertEqual(server.openai_usage_summary()["status"]["reason"], "provider_timeout")
+        self.assertEqual(
+            server.provider_state_service().summary("openai")["status"]["reason"],
+            "provider_timeout",
+        )
         failures = [entry for entry in server.recent_log_entries() if entry.get("event") == "external_request_failed"]
         self.assertEqual(failures[-1]["context"]["reason"], "provider_timeout")
 
@@ -8246,7 +8281,10 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "urlopen", return_value=DisconnectResponse()):
             with self.assertRaises(server.ClientDisconnected):
                 server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: (_ for _ in ()).throw(server.ClientDisconnected()))
-        self.assertEqual(server.openai_usage_summary()["last_operation"], "responses_stream_cancelled")
+        self.assertEqual(
+            server.provider_state_service().summary("openai")["last_operation"],
+            "responses_stream_cancelled",
+        )
 
     def test_stream_conversation_lock_retry_is_bounded_and_reconnects(self):
         responses = [server.AppError(409, "locked", reason="conversation_locked"), {"status": "completed"}]
@@ -8385,12 +8423,19 @@ class CoachTests(unittest.TestCase):
         request.assert_called_once()
 
     def test_openai_usage_updates_are_atomic_and_tolerate_invalid_provider_counts(self):
-        threads = [threading.Thread(target=server.record_openai_usage, args=({"usage": {"input_tokens": "bad", "output_tokens": 2}}, "test")) for _ in range(8)]
+        state = server.provider_state_service()
+        threads = [
+            threading.Thread(
+                target=state.record_usage,
+                args=("openai", {"usage": {"input_tokens": "bad", "output_tokens": 2}}, "test"),
+            )
+            for _ in range(8)
+        ]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
-        summary = server.openai_usage_summary()
+        summary = state.summary("openai")
         self.assertEqual(summary["requests"], 8)
         self.assertEqual(summary["input_tokens"], 0)
         self.assertEqual(summary["output_tokens"], 16)
@@ -8423,18 +8468,24 @@ class CoachTests(unittest.TestCase):
                     database_lock = ObservedDatabaseLock()
                     errors = []
 
-                    def worker():
-                        try:
-                            if update:
-                                server.record_openai_usage({"usage": {"output_tokens": 2}}, "test")
-                            else:
-                                server.openai_usage_summary()
-                        except Exception as exc:
-                            errors.append(exc)
-
                     with patch.object(server, "DB_LOCK", database_lock), patch.object(
+                        server, "PROVIDER_STATE_SERVICE", None
+                    ), patch.object(
                         server, "urlopen", side_effect=AssertionError("State must stay local")
                     ):
+                        state = server.provider_state_service()
+
+                        def worker(update=update, state=state, errors=errors):
+                            try:
+                                if update:
+                                    state.record_usage(
+                                        "openai", {"usage": {"output_tokens": 2}}, "test"
+                                    )
+                                else:
+                                    state.summary("openai")
+                            except Exception as exc:
+                                errors.append(exc)
+
                         thread = threading.Thread(target=worker)
                         try:
                             with server.DB_LOCK, server.database():

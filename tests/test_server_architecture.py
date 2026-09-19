@@ -164,6 +164,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "backend.providers.usage",
         ("daily_summary", "usage_counts", "recorded_usage"),
     ),
+    ("backend.providers.state", ("ProviderStateService",)),
     (
         "backend.providers.calendar",
         (
@@ -245,6 +246,17 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_urlopen_interruptibly",
     "_read_http_response",
     "_read_openai_stream_response",
+    "record_openai_status",
+    "record_openai_success",
+    "_persist_openai_rate_limits",
+    "_openai_usage_summary_unlocked",
+    "openai_usage_summary",
+    "_record_openai_usage_unlocked",
+    "record_openai_usage",
+    "_provider_usage_summary",
+    "gemini_usage_summary",
+    "_record_gemini_status",
+    "_record_gemini_usage",
 )
 
 

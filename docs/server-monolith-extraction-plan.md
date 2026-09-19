@@ -205,6 +205,9 @@ Abhängigkeit: P1.
     Abbruchprüfung und Bytefortschritt in den OpenAI-Adapter verschieben.
   - [x] Stream-Transport einschließlich Öffnen, Header-Abbruch, Response-Handle,
     Status-/Header-Metadaten, Größenlimit und Cleanup im OpenAI-Adapter besitzen.
+  - [x] Persistierten OpenAI-/Gemini-Status, tägliche Usage und OpenAI-
+    Rate-Limits in einem transaktionalen Provider-State-Service besitzen;
+    DB-Lock, Manager-Lebenszyklus und redigiertes Logging bleiben eindeutig.
   - [ ] Request- und Background-Transport einschließlich Abbruch und Polling
     vollständig im OpenAI-Adapter besitzen.
 - [ ] Gemini Payload-/Tool-Konvertierung und Streaming zum Gemini-Adapter ziehen;

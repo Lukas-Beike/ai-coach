@@ -483,6 +483,68 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - Docker-/E2E-Ausführung bleibt lokal durch den nicht erreichbaren
   Docker-Desktop-Daemon blockiert; die externen PR-Gates bleiben verbindlich.
 
+## P2.9 — Provider-Status, Usage und Rate-Limit-Persistenz
+
+- Basis: bestätigter Merge-Commit
+  `da4251a74b4218a962e2285e27542d49e92abf38` von PR #689; `mergedAt`
+  `2026-09-19T19:49:22Z`, Erreichbarkeit auf `origin/develop`, grüne Gates
+  und null offene Review-Threads bestätigt.
+- Luna-Worker, erste geprüfte Commits `7e83e1f` und `7c11d7d`, integriert als
+  `5346a8b` und `d56fa07`: erster Review **FAIL**. Die erste Fassung entfernte
+  `rate_limits: {}` aus der Gemini-Summary und führte ein neues generisches
+  Usage-Log für Gemini ein. Konkreter Korrekturauftrag ging an denselben
+  Worker. Erneutes tatsächliches Diff- und Code-Review: **PASS** — die
+  bestehenden Summary- und Logging-Verträge sind wieder exakt hergestellt.
+- Integrierter Arbeitsstand: **PASS**. `ProviderStateService` besitzt nun
+  Status-, Usage- und OpenAI-Rate-Limit-Schlüssel, Normalisierung sowie die
+  atomare Read-Modify-Write-Transaktion. Der Composition Root bindet genau
+  eine Instanz an aktiven `DatabaseManager`, `KeyValueRepository`, `DB_LOCK`,
+  Uhr und Logger und verwirft sie bei Managerwechsel. Backend-Code importiert
+  `server.py` nicht; die entfernten Serverimplementierungen sind durch den
+  Architekturtest gesperrt. Sämtliche Aufrufer und Test-Patch-Ziele verwenden
+  den neuen Eigentümer direkt; dauerhafte Kompatibilitätswrapper gibt es nicht.
+- Erster vollständiger Integrationslauf: **FAIL** — nach direktem Zurücksetzen
+  des `DATABASE_MANAGER` durch den bestehenden Test-Isolationshelper blieb der
+  Service an den geschlossenen Manager gebunden. Root-Korrektur: jede
+  Manager-Neuerzeugung invalidiert den Service unabhängig davon, wie der alte
+  Manager entfernt wurde. Der neue Lifecycle-Regressionstest und die zuvor
+  blockierende Sequenz aus Dialogue-, Recovery- und Providerfehlerfällen
+  laufen danach mit 84 Tests in 14,622 s durch: erneutes Review **PASS**.
+- `server.py`: 19.868 physische Zeilen und 1.090 verbleibende
+  Funktionen/Klassen. Das Inventar enthält 1.536 Einträge; P0 bleibt ohne
+  unklare Zuordnung, in P2 bleiben 69 Definitionen und 8 globale Bindungen
+  offen. Entscheidend ist der vollständige Eigentümerwechsel; die Zeilenzahl
+  allein ist kein Abnahmekriterium.
+
+### Prüfungen
+
+- Worker-Stand: 46 Provider-State-/Usage-/OpenAI-Tests, PASS; Root-Diff-Review,
+  Ruff, Bytecode-Compile und `git diff --check`: PASS.
+- Architektur-, Provider-State- und Coach-Response-Fehlerregressionen:
+  12 Tests, PASS. Gezielte HTTP-, OpenAI-/Gemini-Streaming-, Status-, Usage-
+  und Deadlockregressionen: 14 Tests, PASS.
+- Vollständiger `tests.test_server`-Lauf: 461 Tests, 3 übersprungen, PASS in
+  122,146 s. Vollständiger Repository-Lauf nach der Lifecycle-Korrektur:
+  955 Tests, 12 übersprungen, PASS in 122,806 s. Ruff für die neuen
+  Provider-State-Dateien und die neu eingeführte Closure-Bindung, Compileall,
+  Inventar-Check und `git diff --check`: PASS.
+- Externes Codex-Review auf `3ee4e4880a0b3d4f892a98d41d926f9f8e8395ec`:
+  **FAIL (P1)** — ohne konfigurierte OpenAI-/Gemini-Credentials liefert die
+  Settings-Auswahl absichtlich den leeren String, den der neue Service strikt
+  ablehnte. Korrektur: nur die beiden öffentlichen Projektionen verwenden wie
+  zuvor OpenAI als leeren Summary-Fallback; die sichtbare Provider-Auswahl
+  bleibt leer. Neuer No-Credentials-Test sowie State-, Deadlock-, Service- und
+  Architekturregressionen: 11 Tests, PASS. Vollständiger Wiederholungslauf:
+  956 Tests, 12 übersprungen, PASS in 135,212 s.
+
+### Verbleibende Risiken und nächster Schritt
+
+- Request-/Background-Transport und die verbleibende Netzwerk-, Retry- und
+  Statusorchestrierung liegen noch in `server.py`; P2 ist daher noch offen.
+- Jede weitere Änderung an diesem Stand erfordert ein erneutes Root-Review.
+  Vor dem Merge bleiben vollständiger Testlauf und externe PR-Gates
+  verbindlich.
+
 ## P2.8 — Begrenzte JSON-Ausführung und OpenAI-Streamtransport
 
 - Basis: bestätigter Squash-Merge von PR #688 am `2026-09-19T19:28:37Z`;

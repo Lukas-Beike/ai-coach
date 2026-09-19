@@ -83,7 +83,7 @@ from backend.providers import calendar as calendar_provider
 from backend.providers import gemini as gemini_provider
 from backend.providers import http as provider_http
 from backend.providers import openai as openai_provider
-from backend.providers import usage as provider_usage
+from backend.providers import state as provider_state
 from backend.providers.http import error_detail as provider_error_detail
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
@@ -906,6 +906,7 @@ SNAPSHOT_REPOSITORY = SnapshotRepository()
 OPERATION_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar("operation_context", default=None)
 DATABASE_MANAGER: DatabaseManager | None = None
 DATABASE_MANAGER_SIGNATURE: tuple[str, str, bool] | None = None
+PROVIDER_STATE_SERVICE: provider_state.ProviderStateService | None = None
 
 PROVIDER_REFRESH_RETRY_BASE_SECONDS = 15 * 60
 PROVIDER_REFRESH_RETRY_MAX_SECONDS = 6 * 60 * 60
@@ -1079,14 +1080,16 @@ def observed_sync(provider: str, area: str = "default"):
 
 def database_manager() -> DatabaseManager:
     """Return the manager for the active path and secure configuration."""
-    global DATABASE_MANAGER, DATABASE_MANAGER_SIGNATURE
+    global DATABASE_MANAGER, DATABASE_MANAGER_SIGNATURE, PROVIDER_STATE_SERVICE
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     signature = (str(DB_PATH.resolve()), CONFIG.app_password, SQLCIPHER_AVAILABLE)
     if DATABASE_MANAGER is not None and DATABASE_MANAGER_SIGNATURE != signature:
         DATABASE_MANAGER.close()
         DATABASE_MANAGER = None
         DATABASE_MANAGER_SIGNATURE = None
+        PROVIDER_STATE_SERVICE = None
     if DATABASE_MANAGER is None:
+        PROVIDER_STATE_SERVICE = None
         if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
             raise RuntimeError("SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich.")
         DATABASE_MANAGER = DatabaseManager(
@@ -1101,6 +1104,22 @@ def database_manager() -> DatabaseManager:
         )
         DATABASE_MANAGER_SIGNATURE = signature
     return DATABASE_MANAGER
+
+
+def provider_state_service() -> provider_state.ProviderStateService:
+    """Return provider observability state bound to the active database manager."""
+    global PROVIDER_STATE_SERVICE
+    manager = database_manager()
+    if PROVIDER_STATE_SERVICE is None:
+        PROVIDER_STATE_SERVICE = provider_state.ProviderStateService(
+            manager,
+            KEY_VALUE_REPOSITORY,
+            DB_LOCK,
+            utc_now,
+            lambda: local_now().date(),
+            LOGGER,
+        )
+    return PROVIDER_STATE_SERVICE
 
 
 @contextmanager
@@ -5800,40 +5819,7 @@ def sync_competitions(
             COMPETITION_SYNC_LOCK.release()
 
 
-OPENAI_STATUS_KEY = "openai_status"
-GEMINI_STATUS_KEY = "gemini_status"
 OPENAI_MAX_RETRY_DELAY_SECONDS = 60
-
-
-def record_openai_status(status: dict[str, Any]) -> None:
-    """Persist only a safe, user-facing OpenAI connection status."""
-    safe_status = {
-        "state": str(status.get("state") or "unknown"),
-        "reason": str(status.get("reason") or "unknown"),
-        "message": str(status.get("message") or "")[:300],
-        "http_status": status.get("http_status"),
-        "updated_at": str(status.get("updated_at") or utc_now()),
-    }
-    provider_code = status.get("provider_error_code")
-    if isinstance(provider_code, str) and provider_code in observability.OPENAI_RESPONSE_ERROR_CODES:
-        safe_status["provider_error_code"] = provider_code
-    set_kv(OPENAI_STATUS_KEY, json.dumps(safe_status, ensure_ascii=False))
-
-
-def record_openai_success(status: int = 200) -> None:
-    record_openai_status({
-        "state": "ok",
-        "reason": "ok",
-        "message": "OpenAI ist verfügbar.",
-        "http_status": status,
-        "updated_at": utc_now(),
-    })
-
-
-def _persist_openai_rate_limits(response_headers: Any) -> None:
-    snapshot = openai_provider.rate_limit_snapshot(response_headers, updated_at=utc_now())
-    if snapshot:
-        set_kv("openai_rate_limits", json.dumps(snapshot, ensure_ascii=False))
 
 
 def _provider_error_body(raw_body: bytes) -> Any:
@@ -5901,8 +5887,9 @@ def _http_success_result(
 ) -> Any:
     result = response.payload if response.response_bytes else None
     if service == "openai":
-        _persist_openai_rate_limits(response.headers)
-        record_openai_success(response.status)
+        state = provider_state_service()
+        state.record_rate_limits(response.headers)
+        state.record_success("openai", response.status)
     LOGGER.info(
         EXTERNAL_HTTP_COMPLETED_EVENT,
         extra={
@@ -5958,14 +5945,22 @@ def _handle_http_error(
 ) -> NoReturn:
     raw_error = provider_http.read_error_body(exc, MAX_EXTERNAL_RESPONSE_BYTES)
     if service == "openai":
-        _persist_openai_rate_limits(getattr(exc, "headers", None))
+        state = provider_state_service()
+        state.record_rate_limits(getattr(exc, "headers", None))
         error_details = openai_provider.error_details(
             exc.code,
             raw_error,
             getattr(exc, "headers", None),
             updated_at=utc_now(),
         )
-        record_openai_status(error_details)
+        state.record_status(
+            "openai",
+            state=error_details.get("state"),
+            reason=error_details.get("reason"),
+            message=error_details.get("message"),
+            http_status=error_details.get("http_status"),
+            provider_error_code=error_details.get("provider_error_code"),
+        )
     elif service == "gemini":
         error_details = gemini_provider.error_details(exc.code, raw_error, updated_at=utc_now())
     else:
@@ -5994,7 +5989,13 @@ def _handle_http_error(
     )
     if error_details:
         if service == "gemini":
-            _record_gemini_status("error", error_details["message"], reason=error_details["reason"], status=exc.code)
+            provider_state_service().record_status(
+                "gemini",
+                state="error",
+                reason=error_details["reason"],
+                message=error_details["message"],
+                http_status=exc.code,
+            )
         status = exc.code if service == "gemini" or exc.code == 429 else 502
         error = AppError(status, error_details["message"], reason=error_details["reason"])
         retry_after = error_details.get("retry_after_seconds")
@@ -6015,13 +6016,12 @@ def _handle_http_network_error(
     if cancel_event is not None and cancel_event.is_set():
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
     if service == "openai":
-        record_openai_status({
-            "state": "error",
-            "reason": "network_error",
-            "message": "OpenAI ist nicht erreichbar. Bitte Netzwerkverbindung prüfen und später erneut versuchen.",
-            "http_status": None,
-            "updated_at": utc_now(),
-        })
+        provider_state_service().record_status(
+            "openai",
+            state="error",
+            reason="network_error",
+            message="OpenAI ist nicht erreichbar. Bitte Netzwerkverbindung prüfen und später erneut versuchen.",
+        )
     LOGGER.exception(
         "Upstream service is unavailable",
         extra={
@@ -6048,13 +6048,12 @@ def _handle_http_client_error(
     exc: BaseException, service: str | None, request_context: dict[str, Any], parsed_url: Any, started: float,
 ) -> NoReturn:
     if service == "openai":
-        record_openai_status({
-            "state": "error",
-            "reason": "client_error",
-            "message": "Die OpenAI-Antwort konnte nicht verarbeitet werden. Bitte später erneut versuchen.",
-            "http_status": None,
-            "updated_at": utc_now(),
-        })
+        provider_state_service().record_status(
+            "openai",
+            state="error",
+            reason="client_error",
+            message="Die OpenAI-Antwort konnte nicht verarbeitet werden. Bitte später erneut versuchen.",
+        )
     LOGGER.exception(
         "External HTTP request failed while processing response",
         extra={
@@ -12678,45 +12677,6 @@ def performance_trend_average(snapshot: dict[str, Any], metrics: dict[str, dict[
     return intervals_performance_average([row for row in rows if isinstance(row, dict)], key, days, end_date)
 
 
-def _openai_usage_summary_unlocked() -> dict[str, Any]:
-    return provider_usage.daily_summary(
-        get_kv("openai_usage"),
-        today=local_now().date(),
-        raw_status=get_kv(OPENAI_STATUS_KEY),
-        raw_rate_limits=get_kv("openai_rate_limits"),
-    )
-
-
-def openai_usage_summary() -> dict[str, Any]:
-    # Composite state readers already hold DB_LOCK. Use that same lock and
-    # connection here; a separate usage lock would invert the acquisition
-    # order between those readers and a completing Coach request.
-    with DB_LOCK, database():
-        return _openai_usage_summary_unlocked()
-
-
-def _record_openai_usage_unlocked(response: dict[str, Any], operation: str) -> None:
-    usage, counts = provider_usage.recorded_usage(
-        _openai_usage_summary_unlocked(),
-        response,
-        provider="openai",
-        operation=operation,
-        recorded_at=utc_now(),
-    )
-    set_kv("openai_usage", json.dumps(usage, ensure_ascii=False))
-    LOGGER.info(
-        "OpenAI usage recorded",
-        extra={"event": "openai_usage", "context": {"operation": operation, **counts}},
-    )
-
-
-def record_openai_usage(response: dict[str, Any], operation: str) -> None:
-    # Keep the complete read-modify-write in one transaction, including when
-    # several provider responses finish at the same time.
-    with DB_LOCK, database():
-        _record_openai_usage_unlocked(response, operation)
-
-
 def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
     failure = openai_provider.response_failure_reason(path, result, OPENAI_RESPONSES_PATH)
     if failure == "invalid_response":
@@ -12725,16 +12685,34 @@ def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
         provider_error = result["error"]
         code = provider_error.get("code") if isinstance(provider_error, dict) else None
         code = code if isinstance(code, str) and code in observability.OPENAI_RESPONSE_ERROR_CODES else None
-        record_openai_status({"state": "error", "reason": "response_error", "message": "OpenAI returned an error response.",
-                              "http_status": 200, "provider_error_code": code})
+        provider_state_service().record_status(
+            "openai",
+            state="error",
+            reason="response_error",
+            message="OpenAI returned an error response.",
+            http_status=200,
+            provider_error_code=code,
+        )
         error = AppError(502, "OpenAI returned an error response.", reason="response_error")
         error.provider_error_code = code
         raise error
     if failure == "response_failed":
-        record_openai_status({"state": "error", "reason": "response_failed", "message": "OpenAI did not complete the coach response.", "http_status": 200})
+        provider_state_service().record_status(
+            "openai",
+            state="error",
+            reason="response_failed",
+            message="OpenAI did not complete the coach response.",
+            http_status=200,
+        )
         raise AppError(502, "OpenAI did not complete the coach response.", reason="response_failed")
     if failure == "invalid_response_status":
-        record_openai_status({"state": "error", "reason": "invalid_response_status", "message": "OpenAI returned an unknown response status.", "http_status": 200})
+        provider_state_service().record_status(
+            "openai",
+            state="error",
+            reason="invalid_response_status",
+            message="OpenAI returned an unknown response status.",
+            http_status=200,
+        )
         raise AppError(502, "OpenAI returned an unknown response status.", reason="invalid_response_status")
     return result
 
@@ -12761,7 +12739,7 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     # Background Responses are billed/observed when their final result is
     # retrieved; counting the queued creation would double-count one turn.
     if not (path == OPENAI_RESPONSES_PATH and request_payload.get("background") is True):
-        record_openai_usage(result, path.strip("/") or "request")
+        provider_state_service().record_usage("openai", result, path.strip("/") or "request")
     return result
 
 
@@ -12815,39 +12793,6 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
     if not isinstance(text, str) or not text.strip():
         raise AppError(502, "OpenAI hat kein Transkript zurückgegeben.")
     return {"transcript": text.strip()}
-
-
-def _provider_usage_summary(provider: str) -> dict[str, Any]:
-    key = f"{provider}_usage"
-    status_key = GEMINI_STATUS_KEY if provider == "gemini" else OPENAI_STATUS_KEY
-    return provider_usage.daily_summary(
-        get_kv(key),
-        today=local_now().date(),
-        raw_status=get_kv(status_key),
-    )
-
-
-def gemini_usage_summary() -> dict[str, Any]:
-    with DB_LOCK, database():
-        return _provider_usage_summary("gemini")
-
-
-def _record_gemini_status(state: str, message: str, *, reason: str = "ok", status: int | None = None) -> None:
-    set_kv(GEMINI_STATUS_KEY, json.dumps({
-        "state": state, "reason": reason, "message": message[:300], "http_status": status, "updated_at": utc_now(),
-    }, ensure_ascii=False))
-
-
-def _record_gemini_usage(response: dict[str, Any], operation: str) -> None:
-    with DB_LOCK, database():
-        usage, _ = provider_usage.recorded_usage(
-            _provider_usage_summary("gemini"),
-            response,
-            provider="gemini",
-            operation=operation,
-            recorded_at=utc_now(),
-        )
-        set_kv("gemini_usage", json.dumps(usage, ensure_ascii=False))
 
 
 def _gemini_content_has_function_response(content: dict[str, Any]) -> bool:
@@ -13067,13 +13012,25 @@ def gemini_raw_request(model: str, payload: dict[str, Any], *, operation: str, c
         result = http_json("POST", f"{GEMINI_API_BASE_URL}/models/{model}:generateContent", payload,
                            {"x-goog-api-key": CONFIG.gemini_api_key}, timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS, service="gemini", cancel_event=cancel_event)
     except AppError as exc:
-        _record_gemini_status("error", exc.message, reason=exc.reason or "request_failed", status=exc.status)
+        provider_state_service().record_status(
+            "gemini",
+            state="error",
+            reason=exc.reason or "request_failed",
+            message=exc.message,
+            http_status=exc.status,
+        )
         raise
     if not isinstance(result, dict):
-        _record_gemini_status("error", "Gemini hat keine JSON-Antwort geliefert.", reason="invalid_response", status=502)
+        provider_state_service().record_status(
+            "gemini",
+            state="error",
+            reason="invalid_response",
+            message="Gemini hat keine JSON-Antwort geliefert.",
+            http_status=502,
+        )
         raise AppError(502, "Gemini hat keine gültige Antwort geliefert.", reason="invalid_response")
-    _record_gemini_status("ok", "Gemini ist verfügbar.")
-    _record_gemini_usage(result, operation)
+    provider_state_service().record_success("gemini", None)
+    provider_state_service().record_usage("gemini", result, operation)
     return result
 
 
@@ -13173,37 +13130,65 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
         aggregate = stream_result.aggregate
         if not aggregate["candidates"]:
             raise AppError(502, "Gemini hat keine Coach-Antwort geliefert.", reason="invalid_response")
-        _record_gemini_status("ok", "Gemini ist verf\\u00fcgbar.", status=200)
-        _record_gemini_usage(aggregate, "generate_content_stream")
+        provider_state_service().record_success("gemini", 200)
+        provider_state_service().record_usage("gemini", aggregate, "generate_content_stream")
         LOGGER.info(EXTERNAL_HTTP_COMPLETED_EVENT, extra={"event": "external_request_completed", "context": {
             **context, "status": 200, "duration_ms": round((time.perf_counter() - started) * 1000, 1),
             "response_bytes": stream_bytes,
         }})
         return _gemini_responses_result(payload, history, persistent, aggregate)
     except provider_http.ProviderRequestCancelled as exc:
-        _record_gemini_status("error", COACH_ABORTED_ERROR, reason="chat_cancelled", status=499)
+        provider_state_service().record_status(
+            "gemini", state="error", reason="chat_cancelled", message=COACH_ABORTED_ERROR, http_status=499
+        )
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
     except provider_http.ProviderResponseTooLarge as exc:
         error = AppError(502, "Die Streaming-Antwort von Gemini ist zu\\u00df.", reason="response_too_large")
-        _record_gemini_status("error", error.message, reason=error.reason, status=error.status)
+        provider_state_service().record_status(
+            "gemini", state="error", reason=error.reason, message=error.message, http_status=error.status
+        )
         raise error from exc
     except HTTPError as exc:
         raw_error = provider_http.read_error_body(exc, MAX_EXTERNAL_RESPONSE_BYTES)
         details = gemini_provider.error_details(int(exc.code), raw_error, updated_at=utc_now())
-        _record_gemini_status("error", details["message"], reason=details["reason"], status=int(exc.code))
+        provider_state_service().record_status(
+            "gemini",
+            state="error",
+            reason=details["reason"],
+            message=details["message"],
+            http_status=int(exc.code),
+        )
         raise AppError(int(exc.code), details["message"], reason=details["reason"]) from exc
     except AppError as exc:
-        _record_gemini_status("error", exc.message, reason=exc.reason or "request_failed", status=exc.status)
+        provider_state_service().record_status(
+            "gemini",
+            state="error",
+            reason=exc.reason or "request_failed",
+            message=exc.message,
+            http_status=exc.status,
+        )
         raise
     except TimeoutError as exc:
         if cancel_event is not None and cancel_event.is_set():
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-        _record_gemini_status("error", "Gemini hat nicht rechtzeitig geantwortet.", reason="provider_timeout", status=504)
+        provider_state_service().record_status(
+            "gemini",
+            state="error",
+            reason="provider_timeout",
+            message="Gemini hat nicht rechtzeitig geantwortet.",
+            http_status=504,
+        )
         raise AppError(504, "Gemini hat nicht rechtzeitig geantwortet.", reason="provider_timeout") from exc
     except (URLError, OSError, UnicodeDecodeError, ValueError) as exc:
         if cancel_event is not None and cancel_event.is_set():
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-        _record_gemini_status("error", "Gemini ist vor\\u00fcbergehend nicht verf\\u00fcgbar.", reason="provider_unavailable", status=503)
+        provider_state_service().record_status(
+            "gemini",
+            state="error",
+            reason="provider_unavailable",
+            message="Gemini ist vor\\u00fcbergehend nicht verf\\u00fcgbar.",
+            http_status=503,
+        )
         raise AppError(503, "Gemini ist vor\\u00fcbergehend nicht verf\\u00fcgbar.", reason="provider_unavailable") from exc
 
 
@@ -13307,7 +13292,7 @@ def responses_background_request(
             raise AppError(504, "Die Hintergrundplanung hat das Zeitlimit überschritten.", reason="provider_timeout")
         current = retrieve_openai_response(active_response_id)
     current = _validate_openai_response(OPENAI_RESPONSES_PATH, current)
-    record_openai_usage(current, "responses_background")
+    provider_state_service().record_usage("openai", current, "responses_background")
     return current
 
 
@@ -13354,7 +13339,7 @@ def _handle_openai_stream_app_error(
     context: dict[str, Any], started: float, stream_bytes: int,
 ) -> NoReturn:
     if cancel_event is not None and cancel_event.is_set() and final_response is None:
-        record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        provider_state_service().record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
     reason = exc.reason or "request_failed"
     _log_openai_stream_failure(context, started, stream_bytes, reason, exc.status, level=logging.INFO if exc.reason == "chat_cancelled" else logging.WARNING)
     _capture_openai_stream_failure(exc.status, reason, started, stream_bytes)
@@ -13366,7 +13351,7 @@ def _handle_openai_stream_disconnect(
     context: dict[str, Any], started: float, stream_bytes: int,
 ) -> NoReturn:
     if final_response is None:
-        record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        provider_state_service().record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
     _log_openai_stream_failure(context, started, stream_bytes, "client_disconnected", 499, level=logging.INFO)
     _capture_openai_stream_failure(499, "client_disconnected", started, stream_bytes)
     raise ClientDisconnected()
@@ -13383,7 +13368,14 @@ def _handle_openai_stream_http_error(
         getattr(exc, "headers", None),
         updated_at=utc_now(),
     )
-    record_openai_status(details)
+    provider_state_service().record_status(
+        "openai",
+        state=details.get("state"),
+        reason=details.get("reason"),
+        message=details.get("message"),
+        http_status=details.get("http_status"),
+        provider_error_code=details.get("provider_error_code"),
+    )
     reason = openai_provider.safe_log_reason(details["reason"])
     _log_openai_stream_failure(context, started, stream_bytes, reason, status)
     _capture_openai_stream_failure(
@@ -13409,12 +13401,18 @@ def _handle_openai_stream_timeout(
     context: dict[str, Any], started: float, stream_bytes: int,
 ) -> NoReturn:
     if cancel_event is not None and cancel_event.is_set():
-        record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        provider_state_service().record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
         _log_openai_stream_failure(context, started, stream_bytes, "chat_cancelled", 499, level=logging.INFO)
         _capture_openai_stream_failure(499, "chat_cancelled", started, stream_bytes)
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
     details = {"state": "error", "reason": "provider_timeout", "message": "OpenAI hat nicht rechtzeitig geantwortet.", "http_status": 504}
-    record_openai_status(details)
+    provider_state_service().record_status(
+        "openai",
+        state=details["state"],
+        reason=details["reason"],
+        message=details["message"],
+        http_status=details["http_status"],
+    )
     _log_openai_stream_failure(context, started, stream_bytes, "provider_timeout", 504)
     _capture_openai_stream_failure(504, "provider_timeout", started, stream_bytes)
     raise AppError(504, details["message"], reason="provider_timeout") from exc
@@ -13425,11 +13423,17 @@ def _handle_openai_stream_network_error(
     context: dict[str, Any], started: float, stream_bytes: int,
 ) -> NoReturn:
     if cancel_event is not None and cancel_event.is_set():
-        record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        provider_state_service().record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
         _log_openai_stream_failure(context, started, stream_bytes, "chat_cancelled", 499, level=logging.INFO)
         _capture_openai_stream_failure(499, "chat_cancelled", started, stream_bytes)
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-    record_openai_status({"state": "error", "reason": "provider_unavailable", "message": "OpenAI ist vorübergehend nicht verfügbar.", "http_status": 503})
+    provider_state_service().record_status(
+        "openai",
+        state="error",
+        reason="provider_unavailable",
+        message="OpenAI ist vorübergehend nicht verfügbar.",
+        http_status=503,
+    )
     _log_openai_stream_failure(context, started, stream_bytes, "provider_unavailable", 503)
     _capture_openai_stream_failure(503, "provider_unavailable", started, stream_bytes)
     raise AppError(503, "OpenAI ist vorübergehend nicht verfügbar.", reason="provider_unavailable") from exc
@@ -13496,14 +13500,15 @@ def openai_stream_request(
             )
         finally:
             if stream_state.status is not None:
-                _persist_openai_rate_limits(stream_state.headers)
-                record_openai_success(stream_state.status)
+                state = provider_state_service()
+                state.record_rate_limits(stream_state.headers)
+                state.record_success("openai", stream_state.status)
         final_response = stream_result.response
         _raise_chat_cancelled(cancel_event)
         if final_response is None:
             raise AppError(502, "OpenAI hat keine vollständige Streaming-Antwort zurückgegeben.", reason="invalid_response")
         final_response = _validate_openai_response(OPENAI_RESPONSES_PATH, final_response)
-        record_openai_usage(final_response, "responses_stream")
+        provider_state_service().record_usage("openai", final_response, "responses_stream")
         stream_bytes = stream_state.response_bytes
         DIAGNOSTIC_CAPTURE.capture("openai_stream_completed", {
             "service": "openai", "status": 200,
@@ -18029,7 +18034,7 @@ def public_bootstrap() -> dict[str, Any]:
                 "openai": bool(CONFIG.openai_api_key), "gemini": bool(CONFIG.gemini_api_key), "intervals": bool(CONFIG.intervals_api_key),
                 "weather": bool(get_profile().get("weather_location")), "external_calendar": bool(CONFIG.calendar_ical_url),
             },
-            "usage": openai_usage_summary() if SETTINGS.selected_ai_provider() != "gemini" else gemini_usage_summary(),
+            "usage": provider_state_service().summary(SETTINGS.selected_ai_provider() or "openai"),
         }
 
 
@@ -18193,7 +18198,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
                 "weather": bool(weather.get("configured")),
                 "external_calendar": bool(CONFIG.calendar_ical_url),
             },
-            "usage": openai_usage_summary() if SETTINGS.selected_ai_provider() != "gemini" else gemini_usage_summary(),
+            "usage": provider_state_service().summary(SETTINGS.selected_ai_provider() or "openai"),
         }
 
 
@@ -18318,8 +18323,8 @@ def diagnostic_report() -> dict[str, Any]:
             "thinking_level": SETTINGS.selected_thinking_level(),
             "available_models": [option["id"] for option in SETTINGS.available_model_options()],
         },
-        "openai": openai_usage_summary(),
-        "gemini": gemini_usage_summary(),
+        "openai": provider_state_service().summary("openai"),
+        "gemini": provider_state_service().summary("gemini"),
         "coach_commands": coach_diagnostic_history(),
         "sync": {
             "last_success": get_kv("last_sync_at"),
