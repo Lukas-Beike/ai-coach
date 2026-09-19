@@ -5790,6 +5790,21 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(retrieve.call_count, 2)
         self.assertEqual(result["status"], "completed")
 
+    def test_openai_background_polling_keeps_the_create_time_in_its_deadline(self):
+        initial = {"id": "resp_background_deadline", "status": "queued", "usage": {}}
+        terminal = {"id": "resp_background_deadline", "status": "completed", "usage": {}}
+
+        with patch.object(server, "responses_request", return_value=initial), patch.object(
+            server.time, "monotonic", side_effect=[100.0, 104.0]
+        ), patch.object(
+            server.openai_provider, "poll_background_response", return_value=terminal
+        ) as poll, patch.object(server.provider_state_service(), "record_usage"):
+            result = server.responses_background_request({"model": "gpt-5.6-sol", "input": "fake"})
+
+        self.assertIs(result, terminal)
+        self.assertEqual(poll.call_args.kwargs["max_seconds"], server.OPENAI_BACKGROUND_MAX_SECONDS - 4.0)
+        self.assertEqual(poll.call_args.args, ({**initial, "id": "resp_background_deadline"},))
+
     def test_background_coach_job_is_persisted_and_session_scoped(self):
         job = server.enqueue_background_coach_job(
             "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",

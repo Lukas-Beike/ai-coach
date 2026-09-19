@@ -536,6 +536,14 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   bleibt leer. Neuer No-Credentials-Test sowie State-, Deadlock-, Service- und
   Architekturregressionen: 11 Tests, PASS. Vollständiger Wiederholungslauf:
   956 Tests, 12 übersprungen, PASS in 135,212 s.
+- Korrigierter Head `81e03832e2c7c2c3ffa8e7690f22fcc49677f0be`:
+  erneutes Root-Diff-Review **PASS**. Der einmal zulässige Codex-Follow-up-
+  Review meldete keine weiteren Befunde; CodeQL, SonarCloud, Unit-Shards,
+  Container-, Quality- und Browser-/Accessibility-Gates sind grün. Der einzige
+  Review-Thread ist gelöst.
+- PR #690 wurde am `2026-09-19T20:29:37Z` als Squash gemergt. Merge-Commit
+  `22e4b1b90bdaec7adb5a24010dff4b02f634e83b` ist auf `origin/develop`
+  erreichbar.
 
 ### Verbleibende Risiken und nächster Schritt
 
@@ -544,6 +552,49 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - Jede weitere Änderung an diesem Stand erfordert ein erneutes Root-Review.
   Vor dem Merge bleiben vollständiger Testlauf und externe PR-Gates
   verbindlich.
+
+## P2.10 — OpenAI-Background-Polling
+
+- Basis: bestätigter Merge-Commit
+  `22e4b1b90bdaec7adb5a24010dff4b02f634e83b` von PR #690; `mergedAt`
+  `2026-09-19T20:29:37Z`, Erreichbarkeit auf `origin/develop`, grüne finale
+  Gates und ein gelöster, veralteter Review-Thread bestätigt.
+- Luna-Worker-Commit `b331a712d6348a0b4b867dd4c4069315d1e72638`:
+  eigenes tatsächliches Diff- und Code-Review **PASS**. Der OpenAI-Adapter
+  besitzt jetzt Response-ID-validiertes Polling, abbrechbares Warten,
+  monotone Deadline und Best-effort-Remote-Cancel. Die Funktion importiert
+  `server.py` nicht, loggt keine Nutzdaten und besitzt weder Usage-/Status-
+  Persistenz noch Serverzustand.
+- Integrationsreview **PASS**: `responses_background_request` delegiert die
+  Poll-Schleife an den Adapter; Create/Resume, finale Response-Validierung und
+  Usage-Erfassung behalten ihre bisherigen Eigentümer. Die an den Adapter
+  übergebene Restdeadline zieht Create-/Resume-Zeit ab und erhält damit die
+  bisherige Gesamtgrenze. Es gibt keinen Kompatibilitätswrapper und keinen
+  neuen Sammelmodul-Einstieg.
+- Das Inventar weist `_gemini_request_payload` nun ausdrücklich P7
+  `coach/conversation.py` zu, weil die Funktion persistierte Historie und
+  Request-Aufbau verbindet. Damit verbleiben null unklare P0-Zuordnungen.
+  `server.py` hat 19.869 physische Zeilen und 1.090 Definitionen; im Inventar
+  bleiben 69 P2-Definitionen und 8 P2-Bindungen offen.
+
+### Prüfungen
+
+- Worker: `tests.test_provider_openai` — 43 Tests, PASS; Ruff, Bytecode-Compile
+  und `git diff --check`: PASS.
+- Integrierte Provider-, Background-, Coach-Aufrufer- und Architekturtests:
+  137 Tests, PASS in 29,714 s.
+- Ruff für Adapter, Adaptertests und Inventargenerator sowie B023 für den
+  ergänzten Servertest, Bytecode-Compile, Inventar-Check und
+  `git diff --check`: PASS.
+- Vollständiger Repository-Lauf folgt vor dem Root-Abschlussgate dieses
+  Pakets.
+
+### Verbleibende Risiken und nächster Schritt
+
+- Request-, Retrieve-/Cancel- und Stream-Fehler-/Statusorchestrierung liegen
+  weiterhin in `server.py`; P2 ist noch nicht abgeschlossen.
+- Der neue integrierte Stand benötigt vor Veröffentlichung noch vollständigen
+  Repository-Test, aktualisiertes Root-Diff-Review und die externen PR-Gates.
 
 ## P2.8 — Begrenzte JSON-Ausführung und OpenAI-Streamtransport
 

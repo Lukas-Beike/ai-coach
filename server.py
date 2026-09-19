@@ -13283,14 +13283,15 @@ def responses_background_request(
         active_response_id = openai_provider.response_id(current.get("id"))
         if on_response_id is not None:
             on_response_id(active_response_id)
-    while str(current.get("status") or "").casefold() in {"queued", "in_progress"}:
-        if cancel_event is not None and cancel_event.wait(OPENAI_BACKGROUND_POLL_SECONDS):
-            cancel_openai_response(active_response_id)
-            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
-        if time.monotonic() - started >= OPENAI_BACKGROUND_MAX_SECONDS:
-            cancel_openai_response(active_response_id)
-            raise AppError(504, "Die Hintergrundplanung hat das Zeitlimit überschritten.", reason="provider_timeout")
-        current = retrieve_openai_response(active_response_id)
+    remaining_seconds = max(0.0, OPENAI_BACKGROUND_MAX_SECONDS - (time.monotonic() - started))
+    current = openai_provider.poll_background_response(
+        {**current, "id": active_response_id},
+        retrieve=retrieve_openai_response,
+        cancel=cancel_openai_response,
+        cancel_event=cancel_event,
+        poll_seconds=OPENAI_BACKGROUND_POLL_SECONDS,
+        max_seconds=remaining_seconds,
+    )
     current = _validate_openai_response(OPENAI_RESPONSES_PATH, current)
     provider_state_service().record_usage("openai", current, "responses_background")
     return current
