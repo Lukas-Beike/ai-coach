@@ -212,7 +212,7 @@ class CoachTests(unittest.TestCase):
         order = []
         http_server = Mock()
         with patch.object(server.observability, "configure_logging"), patch.object(
-        server.app_config, "security_configuration_error", return_value=None
+            server.app_config, "security_configuration_error", return_value=None
         ), patch.object(server, "initialise_database", side_effect=lambda: order.append("schema")), patch.object(
             server, "resume_interrupted_sync_jobs", side_effect=lambda: order.append("sync-recovery")
         ), patch.object(

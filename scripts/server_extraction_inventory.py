@@ -55,6 +55,7 @@ PLANNING_COMPETITIONS = "planning/competitions.py"
 BACKUP_PACKAGE = "backup/"
 CALENDAR_PACKAGE = "calendar/"
 PRIVACY_MODULE = "privacy.py"
+DIAGNOSTICS_REPORT = "diagnostics/report.py"
 KIND_FUNCTION = "Funktion"
 KIND_CLASS = "Klasse"
 KIND_GLOBAL = "Globale Bindung"
@@ -193,6 +194,8 @@ def _explicit_owner(name: str) -> str | None:
             "external_result_context": OBSERVABILITY_MODULE,
             "provider_error": ERRORS_MODULE,
             "CoachHTTPServer": HTTP_API_PACKAGE,
+            "login_user": HTTP_AUTH,
+            "logout_user": HTTP_AUTH,
             "bootstrap_provider_states": "http_api/bootstrap.py",
             "VERSIONED_STATIC_ASSETS": HTTP_API_PACKAGE,
             "UTC_OFFSET_SUFFIX": CONFIG_MODULE,
@@ -291,7 +294,7 @@ def _explicit_owner(name: str) -> str | None:
             "safe_openai_log_reason": OBSERVABILITY_MODULE,
             "_log_openai_stream_failure": OBSERVABILITY_MODULE,
             "SETTINGS_SECRET_KEYS": OBSERVABILITY_MODULE,
-            "coach_diagnostic_history": OBSERVABILITY_MODULE,
+            "coach_diagnostic_history": DIAGNOSTICS_REPORT,
             "_safe_response_headers": OBSERVABILITY_MODULE,
             "set_diagnostic_capture": OBSERVABILITY_MODULE,
             "capture_diagnostic_event": OBSERVABILITY_MODULE,
@@ -308,6 +311,25 @@ def _explicit_owner(name: str) -> str | None:
             "_paired_activity_match": ACTIVITIES_PACKAGE,
             "_unpaired_activity_match": ACTIVITIES_PACKAGE,
             "mark_daily_sync": "sync/daily.py",
+            "_add_weather_context": "coach/context.py",
+            "_latest_ride_activity": "performance/activity_validation.py",
+            "latest_activity_for_validation": "performance/activity_validation.py",
+            "bounded_activity_metric": "performance/activity_validation.py",
+            "cycling_activity_validation_details": "performance/activity_validation.py",
+            "recent_log_entries": DIAGNOSTICS_REPORT,
+            "diagnostic_report": DIAGNOSTICS_REPORT,
+            "_diagnostic_frame": DIAGNOSTICS_REPORT,
+            "_diagnostic_error_metadata": DIAGNOSTICS_REPORT,
+            "_diagnostic_command_steps": DIAGNOSTICS_REPORT,
+            "_diagnostic_history_entry": DIAGNOSTICS_REPORT,
+            "_provider_refresh_cleanup": "sync/refresh.py",
+            "_provider_refresh_start": "sync/refresh.py",
+            "_provider_refresh_finish": "sync/refresh.py",
+            "_provider_refresh_error_code": "sync/refresh.py",
+            "_current_provider_freshness": "sync/freshness.py",
+            "_publish_sync_job_result_event": "sync/jobs.py",
+            "_update_local_planned_workout_in_db": "planning/calendar.py",
+            "readiness_state": PERFORMANCE_PACKAGE,
         }
     return explicit.get(name)
 
@@ -462,7 +484,7 @@ _PHASE_RULES = (
     (("scheduler", "coach/jobs", "coach/streams", "coach/morning"), "P8"),
     (("sync",), "P6"),
     (("coach",), "P7"),
-    (("backup", "privacy"), "P9"),
+    (("backup", "privacy", "diagnostics"), "P9"),
     (("http_api",), "P10"),
 )
 

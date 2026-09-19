@@ -336,3 +336,71 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - Offen in P1 sind Konfigurationsvalidierung, Settings-Dateischreibpfade,
   Provider-Freshness und die übrige diagnostische Observability. Diese werden
   vor P2 in kleinen, getrennten Schreibbereichen abgeschlossen.
+
+## P1.5 — Persistente Konfiguration, Diagnostic-Capture und Provider-Freshness
+
+- Basis: bestätigter Merge-Commit
+  `abf467b2377c6aac30a626e848f7b966f796d2d7` von PR #668; `mergedAt`
+  `2026-09-15T20:40:44Z` und Erreichbarkeit auf `origin/develop` bestätigt.
+- Konfigurations-Worker: korrigierter lokaler Commit
+  `0b4ef9862c71137e9a2b9a897c1be55f5f35dc09`; Schreibbereich ausschließlich
+  `backend/config.py` und `tests/test_config.py`.
+- Erstes Konfigurationsreview: **FAIL** — der Worker hatte die Prozessumgebung
+  erst nach dem Dateischreiben aktualisiert und einen nicht portablen
+  Import-Smoke-Test verwendet. Korrekturreview: **PASS** — Allowlist,
+  CR/LF-Bereinigung, Fehlerabbildung, Update-Reihenfolge und der Import aus
+  leerem temporärem Arbeitsverzeichnis entsprechen dem Ausgangsvertrag.
+- Diagnostic-Capture-Worker: korrigierter lokaler Commit
+  `f3ffeae943ad564a2828c443f90ea65136f79cca`; Schreibbereich ausschließlich
+  `backend/observability.py` und `tests/test_observability.py`.
+- Erstes Capture-Review: **FAIL** — naive persistierte Ablaufzeiten wurden neu
+  als UTC akzeptiert, und der Importtest war nicht containerportabel.
+  Korrekturreview: **PASS** — nur timezone-aware Ablaufzeiten aktivieren die
+  Aufzeichnung; abgelaufener/fehlerhafter Zustand wird bereinigt, der konkrete
+  `DiagnosticCapture` besitzt allein seinen `RLock`, und die 1.500-Eintrags-
+  sowie Ein-Stunden-Grenzen bleiben erhalten.
+- Freshness-Worker: lokaler Commit
+  `23dc506aa2f313e24d5c2f692008c0bc149d0359`; Schreibbereich ausschließlich
+  `backend/sync/freshness.py` und `tests/test_sync_freshness.py`.
+- Freshness-Review: **PASS** — sechs Bereiche, Reihenfolge, Labels,
+  Fresh/Stale/Error/Partial/Syncing-Zustände, zukünftige Retry-Projektion und
+  begrenztes Cleanup entsprechen dem Ausgangscode. Das Modul besitzt weder
+  Lock noch Commit/Rollback, Provider-I/O oder Dateisystemzugriff; Verbindung
+  und Transaktion bleiben beim Aufrufer.
+- Geprüfter integrierter Code-Stand nach Rebase auf `origin/develop`:
+  `a44a7d35d25afe5e58eca699a0a68a866c250b76`.
+- Integrationsreview: **PASS** — Konfigurations- und Capture-Aufrufer sowie
+  Test-Patchziele verwenden die fachlichen Eigentümer direkt. Die
+  Freshness-Fachlogik ist vollständig verlagert; `_current_provider_freshness`
+  verdrahtet ausschließlich die konkrete Konfiguration, KV-/Profilzugriffe,
+  den vorhandenen DB-Kontext und die Uhr. Es bestehen keine Rückimporte auf
+  `server.py`, keine Server-Callbacks mit ausgelagerter Fachlogik und keine
+  Kompatibilitätswrapper.
+- `server.py`: 21.127 physische Zeilen, 1.181 verbleibende
+  Funktionen/Klassen. Das Inventar enthält 1.650 Einträge und null offene
+  P0-Zuordnungen. Die Reduktion um 367 Zeilen gegenüber P1.4 ist lediglich ein
+  Begleitwert; maßgeblich sind die klaren Zustands- und Fachlogikeigentümer.
+
+### Prüfungen
+
+- `python -m unittest discover -s tests` nach Rebase auf den aktuellen
+  Zielbranch — 852 Tests, 12 übersprungen, PASS in 186,011 s.
+- Gezielte Config-/Capture-/Freshness-/Architektur- und Serverregressionen —
+  PASS; insbesondere persistente Umgebungspriorität, Capture-Parallelität,
+  Redaktionsgrenzen, Freshness-Retry, caller-owned Rollback und
+  Startup-Sicherheitsprüfung.
+- `ruff check backend/config.py backend/observability.py backend/sync/freshness.py tests/test_config.py tests/test_observability.py tests/test_sync_freshness.py scripts/server_extraction_inventory.py`
+  — PASS.
+- `python -m compileall -q server.py backend tests` — PASS.
+- `python scripts/server_extraction_inventory.py --check` — PASS.
+- `git diff --check` — PASS.
+
+### Verbleibende Risiken und nächster Schritt
+
+- Docker-/E2E-Ausführung bleibt lokal durch den nicht erreichbaren
+  Docker-Desktop-Daemon blockiert; Container-, Browser-, Accessibility- und
+  Security-Gates werden deshalb im PR verbindlich geprüft.
+- Diagnosehistorie und -report bleiben planmäßig P9; OpenAI-spezifische
+  Diagnoseklassifikation sowie sichere HTTP-Header gehören mit dem Transport
+  zu P2. P1 ist damit vollständig abgeschlossen, nächster Schritt ist P2 in
+  kleinen Provider-Adapter-Paketen.
