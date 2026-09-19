@@ -135,6 +135,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "StreamReadResult",
             "StreamReadState",
             "read_stream_response",
+            "request_stream_response",
             "endpoint",
             "retry_after_seconds",
             "error_diagnostic_details",

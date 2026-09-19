@@ -13483,29 +13483,21 @@ def openai_stream_request(
     stream_state = openai_provider.StreamReadState()
     try:
         _raise_chat_cancelled(cancel_event)
-        with provider_http.open_interruptibly(
-            request,
-            OPENAI_RESPONSE_TIMEOUT_SECONDS,
-            cancel_event,
-            opener=urlopen,
-        ) as response:
-            if cancel_event is not None:
-                cancel_event._provider_response = response
-            try:
-                _persist_openai_rate_limits(getattr(response, "headers", None))
-                record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
-                stream_result = openai_provider.read_stream_response(
-                    response,
-                    max_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
-                    cancel_event=cancel_event,
-                    on_text_delta=on_text_delta,
-                    on_response_id=on_response_id,
-                    state=stream_state,
-                )
-            finally:
-                missing = object()
-                if cancel_event is not None and getattr(cancel_event, "_provider_response", missing) is response:
-                    delattr(cancel_event, "_provider_response")
+        try:
+            stream_result = openai_provider.request_stream_response(
+                request,
+                timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+                max_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+                cancel_event=cancel_event,
+                on_text_delta=on_text_delta,
+                on_response_id=on_response_id,
+                opener=urlopen,
+                state=stream_state,
+            )
+        finally:
+            if stream_state.status is not None:
+                _persist_openai_rate_limits(stream_state.headers)
+                record_openai_success(stream_state.status)
         final_response = stream_result.response
         _raise_chat_cancelled(cancel_event)
         if final_response is None:

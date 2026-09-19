@@ -8135,7 +8135,10 @@ class CoachTests(unittest.TestCase):
     def test_openai_stream_request_preserves_response_too_large_contract_and_byte_count(self):
         class OversizedResponse:
             status = 200
-            headers = None
+            headers = {
+                "x-ratelimit-remaining-requests": "7",
+                "x-ratelimit-remaining-tokens": "9000",
+            }
 
             def __enter__(self):
                 return self
@@ -8156,6 +8159,9 @@ class CoachTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status, 502)
         self.assertEqual(raised.exception.reason, "response_too_large")
+        summary = server.openai_usage_summary()
+        self.assertEqual(summary["rate_limits"]["remaining_requests"], "7")
+        self.assertEqual(summary["rate_limits"]["remaining_tokens"], "9000")
         captured = server.DIAGNOSTIC_CAPTURE.entries()
         failed = next(entry for entry in reversed(captured) if entry["event"] == "openai_stream_failed")
         self.assertEqual(failed["details"]["response_bytes"], len(b"data: {}\n"))
