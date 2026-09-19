@@ -534,14 +534,20 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - SonarCloud auf `a8e546c5d3ff1cf593ca9092c7af114d55a78f3c`: **FAIL** —
   `StreamAccumulator._merge_chunk` und `consume_sse_event` überschritten mit
   47 beziehungsweise 17 die erlaubte kognitive Komplexität 15.
-- Korrekturcommit `27301f4`: **PASS** im erneuten Root-Diff- und Code-Review.
-  Ausschließlich private Parserteilschritte wurden getrennt; öffentliche API,
-  Eventreihenfolge, Delta-/Response-ID-Ausgabe, Metadatenaggregation und
-  Fehlerverträge bleiben unverändert.
+- Korrekturcommit `27301f4`, nach Rebase als `ea11c91` integriert: **PASS** im
+  erneuten Root-Diff- und Code-Review. Ausschließlich private Parserteilschritte
+  wurden getrennt; öffentliche API, Eventreihenfolge, Delta-/Response-ID-Ausgabe,
+  Metadatenaggregation und Fehlerverträge bleiben unverändert.
 - Provider- und Architekturregressionen: 32 Tests, PASS. Vollständiger Lauf:
   888 Tests, 12 übersprungen, PASS in 183,539 s. Ruff, Compileall und
   `git diff --check`: PASS. Der aktualisierte PR-Head benötigt erneut alle
   externen Gates.
+- PR #682 wurde zuvor am `2026-09-19T17:22:31Z` auf dem alten Head gemergt;
+  Merge-Commit `3e1dd708398a3a5fc8bcd6c1ef16f638fb9aeb8f` ist auf
+  `origin/develop` erreichbar und besitzt keine offenen Review-Threads. Der
+  separate Sonar-Analysecheck blieb dort rot; die Korrektur wird deshalb als
+  eigener Folge-PR gegen genau diesen Merge veröffentlicht und P2.3 bis zu
+  dessen bestätigtem Merge nicht als abgeschlossen behandelt.
 
 ### Verbleibende Risiken und nächster Schritt
 
