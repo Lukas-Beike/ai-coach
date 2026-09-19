@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse, urlunparse
+from urllib.request import urlopen
 
 from backend.errors import AppError
 from backend.providers import http as provider_http
@@ -216,6 +217,37 @@ def read_stream_response(
     if event_response is not None:
         final_response = event_response
     return StreamReadResult(final_response, read_state.response_bytes)
+
+
+def request_stream_response(
+    request: Any,
+    *,
+    timeout: int,
+    max_bytes: int,
+    cancel_event: Any = None,
+    on_text_delta: Callable[[str], None],
+    on_response_id: Callable[[str], None] | None = None,
+    opener: Any = urlopen,
+    state: StreamReadState | None = None,
+) -> StreamReadResult:
+    """Open, read, and close an OpenAI SSE response."""
+    response = provider_http.open_interruptibly(request, timeout, cancel_event, opener=opener)
+    with response:
+        if cancel_event is not None:
+            cancel_event._provider_response = response
+        try:
+            return read_stream_response(
+                response,
+                max_bytes=max_bytes,
+                cancel_event=cancel_event,
+                on_text_delta=on_text_delta,
+                on_response_id=on_response_id,
+                state=state,
+            )
+        finally:
+            missing = object()
+            if cancel_event is not None and getattr(cancel_event, "_provider_response", missing) is response:
+                delattr(cancel_event, "_provider_response")
 
 
 def _decode_sse_event(data_lines: list[str]) -> dict[str, Any] | None:
