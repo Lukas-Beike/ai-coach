@@ -41,6 +41,59 @@ def _close_response(response: Any) -> None:
         return
 
 
+class _OpenState:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.cancelled = False
+        self.has_response = False
+        self.response: Any = None
+        self.error: Exception | None = None
+
+    def save_response(self, response: Any) -> bool:
+        with self.lock:
+            if self.cancelled:
+                return False
+            self.response = response
+            self.has_response = True
+            return True
+
+    def save_error(self, error: Exception) -> None:
+        with self.lock:
+            if not self.cancelled:
+                self.error = error
+
+    def cancel(self) -> tuple[bool, Any]:
+        with self.lock:
+            self.cancelled = True
+            if not self.has_response:
+                return False, None
+            response = self.response
+            self.has_response = False
+            return True, response
+
+    def result(self) -> tuple[Any, Exception | None]:
+        with self.lock:
+            return self.response, self.error
+
+
+def _open_request(opener: Any, request: Any, timeout: int, state: _OpenState, completed: threading.Event) -> None:
+    try:
+        response = opener(request, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001
+        state.save_error(exc)
+    else:
+        if not state.save_response(response):
+            _close_response(response)
+    finally:
+        completed.set()
+
+
+def _cancel_open(state: _OpenState) -> None:
+    has_response, response = state.cancel()
+    if has_response:
+        _close_response(response)
+
+
 def open_interruptibly(
     request: Any,
     timeout: int,
@@ -54,50 +107,26 @@ def open_interruptibly(
         return opener(request, timeout=timeout)
 
     completed = threading.Event()
-    state: dict[str, Any] = {"cancelled": False}
-    missing = object()
-    lock = threading.Lock()
-
-    def open_request() -> None:
-        response = missing
-        try:
-            response = opener(request, timeout=timeout)
-        except BaseException as exc:  # noqa: BLE001
-            with lock:
-                if not state["cancelled"]:
-                    state["error"] = exc
-        else:
-            with lock:
-                if state["cancelled"]:
-                    late_response = response
-                else:
-                    state["response"] = response
-                    late_response = missing
-            if late_response is not missing:
-                _close_response(late_response)
-        finally:
-            completed.set()
-
-    threading.Thread(target=open_request, name="provider-header-wait", daemon=True).start()
-
-    def cancel_open() -> None:
-        with lock:
-            state["cancelled"] = True
-            response = state.pop("response", missing)
-        if response is not missing:
-            _close_response(response)
+    state = _OpenState()
+    threading.Thread(
+        target=_open_request,
+        args=(opener, request, timeout, state, completed),
+        name="provider-header-wait",
+        daemon=True,
+    ).start()
 
     while not completed.wait(poll_seconds):
         if cancel_event.is_set():
-            cancel_open()
+            _cancel_open(state)
             raise ProviderRequestCancelled
 
     if cancel_event.is_set():
-        cancel_open()
+        _cancel_open(state)
         raise ProviderRequestCancelled
-    if "error" in state:
-        raise state["error"]
-    return state["response"]
+    response, error = state.result()
+    if error is not None:
+        raise error
+    return response
 
 
 def request_body(payload: Any | None, raw_body: bytes | None) -> bytes | None:
