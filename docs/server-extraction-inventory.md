@@ -30,14 +30,14 @@ Der Generator führt selbst keine Tests und keine Laufzeitinitialisierung aus. S
 
 | Phase | Funktionen/Klassen | Globale Bindungen | Importbindungen |
 | --- | ---: | ---: | ---: |
-| P0 (Zuordnung offen) | 7 | 0 | 0 |
+| P0 (Zuordnung offen) | 0 | 0 | 0 |
 | P1 | 20 | 40 | 143 |
-| P2 | 90 | 10 | 0 |
+| P2 | 85 | 10 | 0 |
 | P3 | 189 | 27 | 0 |
-| P4 | 284 | 30 | 0 |
+| P4 | 285 | 30 | 0 |
 | P5 | 24 | 10 | 0 |
 | P6 | 228 | 43 | 0 |
-| P7 | 190 | 39 | 0 |
+| P7 | 201 | 39 | 0 |
 | P8 | 13 | 11 | 0 |
 | P9 | 25 | 6 | 0 |
 | P10 | 30 | 39 | 0 |
@@ -1769,17 +1769,17 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 12. Jede Gruppe ist al
 | Funktion | `gemini_usage_summary` | 12854 | `providers/` | P2 | offen | keine statisch gefunden |
 | Funktion | `_record_gemini_status` | 12859 | `providers/` | P2 | offen | keine statisch gefunden |
 | Funktion | `_record_gemini_usage` | 12865 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_gemini_content_has_function_response` | 12877 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_gemini_history_exchange_boundary` | 12882 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_trim_gemini_history` | 12889 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_gemini_history_parts_without_raw_media` | 12900 | `providers/` | P2 | offen | keine statisch gefunden |
-| Funktion | `_gemini_inline_media_from_history` | 12916 | `unklar: planning/, sync/, db/, performance/` | P0 (Zuordnung offen) | offen | keine statisch gefunden |
-| Funktion | `_gemini_history` | 12928 | `unklar: planning/, sync/, db/, performance/` | P0 (Zuordnung offen) | offen | tests/test_coach_attachments.py:198 (Monkeypatch/getattr/sys.modules); tests/test_coach_attachments.py:227 (Monkeypatch/getattr/sys.modules); tests/test_server.py:4362 (direkt/dynamisch unklar); tests/test_server.py:4494 (direkt/dynamisch unklar) |
-| Funktion | `_save_gemini_history` | 12936 | `unklar: planning/, sync/, db/, performance/` | P0 (Zuordnung offen) | offen | keine statisch gefunden |
-| Funktion | `repair_incomplete_gemini_tool_history` | 12948 | `unklar: planning/, sync/, db/, performance/` | P0 (Zuordnung offen) | offen | keine statisch gefunden |
-| Funktion | `_gemini_selected_raw_attachments` | 12964 | `unklar: planning/, sync/, db/, performance/` | P0 (Zuordnung offen) | offen | keine statisch gefunden |
-| Funktion | `_gemini_history_parts` | 12980 | `unklar: planning/, sync/, db/, performance/` | P0 (Zuordnung offen) | offen | tests/test_server.py:4373 (direkt/dynamisch unklar); tests/test_server.py:4378 (direkt/dynamisch unklar) |
-| Funktion | `_gemini_local_chat_history` | 13002 | `providers/` | P2 | offen | tests/test_coach_attachments.py:215 (direkt/dynamisch unklar); tests/test_coach_attachments.py:227 (Monkeypatch/getattr/sys.modules) |
+| Funktion | `_gemini_content_has_function_response` | 12877 | `coach/conversation.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_gemini_history_exchange_boundary` | 12882 | `coach/conversation.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_trim_gemini_history` | 12889 | `coach/conversation.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_gemini_history_parts_without_raw_media` | 12900 | `coach/conversation.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_gemini_inline_media_from_history` | 12916 | `coach/conversation.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_gemini_history` | 12928 | `coach/conversation.py` | P7 | offen | tests/test_coach_attachments.py:198 (Monkeypatch/getattr/sys.modules); tests/test_coach_attachments.py:227 (Monkeypatch/getattr/sys.modules); tests/test_server.py:4362 (direkt/dynamisch unklar); tests/test_server.py:4494 (direkt/dynamisch unklar) |
+| Funktion | `_save_gemini_history` | 12936 | `coach/conversation.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `repair_incomplete_gemini_tool_history` | 12948 | `coach/conversation.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_gemini_selected_raw_attachments` | 12964 | `coach/conversation.py` | P7 | offen | keine statisch gefunden |
+| Funktion | `_gemini_history_parts` | 12980 | `coach/conversation.py` | P7 | offen | tests/test_server.py:4373 (direkt/dynamisch unklar); tests/test_server.py:4378 (direkt/dynamisch unklar) |
+| Funktion | `_gemini_local_chat_history` | 13002 | `coach/conversation.py` | P7 | offen | tests/test_coach_attachments.py:215 (direkt/dynamisch unklar); tests/test_coach_attachments.py:227 (Monkeypatch/getattr/sys.modules) |
 | Funktion | `_gemini_request_payload` | 13024 | `providers/` | P2 | offen | tests/test_coach_attachments.py:160 (direkt/dynamisch unklar); tests/test_coach_attachments.py:186 (direkt/dynamisch unklar); tests/test_coach_attachments.py:190 (direkt/dynamisch unklar); tests/test_coach_attachments.py:199 (direkt/dynamisch unklar); tests/test_coach_attachments.py:232 (direkt/dynamisch unklar); tests/test_coach_attachments.py:233 (direkt/dynamisch unklar); tests/test_coach_attachments.py:70 (direkt/dynamisch unklar); tests/test_server.py:4390 (direkt/dynamisch unklar); tests/test_server.py:4403 (direkt/dynamisch unklar); tests/test_server.py:4473 (direkt/dynamisch unklar) |
 | Funktion | `gemini_raw_request` | 13120 | `providers/` | P2 | offen | keine statisch gefunden |
 | Funktion | `_gemini_responses_result` | 13139 | `providers/` | P2 | offen | keine statisch gefunden |
@@ -1922,7 +1922,7 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 12. Jede Gruppe ist al
 | Funktion | `_structured_coach_apply_library_plan_result` | 15274 | `coach/context.py` | P7 | offen | keine statisch gefunden |
 | Funktion | `_commit_structured_training_plan` | 15288 | `planning/` | P4 | offen | keine statisch gefunden |
 | Funktion | `_persist_committed_training_plan` | 15302 | `planning/` | P4 | offen | keine statisch gefunden |
-| Funktion | `_validate_committed_training_plan` | 15330 | `unklar: performance/, coach/context.py, coach/conversation.py, providers/, activities/` | P0 (Zuordnung offen) | offen | keine statisch gefunden |
+| Funktion | `_validate_committed_training_plan` | 15330 | `planning/` | P4 | offen | keine statisch gefunden |
 | Funktion | `_replace_structured_coach_training_plan` | 15346 | `coach/context.py` | P7 | offen | keine statisch gefunden |
 | Funktion | `_validate_structured_training_change_scopes` | 15365 | `planning/` | P4 | offen | keine statisch gefunden |
 | Funktion | `_apply_structured_coach_training_changes` | 15385 | `coach/context.py` | P7 | offen | keine statisch gefunden |
@@ -2196,7 +2196,7 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 12. Jede Gruppe ist al
 | `coach/` | 27 |
 | `coach/authorization.py` | 35 |
 | `coach/context.py` | 63 |
-| `coach/conversation.py` | 8 |
+| `coach/conversation.py` | 19 |
 | `coach/dialogue.py` | 18 |
 | `coach/jobs.py` | 5 |
 | `coach/morning.py` | 3 |
@@ -2217,11 +2217,11 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 12. Jede Gruppe ist al
 | `observability.py` | 18 |
 | `performance/` | 56 |
 | `performance/activity_validation.py` | 4 |
-| `planning/` | 218 |
+| `planning/` | 219 |
 | `planning/calendar.py` | 1 |
 | `planning/competitions.py` | 96 |
 | `privacy.py` | 8 |
-| `providers/` | 70 |
+| `providers/` | 65 |
 | `providers/calendar.py` | 6 |
 | `providers/http.py` | 11 |
 | `providers/intervals_client.py` | 1 |
@@ -2240,8 +2240,6 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 12. Jede Gruppe ist al
 | `sync/scheduler.py` | 13 |
 | `sync/snapshots.py` | 1 |
 | `sync/status.py` | 1 |
-| `unklar: performance/, coach/context.py, coach/conversation.py, providers/, activities/` | 1 |
-| `unklar: planning/, sync/, db/, performance/` | 6 |
 | `weather/` | 55 |
 
 ## Grenzen und offene Unsicherheiten
