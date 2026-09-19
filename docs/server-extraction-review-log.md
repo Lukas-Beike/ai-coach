@@ -529,6 +529,20 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - Ruff auf den betroffenen Provider- und Provider-Testdateien, Compileall,
   Inventar-Check und `git diff --check`: PASS.
 
+### PR-#682-Korrekturrunde
+
+- SonarCloud auf `a8e546c5d3ff1cf593ca9092c7af114d55a78f3c`: **FAIL** —
+  `StreamAccumulator._merge_chunk` und `consume_sse_event` überschritten mit
+  47 beziehungsweise 17 die erlaubte kognitive Komplexität 15.
+- Korrekturcommit `27301f4`: **PASS** im erneuten Root-Diff- und Code-Review.
+  Ausschließlich private Parserteilschritte wurden getrennt; öffentliche API,
+  Eventreihenfolge, Delta-/Response-ID-Ausgabe, Metadatenaggregation und
+  Fehlerverträge bleiben unverändert.
+- Provider- und Architekturregressionen: 32 Tests, PASS. Vollständiger Lauf:
+  888 Tests, 12 übersprungen, PASS in 183,539 s. Ruff, Compileall und
+  `git diff --check`: PASS. Der aktualisierte PR-Head benötigt erneut alle
+  externen Gates.
+
 ### Verbleibende Risiken und nächster Schritt
 
 - Die externen PR-Gates dieses Pakets bleiben vor dem Merge verbindlich. Die
