@@ -1,9 +1,46 @@
 import unittest
 
-from backend.providers.http import error_detail, read_bounded_response
+from backend.providers.http import (
+    error_detail,
+    multipart_form_data,
+    read_bounded_response,
+)
 
 
 class ProviderHTTPTests(unittest.TestCase):
+    def test_multipart_form_data_has_deterministic_exact_wire_bytes(self):
+        body, content_type = multipart_form_data(
+            [("model", "gpt-transcribe"), ("languages[]", "de")],
+            "file",
+            "voice.webm",
+            "audio/webm",
+            b"\x00\xffaudio\r\n",
+            boundary_token="test-boundary",
+        )
+        boundary = b"----IntervalsCoachtest-boundary"
+        expected = (
+            b"--" + boundary + b"\r\n"
+            b'Content-Disposition: form-data; name="model"\r\n\r\n'
+            b"gpt-transcribe\r\n"
+            b"--" + boundary + b"\r\n"
+            b'Content-Disposition: form-data; name="languages[]"\r\n\r\n'
+            b"de\r\n"
+            b"--" + boundary + b"\r\n"
+            b'Content-Disposition: form-data; name="file"; filename="voice.webm"\r\n'
+            b"Content-Type: audio/webm\r\n\r\n"
+            b"\x00\xffaudio\r\n"
+            b"\r\n--" + boundary + b"--\r\n"
+        )
+        self.assertEqual(body, expected)
+        self.assertEqual(content_type, "multipart/form-data; boundary=----IntervalsCoachtest-boundary")
+
+    def test_multipart_form_data_default_boundary_has_expected_prefix_and_hex_token(self):
+        body, content_type = multipart_form_data([], "file", "voice.mp3", "audio/mpeg", b"audio")
+        self.assertRegex(content_type, r"^multipart/form-data; boundary=----IntervalsCoach[0-9a-f]{32}$")
+        boundary = content_type.split("=", 1)[1].encode("ascii")
+        self.assertTrue(body.startswith(b"--" + boundary + b"\r\n"))
+        self.assertTrue(body.endswith(b"\r\n--" + boundary + b"--\r\n"))
+
     def test_read_bounded_response_rejects_oversized_body(self):
         class Response:
             def read(self, size):

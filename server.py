@@ -8,7 +8,6 @@ import base64
 import difflib
 import hashlib
 import hmac
-import ipaddress
 import json
 import logging
 import math
@@ -20,7 +19,6 @@ import re
 import secrets
 import shutil
 import socket
-import ssl
 import sqlite3
 import threading
 import tempfile
@@ -32,13 +30,12 @@ from contextlib import nullcontext, contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from functools import wraps
-from http.client import HTTPResponse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any, Callable, Iterator, NoReturn
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
@@ -81,8 +78,10 @@ from backend.db.schema import (
 )
 from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
+from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
 from backend.providers import gemini as gemini_provider
+from backend.providers import http as provider_http
 from backend.providers import openai as openai_provider
 from backend.providers.http import error_detail as provider_error_detail, read_bounded_response
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
@@ -245,8 +244,6 @@ MAX_PRIVACY_EXPORT_BYTES = 100_000_000
 MIN_EXPORT_FREE_BYTES = 10_000_000
 EXPORT_TIME_LIMIT_SECONDS = 120
 STREAM_CHUNK_BYTES = 64 * 1024
-CALENDAR_FETCH_TIMEOUT_SECONDS = 30
-CALENDAR_CONNECTION_TIMEOUT_SECONDS = 10
 MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 # The Responses API counts both visible output and reasoning tokens against
 # max_output_tokens. Keep ordinary replies bounded, but leave enough room for
@@ -4465,172 +4462,6 @@ def list_competitions(limit: int | None = None) -> list[dict[str, Any]]:
         return COMPETITION_REPOSITORY.list(db, max(1, min(int(limit), 500)) if limit is not None else None)
 
 
-def _resolve_calendar_addresses(hostname: str, *, status: int) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
-    try:
-        addresses = [ipaddress.ip_address(hostname)]
-    except ValueError:
-        try:
-            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)]
-        except OSError as exc:
-            message = "Die Kalenderadresse konnte nicht aufgelöst werden."
-            raise AppError(status, message) from exc
-    addresses = list(dict.fromkeys(addresses))
-    if not addresses or any(not address.is_global for address in addresses):
-        raise AppError(status, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
-    return addresses
-
-
-def _calendar_feed_request(url: str) -> tuple[str, int, bytes]:
-    parsed = urlparse(url)
-    hostname = (parsed.hostname or "").rstrip(".").casefold()
-    port = parsed.port or 443
-    request_target = parsed.path or "/"
-    if parsed.query:
-        request_target += "?" + parsed.query
-    if any(char in request_target for char in "\r\n"):
-        raise AppError(400, "Die Kalenderadresse enthält ungültige Zeichen.")
-    try:
-        host_header = hostname.encode("idna").decode("ascii")
-        request_bytes = (
-            f"GET {request_target} HTTP/1.1\r\n"
-            f"Host: {host_header}\r\n"
-            "Accept: text/calendar, text/plain;q=0.9\r\n"
-            f"User-Agent: IntervalsCoach/{APP_VERSION}\r\n"
-            "Connection: close\r\n\r\n"
-        ).encode("ascii")
-    except UnicodeError as exc:
-        raise AppError(400, "Die Kalenderadresse enthält ungültige Zeichen.") from exc
-    return hostname, port, request_bytes
-
-
-def _calendar_fetch_remaining(deadline: float) -> float:
-    remaining = deadline - time.perf_counter()
-    if remaining <= 0:
-        raise TimeoutError("calendar request deadline exceeded")
-    return remaining
-
-
-def _fetch_calendar_address(
-    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
-    port: int,
-    hostname: str,
-    tls_context: ssl.SSLContext,
-    request_bytes: bytes,
-    deadline: float,
-) -> tuple[bytes, int]:
-    raw_socket = None
-    tls_socket = None
-    try:
-        raw_socket = socket.create_connection(
-            (str(address), port), timeout=min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, _calendar_fetch_remaining(deadline))
-        )
-        tls_socket = tls_context.wrap_socket(raw_socket, server_hostname=hostname)
-        raw_socket = None
-        tls_socket.settimeout(min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, _calendar_fetch_remaining(deadline)))
-        tls_socket.sendall(request_bytes)
-        response = HTTPResponse(tls_socket, method="GET")
-        response.begin()
-        if 300 <= response.status < 400:
-            raise AppError(400, "Der Kalender-Feed darf nicht auf eine andere Adresse weiterleiten.")
-        if response.status >= 400:
-            raise AppError(502, f"Der Kalender-Feed antwortete mit HTTP {response.status}.")
-        payload = response.read(calendar_provider.MAX_EXTERNAL_CALENDAR_BYTES + 1)
-        if len(payload) > calendar_provider.MAX_EXTERNAL_CALENDAR_BYTES:
-            raise AppError(413, "Der Kalender-Feed ist zu groß.")
-        return payload, response.status
-    finally:
-        if tls_socket is not None:
-            tls_socket.close()
-        if raw_socket is not None:
-            raw_socket.close()
-
-
-def _calendar_fetch_failure_log(request_context: dict[str, Any], started: float, error: AppError, timed_out: bool) -> None:
-    LOGGER.exception(
-        "External calendar request failed",
-        extra={
-            "event": "external_request_failed",
-            "context": {
-                **request_context,
-                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                "status": error.status,
-                "error_code": "timeout" if timed_out or error.status == 504 else "provider_error",
-            },
-        },
-    )
-
-
-def fetch_calendar_feed(url: str) -> bytes:
-    hostname, port, request_bytes = _calendar_feed_request(url)
-    tls_context = ssl.create_default_context()
-    tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
-    # Resolve immediately before connecting and connect only to these checked
-    # addresses. This closes the validation/fetch DNS rebinding window. Keep
-    # one resolution per fetch; resolving twice made a slow resolver multiply
-    # the calendar synchronization time.
-    started = time.perf_counter()
-    request_context = {
-        "service": "calendar",
-        "method": "GET",
-        "path": "/redacted",
-        "timeout_seconds": CALENDAR_FETCH_TIMEOUT_SECONDS,
-    }
-    LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": request_context})
-    timed_out = False
-    try:
-        addresses = _resolve_calendar_addresses(hostname, status=502)
-        request_context["address_count"] = len(addresses)
-        deadline = started + CALENDAR_FETCH_TIMEOUT_SECONDS
-        last_network_error: OSError | None = None
-        for address in addresses:
-            try:
-                payload, status = _fetch_calendar_address(address, port, hostname, tls_context, request_bytes, deadline)
-                LOGGER.info(
-                    EXTERNAL_HTTP_COMPLETED_EVENT,
-                    extra={
-                        "event": "external_request_completed",
-                        "context": {
-                            **request_context,
-                            "status": status,
-                            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                            "response_bytes": len(payload),
-                        },
-                    },
-                )
-                return payload
-            except AppError:
-                raise
-            except TimeoutError as exc:
-                timed_out = True
-                last_network_error = exc
-                break
-            except OSError as exc:
-                last_network_error = exc
-                continue
-        if timed_out:
-            raise AppError(504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet.")
-        raise AppError(502, "Der Kalender-Feed konnte nicht geladen werden.") from last_network_error
-    except AppError as exc:
-        _calendar_fetch_failure_log(request_context, started, exc, timed_out)
-        raise
-
-
-def external_calendar_url(value: Any) -> str:
-    raw = str(value or "").strip()
-    parsed = urlparse(raw)
-    try:
-        port = parsed.port
-    except ValueError as exc:
-        raise AppError(400, "Die Kalenderadresse muss einen gültigen HTTPS-Port verwenden.") from exc
-    hostname = (parsed.hostname or "").rstrip(".").casefold()
-    if parsed.scheme.lower() != "https" or port not in {None, 443} or not hostname or parsed.username or parsed.password or parsed.fragment:
-        raise AppError(400, "Die Kalenderadresse muss eine HTTPS-URL ohne Zugangsdaten sein.")
-    if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
-        raise AppError(400, "Lokale Kalenderadressen werden aus Sicherheitsgründen nicht abgerufen.")
-    _resolve_calendar_addresses(hostname, status=400)
-    return raw
-
-
 def list_external_calendar_events(limit: int = 300, training_relevant_only: bool = False) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
         relevance_filter = " AND training_relevant = 1" if training_relevant_only else ""
@@ -4664,10 +4495,8 @@ def sync_external_calendar(reason: str = "manual", operation_id: str | None = No
         return {"status": "already_running"}
     try:
         set_kv("external_calendar_sync_status", "Kalender: Synchronisierung läuft…")
-        url = external_calendar_url(CONFIG.calendar_ical_url)
-        payload = fetch_calendar_feed(url)
-        if len(payload) > calendar_provider.MAX_EXTERNAL_CALENDAR_BYTES:
-            raise AppError(413, "Der Kalender-Feed ist zu groß.")
+        url = calendar_provider.external_calendar_url(CONFIG.calendar_ical_url)
+        payload = calendar_provider.fetch_calendar_feed(url, app_version=APP_VERSION)
         current_local = local_now()
         today = current_local.date()
         latest = today + timedelta(days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS)
@@ -13010,23 +12839,6 @@ def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
     return result
 
 
-def openai_endpoint(path: str) -> str:
-    """Resolve an OpenAI-compatible API path against the configured base URL."""
-    base_url = str(getattr(CONFIG, "openai_base_url", DEFAULT_OPENAI_BASE_URL) or DEFAULT_OPENAI_BASE_URL).strip() or DEFAULT_OPENAI_BASE_URL
-    parsed = urlparse(base_url)
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise AppError(500, "OPENAI_BASE_URL muss eine gültige HTTP(S)-Basis-URL ohne Zugangsdaten oder Query-Parameter sein.")
-    normalized_path = "/" + str(path or "").lstrip("/")
-    return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/") + normalized_path, "", "", ""))
-
-
 def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
         raise AppError(503, OPENAI_API_KEY_ERROR)
@@ -13035,7 +12847,7 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
         request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
     result = http_json(
         "POST",
-        openai_endpoint(path),
+        openai_provider.endpoint(CONFIG.openai_base_url, path, default_base_url=DEFAULT_OPENAI_BASE_URL),
         request_payload,
         {"Authorization": f"Bearer {CONFIG.openai_api_key}"},
         timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
@@ -13051,55 +12863,14 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def multipart_form_data(
-    fields: list[tuple[str, str]],
-    file_field: str,
-    filename: str,
-    file_content_type: str,
-    file_data: bytes,
-) -> tuple[bytes, str]:
-    """Build a bounded multipart request without persisting the uploaded audio."""
-    boundary = "----IntervalsCoach" + secrets.token_hex(16)
-    boundary_bytes = boundary.encode("ascii")
-    parts: list[bytes] = []
-    for name, value in fields:
-        parts.extend((b"--" + boundary_bytes + b"\r\n",))
-        parts.extend((f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"),))
-        parts.extend((value.encode("utf-8"), b"\r\n"))
-    parts.extend((b"--" + boundary_bytes + b"\r\n",))
-    parts.extend((
-        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode("ascii"),
-        f"Content-Type: {file_content_type}\r\n\r\n".encode("ascii"),
-        file_data,
-        b"\r\n--" + boundary_bytes + b"--\r\n",
-    ))
-    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
-
-
-VOICE_AUDIO_TYPES = {
-    "audio/webm": ".webm",
-    "audio/mp4": ".mp4",
-    "audio/ogg": ".ogg",
-    "audio/mpeg": ".mp3",
-    "audio/wav": ".wav",
-    "audio/x-wav": ".wav",
-    "audio/mpga": ".mpga",
-    "audio/m4a": ".m4a",
-}
-
-
-def normalized_audio_type(content_type: str) -> str:
-    return str(content_type or "").split(";", 1)[0].strip().casefold()
-
-
 def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
     """Transcribe one short voice note; audio is intentionally never persisted."""
     if not isinstance(audio, bytes) or not audio:
         raise AppError(400, "Die Audioaufnahme ist leer.")
     if len(audio) > MAX_AUDIO_BODY_BYTES:
         raise AppError(413, "Die Audioaufnahme ist zu groß.")
-    audio_type = normalized_audio_type(content_type)
-    suffix = VOICE_AUDIO_TYPES.get(audio_type)
+    audio_type = audio_provider.normalized_audio_type(content_type)
+    suffix = audio_provider.audio_suffix(audio_type)
     if not suffix:
         raise AppError(415, "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG, MP3 und WAV.")
     if SETTINGS.selected_ai_provider() == "gemini":
@@ -13118,7 +12889,7 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
         return {"transcript": transcript}
     if not CONFIG.openai_api_key:
         raise AppError(503, OPENAI_API_KEY_ERROR)
-    body, multipart_type = multipart_form_data(
+    body, multipart_type = provider_http.multipart_form_data(
         [
             ("model", "gpt-transcribe"),
             ("languages[]", "de"),
@@ -13131,7 +12902,7 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
     )
     result = http_json(
         "POST",
-        openai_endpoint("/audio/transcriptions"),
+        openai_provider.endpoint(CONFIG.openai_base_url, "/audio/transcriptions", default_base_url=DEFAULT_OPENAI_BASE_URL),
         headers={"Authorization": f"Bearer {CONFIG.openai_api_key}"},
         timeout=90,
         service="openai",
@@ -13684,7 +13455,7 @@ def retrieve_openai_response(response_id: str) -> dict[str, Any]:
     response_id = _openai_response_id(response_id)
     result = http_json(
         "GET",
-        openai_endpoint(f"/responses/{quote(response_id, safe='')}"),
+        openai_provider.endpoint(CONFIG.openai_base_url, f"/responses/{quote(response_id, safe='')}", default_base_url=DEFAULT_OPENAI_BASE_URL),
         headers={"Authorization": f"Bearer {CONFIG.openai_api_key}"},
         timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
         service="openai",
@@ -13700,7 +13471,7 @@ def cancel_openai_response(response_id: str) -> None:
     try:
         http_json(
             "POST",
-            openai_endpoint(f"/responses/{quote(response_id, safe='')}/cancel"),
+            openai_provider.endpoint(CONFIG.openai_base_url, f"/responses/{quote(response_id, safe='')}/cancel", default_base_url=DEFAULT_OPENAI_BASE_URL),
             {},
             {"Authorization": f"Bearer {CONFIG.openai_api_key}"},
             timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
@@ -13966,7 +13737,7 @@ def openai_stream_request(
     request_payload.pop("_ai_provider", None)
     request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
     body = json.dumps(request_payload).encode("utf-8")
-    endpoint = openai_endpoint(OPENAI_RESPONSES_PATH)
+    endpoint = openai_provider.endpoint(CONFIG.openai_base_url, OPENAI_RESPONSES_PATH, default_base_url=DEFAULT_OPENAI_BASE_URL)
     parsed_endpoint = urlparse(endpoint)
     request = Request(
         endpoint,
@@ -19250,7 +19021,7 @@ def delete_remote_conversation(conversation_id: str) -> bool:
         return False
     http_json(
         "DELETE",
-        openai_endpoint("/conversations/" + quote(conversation_id, safe="")),
+        openai_provider.endpoint(CONFIG.openai_base_url, "/conversations/" + quote(conversation_id, safe=""), default_base_url=DEFAULT_OPENAI_BASE_URL),
         headers={"Authorization": f"Bearer {CONFIG.openai_api_key}"},
         timeout=30,
         service="openai",
@@ -20090,8 +19861,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         return read_request_audio_body(
             self.headers,
             self.rfile.read,
-            allowed_types=VOICE_AUDIO_TYPES,
-            normalize_type=normalized_audio_type,
+            allowed_types=audio_provider.VOICE_AUDIO_TYPES,
+            normalize_type=audio_provider.normalized_audio_type,
             max_bytes=MAX_AUDIO_BODY_BYTES,
             error=AppError,
         )

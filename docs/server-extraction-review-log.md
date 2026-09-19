@@ -520,3 +520,72 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   zurückgegeben; nicht-stringartige und unbekannte Eingaben werden
   `http_error`. Der betroffene Sicherheitsumfang wird nach dem neuen Commit
   erneut geprüft.
+- Codex-Review auf `1cab17f`: **FAIL** — die bereits statisch projizierte
+  Kategorie `usage_limit_exceeded` war bei einer zweiten Projektion nicht
+  idempotent und fiel auf `http_error` zurück. Korrekturcommit
+  `1390aefc50d24e7be26649ab8742c3267f3b5f8a`: **PASS** — ausschließlich der
+  statische Kategorienwert wurde ergänzt; unbekannte Werte bleiben redigiert.
+  Provider- und Serverregressionen: 11 Tests, PASS; vollständiger Lauf: 871
+  Tests, 12 übersprungen, PASS in 180,945 s. Ruff, Compileall und Diff-Check:
+  PASS.
+- PR #680 wurde am `2026-09-19T16:53:42Z` als Squash gemergt. Merge-Commit
+  `de078fa0439af897b3fc25c4f0cdbf926bfa626a` ist auf `origin/develop`
+  erreichbar; Review-Threads sind aufgelöst. CodeQL, Codex, Unit-, Shard-,
+  Container- und Quality-Gates waren beim Merge grün; der nachgelagerte
+  Browser-/Accessibility-Job wurde separat bis zum Abschluss beobachtet.
+
+## P2.2 — Kalendertransport, Provider-HTTP und Audio/OpenAI-Hilfen
+
+- Basis: bestätigter Merge-Commit
+  `de078fa0439af897b3fc25c4f0cdbf926bfa626a` von PR #680; `mergedAt`
+  `2026-09-19T16:53:42Z`, Erreichbarkeit auf `origin/develop` und aufgelöste
+  Review-Threads bestätigt.
+- Kalendertransport-Worker: geprüfter Commit
+  `9b670cfad5d15c3c8677f79d06d857c45f581cf6`, integriert als `e6fa07e`.
+  Review: **PASS** — URL-, DNS-, SSRF- und IP-Revalidierung, gepinntes
+  Verbindungsziel mit ursprünglichem TLS-SNI/Host, TLS >= 1.2, Gesamtdeadline,
+  5-MB-Grenze, begrenzter Retry, deterministisches Cleanup und redigiertes
+  Fehlerlogging liegen vollständig in `backend/providers/calendar.py`.
+- OpenAI-/Audio-Worker: geprüfter Commit
+  `d154f111d69291db6d104fca6a7f08635e881611`, integriert als `ed23144`.
+  Review: **PASS** — Endpoint-Zusammensetzung, Multipart-Encoding sowie
+  Audio-MIME-/Suffix-Normalisierung sind reine Provider-Hilfen ohne Zugriff
+  auf `server.py`, globale Serverzustände oder externe Provider.
+- Geprüfter integrierter Code-Commit nach Rebase: `63283c2`.
+  Integrationsreview: **PASS** — die bisherigen Kalendertransport-,
+  OpenAI-Endpoint-, Multipart- und Audio-Kompatibilitätswrapper wurden aus
+  `server.py` entfernt. Sämtliche Aufrufer verwenden die Eigentümermodule
+  direkt; Test-Patch-Ziele wurden auf diese Module migriert. Kalender-Sync
+  behält Parse-before-delete, Transaktion und den letzten guten Datenstand.
+  Architekturtests verbieten die Rückkehr aller entfernten Symbole.
+- `server.py`: 20.129 physische Zeilen und 1.108 verbleibende
+  Funktionen/Klassen. Das Inventar enthält 1.555 Einträge; P0 bleibt bei null
+  unklaren Zuordnungen, in P2 bleiben 103 Definitionen und 10 globale
+  Bindungen offen. Der fachliche Eigentümerwechsel, nicht die Zeilenabnahme,
+  ist das Abnahmekriterium.
+
+### Prüfungen
+
+- Worker-Kalendertransport: 20 Tests, PASS; eigenes Diff-Review, Ruff,
+  Compileall und `git diff --check`: PASS.
+- Worker-OpenAI/Audio: 18 Tests, PASS; eigenes Diff-Review, Ruff, Compileall
+  und `git diff --check`: PASS.
+- Integrierte Provider-, Aufrufer- und Architekturregressionen: 46 Tests,
+  PASS in 1,460 s.
+- Vollständiger integrierter Lauf: `python -m unittest discover -s tests` —
+  878 Tests, 12 übersprungen, PASS in 174,419 s.
+- Nach Rebase auf den bestätigten PR-#680-Mergecommit: vollständiger Lauf —
+  878 Tests, 12 übersprungen, PASS in 185,179 s.
+- `ruff check` für alle geänderten Provider-, Provider-Test- und
+  Inventardateien, Compileall, Inventar-Check und `git diff --check`: PASS.
+
+### Verbleibende Risiken und nächster Schritt
+
+- Die nach dem Rebase erneut ausgeführten Prüfungen und externen PR-Gates sind
+  vor dem Merge des Pakets verbindlich; jede weitere Änderung hebt diesen PASS
+  für den betroffenen Umfang auf.
+- SSE-Verarbeitung und Gemini-Stream-Akkumulation sind separat geprüft, aber
+  absichtlich noch nicht integriert; sie folgen als eigenes P2-Paket, damit
+  Schreibbereiche und Reviewumfang klein bleiben.
+- Docker-/E2E-Ausführung bleibt lokal durch den nicht erreichbaren
+  Docker-Desktop-Daemon blockiert; die externen PR-Gates bleiben verbindlich.
