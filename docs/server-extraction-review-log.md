@@ -186,7 +186,6 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - `python -m compileall -q server.py backend` — PASS.
 - `python scripts/server_extraction_inventory.py --check` — PASS.
 - `git diff --check` — PASS.
-
 ### Verbleibende Risiken und nächster Schritt
 
 - Docker-/E2E-Ausführung bleibt lokal durch den nicht erreichbaren
@@ -394,6 +393,16 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - `python -m compileall -q server.py backend tests` — PASS.
 - `python scripts/server_extraction_inventory.py --check` — PASS.
 - `git diff --check` — PASS.
+- PR-#679-Sonar-Erstlauf: **FAIL** — drei neue `python:S1192`-Befunde im
+  Inventargenerator für mehrfach verwendete Eigentümerpfade.
+- Korrekturreview des konkreten Diffs: **PASS** — die Pfade für
+  `coach/context.py`, `performance/activity_validation.py` und
+  `sync/refresh.py` besitzen nun jeweils genau eine Konstante; die erzeugten
+  Eigentümerwerte und damit das Inventar bleiben unverändert.
+- Korrekturprüfungen: `python scripts/server_extraction_inventory.py --check`,
+  `python -m unittest tests.test_server_architecture`,
+  `ruff check scripts/server_extraction_inventory.py` und `git diff --check`
+  — PASS.
 
 ### Verbleibende Risiken und nächster Schritt
 
