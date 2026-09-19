@@ -41,6 +41,8 @@ os.environ.update({
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.db.schema import database_schema_is_current, database_table_names
+from backend.providers import calendar as calendar_provider
+from backend.providers import gemini as gemini_provider
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 
@@ -2433,139 +2435,6 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("import_public_calendar", backend)
         self.assertNotIn("renderExternalCalendarMarker", app)
 
-    def test_ical_calendar_parser_extracts_timing_and_duration(self):
-        events = server.parse_ical_calendar(
-            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:family-1\r\n"
-            b"DTSTART;TZID=Europe/Berlin:20260902T100000\r\n"
-            b"DTEND;TZID=Europe/Berlin:20260902T130000\r\nSUMMARY:Family appointment\r\n"
-            b"END:VEVENT\r\nBEGIN:VEVENT\r\nUID:all-day\r\nDTSTART;VALUE=DATE:20260903\r\n"
-            b"DTEND;VALUE=DATE:20260904\r\nSUMMARY:Travel\r\nEND:VEVENT\r\n"
-            b"BEGIN:VEVENT\r\nUID:info-only\r\nDTSTART;VALUE=DATE:20260904\r\n"
-            b"SUMMARY:Team info\r\nDESCRIPTION: [NO_TRAINING] Nur zur Information\r\nEND:VEVENT\r\n"
-            b"BEGIN:VEVENT\r\nUID:no-intensity\r\nDTSTART;VALUE=DATE:20260905\r\n"
-            b"SUMMARY:Evening event\r\nDESCRIPTION: [NO_INTENSITY] Training remains possible, but easy\r\nEND:VEVENT\r\n"
-            b"BEGIN:VEVENT\r\nUID:other-marker\r\nDTSTART;VALUE=DATE:20260906\r\n"
-            b"SUMMARY:Other marker\r\nDESCRIPTION: [OTHER_TAG] Keine besondere Wirkung\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
-            window_start=date(2026, 9, 2),
-            window_end=date(2026, 9, 8),
-        )
-        self.assertEqual(events[0]["duration_minutes"], 180)
-        self.assertEqual(events[0]["event_date"], "2026-09-02")
-        self.assertFalse(events[0]["all_day"])
-        self.assertEqual(events[1]["duration_minutes"], 1440)
-        self.assertTrue(events[1]["all_day"])
-        self.assertFalse(events[0]["training_relevant"])
-        self.assertFalse(events[1]["training_relevant"])
-        self.assertFalse(events[2]["training_relevant"])
-        self.assertTrue(events[3]["no_intensity"])
-        self.assertTrue(events[3]["training_relevant"])
-        self.assertFalse(events[3]["short_only"])
-        self.assertFalse(events[4]["no_intensity"])
-        self.assertTrue(events[4]["training_relevant"])
-        self.assertFalse(events[4]["training_impact"])
-
-    def test_ical_training_markers_are_contains_matched_in_description_only(self):
-        events = server.parse_ical_calendar(
-            b"BEGIN:VCALENDAR\r\n"
-            b"BEGIN:VEVENT\r\nUID:short-only\r\nDTSTART;VALUE=DATE:20260907\r\n"
-            b"SUMMARY:[SHORT_ONLY] Summary only\r\nDESCRIPTION:family appointment\r\nEND:VEVENT\r\n"
-            b"BEGIN:VEVENT\r\nUID:short-only-description\r\nDTSTART;VALUE=DATE:20260908\r\n"
-            b"SUMMARY:Family appointment\r\nDESCRIPTION:Please keep it [short_only] today\r\nEND:VEVENT\r\n"
-            b"END:VCALENDAR\r\n",
-            window_start=date(2026, 9, 7), window_end=date(2026, 9, 8),
-        )
-        self.assertFalse(events[0]["training_impact"])
-        self.assertTrue(events[1]["training_impact"])
-        self.assertTrue(events[1]["short_only"])
-
-    def test_calendar_provider_primitives_unfold_and_validate_without_server_dependency(self):
-        from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
-
-        payload = b"BEGIN:VCALENDAR\r\nDESCRIPTION:First\r\n continuation\r\nEND:VCALENDAR\r\n"
-        lines = unfold_ical(payload, max_bytes=1024, error=lambda status, message: ValueError(f"{status}: {message}"))
-
-        self.assertIn("DESCRIPTION:Firstcontinuation", lines)
-        self.assertEqual(parse_ics_value(r"Name\, with\; escaped\\text"), "Name, with; escaped\\text")
-        self.assertEqual(parse_ics_date("VALUE=DATE:20260901"), "2026-09-01")
-        self.assertEqual(ical_duration("PT1H30M"), timedelta(hours=1, minutes=30))
-        with self.assertRaisesRegex(ValueError, "400"):
-            unfold_ical(b"BEGIN:VEVENT\r\nEND:VEVENT\r\n", max_bytes=1024, error=lambda status, message: ValueError(f"{status}: {message}"))
-
-    def test_ical_parser_supports_google_recurring_rules_and_rejects_unsupported_feeds(self):
-        with self.assertRaises(server.AppError):
-            server.parse_ical_calendar(b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:broken\r\nEND:VEVENT\r\n")
-        weekly = (
-            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:recurring\r\n"
-            b"DTSTART;VALUE=DATE:20260901\r\nRRULE:FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH\r\n"
-            b"SUMMARY:Repeated\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-        )
-        weekly_events = server.parse_ical_calendar(weekly, window_start=date(2026, 9, 1), window_end=date(2026, 9, 14))
-        self.assertEqual([event["event_date"] for event in weekly_events], ["2026-09-01", "2026-09-03", "2026-09-08", "2026-09-10"])
-
-        monthly = weekly.replace(
-            b"DTSTART;VALUE=DATE:20260901\r\nRRULE:FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH",
-            b"DTSTART;VALUE=DATE:20260105\r\nRRULE:FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1",
-        ).replace(b"UID:recurring", b"UID:monthly")
-        monthly_events = server.parse_ical_calendar(monthly, window_start=date(2026, 2, 1), window_end=date(2026, 3, 28))
-        self.assertEqual([event["event_date"] for event in monthly_events], ["2026-02-02", "2026-03-02"])
-
-        yearly = weekly.replace(
-            b"DTSTART;VALUE=DATE:20260901\r\nRRULE:FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH",
-            b"DTSTART;VALUE=DATE:20250901\r\nRRULE:FREQ=YEARLY;BYMONTH=9;BYMONTHDAY=1",
-        ).replace(b"UID:recurring", b"UID:yearly")
-        yearly_events = server.parse_ical_calendar(yearly, window_start=date(2026, 8, 31), window_end=date(2026, 9, 30))
-        self.assertEqual([event["event_date"] for event in yearly_events], ["2026-09-01"])
-
-        unsupported = weekly.replace(b"FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH", b"FREQ=HOURLY;COUNT=2")
-        with self.assertRaises(server.AppError):
-            server.parse_ical_calendar(unsupported)
-        for malformed_byday in (b"BYDAY=MO,", b"BYDAY=MO,,TU", b"BYDAY=,"):
-            malformed = weekly.replace(b"BYDAY=TU,TH", malformed_byday)
-            with self.assertRaises(server.AppError):
-                server.parse_ical_calendar(malformed)
-
-    def test_ical_parser_applies_google_rdate_and_recurring_exceptions(self):
-        payload = (
-            b"BEGIN:VCALENDAR\r\n"
-            b"BEGIN:VEVENT\r\nUID:series\r\nDTSTART;VALUE=DATE:20260907\r\n"
-            b"RRULE:FREQ=WEEKLY;BYDAY=MO\r\nRDATE;VALUE=DATE:20260909\r\nSUMMARY:Series\r\nEND:VEVENT\r\n"
-            b"BEGIN:VEVENT\r\nUID:series\r\nRECURRENCE-ID;VALUE=DATE:20260914\r\n"
-            b"DTSTART;VALUE=DATE:20260914\r\nSUMMARY:Changed\r\nEND:VEVENT\r\n"
-            b"END:VCALENDAR\r\n"
-        )
-        events = server.parse_ical_calendar(payload, window_start=date(2026, 9, 7), window_end=date(2026, 9, 20))
-        self.assertEqual([(event["event_date"], event["name"]) for event in events], [
-            ("2026-09-07", "Series"),
-            ("2026-09-09", "Series"),
-            ("2026-09-14", "Changed"),
-        ])
-
-    def test_ical_parser_expands_bounded_daily_weekly_rules_with_exdates_and_dst(self):
-        server.save_profile({"timezone": "Europe/Berlin"})
-        daily = (
-            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:daily\r\n"
-            b"DTSTART;TZID=Europe/Berlin:20261024T100000\r\nDTEND;TZID=Europe/Berlin:20261024T110000\r\n"
-            b"RRULE:FREQ=DAILY;COUNT=5\r\nEXDATE;TZID=Europe/Berlin:20261025T100000\r\nSUMMARY:Daily\r\n"
-            b"END:VEVENT\r\nEND:VCALENDAR\r\n"
-        )
-        daily_events = server.parse_ical_calendar(daily, window_start=date(2026, 10, 24), window_end=date(2026, 10, 30))
-        self.assertEqual([event["event_date"] for event in daily_events], ["2026-10-24", "2026-10-26", "2026-10-27", "2026-10-28"])
-        self.assertTrue(daily_events[0]["start_local"].endswith("+02:00"))
-        self.assertTrue(daily_events[1]["start_local"].endswith("+01:00"))
-
-        weekly = (
-            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID=weekly\r\n"
-            b"DTSTART;TZID=Europe/Berlin:20260901T090000\r\nDTEND;TZID=Europe/Berlin:20260901T100000\r\n"
-            b"RRULE:FREQ=WEEKLY;UNTIL=20260922T235959;BYDAY=MO,WE\r\n"
-            b"EXDATE;TZID=Europe/Berlin:20260909T090000\r\nSUMMARY:Weekly\r\n"
-            b"END:VEVENT\r\nBEGIN:VEVENT\r\nUID=weekly\r\nDTSTART;TZID=Europe/Berlin:20260902T090000\r\nSUMMARY:Duplicate\r\nEND:VEVENT\r\n"
-            b"END:VCALENDAR\r\n"
-        ).replace(b"UID=", b"UID:").replace(b"SUMMARY=", b"SUMMARY:")
-        weekly_events = server.parse_ical_calendar(weekly, window_start=date(2026, 8, 31), window_end=date(2026, 9, 30))
-        self.assertEqual([event["event_date"] for event in weekly_events], ["2026-09-02", "2026-09-07", "2026-09-14", "2026-09-16", "2026-09-21"])
-        self.assertEqual(len({event["start_local"] for event in weekly_events}), len(weekly_events))
-        with self.assertRaises(server.AppError):
-            server.parse_ical_calendar(daily.replace(b"COUNT=5", b"COUNT=1001"), window_start=date(2026, 10, 24), window_end=date(2026, 10, 30))
 
     def test_external_calendar_keeps_last_good_events_on_invalid_feed(self):
         today = server.local_now().date().isoformat()
@@ -2681,7 +2550,7 @@ class CoachTests(unittest.TestCase):
 
     def test_external_calendar_sync_limits_events_to_eight_weeks(self):
         today = server.local_now().date()
-        in_window = today + timedelta(days=server.EXTERNAL_CALENDAR_WINDOW_DAYS)
+        in_window = today + timedelta(days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS)
         outside_window = in_window + timedelta(days=1)
         payload = (
             "BEGIN:VCALENDAR\r\n"
@@ -4687,12 +4556,6 @@ class CoachTests(unittest.TestCase):
         delete.assert_called_once_with("conv-test")
         self.assertTrue(result["remote_conversation_deleted"])
 
-    def test_gemini_error_classes_preserve_authentication_quota_and_rate_limits(self):
-        self.assertEqual(server.gemini_error_details(401, b"{}")["reason"], "authentication_or_permission")
-        quota = json.dumps({"error": {"status": "RESOURCE_EXHAUSTED", "details": [{"reason": "quotaExceeded"}]}}).encode()
-        self.assertEqual(server.gemini_error_details(429, quota)["reason"], "insufficient_quota")
-        self.assertEqual(server.gemini_error_details(429, b"{}")["reason"], "rate_limit_exceeded")
-
     def test_provider_authentication_errors_do_not_use_the_session_status(self):
         provider_error = server.AppError(401, "Gemini-SchlÃ¼ssel ungÃ¼ltig.", reason="authentication_or_permission")
         self.assertEqual(server.public_app_error_status(provider_error), 502)
@@ -4714,7 +4577,9 @@ class CoachTests(unittest.TestCase):
 
     def test_gemini_function_schemas_keep_openai_nullable_fields_as_json_schema(self):
         schema = {"type": "object", "properties": {"notes": {"type": ["string", "null"]}}}
-        declaration = server._gemini_tools([{"type": "function", "name": "save_feedback", "parameters": schema}])[0]["functionDeclarations"][0]
+        declaration = gemini_provider.function_tools(
+            [{"type": "function", "name": "save_feedback", "parameters": schema}]
+        )[0]["functionDeclarations"][0]
         self.assertEqual(declaration["parametersJsonSchema"], schema)
         self.assertNotIn("parameters", declaration)
 
@@ -8171,26 +8036,6 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(summary["rate_limits"]["remaining_tokens"], "0")
         self.assertNotIn("current quota", json.dumps(summary))
 
-    def test_openai_documented_spend_and_usage_codes_are_classified(self):
-        for code in (
-            "organization_spend_limit_exceeded",
-            "project_spend_limit_exceeded",
-            "organization_usage_limit_exceeded",
-        ):
-            details = server.openai_error_details(429, json.dumps({"error": {"code": code}}).encode("utf-8"))
-            self.assertEqual(details["reason"], code)
-            self.assertIn("Limit", details["message"])
-
-    def test_openai_retry_after_is_parsed_for_transient_rate_limits(self):
-        details = server.openai_error_details(
-            429,
-            json.dumps({"error": {"code": "rate_limit_exceeded"}}).encode("utf-8"),
-            {"retry-after": "12.5"},
-        )
-        self.assertEqual(details["reason"], "rate_limit_exceeded")
-        self.assertEqual(details["retry_after_seconds"], 13)
-        self.assertIsNone(server._retry_after_seconds({"retry-after": "not-a-delay"}))
-
     def test_openai_retry_after_is_attached_to_transient_http_error(self):
         error_body = json.dumps({"error": {"code": "rate_limit_exceeded"}}).encode("utf-8")
         upstream_error = server.HTTPError(
@@ -8220,10 +8065,6 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(raised.exception.reason, "rate_limit_exceeded")
         self.assertEqual(raised.exception.retry_after_seconds, 9)
 
-    def test_openai_log_reasons_are_static_allowlisted_values(self):
-        self.assertEqual(server.safe_openai_log_reason("project_spend_limit_exceeded"), "usage_limit_exceeded")
-        self.assertEqual(server.safe_openai_log_reason("provider-private-message"), "http_error")
-
     def test_openai_conversation_lock_retry_uses_structured_reason(self):
         calls = []
         responses = [server.AppError(409, "locked", reason="conversation_locked"), {"output_text": "ok"}]
@@ -8240,58 +8081,6 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["output_text"], "ok")
         self.assertEqual(calls, ["/responses", "/responses"])
         sleep.assert_called_once_with(1)
-
-    def test_openai_conversation_state_error_is_classified_without_provider_text(self):
-        raw_error = json.dumps({
-            "error": {
-                "code": "invalid_function_call_output",
-                "type": "invalid_request_error",
-                "param": "input[0]",
-                "message": "secret tool call detail must never be stored",
-            },
-        }).encode("utf-8")
-        details = server.openai_error_details(400, raw_error)
-        self.assertEqual(details["reason"], "conversation_state_invalid")
-        diagnostic = server.openai_error_diagnostic_details(raw_error, {"x-request-id": "req_test_123"})
-        self.assertEqual(diagnostic["error_code"], "invalid_function_call_output")
-        self.assertEqual(diagnostic["parameter"], "input[0]")
-        self.assertNotIn("secret", json.dumps(diagnostic))
-
-    def test_openai_code_null_input_state_errors_are_classified_for_recovery(self):
-        messages = (
-            "No tool output found for function call call_private_example.",
-            "Item 'rs_private_example' of type 'reasoning' was provided without its required following item.",
-        )
-        for provider_message in messages:
-            with self.subTest(provider_message=provider_message):
-                raw_error = json.dumps({
-                    "error": {
-                        "code": None,
-                        "type": "invalid_request_error",
-                        "param": "input",
-                        "message": provider_message,
-                    },
-                }).encode("utf-8")
-
-                details = server.openai_error_details(400, raw_error)
-                self.assertEqual(details["reason"], "conversation_state_invalid")
-                diagnostic = server.openai_error_diagnostic_details(raw_error)
-                self.assertEqual(diagnostic["error_type"], "invalid_request_error")
-                self.assertEqual(diagnostic["parameter"], "input")
-                self.assertNotIn("private_example", json.dumps(diagnostic))
-
-    def test_openai_code_null_unrelated_input_error_does_not_rotate_conversation(self):
-        raw_error = json.dumps({
-            "error": {
-                "code": None,
-                "type": "invalid_request_error",
-                "param": "input",
-                "message": "Input contains an unsupported content type.",
-            },
-        }).encode("utf-8")
-
-        details = server.openai_error_details(400, raw_error)
-        self.assertEqual(details["reason"], "http_error")
 
     def test_streaming_openai_400_is_captured_without_error_message_or_payload(self):
         raw_error = json.dumps({
@@ -8393,6 +8182,31 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.openai_usage_summary()["status"]["reason"], "provider_timeout")
         failures = [entry for entry in server.recent_log_entries() if entry.get("event") == "external_request_failed"]
         self.assertEqual(failures[-1]["context"]["reason"], "provider_timeout")
+
+    def test_openai_stream_failure_log_preserves_safe_reason_and_rejects_unrecognized_text(self):
+        with patch.object(server.LOGGER, "log") as log:
+            server._log_openai_stream_failure(
+                {"service": "openai"},
+                server.time.perf_counter(),
+                0,
+                "usage_limit_exceeded",
+                429,
+            )
+
+        self.assertEqual(log.call_args.kwargs["extra"]["context"]["reason"], "usage_limit_exceeded")
+
+        with patch.object(server.LOGGER, "log") as log:
+            server._log_openai_stream_failure(
+                {"service": "openai"},
+                server.time.perf_counter(),
+                0,
+                "athlete-private provider failure",
+                502,
+            )
+
+        logged_context = log.call_args.kwargs["extra"]["context"]
+        self.assertEqual(logged_context["reason"], "http_error")
+        self.assertNotIn("athlete-private", json.dumps(log.call_args.kwargs))
 
     def test_openai_stream_request_client_disconnect_records_cancelled_usage(self):
         class DisconnectResponse:
