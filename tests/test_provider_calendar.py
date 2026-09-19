@@ -57,12 +57,15 @@ class CalendarProviderTests(unittest.TestCase):
             parse_ical_calendar(b"x" * (MAX_EXTERNAL_CALENDAR_BYTES + 1), local_zone=timezone.utc, today=date(2026, 9, 1))
         with self.assertRaisesRegex(AppError, "fenster"):
             parse_ical_calendar(feed("UID:x\r\nDTSTART:20260901T100000Z"), local_zone=timezone.utc, today=date(2026, 9, 1), window_end=date(2027, 1, 1))
+        self.assertEqual(len(parse_ical_calendar(feed("UID:x\r\nDTSTART:20260901T100000Z"), local_zone=timezone.utc, today=date(2026, 9, 1), window_start=date(2026, 9, 1), window_end=date(2026, 10, 27))), 1)
+        with self.assertRaisesRegex(AppError, "fenster"):
+            parse_ical_calendar(feed("UID:x\r\nDTSTART:20260901T100000Z"), local_zone=timezone.utc, today=date(2026, 9, 1), window_start=date(2026, 9, 1), window_end=date(2026, 10, 28))
         with self.assertRaisesRegex(AppError, "UID und DTSTART"):
             parse(feed("UID:missing"))
 
     def test_unfold_default_and_configurable_payload_limit(self):
         payload = b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
-        self.assertEqual(MAX_EXTERNAL_CALENDAR_BYTES, 2_000_000)
+        self.assertEqual(MAX_EXTERNAL_CALENDAR_BYTES, 5_000_000)
         self.assertEqual(unfold_ical(payload)[0], "BEGIN:VCALENDAR")
         with self.assertRaisesRegex(AppError, "zu groß"):
             unfold_ical(payload, max_bytes=len(payload) - 1)
@@ -76,13 +79,13 @@ class CalendarProviderTests(unittest.TestCase):
         self.assertEqual([item["event_date"] for item in weekly], ["2026-09-02", "2026-09-07", "2026-09-09", "2026-09-14"])
 
     def test_monthly_yearly_filters_and_bounds(self):
-        monthly = parse(feed("UID:monthly\r\nDTSTART:20260101T100000Z\r\nRRULE:FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1;COUNT=3"), start=date(2026, 1, 1), end=date(2026, 4, 30))
-        self.assertEqual([item["event_date"] for item in monthly], ["2026-01-05", "2026-02-02", "2026-03-02"])
-        yearly = parse(feed("UID:yearly\r\nDTSTART:20260101T100000Z\r\nRRULE:FREQ=YEARLY;BYMONTH=9;BYMONTHDAY=15;COUNT=2"), start=date(2026, 9, 1), end=date(2026, 12, 29))
+        monthly = parse(feed("UID:monthly\r\nDTSTART:20260101T100000Z\r\nRRULE:FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1;COUNT=3"), start=date(2026, 1, 1), end=date(2026, 2, 26))
+        self.assertEqual([item["event_date"] for item in monthly], ["2026-01-05", "2026-02-02"])
+        yearly = parse(feed("UID:yearly\r\nDTSTART:20260101T100000Z\r\nRRULE:FREQ=YEARLY;BYMONTH=9;BYMONTHDAY=15;COUNT=2"), start=date(2026, 9, 1), end=date(2026, 10, 27))
         self.assertEqual([item["event_date"] for item in yearly], ["2026-09-15"])
         over = feed("UID:many\r\nDTSTART:20260901T100000Z\r\nRRULE:FREQ=DAILY;COUNT=1001")
         with self.assertRaisesRegex(AppError, "COUNT.*zwischen"):
-            parse(over, start=date(2026, 9, 1), end=date(2026, 12, 1))
+            parse(over, start=date(2026, 9, 1), end=date(2026, 10, 27))
 
     def test_rdate_exdate_recurrence_id_and_cancelled(self):
         events = parse(feed(
