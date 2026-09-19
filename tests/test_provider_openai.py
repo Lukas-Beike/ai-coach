@@ -8,6 +8,7 @@ from backend.providers.http import ProviderRequestCancelled, ProviderResponseToo
 from backend.providers.openai import (
     StreamReadResult,
     StreamReadState,
+    StreamTransportState,
     consume_sse_event,
     endpoint,
     error_details,
@@ -28,13 +29,22 @@ def body(error=None):
     return json.dumps({"error": error or {}}).encode()
 
 
+_UNSET = object()
+
+
 class _StreamResponse:
-    def __init__(self, lines, *, on_iter=None, close_event=None):
+    def __init__(self, lines, *, on_iter=None, close_event=None, status=_UNSET, code=_UNSET, headers=_UNSET):
         self._lines = iter(lines)
         self._index = 0
         self._on_iter = on_iter
         self._close_event = close_event
         self.closed = False
+        if status is not _UNSET:
+            self.status = status
+        if code is not _UNSET:
+            self.code = code
+        if headers is not _UNSET:
+            self.headers = headers
 
     def __enter__(self):
         return self
@@ -300,6 +310,30 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(response_ids, ["resp_123"])
         self.assertTrue(response.closed)
 
+    def test_request_stream_response_records_headers_and_status_fallbacks(self):
+        self.assertIs(StreamReadState, StreamTransportState)
+        self.assertEqual(StreamReadState(5).response_bytes, 5)
+        headers = {"x-request-id": "req_test"}
+        response = _StreamResponse([b"\n"], status=202, code=203, headers=headers)
+        state = StreamTransportState()
+        request_stream_response(
+            object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None,
+            opener=lambda *_args, **_kwargs: response, state=state,
+        )
+        self.assertEqual(state.status, 202)
+        self.assertIs(state.headers, headers)
+
+        for response_kwargs, expected_status in (({"code": 204}, 204), ({}, 200)):
+            with self.subTest(response_kwargs=response_kwargs):
+                response = _StreamResponse([b"\n"], **response_kwargs)
+                state = StreamTransportState()
+                request_stream_response(
+                    object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None,
+                    opener=lambda *_args, _response=response, **_kwargs: _response, state=state,
+                )
+                self.assertEqual(state.status, expected_status)
+                self.assertIsNone(state.headers)
+
     def test_request_stream_response_cancels_header_wait_and_closes_late_response(self):
         started = threading.Event()
         release = threading.Event()
@@ -340,6 +374,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
     def test_request_stream_response_cancels_during_iteration_and_closes_response(self):
         cancel_event = threading.Event()
+        state = StreamTransportState()
 
         def on_iter(index):
             if index == 1:
@@ -354,8 +389,10 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 cancel_event=cancel_event,
                 on_text_delta=lambda _delta: None,
                 opener=lambda request, timeout: response,
+                state=state,
             )
         self.assertTrue(response.closed)
+        self.assertEqual(state.response_bytes, len(b": comment\n"))
 
     def test_request_stream_response_preserves_replaced_response_handle(self):
         cancel_event = threading.Event()
@@ -392,26 +429,33 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         iterator_failure = RuntimeError("iterator failed")
 
         class FailingResponse(_StreamResponse):
-            def __iter__(self):
-                raise iterator_failure
-                yield b""  # pragma: no cover
+            def __next__(self):
+                if self._index == 1:
+                    raise iterator_failure
+                return super().__next__()
 
-        response = FailingResponse([])
+        response = FailingResponse([b"data: {}\n"])
+        state = StreamTransportState()
         with self.assertRaises(RuntimeError) as raised:
             request_stream_response(
                 object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None,
                 opener=lambda *_args, **_kwargs: response,
+                state=state,
             )
         self.assertIs(raised.exception, iterator_failure)
         self.assertTrue(response.closed)
+        self.assertEqual(state.response_bytes, len(b"data: {}\n"))
 
         unicode_response = _StreamResponse([b"data: \xff\n"])
+        unicode_state = StreamTransportState()
         with self.assertRaises(UnicodeDecodeError):
             request_stream_response(
                 object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None,
                 opener=lambda *_args, **_kwargs: unicode_response,
+                state=unicode_state,
             )
         self.assertTrue(unicode_response.closed)
+        self.assertEqual(unicode_state.response_bytes, len(b"data: \xff\n"))
 
     def test_request_stream_response_preserves_size_limit_and_byte_state(self):
         state = StreamReadState()
