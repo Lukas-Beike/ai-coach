@@ -91,6 +91,27 @@ def poll_background_response(
     return current
 
 
+def _conversation_retry_cancelled(cancel_event: Any) -> bool:
+    return cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)()
+
+
+def _raise_if_conversation_retry_cancelled(cancel_event: Any, cause: BaseException) -> None:
+    if _conversation_retry_cancelled(cancel_event):
+        raise provider_http.ProviderRequestCancelled from cause
+
+
+def _wait_for_conversation_retry(
+    delay: int,
+    cancel_event: Any,
+    wait: Callable[[float], Any],
+    cause: BaseException,
+) -> None:
+    if cancel_event is None:
+        wait(delay)
+    elif cancel_event.wait(delay) or _conversation_retry_cancelled(cancel_event):
+        raise provider_http.ProviderRequestCancelled from cause
+
+
 def request_with_conversation_retry(
     request: Callable[[], Any],
     *,
@@ -110,16 +131,10 @@ def request_with_conversation_retry(
             if getattr(exc, "reason", None) != "conversation_locked" or attempt + 1 >= max_attempts:
                 raise
             delay = 2**attempt
-            is_cancelled = getattr(cancel_event, "is_set", lambda: False) if cancel_event is not None else lambda: False
-            if is_cancelled():
-                raise provider_http.ProviderRequestCancelled from exc
+            _raise_if_conversation_retry_cancelled(cancel_event, exc)
             if on_retry is not None:
                 on_retry(attempt + 1, delay)
-            if cancel_event is not None:
-                if cancel_event.wait(delay) or is_cancelled():
-                    raise provider_http.ProviderRequestCancelled from exc
-            else:
-                wait(delay)
+            _wait_for_conversation_retry(delay, cancel_event, wait, exc)
 
     raise AssertionError("unreachable")
 
