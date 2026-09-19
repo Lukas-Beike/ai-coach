@@ -10,11 +10,12 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlparse
-from urllib.request import Request
+from urllib.request import Request, urlopen
 
 from backend import observability
 
@@ -25,6 +26,107 @@ _SECRET_PATTERNS = (
     (re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b"), "[REDACTED_GEMINI_KEY]"),
     (re.compile(r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+"), r"\1[REDACTED]"),
 )
+
+
+class ProviderRequestCancelled(Exception):
+    """Transport-level signal for a provider request cancelled by its caller."""
+
+
+def _close_response(response: Any) -> None:
+    if response is None:
+        return
+    try:
+        response.close()
+    except Exception:  # noqa: BLE001
+        return
+
+
+class _OpenState:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.cancelled = False
+        self.has_response = False
+        self.response: Any = None
+        self.error: Exception | None = None
+
+    def save_response(self, response: Any) -> bool:
+        with self.lock:
+            if self.cancelled:
+                return False
+            self.response = response
+            self.has_response = True
+            return True
+
+    def save_error(self, error: Exception) -> None:
+        with self.lock:
+            if not self.cancelled:
+                self.error = error
+
+    def cancel(self) -> tuple[bool, Any]:
+        with self.lock:
+            self.cancelled = True
+            if not self.has_response:
+                return False, None
+            response = self.response
+            self.has_response = False
+            return True, response
+
+    def result(self) -> tuple[Any, Exception | None]:
+        with self.lock:
+            return self.response, self.error
+
+
+def _open_request(opener: Any, request: Any, timeout: int, state: _OpenState, completed: threading.Event) -> None:
+    try:
+        response = opener(request, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001
+        state.save_error(exc)
+    else:
+        if not state.save_response(response):
+            _close_response(response)
+    finally:
+        completed.set()
+
+
+def _cancel_open(state: _OpenState) -> None:
+    has_response, response = state.cancel()
+    if has_response:
+        _close_response(response)
+
+
+def open_interruptibly(
+    request: Any,
+    timeout: int,
+    cancel_event: Any = None,
+    *,
+    opener: Any = urlopen,
+    poll_seconds: float = 0.1,
+) -> Any:
+    """Open a provider request while allowing header-wait cancellation."""
+    if cancel_event is None:
+        return opener(request, timeout=timeout)
+
+    completed = threading.Event()
+    state = _OpenState()
+    threading.Thread(
+        target=_open_request,
+        args=(opener, request, timeout, state, completed),
+        name="provider-header-wait",
+        daemon=True,
+    ).start()
+
+    while not completed.wait(poll_seconds):
+        if cancel_event.is_set():
+            _cancel_open(state)
+            raise ProviderRequestCancelled
+
+    if cancel_event.is_set():
+        _cancel_open(state)
+        raise ProviderRequestCancelled
+    response, error = state.result()
+    if error is not None:
+        raise error
+    return response
 
 
 def request_body(payload: Any | None, raw_body: bytes | None) -> bytes | None:
@@ -167,6 +269,27 @@ def read_bounded_response(response: Any, max_bytes: int, *, before_read: Any = N
     if len(raw) > max_bytes:
         raise ValueError("provider response exceeds configured size limit")
     return raw
+
+
+def read_response(response: Any, max_bytes: int, cancel_event: Any = None) -> bytes:
+    """Read a bounded provider response while honoring caller cancellation."""
+    if cancel_event is None:
+        return read_bounded_response(response, max_bytes)
+
+    def check_cancelled() -> None:
+        if cancel_event.is_set():
+            raise ProviderRequestCancelled
+
+    check_cancelled()
+    cancel_event._provider_response = response
+    try:
+        raw = read_bounded_response(response, max_bytes, before_read=check_cancelled)
+        check_cancelled()
+        return raw
+    finally:
+        missing = object()
+        if getattr(cancel_event, "_provider_response", missing) is response:
+            delattr(cancel_event, "_provider_response")
 
 
 def _decoded_error_payload(raw_body: bytes) -> dict[str, Any]:

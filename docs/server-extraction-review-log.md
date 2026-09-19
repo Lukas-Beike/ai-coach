@@ -647,6 +647,69 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   Docker-Desktop-Daemon blockiert. Vor einem Merge bleiben daher die externen
   Container-, Browser-, Sonar-, CodeQL- und Codex-Gates verbindlich.
 
+### Abschließendes externes Gate und Merge
+
+- Der korrigierte Head `43a6ad1aff241cf271d4eca1e0e85b60a3f4a053`
+  bestand Codex, SonarCloud, CodeQL, vier Test-Shards, Container-Unit-Tests,
+  Quality-Baseline sowie Browser-/Accessibility-Checks; es bestanden null
+  Review-Threads. PR #686 wurde am `2026-09-19T18:39:52Z` gemergt.
+- Merge-Commit `a2ba01341a60d7864b7b72d18672c5b51a367e98` ist auf
+  `origin/develop` erreichbar. P2.5 ist damit abgeschlossen.
+
+## P2.6 — Abbrechbarer Provider-HTTP-Transport
+
+- Basis: bestätigter Merge-Commit
+  `a2ba01341a60d7864b7b72d18672c5b51a367e98` von PR #686.
+- Luna-Worker: geprüfter Commit
+  `c4e77104052f1edc17bcd25e82b47856da698f47`, integriert als `d3f4a92`.
+  Review: **PASS** — `ProviderRequestCancelled`, `open_interruptibly` und
+  `read_response` besitzen das abbrechbare Header-Warten, Late-Response-Cleanup,
+  begrenzte Reads und den temporären Response-Handle. Das Modul importiert
+  `server` nicht, besitzt keinen globalen Laufzeitzustand und verändert weder
+  Retry- noch Statuspolitik.
+- Geprüfter Root-Integrationscommit `ccf925e`: **PASS** — die Server-Wrapper
+  `_urlopen_interruptibly` und `_read_http_response` wurden entfernt. `http_json`
+  und Gemini-Streaming delegieren direkt an den Transportadapter; `server.py`
+  übersetzt nur das neutrale Abbruchsignal in den bestehenden 499-Vertrag und
+  behält Logging, Providerstatus und Fehlerprojektion. Architekturtests sperren
+  die entfernten Symbole gegen Wiedereinführung.
+- SonarCloud auf `60b577ef7b750ea27bfd2b0e8096c4cdc8d73b74`:
+  **FAIL** — Cognitive Complexity 21 in `open_interruptibly` und ein zu breiter
+  `BaseException`-Catch. Der Korrekturcommit desselben Luna-Workers
+  `748e025ddd63ee7381fcf3c40e1265be03a9ab28`, integriert als `b764afd`,
+  kapselt den Thread-Zustand in `_OpenState`, zerlegt Worker und Abbruch-Cleanup
+  und fängt nur reguläre `Exception`; erneutes Root-Diff-Review: **PASS**.
+- Der Inventargenerator ordnet `_gemini_request_history`,
+  `_gemini_last_user_text` und `_gemini_call_names` nun explizit P7
+  `coach/conversation.py` zu. Damit bleibt P0 stabil bei null, statt durch
+  wechselnde Heuristikkandidaten wieder unklar zu werden.
+- `server.py`: 19.895 physische Zeilen und 1.101 verbleibende
+  Funktionen/Klassen. Das Inventar enthält 1.548 Einträge; P2 enthält 82
+  Definitionen und 10 globale Bindungen. `backend/` umfasst 51 Python-Dateien
+  mit 7.186 physischen Zeilen.
+
+### Prüfungen
+
+- Luna-Worker: 20 Tests, PASS; Root-Diff-Review, Ruff, Compileall und
+  `git diff --check`: PASS.
+- Sonar-Korrektur: 20 Provider-HTTP-Tests beim Worker und beim Root, PASS;
+  Ruff, Compileall und `git diff --check`: PASS.
+- Integrierte Provider-HTTP-, Cancellation-, Gemini-Stream- und
+  Architekturregressionen: 27 Tests, PASS. Ruff auf den geänderten Provider-
+  und Provider-Testdateien, Compileall, Inventar-Check und `git diff --check`:
+  PASS.
+- Vollständiger integrierter Wiederholungslauf nach der Sonar-Korrektur:
+  916 Tests, 12 übersprungen, PASS in 215,023 s.
+
+### Verbleibende Risiken und nächster Schritt
+
+- `http_json` besitzt weiterhin Logging, Providerstatus, Retry- und
+  Fehlerorchestrierung in `server.py`; OpenAI-Request-, Background- und
+  Stream-Transport sowie Gemini-Stream-Transport sind ebenfalls noch offen.
+- Der vollständige Testlauf und alle externen PR-Gates sind vor einem Merge
+  verbindlich. Lokale Docker-/E2E-Ausführung bleibt vom nicht erreichbaren
+  Docker-Desktop-Daemon abhängig.
+
 ## P2.3 — OpenAI-SSE und Gemini-Stream-Akkumulation
 
 - Basis: bestätigter Merge-Commit
