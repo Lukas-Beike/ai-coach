@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -104,6 +105,48 @@ def response_text(response: dict[str, Any]) -> str:
     if isinstance(direct, str) and direct.strip():
         return direct.strip()
     return "\n".join(text for item in response.get("output", []) for text in _item_text(item)).strip()
+
+
+def consume_sse_event(
+    data_lines: list[str],
+    event_name: str,
+    on_text_delta: Callable[[str], None],
+    on_response_id: Callable[[str], None] | None = None,
+) -> dict[str, Any] | None:
+    """Interpret one OpenAI Responses API SSE event without side effects."""
+    if not data_lines:
+        return None
+    raw_event = "\n".join(data_lines)
+    if raw_event.strip() == "[DONE]":
+        return None
+    try:
+        event = json.loads(raw_event)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise AppError(
+            502,
+            "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben.",
+            reason="invalid_response",
+        ) from exc
+    if not isinstance(event, dict):
+        raise AppError(
+            502,
+            "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben.",
+            reason="invalid_response",
+        )
+
+    kind = event_name or str(event.get("type") or "")
+    candidate = event.get("response") if isinstance(event.get("response"), dict) else event
+    if kind in {"response.created", "response.in_progress"}:
+        response_id = str(candidate.get("id") or "").strip()
+        if response_id and on_response_id is not None:
+            on_response_id(response_id)
+    elif kind == "response.output_text.delta":
+        delta = event.get("delta")
+        if isinstance(delta, str) and delta:
+            on_text_delta(delta)
+    elif kind in {"response.completed", "response.incomplete", "response.failed"}:
+        return candidate
+    return None
 
 
 def retry_after_seconds(headers: Any) -> int | None:

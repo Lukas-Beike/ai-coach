@@ -1,7 +1,13 @@
 import json
 import unittest
 
-from backend.providers.gemini import error_details, function_tools, response_text
+from backend.errors import AppError
+from backend.providers.gemini import (
+    StreamAccumulator,
+    error_details,
+    function_tools,
+    response_text,
+)
 
 
 class GeminiProviderErrorTests(unittest.TestCase):
@@ -95,6 +101,69 @@ class GeminiProviderAdapterTests(unittest.TestCase):
         ])
         self.assertEqual(tools[0]["functionDeclarations"][0]["name"], "save")
         self.assertEqual(function_tools([]), [])
+
+
+class GeminiStreamAccumulatorTests(unittest.TestCase):
+    def accumulate(self, events):
+        deltas = []
+        accumulator = StreamAccumulator(deltas.append)
+        for event in events:
+            accumulator.consume_data_lines(event)
+        return accumulator.aggregate, deltas
+
+    def test_ignores_empty_and_done_events(self):
+        aggregate, deltas = self.accumulate([[], [""], ["  "], ["[DONE]"]])
+        self.assertEqual(aggregate, {"candidates": []})
+        self.assertEqual(deltas, [])
+
+    def test_multiline_json_is_decoded(self):
+        aggregate, deltas = self.accumulate([["{\"candidates\":", " [{\"content\": {\"parts\": [{\"text\": \"Hallo\"}]}}]} "]])
+        self.assertEqual(deltas, ["Hallo"])
+        self.assertEqual(aggregate["candidates"][0]["content"]["parts"], [{"text": "Hallo"}])
+
+    def test_metadata_and_multiple_candidates_are_preserved(self):
+        aggregate, deltas = self.accumulate([[
+            json.dumps({
+                "modelVersion": "gemini-test",
+                "promptFeedback": {"blockReason": "NONE"},
+                "usageMetadata": {"totalTokenCount": 4},
+                "candidates": [
+                    {"finishReason": "STOP", "content": {"role": "model", "parts": [{"text": "A"}]}},
+                    {"finishMessage": "second", "content": {"parts": [{"text": "B"}]}},
+                ],
+            }),
+        ]])
+        self.assertEqual(deltas, ["A"])
+        self.assertEqual(aggregate["modelVersion"], "gemini-test")
+        self.assertEqual(aggregate["promptFeedback"], {"blockReason": "NONE"})
+        self.assertEqual(aggregate["usageMetadata"], {"totalTokenCount": 4})
+        self.assertEqual(aggregate["candidates"][0]["finishReason"], "STOP")
+        self.assertEqual(aggregate["candidates"][1]["finishMessage"], "second")
+        self.assertEqual(aggregate["candidates"][1]["content"]["parts"], [{"text": "B"}])
+
+    def test_text_parts_coalesce_only_when_metadata_matches(self):
+        aggregate, deltas = self.accumulate([
+            [json.dumps({"candidates": [{"content": {"parts": [{"text": "one", "thought": True}]}}]})],
+            [json.dumps({"candidates": [{"content": {"parts": [{"text": " two", "thought": True}]}}]})],
+            [json.dumps({"candidates": [{"content": {"parts": [{"text": "three", "thought": False}]}}]})],
+        ])
+        self.assertEqual(deltas, ["one", " two", "three"])
+        self.assertEqual(aggregate["candidates"][0]["content"]["parts"], [
+            {"text": "one two", "thought": True},
+            {"text": "three", "thought": False},
+        ])
+
+    def test_invalid_json_and_non_objects_raise_invalid_response(self):
+        for data_lines in (["not-json"], ["[]"], ["null"], ["42"]):
+            with self.subTest(data_lines=data_lines):
+                with self.assertRaises(AppError) as raised:
+                    StreamAccumulator(lambda _delta: None).consume_data_lines(data_lines)
+                self.assertEqual(raised.exception.status, 502)
+                self.assertEqual(raised.exception.reason, "invalid_response")
+                self.assertEqual(
+                    raised.exception.message,
+                    "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben.",
+                )
 
 
 if __name__ == "__main__":

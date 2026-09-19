@@ -113,6 +113,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "backend.providers.openai",
         (
             "OPENAI_RATE_LIMIT_HEADERS",
+            "consume_sse_event",
             "endpoint",
             "retry_after_seconds",
             "error_diagnostic_details",
@@ -124,6 +125,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "backend.providers.gemini",
         (
+            "StreamAccumulator",
             "response_text",
             "function_tools",
             "error_details",

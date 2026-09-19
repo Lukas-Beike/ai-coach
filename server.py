@@ -13303,63 +13303,15 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
     }
     started = time.perf_counter()
     LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": context})
-    aggregate: dict[str, Any] = {"candidates": []}
+    accumulator = gemini_provider.StreamAccumulator(on_text_delta)
     stream_bytes = 0
     data_lines: list[str] = []
 
-    def merge_chunk(chunk: Any) -> None:
-        if not isinstance(chunk, dict):
-            raise AppError(502, "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben.", reason="invalid_response")
-        usage = chunk.get("usageMetadata")
-        if isinstance(usage, dict):
-            aggregate["usageMetadata"] = usage
-        for key in ("modelVersion", "promptFeedback"):
-            if key in chunk:
-                aggregate[key] = chunk[key]
-        candidates = chunk.get("candidates") if isinstance(chunk.get("candidates"), list) else []
-        for index, candidate in enumerate(candidates):
-            if not isinstance(candidate, dict):
-                continue
-            while len(aggregate["candidates"]) <= index:
-                aggregate["candidates"].append({"content": {"role": "model", "parts": []}})
-            target = aggregate["candidates"][index]
-            for key in ("finishReason", "finishMessage", "safetyRatings", "citationMetadata"):
-                if key in candidate:
-                    target[key] = candidate[key]
-            content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
-            if content.get("role"):
-                target["content"]["role"] = content["role"]
-            target_parts = target["content"]["parts"]
-            for part in content.get("parts") if isinstance(content.get("parts"), list) else []:
-                if not isinstance(part, dict):
-                    continue
-                delta = part.get("text")
-                if isinstance(delta, str) and delta:
-                    if index == 0:
-                        on_text_delta(delta)
-                    metadata = {key: value for key, value in part.items() if key != "text"}
-                    previous = target_parts[-1] if target_parts else None
-                    if isinstance(previous, dict) and set(previous) <= {"text", *metadata} and all(
-                        previous.get(key) == value for key, value in metadata.items()
-                    ):
-                        previous["text"] = str(previous.get("text") or "") + delta
-                    else:
-                        target_parts.append(dict(part))
-                else:
-                    target_parts.append(dict(part))
-
     def handle_event() -> None:
         nonlocal data_lines
-        if not data_lines:
-            return
-        raw = "\n".join(data_lines)
+        event_lines = data_lines
         data_lines = []
-        if raw.strip() == "[DONE]":
-            return
-        try:
-            merge_chunk(json.loads(raw))
-        except json.JSONDecodeError as exc:
-            raise AppError(502, "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben.", reason="invalid_response") from exc
+        accumulator.consume_data_lines(event_lines)
 
     try:
         _raise_chat_cancelled(cancel_event)
@@ -13382,6 +13334,7 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
                 if cancel_event is not None and getattr(cancel_event, "_provider_response", None) is response:
                     cancel_event._provider_response = None
         _raise_chat_cancelled(cancel_event)
+        aggregate = accumulator.aggregate
         if not aggregate["candidates"]:
             raise AppError(502, "Gemini hat keine Coach-Antwort geliefert.", reason="invalid_response")
         _record_gemini_status("ok", "Gemini ist verf\\u00fcgbar.", status=200)
@@ -13523,53 +13476,6 @@ def _raise_chat_cancelled(cancel_event: threading.Event | None) -> None:
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
 
 
-def _notify_openai_stream_response_id(
-    event: dict[str, Any], kind: str, on_response_id: Callable[[str], None] | None,
-) -> None:
-    if kind not in {"response.created", "response.in_progress"}:
-        return
-    candidate = event.get("response") if isinstance(event.get("response"), dict) else event
-    if not isinstance(candidate, dict):
-        return
-    response_id = str(candidate.get("id") or "").strip()
-    if response_id and on_response_id is not None:
-        on_response_id(response_id)
-
-
-def _forward_openai_stream_delta(event: dict[str, Any], kind: str, on_text_delta: Any) -> None:
-    if kind != "response.output_text.delta":
-        return
-    delta = event.get("delta")
-    if isinstance(delta, str) and delta:
-        on_text_delta(delta)
-
-
-def _openai_stream_final_response(event: dict[str, Any], kind: str) -> dict[str, Any] | None:
-    if kind not in {"response.completed", "response.incomplete", "response.failed"}:
-        return None
-    candidate = event.get("response") if isinstance(event.get("response"), dict) else event
-    return candidate if isinstance(candidate, dict) else None
-
-
-def _consume_openai_sse_event(
-    data_lines: list[str], event_name: str, on_text_delta: Any,
-    on_response_id: Callable[[str], None] | None,
-) -> tuple[dict[str, Any] | None, str, list[str]]:
-    if not data_lines:
-        return None, "", []
-    raw_event = "\n".join(data_lines)
-    if raw_event.strip() == "[DONE]":
-        return None, "", []
-    try:
-        event = json.loads(raw_event)
-    except json.JSONDecodeError as exc:
-        raise AppError(502, "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben.", reason="invalid_response") from exc
-    kind = event_name or str(event.get("type") or "")
-    _notify_openai_stream_response_id(event, kind, on_response_id)
-    _forward_openai_stream_delta(event, kind, on_text_delta)
-    return _openai_stream_final_response(event, kind), "", []
-
-
 def _read_openai_stream_response(
     request: Request, cancel_event: threading.Event | None, on_text_delta: Any,
     on_response_id: Callable[[str], None] | None, stream_state: dict[str, int],
@@ -13589,16 +13495,18 @@ def _read_openai_stream_response(
                 raise AppError(502, "Die Streaming-Antwort von OpenAI ist zu groß.", reason="response_too_large")
             line = raw_line.decode("utf-8").rstrip("\r\n")
             if not line:
-                event_response, event_name, data_lines = _consume_openai_sse_event(
+                event_response = openai_provider.consume_sse_event(
                     data_lines, event_name, on_text_delta, on_response_id,
                 )
+                event_name = ""
+                data_lines = []
                 if event_response is not None:
                     final_response = event_response
             elif line.startswith("event:"):
                 event_name = line[6:].strip()
             elif line.startswith("data:"):
                 data_lines.append(line[5:].lstrip())
-        event_response, _, _ = _consume_openai_sse_event(
+        event_response = openai_provider.consume_sse_event(
             data_lines, event_name, on_text_delta, on_response_id,
         )
         if event_response is not None:
