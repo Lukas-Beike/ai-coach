@@ -586,15 +586,16 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - Ruff für Adapter, Adaptertests und Inventargenerator sowie B023 für den
   ergänzten Servertest, Bytecode-Compile, Inventar-Check und
   `git diff --check`: PASS.
-- Vollständiger Repository-Lauf folgt vor dem Root-Abschlussgate dieses
-  Pakets.
+- Vollständiger Repository-Lauf: 964 Tests, 12 übersprungen, PASS in
+  181,523 s.
 
 ### Verbleibende Risiken und nächster Schritt
 
 - Request-, Retrieve-/Cancel- und Stream-Fehler-/Statusorchestrierung liegen
   weiterhin in `server.py`; P2 ist noch nicht abgeschlossen.
-- Der neue integrierte Stand benötigt vor Veröffentlichung noch vollständigen
-  Repository-Test, aktualisiertes Root-Diff-Review und die externen PR-Gates.
+- Der neue integrierte Stand benötigt vor dem Merge noch die externen
+  PR-Gates. Jede Änderung nach diesem PASS erfordert ein erneutes Review des
+  betroffenen Umfangs.
 
 ## P2.8 — Begrenzte JSON-Ausführung und OpenAI-Streamtransport
 
