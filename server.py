@@ -12767,9 +12767,11 @@ def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
 def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
         raise AppError(503, OPENAI_API_KEY_ERROR)
-    request_payload = dict(payload)
-    if path == OPENAI_RESPONSES_PATH:
-        request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
+    request_payload = (
+        openai_provider.responses_payload(payload, thinking_level=SETTINGS.selected_thinking_level())
+        if path == OPENAI_RESPONSES_PATH
+        else dict(payload)
+    )
     result = http_json(
         "POST",
         openai_provider.endpoint(CONFIG.openai_base_url, path, default_base_url=DEFAULT_OPENAI_BASE_URL),
@@ -13020,7 +13022,7 @@ def _gemini_local_chat_history() -> list[dict[str, Any]]:
     return _trim_gemini_history(history)
 
 
-def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:  # NOSONAR - provider payload assembly is intentionally kept atomic
+def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
     persistent = bool(payload.get("conversation"))
     history = _gemini_history() if persistent else []
     input_value = payload.get("input")
@@ -13045,38 +13047,11 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
             call_names = saved if isinstance(saved, dict) else {}
         except (TypeError, json.JSONDecodeError):
             pass
-        parts = []
-        for item in input_value:
-            if isinstance(item, dict) and item.get("role") == "user" and isinstance(item.get("content"), list):
-                for part in item["content"]:
-                    if part.get("type") == "input_text":
-                        parts.append({"text": part["text"]})
-                    elif part.get("type") == "input_image":
-                        header, data = part["image_url"].split(",", 1)
-                        parts.append({"inlineData": {"mimeType": header[5:].split(";")[0], "data": data}})
-                    elif part.get("type") == "input_file":
-                        header, data = part["file_data"].split(",", 1)
-                        mime = header[5:].split(";")[0]
-                        parts.append({"inlineData": {"mimeType": mime, "data": data}})
-                continue
-            if not isinstance(item, dict) or item.get("type") != "function_call_output":
-                continue
-            call_id = str(item.get("call_id") or "")
-            try:
-                output = json.loads(item.get("output") or "{}")
-            except (TypeError, json.JSONDecodeError):
-                output = {"error": "Tool output was not JSON."}
-            parts.append({"functionResponse": {"name": call_names.get(call_id, "coach_tool"), "response": output if isinstance(output, dict) else {"result": output}}})
-        has_input_media = any(
-            isinstance(part, dict) and (
-                "inlineData" in part or "untrusted_fit_raw_base64" in str(part.get("text") or "")
-            )
-            for part in parts
+        parts = gemini_provider.input_parts(
+            input_value,
+            call_names,
+            payload.get("_gemini_transient_images"),
         )
-        if not has_input_media:
-            for image in payload.get("_gemini_transient_images") or []:
-                if isinstance(image, dict) and image.get("mime") and image.get("data"):
-                    parts.append({"inlineData": {"mimeType": image["mime"], "data": image["data"]}})
         if parts:
             history.append({"role": "user", "parts": parts})
     history = _trim_gemini_history(history)
@@ -13085,34 +13060,14 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
     # provider failure cannot leave the stored history malformed.
     if persistent and isinstance(input_value, list) and parts:
         _save_gemini_history(history)
-    request: dict[str, Any] = {"contents": history, "generationConfig": {"maxOutputTokens": int(payload.get("max_output_tokens") or COACH_DEFAULT_MAX_OUTPUT_TOKENS)}}
-    instructions = str(payload.get("instructions") or "")
-    if instructions:
-        request["systemInstruction"] = {"parts": [{"text": instructions}]}
-    tools = gemini_provider.function_tools(payload.get("tools"))
-    if tools:
-        request["tools"] = tools
-        choice = payload.get("tool_choice", "auto")
-        config: dict[str, Any] = {"mode": "AUTO"}
-        if choice == "none":
-            config["mode"] = "NONE"
-        elif isinstance(choice, dict) and choice.get("type") == "function":
-            config = {"mode": "ANY", "allowedFunctionNames": [str(choice.get("name"))]}
-        request["toolConfig"] = {"functionCallingConfig": config}
-    text_format = payload.get("text") if isinstance(payload.get("text"), dict) else {}
-    format_config = text_format.get("format") if isinstance(text_format.get("format"), dict) else {}
-    if format_config.get("type") == "json_schema" and isinstance(format_config.get("schema"), dict):
-        request["generationConfig"].update({"responseMimeType": JSON_MEDIA_TYPE, "responseJsonSchema": format_config["schema"]})
-    explicit_reasoning = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else {}
-    thinking_level = str(explicit_reasoning.get("effort") or SETTINGS.selected_thinking_level()).casefold()
-    if thinking_level not in {"low", "medium", "high"}:
-        thinking_level = SETTINGS.selected_thinking_level()
-    if model.startswith("gemini-3."):
-        request["generationConfig"]["thinkingConfig"] = {"thinkingLevel": thinking_level}
-    else:
-        thinking = {"low": 1024, "medium": 8192, "high": 24576}.get(thinking_level)
-        if thinking:
-            request["generationConfig"]["thinkingConfig"] = {"thinkingBudget": thinking}
+    request = gemini_provider.request_payload(
+        payload,
+        model=model,
+        contents=history,
+        default_max_output_tokens=COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+        default_thinking_level=SETTINGS.selected_thinking_level(),
+        json_media_type=JSON_MEDIA_TYPE,
+    )
     return request, history, persistent
 
 
@@ -13284,9 +13239,10 @@ def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
     """Call Responses API and retry transient locks on the persistent conversation."""
     if request_ai_provider(payload) == "gemini":
         return gemini_responses_request(payload)
-    request_payload = dict(payload)
-    request_payload.pop("_ai_provider", None)
-    request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
+    request_payload = openai_provider.responses_payload(
+        payload,
+        thinking_level=SETTINGS.selected_thinking_level(),
+    )
     for attempt in range(3):
         try:
             return openai_request(OPENAI_RESPONSES_PATH, request_payload)
@@ -13305,18 +13261,11 @@ def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
     raise AppError(502, "Die OpenAI-Konversationsanfrage konnte nicht abgeschlossen werden.")
 
 
-def _openai_response_id(value: Any) -> str:
-    response_id = str(value or "").strip()
-    if not re.fullmatch(r"(?a:resp_[\w-]{1,200})", response_id):
-        raise AppError(502, "OpenAI hat keine gültige Response-ID zurückgegeben.", reason="invalid_response")
-    return response_id
-
-
 def retrieve_openai_response(response_id: str) -> dict[str, Any]:
     """Retrieve one background response without exposing its identifier in logs."""
     if not CONFIG.openai_api_key:
         raise AppError(503, OPENAI_API_KEY_ERROR)
-    response_id = _openai_response_id(response_id)
+    response_id = openai_provider.response_id(response_id)
     result = http_json(
         "GET",
         openai_provider.endpoint(CONFIG.openai_base_url, f"/responses/{quote(response_id, safe='')}", default_base_url=DEFAULT_OPENAI_BASE_URL),
@@ -13331,7 +13280,7 @@ def cancel_openai_response(response_id: str) -> None:
     """Best-effort cancellation for an active OpenAI background response."""
     if not CONFIG.openai_api_key:
         return
-    response_id = _openai_response_id(response_id)
+    response_id = openai_provider.response_id(response_id)
     try:
         http_json(
             "POST",
@@ -13361,12 +13310,15 @@ def responses_background_request(
     started = time.monotonic()
     if response_id:
         current = retrieve_openai_response(response_id)
-        active_response_id = _openai_response_id(current.get("id") or response_id)
+        active_response_id = openai_provider.response_id(current.get("id") or response_id)
     else:
-        request_payload = {**payload, "background": True, "store": True}
-        request_payload.pop("_ai_provider", None)
+        request_payload = openai_provider.responses_payload(
+            payload,
+            thinking_level=SETTINGS.selected_thinking_level(),
+            background=True,
+        )
         current = responses_request(request_payload)
-        active_response_id = _openai_response_id(current.get("id"))
+        active_response_id = openai_provider.response_id(current.get("id"))
         if on_response_id is not None:
             on_response_id(active_response_id)
     while str(current.get("status") or "").casefold() in {"queued", "in_progress"}:
@@ -13552,9 +13504,11 @@ def openai_stream_request(
 ) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
         raise AppError(503, OPENAI_API_KEY_ERROR)
-    request_payload = {**payload, "stream": True}
-    request_payload.pop("_ai_provider", None)
-    request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
+    request_payload = openai_provider.responses_payload(
+        payload,
+        thinking_level=SETTINGS.selected_thinking_level(),
+        stream=True,
+    )
     body = json.dumps(request_payload).encode("utf-8")
     endpoint = openai_provider.endpoint(CONFIG.openai_base_url, OPENAI_RESPONSES_PATH, default_base_url=DEFAULT_OPENAI_BASE_URL)
     parsed_endpoint = urlparse(endpoint)
@@ -13632,8 +13586,11 @@ def responses_stream_request(
         result = gemini_stream_request(payload, on_text_delta, cancel_event=cancel_event)
         _raise_chat_cancelled(cancel_event)
         return result
-    request_payload = dict(payload)
-    request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
+    request_payload = openai_provider.responses_payload(
+        payload,
+        thinking_level=SETTINGS.selected_thinking_level(),
+        stream=True,
+    )
     for attempt in range(3):
         try:
             return openai_stream_request(request_payload, on_text_delta, cancel_event, on_response_id)
