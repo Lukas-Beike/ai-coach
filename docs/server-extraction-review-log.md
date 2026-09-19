@@ -540,8 +540,10 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   Metadatenaggregation und Fehlerverträge bleiben unverändert.
 - Provider- und Architekturregressionen: 32 Tests, PASS. Vollständiger Lauf:
   888 Tests, 12 übersprungen, PASS in 183,539 s. Ruff, Compileall und
-  `git diff --check`: PASS. Der aktualisierte PR-Head benötigt erneut alle
-  externen Gates.
+  `git diff --check`: PASS. Nach Rebase auf den bestätigten Merge-Commit von
+  PR #682: erneut 32 gezielte Tests sowie 888 Tests, 12 übersprungen, PASS in
+  181,716 s; Ruff, Compileall, Inventar- und Diff-Check: PASS. Der aktualisierte
+  PR-Head benötigt erneut alle externen Gates.
 - PR #682 wurde zuvor am `2026-09-19T17:22:31Z` auf dem alten Head gemergt;
   Merge-Commit `3e1dd708398a3a5fc8bcd6c1ef16f638fb9aeb8f` ist auf
   `origin/develop` erreichbar und besitzt keine offenen Review-Threads. Der
