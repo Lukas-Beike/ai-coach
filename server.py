@@ -5893,33 +5893,25 @@ def _log_http_request_started(request_context: dict[str, Any], parsed_url: Any, 
 
 
 def _http_success_result(
-    response: Any,
-    cancel_event: threading.Event | None,
+    response: provider_http.JsonResponse,
     service: str | None,
     request_context: dict[str, Any],
     parsed_url: Any,
     started: float,
 ) -> Any:
-    try:
-        raw = provider_http.read_response(response, MAX_EXTERNAL_RESPONSE_BYTES, cancel_event)
-    except provider_http.ProviderRequestCancelled as exc:
-        raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-    except ValueError as exc:
-        raise AppError(502, "Die Antwort des externen Dienstes ist zu groß.") from exc
-    result = json.loads(raw) if raw else None
+    result = response.payload if response.response_bytes else None
     if service == "openai":
-        _persist_openai_rate_limits(getattr(response, "headers", None))
-        record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
-    status = getattr(response, "status", None) or getattr(response, "code", None) or 200
+        _persist_openai_rate_limits(response.headers)
+        record_openai_success(response.status)
     LOGGER.info(
         EXTERNAL_HTTP_COMPLETED_EVENT,
         extra={
             "event": "external_request_completed",
             "context": {
                 **request_context,
-                "status": status,
+                "status": response.status,
                 "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                "response_bytes": len(raw),
+                "response_bytes": response.response_bytes,
                 **observability.external_result_context(result),
             },
         },
@@ -5929,10 +5921,10 @@ def _http_success_result(
         "method": request_context["method"],
         "host": observability.safe_url_netloc(parsed_url),
         "path": request_context["path"],
-        "status": status,
+        "status": response.status,
         "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-        "response_bytes": len(raw),
-        "headers": _safe_response_headers(getattr(response, "headers", None)),
+        "response_bytes": response.response_bytes,
+        "headers": _safe_response_headers(response.headers),
         "response": observability.diagnostic_capture_response(result),
     })
     return result
@@ -6108,11 +6100,24 @@ def http_json(
     _log_http_request_started(request_context, parsed_url, request_headers)
     try:
         _raise_chat_cancelled(cancel_event)
-        with provider_http.open_interruptibly(request, timeout, cancel_event, opener=urlopen) as response:
-            return _http_success_result(response, cancel_event, service, request_context, parsed_url, started)
+        response = provider_http.request_json(
+            request,
+            timeout=timeout,
+            max_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+            cancel_event=cancel_event,
+            opener=urlopen,
+        )
+        return _http_success_result(response, service, request_context, parsed_url, started)
     except provider_http.ProviderRequestCancelled as exc:
         _handle_http_app_error(
             AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled"),
+            request_context,
+            parsed_url,
+            started,
+        )
+    except provider_http.ProviderResponseTooLarge as exc:
+        _handle_http_app_error(
+            AppError(502, "Die Antwort des externen Dienstes ist zu groß."),
             request_context,
             parsed_url,
             started,
