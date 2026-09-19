@@ -8,7 +8,6 @@ from backend.providers.http import ProviderRequestCancelled, ProviderResponseToo
 from backend.providers.openai import (
     StreamReadResult,
     StreamReadState,
-    StreamTransportState,
     consume_sse_event,
     endpoint,
     error_details,
@@ -311,11 +310,10 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertTrue(response.closed)
 
     def test_request_stream_response_records_headers_and_status_fallbacks(self):
-        self.assertIs(StreamReadState, StreamTransportState)
         self.assertEqual(StreamReadState(5).response_bytes, 5)
         headers = {"x-request-id": "req_test"}
         response = _StreamResponse([b"\n"], status=202, code=203, headers=headers)
-        state = StreamTransportState()
+        state = StreamReadState()
         request_stream_response(
             object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None,
             opener=lambda *_args, **_kwargs: response, state=state,
@@ -326,7 +324,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         for response_kwargs, expected_status in (({"code": 204}, 204), ({}, 200)):
             with self.subTest(response_kwargs=response_kwargs):
                 response = _StreamResponse([b"\n"], **response_kwargs)
-                state = StreamTransportState()
+                state = StreamReadState()
                 request_stream_response(
                     object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None,
                     opener=lambda *_args, _response=response, **_kwargs: _response, state=state,
@@ -374,7 +372,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
     def test_request_stream_response_cancels_during_iteration_and_closes_response(self):
         cancel_event = threading.Event()
-        state = StreamTransportState()
+        state = StreamReadState()
 
         def on_iter(index):
             if index == 1:
@@ -435,7 +433,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 return super().__next__()
 
         response = FailingResponse([b"data: {}\n"])
-        state = StreamTransportState()
+        state = StreamReadState()
         with self.assertRaises(RuntimeError) as raised:
             request_stream_response(
                 object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None,
@@ -447,7 +445,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(state.response_bytes, len(b"data: {}\n"))
 
         unicode_response = _StreamResponse([b"data: \xff\n"])
-        unicode_state = StreamTransportState()
+        unicode_state = StreamReadState()
         with self.assertRaises(UnicodeDecodeError):
             request_stream_response(
                 object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None,

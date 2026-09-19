@@ -169,15 +169,12 @@ class StreamReadResult:
 
 
 @dataclass
-class StreamTransportState:
+class StreamReadState:
     """Open response metadata and observable stream progress."""
 
     response_bytes: int = 0
     status: int | None = None
     headers: Any = None
-
-
-StreamReadState = StreamTransportState
 
 
 def read_stream_response(
@@ -236,7 +233,7 @@ def request_stream_response(
     state: StreamReadState | None = None,
 ) -> StreamReadResult:
     """Open, read, and close an OpenAI SSE response."""
-    transport_state = state or StreamTransportState()
+    transport_state = state or StreamReadState()
     response = provider_http.open_interruptibly(request, timeout, cancel_event, opener=opener)
     transport_state.status = getattr(response, "status", None) or getattr(response, "code", None) or 200
     transport_state.headers = getattr(response, "headers", None)
