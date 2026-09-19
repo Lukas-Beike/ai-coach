@@ -482,6 +482,61 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   offen.
 - Docker-/E2E-Ausführung bleibt lokal durch den nicht erreichbaren
   Docker-Desktop-Daemon blockiert; die externen PR-Gates bleiben verbindlich.
+
+## P2.3 — OpenAI-SSE und Gemini-Stream-Akkumulation
+
+- Basis: bestätigter Merge-Commit
+  `7bbba03232366412a08ef03f095217116f3ffee1` von PR #681; `mergedAt`
+  `2026-09-19T17:08:53Z`, Erreichbarkeit auf `origin/develop` und null offene
+  Review-Threads bestätigt.
+- OpenAI-SSE-Worker: geprüfter Commit
+  `61731158dc8ce92d789e4fc95095594e1af3265c`, integriert als `78b7edf`.
+  Review: **PASS** — fragmentierte Mehrzeilen-Events, `[DONE]`, Delta- und
+  Response-ID-Weitergabe sowie alle finalen Response-Zustände werden im
+  OpenAI-Adapter interpretiert; ungültiges JSON und Nicht-Objekte liefern den
+  bestehenden redigierten `invalid_response`-Vertrag.
+- Gemini-Stream-Worker: geprüfter Commit
+  `b7cdbe4c46b4b3ea3919e9f26358c3f1929e3dda`, integriert als `5b68305`.
+  Review: **PASS** — der Adapter besitzt den vollständigen Akkumulatorzustand,
+  erhält Usage-/Modell-/Safety-/Citation-Metadaten und alle Kandidaten und
+  koalesziert Textteile nur bei identischer Part-Metadatenstruktur.
+- Geprüfter integrierter Code-Commit nach Rebase: `edf5e53`.
+  Integrationsreview: **PASS** — vier OpenAI-SSE-Helfer und die gesamte
+  Gemini-Chunk-Merge-Logik wurden aus `server.py` entfernt. Der Server besitzt
+  weiter nur I/O, Cancellation, Byte-Limit, Status-/Usage-Persistenz und
+  Stream-Lifecycle; Delta-/Response-ID-Callbacks sind reine Ausgabesenken und
+  tragen keine ausgelagerte Fachlogik. Es gibt keine Rückimporte oder
+  Kompatibilitätswrapper; Architekturtests sperren die neuen Eigentümer.
+- `server.py`: 20.037 physische Zeilen und 1.104 verbleibende
+  Funktionen/Klassen. Das Inventar enthält 1.551 Einträge; P0 bleibt ohne
+  unklare Zuordnung, in P2 bleiben 99 Definitionen und 10 globale Bindungen
+  offen.
+
+### Prüfungen
+
+- OpenAI-SSE-Worker: 15 Tests, PASS; eigenes Diff-Review, Ruff, Compileall und
+  `git diff --check`: PASS.
+- Gemini-Stream-Worker: 13 Tests, PASS; eigenes Diff-Review, Ruff, Compileall
+  und `git diff --check`: PASS.
+- Integrierte Provider-, Architektur-, Cancellation- und
+  Streamingregressionen: 37 Tests, PASS.
+- Vollständiger integrierter Lauf vor dem finalen Rebase:
+  `python -m unittest discover -s tests` — 888 Tests, 12 übersprungen, PASS in
+  194,113 s.
+- Vollständiger Lauf nach Rebase auf den bestätigten PR-#681-Mergecommit:
+  `python -m unittest discover -s tests` — 888 Tests, 12 übersprungen, PASS in
+  257,471 s.
+- Ruff auf den betroffenen Provider- und Provider-Testdateien, Compileall,
+  Inventar-Check und `git diff --check`: PASS.
+
+### Verbleibende Risiken und nächster Schritt
+
+- Die externen PR-Gates dieses Pakets bleiben vor dem Merge verbindlich. Die
+  finalen Gates von PR #681 einschließlich Browser-/Accessibility-Lauf
+  `35456920160` sind vollständig grün.
+- HTTP-Orchestrierung, vollständige OpenAI-/Gemini-Requests und Background-
+  Lifecycle bleiben P2; die separat geprüften HTTP-Wire- und Usage-Bausteine
+  werden im nächsten kleinen Paket integriert.
 - Nächster Schritt ist ein kleiner, unabhängiger P2-Transportbaustein; danach
   werden dessen Serveraufrufer sequenziell integriert und erneut vollständig
   geprüft.
