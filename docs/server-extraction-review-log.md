@@ -413,3 +413,75 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   Diagnoseklassifikation sowie sichere HTTP-Header gehören mit dem Transport
   zu P2. P1 ist damit vollständig abgeschlossen, nächster Schritt ist P2 in
   kleinen Provider-Adapter-Paketen.
+
+## P2.1 — Providerfehler und iCalendar-Parsing
+
+- Basis: bestätigter Merge-Commit
+  `68f2e140f54d1282ffd399177de0e7cbee83aa05` von PR #679; `mergedAt`
+  `2026-09-19T15:44:12Z` und Erreichbarkeit auf `origin/develop` bestätigt.
+- OpenAI-Worker: geprüfter Commit
+  `d740ec1327041379ce0dd232fcb8f727992b7cd6`, integriert als `c438ac8`.
+  Review: **PASS** — Retry-After, Quota-/Billing-, Conversation-Lock- und
+  Invalid-State-Klassifikation, sichere Diagnosefelder und allowlist-basierte
+  Rate-Limit-Projektion sind rein und geben keinen Providertext weiter.
+- Kalender-Worker: Commits `1116a13972c8a5142b61cd300ecdac2bd63273b7`
+  und `f663e31d506e9ee9cb087b98a3bb8825c691a770`, integriert als `d730214`
+  und `4b1dbf5`. Erstes Review: **FAIL** — drei Rekurrenzschleifen verglichen
+  ihre Laufvariable mit einer mitwachsenden rechten Seite und `unfold_ical`
+  bot einen verbotenen Fehler-Callback. Korrekturreview: **PASS** — feste
+  Iterationsgrenzen und direkter `AppError`-Vertrag.
+- Der erste Kalender-PASS wurde nach dem Integrationsabgleich widerrufen:
+  **FAIL** — die delegierten Grenzwerte 2 MB/120 Tage/8.000 Perioden wichen
+  vom tatsächlichen Serververtrag ab. Korrekturcommit
+  `03f2d9e17ef4289a2a61e81e83807d0f2d3f4745`, integriert als `e7c0dbd`;
+  erneutes Review: **PASS** mit 5 MB, 56 Tagen, 1.000 Instanzen und 10.000
+  Rekurrenzperioden.
+- Gemini-Worker: geprüfter Commit
+  `0c7ea0f27806625d2794cdcad9ba83daf52bd4d9`, integriert als `81ae0cf`.
+  Review: **PASS** — die bestehende Auth-/Quota-/Rate-Limit-/HTTP-
+  Klassifikation ist unverändert und die Rückgabe enthält keinen Rohtext.
+- Geprüfter integrierter Commit: `ff1be93`. Integrationsreview: **PASS** —
+  Kalenderparser und Fehlerklassifikation sind vollständig aus `server.py`
+  entfernt; Aufrufer verwenden die Provider-Module direkt. Es gibt keine
+  Rückimporte, Server-Callbacks oder Kompatibilitätswrapper. Kalender-Sync
+  parst vor dem Löschen der letzten guten Events; URL-/DNS-Grenzen,
+  Transaktion, Replan und Fehlerstatus bleiben erhalten. Architekturtests
+  verhindern die Rückverlagerung der entfernten Symbole.
+- Das nach der Löschung zeilenverschobene Inventar meldete vorübergehend 52
+  falsche P0-Zuordnungen. Review: **FAIL** für die Inventarqualität. Die
+  Eigentümer wurden symbolbasiert stabilisiert; erneutes Review: **PASS** mit
+  null offenen P0-Zuordnungen.
+- `server.py`: 20.357 physische Zeilen und 1.118 verbleibende
+  Funktionen/Klassen. Das Inventar enthält 1.570 Einträge; davon bleiben 113
+  Definitionen und 13 globale Bindungen in P2 offen. Die Zeilenreduktion ist
+  nur Begleitwert; maßgeblich sind direkte Eigentümer und entfernte Wrapper.
+
+### Prüfungen
+
+- Provider-/Architekturtests: 23 Tests, PASS.
+- Kalender-/Gemini-Aufruferregressionen: 9 Tests, PASS.
+- Erster vollständiger Lauf: **FAIL** — 869 von 870 Tests bestanden; ein Test
+  patchte noch den entfernten `_gemini_tools`-Wrapper.
+- Migriertes Testziel auf `backend.providers.gemini.function_tools`: PASS.
+- Abschließender integrierter Lauf:
+  `python -m unittest discover -s tests -v` — 870 Tests, 12 übersprungen,
+  PASS in 185,358 s.
+- `ruff check backend/providers/calendar.py backend/providers/gemini.py tests/test_provider_calendar.py tests/test_provider_gemini.py`
+  — PASS. Repositoryweiter Ruff bleibt wegen bereits vorhandener Monolith-
+  und Architekturtestbefunde nicht grün.
+- `ruff check scripts/server_extraction_inventory.py` — PASS.
+- `python -m compileall -q server.py backend` — PASS.
+- `python scripts/server_extraction_inventory.py --check` — PASS.
+- `git diff --check` — PASS.
+
+### Verbleibende Risiken und nächster Schritt
+
+- P2 ist noch nicht abgeschlossen: HTTP-Transport, vollständige OpenAI-
+  Requests/SSE/Background/Audio, vollständige Gemini-Payload-/Streaming-
+  Orchestrierung, Kalender-SSRF/Abruf sowie Garmin-/Intervals-Adapter bleiben
+  offen.
+- Docker-/E2E-Ausführung bleibt lokal durch den nicht erreichbaren
+  Docker-Desktop-Daemon blockiert; die externen PR-Gates bleiben verbindlich.
+- Nächster Schritt ist ein kleiner, unabhängiger P2-Transportbaustein; danach
+  werden dessen Serveraufrufer sequenziell integriert und erneut vollständig
+  geprüft.
