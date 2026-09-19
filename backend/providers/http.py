@@ -32,6 +32,10 @@ class ProviderRequestCancelled(Exception):
     """Transport-level signal for a provider request cancelled by its caller."""
 
 
+class ProviderResponseTooLarge(ValueError):
+    """Transport-level signal for a response exceeding its configured limit."""
+
+
 def _close_response(response: Any) -> None:
     if response is None:
         return
@@ -267,7 +271,7 @@ def read_bounded_response(response: Any, max_bytes: int, *, before_read: Any = N
         if before_read is not None:
             before_read()
     if len(raw) > max_bytes:
-        raise ValueError("provider response exceeds configured size limit")
+        raise ProviderResponseTooLarge("provider response exceeds configured size limit")
     return raw
 
 

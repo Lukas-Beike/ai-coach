@@ -4,11 +4,20 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
+from urllib.request import urlopen
 
 from backend.errors import AppError
+from backend.providers import http as provider_http
 
 _STREAMING_EVENT_ERROR = "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben."
+
+
+@dataclass(frozen=True)
+class StreamReadResult:
+    aggregate: dict[str, Any]
+    response_bytes: int
 
 
 class StreamAccumulator:
@@ -78,6 +87,54 @@ class StreamAccumulator:
             previous["text"] = str(previous.get("text") or "") + delta
         else:
             target_parts.append(dict(part))
+
+
+def read_stream_response(
+    request: Any,
+    *,
+    timeout: int,
+    max_bytes: int,
+    on_text_delta: Callable[[str], None],
+    cancel_event: Any = None,
+    opener: Any = urlopen,
+) -> StreamReadResult:
+    """Read and aggregate a Gemini SSE response."""
+    def check_cancelled() -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise provider_http.ProviderRequestCancelled
+
+    accumulator = StreamAccumulator(on_text_delta)
+    response_bytes = 0
+    data_lines: list[str] = []
+
+    def flush_event() -> None:
+        nonlocal data_lines
+        event_lines = data_lines
+        data_lines = []
+        accumulator.consume_data_lines(event_lines)
+
+    check_cancelled()
+    with provider_http.open_interruptibly(request, timeout, cancel_event, opener=opener) as response:
+        if cancel_event is not None:
+            cancel_event._provider_response = response
+        try:
+            for raw_line in response:
+                check_cancelled()
+                response_bytes += len(raw_line)
+                if response_bytes > max_bytes:
+                    raise provider_http.ProviderResponseTooLarge("provider response exceeds configured size limit")
+                line = raw_line.decode("utf-8").rstrip("\r\n")
+                if not line:
+                    flush_event()
+                elif line.startswith("data:"):
+                    data_lines.append(line[5:].lstrip())
+            flush_event()
+            check_cancelled()
+        finally:
+            missing = object()
+            if cancel_event is not None and getattr(cancel_event, "_provider_response", missing) is response:
+                delattr(cancel_event, "_provider_response")
+    return StreamReadResult(accumulator.aggregate, response_bytes)
 
 
 def response_text(result: Any) -> str:

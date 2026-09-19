@@ -3,6 +3,7 @@ import unittest
 
 from backend.providers.http import (
     ProviderRequestCancelled,
+    ProviderResponseTooLarge,
     error_detail,
     json_request_parts,
     multipart_form_data,
@@ -160,7 +161,7 @@ class ProviderHTTPTests(unittest.TestCase):
             def read(self, _size):
                 return b"1234"
 
-        with self.assertRaisesRegex(ValueError, "provider response exceeds configured size limit"):
+        with self.assertRaisesRegex(ProviderResponseTooLarge, "provider response exceeds configured size limit"):
             read_response(Response(), 3, cancel_event)
         self.assertFalse(hasattr(cancel_event, "_provider_response"))
 

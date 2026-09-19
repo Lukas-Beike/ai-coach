@@ -6,10 +6,12 @@ import json
 import math
 import re
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 from backend.errors import AppError
+from backend.providers import http as provider_http
 
 OPENAI_RATE_LIMIT_HEADERS = {
     "retry-after": "retry_after",
@@ -155,6 +157,65 @@ def consume_sse_event(
     elif kind in {"response.completed", "response.incomplete", "response.failed"}:
         return candidate
     return None
+
+
+@dataclass(frozen=True)
+class StreamReadResult:
+    """The terminal response and wire bytes consumed by an SSE stream reader."""
+
+    response: dict[str, Any] | None
+    response_bytes: int
+
+
+@dataclass
+class StreamReadState:
+    """Observable progress retained when stream iteration raises."""
+
+    response_bytes: int = 0
+
+
+def read_stream_response(
+    response: Any,
+    *,
+    max_bytes: int,
+    cancel_event: Any = None,
+    on_text_delta: Callable[[str], None],
+    on_response_id: Callable[[str], None] | None = None,
+    state: StreamReadState | None = None,
+) -> StreamReadResult:
+    """Read and parse an OpenAI SSE response without owning its lifecycle."""
+    def check_cancelled() -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise provider_http.ProviderRequestCancelled
+
+    final_response: dict[str, Any] | None = None
+    event_name = ""
+    data_lines: list[str] = []
+    read_state = state or StreamReadState()
+    check_cancelled()
+    for raw_line in response:
+        check_cancelled()
+        read_state.response_bytes += len(raw_line)
+        if read_state.response_bytes > max_bytes:
+            raise provider_http.ProviderResponseTooLarge("provider response exceeds configured size limit")
+        line = raw_line.decode("utf-8").rstrip("\r\n")
+        if not line:
+            event_response = consume_sse_event(data_lines, event_name, on_text_delta, on_response_id)
+            check_cancelled()
+            event_name = ""
+            data_lines = []
+            if event_response is not None:
+                final_response = event_response
+        elif line.startswith("event:"):
+            event_name = line[6:].strip()
+        elif line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+    check_cancelled()
+    event_response = consume_sse_event(data_lines, event_name, on_text_delta, on_response_id)
+    check_cancelled()
+    if event_response is not None:
+        final_response = event_response
+    return StreamReadResult(final_response, read_state.response_bytes)
 
 
 def _decode_sse_event(data_lines: list[str]) -> dict[str, Any] | None:

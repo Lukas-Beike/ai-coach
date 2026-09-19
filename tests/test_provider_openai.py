@@ -1,14 +1,19 @@
 import json
+import threading
 import unittest
 from types import MappingProxyType
 
 from backend.errors import AppError
+from backend.providers.http import ProviderRequestCancelled, ProviderResponseTooLarge
 from backend.providers.openai import (
+    StreamReadResult,
+    StreamReadState,
     consume_sse_event,
     endpoint,
     error_details,
     error_diagnostic_details,
     rate_limit_snapshot,
+    read_stream_response,
     response_failure_reason,
     response_id,
     response_text,
@@ -152,6 +157,90 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             self.assertEqual(raised.exception.status, 502)
             self.assertEqual(raised.exception.message, expected_message)
             self.assertEqual(raised.exception.reason, "invalid_response")
+
+    def test_read_stream_response_returns_final_response_deltas_ids_and_byte_count(self):
+        lines = [
+            b"event: response.created\n",
+            b'data: {"response":{"id":"resp_123"}}\n',
+            b"\n",
+            b"event: response.output_text.delta\n",
+            b'data: {"delta":"Hallo"}\n',
+            b"\n",
+            b"event: response.completed\n",
+            b'data: {"response":{"id":"resp_123","status":"completed"}}\n',
+            b"\n",
+        ]
+        deltas = []
+        response_ids = []
+        result = read_stream_response(
+            lines,
+            max_bytes=sum(map(len, lines)),
+            on_text_delta=deltas.append,
+            on_response_id=response_ids.append,
+        )
+        self.assertEqual(result, StreamReadResult({"id": "resp_123", "status": "completed"}, sum(map(len, lines))))
+        self.assertEqual(deltas, ["Hallo"])
+        self.assertEqual(response_ids, ["resp_123"])
+
+    def test_read_stream_response_flushes_trailing_event_without_blank_line(self):
+        lines = [
+            b"event: response.output_text.delta\n",
+            b'data: {"delta":"trailing"}\n',
+        ]
+        deltas = []
+        result = read_stream_response(lines, max_bytes=1000, on_text_delta=deltas.append)
+        self.assertIsNone(result.response)
+        self.assertEqual(result.response_bytes, sum(map(len, lines)))
+        self.assertEqual(deltas, ["trailing"])
+
+    def test_read_stream_response_raises_before_iterating_when_cancelled(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+
+        class UnreadResponse:
+            def __iter__(self):
+                raise AssertionError("cancelled response must not be iterated")
+
+        with self.assertRaises(ProviderRequestCancelled):
+            read_stream_response(UnreadResponse(), max_bytes=10, cancel_event=cancel_event, on_text_delta=lambda _: None)
+
+    def test_read_stream_response_raises_when_cancelled_during_iteration(self):
+        cancel_event = threading.Event()
+
+        class CancellingResponse:
+            def __init__(self):
+                self._lines = iter((b"data: {\"delta\":\"first\"}\n", b"\n"))
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                line = next(self._lines)
+                cancel_event.set()
+                return line
+
+        with self.assertRaises(ProviderRequestCancelled):
+            read_stream_response(CancellingResponse(), max_bytes=1000, cancel_event=cancel_event, on_text_delta=lambda _: None)
+
+    def test_read_stream_response_rejects_oversized_stream(self):
+        state = StreamReadState()
+        with self.assertRaisesRegex(ProviderResponseTooLarge, "^provider response exceeds configured size limit$"):
+            read_stream_response([b"data: {}\n"], max_bytes=1, on_text_delta=lambda _: None, state=state)
+        self.assertEqual(state.response_bytes, len(b"data: {}\n"))
+
+    def test_read_stream_response_preserves_iterator_exception(self):
+        failure = RuntimeError("iterator failed")
+
+        class FailingResponse:
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                raise failure
+
+        with self.assertRaises(RuntimeError) as raised:
+            read_stream_response(FailingResponse(), max_bytes=1000, on_text_delta=lambda _: None)
+        self.assertIs(raised.exception, failure)
 
     def test_response_parsers_remain_pure(self):
         self.assertEqual(response_failure_reason("/responses", None), "invalid_response")
