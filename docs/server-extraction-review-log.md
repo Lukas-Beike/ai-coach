@@ -483,6 +483,70 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - Docker-/E2E-Ausführung bleibt lokal durch den nicht erreichbaren
   Docker-Desktop-Daemon blockiert; die externen PR-Gates bleiben verbindlich.
 
+## P2.4 — Provider-HTTP-Wire-Aufbau und Usage-Berechnungen
+
+- Basis: bestätigter Korrektur-Merge-Commit
+  `ddbd40f53cbf22090a19edfea4cd2015421db8f6` von PR #683; `mergedAt`
+  `2026-09-19T17:34:18Z`, Erreichbarkeit auf `origin/develop`, null offene
+  Review-Threads sowie erfolgreiche Codex-, Sonar-, CodeQL-, Unit-, Container-,
+  Quality- und Browser-Gates bestätigt.
+- HTTP-Wire-Worker: geprüfter Commit
+  `b990c41532e3e086b77f139acd79af840be957bc`, nach Rebase integriert als
+  `531a29a`. Review: **PASS** — JSON-/Raw-Body-Ausschluss, Request-/Headeraufbau,
+  ausschließlich Query-Schlüssel im Diagnosekontext sowie gebundener Read mit
+  deterministischem Close liegen in `backend/providers/http.py`. Netzwerk,
+  Cancellation, Logging und Fehlerprojektion bleiben außerhalb.
+- Usage-Worker: geprüfter Commit
+  `b6004d21deed622286d8aaf482b3ebcf0755ece3`, nach Rebase integriert als
+  `5ada139`. Review: **PASS** — Tagesnormalisierung, providerabhängige
+  Tokenzählung und nicht mutierende Akkumulation sind reine Berechnungen ohne
+  DB-, Lock-, Zeit-, Log- oder Serverzugriff.
+- Geprüfter Integrationscommit `52aeec9`, nach Rebase `47512ca`:
+  **PASS** — die drei HTTP-Helfer wurden aus `server.py` entfernt und alle
+  Aufrufer auf das Eigentümermodul umgestellt. Usage-Persistenz, `DB_LOCK` und
+  die atomare Read-Modify-Write-Transaktion verbleiben beim Server; der neue
+  Usage-Adapter erhält ausschließlich bereits gelesene Werte und liefert
+  persistierbare Projektionen zurück. Es bestehen weder Rückimporte noch
+  Kompatibilitätswrapper oder fachliche Server-Callbacks.
+- Architekturkorrektur `9c719c7`: **PASS** — die bereits im Plan festgelegten
+  Gemini-Historien-/Attachment-Eigentümer wurden `coach/conversation.py` (P7)
+  und die Commit-Validierung `planning/` (P4) zugeordnet. P0 ist damit wieder
+  exakt geschlossen; es wurde keine Laufzeitlogik verändert.
+- `server.py`: 19.949 physische Zeilen und 1.101 verbleibende
+  Funktionen/Klassen. Das Inventar enthält 1.549 Einträge; P0 ist bei null
+  unklaren Zuordnungen, in P2 bleiben 85 Definitionen und 10 globale Bindungen
+  offen. Diese Restdefinitionen, nicht die reine Zeilenabnahme, bestimmen die
+  nächsten P2-Pakete.
+
+### Prüfungen
+
+- HTTP-Wire-Worker: 10 Tests, PASS; eigenes Diff-Review, Ruff, Compileall und
+  `git diff --check`: PASS.
+- Usage-Worker: 3 Tests, PASS; eigenes Diff-Review, Ruff, Compileall und
+  `git diff --check`: PASS.
+- Integrierte Provider- und Architekturregressionen nach Rebase: 15 Tests,
+  PASS. Zusätzlich wurden vor dem Rebase 14 Serverregressionen für HTTP,
+  Cancellation, Response-Close/Redaktion, Rate-Limits, Retry-After sowie
+  atomare Usage-Aktualisierung und Lock-Reihenfolge ausgeführt: PASS.
+- Vollständiger integrierter Lauf vor dem Rebase: 897 Tests, 12 übersprungen,
+  PASS in 242,292 s. Nach Rebase auf PR #683 und der Eigentümerkorrektur:
+  897 Tests, 12 übersprungen, PASS in 181,102 s.
+- Ruff auf allen geänderten Provider-, Provider-Test- und Inventardateien,
+  Compileall, Inventar-Check und `git diff --check`: PASS.
+
+### Verbleibende Risiken und nächster Schritt
+
+- Die externen PR-Gates dieses Pakets bleiben vor dem Merge verbindlich; jede
+  weitere Codeänderung erfordert ein erneutes Review des betroffenen Umfangs.
+- `http_json` besitzt weiterhin Netzwerk-, Retry-/Cancellation- und
+  Statusorchestrierung in `server.py`; vollständige OpenAI-/Gemini-Requests,
+  Background-Retrieve/Cancel und Gemini-Konversationshistorie bleiben ihren
+  geplanten P2-/P7-Paketen vorbehalten. P2.4 schließt diese Punkte nicht
+  vorzeitig als erledigt.
+- Docker-/E2E-Ausführung bleibt lokal durch den nicht erreichbaren
+  Docker-Desktop-Daemon blockiert; die externen Container-/Browser-Gates sind
+  deshalb verbindlich.
+
 ## P2.3 — OpenAI-SSE und Gemini-Stream-Akkumulation
 
 - Basis: bestätigter Merge-Commit
@@ -547,9 +611,11 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - PR #682 wurde zuvor am `2026-09-19T17:22:31Z` auf dem alten Head gemergt;
   Merge-Commit `3e1dd708398a3a5fc8bcd6c1ef16f638fb9aeb8f` ist auf
   `origin/develop` erreichbar und besitzt keine offenen Review-Threads. Der
-  separate Sonar-Analysecheck blieb dort rot; die Korrektur wird deshalb als
-  eigener Folge-PR gegen genau diesen Merge veröffentlicht und P2.3 bis zu
-  dessen bestätigtem Merge nicht als abgeschlossen behandelt.
+  separate Sonar-Analysecheck blieb dort rot. Folge-PR #683 wurde am
+  `2026-09-19T17:34:18Z` mit Merge-Commit
+  `ddbd40f53cbf22090a19edfea4cd2015421db8f6` gemergt und ist auf
+  `origin/develop` erreichbar; null Review-Threads sowie erfolgreiche Codex-,
+  Sonar-, CodeQL-, Unit-, Container-, Quality- und Browser-Gates sind bestätigt.
 
 ### Verbleibende Risiken und nächster Schritt
 

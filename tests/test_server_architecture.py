@@ -104,7 +104,16 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "backend.config",
         ("load_local_env", "security_configuration_error", "save_persistent_settings"),
     ),
-    ("backend.providers.http", ("ProviderHTTPError", "multipart_form_data")),
+    (
+        "backend.providers.http",
+        (
+            "ProviderHTTPError",
+            "request_body",
+            "json_request_parts",
+            "read_error_body",
+            "multipart_form_data",
+        ),
+    ),
     (
         "backend.providers.audio",
         ("VOICE_AUDIO_TYPES", "normalized_audio_type", "audio_suffix"),
@@ -133,6 +142,10 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "_gemini_error_tokens",
             "_gemini_error_reason",
         ),
+    ),
+    (
+        "backend.providers.usage",
+        ("daily_summary", "usage_counts", "recorded_usage"),
     ),
     (
         "backend.providers.calendar",

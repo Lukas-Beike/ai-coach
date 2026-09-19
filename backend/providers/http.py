@@ -10,8 +10,13 @@ from __future__ import annotations
 import json
 import re
 import secrets
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import parse_qs, urlparse
+from urllib.request import Request
+
+from backend import observability
 
 _SECRET_PATTERNS = (
     (re.compile(r"(?i)https?://[^\s<>\"'`]+"), "[REDACTED_URL]"),
@@ -20,6 +25,71 @@ _SECRET_PATTERNS = (
     (re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b"), "[REDACTED_GEMINI_KEY]"),
     (re.compile(r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+"), r"\1[REDACTED]"),
 )
+
+
+def request_body(payload: Any | None, raw_body: bytes | None) -> bytes | None:
+    """Encode a JSON payload unless an already encoded body was provided."""
+    if raw_body is not None and payload is not None:
+        raise ValueError("payload and raw_body are mutually exclusive")
+    if raw_body is not None:
+        return raw_body
+    return json.dumps(payload).encode("utf-8") if payload is not None else None
+
+
+def json_request_parts(
+    method: str,
+    url: str,
+    *,
+    payload: Any | None = None,
+    raw_body: bytes | None = None,
+    headers: Mapping[str, str] | None = None,
+    timeout: int = 45,
+    service: str | None = None,
+    content_type: str | None = None,
+    app_version: str,
+    operation_context: Mapping[str, Any] | None = None,
+) -> tuple[Request, Any, dict[str, str], dict[str, Any]]:
+    """Build a JSON provider request and its safe diagnostic context."""
+    body = request_body(payload, raw_body)
+    request_headers = {"Accept": "application/json", "User-Agent": f"IntervalsCoach/{app_version}"}
+    if body is not None:
+        request_headers["Content-Type"] = "application/json"
+    request_headers.update(headers or {})
+    if content_type is not None and body is not None:
+        request_headers["Content-Type"] = content_type
+
+    parsed_url = urlparse(url)
+    request = Request(url, data=body, headers=request_headers, method=method)
+    request_context: dict[str, Any] = {
+        "service": service or parsed_url.netloc,
+        "method": method.upper(),
+        "host": parsed_url.netloc,
+        "path": observability.safe_provider_path(parsed_url.path),
+        "timeout_seconds": timeout,
+        "request_bytes": len(body or b""),
+    }
+    if operation_context:
+        for key in ("operation_id", "trigger"):
+            if key in operation_context:
+                request_context[key] = operation_context[key]
+        request_context["phase"] = operation_context.get(
+            "phase", request_context["path"].rsplit("/", 1)[-1] or "request"
+        )
+    if parsed_url.query:
+        request_context["query_keys"] = sorted(parse_qs(parsed_url.query, keep_blank_values=True))
+    return request, parsed_url, request_headers, request_context
+
+
+def read_error_body(error: Any, max_bytes: int) -> bytes:
+    """Read at most ``max_bytes + 1`` bytes and close the error response."""
+    try:
+        try:
+            raw = error.read(max_bytes + 1)
+        except TypeError:
+            raw = error.read()
+        return raw[: max_bytes + 1]
+    finally:
+        error.close()
 
 
 def multipart_form_data(
