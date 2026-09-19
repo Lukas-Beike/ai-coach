@@ -116,6 +116,25 @@ def consume_sse_event(
     """Interpret one OpenAI Responses API SSE event without side effects."""
     if not data_lines:
         return None
+    event = _decode_sse_event(data_lines)
+    if event is None:
+        return None
+    kind = event_name or str(event.get("type") or "")
+    candidate = event.get("response") if isinstance(event.get("response"), dict) else event
+    if kind in {"response.created", "response.in_progress"}:
+        response_id = str(candidate.get("id") or "").strip()
+        if response_id and on_response_id is not None:
+            on_response_id(response_id)
+    elif kind == "response.output_text.delta":
+        delta = event.get("delta")
+        if isinstance(delta, str) and delta:
+            on_text_delta(delta)
+    elif kind in {"response.completed", "response.incomplete", "response.failed"}:
+        return candidate
+    return None
+
+
+def _decode_sse_event(data_lines: list[str]) -> dict[str, Any] | None:
     raw_event = "\n".join(data_lines)
     if raw_event.strip() == "[DONE]":
         return None
@@ -133,20 +152,7 @@ def consume_sse_event(
             "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben.",
             reason="invalid_response",
         )
-
-    kind = event_name or str(event.get("type") or "")
-    candidate = event.get("response") if isinstance(event.get("response"), dict) else event
-    if kind in {"response.created", "response.in_progress"}:
-        response_id = str(candidate.get("id") or "").strip()
-        if response_id and on_response_id is not None:
-            on_response_id(response_id)
-    elif kind == "response.output_text.delta":
-        delta = event.get("delta")
-        if isinstance(delta, str) and delta:
-            on_text_delta(delta)
-    elif kind in {"response.completed", "response.incomplete", "response.failed"}:
-        return candidate
-    return None
+    return event
 
 
 def retry_after_seconds(headers: Any) -> int | None:
