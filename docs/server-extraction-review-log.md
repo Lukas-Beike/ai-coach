@@ -593,9 +593,56 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 
 - Request-, Retrieve-/Cancel- und Stream-Fehler-/Statusorchestrierung liegen
   weiterhin in `server.py`; P2 ist noch nicht abgeschlossen.
-- Der neue integrierte Stand benötigt vor dem Merge noch die externen
-  PR-Gates. Jede Änderung nach diesem PASS erfordert ein erneutes Review des
-  betroffenen Umfangs.
+- PR #691 wurde mit geprüftem Head
+  `c059cfc510469e2c96e977add4db083e10bfde6e` am
+  `2026-09-19T20:54:22Z` als Squash-Merge
+  `176b897653783e5993efcc0ff39e7a05770ff44e` integriert. Der Merge-Commit
+  ist auf `origin/develop` erreichbar; Codex, SonarCloud, CodeQL, Test-Shards,
+  Container-, Quality- und Browser-Gates sind grün. Die GraphQL-Abfrage ergab
+  null Review-Threads.
+
+## P2.11 — OpenAI-Conversation-Lock-Retry
+
+- Basis: bestätigter Merge-Commit
+  `176b897653783e5993efcc0ff39e7a05770ff44e` von PR #691.
+- Luna-Worker-Commit `78d99dc2b063ddd6bdaef47880666f222cb0ea33`:
+  tatsächliches Diff- und Code-Review **PASS**. Die zustandslose öffentliche
+  Adapterfunktion `request_with_conversation_retry` besitzt Lock-Erkennung,
+  drei begrenzte Versuche, die Delays 1/2 Sekunden, abbrechbares Event-Warten
+  und Retry-Telemetrie-Hook. Nicht-Lock- und letzter Lock-Fehler werden
+  unverändert weitergereicht; Cancellation behält den Lock-Fehler als Cause.
+  Es gibt keinen `server.py`-Import, keine Provider-/Usage-Persistenz und
+  keine Nutzdatenprotokollierung.
+- Integrationscommit `6ba525e8929d9f08d15250ac4c7c1f5f554d95cd`:
+  eigenes tatsächliches Diff- und Code-Review **PASS**.
+  `responses_request` und `responses_stream_request` delegieren die gesamte
+  Retry-Entscheidung und Backoff-Reihenfolge an den Adapter. Die verbleibenden
+  Callbacks führen nur den konkreten Request beziehungsweise redigierte
+  Retry-Telemetrie aus. Promptes Stream-Cancel während des Backoffs wird auf
+  den bestehenden 499-Vertrag abgebildet und weiterhin als abgebrochene
+  OpenAI-Usage erfasst.
+- `server.py` hat 19.869 physische Zeilen und 1.090 Definitionen; im Inventar
+  verbleiben 69 P2-Definitionen und 8 P2-Bindungen. Die unveränderte Zahl zeigt,
+  dass dieses Paket Orchestrierung statt bloßer Zeilenmenge verlagert.
+
+### Prüfungen
+
+- Worker und Root-Wiederholung: `tests.test_provider_openai` — 50 Tests,
+  PASS; Ruff, Bytecode-Compile und `git diff --check`: PASS.
+- Integrierter OpenAI-Adapter plus vollständige Servertests: 515 Tests,
+  3 übersprungen, PASS in 82,598 s.
+- Gezielte Retry-/Cancellation-Regressionsprüfung: 54 Tests, PASS in
+  0,388 s. Inventar-Check, relevante Ruff-Regeln, Bytecode-Compile und
+  `git diff --check`: PASS.
+- Vollständiger Repository-Lauf: 972 Tests, 12 übersprungen, PASS in
+  174,490 s.
+
+### Verbleibende Risiken und nächster Schritt
+
+- Request-, Retrieve-/Cancel-, allgemeine HTTP- sowie Stream-Fehler- und
+  Statusorchestrierung liegen noch in `server.py`; P2 ist daher weiter offen.
+- Vor dem Merge folgen noch die externen PR-Gates. Jede Änderung nach diesem
+  PASS erfordert ein erneutes Review des betroffenen Umfangs.
 
 ## P2.8 — Begrenzte JSON-Ausführung und OpenAI-Streamtransport
 
