@@ -37,6 +37,7 @@ _SAFE_LOG_REASONS = {
     "authentication_or_permission": "authentication_or_permission",
     "not_found": "not_found",
     "provider_unavailable": "provider_unavailable",
+    "usage_limit_exceeded": "usage_limit_exceeded",
 }
 
 

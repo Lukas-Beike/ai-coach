@@ -8183,7 +8183,18 @@ class CoachTests(unittest.TestCase):
         failures = [entry for entry in server.recent_log_entries() if entry.get("event") == "external_request_failed"]
         self.assertEqual(failures[-1]["context"]["reason"], "provider_timeout")
 
-    def test_openai_stream_failure_log_rejects_unrecognized_reason_text(self):
+    def test_openai_stream_failure_log_preserves_safe_reason_and_rejects_unrecognized_text(self):
+        with patch.object(server.LOGGER, "log") as log:
+            server._log_openai_stream_failure(
+                {"service": "openai"},
+                server.time.perf_counter(),
+                0,
+                "usage_limit_exceeded",
+                429,
+            )
+
+        self.assertEqual(log.call_args.kwargs["extra"]["context"]["reason"], "usage_limit_exceeded")
+
         with patch.object(server.LOGGER, "log") as log:
             server._log_openai_stream_failure(
                 {"service": "openai"},

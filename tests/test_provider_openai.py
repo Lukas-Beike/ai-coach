@@ -150,6 +150,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
     def test_safe_log_reason_is_static_allowlist(self):
         self.assertEqual(safe_log_reason("project_spend_limit_exceeded"), "usage_limit_exceeded")
+        self.assertEqual(safe_log_reason("usage_limit_exceeded"), "usage_limit_exceeded")
         self.assertEqual(safe_log_reason("provider_timeout"), "provider_timeout")
         self.assertEqual(safe_log_reason("provider-private-message"), "http_error")
         self.assertEqual(safe_log_reason(None), "http_error")
