@@ -73,18 +73,12 @@ def _validate_ical_structure(lines: list[str]) -> None:
         raise AppError(400, "Der Kalender-Feed enthält nicht geschlossene Komponenten.")
 
 
-def unfold_ical(payload: bytes, *, max_bytes: int = MAX_EXTERNAL_CALENDAR_BYTES, error: Any = None) -> list[str]:
-    """Validate and unfold a feed; ``error`` is retained for old primitive callers."""
-    try:
-        if not isinstance(payload, (bytes, bytearray)) or len(payload) > max_bytes:
-            raise AppError(413, "Der Kalender-Feed ist zu groß.")
-        lines = _unfold_lines(_decode_ical(payload))
-        _validate_ical_structure(lines)
-        return lines
-    except AppError as exc:
-        if error is not None:
-            raise error(exc.status, exc.message) from exc
-        raise
+def unfold_ical(payload: bytes, *, max_bytes: int = MAX_EXTERNAL_CALENDAR_BYTES) -> list[str]:
+    if not isinstance(payload, (bytes, bytearray)) or len(payload) > max_bytes:
+        raise AppError(413, "Der Kalender-Feed ist zu groß.")
+    lines = _unfold_lines(_decode_ical(payload))
+    _validate_ical_structure(lines)
+    return lines
 
 
 def ical_duration(raw: str) -> timedelta | None:
@@ -280,9 +274,10 @@ def _ical_add_start(starts: list[datetime], value: datetime, first: date, last: 
 
 def _ical_daily(base: datetime, rule: dict[str, Any], first: date, last: date) -> list[datetime]:
     starts: list[datetime] = []
-    index = 0 if rule["count"] is not None else max(0, math.ceil((first - base.date()).days / rule["interval"]) - 1)
+    first_index = 0 if rule["count"] is not None else max(0, math.ceil((first - base.date()).days / rule["interval"]) - 1)
+    index = first_index
     occurrences = 0
-    while index <= (index + ICAL_MAX_RECURRENCE_COUNT * 366):
+    while index <= first_index + ICAL_MAX_RECURRENCE_COUNT * 366:
         value = _ical_shift_local(base, index * rule["interval"])
         if value.date() > last or (rule["until"] is not None and value > rule["until"]):
             break
@@ -299,11 +294,12 @@ def _ical_weekly(base: datetime, rule: dict[str, Any], first: date, last: date) 
     base_date = base.date()
     base_week = base_date - timedelta(days=(base_date.weekday() - rule["wkst"]) % 7)
     target = first - timedelta(days=(first.weekday() - rule["wkst"]) % 7)
-    slot = 0 if rule["count"] is not None else max(0, max(0, (target - base_week).days // 7) // rule["interval"] - 1)
+    first_slot = 0 if rule["count"] is not None else max(0, max(0, (target - base_week).days // 7) // rule["interval"] - 1)
+    slot = first_slot
     bydays = rule["bydays"] or [(base_date.weekday(), None)]
     starts: list[datetime] = []
     occurrences = 0
-    while slot <= slot + ICAL_MAX_RECURRENCE_PERIODS:
+    while slot <= first_slot + ICAL_MAX_RECURRENCE_PERIODS:
         week = base_week + timedelta(days=slot * rule["interval"] * 7)
         if week > last:
             break
@@ -327,10 +323,11 @@ def _ical_period(base: datetime, rule: dict[str, Any], first: date, last: date) 
     monthly = rule["frequency"] == "MONTHLY"
     base_period = base_date.year * 12 + base_date.month - 1 if monthly else base_date.year
     target_period = first.year * 12 + first.month - 1 if monthly else first.year
-    period = 0 if rule["count"] is not None else max(0, max(0, target_period - base_period) // rule["interval"] - 1)
+    first_period = 0 if rule["count"] is not None else max(0, max(0, target_period - base_period) // rule["interval"] - 1)
+    period = first_period
     starts: list[datetime] = []
     occurrences = 0
-    while period <= period + ICAL_MAX_RECURRENCE_PERIODS:
+    while period <= first_period + ICAL_MAX_RECURRENCE_PERIODS:
         if monthly:
             month_index = base_date.year * 12 + base_date.month - 1 + period * rule["interval"]
             year, month = divmod(month_index, 12)

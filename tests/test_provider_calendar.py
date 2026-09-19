@@ -1,8 +1,10 @@
 import unittest
-from datetime import date, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from backend.errors import AppError
+from backend.providers import calendar as calendar_provider
 from backend.providers.calendar import (
     EXTERNAL_CALENDAR_WINDOW_DAYS,
     MAX_EXTERNAL_CALENDAR_BYTES,
@@ -11,6 +13,7 @@ from backend.providers.calendar import (
     ical_training_impact,
     ical_training_relevant,
     parse_ical_calendar,
+    unfold_ical,
 )
 
 
@@ -57,6 +60,13 @@ class CalendarProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(AppError, "UID und DTSTART"):
             parse(feed("UID:missing"))
 
+    def test_unfold_default_and_configurable_payload_limit(self):
+        payload = b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
+        self.assertEqual(MAX_EXTERNAL_CALENDAR_BYTES, 2_000_000)
+        self.assertEqual(unfold_ical(payload)[0], "BEGIN:VCALENDAR")
+        with self.assertRaisesRegex(AppError, "zu groß"):
+            unfold_ical(payload, max_bytes=len(payload) - 1)
+
     def test_daily_weekly_and_dst_keep_local_wall_time(self):
         daily = parse(feed("UID:daily\r\nDTSTART;TZID=Europe/Berlin:20261024T080000\r\nRRULE:FREQ=DAILY;COUNT=4"), start=date(2026, 10, 24), end=date(2026, 10, 30), zone=ZoneInfo("Europe/Berlin"))
         self.assertEqual([item["start_local"] for item in daily], [
@@ -92,6 +102,53 @@ class CalendarProviderTests(unittest.TestCase):
         self.assertFalse(ical_training_relevant("[NO_TRAINING]"))
         self.assertTrue(ical_no_intensity("x [NO_INTENSITY] y"))
         self.assertFalse(ical_short_only("x"))
+
+    def test_recurrence_iteration_caps_are_fixed_not_tautological(self):
+        base = datetime(1900, 1, 1, tzinfo=timezone.utc)
+        daily_rule = {"count": None, "interval": 1, "bymonth": [], "bymonthday": [], "bydays": [], "until": None}
+        with patch.object(calendar_provider, "ICAL_MAX_RECURRENCE_COUNT", 2), patch.object(calendar_provider, "_ical_matches_date_filters", return_value=False):
+            daily_calls = 0
+
+            def counted_daily_shift(value, days):
+                nonlocal daily_calls
+                daily_calls += 1
+                if daily_calls > 2 * 366 + 1:
+                    raise AssertionError("daily recurrence exceeded its fixed bound")
+                return value
+
+            with patch.object(calendar_provider, "_ical_shift_local", side_effect=counted_daily_shift):
+                self.assertEqual(calendar_provider._ical_daily(base, daily_rule, date(1900, 1, 1), date(9999, 12, 31)), [])
+            self.assertEqual(daily_calls, 2 * 366 + 1)
+
+        weekly_rule = {"count": None, "interval": 1, "bymonth": [], "bymonthday": [], "bydays": [], "wkst": 0, "until": None}
+        with patch.object(calendar_provider, "ICAL_MAX_RECURRENCE_PERIODS", 2):
+            weekly_calls = 0
+
+            def counted_weekly_filter(*args):
+                nonlocal weekly_calls
+                weekly_calls += 1
+                if weekly_calls > 3:
+                    raise AssertionError("weekly recurrence exceeded its fixed bound")
+                return False
+
+            with patch.object(calendar_provider, "_ical_matches_date_filters", side_effect=counted_weekly_filter):
+                self.assertEqual(calendar_provider._ical_weekly(base, weekly_rule, date(1900, 1, 1), date(9999, 12, 31)), [])
+            self.assertEqual(weekly_calls, 3)
+
+        period_rule = {"frequency": "MONTHLY", "count": None, "interval": 1, "bymonth": [], "bymonthday": [], "bydays": [], "bysetpos": [], "until": None}
+        with patch.object(calendar_provider, "ICAL_MAX_RECURRENCE_PERIODS", 2):
+            period_calls = 0
+
+            def counted_period_dates(*args):
+                nonlocal period_calls
+                period_calls += 1
+                if period_calls > 3:
+                    raise AssertionError("period recurrence exceeded its fixed bound")
+                return []
+
+            with patch.object(calendar_provider, "_ical_period_dates", side_effect=counted_period_dates):
+                self.assertEqual(calendar_provider._ical_period(base, period_rule, date(1900, 1, 1), date(9999, 12, 31)), [])
+            self.assertEqual(period_calls, 3)
 
 
 if __name__ == "__main__":
