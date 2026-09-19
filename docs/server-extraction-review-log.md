@@ -528,6 +528,14 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   955 Tests, 12 übersprungen, PASS in 122,806 s. Ruff für die neuen
   Provider-State-Dateien und die neu eingeführte Closure-Bindung, Compileall,
   Inventar-Check und `git diff --check`: PASS.
+- Externes Codex-Review auf `3ee4e4880a0b3d4f892a98d41d926f9f8e8395ec`:
+  **FAIL (P1)** — ohne konfigurierte OpenAI-/Gemini-Credentials liefert die
+  Settings-Auswahl absichtlich den leeren String, den der neue Service strikt
+  ablehnte. Korrektur: nur die beiden öffentlichen Projektionen verwenden wie
+  zuvor OpenAI als leeren Summary-Fallback; die sichtbare Provider-Auswahl
+  bleibt leer. Neuer No-Credentials-Test sowie State-, Deadlock-, Service- und
+  Architekturregressionen: 11 Tests, PASS. Vollständiger Wiederholungslauf:
+  956 Tests, 12 übersprungen, PASS in 135,212 s.
 
 ### Verbleibende Risiken und nächster Schritt
 

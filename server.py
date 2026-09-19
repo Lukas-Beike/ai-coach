@@ -18034,7 +18034,7 @@ def public_bootstrap() -> dict[str, Any]:
                 "openai": bool(CONFIG.openai_api_key), "gemini": bool(CONFIG.gemini_api_key), "intervals": bool(CONFIG.intervals_api_key),
                 "weather": bool(get_profile().get("weather_location")), "external_calendar": bool(CONFIG.calendar_ical_url),
             },
-            "usage": provider_state_service().summary(SETTINGS.selected_ai_provider()),
+            "usage": provider_state_service().summary(SETTINGS.selected_ai_provider() or "openai"),
         }
 
 
@@ -18198,7 +18198,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
                 "weather": bool(weather.get("configured")),
                 "external_calendar": bool(CONFIG.calendar_ical_url),
             },
-            "usage": provider_state_service().summary(SETTINGS.selected_ai_provider()),
+            "usage": provider_state_service().summary(SETTINGS.selected_ai_provider() or "openai"),
         }
 
 

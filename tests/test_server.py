@@ -1684,6 +1684,19 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["checkins"][0]["checkin_date"], "2026-08-30")
         self.assertEqual(state["checkins"][0]["motivation"], 8)
 
+    def test_public_states_keep_empty_usage_when_no_ai_provider_is_configured(self):
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="")
+
+        with patch.object(server, "CONFIG", config):
+            bootstrap = server.public_bootstrap()
+            state = server.public_state(local_only=True)
+
+        for result in (bootstrap, state):
+            self.assertEqual(result["ai_provider"]["selected"], "")
+            self.assertEqual(result["usage"]["requests"], 0)
+            self.assertEqual(result["usage"]["status"], {})
+            self.assertEqual(result["usage"]["rate_limits"], {})
+
     def test_daily_planning_context_combines_checkin_recovery_weather_and_appointments(self):
         today = server.local_now().date().isoformat()
         server.save_snapshot({
