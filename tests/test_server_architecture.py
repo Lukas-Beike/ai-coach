@@ -105,11 +105,30 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("load_local_env", "security_configuration_error", "save_persistent_settings"),
     ),
     ("backend.providers.http", ("ProviderHTTPError",)),
+    (
+        "backend.providers.openai",
+        (
+            "OPENAI_RATE_LIMIT_HEADERS",
+            "retry_after_seconds",
+            "error_diagnostic_details",
+            "error_details",
+            "safe_log_reason",
+            "rate_limit_snapshot",
+        ),
+    ),
     ("backend.http_api.responses", ("json_bytes",)),
     ("backend.sync.windows", ("split_date_windows",)),
     ("backend.sync.freshness", ("provider_freshness_state",)),
     ("backend.db.schema", ("database_table_names",)),
     ("backend.db.bootstrap", ("initialize_application_database",)),
+)
+
+FORBIDDEN_SERVER_SYMBOLS = (
+    "_retry_after_seconds",
+    "openai_error_diagnostic_details",
+    "openai_error_details",
+    "safe_openai_log_reason",
+    "record_openai_rate_limits",
 )
 
 
@@ -255,12 +274,11 @@ def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
     implementations: dict[str, int] = {}
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if not node.name.startswith("_"):
-                implementations[node.name] = node.lineno
+            implementations[node.name] = node.lineno
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
             for target in targets:
-                if isinstance(target, ast.Name) and not target.id.startswith("_"):
+                if isinstance(target, ast.Name):
                     implementations[target.id] = node.lineno
     return implementations
 
@@ -285,6 +303,11 @@ class ServerArchitectureTests(unittest.TestCase):
             for symbol in symbols
             if symbol in implementations
         ]
+        violations.extend(
+            f"legacy extracted symbol {symbol} is redefined in server.py:{implementations[symbol]}"
+            for symbol in FORBIDDEN_SERVER_SYMBOLS
+            if symbol in implementations
+        )
         self.assertEqual(
             [],
             violations,

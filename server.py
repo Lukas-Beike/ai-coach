@@ -84,7 +84,7 @@ from backend.db.schema import (
 from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
 from backend.providers.gemini import function_tools as gemini_function_tools, response_text as gemini_response_text
-from backend.providers.openai import response_failure_reason as openai_response_failure_reason, response_text as openai_response_text
+from backend.providers import openai as openai_provider
 from backend.providers.http import error_detail as provider_error_detail, read_bounded_response
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
@@ -6556,162 +6556,9 @@ def sync_competitions(
             COMPETITION_SYNC_LOCK.release()
 
 
-OPENAI_RATE_LIMIT_HEADERS = {
-    "retry-after": "retry_after",
-    "x-ratelimit-limit-requests": "limit_requests",
-    "x-ratelimit-remaining-requests": "remaining_requests",
-    "x-ratelimit-reset-requests": "reset_requests",
-    "x-ratelimit-limit-tokens": "limit_tokens",
-    "x-ratelimit-remaining-tokens": "remaining_tokens",
-    "x-ratelimit-reset-tokens": "reset_tokens",
-}
 OPENAI_STATUS_KEY = "openai_status"
 GEMINI_STATUS_KEY = "gemini_status"
 OPENAI_MAX_RETRY_DELAY_SECONDS = 60
-
-
-def _retry_after_seconds(headers: Any) -> int | None:
-    """Parse a bounded numeric Retry-After hint without retaining raw headers."""
-    if headers is None:
-        return None
-    try:
-        value = headers.get("retry-after")
-        seconds = float(str(value).strip())
-    except (AttributeError, TypeError, ValueError, OverflowError):
-        return None
-    if not math.isfinite(seconds) or seconds < 0:
-        return None
-    return max(1, min(int(math.ceil(seconds)), 24 * 60 * 60))
-
-
-def _safe_openai_error_token(value: Any) -> str | None:
-    """Keep a provider error classifier without retaining provider text."""
-    token = str(value or "").strip().casefold()
-    if not token or len(token) > 160 or not re.fullmatch(r"[a-z0-9_.\[\]-]+", token):
-        return None
-    return token
-
-
-def openai_error_diagnostic_details(raw_body: bytes, headers: Any = None) -> dict[str, Any]:
-    """Return safe OpenAI error metadata; never retain an upstream message/body."""
-    payload: Any = None
-    try:
-        payload = json.loads(raw_body) if raw_body else None
-    except (TypeError, json.JSONDecodeError):
-        payload = None
-    error = payload.get("error") if isinstance(payload, dict) else None
-    error = error if isinstance(error, dict) else {}
-    details: dict[str, Any] = {"error_body_bytes": min(len(raw_body or b""), MAX_EXTERNAL_RESPONSE_BYTES + 1)}
-    for source, target in (("code", "error_code"), ("type", "error_type"), ("param", "parameter")):
-        token = _safe_openai_error_token(error.get(source))
-        if token:
-            details[target] = token
-    try:
-        request_id = _safe_openai_error_token(headers.get("x-request-id")) if headers is not None else None
-    except (AttributeError, TypeError):
-        request_id = None
-    if request_id:
-        details["request_id"] = request_id
-    return details
-
-
-def _openai_error_tokens(error: dict[str, Any]) -> tuple[str, str, str, str, str]:
-    """Return transient normalized tokens used only for OpenAI error classification."""
-    code = str(error.get("code") or "").strip().casefold()
-    error_type = str(error.get("type") or "").strip().casefold()
-    parameter = str(error.get("param") or "").strip().casefold()
-    provider_message = str(error.get("message") or "").strip().casefold()
-    searchable = " ".join((code, error_type, provider_message))
-    return code, error_type, parameter, provider_message, searchable
-
-
-def _openai_invalid_input_state(error_type: str, parameter: str, provider_message: str) -> bool:
-    """Identify recoverable tool-output and reasoning continuation state errors."""
-    return error_type == "invalid_request_error" and parameter.startswith("input") and (
-        "no tool output found for function call" in provider_message
-        or ("reasoning" in provider_message and "required following item" in provider_message)
-    )
-
-
-def _openai_conversation_error(status: int, code: str, error_type: str, parameter: str, provider_message: str, searchable: str) -> tuple[str, str] | None:
-    """Classify conversation locking and invalid continuation state separately."""
-    if code in {"conversation_locked", "conversation_lock_timeout", "concurrent_request"} or ("conversation" in searchable and "lock" in searchable):
-        return "conversation_locked", "Die OpenAI-Konversation wird gerade von einer anderen Anfrage verwendet. Bitte kurz warten und erneut versuchen."
-    invalid_state = _openai_invalid_input_state(error_type, parameter, provider_message)
-    continuation_error = "conversation" in searchable and any(marker in searchable for marker in ("state", "previous", "invalid", "not found"))
-    if status == 400 and (code in {"conversation_not_found", "invalid_conversation", "conversation_state_invalid", "invalid_function_call_output"} or "function_call_output" in searchable or invalid_state or continuation_error):
-        return "conversation_state_invalid", "Der KI-Dienst konnte den bisherigen Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten."
-    return None
-
-
-def _openai_billing_error(code: str, error_type: str, searchable: str) -> tuple[str, str] | None:
-    """Classify quota and billing limits before generic rate limiting."""
-    if code == "credit_balance_exhausted":
-        return "credit_balance_exhausted", "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
-    if code in {"organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
-        return code, "Das OpenAI-Ausgaben- oder Nutzungslimit ist erreicht. Bitte das Limit im OpenAI-Konto prüfen."
-    if code in {"insufficient_quota", "billing_hard_limit_reached"} or error_type == "insufficient_quota" or any(marker in searchable for marker in ("insufficient_quota", "quota", "billing_hard_limit", "credits")):
-        return "insufficient_quota", "Das OpenAI-Guthaben bzw. Kontingent ist aufgebraucht. Bitte Guthaben und Abrechnung im OpenAI-Konto prüfen."
-    return None
-
-
-def _openai_error_reason(status: int, error: dict[str, Any]) -> tuple[str, str]:
-    """Map safe OpenAI error markers to an athlete-facing recovery action."""
-    code, error_type, parameter, provider_message, searchable = _openai_error_tokens(error)
-    conversation_error = _openai_conversation_error(status, code, error_type, parameter, provider_message, searchable)
-    if conversation_error:
-        return conversation_error
-    billing_error = _openai_billing_error(code, error_type, searchable)
-    if billing_error:
-        return billing_error
-    if status == 429 or code == "rate_limit_exceeded" or error_type == "rate_limit_exceeded":
-        return "rate_limit_exceeded", "OpenAI hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen."
-    if status in {401, 403} or code in {"invalid_api_key", "invalid_organization", "permission_denied"}:
-        return "authentication_or_permission", "Der OpenAI-Zugang wurde abgelehnt. Bitte API-Schlüssel und Projektberechtigungen prüfen."
-    if status == 404 or code in {"model_not_found", "not_found"}:
-        return "not_found", "Das konfigurierte OpenAI-Modell oder der angeforderte Dienst wurde nicht gefunden."
-    if status >= 500:
-        return "provider_unavailable", "OpenAI ist vorübergehend nicht verfügbar. Bitte später erneut versuchen."
-    return "http_error", f"OpenAI konnte die Anfrage nicht verarbeiten (HTTP {status})."
-
-
-def openai_error_details(status: int, raw_body: bytes, headers: Any = None) -> dict[str, Any]:
-    """Classify an OpenAI error without exposing the provider's raw message."""
-    reason, message = _openai_error_reason(status, _provider_error_payload(raw_body))
-    details = {
-        "state": "error",
-        "reason": reason,
-        "message": message,
-        "http_status": status,
-        "updated_at": utc_now(),
-    }
-    retry_after = _retry_after_seconds(headers)
-    if retry_after is not None:
-        details["retry_after_seconds"] = retry_after
-    return details
-
-
-def safe_openai_log_reason(reason: Any) -> str:
-    """Project an OpenAI status reason onto static values safe for structured logs."""
-    if reason == "conversation_locked":
-        return "conversation_locked"
-    if reason == "conversation_state_invalid":
-        return "conversation_state_invalid"
-    if reason == "credit_balance_exhausted":
-        return "credit_balance_exhausted"
-    if reason in {"organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
-        return "usage_limit_exceeded"
-    if reason == "insufficient_quota":
-        return "insufficient_quota"
-    if reason == "rate_limit_exceeded":
-        return "rate_limit_exceeded"
-    if reason == "authentication_or_permission":
-        return "authentication_or_permission"
-    if reason == "not_found":
-        return "not_found"
-    if reason == "provider_unavailable":
-        return "provider_unavailable"
-    return "http_error"
 
 
 def _provider_error_payload(raw_body: bytes) -> dict[str, Any]:
@@ -6776,16 +6623,10 @@ def record_openai_success(status: int = 200) -> None:
     })
 
 
-def record_openai_rate_limits(response_headers: Any) -> None:
-    if response_headers is None:
-        return
-    values: dict[str, str] = {}
-    for header_name, value_name in OPENAI_RATE_LIMIT_HEADERS.items():
-        value = response_headers.get(header_name)
-        if value not in (None, ""):
-            values[value_name] = str(value)
-    if values:
-        set_kv("openai_rate_limits", json.dumps({"updated_at": utc_now(), **values}, ensure_ascii=False))
+def _persist_openai_rate_limits(response_headers: Any) -> None:
+    snapshot = openai_provider.rate_limit_snapshot(response_headers, updated_at=utc_now())
+    if snapshot:
+        set_kv("openai_rate_limits", json.dumps(snapshot, ensure_ascii=False))
 
 
 def _provider_error_body(raw_body: bytes) -> Any:
@@ -6950,7 +6791,7 @@ def _http_success_result(
     raw = _read_http_response(response, cancel_event)
     result = json.loads(raw) if raw else None
     if service == "openai":
-        record_openai_rate_limits(getattr(response, "headers", None))
+        _persist_openai_rate_limits(getattr(response, "headers", None))
         record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
     status = getattr(response, "status", None) or getattr(response, "code", None) or 200
     LOGGER.info(
@@ -7008,8 +6849,13 @@ def _handle_http_error(
 ) -> NoReturn:
     raw_error = _read_http_error_body(exc)
     if service == "openai":
-        record_openai_rate_limits(getattr(exc, "headers", None))
-        error_details = openai_error_details(exc.code, raw_error, getattr(exc, "headers", None))
+        _persist_openai_rate_limits(getattr(exc, "headers", None))
+        error_details = openai_provider.error_details(
+            exc.code,
+            raw_error,
+            getattr(exc, "headers", None),
+            updated_at=utc_now(),
+        )
         record_openai_status(error_details)
     elif service == "gemini":
         error_details = gemini_error_details(exc.code, raw_error)
@@ -13766,7 +13612,7 @@ def record_openai_usage(response: dict[str, Any], operation: str) -> None:
 
 
 def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
-    failure = openai_response_failure_reason(path, result, OPENAI_RESPONSES_PATH)
+    failure = openai_provider.response_failure_reason(path, result, OPENAI_RESPONSES_PATH)
     if failure == "invalid_response":
         raise AppError(502, "OpenAI response is not a JSON object.", reason="invalid_response")
     if failure == "response_error":
@@ -14594,7 +14440,7 @@ def _read_openai_stream_response(
     with urlopen(request, timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS) as response:
         if cancel_event is not None:
             cancel_event._openai_response = response
-        record_openai_rate_limits(getattr(response, "headers", None))
+        _persist_openai_rate_limits(getattr(response, "headers", None))
         record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
         for raw_line in response:
             _raise_chat_cancelled(cancel_event)
@@ -14680,11 +14526,26 @@ def _handle_openai_stream_http_error(
 ) -> NoReturn:
     raw_error = _read_http_error_body(exc)
     status = int(getattr(exc, "code", 502) or 502)
-    details = openai_error_details(status, raw_error, getattr(exc, "headers", None))
+    details = openai_provider.error_details(
+        status,
+        raw_error,
+        getattr(exc, "headers", None),
+        updated_at=utc_now(),
+    )
     record_openai_status(details)
-    reason = safe_openai_log_reason(details["reason"])
+    reason = openai_provider.safe_log_reason(details["reason"])
     _log_openai_stream_failure(context, started, stream_bytes, reason, status)
-    _capture_openai_stream_failure(status, details["reason"], started, stream_bytes, openai_error_diagnostic_details(raw_error, getattr(exc, "headers", None)))
+    _capture_openai_stream_failure(
+        status,
+        details["reason"],
+        started,
+        stream_bytes,
+        openai_provider.error_diagnostic_details(
+            raw_error,
+            getattr(exc, "headers", None),
+            max_response_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+        ),
+    )
     error = AppError(status, details["message"], reason=details["reason"])
     retry_after = details.get("retry_after_seconds")
     if isinstance(retry_after, int):
@@ -14913,7 +14774,7 @@ def reset_coach_chat() -> dict[str, Any]:
 
 
 def output_text(response: dict[str, Any]) -> str:
-    return openai_response_text(response)
+    return openai_provider.response_text(response)
 
 
 COACH_ACTION_TTL_SECONDS = 10 * 60

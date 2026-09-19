@@ -8171,26 +8171,6 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(summary["rate_limits"]["remaining_tokens"], "0")
         self.assertNotIn("current quota", json.dumps(summary))
 
-    def test_openai_documented_spend_and_usage_codes_are_classified(self):
-        for code in (
-            "organization_spend_limit_exceeded",
-            "project_spend_limit_exceeded",
-            "organization_usage_limit_exceeded",
-        ):
-            details = server.openai_error_details(429, json.dumps({"error": {"code": code}}).encode("utf-8"))
-            self.assertEqual(details["reason"], code)
-            self.assertIn("Limit", details["message"])
-
-    def test_openai_retry_after_is_parsed_for_transient_rate_limits(self):
-        details = server.openai_error_details(
-            429,
-            json.dumps({"error": {"code": "rate_limit_exceeded"}}).encode("utf-8"),
-            {"retry-after": "12.5"},
-        )
-        self.assertEqual(details["reason"], "rate_limit_exceeded")
-        self.assertEqual(details["retry_after_seconds"], 13)
-        self.assertIsNone(server._retry_after_seconds({"retry-after": "not-a-delay"}))
-
     def test_openai_retry_after_is_attached_to_transient_http_error(self):
         error_body = json.dumps({"error": {"code": "rate_limit_exceeded"}}).encode("utf-8")
         upstream_error = server.HTTPError(
@@ -8220,10 +8200,6 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(raised.exception.reason, "rate_limit_exceeded")
         self.assertEqual(raised.exception.retry_after_seconds, 9)
 
-    def test_openai_log_reasons_are_static_allowlisted_values(self):
-        self.assertEqual(server.safe_openai_log_reason("project_spend_limit_exceeded"), "usage_limit_exceeded")
-        self.assertEqual(server.safe_openai_log_reason("provider-private-message"), "http_error")
-
     def test_openai_conversation_lock_retry_uses_structured_reason(self):
         calls = []
         responses = [server.AppError(409, "locked", reason="conversation_locked"), {"output_text": "ok"}]
@@ -8240,58 +8216,6 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["output_text"], "ok")
         self.assertEqual(calls, ["/responses", "/responses"])
         sleep.assert_called_once_with(1)
-
-    def test_openai_conversation_state_error_is_classified_without_provider_text(self):
-        raw_error = json.dumps({
-            "error": {
-                "code": "invalid_function_call_output",
-                "type": "invalid_request_error",
-                "param": "input[0]",
-                "message": "secret tool call detail must never be stored",
-            },
-        }).encode("utf-8")
-        details = server.openai_error_details(400, raw_error)
-        self.assertEqual(details["reason"], "conversation_state_invalid")
-        diagnostic = server.openai_error_diagnostic_details(raw_error, {"x-request-id": "req_test_123"})
-        self.assertEqual(diagnostic["error_code"], "invalid_function_call_output")
-        self.assertEqual(diagnostic["parameter"], "input[0]")
-        self.assertNotIn("secret", json.dumps(diagnostic))
-
-    def test_openai_code_null_input_state_errors_are_classified_for_recovery(self):
-        messages = (
-            "No tool output found for function call call_private_example.",
-            "Item 'rs_private_example' of type 'reasoning' was provided without its required following item.",
-        )
-        for provider_message in messages:
-            with self.subTest(provider_message=provider_message):
-                raw_error = json.dumps({
-                    "error": {
-                        "code": None,
-                        "type": "invalid_request_error",
-                        "param": "input",
-                        "message": provider_message,
-                    },
-                }).encode("utf-8")
-
-                details = server.openai_error_details(400, raw_error)
-                self.assertEqual(details["reason"], "conversation_state_invalid")
-                diagnostic = server.openai_error_diagnostic_details(raw_error)
-                self.assertEqual(diagnostic["error_type"], "invalid_request_error")
-                self.assertEqual(diagnostic["parameter"], "input")
-                self.assertNotIn("private_example", json.dumps(diagnostic))
-
-    def test_openai_code_null_unrelated_input_error_does_not_rotate_conversation(self):
-        raw_error = json.dumps({
-            "error": {
-                "code": None,
-                "type": "invalid_request_error",
-                "param": "input",
-                "message": "Input contains an unsupported content type.",
-            },
-        }).encode("utf-8")
-
-        details = server.openai_error_details(400, raw_error)
-        self.assertEqual(details["reason"], "http_error")
 
     def test_streaming_openai_400_is_captured_without_error_message_or_payload(self):
         raw_error = json.dumps({

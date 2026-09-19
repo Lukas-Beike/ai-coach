@@ -112,14 +112,31 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(locked["reason"], "conversation_locked")
         self.assertEqual(invalid["reason"], "conversation_state_invalid")
         self.assertNotIn("secret", json.dumps(invalid))
-        self.assertEqual(
-            error_details(
-                400,
-                body({"type": "invalid_request_error", "param": "input", "message": "No tool output found for function call private"}),
-                updated_at="now",
-            )["reason"],
-            "conversation_state_invalid",
+        for provider_message in (
+            "No tool output found for function call private",
+            "Item private of type reasoning was provided without its required following item.",
+        ):
+            with self.subTest(provider_message=provider_message):
+                self.assertEqual(
+                    error_details(
+                        400,
+                        body({"type": "invalid_request_error", "param": "input", "message": provider_message}),
+                        updated_at="now",
+                    )["reason"],
+                    "conversation_state_invalid",
+                )
+        unrelated = error_details(
+            400,
+            body(
+                {
+                    "type": "invalid_request_error",
+                    "param": "input",
+                    "message": "Input contains an unsupported content type.",
+                }
+            ),
+            updated_at="now",
         )
+        self.assertEqual(unrelated["reason"], "http_error")
 
     def test_error_details_attach_retry_after_and_never_provider_text(self):
         details = error_details(
