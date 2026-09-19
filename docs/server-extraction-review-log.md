@@ -512,7 +512,7 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   Gemini-Historien-/Attachment-Eigentümer wurden `coach/conversation.py` (P7)
   und die Commit-Validierung `planning/` (P4) zugeordnet. P0 ist damit wieder
   exakt geschlossen; es wurde keine Laufzeitlogik verändert.
-- `server.py`: 19.949 physische Zeilen und 1.101 verbleibende
+- `server.py`: 19.948 physische Zeilen und 1.101 verbleibende
   Funktionen/Klassen. Das Inventar enthält 1.549 Einträge; P0 ist bei null
   unklaren Zuordnungen, in P2 bleiben 85 Definitionen und 10 globale Bindungen
   offen. Diese Restdefinitionen, nicht die reine Zeilenabnahme, bestimmen die
@@ -533,6 +533,20 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   897 Tests, 12 übersprungen, PASS in 181,102 s.
 - Ruff auf allen geänderten Provider-, Provider-Test- und Inventardateien,
   Compileall, Inventar-Check und `git diff --check`: PASS.
+
+### PR-#684-Korrekturrunde
+
+- SonarCloud auf `3cf9795c273fd42a8c6fd5a528e0f29e77a88da5`: **FAIL** — nach
+  der Request-Delegation verblieb in `http_json` die unbenutzte lokale Bindung
+  `body = request.data`.
+- Korrekturcommit `b912ab5`: **PASS** im erneuten Root-Diff- und Code-Review.
+  Nur die tote Bindung wurde entfernt; Requestobjekt, Netzwerk-, Cancellation-,
+  Logging- und Fehlerpfade sowie öffentliche Schnittstellen bleiben unverändert.
+- Provider- und Architekturregressionen: 15 Tests, PASS. Vollständiger Lauf:
+  897 Tests, 12 übersprungen, PASS in 175,628 s. Ruff auf den extrahierten
+  Provider-, Provider-Test- und Inventardateien, Compileall, Inventar- und
+  Diff-Check: PASS. Der aktualisierte PR-Head benötigt erneut sämtliche
+  externen Gates.
 
 ### Verbleibende Risiken und nächster Schritt
 
