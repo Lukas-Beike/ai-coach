@@ -485,3 +485,32 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - Nächster Schritt ist ein kleiner, unabhängiger P2-Transportbaustein; danach
   werden dessen Serveraufrufer sequenziell integriert und erneut vollständig
   geprüft.
+
+### PR-#680-Korrekturrunde
+
+- Externe Analyse des geprüften Stands `e9eedded46d9f7626927b286ed7b383281575c6c`:
+  **FAIL** — Sonar meldete sechs Cognitive-Complexity-Befunde im neuen
+  Kalenderparser und ein vierfaches Eigentümerliteral im Inventargenerator;
+  CodeQL meldete einen nicht allowlist-projizierten Stream-Fehlergrund im
+  strukturierten Log.
+- Kalender-Korrekturcommit des ursprünglichen Workers:
+  `35d4e289e1f066aa22ce16b390e09be90959ca20`, integriert als `1a1e2c1`.
+  Eigenes Diff-Review: **PASS** — die sechs Funktionen wurden in kleine reine
+  Hilfsfunktionen zerlegt. COUNT-/UNTIL-Reihenfolge, Exception-Unterdrückung,
+  Recurrence-Grenzen, Zeitzonen, Fehlertexte und öffentliche Schnittstelle
+  bleiben unverändert; keine Rückimporte oder Server-Callbacks.
+- Integrationskorrektur `e3883d8`: **PASS** — der Loggrund wird unmittelbar
+  vor dem strukturierten Log über eine statische Allowlist projiziert;
+  bekannte Timeout-/Cancellation-/Response-Gründe bleiben erhalten,
+  unbekannter Text wird `http_error`. Der Inventareigentümer
+  `sync/reconcile.py` besitzt nun eine einzelne Konstante.
+- Geprüfter integrierter Stand: `1a1e2c1`. Vollständiger Lauf
+  `python -m unittest discover -s tests` — 871 Tests, 12 übersprungen, PASS
+  in 181,550 s. Provider-/Log-Korrekturtests: 25 Tests, PASS. Ruff auf allen
+  betroffenen Provider-, Test- und Inventardateien, Compileall,
+  Inventar-Check und `git diff --check`: PASS.
+- Lokale Sonar-Dateianalyse für `backend/providers/calendar.py`,
+  `scripts/server_extraction_inventory.py` und `server.py`: keine Befunde;
+  der CLI-Gesamtcode ist ausschließlich wegen nicht verfügbarer optionaler
+  Vortex-Analyse ungleich null. Der aktualisierte PR-Head benötigt erneut die
+  vollständigen GitHub-, Sonar- und Codex-Gates.
