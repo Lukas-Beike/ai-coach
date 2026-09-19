@@ -1,7 +1,9 @@
 import json
 import unittest
 
+from backend.errors import AppError
 from backend.providers.openai import (
+    endpoint,
     error_details,
     error_diagnostic_details,
     rate_limit_snapshot,
@@ -17,6 +19,31 @@ def body(error=None):
 
 
 class OpenAIProviderErrorTests(unittest.TestCase):
+    def test_endpoint_joins_base_path_and_normalizes_api_path(self):
+        self.assertEqual(
+            endpoint("https://foundry.example.invalid/openai/v1/", "/responses", default_base_url="https://api.openai.com/v1"),
+            "https://foundry.example.invalid/openai/v1/responses",
+        )
+        self.assertEqual(
+            endpoint("https://foundry.example.invalid/openai/v1", "conversations/abc", default_base_url="https://api.openai.com/v1"),
+            "https://foundry.example.invalid/openai/v1/conversations/abc",
+        )
+
+    def test_endpoint_uses_default_for_empty_base_and_rejects_unsafe_base_urls(self):
+        default = "https://api.openai.com/v1"
+        self.assertEqual(endpoint("", "responses", default_base_url=default), default + "/responses")
+        self.assertEqual(endpoint("   ", "responses", default_base_url=default), default + "/responses")
+        for invalid in (
+            "https://user:password@foundry.example.invalid/openai/v1",
+            "https://foundry.example.invalid/openai/v1?api-version=2024-10-21",
+            "https://foundry.example.invalid/openai/v1#fragment",
+            "ftp://foundry.example.invalid/openai/v1",
+            "openai/v1",
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(AppError) as raised:
+                endpoint(invalid, "responses", default_base_url=default)
+            self.assertEqual(raised.exception.status, 500)
+
     def test_response_parsers_remain_pure(self):
         self.assertEqual(response_failure_reason("/responses", None), "invalid_response")
         self.assertEqual(response_failure_reason("/responses", {"status": "failed"}), "response_failed")

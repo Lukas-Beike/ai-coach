@@ -6,6 +6,9 @@ import json
 import math
 import re
 from typing import Any
+from urllib.parse import urlparse, urlunparse
+
+from backend.errors import AppError
 
 OPENAI_RATE_LIMIT_HEADERS = {
     "retry-after": "retry_after",
@@ -39,6 +42,23 @@ _SAFE_LOG_REASONS = {
     "provider_unavailable": "provider_unavailable",
     "usage_limit_exceeded": "usage_limit_exceeded",
 }
+
+
+def endpoint(base_url: Any, path: str, *, default_base_url: str) -> str:
+    """Resolve an OpenAI-compatible API path against a configured base URL."""
+    base = str(base_url or default_base_url).strip() or default_base_url
+    parsed = urlparse(base)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise AppError(500, "OPENAI_BASE_URL muss eine gültige HTTP(S)-Basis-URL ohne Zugangsdaten oder Query-Parameter sein.")
+    normalized_path = "/" + str(path or "").lstrip("/")
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/") + normalized_path, "", "", ""))
 
 
 def response_failure_reason(path: str, result: Any, responses_path: str = "/responses") -> str | None:

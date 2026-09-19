@@ -7,11 +7,11 @@ an application error by their caller.
 
 from __future__ import annotations
 
-import re
 import json
+import re
+import secrets
 from dataclasses import dataclass
 from typing import Any
-
 
 _SECRET_PATTERNS = (
     (re.compile(r"(?i)https?://[^\s<>\"'`]+"), "[REDACTED_URL]"),
@@ -20,6 +20,33 @@ _SECRET_PATTERNS = (
     (re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b"), "[REDACTED_GEMINI_KEY]"),
     (re.compile(r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+"), r"\1[REDACTED]"),
 )
+
+
+def multipart_form_data(
+    fields: list[tuple[str, str]],
+    file_field: str,
+    filename: str,
+    file_content_type: str,
+    file_data: bytes,
+    *,
+    boundary_token: str | None = None,
+) -> tuple[bytes, str]:
+    """Build a bounded multipart request without persisting the uploaded data."""
+    boundary = "----IntervalsCoach" + (boundary_token if boundary_token is not None else secrets.token_hex(16))
+    boundary_bytes = boundary.encode("ascii")
+    parts: list[bytes] = []
+    for name, value in fields:
+        parts.extend((b"--" + boundary_bytes + b"\r\n",))
+        parts.extend((f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),))
+        parts.extend((value.encode("utf-8"), b"\r\n"))
+    parts.extend((b"--" + boundary_bytes + b"\r\n",))
+    parts.extend((
+        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode("ascii"),
+        f"Content-Type: {file_content_type}\r\n\r\n".encode("ascii"),
+        file_data,
+        b"\r\n--" + boundary_bytes + b"--\r\n",
+    ))
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
 def redact_provider_text(value: Any, *, limit: int = 500) -> str:
