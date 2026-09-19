@@ -512,7 +512,7 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   Gemini-Historien-/Attachment-Eigentümer wurden `coach/conversation.py` (P7)
   und die Commit-Validierung `planning/` (P4) zugeordnet. P0 ist damit wieder
   exakt geschlossen; es wurde keine Laufzeitlogik verändert.
-- `server.py`: 19.949 physische Zeilen und 1.101 verbleibende
+- `server.py`: 19.948 physische Zeilen und 1.101 verbleibende
   Funktionen/Klassen. Das Inventar enthält 1.549 Einträge; P0 ist bei null
   unklaren Zuordnungen, in P2 bleiben 85 Definitionen und 10 globale Bindungen
   offen. Diese Restdefinitionen, nicht die reine Zeilenabnahme, bestimmen die
@@ -533,6 +533,30 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   897 Tests, 12 übersprungen, PASS in 181,102 s.
 - Ruff auf allen geänderten Provider-, Provider-Test- und Inventardateien,
   Compileall, Inventar-Check und `git diff --check`: PASS.
+
+### PR-#684-Korrekturrunde
+
+- SonarCloud auf `3cf9795c273fd42a8c6fd5a528e0f29e77a88da5`: **FAIL** — nach
+  der Request-Delegation verblieb in `http_json` die unbenutzte lokale Bindung
+  `body = request.data`.
+- Korrekturcommit `b912ab5`, nach Rebase als `a821ae4` integriert: **PASS** im
+  erneuten Root-Diff- und Code-Review. Nur die tote Bindung wurde entfernt;
+  Requestobjekt, Netzwerk-, Cancellation-, Logging- und Fehlerpfade sowie
+  öffentliche Schnittstellen bleiben unverändert.
+- Provider- und Architekturregressionen: 15 Tests, PASS. Vollständiger Lauf:
+  897 Tests, 12 übersprungen, PASS in 175,628 s. Ruff auf den extrahierten
+  Provider-, Provider-Test- und Inventardateien, Compileall, Inventar- und
+  Diff-Check: PASS. Nach dem Rebase auf den tatsächlich gemergten Stand von
+  PR #684 wurden erneut 897 Tests mit 12 Überspringungen in 268,102 s
+  erfolgreich ausgeführt; die 15 fokussierten Regressionen und alle genannten
+  statischen Checks blieben ebenfalls grün. Der aktualisierte PR-Head benötigt
+  erneut sämtliche externen Gates.
+- PR #684 wurde zuvor am `2026-09-19T17:49:28Z` auf dem alten Head gemergt;
+  Merge-Commit `b4b4138b08abb636241d63e12709806422d60616` ist auf
+  `origin/develop` erreichbar und besitzt keine offenen Review-Threads. Der
+  separate Sonar-Analysecheck blieb dort rot; die Korrektur wird deshalb als
+  eigener Folge-PR gegen genau diesen Merge veröffentlicht und P2.4 bis zu
+  dessen bestätigtem Merge nicht als abgeschlossen behandelt.
 
 ### Verbleibende Risiken und nächster Schritt
 

@@ -6141,7 +6141,6 @@ def http_json(
         app_version=APP_VERSION,
         operation_context=OPERATION_CONTEXT.get(),
     )
-    body = request.data
     started = time.perf_counter()
     _log_http_request_started(request_context, parsed_url, request_headers)
     try:
