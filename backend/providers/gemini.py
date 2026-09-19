@@ -34,43 +34,50 @@ class StreamAccumulator:
     def _merge_chunk(self, chunk: Any) -> None:
         if not isinstance(chunk, dict):
             raise AppError(502, _STREAMING_EVENT_ERROR, reason="invalid_response")
+        self._merge_response_metadata(chunk)
+        candidates = chunk.get("candidates") if isinstance(chunk.get("candidates"), list) else []
+        for index, candidate in enumerate(candidates):
+            if isinstance(candidate, dict):
+                self._merge_candidate(index, candidate)
+
+    def _merge_response_metadata(self, chunk: dict[str, Any]) -> None:
         usage = chunk.get("usageMetadata")
         if isinstance(usage, dict):
             self.aggregate["usageMetadata"] = usage
         for key in ("modelVersion", "promptFeedback"):
             if key in chunk:
                 self.aggregate[key] = chunk[key]
-        candidates = chunk.get("candidates") if isinstance(chunk.get("candidates"), list) else []
-        for index, candidate in enumerate(candidates):
-            if not isinstance(candidate, dict):
-                continue
-            while len(self.aggregate["candidates"]) <= index:
-                self.aggregate["candidates"].append({"content": {"role": "model", "parts": []}})
-            target = self.aggregate["candidates"][index]
-            for key in ("finishReason", "finishMessage", "safetyRatings", "citationMetadata"):
-                if key in candidate:
-                    target[key] = candidate[key]
-            content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
-            if content.get("role"):
-                target["content"]["role"] = content["role"]
-            target_parts = target["content"]["parts"]
-            for part in content.get("parts") if isinstance(content.get("parts"), list) else []:
-                if not isinstance(part, dict):
-                    continue
-                delta = part.get("text")
-                if isinstance(delta, str) and delta:
-                    if index == 0:
-                        self._on_text_delta(delta)
-                    metadata = {key: value for key, value in part.items() if key != "text"}
-                    previous = target_parts[-1] if target_parts else None
-                    if isinstance(previous, dict) and set(previous) <= {"text", *metadata} and all(
-                        previous.get(key) == value for key, value in metadata.items()
-                    ):
-                        previous["text"] = str(previous.get("text") or "") + delta
-                    else:
-                        target_parts.append(dict(part))
-                else:
-                    target_parts.append(dict(part))
+
+    def _merge_candidate(self, index: int, candidate: dict[str, Any]) -> None:
+        while len(self.aggregate["candidates"]) <= index:
+            self.aggregate["candidates"].append({"content": {"role": "model", "parts": []}})
+        target = self.aggregate["candidates"][index]
+        for key in ("finishReason", "finishMessage", "safetyRatings", "citationMetadata"):
+            if key in candidate:
+                target[key] = candidate[key]
+        content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
+        if content.get("role"):
+            target["content"]["role"] = content["role"]
+        parts = content.get("parts") if isinstance(content.get("parts"), list) else []
+        for part in parts:
+            if isinstance(part, dict):
+                self._merge_part(index, target["content"]["parts"], part)
+
+    def _merge_part(self, index: int, target_parts: list[dict[str, Any]], part: dict[str, Any]) -> None:
+        delta = part.get("text")
+        if not isinstance(delta, str) or not delta:
+            target_parts.append(dict(part))
+            return
+        if index == 0:
+            self._on_text_delta(delta)
+        metadata = {key: value for key, value in part.items() if key != "text"}
+        previous = target_parts[-1] if target_parts else None
+        if isinstance(previous, dict) and set(previous) <= {"text", *metadata} and all(
+            previous.get(key) == value for key, value in metadata.items()
+        ):
+            previous["text"] = str(previous.get("text") or "") + delta
+        else:
+            target_parts.append(dict(part))
 
 
 def response_text(result: Any) -> str:
