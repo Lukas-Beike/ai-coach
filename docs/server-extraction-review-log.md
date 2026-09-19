@@ -520,3 +520,54 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   zurückgegeben; nicht-stringartige und unbekannte Eingaben werden
   `http_error`. Der betroffene Sicherheitsumfang wird nach dem neuen Commit
   erneut geprüft.
+
+## P2.2 — Kalendertransport, Provider-HTTP und Audio/OpenAI-Hilfen
+
+- Lokaler Ausgangsstand: geprüfter PR-#680-Head
+  `1cab17ffddfe88e66be0bd7c99aaf88402fbe61b`; Veröffentlichung bleibt bis
+  zum bestätigten Merge dieses Vorgängers nach `develop` gesperrt.
+- Kalendertransport-Worker: geprüfter Commit
+  `9b670cfad5d15c3c8677f79d06d857c45f581cf6`, integriert als `b50d311`.
+  Review: **PASS** — URL-, DNS-, SSRF- und IP-Revalidierung, gepinntes
+  Verbindungsziel mit ursprünglichem TLS-SNI/Host, TLS >= 1.2, Gesamtdeadline,
+  5-MB-Grenze, begrenzter Retry, deterministisches Cleanup und redigiertes
+  Fehlerlogging liegen vollständig in `backend/providers/calendar.py`.
+- OpenAI-/Audio-Worker: geprüfter Commit
+  `d154f111d69291db6d104fca6a7f08635e881611`, integriert als `431d9dd`.
+  Review: **PASS** — Endpoint-Zusammensetzung, Multipart-Encoding sowie
+  Audio-MIME-/Suffix-Normalisierung sind reine Provider-Hilfen ohne Zugriff
+  auf `server.py`, globale Serverzustände oder externe Provider.
+- Integrierter Arbeitsdiff: **PASS** — die bisherigen Kalendertransport-,
+  OpenAI-Endpoint-, Multipart- und Audio-Kompatibilitätswrapper wurden aus
+  `server.py` entfernt. Sämtliche Aufrufer verwenden die Eigentümermodule
+  direkt; Test-Patch-Ziele wurden auf diese Module migriert. Kalender-Sync
+  behält Parse-before-delete, Transaktion und den letzten guten Datenstand.
+  Architekturtests verbieten die Rückkehr aller entfernten Symbole.
+- `server.py`: 20.129 physische Zeilen und 1.108 verbleibende
+  Funktionen/Klassen. Das Inventar enthält 1.555 Einträge; P0 bleibt bei null
+  unklaren Zuordnungen, in P2 bleiben 103 Definitionen und 10 globale
+  Bindungen offen. Der fachliche Eigentümerwechsel, nicht die Zeilenabnahme,
+  ist das Abnahmekriterium.
+
+### Prüfungen
+
+- Worker-Kalendertransport: 20 Tests, PASS; eigenes Diff-Review, Ruff,
+  Compileall und `git diff --check`: PASS.
+- Worker-OpenAI/Audio: 18 Tests, PASS; eigenes Diff-Review, Ruff, Compileall
+  und `git diff --check`: PASS.
+- Integrierte Provider-, Aufrufer- und Architekturregressionen: 46 Tests,
+  PASS in 1,460 s.
+- Vollständiger integrierter Lauf: `python -m unittest discover -s tests` —
+  878 Tests, 12 übersprungen, PASS in 174,419 s.
+- `ruff check` für alle geänderten Provider-, Provider-Test- und
+  Inventardateien, Compileall, Inventar-Check und `git diff --check`: PASS.
+
+### Verbleibende Risiken und nächster Schritt
+
+- Der Stand muss nach dem bestätigten PR-#680-Merge auf den tatsächlichen
+  `origin/develop`-Mergecommit umgebettet und erneut geprüft werden.
+- SSE-Verarbeitung und Gemini-Stream-Akkumulation sind separat geprüft, aber
+  absichtlich noch nicht integriert; sie folgen als eigenes P2-Paket, damit
+  Schreibbereiche und Reviewumfang klein bleiben.
+- Docker-/E2E-Ausführung bleibt lokal durch den nicht erreichbaren
+  Docker-Desktop-Daemon blockiert; die externen PR-Gates bleiben verbindlich.

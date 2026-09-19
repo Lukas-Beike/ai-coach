@@ -2444,58 +2444,11 @@ class CoachTests(unittest.TestCase):
                 ("good-event", "good-event", "Good event", today, today + "T10:00:00+02:00", today + "T11:00:00+02:00", 60, 0, 1, server.utc_now()),
             )
         with patch.object(server, "CONFIG", replace(server.CONFIG, calendar_ical_url="https://calendar.example/feed.ics")), patch.object(
-            server, "external_calendar_url", return_value="https://calendar.example/feed.ics"
-        ), patch.object(server, "fetch_calendar_feed", return_value=b"not an ical feed"):
+            calendar_provider, "external_calendar_url", return_value="https://calendar.example/feed.ics"
+        ), patch.object(calendar_provider, "fetch_calendar_feed", return_value=b"not an ical feed"):
             with self.assertRaises(server.AppError):
                 server.sync_external_calendar("test")
         self.assertEqual(server.list_external_calendar_events(1000)[0]["id"], "good-event")
-
-    def test_calendar_dns_validation_rejects_non_global_addresses(self):
-        with patch.object(server.socket, "getaddrinfo", return_value=[(None, None, None, None, ("100.64.0.1", 443))]):
-            with self.assertRaises(server.AppError) as raised:
-                server.external_calendar_url("https://calendar.example/feed.ics")
-        self.assertEqual(raised.exception.status, 400)
-
-    def test_calendar_url_validation_resolves_hostname_once(self):
-        with patch.object(
-            server.socket,
-            "getaddrinfo",
-            return_value=[(None, None, None, None, ("93.184.216.34", 443))],
-        ) as resolve:
-            self.assertEqual(server.external_calendar_url("https://calendar.example/feed.ics"), "https://calendar.example/feed.ics")
-
-        self.assertEqual(resolve.call_count, 1)
-
-    def test_calendar_feed_resolves_once_and_retries_another_global_address(self):
-        raw_socket = Mock()
-        tls_socket = Mock()
-        tls_context = Mock()
-        tls_context.wrap_socket.return_value = tls_socket
-        response = Mock(status=200)
-        response.read.return_value = b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
-        addresses = [server.ipaddress.ip_address("93.184.216.34"), server.ipaddress.ip_address("93.184.216.35")]
-
-        with patch.object(server, "_resolve_calendar_addresses", return_value=addresses) as resolve, patch.object(
-            server.ssl, "create_default_context", return_value=tls_context
-        ), patch.object(server.socket, "create_connection", side_effect=[OSError("first address unavailable"), raw_socket]) as connect, patch.object(
-            server, "HTTPResponse", return_value=response
-        ):
-            payload = server.fetch_calendar_feed("https://calendar.example/feed.ics")
-
-        self.assertEqual(payload, b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
-        resolve.assert_called_once_with("calendar.example", status=502)
-        self.assertEqual(connect.call_count, 2)
-        tls_context.wrap_socket.assert_called_once_with(raw_socket, server_hostname="calendar.example")
-        tls_socket.close.assert_called_once_with()
-
-    def test_calendar_feed_timeout_is_reported_as_gateway_timeout(self):
-        with patch.object(
-            server, "_resolve_calendar_addresses", return_value=[server.ipaddress.ip_address("93.184.216.34")]
-        ), patch.object(server.socket, "create_connection", side_effect=TimeoutError("calendar timeout")):
-            with self.assertRaises(server.AppError) as raised:
-                server.fetch_calendar_feed("https://calendar.example/feed.ics")
-
-        self.assertEqual(raised.exception.status, 504)
 
     def test_ical_no_training_marker_is_excluded_from_adaptive_constraints(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -2530,7 +2483,7 @@ class CoachTests(unittest.TestCase):
                 b"DTEND:20260903T120000Z\r\nSUMMARY:Unmarked\r\nDESCRIPTION:[NO_TRAINING]\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         )
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
-        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_calendar_feed", return_value=payload), patch.object(
+        with patch.object(server, "CONFIG", config), patch.object(calendar_provider, "fetch_calendar_feed", return_value=payload) as fetch, patch.object(
             server, "local_now", return_value=datetime(2026, 9, 2, tzinfo=timezone.utc)
         ), patch.object(
             server, "check_adaptive_replan", return_value={"needs_replan": True, "replan_changes": 2}
@@ -2547,6 +2500,7 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(state["events"][0]["short_only"], 0)
             self.assertEqual([event["uid"] for event in server.list_external_calendar_events(1000, training_relevant_only=True)], ["family-2"])
             self.assertFalse(state["events"][1]["training_relevant"])
+            fetch.assert_called_once_with(config.calendar_ical_url, app_version=server.APP_VERSION)
 
     def test_external_calendar_sync_limits_events_to_eight_weeks(self):
         today = server.local_now().date()
@@ -2559,7 +2513,7 @@ class CoachTests(unittest.TestCase):
             "END:VCALENDAR\r\n"
         ).encode()
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
-        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_calendar_feed", return_value=payload):
+        with patch.object(server, "CONFIG", config), patch.object(calendar_provider, "fetch_calendar_feed", return_value=payload):
             result = server.sync_external_calendar("test")
 
         self.assertEqual(result["window_days"], 56)
@@ -2574,16 +2528,10 @@ class CoachTests(unittest.TestCase):
                 ("event-old", "family-old", "Existing appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T11:00:00+02:00", 60, 0, server.utc_now()),
             )
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
-        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_calendar_feed", side_effect=server.AppError(502, "upstream unavailable")):
+        with patch.object(server, "CONFIG", config), patch.object(calendar_provider, "fetch_calendar_feed", side_effect=server.AppError(502, "upstream unavailable")):
             with self.assertRaises(server.AppError):
                 server.sync_external_calendar("test")
         self.assertEqual(server.list_external_calendar_events()[0]["id"], "event-old")
-
-    def test_external_calendar_url_rejects_private_or_non_https_urls(self):
-        with self.assertRaises(server.AppError):
-            server.external_calendar_url("http://calendar.example.test/family.ics")
-        with self.assertRaises(server.AppError):
-            server.external_calendar_url("https://127.0.0.1/calendar.ics")
 
     def test_external_calendar_event_reduces_hard_or_long_local_draft_only_in_preview(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -4717,24 +4665,6 @@ class CoachTests(unittest.TestCase):
         self.assertIn(b"gpt-transcribe", captured["raw_body"])
         self.assertIn(audio, captured["raw_body"])
         self.assertEqual(captured["headers"]["Authorization"], "Bearer test-key")
-
-    def test_openai_endpoint_joins_compatible_provider_base_url_and_rejects_credentials(self):
-        config = replace(server.CONFIG, openai_base_url="https://foundry.example.invalid/openai/v1/")
-        with patch.object(server, "CONFIG", config):
-            self.assertEqual(server.openai_endpoint("/responses"), "https://foundry.example.invalid/openai/v1/responses")
-            self.assertEqual(server.openai_endpoint("conversations/abc"), "https://foundry.example.invalid/openai/v1/conversations/abc")
-        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_base_url="")):
-            self.assertEqual(server.openai_endpoint("responses"), server.DEFAULT_OPENAI_BASE_URL + "/responses")
-
-        for invalid in (
-            "https://user:password@foundry.example.invalid/openai/v1",
-            "https://foundry.example.invalid/openai/v1?api-version=2024-10-21",
-            "ftp://foundry.example.invalid/openai/v1",
-        ):
-            with self.subTest(invalid=invalid), patch.object(server, "CONFIG", replace(server.CONFIG, openai_base_url=invalid)):
-                with self.assertRaises(server.AppError) as raised:
-                    server.openai_endpoint("responses")
-                self.assertEqual(raised.exception.status, 500)
 
     def test_openai_request_uses_configured_compatible_provider_endpoint(self):
         captured = {}
@@ -7727,8 +7657,8 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(sdk_error.exception.reason, "provider_client_error")
             self.assertNotIn(email, str(sdk_error.exception))
 
-            with patch.object(server, "external_calendar_url", return_value=calendar_url), patch.object(
-                server, "fetch_calendar_feed", side_effect=RuntimeError(f"calendar request failed for {email}")
+            with patch.object(calendar_provider, "external_calendar_url", return_value=calendar_url), patch.object(
+                calendar_provider, "fetch_calendar_feed", side_effect=RuntimeError(f"calendar request failed for {email}")
             ):
                 with self.assertRaises(server.AppError) as calendar_error:
                     server.sync_external_calendar("test")
