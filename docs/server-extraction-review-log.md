@@ -673,6 +673,12 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   übersetzt nur das neutrale Abbruchsignal in den bestehenden 499-Vertrag und
   behält Logging, Providerstatus und Fehlerprojektion. Architekturtests sperren
   die entfernten Symbole gegen Wiedereinführung.
+- SonarCloud auf `60b577ef7b750ea27bfd2b0e8096c4cdc8d73b74`:
+  **FAIL** — Cognitive Complexity 21 in `open_interruptibly` und ein zu breiter
+  `BaseException`-Catch. Der Korrekturcommit desselben Luna-Workers
+  `748e025ddd63ee7381fcf3c40e1265be03a9ab28`, integriert als `b764afd`,
+  kapselt den Thread-Zustand in `_OpenState`, zerlegt Worker und Abbruch-Cleanup
+  und fängt nur reguläre `Exception`; erneutes Root-Diff-Review: **PASS**.
 - Der Inventargenerator ordnet `_gemini_request_history`,
   `_gemini_last_user_text` und `_gemini_call_names` nun explizit P7
   `coach/conversation.py` zu. Damit bleibt P0 stabil bei null, statt durch
@@ -680,18 +686,20 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - `server.py`: 19.895 physische Zeilen und 1.101 verbleibende
   Funktionen/Klassen. Das Inventar enthält 1.548 Einträge; P2 enthält 82
   Definitionen und 10 globale Bindungen. `backend/` umfasst 51 Python-Dateien
-  mit 7.157 physischen Zeilen.
+  mit 7.186 physischen Zeilen.
 
 ### Prüfungen
 
 - Luna-Worker: 20 Tests, PASS; Root-Diff-Review, Ruff, Compileall und
   `git diff --check`: PASS.
+- Sonar-Korrektur: 20 Provider-HTTP-Tests beim Worker und beim Root, PASS;
+  Ruff, Compileall und `git diff --check`: PASS.
 - Integrierte Provider-HTTP-, Cancellation-, Gemini-Stream- und
   Architekturregressionen: 27 Tests, PASS. Ruff auf den geänderten Provider-
   und Provider-Testdateien, Compileall, Inventar-Check und `git diff --check`:
   PASS.
-- Vollständiger integrierter Lauf: 916 Tests, 12 übersprungen, PASS in
-  191,684 s.
+- Vollständiger integrierter Wiederholungslauf nach der Sonar-Korrektur:
+  916 Tests, 12 übersprungen, PASS in 215,023 s.
 
 ### Verbleibende Risiken und nächster Schritt
 
