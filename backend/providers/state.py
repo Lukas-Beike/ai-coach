@@ -102,8 +102,6 @@ class ProviderStateService:
             raw_status=self._repository.get(db, _STATUS_KEYS[provider]),
             raw_rate_limits=raw_rate_limits,
         )
-        if provider == "gemini":
-            summary.pop("rate_limits", None)
         return summary
 
     def summary(self, provider: str) -> dict[str, Any]:
@@ -195,11 +193,11 @@ class ProviderStateService:
                 recorded_at=_timestamp(self._now()),
             )
             self._repository.set(db, _USAGE_KEYS[provider], _json(updated))
-        if self._logger is not None:
+        if self._logger is not None and provider == "openai":
             self._logger.info(
-                "Provider usage recorded",
+                "OpenAI usage recorded",
                 extra={
-                    "event": "provider_usage",
+                    "event": "openai_usage",
                     "context": {"operation": safe_operation, **counts},
                 },
             )

@@ -75,7 +75,7 @@ class ProviderStateServiceTests(unittest.TestCase):
             self.logger,
         )
 
-    def test_empty_summaries_are_daily_and_gemini_hides_rate_limits(self):
+    def test_empty_summaries_are_daily_for_both_providers(self):
         self.assertEqual(
             self.service.summary("openai"),
             {
@@ -97,6 +97,7 @@ class ProviderStateServiceTests(unittest.TestCase):
                 "output_tokens": 0,
                 "total_tokens": 0,
                 "status": {},
+                "rate_limits": {},
             },
         )
 
@@ -168,7 +169,18 @@ class ProviderStateServiceTests(unittest.TestCase):
         self.assertEqual(second, {"input_tokens": 4, "output_tokens": 1, "total_tokens": 5})
         self.assertEqual(self.service.summary("openai")["requests"], 2)
         self.assertEqual(self.service.summary("openai")["total_tokens"], 10)
+        self.service.record_usage(
+            "gemini",
+            {
+                "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 2},
+                "secret": "gemini-private-payload",
+            },
+            "generate_content",
+        )
+        self.assertEqual(len(self.logger.calls), 2)
         self.assertNotIn("private", json.dumps(self.logger.calls))
+        self.assertEqual(self.logger.calls[0][0], "OpenAI usage recorded")
+        self.assertEqual(self.logger.calls[0][1]["extra"]["event"], "openai_usage")
         self.assertEqual(self.logger.calls[-1][1]["extra"]["context"], {
             "operation": "stream",
             "input_tokens": 4,
