@@ -8,11 +8,14 @@ from backend.providers import calendar as calendar_provider
 from backend.providers.calendar import (
     EXTERNAL_CALENDAR_WINDOW_DAYS,
     MAX_EXTERNAL_CALENDAR_BYTES,
+    ical_duration,
     ical_no_intensity,
     ical_short_only,
     ical_training_impact,
     ical_training_relevant,
     parse_ical_calendar,
+    parse_ics_date,
+    parse_ics_value,
     unfold_ical,
 )
 
@@ -27,6 +30,54 @@ def parse(payload: bytes, *, start=date(2026, 9, 1), end=None, zone=timezone.utc
 
 
 class CalendarProviderTests(unittest.TestCase):
+    def test_timing_default_relevance_and_description_markers(self):
+        events = parse(
+            feed(
+                "UID:family-1\r\nDTSTART;TZID=Europe/Berlin:20260902T100000\r\n"
+                "DTEND;TZID=Europe/Berlin:20260902T130000\r\nSUMMARY:Family appointment",
+                "UID:all-day\r\nDTSTART;VALUE=DATE:20260903\r\n"
+                "DTEND;VALUE=DATE:20260904\r\nSUMMARY:Travel",
+                "UID:info-only\r\nDTSTART;VALUE=DATE:20260904\r\n"
+                "SUMMARY:Team info\r\nDESCRIPTION: [NO_TRAINING] Nur zur Information",
+                "UID:no-intensity\r\nDTSTART;VALUE=DATE:20260905\r\n"
+                "SUMMARY:Evening event\r\nDESCRIPTION: [NO_INTENSITY] Training remains possible, but easy",
+                "UID:other-marker\r\nDTSTART;VALUE=DATE:20260906\r\n"
+                "SUMMARY:Other marker\r\nDESCRIPTION: [OTHER_TAG] Keine besondere Wirkung",
+            ),
+            start=date(2026, 9, 2),
+            end=date(2026, 9, 8),
+            zone=ZoneInfo("Europe/Berlin"),
+        )
+        self.assertEqual(events[0]["duration_minutes"], 180)
+        self.assertEqual(events[0]["event_date"], "2026-09-02")
+        self.assertFalse(events[0]["all_day"])
+        self.assertEqual(events[1]["duration_minutes"], 1440)
+        self.assertTrue(events[1]["all_day"])
+        self.assertFalse(events[0]["training_relevant"])
+        self.assertFalse(events[1]["training_relevant"])
+        self.assertFalse(events[2]["training_relevant"])
+        self.assertTrue(events[3]["no_intensity"])
+        self.assertTrue(events[3]["training_relevant"])
+        self.assertFalse(events[3]["short_only"])
+        self.assertFalse(events[4]["no_intensity"])
+        self.assertTrue(events[4]["training_relevant"])
+        self.assertFalse(events[4]["training_impact"])
+
+    def test_training_markers_are_contains_matched_in_description_only(self):
+        events = parse(
+            feed(
+                "UID:summary-only\r\nDTSTART;VALUE=DATE:20260907\r\n"
+                "SUMMARY:[SHORT_ONLY] Summary only\r\nDESCRIPTION:family appointment",
+                "UID:description\r\nDTSTART;VALUE=DATE:20260908\r\n"
+                "SUMMARY:Family appointment\r\nDESCRIPTION:Please keep it [short_only] today",
+            ),
+            start=date(2026, 9, 7),
+            end=date(2026, 9, 8),
+        )
+        self.assertFalse(events[0]["training_impact"])
+        self.assertTrue(events[1]["training_impact"])
+        self.assertTrue(events[1]["short_only"])
+
     def test_normal_all_day_duration_and_markers(self):
         events = parse(feed(
             "UID:all-day\r\nDTSTART;VALUE=DATE:20260902\r\nDTEND;VALUE=DATE:20260904\r\nSUMMARY:Race\r\nDESCRIPTION:note [NO_INTENSITY] [SHORT_ONLY]",
@@ -69,6 +120,11 @@ class CalendarProviderTests(unittest.TestCase):
         self.assertEqual(unfold_ical(payload)[0], "BEGIN:VCALENDAR")
         with self.assertRaisesRegex(AppError, "zu groß"):
             unfold_ical(payload, max_bytes=len(payload) - 1)
+        folded = b"BEGIN:VCALENDAR\r\nDESCRIPTION:First\r\n continuation\r\nEND:VCALENDAR\r\n"
+        self.assertIn("DESCRIPTION:Firstcontinuation", unfold_ical(folded))
+        self.assertEqual(parse_ics_value(r"Name\, with\; escaped\\text"), "Name, with; escaped\\text")
+        self.assertEqual(parse_ics_date("VALUE=DATE:20260901"), "2026-09-01")
+        self.assertEqual(ical_duration("PT1H30M"), timedelta(hours=1, minutes=30))
 
     def test_daily_weekly_and_dst_keep_local_wall_time(self):
         daily = parse(feed("UID:daily\r\nDTSTART;TZID=Europe/Berlin:20261024T080000\r\nRRULE:FREQ=DAILY;COUNT=4"), start=date(2026, 10, 24), end=date(2026, 10, 30), zone=ZoneInfo("Europe/Berlin"))
@@ -87,6 +143,20 @@ class CalendarProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(AppError, "COUNT.*zwischen"):
             parse(over, start=date(2026, 9, 1), end=date(2026, 10, 27))
 
+    def test_week_start_and_malformed_byday_contract(self):
+        weekly = feed(
+            "UID:recurring\r\nDTSTART;VALUE=DATE:20260901\r\n"
+            "RRULE:FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH\r\nSUMMARY:Repeated"
+        )
+        events = parse(weekly, start=date(2026, 9, 1), end=date(2026, 9, 14))
+        self.assertEqual(
+            [event["event_date"] for event in events],
+            ["2026-09-01", "2026-09-03", "2026-09-08", "2026-09-10"],
+        )
+        for malformed in (b"BYDAY=MO,", b"BYDAY=MO,,TU", b"BYDAY=,"):
+            with self.assertRaises(AppError):
+                parse(weekly.replace(b"BYDAY=TU,TH", malformed))
+
     def test_rdate_exdate_recurrence_id_and_cancelled(self):
         events = parse(feed(
             "UID:r\r\nDTSTART:20260901T100000Z\r\nRRULE:FREQ=DAILY;COUNT=4\r\nEXDATE:20260902T100000Z\r\nRDATE:20260910T100000Z",
@@ -94,6 +164,18 @@ class CalendarProviderTests(unittest.TestCase):
             "UID:r\r\nRECURRENCE-ID:20260901T100000Z\r\nSTATUS:CANCELLED",
         ), start=date(2026, 9, 1), end=date(2026, 9, 12))
         self.assertEqual([(item["event_date"], item["name"]) for item in events], [("2026-09-04", "Privater Kalendereintrag"), ("2026-09-05", "moved"), ("2026-09-10", "Privater Kalendereintrag")])
+
+    def test_overlapping_multiday_event_and_nested_alarm(self):
+        payload = feed(
+            "UID:trip\r\nDTSTART;VALUE=DATE:20260906\r\nDTEND;VALUE=DATE:20260909\r\n"
+            "SUMMARY:Trip\r\nDESCRIPTION:[SHORT_ONLY]\r\nBEGIN:VALARM\r\n"
+            "ACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nTRIGGER:-PT15M\r\nEND:VALARM"
+        )
+        events = parse(payload, start=date(2026, 9, 7), end=date(2026, 9, 10))
+        self.assertEqual(len(events), 1)
+        self.assertTrue(events[0]["short_only"])
+        self.assertEqual(events[0]["event_date"], "2026-09-06")
+        self.assertEqual(parse(payload, start=date(2026, 9, 9), end=date(2026, 9, 10)), [])
 
     def test_unsupported_rules_and_markers(self):
         with self.assertRaisesRegex(AppError, "nicht unterstützt"):
