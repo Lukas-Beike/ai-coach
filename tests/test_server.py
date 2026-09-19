@@ -4283,6 +4283,29 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(captured["request"].full_url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse")
         self.assertEqual(captured["request"].headers["X-goog-api-key"], "test-gemini-key")
 
+    def test_gemini_stream_preserves_response_too_large_contract(self):
+        class StreamResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def __iter__(self):
+                yield b"data: {}\n"
+
+        config = replace(server.CONFIG, gemini_api_key="test-gemini-key")
+        with (
+            patch.object(server, "CONFIG", config),
+            patch.object(server, "MAX_EXTERNAL_RESPONSE_BYTES", 1),
+            patch.object(server, "urlopen", return_value=StreamResponse()),
+            self.assertRaises(server.AppError) as raised,
+        ):
+            server.gemini_stream_request({"model": "gemini-3.8-flash", "input": "test"}, lambda _: None)
+
+        self.assertEqual(raised.exception.status, 502)
+        self.assertEqual(raised.exception.reason, "response_too_large")
+
     def test_gemini_persists_tool_response_before_a_failed_followup(self):
         responses = [
             {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "save_checkin", "args": {}}}]}}]},
@@ -8076,6 +8099,34 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(request.get_header("Accept"), "text/event-stream")
         self.assertNotIn("Hallo", json.dumps(server.recent_log_entries(), ensure_ascii=False))
         self.assertEqual(server.openai_usage_summary()["total_tokens"], 6)
+
+    def test_openai_stream_request_preserves_response_too_large_contract_and_byte_count(self):
+        class OversizedResponse:
+            status = 200
+            headers = None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def __iter__(self):
+                yield b"data: {}\n"
+
+        server.DIAGNOSTIC_CAPTURE.set_enabled(True)
+        with (
+            patch.object(server, "MAX_EXTERNAL_RESPONSE_BYTES", 1),
+            patch.object(server, "urlopen", return_value=OversizedResponse()),
+            self.assertRaises(server.AppError) as raised,
+        ):
+            server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+
+        self.assertEqual(raised.exception.status, 502)
+        self.assertEqual(raised.exception.reason, "response_too_large")
+        captured = server.DIAGNOSTIC_CAPTURE.entries()
+        failed = next(entry for entry in reversed(captured) if entry["event"] == "openai_stream_failed")
+        self.assertEqual(failed["details"]["response_bytes"], len(b"data: {}\n"))
 
     def test_openai_stream_request_cancel_before_provider_call_records_cancelled_usage(self):
         cancel_event = threading.Event()

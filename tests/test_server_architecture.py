@@ -109,6 +109,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "ProviderHTTPError",
             "ProviderRequestCancelled",
+            "ProviderResponseTooLarge",
             "request_body",
             "json_request_parts",
             "open_interruptibly",
@@ -128,6 +129,9 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "response_id",
             "responses_payload",
             "consume_sse_event",
+            "StreamReadResult",
+            "StreamReadState",
+            "read_stream_response",
             "endpoint",
             "retry_after_seconds",
             "error_diagnostic_details",
@@ -140,6 +144,8 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "backend.providers.gemini",
         (
             "StreamAccumulator",
+            "StreamReadResult",
+            "read_stream_response",
             "response_text",
             "function_tools",
             "input_parts",
@@ -234,6 +240,7 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_calendar_fetch_failure_log",
     "_urlopen_interruptibly",
     "_read_http_response",
+    "_read_openai_stream_response",
 )
 
 

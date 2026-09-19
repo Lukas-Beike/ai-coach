@@ -122,7 +122,7 @@ def read_stream_response(
                 check_cancelled()
                 response_bytes += len(raw_line)
                 if response_bytes > max_bytes:
-                    raise ValueError("provider response exceeds configured size limit")
+                    raise provider_http.ProviderResponseTooLarge("provider response exceeds configured size limit")
                 line = raw_line.decode("utf-8").rstrip("\r\n")
                 if not line:
                     flush_event()

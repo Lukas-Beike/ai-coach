@@ -12,7 +12,7 @@ from backend.providers.gemini import (
     request_payload,
     response_text,
 )
-from backend.providers.http import ProviderRequestCancelled
+from backend.providers.http import ProviderRequestCancelled, ProviderResponseTooLarge
 
 
 class GeminiProviderErrorTests(unittest.TestCase):
@@ -370,7 +370,7 @@ class GeminiStreamResponseReaderTests(unittest.TestCase):
 
     def test_size_limit_uses_stable_value_error(self):
         response = _StreamResponse([b"data: {}\n"])
-        with self.assertRaisesRegex(ValueError, "^provider response exceeds configured size limit$"):
+        with self.assertRaisesRegex(ProviderResponseTooLarge, "^provider response exceeds configured size limit$"):
             read_stream_response(
                 object(), timeout=3, max_bytes=1, on_text_delta=lambda _delta: None,
                 opener=lambda request, timeout: response,

@@ -4,9 +4,10 @@ import unittest
 from types import MappingProxyType
 
 from backend.errors import AppError
-from backend.providers.http import ProviderRequestCancelled
+from backend.providers.http import ProviderRequestCancelled, ProviderResponseTooLarge
 from backend.providers.openai import (
     StreamReadResult,
+    StreamReadState,
     consume_sse_event,
     endpoint,
     error_details,
@@ -222,8 +223,10 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             read_stream_response(CancellingResponse(), max_bytes=1000, cancel_event=cancel_event, on_text_delta=lambda _: None)
 
     def test_read_stream_response_rejects_oversized_stream(self):
-        with self.assertRaisesRegex(ValueError, "^provider response exceeds configured size limit$"):
-            read_stream_response([b"data: {}\n"], max_bytes=1, on_text_delta=lambda _: None)
+        state = StreamReadState()
+        with self.assertRaisesRegex(ProviderResponseTooLarge, "^provider response exceeds configured size limit$"):
+            read_stream_response([b"data: {}\n"], max_bytes=1, on_text_delta=lambda _: None, state=state)
+        self.assertEqual(state.response_bytes, len(b"data: {}\n"))
 
     def test_read_stream_response_preserves_iterator_exception(self):
         failure = RuntimeError("iterator failed")

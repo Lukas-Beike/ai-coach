@@ -167,6 +167,13 @@ class StreamReadResult:
     response_bytes: int
 
 
+@dataclass
+class StreamReadState:
+    """Observable progress retained when stream iteration raises."""
+
+    response_bytes: int = 0
+
+
 def read_stream_response(
     response: Any,
     *,
@@ -174,6 +181,7 @@ def read_stream_response(
     cancel_event: Any = None,
     on_text_delta: Callable[[str], None],
     on_response_id: Callable[[str], None] | None = None,
+    state: StreamReadState | None = None,
 ) -> StreamReadResult:
     """Read and parse an OpenAI SSE response without owning its lifecycle."""
     def check_cancelled() -> None:
@@ -183,13 +191,13 @@ def read_stream_response(
     final_response: dict[str, Any] | None = None
     event_name = ""
     data_lines: list[str] = []
-    response_bytes = 0
+    read_state = state or StreamReadState()
     check_cancelled()
     for raw_line in response:
         check_cancelled()
-        response_bytes += len(raw_line)
-        if response_bytes > max_bytes:
-            raise ValueError("provider response exceeds configured size limit")
+        read_state.response_bytes += len(raw_line)
+        if read_state.response_bytes > max_bytes:
+            raise provider_http.ProviderResponseTooLarge("provider response exceeds configured size limit")
         line = raw_line.decode("utf-8").rstrip("\r\n")
         if not line:
             event_response = consume_sse_event(data_lines, event_name, on_text_delta, on_response_id)
@@ -207,7 +215,7 @@ def read_stream_response(
     check_cancelled()
     if event_response is not None:
         final_response = event_response
-    return StreamReadResult(final_response, response_bytes)
+    return StreamReadResult(final_response, read_state.response_bytes)
 
 
 def _decode_sse_event(data_lines: list[str]) -> dict[str, Any] | None:

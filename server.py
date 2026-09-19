@@ -13151,43 +13151,21 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
     }
     started = time.perf_counter()
     LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": context})
-    accumulator = gemini_provider.StreamAccumulator(on_text_delta)
     stream_bytes = 0
-    data_lines: list[str] = []
-
-    def handle_event() -> None:
-        nonlocal data_lines
-        event_lines = data_lines
-        data_lines = []
-        accumulator.consume_data_lines(event_lines)
 
     try:
         _raise_chat_cancelled(cancel_event)
-        with provider_http.open_interruptibly(
+        stream_result = gemini_provider.read_stream_response(
             request,
-            OPENAI_RESPONSE_TIMEOUT_SECONDS,
-            cancel_event,
+            timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+            max_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+            on_text_delta=on_text_delta,
+            cancel_event=cancel_event,
             opener=urlopen,
-        ) as response:
-            if cancel_event is not None:
-                cancel_event._provider_response = response
-            try:
-                for raw_line in response:
-                    _raise_chat_cancelled(cancel_event)
-                    stream_bytes += len(raw_line)
-                    if stream_bytes > MAX_EXTERNAL_RESPONSE_BYTES:
-                        raise AppError(502, "Die Streaming-Antwort von Gemini ist zu\\u00df.", reason="response_too_large")
-                    line = raw_line.decode("utf-8").rstrip("\r\n")
-                    if not line:
-                        handle_event()
-                    elif line.startswith("data:"):
-                        data_lines.append(line[5:].lstrip())
-                handle_event()
-            finally:
-                if cancel_event is not None and getattr(cancel_event, "_provider_response", None) is response:
-                    cancel_event._provider_response = None
+        )
         _raise_chat_cancelled(cancel_event)
-        aggregate = accumulator.aggregate
+        stream_bytes = stream_result.response_bytes
+        aggregate = stream_result.aggregate
         if not aggregate["candidates"]:
             raise AppError(502, "Gemini hat keine Coach-Antwort geliefert.", reason="invalid_response")
         _record_gemini_status("ok", "Gemini ist verf\\u00fcgbar.", status=200)
@@ -13200,6 +13178,10 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
     except provider_http.ProviderRequestCancelled as exc:
         _record_gemini_status("error", COACH_ABORTED_ERROR, reason="chat_cancelled", status=499)
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
+    except provider_http.ProviderResponseTooLarge as exc:
+        error = AppError(502, "Die Streaming-Antwort von Gemini ist zu\\u00df.", reason="response_too_large")
+        _record_gemini_status("error", error.message, reason=error.reason, status=error.status)
+        raise error from exc
     except HTTPError as exc:
         raw_error = provider_http.read_error_body(exc, MAX_EXTERNAL_RESPONSE_BYTES)
         details = gemini_provider.error_details(int(exc.code), raw_error, updated_at=utc_now())
@@ -13327,44 +13309,6 @@ def responses_background_request(
 def _raise_chat_cancelled(cancel_event: threading.Event | None) -> None:
     if cancel_event is not None and cancel_event.is_set():
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
-
-
-def _read_openai_stream_response(
-    request: Request, cancel_event: threading.Event | None, on_text_delta: Any,
-    on_response_id: Callable[[str], None] | None, stream_state: dict[str, int],
-) -> dict[str, Any] | None:
-    final_response: dict[str, Any] | None = None
-    event_name = ""
-    data_lines: list[str] = []
-    with urlopen(request, timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS) as response:
-        if cancel_event is not None:
-            cancel_event._openai_response = response
-        _persist_openai_rate_limits(getattr(response, "headers", None))
-        record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
-        for raw_line in response:
-            _raise_chat_cancelled(cancel_event)
-            stream_state["bytes"] += len(raw_line)
-            if stream_state["bytes"] > MAX_EXTERNAL_RESPONSE_BYTES:
-                raise AppError(502, "Die Streaming-Antwort von OpenAI ist zu groß.", reason="response_too_large")
-            line = raw_line.decode("utf-8").rstrip("\r\n")
-            if not line:
-                event_response = openai_provider.consume_sse_event(
-                    data_lines, event_name, on_text_delta, on_response_id,
-                )
-                event_name = ""
-                data_lines = []
-                if event_response is not None:
-                    final_response = event_response
-            elif line.startswith("event:"):
-                event_name = line[6:].strip()
-            elif line.startswith("data:"):
-                data_lines.append(line[5:].lstrip())
-        event_response = openai_provider.consume_sse_event(
-            data_lines, event_name, on_text_delta, on_response_id,
-        )
-        if event_response is not None:
-            final_response = event_response
-    return final_response
 
 
 def _log_openai_stream_failure(
@@ -13531,18 +13475,39 @@ def openai_stream_request(
         "request_bytes": len(body),
     })
     final_response: dict[str, Any] | None = None
-    stream_state = {"bytes": 0}
+    stream_state = openai_provider.StreamReadState()
     try:
         _raise_chat_cancelled(cancel_event)
-        final_response = _read_openai_stream_response(
-            request, cancel_event, on_text_delta, on_response_id, stream_state,
-        )
+        with provider_http.open_interruptibly(
+            request,
+            OPENAI_RESPONSE_TIMEOUT_SECONDS,
+            cancel_event,
+            opener=urlopen,
+        ) as response:
+            if cancel_event is not None:
+                cancel_event._provider_response = response
+            try:
+                _persist_openai_rate_limits(getattr(response, "headers", None))
+                record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
+                stream_result = openai_provider.read_stream_response(
+                    response,
+                    max_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+                    cancel_event=cancel_event,
+                    on_text_delta=on_text_delta,
+                    on_response_id=on_response_id,
+                    state=stream_state,
+                )
+            finally:
+                missing = object()
+                if cancel_event is not None and getattr(cancel_event, "_provider_response", missing) is response:
+                    delattr(cancel_event, "_provider_response")
+        final_response = stream_result.response
         _raise_chat_cancelled(cancel_event)
         if final_response is None:
             raise AppError(502, "OpenAI hat keine vollständige Streaming-Antwort zurückgegeben.", reason="invalid_response")
         final_response = _validate_openai_response(OPENAI_RESPONSES_PATH, final_response)
         record_openai_usage(final_response, "responses_stream")
-        stream_bytes = stream_state["bytes"]
+        stream_bytes = stream_state.response_bytes
         DIAGNOSTIC_CAPTURE.capture("openai_stream_completed", {
             "service": "openai", "status": 200,
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
@@ -13554,15 +13519,21 @@ def openai_stream_request(
         )
         return final_response
     except AppError as exc:
-        _handle_openai_stream_app_error(exc, cancel_event, final_response, context, started, stream_state["bytes"])
+        _handle_openai_stream_app_error(exc, cancel_event, final_response, context, started, stream_state.response_bytes)
+    except provider_http.ProviderRequestCancelled:
+        error = AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
+        _handle_openai_stream_app_error(error, cancel_event, final_response, context, started, stream_state.response_bytes)
+    except provider_http.ProviderResponseTooLarge:
+        error = AppError(502, "Die Streaming-Antwort von OpenAI ist zu groß.", reason="response_too_large")
+        _handle_openai_stream_app_error(error, cancel_event, final_response, context, started, stream_state.response_bytes)
     except ClientDisconnected:
-        _handle_openai_stream_disconnect(final_response, context, started, stream_state["bytes"])
+        _handle_openai_stream_disconnect(final_response, context, started, stream_state.response_bytes)
     except HTTPError as exc:
-        _handle_openai_stream_http_error(exc, context, started, stream_state["bytes"])
+        _handle_openai_stream_http_error(exc, context, started, stream_state.response_bytes)
     except TimeoutError as exc:
-        _handle_openai_stream_timeout(exc, cancel_event, context, started, stream_state["bytes"])
+        _handle_openai_stream_timeout(exc, cancel_event, context, started, stream_state.response_bytes)
     except (OSError, ValueError) as exc:
-        _handle_openai_stream_network_error(exc, cancel_event, context, started, stream_state["bytes"])
+        _handle_openai_stream_network_error(exc, cancel_event, context, started, stream_state.response_bytes)
 
 
 def responses_stream_request(
