@@ -189,8 +189,9 @@ Abhängigkeit: P1.
 
 - [ ] `http_json`, begrenzte Reads, Providerfehler und sichere HTTP-Aufrufe
   mit `providers/http.py` zusammenführen.
-  - [x] Request-Body/-Header-Aufbau, begrenzte Erfolgs-/Fehler-Reads und
-    redigierte Providerfehler in reine Adapter verschieben.
+  - [x] Request-Body/-Header-Aufbau, begrenzte Erfolgs-/Fehler-Reads,
+    abbrechbares Header-Warten samt Response-Handle-Lifecycle und redigierte
+    Providerfehler in reine Adapter verschieben.
   - [ ] Netzwerk-, Retry-/Cancellation- und Statusorchestrierung vollständig
     aus `server.py` entfernen.
 - [ ] OpenAI Request/Response, Background Retrieve/Cancel, SSE-Verarbeitung,
