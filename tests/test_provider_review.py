@@ -181,7 +181,7 @@ class ProviderReviewTests(unittest.TestCase):
     def test_utf8_login_does_not_normalize_password_or_expose_it(self):
         for password in ("synthetic-ascii-123", "synthetic-\u00e4\u00f6\u00fc-123", "synthetic-\U0001f6b4-123"):
             with self.subTest(kind="utf8"), patch.object(server, "CONFIG", replace(server.CONFIG, app_password=password)), \
-                    patch.object(server, "security_configuration_error", return_value=None), \
+                    patch.object(server.app_config, "security_configuration_error", return_value=None), \
                     patch.object(server, "allow_rate", return_value=(True, 0)):
                 # The storage fixture stays SQLite; login uses the real comparison and session SQL.
                 with patch.object(server, "database_manager", return_value=self.manager_for_login()):
@@ -313,7 +313,12 @@ class ProviderReviewTests(unittest.TestCase):
         for length in (11, 12):
             with patch.object(server, "CONFIG", replace(server.CONFIG, app_password="\U0001f6b4" * length)), \
                     patch.object(server, "SQLCIPHER_AVAILABLE", True):
-                self.assertEqual(server.security_configuration_error() is None, length == 12)
+                self.assertEqual(
+                    server.app_config.security_configuration_error(
+                        server.CONFIG, sqlcipher_available=server.SQLCIPHER_AVAILABLE
+                    ) is None,
+                    length == 12,
+                )
 
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher requires the isolated application container")
     def test_fresh_sqlcipher_unicode_key_login_and_reopen(self):

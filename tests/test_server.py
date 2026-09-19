@@ -212,7 +212,7 @@ class CoachTests(unittest.TestCase):
         order = []
         http_server = Mock()
         with patch.object(server.observability, "configure_logging"), patch.object(
-            server, "security_configuration_error", return_value=None
+            server.app_config, "security_configuration_error", return_value=None
         ), patch.object(server, "initialise_database", side_effect=lambda: order.append("schema")), patch.object(
             server, "resume_interrupted_sync_jobs", side_effect=lambda: order.append("sync-recovery")
         ), patch.object(
@@ -6181,7 +6181,7 @@ class CoachTests(unittest.TestCase):
                 server.sync_intervals("cancelled", activity_days=42, cancel_event=cancel_event)
             freshness = {
                 (item["provider"], item["area"]): item
-                for item in server.provider_freshness_state()
+                for item in server._current_provider_freshness()
             }
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         with server.DB_LOCK, server.database() as db:
@@ -6700,14 +6700,14 @@ class CoachTests(unittest.TestCase):
                 {"GARMIN_EMAIL": "", "GARMIN_PASSWORD": "", "GARMINTOKENS": ""},
                 clear=False,
             ):
-                server.save_settings({
+                server.app_config.save_persistent_settings(data_dir, {
                     "GARMIN_EMAIL": "athlete@example.com",
                     "GARMIN_PASSWORD": "test-password",
                     "GARMINTOKENS": "/data/garmin_tokens",
-                })
+                }, os.environ)
                 for key in ("GARMIN_EMAIL", "GARMIN_PASSWORD", "GARMINTOKENS"):
                     os.environ.pop(key, None)
-                server.load_local_env()
+                server.app_config.load_local_env(Path(temp_root), data_dir, os.environ)
                 self.assertEqual(os.environ["GARMIN_EMAIL"], "athlete@example.com")
                 self.assertEqual(os.environ["GARMIN_PASSWORD"], "test-password")
                 self.assertEqual(os.environ["GARMINTOKENS"], "/data/garmin_tokens")
@@ -6716,13 +6716,13 @@ class CoachTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             data_dir = Path(temp_root) / "data"
             with patch.object(server, "ROOT", Path(temp_root)), patch.object(server, "DATA_DIR", data_dir):
-                server.save_settings({
+                server.app_config.save_persistent_settings(data_dir, {
                     "OPENAI_API_KEY": "file-openai",
                     "INTERVALS_API_KEY": "file-intervals",
                     "GARMIN_EMAIL": "file@example.com",
                     "GARMIN_PASSWORD": "file-password",
                     "GARMINTOKENS": "/data/file-tokens",
-                })
+                }, os.environ)
                 for key in ("OPENAI_API_KEY", "INTERVALS_API_KEY", "GARMIN_EMAIL", "GARMIN_PASSWORD", "GARMINTOKENS"):
                     os.environ.pop(key, None)
                 with patch.dict(os.environ, {
@@ -6732,7 +6732,7 @@ class CoachTests(unittest.TestCase):
                     "GARMIN_PASSWORD": "env-password",
                     "GARMINTOKENS": "/data/env-tokens",
                 }, clear=False):
-                    server.load_local_env()
+                    server.app_config.load_local_env(Path(temp_root), data_dir, os.environ)
                     self.assertEqual(os.environ["OPENAI_API_KEY"], "env-openai")
                     self.assertEqual(os.environ["INTERVALS_API_KEY"], "env-intervals")
                     self.assertEqual(os.environ["GARMIN_EMAIL"], "env@example.com")
@@ -7926,8 +7926,8 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(response_body.closed)
 
     def test_user_enabled_diagnostic_capture_keeps_response_shape_without_content(self):
-        self.assertFalse(server.diagnostic_capture_status()["active"])
-        enabled = server.set_diagnostic_capture(True)
+        self.assertFalse(server.DIAGNOSTIC_CAPTURE.status()["active"])
+        enabled = server.DIAGNOSTIC_CAPTURE.set_enabled(True)
         self.assertTrue(enabled["active"])
         response = {
             "bodyBattery": 82,
@@ -7941,14 +7941,14 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("must-not-appear", report_text)
         self.assertNotIn("must-never-appear", report_text)
         self.assertNotIn("must-also-never-appear", report_text)
-        entries = server.diagnostic_capture_entries()
+        entries = server.DIAGNOSTIC_CAPTURE.entries()
         self.assertTrue(entries)
         response_capture = entries[-1]["details"]["response"]
         self.assertIn("shape", response_capture)
         self.assertNotIn("content", response_capture)
 
-        server.set_diagnostic_capture(False)
-        self.assertFalse(server.diagnostic_capture_status()["active"])
+        server.DIAGNOSTIC_CAPTURE.set_enabled(False)
+        self.assertFalse(server.DIAGNOSTIC_CAPTURE.status()["active"])
         server.external_call("garmin", "body_battery", lambda: {"new_marker": "not captured"})
         self.assertNotIn("not captured", json.dumps(server.diagnostic_report(), ensure_ascii=False))
 
@@ -8304,13 +8304,13 @@ class CoachTests(unittest.TestCase):
         upstream_error = server.HTTPError(
             "https://api.openai.com/v1/responses", 400, "Bad Request", {"x-request-id": "req_test_456"}, BytesIO(raw_error)
         )
-        server.set_diagnostic_capture(True)
+        server.DIAGNOSTIC_CAPTURE.set_enabled(True)
         config = replace(server.CONFIG, openai_api_key="openai-test")
         with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=upstream_error):
             with self.assertRaises(server.AppError) as raised:
                 server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "conversation_state_invalid")
-        captured = server.diagnostic_capture_entries()
+        captured = server.DIAGNOSTIC_CAPTURE.entries()
         failed = next(entry for entry in reversed(captured) if entry["event"] == "openai_stream_failed")
         self.assertEqual(failed["details"]["error_code"], "invalid_function_call_output")
         self.assertEqual(failed["details"]["request_id"], "req_test_456")
@@ -8623,12 +8623,12 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(state["last_error"])
 
     def test_diagnostic_response_shape_keeps_only_structure(self):
-        shape = server.diagnostic_response_shape({"athlete_name": "Ada", "nested": [{"secret": "hidden"}], "invalid key": 1})
+        shape = server.observability.diagnostic_response_shape({"athlete_name": "Ada", "nested": [{"secret": "hidden"}], "invalid key": 1})
         self.assertEqual(shape["type"], "object")
         self.assertEqual(shape["fields"], ["athlete_name", "nested", "[nonstandard]"])
         self.assertEqual(shape["sample"], {"type": "string", "length": 3})
         self.assertNotIn("Ada", json.dumps(shape))
-        self.assertEqual(server.diagnostic_response_shape([{"token": "hidden"}])["item_shape"]["fields"], ["token"])
+        self.assertEqual(server.observability.diagnostic_response_shape([{"token": "hidden"}])["item_shape"]["fields"], ["token"])
 
     def test_garmin_sdk_calls_log_operation_and_result_summary(self):
         server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
@@ -8719,24 +8719,24 @@ class CoachTests(unittest.TestCase):
         )
         with patch.object(server, "CONFIG", config):
             server.save_profile({"weather_location": "Berlin"})
-            initial = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            initial = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertEqual(initial[("intervals", "activities")]["state"], "never_loaded")
             self.assertEqual(initial[("weather", "forecast")]["state"], "never_loaded")
             refresh_id = server._provider_refresh_start("intervals", "activities", "operation-test", "manual")
             server._provider_refresh_finish(refresh_id, "error", "failed", error_code="network_error")
-            failed = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            failed = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertEqual(failed[("intervals", "activities")]["state"], "error")
             self.assertEqual(failed[("intervals", "activities")]["error_code"], "network_error")
             self.assertIsNone(failed[("intervals", "activities")]["next_retry_at"])
             with patch.object(server, "CONFIG", replace(config, intervals_api_key="")):
-                unconfigured = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+                unconfigured = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertEqual(unconfigured[("intervals", "activities")]["state"], "not_configured")
             self.assertEqual(unconfigured[("intervals", "activities")]["error_code"], "network_error")
             server.enqueue_sync_job(
                 "intervals", "refresh", {"days": 1},
                 requested_by="test", available_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
             )
-            scheduled = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            scheduled = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertTrue(scheduled[("intervals", "activities")]["next_retry_at"])
             refresh_id = server._provider_refresh_start("intervals", "activities", "operation-test-2", "manual")
             server._provider_refresh_finish(refresh_id, "success", "complete")
@@ -8746,17 +8746,17 @@ class CoachTests(unittest.TestCase):
                     "UPDATE provider_refresh_history SET started_at=?, finished_at=? WHERE id=?",
                     (stale_at, stale_at, refresh_id),
                 )
-            stale = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            stale = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertEqual(stale[("intervals", "activities")]["state"], "stale")
             self.assertTrue(stale[("intervals", "activities")]["has_last_good"])
 
     def test_provider_refresh_history_is_bounded_and_diagnostic_safe(self):
-        for index in range(server.PROVIDER_REFRESH_MAX_ROWS + 5):
+        for index in range(server.sync_freshness.PROVIDER_REFRESH_MAX_ROWS + 5):
             refresh_id = server._provider_refresh_start("garmin", "data", f"operation-{index}", "manual")
             server._provider_refresh_finish(refresh_id, "success", "complete")
         with server.DB_LOCK, server.database() as db:
             count = db.execute("SELECT COUNT(*) AS count FROM provider_refresh_history").fetchone()["count"]
-        self.assertEqual(count, server.PROVIDER_REFRESH_MAX_ROWS)
+        self.assertEqual(count, server.sync_freshness.PROVIDER_REFRESH_MAX_ROWS)
         report = server.diagnostic_report()
         self.assertIn("provider_freshness", report)
         self.assertNotIn("operation-", json.dumps(report))

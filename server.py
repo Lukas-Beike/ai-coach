@@ -65,9 +65,11 @@ from backend.errors import (
     provider_error,
     public_app_error_status,
 )
+from backend import config as app_config
 from backend import observability
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
+from backend.sync import freshness as sync_freshness
 from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
@@ -79,7 +81,7 @@ from backend.db.schema import (
     database_index_names,
     database_schema_is_current,
 )
-from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config, load_local_env as load_config_env
+from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
 from backend.providers.gemini import function_tools as gemini_function_tools, response_text as gemini_response_text
 from backend.providers.openai import response_failure_reason as openai_response_failure_reason, response_text as openai_response_text
@@ -257,15 +259,6 @@ COACH_LONG_PLAN_MAX_OUTPUT_TOKENS = 32_000
 COACH_FOLLOWUP_MAX_OUTPUT_TOKENS = 2_500
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
 MESSAGE_ATTACHMENTS_QUERY = "SELECT attachments FROM messages WHERE id=?"
-# Provider error messages can echo athlete data; retain only documented codes.
-OPENAI_RESPONSE_ERROR_CODES = frozenset({
-    "server_error", "rate_limit_exceeded", "invalid_prompt", "data_residency_mismatch",
-    "bio_policy", "misalignment_policy_violation", "vector_store_timeout", "invalid_image",
-    "invalid_image_format", "invalid_base64_image", "invalid_image_url", "image_too_large",
-    "image_too_small", "image_parse_error", "image_content_policy_violation", "invalid_image_mode",
-    "image_file_too_large", "unsupported_image_media_type", "empty_image_file",
-    "failed_to_download_image", "image_file_not_found",
-})
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
@@ -281,7 +274,6 @@ PLANNED_UNIT_SYNCS: set[str] = set()
 COMPETITION_SYNC_LOCK = threading.Lock()
 PERFORMANCE_LOCK = threading.Lock()
 OPENAI_CONVERSATION_LOCK = threading.RLock()
-DIAGNOSTIC_CAPTURE_LOCK = threading.RLock()
 CHAT_STREAM_LOCK = threading.Lock()
 CHAT_STREAMS: dict[str, dict[str, Any]] = {}
 CHAT_QUEUE_LIMIT = 3
@@ -380,11 +372,6 @@ def garmin_operation(function: Any) -> Any:
         with provider_operation("garmin"):
             return function(*args, **kwargs)
     return guarded
-
-
-def load_local_env() -> None:
-    """Compatibility entrypoint for tests and settings persistence."""
-    load_config_env(ROOT, DATA_DIR)
 
 
 CONFIG = load_config(ROOT, DATA_DIR)
@@ -711,19 +698,19 @@ def external_call(
         context.update({"operation_id": operation_context["operation_id"], "trigger": operation_context["trigger"], "phase": operation})
     started = time.perf_counter()
     LOGGER.info("External call started", extra={"event": "external_call_started", "context": context})
-    capture_diagnostic_event("external_call_started", {
+    DIAGNOSTIC_CAPTURE.capture("external_call_started", {
         "service": service,
         "operation": operation,
-        "details": _safe_diagnostic_context(details),
+        "details": observability.safe_diagnostic_context(details),
     })
     try:
         result = call()
     except AppError as exc:
-        capture_diagnostic_event("external_call_failed", {
+        DIAGNOSTIC_CAPTURE.capture("external_call_failed", {
             "service": service,
             "operation": operation,
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-            "error": _safe_diagnostic_error(exc),
+            "error": observability.safe_diagnostic_error(exc),
         })
         raise
     except Exception as exc:
@@ -733,11 +720,11 @@ def external_call(
             "error_code": operation_error_code(exc),
         }
         LOGGER.exception("External call failed", extra={"event": "external_call_failed", "context": failure_context}, exc_info=True)
-        capture_diagnostic_event("external_call_failed", {
+        DIAGNOSTIC_CAPTURE.capture("external_call_failed", {
             "service": service,
             "operation": operation,
             "duration_ms": failure_context["duration_ms"],
-            "error": _safe_diagnostic_error(exc),
+            "error": observability.safe_diagnostic_error(exc),
         })
         raise provider_error(service, "client") from exc
     LOGGER.info(
@@ -751,11 +738,11 @@ def external_call(
             },
         },
     )
-    capture_diagnostic_event("external_call_completed", {
+    DIAGNOSTIC_CAPTURE.capture("external_call_completed", {
         "service": service,
         "operation": operation,
         "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-        "response": diagnostic_capture_response(result),
+        "response": observability.diagnostic_capture_response(result),
     })
     return result
 
@@ -921,40 +908,12 @@ ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(utc_now)
 SNAPSHOT_REPOSITORY = SnapshotRepository()
 
 
-def security_configuration_error() -> str | None:
-    if not CONFIG.app_password:
-        return "APP_PASSWORD ist nicht konfiguriert. Lege ein langes, zufälliges Passwort als Container-Umgebungsvariable fest."
-    if len(CONFIG.app_password) < 12:
-        return "APP_PASSWORD muss mindestens 12 Zeichen lang sein."
-    if not SQLCIPHER_AVAILABLE:
-        return "SQLCipher ist nicht verfügbar; die verschlüsselte Datenbank kann nicht geöffnet werden."
-    return None
-
-
 OPERATION_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar("operation_context", default=None)
 DATABASE_MANAGER: DatabaseManager | None = None
 DATABASE_MANAGER_SIGNATURE: tuple[str, str, bool] | None = None
 
-PROVIDER_REFRESH_RETENTION_DAYS = 30
-PROVIDER_REFRESH_MAX_ROWS = 200
 PROVIDER_REFRESH_RETRY_BASE_SECONDS = 15 * 60
 PROVIDER_REFRESH_RETRY_MAX_SECONDS = 6 * 60 * 60
-PROVIDER_REFRESH_STALE_SECONDS = {
-    ("intervals", "activities"): 48 * 60 * 60,
-    ("intervals", "competitions"): 48 * 60 * 60,
-    ("intervals", "performance"): 48 * 60 * 60,
-    ("garmin", "data"): 48 * 60 * 60,
-    ("weather", "forecast"): WEATHER_CACHE_SECONDS if "WEATHER_CACHE_SECONDS" in globals() else 3 * 60 * 60,
-    ("calendar", "events"): 48 * 60 * 60,
-}
-PROVIDER_REFRESH_LABELS = {
-    ("intervals", "activities"): "Intervals.icu · Training",
-    ("intervals", "competitions"): "Intervals.icu · Wettkämpfe",
-    ("intervals", "performance"): "Intervals.icu · Leistung",
-    ("garmin", "data"): "Garmin",
-    ("weather", "forecast"): "Open-Meteo",
-    ("calendar", "events"): "Gemeinsamer Kalender",
-}
 SYNC_JOB_MAX_ATTEMPTS = 3
 SYNC_JOB_RETRY_BASE_SECONDS = 15 * 60
 SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
@@ -963,11 +922,6 @@ SYNC_JOB_LIST_LIMIT = 50
 GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
 MORNING_RETRY_SECONDS = 15 * 60
 MORNING_MAX_ATTEMPTS = 3
-DIAGNOSTIC_CAPTURE_DURATION_SECONDS = 60 * 60
-DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 1500
-DIAGNOSTIC_CAPTURE_STATE_KEY = "diagnostic_capture_state"
-DIAGNOSTIC_CAPTURE_ENTRIES_KEY = "diagnostic_capture_entries"
-
 CHANGE_HISTORY_RETENTION_DAYS = 180
 # A complete replacement can archive and recreate up to 366 sessions. Keep
 # enough bounded history rows for that operation plus normal recent changes.
@@ -1174,8 +1128,11 @@ def initialise_database() -> None:
             all_sync_days=ALL_SYNC_DAYS,
         )
 def _provider_refresh_cleanup(db: Any) -> None:
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=PROVIDER_REFRESH_RETENTION_DAYS)).isoformat()
-    cleanup_refresh_history(db, cutoff=cutoff, max_rows=PROVIDER_REFRESH_MAX_ROWS)
+    cutoff = (
+        datetime.now(timezone.utc)
+        - timedelta(days=sync_freshness.PROVIDER_REFRESH_RETENTION_DAYS)
+    ).isoformat()
+    cleanup_refresh_history(db, cutoff=cutoff, max_rows=sync_freshness.PROVIDER_REFRESH_MAX_ROWS)
 
 
 def _provider_refresh_start(provider: str, area: str, operation_id: str, trigger: str) -> str:
@@ -1914,141 +1871,18 @@ def resolve_sync_job(job_id: str, payload: Any) -> dict[str, Any]:
     return sync_job_state(job_id)
 
 
-def _scheduled_provider_retry_at(db: Any, provider: str) -> str | None:
-    """Return only a future queued retry, never an advisory history timestamp."""
-    now = datetime.now(timezone.utc)
-    rows = db.execute(
-        "SELECT available_at FROM sync_jobs "
-        "WHERE provider=? AND type='refresh' "
-        "AND status='queued' AND available_at IS NOT NULL ORDER BY available_at",
-        (provider,),
-    ).fetchall()
-    for row in rows:
-        try:
-            available_at = datetime.fromisoformat(str(row["available_at"]).replace("Z", UTC_OFFSET_SUFFIX)).astimezone(timezone.utc)
-        except (TypeError, ValueError):
-            continue
-        if available_at > now:
-            return available_at.isoformat()
-    return None
-
-
-def _provider_freshness_inputs() -> tuple[dict[tuple[str, str], Any], dict[tuple[str, str], Any], dict[tuple[str, str], bool]]:
-    fallbacks = {
-        ("intervals", "activities"): get_kv("last_sync_at"),
-        ("intervals", "competitions"): get_kv("last_competition_sync_at"),
-        ("intervals", "performance"): get_kv("last_performance_refresh_at"),
-        ("garmin", "data"): get_kv("last_garmin_sync_at"),
-        ("weather", "forecast"): None,
-        ("calendar", "events"): get_kv("last_external_calendar_sync_at"),
-    }
-    fallback_errors = {
-        ("intervals", "activities"): get_kv("last_sync_error"),
-        ("intervals", "competitions"): get_kv("last_competition_sync_error"),
-        ("intervals", "performance"): get_kv("last_performance_error"),
-        ("garmin", "data"): bool(_garmin_core_error_entries()),
-        ("weather", "forecast"): get_kv(WEATHER_FAILURE_KEY),
-        ("calendar", "events"): get_kv("last_external_calendar_sync_error"),
-    }
-    try:
-        cached_weather = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
-        if isinstance(cached_weather, dict):
-            fallbacks[("weather", "forecast")] = cached_weather.get("fetched_at")
-    except (TypeError, ValueError):
-        pass
-    configured = {
-        ("intervals", "activities"): bool(CONFIG.intervals_api_key),
-        ("intervals", "competitions"): bool(CONFIG.intervals_api_key),
-        ("intervals", "performance"): bool(CONFIG.intervals_api_key),
-        ("garmin", "data"): bool(CONFIG.garmin_fixture_path or CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()),
-        ("weather", "forecast"): bool(get_profile().get("weather_location")),
-        ("calendar", "events"): bool(CONFIG.calendar_ical_url),
-    }
-    return fallbacks, fallback_errors, configured
-
-
-def _provider_freshness_last_good_state(key: tuple[str, str], last_good: Any) -> str:
-    if last_good:
-        try:
-            age = (datetime.now(timezone.utc) - datetime.fromisoformat(last_good.replace("Z", UTC_OFFSET_SUFFIX))).total_seconds()
-        except (TypeError, ValueError):
-            age = float("inf")
-        return "stale" if age > PROVIDER_REFRESH_STALE_SECONDS[key] else "fresh"
-    return "error"
-
-
-def _provider_fallback_error_code(fallback_error: bool) -> str | None:
-    return "provider_error" if fallback_error else None
-
-
-def _provider_freshness_error_code(row: dict[str, Any] | None, fallback_error: bool) -> str | None:
-    if row:
-        error_code = str(row.get("error_code") or "")
-        if error_code:
-            return error_code
-    return _provider_fallback_error_code(fallback_error)
-
-
-def _provider_freshness_status(
-    key: tuple[str, str], configured: bool, row: dict[str, Any] | None, last_good: Any, fallback_error: bool,
-) -> tuple[str, str | None]:
-    if not configured:
-        return "not_configured", _provider_freshness_error_code(row, fallback_error)
-    if row:
-        status = row["status"]
-        if status == "running":
-            return "syncing", _provider_fallback_error_code(fallback_error)
-        if status == "error":
-            state = "stale" if last_good else "error"
-            return state, row.get("error_code")
-        if status == "partial":
-            return "partial", _provider_fallback_error_code(fallback_error)
-    if last_good:
-        return _provider_freshness_last_good_state(key, last_good), _provider_fallback_error_code(fallback_error)
-    if fallback_error:
-        return "error", "provider_error"
-    return "never_loaded", None
-
-
-def provider_freshness_state() -> list[dict[str, Any]]:
-    fallbacks, fallback_errors, configured = _provider_freshness_inputs()
-    result: list[dict[str, Any]] = []
+def _current_provider_freshness() -> list[dict[str, Any]]:
+    """Wire runtime state into the backend-owned freshness projection."""
     with DB_LOCK, database() as db:
-        _provider_refresh_cleanup(db)
-        for key, label in PROVIDER_REFRESH_LABELS.items():
-            provider, area = key
-            row = db.execute(
-                "SELECT * FROM provider_refresh_history WHERE provider=? AND area=? ORDER BY started_at DESC LIMIT 1",
-                (provider, area),
-            ).fetchone()
-            last_success = db.execute(
-                "SELECT finished_at FROM provider_refresh_history WHERE provider=? AND area=? AND status IN ('success','partial') "
-                "ORDER BY finished_at DESC LIMIT 1",
-                (provider, area),
-            ).fetchone()
-            row = dict(row) if row else None
-            fallback = fallbacks[key]
-            fallback_error = bool(fallback_errors[key])
-            last_attempt = row.get("started_at") if row else fallback
-            last_good = (last_success["finished_at"] if last_success else None) or fallback
-            scheduled_retry = _scheduled_provider_retry_at(db, provider)
-            state, error_code = _provider_freshness_status(key, configured[key], row, last_good, fallback_error)
-            result.append({
-                "provider": provider,
-                "area": area,
-                "label": label,
-                "configured": configured[key],
-                "read_only": key != ("intervals", "competitions"),
-                "state": state,
-                "phase": row.get("phase") if row else None,
-                "last_attempt_at": last_attempt,
-                "last_success_at": last_good,
-                "error_code": error_code,
-                "next_retry_at": scheduled_retry,
-                "stale": state == "stale",
-                "has_last_good": bool(last_good),
-            })
-    return result
+        return sync_freshness.provider_freshness_state(
+            db,
+            config=CONFIG,
+            get_value=get_kv,
+            profile=get_profile(),
+            garmin_has_core_error=bool(_garmin_core_error_entries()),
+            garmin_tokenstore_exists=Path(CONFIG.garmin_tokenstore).exists(),
+            now=datetime.now(timezone.utc),
+        )
 
 
 def _audit_projection_fields(entity_type: str) -> set[str]:
@@ -2582,82 +2416,12 @@ def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:
 
 
 SETTINGS = SettingsService(lambda: CONFIG, get_kv, set_kv)
-
-
-def _safe_diagnostic_context(value: Any) -> dict[str, Any]:
-    """Keep request metadata useful without retaining request contents."""
-    if not isinstance(value, dict):
-        return {}
-    safe: dict[str, Any] = {}
-    for key, item in value.items():
-        key_text = str(key)[:80]
-        if key_text in {"window_start", "window_end", "date", "latest", "range_supported", "email_configured", "tokenstore_exists"}:
-            safe[key_text] = item if item is None or isinstance(item, (bool, int, float)) else str(item)[:40]
-    return safe
-
-
-def diagnostic_mapping_shape(value: dict[Any, Any], depth: int) -> dict[str, Any]:
-    fields = [
-        text[:80] if re.fullmatch(r"(?a:[A-Za-z][\w-]{0,79})", text) else "[nonstandard]"
-        for key in list(value)[:50]
-        for text in (str(key),)
-    ]
-    result: dict[str, Any] = {"type": "object", "field_count": len(value), "fields": fields}
-    if depth < 1 and value:
-        result["sample"] = diagnostic_response_shape(next(iter(value.values())), depth + 1)
-    return result
-
-
-def diagnostic_sequence_shape(value: list[Any] | tuple[Any, ...], depth: int) -> dict[str, Any]:
-    result: dict[str, Any] = {"type": "array", "items": len(value)}
-    if depth < 1 and value:
-        result["item_shape"] = diagnostic_response_shape(value[0], depth + 1)
-    return result
-
-
-def diagnostic_response_shape(value: Any, depth: int = 0) -> dict[str, Any]:
-    """Describe a response without retaining athlete or provider payload values."""
-    if value is None:
-        return {"type": "null"}
-    if isinstance(value, dict):
-        return diagnostic_mapping_shape(value, depth)
-    if isinstance(value, (list, tuple)):
-        return diagnostic_sequence_shape(value, depth)
-    if isinstance(value, bool):
-        return {"type": "boolean"}
-    if isinstance(value, (int, float)):
-        return {"type": "number"}
-    if isinstance(value, str):
-        return {"type": "string", "length": len(value)}
-    return {"type": type(value).__name__}
-
-
-def diagnostic_capture_response(value: Any) -> dict[str, Any]:
-    """Return response shape metadata without retaining response contents."""
-    return {"shape": diagnostic_response_shape(value)}
-
-
-def _safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
-    """Expose only classified technical exception metadata during user debugging."""
-    status = getattr(exc, "status", None) or getattr(exc, "code", None)
-    result: dict[str, Any] = {"type": type(exc).__name__}
-    if isinstance(status, int):
-        result["status"] = status
-    reason = str(getattr(exc, "reason", "") or "").strip()
-    if reason and re.fullmatch(r"[a-z_]{1,80}", reason):
-        result["reason"] = reason
-    validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
-    if validation_reason and re.fullmatch(r"[a-z_]{1,80}", validation_reason):
-        result["validation_reason"] = validation_reason
-    provider_code = getattr(exc, "provider_error_code", None)
-    if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
-        result["provider_error_code"] = provider_code
-    return result
+DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(get_kv, set_kv, REDACTOR, utc_now)
 
 
 def _coach_error_metadata(exc: BaseException) -> dict[str, Any]:
     """Keep technical call sites, never exception text, source lines or locals."""
-    result = _safe_diagnostic_error(exc)
+    result = observability.safe_diagnostic_error(exc)
     frames = []
     trace = exc.__traceback__
     while trace is not None:
@@ -2685,75 +2449,6 @@ def _safe_response_headers(headers: Any) -> dict[str, str]:
         if name in allowed or name.startswith("x-ratelimit-"):
             result[name] = REDACTOR.redact_text(str(value))[:160]
     return result
-
-
-def _diagnostic_capture_state() -> dict[str, Any]:
-    try:
-        value = json.loads(get_kv(DIAGNOSTIC_CAPTURE_STATE_KEY) or "{}")
-    except (TypeError, ValueError):
-        value = {}
-    return value if isinstance(value, dict) else {}
-
-
-def diagnostic_capture_status() -> dict[str, Any]:
-    state = _diagnostic_capture_state()
-    expires_at = str(state.get("expires_at") or "")
-    try:
-        active = datetime.fromisoformat(expires_at.replace("Z", UTC_OFFSET_SUFFIX)) > datetime.now(timezone.utc)
-    except (TypeError, ValueError):
-        active = False
-    if not active and state:
-        set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, "")
-    try:
-        entries = json.loads(get_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY) or "[]")
-    except (TypeError, ValueError):
-        entries = []
-    return {
-        "active": active,
-        "started_at": state.get("started_at") if active else None,
-        "expires_at": expires_at if active else None,
-        "entries": len(entries) if isinstance(entries, list) else 0,
-        "maximum_entries": DIAGNOSTIC_CAPTURE_MAX_ENTRIES,
-    }
-
-
-def diagnostic_capture_entries() -> list[dict[str, Any]]:
-    try:
-        entries = json.loads(get_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY) or "[]")
-    except (TypeError, ValueError):
-        return []
-    if not isinstance(entries, list):
-        return []
-    return [REDACTOR.sanitize_log_value(entry) for entry in entries if isinstance(entry, dict)][-DIAGNOSTIC_CAPTURE_MAX_ENTRIES:]
-
-
-def set_diagnostic_capture(enabled: Any) -> dict[str, Any]:
-    """Enable a one-hour, user-initiated technical capture or stop it early."""
-    if enabled is not True and enabled is not False:
-        raise AppError(400, "Die Diagnoseaufzeichnung erwartet enabled=true oder enabled=false.")
-    with DIAGNOSTIC_CAPTURE_LOCK:
-        if enabled:
-            now = datetime.now(timezone.utc)
-            expires_at = (now + timedelta(seconds=DIAGNOSTIC_CAPTURE_DURATION_SECONDS)).isoformat()
-            set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, json.dumps({"started_at": now.isoformat(), "expires_at": expires_at}, separators=(",", ":")))
-            set_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY, "[]")
-        else:
-            set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, "")
-    return diagnostic_capture_status()
-
-
-def capture_diagnostic_event(event: str, details: dict[str, Any]) -> None:
-    """Persist bounded response metadata only while the athlete enabled capture."""
-    # A capture is written by sync workers as well as the coach request. Keep
-    # the read-modify-write sequence atomic so concurrent providers cannot
-    # silently discard the most useful event.
-    with DIAGNOSTIC_CAPTURE_LOCK:
-        if not diagnostic_capture_status()["active"]:
-            return
-        entry = {"timestamp": utc_now(), "event": str(event)[:80], "details": REDACTOR.sanitize_log_value(details)}
-        entries = diagnostic_capture_entries()
-        entries.append(entry)
-        set_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY, json.dumps(entries[-DIAGNOSTIC_CAPTURE_MAX_ENTRIES:], ensure_ascii=False, separators=(",", ":")))
 
 
 def garmin_snapshot() -> dict[str, Any]:
@@ -4104,7 +3799,7 @@ def _sync_morning_body_battery_locked(checkin_date: date) -> dict[str, Any]:
         record = _morning_body_battery_record(checkin_date, sleep_payload, records)
     except Exception as exc:
         record = _morning_body_battery_record(checkin_date, {}, [])
-        record["error"] = _safe_diagnostic_error(exc)
+        record["error"] = observability.safe_diagnostic_error(exc)
         records = []
     return _persist_morning_body_battery(checkin_date, existing, record, records)
 
@@ -4133,7 +3828,7 @@ def refresh_morning_body_battery(checkin_date: date | None = None) -> None:
     try:
         sync_garmin_morning_body_battery(checkin_date or local_now().date())
     except Exception as exc:
-        LOGGER.warning("Morning Body Battery refresh failed", extra={"event": "morning_body_battery_sync_failed", "context": _safe_diagnostic_error(exc)})
+        LOGGER.warning("Morning Body Battery refresh failed", extra={"event": "morning_body_battery_sync_failed", "context": observability.safe_diagnostic_error(exc)})
 
 
 def _persist_garmin_sync_payload(
@@ -7066,7 +6761,7 @@ def record_openai_status(status: dict[str, Any]) -> None:
         "updated_at": str(status.get("updated_at") or utc_now()),
     }
     provider_code = status.get("provider_error_code")
-    if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
+    if isinstance(provider_code, str) and provider_code in observability.OPENAI_RESPONSE_ERROR_CODES:
         safe_status["provider_error_code"] = provider_code
     set_kv(OPENAI_STATUS_KEY, json.dumps(safe_status, ensure_ascii=False))
 
@@ -7218,7 +6913,7 @@ def _http_request_parts(
 
 def _log_http_request_started(request_context: dict[str, Any], parsed_url: Any, request_headers: dict[str, str]) -> None:
     LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": request_context})
-    capture_diagnostic_event("external_http_started", {
+    DIAGNOSTIC_CAPTURE.capture("external_http_started", {
         "service": request_context["service"],
         "method": request_context["method"],
         "host": observability.safe_url_netloc(parsed_url),
@@ -7271,7 +6966,7 @@ def _http_success_result(
             },
         },
     )
-    capture_diagnostic_event("external_http_completed", {
+    DIAGNOSTIC_CAPTURE.capture("external_http_completed", {
         "service": request_context["service"],
         "method": request_context["method"],
         "host": observability.safe_url_netloc(parsed_url),
@@ -7280,7 +6975,7 @@ def _http_success_result(
         "duration_ms": round((time.perf_counter() - started) * 1000, 1),
         "response_bytes": len(raw),
         "headers": _safe_response_headers(getattr(response, "headers", None)),
-        "response": diagnostic_capture_response(result),
+        "response": observability.diagnostic_capture_response(result),
     })
     return result
 
@@ -7295,13 +6990,13 @@ def _capture_http_failure(
         "host": observability.safe_url_netloc(parsed_url),
         "path": request_context["path"],
         "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-        "error": _safe_diagnostic_error(error),
+        "error": observability.safe_diagnostic_error(error),
     }
     if error_bytes is not None:
         context["error_bytes"] = error_bytes
     if headers is not None:
         context["headers"] = _safe_response_headers(headers)
-    capture_diagnostic_event("external_http_failed", context)
+    DIAGNOSTIC_CAPTURE.capture("external_http_failed", context)
 
 
 def _handle_http_error(
@@ -11265,7 +10960,7 @@ def sync_public_state(
         running=running,
         get_value=get_kv,
         state_versions=state_versions(),
-        provider_freshness=freshness if freshness is not None else provider_freshness_state(),
+        provider_freshness=freshness if freshness is not None else _current_provider_freshness(),
         maintenance=runtime_maintenance.MAINTENANCE_GATE.state(),
     )
     result["jobs"] = jobs if jobs is not None else sync_jobs_state()
@@ -14077,7 +13772,7 @@ def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
     if failure == "response_error":
         provider_error = result["error"]
         code = provider_error.get("code") if isinstance(provider_error, dict) else None
-        code = code if isinstance(code, str) and code in OPENAI_RESPONSE_ERROR_CODES else None
+        code = code if isinstance(code, str) and code in observability.OPENAI_RESPONSE_ERROR_CODES else None
         record_openai_status({"state": "error", "reason": "response_error", "message": "OpenAI returned an error response.",
                               "http_status": 200, "provider_error_code": code})
         error = AppError(502, "OpenAI returned an error response.", reason="response_error")
@@ -14954,7 +14649,7 @@ def _capture_openai_stream_failure(
     }
     if extra:
         details.update(extra)
-    capture_diagnostic_event("openai_stream_failed", details)
+    DIAGNOSTIC_CAPTURE.capture("openai_stream_failed", details)
 
 
 def _handle_openai_stream_app_error(
@@ -15063,7 +14758,7 @@ def openai_stream_request(
         "request_bytes": len(body),
     }
     LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": context})
-    capture_diagnostic_event("openai_stream_started", {
+    DIAGNOSTIC_CAPTURE.capture("openai_stream_started", {
         "service": "openai",
         "method": "POST",
         "host": observability.safe_url_netloc(parsed_endpoint),
@@ -15083,7 +14778,7 @@ def openai_stream_request(
         final_response = _validate_openai_response(OPENAI_RESPONSES_PATH, final_response)
         record_openai_usage(final_response, "responses_stream")
         stream_bytes = stream_state["bytes"]
-        capture_diagnostic_event("openai_stream_completed", {
+        DIAGNOSTIC_CAPTURE.capture("openai_stream_completed", {
             "service": "openai", "status": 200,
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
             "response_bytes": stream_bytes,
@@ -19539,7 +19234,7 @@ def public_bootstrap() -> dict[str, Any]:
         competitions = list_competitions(limit=100)
         relevant_external = list_external_calendar_events(250, training_relevant_only=True)
         profile = get_profile()
-        freshness = provider_freshness_state()
+        freshness = _current_provider_freshness()
         jobs = sync_jobs_state()
         state_version_values = state_versions()
         return {
@@ -19570,7 +19265,7 @@ def public_bootstrap() -> dict[str, Any]:
             "daily_planning_context": [],
             "performance": {},
             "garmin": garmin_public_state(),
-            "diagnostic_capture": diagnostic_capture_status(),
+            "diagnostic_capture": DIAGNOSTIC_CAPTURE.status(),
             "intervals": intervals_public_state(snapshot),
             "provider_freshness": freshness,
             "provider_states": bootstrap_provider_states(freshness),
@@ -19687,7 +19382,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
         checkins = list_checkins(30)
         external_calendar = external_calendar_state()
         daily_context = daily_planning_context(snapshot, planned, weather, checkins, list_external_calendar_events(50, training_relevant_only=True))
-        freshness = provider_freshness_state()
+        freshness = _current_provider_freshness()
         sync = sync_browser_state(freshness=freshness)
         return {
             "app": {
@@ -19783,68 +19478,6 @@ def recent_log_entries(limit: int = 200) -> list[dict[str, Any]]:
     return entries
 
 
-SETTINGS_SECRET_KEYS = ("OPENAI_API_KEY", "GEMINI_API_KEY", "INTERVALS_API_KEY", "GARMIN_PASSWORD")
-SETTINGS_VALUE_KEYS = ("GARMIN_EMAIL", "GARMINTOKENS", "GARMIN_FIXTURE_PATH")
-SETTINGS_KEYS = SETTINGS_SECRET_KEYS + SETTINGS_VALUE_KEYS
-
-
-def _submitted_settings(values: Any) -> dict[str, str]:
-    if not isinstance(values, dict):
-        raise AppError(400, "Die Einstellungen müssen als Objekt gesendet werden.")
-    updates: dict[str, str] = {}
-    for key in SETTINGS_KEYS:
-        if key not in values:
-            continue
-        raw = str(values.get(key) or "").replace("\r", "").replace("\n", "").strip()
-        if raw:
-            updates[key] = raw
-    if not updates:
-        raise AppError(400, "Keine neuen Zugangsdaten oder Einstellungen eingegeben.")
-    return updates
-
-
-def _read_settings_file(env_path: Path) -> list[str]:
-    try:
-        return env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
-    except OSError as exc:
-        raise AppError(500, f".env konnte nicht gelesen werden: {exc}") from exc
-
-
-def _rewrite_settings_lines(lines: list[str], updates: dict[str, str]) -> list[str]:
-    seen: set[str] = set()
-    rewritten: list[str] = []
-    for line in lines:
-        match = re.match(r"^(\s*(?:export\s+)?)(?a:((?!\d)\w+))(\s*=).*$", line)
-        key = match.group(2) if match else None
-        if key in updates and match:
-            rewritten.append(f"{match.group(1)}{key}={updates[key]}")
-            seen.add(key)
-        else:
-            rewritten.append(line)
-    for key, value in updates.items():
-        if key not in seen:
-            rewritten.append(f"{key}={value}")
-        # Make a local restart inherit the newly submitted values. The value
-        # is never returned to the browser or written to an application log.
-        os.environ[key] = value
-    return rewritten
-
-
-def save_settings(values: Any) -> dict[str, Any]:
-    """Update explicitly submitted settings without ever returning their values."""
-    updates = _submitted_settings(values)
-    # The data directory is the persistent Docker/Unraid mount. A settings file
-    # there survives container restarts, unlike a file written into the image.
-    env_path = DATA_DIR / ".env"
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    rewritten = _rewrite_settings_lines(_read_settings_file(env_path), updates)
-    try:
-        env_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
-    except OSError as exc:
-        raise AppError(500, f".env konnte nicht gespeichert werden: {exc}") from exc
-    return {"status": "ok", "updated": sorted(updates), "restart_required": True}
-
-
 def _diagnostic_frame(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
@@ -19870,7 +19503,7 @@ def _diagnostic_error_metadata(value: Any) -> dict[str, Any] | None:
         if isinstance(item, str) and re.fullmatch(r"(?a:[A-Za-z_]{1,80})", item):
             result[key] = item
     provider_code = value.get("provider_error_code")
-    if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
+    if isinstance(provider_code, str) and provider_code in observability.OPENAI_RESPONSE_ERROR_CODES:
         result["provider_error_code"] = provider_code
     if isinstance(value.get("status"), int) and 100 <= value["status"] <= 599:
         result["status"] = value["status"]
@@ -19968,7 +19601,7 @@ def diagnostic_report() -> dict[str, Any]:
             "running": get_kv("performance_refresh_running") == "1",
         },
         "garmin": garmin_status,
-        "provider_freshness": provider_freshness_state(),
+        "provider_freshness": _current_provider_freshness(),
         "external_calendar": {
             "configured": bool(CONFIG.calendar_ical_url),
             "last_sync_at": get_kv("last_external_calendar_sync_at"),
@@ -19979,7 +19612,7 @@ def diagnostic_report() -> dict[str, Any]:
         "morning_checkin": morning_checkin_state(),
         "database": {"messages": message_count, "workout_library": library_count, "workout_library_state": workout_library_sync_summary(), "competitions": competition_count, "athlete_checkins": checkin_count, "activity_feedback": activity_feedback_count, "external_calendar_events": len(list_external_calendar_events())},
         "logs": recent_log_entries(),
-        "debug_capture": {**diagnostic_capture_status(), "entries": diagnostic_capture_entries()},
+        "debug_capture": {**DIAGNOSTIC_CAPTURE.status(), "entries": DIAGNOSTIC_CAPTURE.entries()},
         "note": "Zugangsdaten, Tokens, Rohantworten und Athleteninhalte sind ausgeschlossen; die optionale Diagnoseaufzeichnung speichert nur technische Antwortformen und Metadaten.",
     }
 
@@ -20616,7 +20249,7 @@ def authenticated_session(handler: BaseHTTPRequestHandler) -> dict[str, Any] | N
 
 
 def login_user(handler: BaseHTTPRequestHandler, password: str) -> dict[str, Any]:
-    if security_configuration_error():
+    if app_config.security_configuration_error(CONFIG, sqlcipher_available=SQLCIPHER_AVAILABLE):
         raise AppError(503, "Die sichere App-Konfiguration ist unvollständig.")
     allowed, retry_after = allow_rate(f"login:{client_ip(handler)}", 5, 900)
     if not allowed:
@@ -20643,7 +20276,7 @@ def logout_user(handler: BaseHTTPRequestHandler) -> None:
 
 
 def require_auth(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    if security_configuration_error():
+    if app_config.security_configuration_error(CONFIG, sqlcipher_available=SQLCIPHER_AVAILABLE):
         raise AppError(503, "Die sichere App-Konfiguration ist unvollständig.")
     session = authenticated_session(handler)
     if not session:
@@ -20816,7 +20449,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, diagnostic_report())
         elif path == "/api/diagnostics/capture":
             require_auth(self)
-            self.send_json(200, diagnostic_capture_status())
+            self.send_json(200, DIAGNOSTIC_CAPTURE.status())
         elif path == "/api/privacy/export":
             require_auth(self)
             stream_privacy_export(self)
@@ -21144,7 +20777,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if path == "/api/change-history/undo/preview":
             self.send_json(200, _history_preview(self.read_json().get("change_id"), session["csrf_hash"]))
         elif path == "/api/diagnostics/capture":
-            self.send_json(200, set_diagnostic_capture(self.read_json().get("enabled")))
+            self.send_json(200, DIAGNOSTIC_CAPTURE.set_enabled(self.read_json().get("enabled")))
         elif path == "/api/privacy/delete":
             payload = self.read_json()
             if payload.get("confirm") != "LOKALE DATEN LÖSCHEN":
@@ -21465,7 +21098,7 @@ def enqueue_startup_sync_jobs() -> None:
 
 def main() -> None:
     observability.configure_logging(LOGGER, DATA_DIR, LOG_PATH, REDACTOR)
-    configuration_error = security_configuration_error()
+    configuration_error = app_config.security_configuration_error(CONFIG, sqlcipher_available=SQLCIPHER_AVAILABLE)
     if configuration_error:
         LOGGER.critical("Secure startup refused", extra={"event": "secure_startup_refused", "context": {"reason": configuration_error}})
         raise SystemExit(configuration_error)

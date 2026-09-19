@@ -30,6 +30,7 @@ SYNC_GARMIN = "sync/garmin.py"
 SYNC_SCHEDULER = "sync/scheduler.py"
 COACH_PACKAGE = "coach/"
 COACH_CONVERSATION = "coach/conversation.py"
+COACH_CONTEXT = "coach/context.py"
 COACH_JOBS = "coach/jobs.py"
 COACH_MORNING = "coach/morning.py"
 COACH_PROPOSALS = "coach/proposals.py"
@@ -48,6 +49,7 @@ SETTINGS_MODULE = "settings.py"
 ACTIVITIES_PACKAGE = "activities/"
 ATHLETE_PACKAGE = "athlete/"
 PERFORMANCE_PACKAGE = "performance/"
+PERFORMANCE_ACTIVITY_VALIDATION = "performance/activity_validation.py"
 WEATHER_PACKAGE = "weather/"
 HISTORY_PACKAGE = "history/"
 PLANNING_PACKAGE = "planning/"
@@ -55,6 +57,8 @@ PLANNING_COMPETITIONS = "planning/competitions.py"
 BACKUP_PACKAGE = "backup/"
 CALENDAR_PACKAGE = "calendar/"
 PRIVACY_MODULE = "privacy.py"
+DIAGNOSTICS_REPORT = "diagnostics/report.py"
+SYNC_REFRESH = "sync/refresh.py"
 KIND_FUNCTION = "Funktion"
 KIND_CLASS = "Klasse"
 KIND_GLOBAL = "Globale Bindung"
@@ -193,6 +197,8 @@ def _explicit_owner(name: str) -> str | None:
             "external_result_context": OBSERVABILITY_MODULE,
             "provider_error": ERRORS_MODULE,
             "CoachHTTPServer": HTTP_API_PACKAGE,
+            "login_user": HTTP_AUTH,
+            "logout_user": HTTP_AUTH,
             "bootstrap_provider_states": "http_api/bootstrap.py",
             "VERSIONED_STATIC_ASSETS": HTTP_API_PACKAGE,
             "UTC_OFFSET_SUFFIX": CONFIG_MODULE,
@@ -201,7 +207,7 @@ def _explicit_owner(name: str) -> str | None:
             "OCTET_STREAM_MIME": HTTP_API_PACKAGE,
             "VO2MAX_UNIT": PERFORMANCE_PACKAGE,
             "LOCAL_INTERVALS_SCOPE": "coach/authorization.py",
-            "WORKDAY_TIME_LABEL": "coach/context.py",
+            "WORKDAY_TIME_LABEL": COACH_CONTEXT,
             "APP_NAME": CONFIG_MODULE,
             "UUID_PATTERN": HTTP_API_PACKAGE,
             "PAYLOAD_HASH_PATTERN": PLANNING_PACKAGE,
@@ -291,7 +297,7 @@ def _explicit_owner(name: str) -> str | None:
             "safe_openai_log_reason": OBSERVABILITY_MODULE,
             "_log_openai_stream_failure": OBSERVABILITY_MODULE,
             "SETTINGS_SECRET_KEYS": OBSERVABILITY_MODULE,
-            "coach_diagnostic_history": OBSERVABILITY_MODULE,
+            "coach_diagnostic_history": DIAGNOSTICS_REPORT,
             "_safe_response_headers": OBSERVABILITY_MODULE,
             "set_diagnostic_capture": OBSERVABILITY_MODULE,
             "capture_diagnostic_event": OBSERVABILITY_MODULE,
@@ -308,6 +314,25 @@ def _explicit_owner(name: str) -> str | None:
             "_paired_activity_match": ACTIVITIES_PACKAGE,
             "_unpaired_activity_match": ACTIVITIES_PACKAGE,
             "mark_daily_sync": "sync/daily.py",
+            "_add_weather_context": COACH_CONTEXT,
+            "_latest_ride_activity": PERFORMANCE_ACTIVITY_VALIDATION,
+            "latest_activity_for_validation": PERFORMANCE_ACTIVITY_VALIDATION,
+            "bounded_activity_metric": PERFORMANCE_ACTIVITY_VALIDATION,
+            "cycling_activity_validation_details": PERFORMANCE_ACTIVITY_VALIDATION,
+            "recent_log_entries": DIAGNOSTICS_REPORT,
+            "diagnostic_report": DIAGNOSTICS_REPORT,
+            "_diagnostic_frame": DIAGNOSTICS_REPORT,
+            "_diagnostic_error_metadata": DIAGNOSTICS_REPORT,
+            "_diagnostic_command_steps": DIAGNOSTICS_REPORT,
+            "_diagnostic_history_entry": DIAGNOSTICS_REPORT,
+            "_provider_refresh_cleanup": SYNC_REFRESH,
+            "_provider_refresh_start": SYNC_REFRESH,
+            "_provider_refresh_finish": SYNC_REFRESH,
+            "_provider_refresh_error_code": SYNC_REFRESH,
+            "_current_provider_freshness": "sync/freshness.py",
+            "_publish_sync_job_result_event": "sync/jobs.py",
+            "_update_local_planned_workout_in_db": "planning/calendar.py",
+            "readiness_state": PERFORMANCE_PACKAGE,
         }
     return explicit.get(name)
 
@@ -393,7 +418,7 @@ def _owner_from_exact_names(name: str, lowered: str) -> str | None:
     if lowered in {"get_kv", "set_kv"}:
         return SETTINGS_MODULE
     if lowered in {"selected", "coach_quick_actions_state"}:
-        return PLANNING_PACKAGE if lowered == "selected" else "coach/context.py"
+        return PLANNING_PACKAGE if lowered == "selected" else COACH_CONTEXT
     if lowered in {"delete_duplicate_activity", "duplicate_activity_delete_preview"}:
         return ACTIVITIES_PACKAGE
     if lowered.startswith("_retry_after"):
@@ -462,7 +487,7 @@ _PHASE_RULES = (
     (("scheduler", "coach/jobs", "coach/streams", "coach/morning"), "P8"),
     (("sync",), "P6"),
     (("coach",), "P7"),
-    (("backup", "privacy"), "P9"),
+    (("backup", "privacy", "diagnostics"), "P9"),
     (("http_api",), "P10"),
 )
 
