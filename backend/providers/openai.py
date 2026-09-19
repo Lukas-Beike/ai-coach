@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import math
 import re
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
 
-from backend.errors import AppError
+from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.providers import http as provider_http
 
 OPENAI_RATE_LIMIT_HEADERS = {
@@ -54,6 +55,40 @@ def response_id(value: Any) -> str:
     if not re.fullmatch(r"(?a:resp_[\w-]{1,200})", normalized):
         raise AppError(502, "OpenAI hat keine gültige Response-ID zurückgegeben.", reason="invalid_response")
     return normalized
+
+
+def poll_background_response(
+    initial_response: dict[str, Any],
+    *,
+    retrieve: Callable[[str], dict[str, Any]],
+    cancel: Callable[[str], Any],
+    cancel_event: Any = None,
+    poll_seconds: float,
+    max_seconds: float,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    """Poll one OpenAI background response until it reaches a terminal status."""
+    started = monotonic()
+    active_response_id = response_id(initial_response.get("id"))
+    current = initial_response
+
+    def abort(error: AppError) -> None:
+        try:
+            cancel(active_response_id)
+        except Exception:  # noqa: BLE001, S110 - remote cancellation is best effort
+            pass
+        raise error
+
+    while str(current.get("status") or "").casefold() in {"queued", "in_progress"}:
+        if cancel_event is not None:
+            if cancel_event.wait(poll_seconds) or getattr(cancel_event, "is_set", lambda: False)():
+                abort(AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled"))
+        else:
+            time.sleep(poll_seconds)
+        if monotonic() - started >= max_seconds:
+            abort(AppError(504, "Die Hintergrundplanung hat das Zeitlimit überschritten.", reason="provider_timeout"))
+        current = retrieve(active_response_id)
+    return current
 
 
 def responses_payload(

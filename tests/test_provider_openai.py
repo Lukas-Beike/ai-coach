@@ -2,6 +2,7 @@ import json
 import threading
 import unittest
 from types import MappingProxyType
+from unittest import mock
 
 from backend.errors import AppError
 from backend.providers.http import ProviderRequestCancelled, ProviderResponseTooLarge
@@ -12,6 +13,7 @@ from backend.providers.openai import (
     endpoint,
     error_details,
     error_diagnostic_details,
+    poll_background_response,
     rate_limit_snapshot,
     read_stream_response,
     request_stream_response,
@@ -87,6 +89,150 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             self.assertEqual(raised.exception.status, 502)
             self.assertEqual(raised.exception.message, "OpenAI hat keine gültige Response-ID zurückgegeben.")
             self.assertEqual(raised.exception.reason, "invalid_response")
+
+    def test_poll_background_response_returns_terminal_initial_response(self):
+        response = {"id": " resp_initial ", "status": "completed", "output": []}
+        retrieve_calls = []
+
+        result = poll_background_response(
+            response,
+            retrieve=lambda response_id: retrieve_calls.append(response_id),
+            cancel=lambda response_id: self.fail("terminal response must not be cancelled"),
+            poll_seconds=1,
+            max_seconds=5,
+        )
+
+        self.assertIs(result, response)
+        self.assertEqual(retrieve_calls, [])
+
+    def test_poll_background_response_polls_until_terminal_with_casefold_status(self):
+        responses = iter((
+            {"status": "IN_PROGRESS"},
+            {"status": "Queued"},
+            {"status": "completed", "answer": "done"},
+        ))
+        retrieved_ids = []
+        waits = []
+        clock = iter((10.0, 10.1, 10.2, 10.3))
+
+        class Event:
+            def wait(self, seconds):
+                waits.append(seconds)
+                return False
+
+        result = poll_background_response(
+            {"id": "resp_poll", "status": "queued"},
+            retrieve=lambda response_id: (retrieved_ids.append(response_id), next(responses))[1],
+            cancel=lambda _response_id: self.fail("polling must not be cancelled"),
+            cancel_event=Event(),
+            poll_seconds=2,
+            max_seconds=5,
+            monotonic=lambda: next(clock),
+        )
+
+        self.assertEqual(result, {"status": "completed", "answer": "done"})
+        self.assertEqual(retrieved_ids, ["resp_poll", "resp_poll", "resp_poll"])
+        self.assertEqual(waits, [2, 2, 2])
+
+    def test_poll_background_response_cancels_before_wait(self):
+        class Event:
+            def wait(self, seconds):
+                waits.append(seconds)
+                return True
+
+        cancelled = []
+        waits = []
+        with self.assertRaises(AppError) as raised:
+            poll_background_response(
+                {"id": "resp_cancel", "status": "in_progress"},
+                retrieve=lambda _response_id: self.fail("cancelled response must not be retrieved"),
+                cancel=cancelled.append,
+                cancel_event=Event(),
+                poll_seconds=3,
+                max_seconds=5,
+                monotonic=lambda: 0,
+            )
+
+        self.assertEqual(cancelled, ["resp_cancel"])
+        self.assertEqual(waits, [3])
+        self.assertEqual((raised.exception.status, raised.exception.reason, raised.exception.message), (499, "chat_cancelled", "Die Coach-Anfrage wurde abgebrochen."))
+
+    def test_poll_background_response_cancels_when_event_is_set_after_wait(self):
+        class Event:
+            def __init__(self):
+                self.set = False
+
+            def wait(self, seconds):
+                waits.append(seconds)
+                self.set = True
+                return False
+
+            def is_set(self):
+                return self.set
+
+        cancelled = []
+        waits = []
+        with self.assertRaises(AppError) as raised:
+            poll_background_response(
+                {"id": "resp_cancel_after_wait", "status": "queued"},
+                retrieve=lambda _response_id: self.fail("cancelled response must not be retrieved"),
+                cancel=cancelled.append,
+                cancel_event=Event(),
+                poll_seconds=3,
+                max_seconds=5,
+                monotonic=lambda: 0,
+            )
+
+        self.assertEqual(cancelled, ["resp_cancel_after_wait"])
+        self.assertEqual(waits, [3])
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+
+    def test_poll_background_response_times_out_from_function_entry(self):
+        times = iter((100.0, 101.0))
+        cancelled = []
+        sleeps = []
+
+        with mock.patch("backend.providers.openai.time.sleep", sleeps.append), self.assertRaises(AppError) as raised:
+            poll_background_response(
+                {"id": "resp_timeout", "status": "queued"},
+                retrieve=lambda _response_id: self.fail("timed out response must not be retrieved"),
+                cancel=cancelled.append,
+                poll_seconds=1,
+                max_seconds=1,
+                monotonic=lambda: next(times),
+            )
+
+        self.assertEqual(sleeps, [1])
+        self.assertEqual(cancelled, ["resp_timeout"])
+        self.assertEqual((raised.exception.status, raised.exception.reason, raised.exception.message), (504, "provider_timeout", "Die Hintergrundplanung hat das Zeitlimit überschritten."))
+
+    def test_poll_background_response_preserves_timeout_when_cancel_fails(self):
+        def cancel(_response_id):
+            raise RuntimeError("remote cancellation failed")
+
+        with mock.patch("backend.providers.openai.time.sleep"), self.assertRaises(AppError) as raised:
+            poll_background_response(
+                {"id": "resp_cancel_failure", "status": "queued"},
+                retrieve=lambda _response_id: self.fail("timed out response must not be retrieved"),
+                cancel=cancel,
+                poll_seconds=1,
+                max_seconds=0,
+                monotonic=lambda: 1,
+            )
+
+        self.assertEqual((raised.exception.status, raised.exception.reason), (504, "provider_timeout"))
+
+    def test_poll_background_response_rejects_invalid_initial_response_id(self):
+        with self.assertRaises(AppError) as raised:
+            poll_background_response(
+                {"id": "not-a-response-id", "status": "completed"},
+                retrieve=lambda _response_id: self.fail("invalid response must not be retrieved"),
+                cancel=lambda _response_id: self.fail("invalid response must not be cancelled"),
+                poll_seconds=1,
+                max_seconds=5,
+            )
+
+        self.assertEqual((raised.exception.status, raised.exception.reason), (502, "invalid_response"))
 
     def test_responses_payload_removes_internal_provider_without_mutating_mapping(self):
         marker = object()
