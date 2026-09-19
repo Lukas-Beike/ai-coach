@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from backend.errors import AppError
@@ -102,6 +102,115 @@ def function_tools(tools: Any) -> list[dict[str, Any]]:
             else {"type": "object", "properties": {}},
         })
     return [{"functionDeclarations": declarations}] if declarations else []
+
+
+def _data_url_part(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, str) or not value.startswith("data:"):
+        return None
+    try:
+        header, data = value.split(",", 1)
+    except ValueError:
+        return None
+    return {"inlineData": {"mimeType": header[5:].split(";", 1)[0], "data": data}}
+
+
+def input_parts(
+    value: Any,
+    call_names: Mapping[str, str],
+    transient_media: Any,
+) -> list[dict[str, Any]]:
+    """Translate Responses input items to Gemini user parts without side effects."""
+    if not isinstance(value, list):
+        return []
+    names = call_names if isinstance(call_names, Mapping) else {}
+    parts: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict) and item.get("role") == "user" and isinstance(item.get("content"), list):
+            for content in item["content"]:
+                if not isinstance(content, dict):
+                    continue
+                if content.get("type") == "input_text":
+                    parts.append({"text": content.get("text")})
+                elif content.get("type") == "input_image":
+                    part = _data_url_part(content.get("image_url"))
+                    if part:
+                        parts.append(part)
+                elif content.get("type") == "input_file":
+                    part = _data_url_part(content.get("file_data"))
+                    if part:
+                        parts.append(part)
+            continue
+        if not isinstance(item, dict) or item.get("type") != "function_call_output":
+            continue
+        try:
+            output = json.loads(item.get("output") or "{}")
+        except (TypeError, ValueError):
+            output = {"error": "Tool output was not JSON."}
+        parts.append({
+            "functionResponse": {
+                "name": names.get(str(item.get("call_id") or ""), "coach_tool"),
+                "response": output if isinstance(output, dict) else {"result": output},
+            }
+        })
+    has_input_media = any(
+        "inlineData" in part or "untrusted_fit_raw_base64" in str(part.get("text") or "")
+        for part in parts
+        if isinstance(part, dict)
+    )
+    if not has_input_media and isinstance(transient_media, (list, tuple)):
+        for image in transient_media:
+            if isinstance(image, dict) and image.get("mime") and image.get("data"):
+                parts.append({"inlineData": {"mimeType": image["mime"], "data": image["data"]}})
+    return parts
+
+
+def request_payload(
+    payload: Mapping[str, Any],
+    *,
+    model: str,
+    contents: list[dict[str, Any]],
+    default_max_output_tokens: int,
+    default_thinking_level: str,
+    json_media_type: str = "application/json",
+) -> dict[str, Any]:
+    """Build a Gemini generateContent request from a Responses-style payload."""
+    request: dict[str, Any] = {
+        "contents": contents,
+        "generationConfig": {
+            "maxOutputTokens": int(payload.get("max_output_tokens") or default_max_output_tokens),
+        },
+    }
+    instructions = str(payload.get("instructions") or "")
+    if instructions:
+        request["systemInstruction"] = {"parts": [{"text": instructions}]}
+    tools = function_tools(payload.get("tools"))
+    if tools:
+        request["tools"] = tools
+        choice = payload.get("tool_choice", "auto")
+        config: dict[str, Any] = {"mode": "AUTO"}
+        if choice == "none":
+            config["mode"] = "NONE"
+        elif isinstance(choice, dict) and choice.get("type") == "function":
+            config = {"mode": "ANY", "allowedFunctionNames": [str(choice.get("name"))]}
+        request["toolConfig"] = {"functionCallingConfig": config}
+    text_format = payload.get("text") if isinstance(payload.get("text"), dict) else {}
+    format_config = text_format.get("format") if isinstance(text_format.get("format"), dict) else {}
+    if format_config.get("type") == "json_schema" and isinstance(format_config.get("schema"), dict):
+        request["generationConfig"].update({
+            "responseMimeType": json_media_type,
+            "responseJsonSchema": format_config["schema"],
+        })
+    explicit_reasoning = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else {}
+    thinking_level = str(explicit_reasoning.get("effort") or default_thinking_level).casefold()
+    if thinking_level not in {"low", "medium", "high"}:
+        thinking_level = str(default_thinking_level).casefold()
+    if model.startswith("gemini-3."):
+        request["generationConfig"]["thinkingConfig"] = {"thinkingLevel": thinking_level}
+    else:
+        thinking = {"low": 1024, "medium": 8192, "high": 24576}.get(thinking_level)
+        if thinking:
+            request["generationConfig"]["thinkingConfig"] = {"thinkingBudget": thinking}
+    return request
 
 
 def _provider_error_payload(raw_body: bytes) -> dict[str, Any]:
