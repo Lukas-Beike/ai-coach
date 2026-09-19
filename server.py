@@ -13022,34 +13022,46 @@ def _gemini_local_chat_history() -> list[dict[str, Any]]:
     return _trim_gemini_history(history)
 
 
+def _gemini_request_history(payload: dict[str, Any], input_value: Any, persistent: bool) -> list[dict[str, Any]]:
+    history = _gemini_history() if persistent else []
+    if not persistent or not isinstance(input_value, str):
+        return history
+    local_history = _gemini_local_chat_history()
+    if not local_history:
+        return history
+    replayed_media = _gemini_inline_media_from_history(local_history)
+    if replayed_media:
+        payload["_gemini_transient_images"] = replayed_media
+    return local_history
+
+
+def _gemini_last_user_text(history: list[dict[str, Any]]) -> str:
+    if not history or not isinstance(history[-1], dict) or history[-1].get("role") != "user":
+        return ""
+    parts = history[-1].get("parts") if isinstance(history[-1].get("parts"), list) else []
+    return str(parts[0].get("text") or "") if parts and isinstance(parts[0], dict) else ""
+
+
+def _gemini_call_names() -> dict[str, str]:
+    try:
+        saved = json.loads(get_kv("gemini_call_names") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return saved if isinstance(saved, dict) else {}
+
+
 def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
     persistent = bool(payload.get("conversation"))
-    history = _gemini_history() if persistent else []
     input_value = payload.get("input")
-    if persistent and isinstance(input_value, str):
-        local_history = _gemini_local_chat_history()
-        if local_history:
-            history = local_history
-            replayed_media = _gemini_inline_media_from_history(local_history)
-            if replayed_media:
-                payload["_gemini_transient_images"] = replayed_media
+    history = _gemini_request_history(payload, input_value, persistent)
+    parts: list[dict[str, Any]] = []
     if isinstance(input_value, str):
-        last_text = ""
-        if history and isinstance(history[-1], dict) and history[-1].get("role") == "user":
-            parts = history[-1].get("parts") if isinstance(history[-1].get("parts"), list) else []
-            last_text = str(parts[0].get("text") or "") if parts and isinstance(parts[0], dict) else ""
-        if input_value != last_text:
+        if input_value != _gemini_last_user_text(history):
             history.append({"role": "user", "parts": [{"text": input_value}]})
     elif isinstance(input_value, list):
-        call_names: dict[str, str] = {}
-        try:
-            saved = json.loads(get_kv("gemini_call_names") or "{}")
-            call_names = saved if isinstance(saved, dict) else {}
-        except (TypeError, json.JSONDecodeError):
-            pass
         parts = gemini_provider.input_parts(
             input_value,
-            call_names,
+            _gemini_call_names(),
             payload.get("_gemini_transient_images"),
         )
         if parts:
