@@ -162,18 +162,25 @@ def _ical_rule_integer(values: dict[str, str], name: str, minimum: int, maximum:
     return result
 
 
+def _ical_rule_byday_token(token: str, frequency: str) -> tuple[int, int | None]:
+    match = re.fullmatch(r"([+-]?\d{1,2})?([A-Z]{2})", token)
+    if not match or match.group(2) not in ICAL_DAY_NUMBERS:
+        raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
+    ordinal = int(match.group(1)) if match.group(1) else None
+    if ordinal == 0 or (ordinal is not None and abs(ordinal) > 53):
+        raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
+    if frequency in {"DAILY", "WEEKLY"} and ordinal is not None:
+        raise AppError(400, "Eine BYDAY-Position wird nur für MONTHLY oder YEARLY unterstützt.")
+    return ICAL_DAY_NUMBERS[match.group(2)], ordinal
+
+
 def _ical_rule_bydays(values: dict[str, str], frequency: str) -> list[tuple[int, int | None]]:
+    raw = values.get("BYDAY")
+    if not raw:
+        return []
     result: list[tuple[int, int | None]] = []
-    for token in values.get("BYDAY", "").split(",") if values.get("BYDAY") else []:
-        match = re.fullmatch(r"([+-]?\d{1,2})?([A-Z]{2})", token)
-        if not match or match.group(2) not in ICAL_DAY_NUMBERS:
-            raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
-        ordinal = int(match.group(1)) if match.group(1) else None
-        if ordinal == 0 or (ordinal is not None and abs(ordinal) > 53):
-            raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
-        if frequency in {"DAILY", "WEEKLY"} and ordinal is not None:
-            raise AppError(400, "Eine BYDAY-Position wird nur für MONTHLY oder YEARLY unterstützt.")
-        item = (ICAL_DAY_NUMBERS[match.group(2)], ordinal)
+    for token in raw.split(","):
+        item = _ical_rule_byday_token(token, frequency)
         if item in result:
             raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
         result.append(item)
@@ -290,6 +297,31 @@ def _ical_daily(base: datetime, rule: dict[str, Any], first: date, last: date) -
     return starts
 
 
+def _ical_weekly_slot(
+    base: datetime,
+    base_date: date,
+    week: date,
+    bydays: list[tuple[int, int | None]],
+    rule: dict[str, Any],
+    first: date,
+    last: date,
+    occurrences: int,
+) -> tuple[list[datetime], int, bool]:
+    starts: list[datetime] = []
+    for weekday, _ordinal in sorted(bydays):
+        day = week + timedelta(days=(weekday - rule["wkst"]) % 7)
+        if day < base_date or not _ical_matches_date_filters(day, {**rule, "bydays": []}):
+            continue
+        value = _ical_shift_local(base, (day - base_date).days)
+        if rule["count"] is not None and occurrences >= rule["count"]:
+            return starts, occurrences, True
+        if rule["until"] is not None and value > rule["until"]:
+            return starts, occurrences, True
+        occurrences += 1
+        _ical_add_start(starts, value, first, last)
+    return starts, occurrences, False
+
+
 def _ical_weekly(base: datetime, rule: dict[str, Any], first: date, last: date) -> list[datetime]:
     base_date = base.date()
     base_week = base_date - timedelta(days=(base_date.weekday() - rule["wkst"]) % 7)
@@ -303,19 +335,46 @@ def _ical_weekly(base: datetime, rule: dict[str, Any], first: date, last: date) 
         week = base_week + timedelta(days=slot * rule["interval"] * 7)
         if week > last:
             break
-        for weekday, _ordinal in sorted(bydays):
-            day = week + timedelta(days=(weekday - rule["wkst"]) % 7)
-            if day < base_date or not _ical_matches_date_filters(day, {**rule, "bydays": []}):
-                continue
-            value = _ical_shift_local(base, (day - base_date).days)
-            if rule["count"] is not None and occurrences >= rule["count"]:
-                return starts
-            if rule["until"] is not None and value > rule["until"]:
-                return starts
-            occurrences += 1
-            _ical_add_start(starts, value, first, last)
+        slot_starts, occurrences, stop = _ical_weekly_slot(base, base_date, week, bydays, rule, first, last, occurrences)
+        starts.extend(slot_starts)
+        if stop:
+            return starts
         slot += 1
     return starts
+
+
+def _ical_period_context(base_date: date, rule: dict[str, Any], period: int) -> tuple[int, list[int], bool]:
+    monthly = rule["frequency"] == "MONTHLY"
+    if monthly:
+        month_index = base_date.year * 12 + base_date.month - 1 + period * rule["interval"]
+        year, month = divmod(month_index, 12)
+        return year, [month + 1], True
+    year = base_date.year + period * rule["interval"]
+    months = rule["bymonth"] or (range(1, 13) if rule["bydays"] or rule["bymonthday"] else [base_date.month])
+    return year, list(months), False
+
+
+def _ical_period_slot(
+    base: datetime,
+    base_date: date,
+    year: int,
+    months: list[int],
+    rule: dict[str, Any],
+    first: date,
+    last: date,
+    occurrences: int,
+) -> tuple[list[datetime], int, bool]:
+    candidates = [day for month in months for day in _ical_period_dates(base_date, year, month, rule)]
+    starts: list[datetime] = []
+    for candidate in [day for day in _ical_apply_bysetpos(candidates, rule) if day >= base_date]:
+        value = _ical_shift_local(base, (candidate - base_date).days)
+        if rule["until"] is not None and value > rule["until"]:
+            return starts, occurrences, True
+        if rule["count"] is not None and occurrences >= rule["count"]:
+            return starts, occurrences, True
+        occurrences += 1
+        _ical_add_start(starts, value, first, last)
+    return starts, occurrences, False
 
 
 def _ical_period(base: datetime, rule: dict[str, Any], first: date, last: date) -> list[datetime]:
@@ -328,24 +387,12 @@ def _ical_period(base: datetime, rule: dict[str, Any], first: date, last: date) 
     starts: list[datetime] = []
     occurrences = 0
     while period <= first_period + ICAL_MAX_RECURRENCE_PERIODS:
-        if monthly:
-            month_index = base_date.year * 12 + base_date.month - 1 + period * rule["interval"]
-            year, month = divmod(month_index, 12)
-            months = [month + 1]
-        else:
-            year = base_date.year + period * rule["interval"]
-            months = rule["bymonth"] or (range(1, 13) if rule["bydays"] or rule["bymonthday"] else [base_date.month])
-            months = list(months)
-        candidates = [d for month in months for d in _ical_period_dates(base_date, year, month, rule)]
-        for candidate in [d for d in _ical_apply_bysetpos(candidates, rule) if d >= base_date]:
-            value = _ical_shift_local(base, (candidate - base_date).days)
-            if rule["until"] is not None and value > rule["until"]:
-                return starts
-            if rule["count"] is not None and occurrences >= rule["count"]:
-                return starts
-            occurrences += 1
-            _ical_add_start(starts, value, first, last)
-        marker = date(year, months[-1], 1) if monthly else date(year, 1, 1)
+        year, months, is_monthly = _ical_period_context(base_date, rule, period)
+        slot_starts, occurrences, stop = _ical_period_slot(base, base_date, year, months, rule, first, last, occurrences)
+        starts.extend(slot_starts)
+        if stop:
+            return starts
+        marker = date(year, months[-1], 1) if is_monthly else date(year, 1, 1)
         if marker > last:
             break
         period += 1
@@ -407,24 +454,32 @@ def _ical_property_parameters(key_part: str) -> tuple[str, dict[str, str]]:
     return parts[0].upper(), parameters
 
 
-def _ical_store_property(event: dict[str, Any], key: str, raw: str, parameters: dict[str, str], local_zone: tzinfo) -> None:
-    if key in {"DTSTART", "DTEND"}:
-        value = _ical_temporal_value(raw, parameters, local_zone)
-        if value:
-            event["all_day"] = value[1] if key == "DTSTART" else event.get("all_day", value[1])
-            event["start" if key == "DTSTART" else "end"] = value[0]
-        return
-    if key in {"EXDATE", "RDATE"}:
-        if key == "RDATE" and "/" in raw:
-            raise AppError(400, "RDATE mit Zeiträumen wird nicht unterstützt.")
-        field = "exdates" if key == "EXDATE" else "rdates"
-        message = "EXDATE der Kalender-Wiederholung ist ungültig." if key == "EXDATE" else "RDATE der Kalender-Wiederholung ist ungültig."
-        for value in raw.split(","):
-            parsed = _ical_temporal_value(value, parameters, local_zone)
-            if parsed is None:
-                raise AppError(400, message)
-            event.setdefault(field, []).append(parsed[0])
-        return
+def _ical_store_temporal_property(event: dict[str, Any], key: str, raw: str, parameters: dict[str, str], local_zone: tzinfo) -> bool:
+    if key not in {"DTSTART", "DTEND"}:
+        return False
+    value = _ical_temporal_value(raw, parameters, local_zone)
+    if value:
+        event["all_day"] = value[1] if key == "DTSTART" else event.get("all_day", value[1])
+        event["start" if key == "DTSTART" else "end"] = value[0]
+    return True
+
+
+def _ical_store_recurrence_dates(event: dict[str, Any], key: str, raw: str, parameters: dict[str, str], local_zone: tzinfo) -> bool:
+    if key not in {"EXDATE", "RDATE"}:
+        return False
+    if key == "RDATE" and "/" in raw:
+        raise AppError(400, "RDATE mit Zeiträumen wird nicht unterstützt.")
+    field = "exdates" if key == "EXDATE" else "rdates"
+    message = "EXDATE der Kalender-Wiederholung ist ungültig." if key == "EXDATE" else "RDATE der Kalender-Wiederholung ist ungültig."
+    for value in raw.split(","):
+        parsed = _ical_temporal_value(value, parameters, local_zone)
+        if parsed is None:
+            raise AppError(400, message)
+        event.setdefault(field, []).append(parsed[0])
+    return True
+
+
+def _ical_store_scalar_property(event: dict[str, Any], key: str, raw: str, parameters: dict[str, str], local_zone: tzinfo) -> None:
     fields = {"UID": ("uid", 500), "SUMMARY": ("name", 200), "DESCRIPTION": ("description", 2000), "STATUS": ("status", 30)}
     if key in fields:
         field, limit = fields[key]
@@ -444,6 +499,37 @@ def _ical_store_property(event: dict[str, Any], key: str, raw: str, parameters: 
         event["unsupported_recurrence"] = True
 
 
+def _ical_store_property(event: dict[str, Any], key: str, raw: str, parameters: dict[str, str], local_zone: tzinfo) -> None:
+    if _ical_store_temporal_property(event, key, raw, parameters, local_zone):
+        return
+    if _ical_store_recurrence_dates(event, key, raw, parameters, local_zone):
+        return
+    _ical_store_scalar_property(event, key, raw, parameters, local_zone)
+
+
+def _ical_append_parsed_event(current: dict[str, Any] | None, events: list[dict[str, Any]]) -> None:
+    if current and current.get("status", "").upper() != "CANCELLED" and not (current.get("uid") and current.get("start")):
+        raise AppError(400, "Ein Kalendertermin benötigt UID und DTSTART.")
+    if current and current.get("uid") and (current.get("start") or (current.get("status", "").upper() == "CANCELLED" and current.get("recurrence_id") is not None)):
+        events.append(current)
+
+
+def _ical_nested_line(current: dict[str, Any] | None, nested: int, upper: str) -> tuple[bool, int]:
+    if current is not None and upper.startswith("BEGIN:"):
+        return True, nested + 1
+    if nested:
+        return True, nested - 1 if upper.startswith("END:") else nested
+    return False, nested
+
+
+def _ical_store_line(current: dict[str, Any], line: str, local_zone: tzinfo) -> None:
+    if ":" not in line:
+        return
+    key_part, raw = line.split(":", 1)
+    key, parameters = _ical_property_parameters(key_part)
+    _ical_store_property(current, key, raw, parameters, local_zone)
+
+
 def _ical_parsed_events(payload: bytes, local_zone: tzinfo) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
@@ -453,24 +539,15 @@ def _ical_parsed_events(payload: bytes, local_zone: tzinfo) -> list[dict[str, An
         if upper == "BEGIN:VEVENT":
             current = {}
             continue
-        if current is not None and upper.startswith("BEGIN:"):
-            nested += 1
-            continue
-        if nested:
-            if upper.startswith("END:"):
-                nested -= 1
+        handled, nested = _ical_nested_line(current, nested, upper)
+        if handled:
             continue
         if upper == "END:VEVENT":
-            if current and current.get("status", "").upper() != "CANCELLED" and not (current.get("uid") and current.get("start")):
-                raise AppError(400, "Ein Kalendertermin benötigt UID und DTSTART.")
-            if current and current.get("uid") and (current.get("start") or (current.get("status", "").upper() == "CANCELLED" and current.get("recurrence_id") is not None)):
-                events.append(current)
+            _ical_append_parsed_event(current, events)
             current = None
             continue
-        if current is not None and ":" in line:
-            key_part, raw = line.split(":", 1)
-            key, parameters = _ical_property_parameters(key_part)
-            _ical_store_property(current, key, raw, parameters, local_zone)
+        if current is not None:
+            _ical_store_line(current, line, local_zone)
     return events
 
 
@@ -482,25 +559,60 @@ def _ical_window(window_start: date | None, window_end: date | None, today: date
     return first, last
 
 
+def _ical_is_master_event(event: dict[str, Any]) -> bool:
+    return event.get("recurrence_id") is None and event.get("status", "").upper() != "CANCELLED"
+
+
+def _ical_is_exception_event(event: dict[str, Any]) -> bool:
+    return event.get("recurrence_id") is not None and event.get("status", "").upper() != "CANCELLED"
+
+
+def _ical_add_result_instances(
+    result: dict[tuple[str, str], dict[str, Any]],
+    event: dict[str, Any],
+    first: date,
+    last: date,
+    local_zone: tzinfo,
+    excluded: set[datetime] | None = None,
+) -> None:
+    for item in _ical_instances(event, first, last, local_zone, excluded):
+        key = (item["uid"], item["start_local"])
+        if key not in result and len(result) >= ICAL_MAX_RECURRENCE_COUNT:
+            raise AppError(400, f"Der Kalender-Feed enthält mehr als {ICAL_MAX_RECURRENCE_COUNT} Termine im Syncfenster.")
+        result.setdefault(key, item)
+
+
+def _ical_add_master_results(
+    result: dict[tuple[str, str], dict[str, Any]],
+    events: list[dict[str, Any]],
+    first: date,
+    last: date,
+    local_zone: tzinfo,
+) -> None:
+    for event in filter(_ical_is_master_event, events):
+        exceptions = {item["recurrence_id"] for item in events if item.get("uid") == event.get("uid") and item.get("recurrence_id") is not None}
+        _ical_add_result_instances(result, event, first, last, local_zone, exceptions)
+
+
+def _ical_add_exception_results(
+    result: dict[tuple[str, str], dict[str, Any]],
+    events: list[dict[str, Any]],
+    first: date,
+    last: date,
+    local_zone: tzinfo,
+) -> None:
+    for event in filter(_ical_is_exception_event, events):
+        _ical_add_result_instances(result, event, first, last, local_zone)
+
+
+def _ical_expanded_results(events: list[dict[str, Any]], first: date, last: date, local_zone: tzinfo) -> list[dict[str, Any]]:
+    result: dict[tuple[str, str], dict[str, Any]] = {}
+    _ical_add_master_results(result, events, first, last, local_zone)
+    _ical_add_exception_results(result, events, first, last, local_zone)
+    return sorted(result.values(), key=lambda item: (item["start_local"], item["name"], item["uid"]))[:ICAL_MAX_RECURRENCE_COUNT]
+
+
 def parse_ical_calendar(payload: bytes, *, local_zone: tzinfo, today: date, window_start: date | None = None, window_end: date | None = None) -> list[dict[str, Any]]:
     first, last = _ical_window(window_start, window_end, today)
     events = _ical_parsed_events(payload, local_zone)
-    result: dict[tuple[str, str], dict[str, Any]] = {}
-    for event in events:
-        if event.get("recurrence_id") is not None or event.get("status", "").upper() == "CANCELLED":
-            continue
-        exceptions = {item["recurrence_id"] for item in events if item.get("uid") == event.get("uid") and item.get("recurrence_id") is not None}
-        for item in _ical_instances(event, first, last, local_zone, exceptions):
-            key = (item["uid"], item["start_local"])
-            if key not in result and len(result) >= ICAL_MAX_RECURRENCE_COUNT:
-                raise AppError(400, f"Der Kalender-Feed enthält mehr als {ICAL_MAX_RECURRENCE_COUNT} Termine im Syncfenster.")
-            result.setdefault(key, item)
-    for event in events:
-        if event.get("recurrence_id") is None or event.get("status", "").upper() == "CANCELLED":
-            continue
-        for item in _ical_instances(event, first, last, local_zone):
-            key = (item["uid"], item["start_local"])
-            if key not in result and len(result) >= ICAL_MAX_RECURRENCE_COUNT:
-                raise AppError(400, f"Der Kalender-Feed enthält mehr als {ICAL_MAX_RECURRENCE_COUNT} Termine im Syncfenster.")
-            result.setdefault(key, item)
-    return sorted(result.values(), key=lambda item: (item["start_local"], item["name"], item["uid"]))[:ICAL_MAX_RECURRENCE_COUNT]
+    return _ical_expanded_results(events, first, last, local_zone)
