@@ -91,6 +91,39 @@ def poll_background_response(
     return current
 
 
+def request_with_conversation_retry(
+    request: Callable[[], Any],
+    *,
+    cancel_event: Any = None,
+    on_retry: Callable[[int, int], None] | None = None,
+    wait: Callable[[float], Any] = time.sleep,
+    max_attempts: int = 3,
+) -> Any:
+    """Run a request, retrying only while its conversation is locked."""
+    if not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or max_attempts <= 0:
+        raise ValueError("max_attempts must be positive")
+
+    for attempt in range(max_attempts):
+        try:
+            return request()
+        except Exception as exc:
+            if getattr(exc, "reason", None) != "conversation_locked" or attempt + 1 >= max_attempts:
+                raise
+            delay = 2**attempt
+            is_cancelled = getattr(cancel_event, "is_set", lambda: False) if cancel_event is not None else lambda: False
+            if is_cancelled():
+                raise provider_http.ProviderRequestCancelled from exc
+            if on_retry is not None:
+                on_retry(attempt + 1, delay)
+            if cancel_event is not None:
+                if cancel_event.wait(delay) or is_cancelled():
+                    raise provider_http.ProviderRequestCancelled from exc
+            else:
+                wait(delay)
+
+    raise AssertionError("unreachable")
+
+
 def responses_payload(
     payload: Mapping[str, Any], *, thinking_level: str, stream: bool = False, background: bool = False
 ) -> dict[str, Any]:
