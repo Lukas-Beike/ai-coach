@@ -483,6 +483,68 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - Docker-/E2E-Ausführung bleibt lokal durch den nicht erreichbaren
   Docker-Desktop-Daemon blockiert; die externen PR-Gates bleiben verbindlich.
 
+## P2.8 — Begrenzte JSON-Ausführung und OpenAI-Streamtransport
+
+- Basis: bestätigter Squash-Merge von PR #688 am `2026-09-19T19:28:37Z`;
+  Merge-Commit `1e46e2c17554b879981f7aab033db26990f81acf` ist auf
+  `origin/develop` erreichbar. Alle Checks waren grün und die GraphQL-Abfrage
+  ergab null Review-Threads.
+- HTTP-Worker: geprüfter Commit
+  `7ded0bfd90533c21a860bfaa69cc170c17826b62`, integriert als `bc300f2`.
+  Review: **PASS** — `request_json` besitzt Öffnen, begrenztes Lesen,
+  UTF-8-/JSON-Dekodierung und Cleanup; Status, Header und Bytezahl werden in
+  `JsonResponse` zurückgegeben. Transportfehler bleiben unverändert, ungültige
+  Antworten erhalten eine statische, geheimnisfreie Fehlermeldung.
+- OpenAI-Worker: Erststand
+  `3341dc4d745e6e16b17b9adbd4dfb84e295f076c`: **FAIL**, weil Status und
+  Rate-Limit-Header nach dem geschlossenen Response nicht verfügbar waren.
+  Korrektur `7e0e15c2742f50031262e4f5216f422b0c1a5165`: erneut **FAIL**, weil ein
+  dauerhafter zweiter State-Name als Kompatibilitätsalias verblieb. Korrektur
+  `399f6a6f187d740eb2eb70e2c27bfdc447e3baa4`: **PASS** — genau ein
+  `StreamReadState` besitzt Bytefortschritt, Status und Header; der Adapter
+  besitzt Öffnen, Header-Abbruch, Response-Handle und deterministisches Cleanup.
+  Integriert als `64b46d9`, `9a5f95d` und `61d6b25`.
+- Root-Integration `763e596` und `70e2905`: **PASS** — `server.py` ruft weder
+  `provider_http.open_interruptibly` noch `provider_http.read_response` direkt
+  auf. Leere JSON-Antworten bleiben `None`, Größenlimits bleiben 502, und
+  OpenAI-Rate-Limit-Header sowie Status werden auch bei nachfolgendem
+  Streamfehler persistiert. Cancellation, Client-Disconnect, Timeout,
+  Response-ID-/Delta-Ausgabe und diagnostische Bytezahlen bleiben erhalten.
+  Es gibt keine Rückimporte, Server-Fachcallbacks oder Kompatibilitätswrapper.
+- `server.py`: 19.863 physische Zeilen und 1.100 verbleibende
+  Funktionen/Klassen. Das Inventar enthält 1.547 Einträge; P0 bleibt ohne
+  unklare Zuordnung, in P2 bleiben 81 Definitionen und 10 globale Bindungen
+  offen. Dieser Schritt verlagert Transportbesitz und entfernt deshalb keine
+  zusätzliche Top-Level-Definition.
+
+### Prüfungen
+
+- HTTP-Worker: 27 fokussierte Tests im Root-Nachlauf, PASS; Ruff, PyCompile und
+  `git diff --check`: PASS.
+- OpenAI-Worker nach den beiden Korrekturrunden: 36 Tests, PASS; Root-Diff- und
+  Code-Review, Ruff, PyCompile und `git diff --check`: PASS.
+- Integrierte Provider-, Architektur-, Status-, Cancellation- und
+  Streamingregressionen: 76 Tests, PASS.
+- Vollständiger integrierter Lauf:
+  `python -m unittest discover -s tests` — 947 Tests, 12 übersprungen, PASS in
+  293,675 s.
+- Ruff auf den geänderten Provider- und Provider-Testdateien, Compileall,
+  PyCompile, Inventar-Check und `git diff --check`: PASS. Die nicht geänderten
+  Altbefunde in der vollständigen Architekturtestdatei bleiben außerhalb dieses
+  Diffs.
+
+### Verbleibende Risiken und nächster Schritt
+
+- `http_json` besitzt noch Beobachtung, Fehlerabbildung und Providerstatus in
+  `server.py`; OpenAI Request-/Background-Transport samt Polling liegt ebenfalls
+  noch dort. P2 ist daher ausdrücklich nicht abgeschlossen.
+- Als nächstes werden Status-/Usage-Persistenz und allgemeine HTTP-
+  Fehlerorchestrierung an eine konkrete Backend-Schnittstelle gebunden; danach
+  folgen OpenAI Request/Retrieve/Cancel in einem kleinen separaten Paket.
+- Jede Änderung nach diesem Stand hebt den PASS für den betroffenen Umfang auf;
+  vor Merge bleiben Codex-, Sonar-, CodeQL-, Unit-, Container-, Quality- und
+  Browser-Gates verbindlich.
+
 ## P2.7 — OpenAI- und Gemini-Stream-Reader
 
 - Basis: bestätigter Merge-Commit
