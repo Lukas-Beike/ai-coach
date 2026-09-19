@@ -84,7 +84,7 @@ from backend.providers import gemini as gemini_provider
 from backend.providers import http as provider_http
 from backend.providers import openai as openai_provider
 from backend.providers import usage as provider_usage
-from backend.providers.http import error_detail as provider_error_detail, read_bounded_response
+from backend.providers.http import error_detail as provider_error_detail
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
 from backend.sync.windows import split_date_windows
@@ -5879,33 +5879,6 @@ def upstream_http_error_message(status: int, raw_body: bytes, service: str | Non
     return f"Anfrage an externen Dienst fehlgeschlagen ({status})."
 
 
-def _urlopen_interruptibly(request: Request, timeout: int, cancel_event: threading.Event | None) -> Any:
-    if cancel_event is None:
-        return urlopen(request, timeout=timeout)
-    completed = threading.Event()
-    result: dict[str, Any] = {}
-
-    def open_request() -> None:
-        try:
-            response = urlopen(request, timeout=timeout)
-            if cancel_event.is_set():
-                response.close()
-            else:
-                result["response"] = response
-        except Exception as exc:
-            result["error"] = exc
-        finally:
-            completed.set()
-
-    threading.Thread(target=open_request, name="provider-header-wait", daemon=True).start()
-    while not completed.wait(0.1):
-        _raise_chat_cancelled(cancel_event)
-    _raise_chat_cancelled(cancel_event)
-    if "error" in result:
-        raise result["error"]
-    return result["response"]
-
-
 def _log_http_request_started(request_context: dict[str, Any], parsed_url: Any, request_headers: dict[str, str]) -> None:
     LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": request_context})
     DIAGNOSTIC_CAPTURE.capture("external_http_started", {
@@ -5919,21 +5892,6 @@ def _log_http_request_started(request_context: dict[str, Any], parsed_url: Any, 
     })
 
 
-def _read_http_response(response: Any, cancel_event: threading.Event | None) -> bytes:
-    if cancel_event is not None:
-        cancel_event._provider_response = response
-    try:
-        _raise_chat_cancelled(cancel_event)
-        try:
-            raw = read_bounded_response(response, MAX_EXTERNAL_RESPONSE_BYTES, before_read=lambda: _raise_chat_cancelled(cancel_event))
-        except ValueError as exc:
-            raise AppError(502, "Die Antwort des externen Dienstes ist zu groß.") from exc
-    finally:
-        if cancel_event is not None and getattr(cancel_event, "_provider_response", None) is response:
-            cancel_event._provider_response = None
-    return raw
-
-
 def _http_success_result(
     response: Any,
     cancel_event: threading.Event | None,
@@ -5942,7 +5900,12 @@ def _http_success_result(
     parsed_url: Any,
     started: float,
 ) -> Any:
-    raw = _read_http_response(response, cancel_event)
+    try:
+        raw = provider_http.read_response(response, MAX_EXTERNAL_RESPONSE_BYTES, cancel_event)
+    except provider_http.ProviderRequestCancelled as exc:
+        raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
+    except ValueError as exc:
+        raise AppError(502, "Die Antwort des externen Dienstes ist zu groß.") from exc
     result = json.loads(raw) if raw else None
     if service == "openai":
         _persist_openai_rate_limits(getattr(response, "headers", None))
@@ -6145,8 +6108,15 @@ def http_json(
     _log_http_request_started(request_context, parsed_url, request_headers)
     try:
         _raise_chat_cancelled(cancel_event)
-        with _urlopen_interruptibly(request, timeout, cancel_event) as response:
+        with provider_http.open_interruptibly(request, timeout, cancel_event, opener=urlopen) as response:
             return _http_success_result(response, cancel_event, service, request_context, parsed_url, started)
+    except provider_http.ProviderRequestCancelled as exc:
+        _handle_http_app_error(
+            AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled"),
+            request_context,
+            parsed_url,
+            started,
+        )
     except HTTPError as exc:
         _handle_http_error(exc, service, request_context, parsed_url, started)
     except (OSError, ValueError) as exc:
@@ -13193,7 +13163,12 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
 
     try:
         _raise_chat_cancelled(cancel_event)
-        with _urlopen_interruptibly(request, OPENAI_RESPONSE_TIMEOUT_SECONDS, cancel_event) as response:
+        with provider_http.open_interruptibly(
+            request,
+            OPENAI_RESPONSE_TIMEOUT_SECONDS,
+            cancel_event,
+            opener=urlopen,
+        ) as response:
             if cancel_event is not None:
                 cancel_event._provider_response = response
             try:
@@ -13222,6 +13197,9 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
             "response_bytes": stream_bytes,
         }})
         return _gemini_responses_result(payload, history, persistent, aggregate)
+    except provider_http.ProviderRequestCancelled as exc:
+        _record_gemini_status("error", COACH_ABORTED_ERROR, reason="chat_cancelled", status=499)
+        raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
     except HTTPError as exc:
         raw_error = provider_http.read_error_body(exc, MAX_EXTERNAL_RESPONSE_BYTES)
         details = gemini_provider.error_details(int(exc.code), raw_error, updated_at=utc_now())

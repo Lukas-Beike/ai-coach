@@ -1,16 +1,176 @@
+import threading
 import unittest
 
 from backend.providers.http import (
+    ProviderRequestCancelled,
     error_detail,
     json_request_parts,
     multipart_form_data,
+    open_interruptibly,
     read_bounded_response,
     read_error_body,
+    read_response,
     request_body,
 )
 
 
 class ProviderHTTPTests(unittest.TestCase):
+    def test_open_interruptibly_without_cancellation_is_synchronous(self):
+        calls = []
+        response = object()
+
+        def opener(request, *, timeout):
+            calls.append((request, timeout))
+            return response
+
+        self.assertIs(open_interruptibly("request", 12, opener=opener), response)
+        self.assertEqual(calls, [("request", 12)])
+
+    def test_open_interruptibly_returns_async_response(self):
+        entered = threading.Event()
+        release = threading.Event()
+        response = object()
+
+        def opener(_request, *, timeout):
+            self.assertEqual(timeout, 12)
+            entered.set()
+            release.wait(1)
+            return response
+
+        threading.Thread(target=lambda: (entered.wait(1), release.set()), daemon=True).start()
+        self.assertIs(open_interruptibly("request", 12, threading.Event(), opener=opener, poll_seconds=0.01), response)
+
+    def test_open_interruptibly_cancels_header_wait_and_closes_late_response(self):
+        entered = threading.Event()
+        release = threading.Event()
+        cancel_event = threading.Event()
+        closed = threading.Event()
+
+        class Response:
+            def close(self):
+                closed.set()
+
+        response = Response()
+
+        def opener(_request, **_kwargs):
+            entered.set()
+            release.wait(1)
+            return response
+
+        result = []
+        thread = threading.Thread(
+            target=lambda: self._capture(result, open_interruptibly, "request", 12, cancel_event, opener=opener, poll_seconds=0.01),
+            daemon=True,
+        )
+        thread.start()
+        self.assertTrue(entered.wait(1))
+        cancel_event.set()
+        thread.join(1)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(result[0][0], ProviderRequestCancelled)
+        release.set()
+        self.assertTrue(closed.wait(1))
+
+    def test_open_interruptibly_preserves_opener_exception(self):
+        expected = RuntimeError("opener failed")
+
+        def opener(_request, **_kwargs):
+            raise expected
+
+        with self.assertRaises(RuntimeError) as context:
+            open_interruptibly("request", 12, threading.Event(), opener=opener, poll_seconds=0.01)
+        self.assertIs(context.exception, expected)
+
+    def test_read_response_registers_and_cleans_response_on_success(self):
+        started = threading.Event()
+        release = threading.Event()
+        cancel_event = threading.Event()
+
+        class Response:
+            def read(self, _size):
+                started.set()
+                release.wait(1)
+                return b"ok"
+
+        response = Response()
+        result = []
+        thread = threading.Thread(target=lambda: self._capture(result, read_response, response, 10, cancel_event), daemon=True)
+        thread.start()
+        self.assertTrue(started.wait(1))
+        self.assertIs(cancel_event._provider_response, response)
+        release.set()
+        thread.join(1)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(result, [(b"ok", None)])
+        self.assertFalse(hasattr(cancel_event, "_provider_response"))
+
+    def test_read_response_cleans_response_on_read_error(self):
+        cancel_event = threading.Event()
+
+        class Response:
+            def read(self, _size):
+                self.assert_registered = getattr(cancel_event, "_provider_response", None)
+                raise OSError("read failed")
+
+        response = Response()
+        with self.assertRaises(OSError):
+            read_response(response, 10, cancel_event)
+        self.assertIs(response.assert_registered, response)
+        self.assertFalse(hasattr(cancel_event, "_provider_response"))
+
+    def test_read_response_cancels_before_read(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+
+        class Response:
+            def read(self, _size):
+                raise AssertionError("read must not start")
+
+        with self.assertRaises(ProviderRequestCancelled):
+            read_response(Response(), 10, cancel_event)
+
+    def test_read_response_cancels_after_read(self):
+        cancel_event = threading.Event()
+
+        class Response:
+            def read(self, _size):
+                cancel_event.set()
+                return b"ok"
+
+        with self.assertRaises(ProviderRequestCancelled):
+            read_response(Response(), 10, cancel_event)
+        self.assertFalse(hasattr(cancel_event, "_provider_response"))
+
+    def test_read_response_preserves_replaced_response_handle(self):
+        cancel_event = threading.Event()
+        replacement = object()
+
+        class Response:
+            def read(self, _size):
+                cancel_event._provider_response = replacement
+                return b"ok"
+
+        self.assertEqual(read_response(Response(), 10, cancel_event), b"ok")
+        self.assertIs(cancel_event._provider_response, replacement)
+
+    def test_read_response_preserves_size_limit_error(self):
+        cancel_event = threading.Event()
+
+        class Response:
+            def read(self, _size):
+                return b"1234"
+
+        with self.assertRaisesRegex(ValueError, "provider response exceeds configured size limit"):
+            read_response(Response(), 3, cancel_event)
+        self.assertFalse(hasattr(cancel_event, "_provider_response"))
+
+    @staticmethod
+    def _capture(result, function, *args, **kwargs):
+        try:
+            result.append((function(*args, **kwargs), None))
+        except BaseException as exc:  # noqa: BLE001
+            result.append((type(exc), exc))
+
     def test_request_body_requires_exactly_one_body_source(self):
         self.assertEqual(request_body({"ü": "ja"}, None), b'{"\\u00fc": "ja"}')
         self.assertEqual(request_body(None, b"raw"), b"raw")

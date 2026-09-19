@@ -108,8 +108,11 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "backend.providers.http",
         (
             "ProviderHTTPError",
+            "ProviderRequestCancelled",
             "request_body",
             "json_request_parts",
+            "open_interruptibly",
+            "read_response",
             "read_error_body",
             "multipart_form_data",
         ),
@@ -229,6 +232,8 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_calendar_fetch_remaining",
     "_fetch_calendar_address",
     "_calendar_fetch_failure_log",
+    "_urlopen_interruptibly",
+    "_read_http_response",
 )
 
 
