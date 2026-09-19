@@ -6,6 +6,8 @@ from backend.providers.gemini import (
     StreamAccumulator,
     error_details,
     function_tools,
+    input_parts,
+    request_payload,
     response_text,
 )
 
@@ -101,6 +103,97 @@ class GeminiProviderAdapterTests(unittest.TestCase):
         ])
         self.assertEqual(tools[0]["functionDeclarations"][0]["name"], "save")
         self.assertEqual(function_tools([]), [])
+
+    def test_input_parts_converts_text_image_and_file_without_mutating_input(self):
+        request_input = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Analyse"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,PNG"},
+                    {"type": "input_file", "file_data": "data:application/pdf;base64,PDF"},
+                ],
+            },
+        ]
+        before = json.loads(json.dumps(request_input))
+        self.assertEqual(
+            input_parts(request_input, {}, []),
+            [
+                {"text": "Analyse"},
+                {"inlineData": {"mimeType": "image/png", "data": "PNG"}},
+                {"inlineData": {"mimeType": "application/pdf", "data": "PDF"}},
+            ],
+        )
+        self.assertEqual(request_input, before)
+
+    def test_input_parts_converts_tool_outputs_and_uses_transient_media_gate(self):
+        tool_input = [
+            {"type": "function_call_output", "call_id": "ok", "output": '{"saved":true}'},
+            {"type": "function_call_output", "call_id": "bad", "output": "not-json"},
+            {"type": "function_call_output", "call_id": "list", "output": "[1, 2]"},
+        ]
+        parts = input_parts(tool_input, {"ok": "save"}, [{"mime": "image/png", "data": "TRANSIENT"}])
+        self.assertEqual(parts[:3], [
+            {"functionResponse": {"name": "save", "response": {"saved": True}}},
+            {"functionResponse": {"name": "coach_tool", "response": {"error": "Tool output was not JSON."}}},
+            {"functionResponse": {"name": "coach_tool", "response": {"result": [1, 2]}}},
+        ])
+        self.assertEqual(parts[3], {"inlineData": {"mimeType": "image/png", "data": "TRANSIENT"}})
+        self.assertEqual(
+            input_parts(
+                [{"role": "user", "content": [{"type": "input_text", "text": "untrusted_fit_raw_base64"}]}],
+                {},
+                [{"mime": "image/png", "data": "IGNORED"}],
+            ),
+            [{"text": "untrusted_fit_raw_base64"}],
+        )
+
+    def test_request_payload_preserves_tools_choice_schema_tokens_and_thinking(self):
+        payload = {
+            "instructions": "Be concise",
+            "max_output_tokens": 321,
+            "reasoning": {"effort": "invalid"},
+            "tools": [{"type": "function", "name": "save", "parameters": {"type": "object"}}],
+            "tool_choice": {"type": "function", "name": "save"},
+            "text": {"format": {"type": "json_schema", "schema": {"type": "object"}}},
+        }
+        before = json.loads(json.dumps(payload))
+        request = request_payload(
+            payload,
+            model="gemini-2.5-flash",
+            contents=[{"role": "user", "parts": [{"text": "Hi"}]}],
+            default_max_output_tokens=999,
+            default_thinking_level="medium",
+            json_media_type="application/custom+json",
+        )
+        self.assertEqual(request["generationConfig"]["maxOutputTokens"], 321)
+        self.assertEqual(request["generationConfig"]["responseMimeType"], "application/custom+json")
+        self.assertEqual(request["generationConfig"]["responseJsonSchema"], {"type": "object"})
+        self.assertEqual(request["generationConfig"]["thinkingConfig"], {"thinkingBudget": 8192})
+        self.assertEqual(request["systemInstruction"], {"parts": [{"text": "Be concise"}]})
+        self.assertEqual(request["toolConfig"], {"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": ["save"]}})
+        self.assertEqual(payload, before)
+
+    def test_request_payload_uses_gemini_three_thinking_level_and_defaults(self):
+        request = request_payload(
+            {"reasoning": {"effort": "high"}},
+            model="gemini-3.0-flash",
+            contents=[],
+            default_max_output_tokens=100,
+            default_thinking_level="low",
+        )
+        self.assertEqual(request["generationConfig"], {
+            "maxOutputTokens": 100,
+            "thinkingConfig": {"thinkingLevel": "high"},
+        })
+        fallback = request_payload(
+            {"reasoning": {"effort": "bogus"}},
+            model="gemini-3.0-flash",
+            contents=[],
+            default_max_output_tokens=100,
+            default_thinking_level="low",
+        )
+        self.assertEqual(fallback["generationConfig"]["thinkingConfig"], {"thinkingLevel": "low"})
 
 
 class GeminiStreamAccumulatorTests(unittest.TestCase):

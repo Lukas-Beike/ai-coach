@@ -189,12 +189,23 @@ Abhängigkeit: P1.
 
 - [ ] `http_json`, begrenzte Reads, Providerfehler und sichere HTTP-Aufrufe
   mit `providers/http.py` zusammenführen.
+  - [x] Request-Body/-Header-Aufbau, begrenzte Erfolgs-/Fehler-Reads und
+    redigierte Providerfehler in reine Adapter verschieben.
+  - [ ] Netzwerk-, Retry-/Cancellation- und Statusorchestrierung vollständig
+    aus `server.py` entfernen.
 - [ ] OpenAI Request/Response, Background Retrieve/Cancel, SSE-Verarbeitung,
   Usage-/Rate-Limit-Auswertung und Audio-Transkription in konkrete Provider-Module
   ziehen. Nutzungs-Persistenz bleibt außerhalb des reinen Transports.
+  - [x] Response-/Fehlerparsing, SSE-Ereignisse, Response-ID-, Payload-,
+    Rate-Limit-/Usage-Berechnungen und Audio-Wire-Helfer auslagern.
+  - [ ] Request-, Background- und Stream-Transport einschließlich Abbruch und
+    Polling vollständig im OpenAI-Adapter besitzen.
 - [ ] Gemini Payload-/Tool-Konvertierung und Streaming zum Gemini-Adapter ziehen;
   persistierte Dialoghistorie gehört zu `coach/conversation.py`.
-- [ ] Kalenderabruf einschließlich SSRF-Prüfung und iCalendar-Parsing auslagern.
+  - [x] Payload-/Tool-/Medienkonvertierung und Stream-Akkumulation auslagern.
+  - [ ] Stream-Transport auslagern und persistierte Historie in P7 nach
+    `coach/conversation.py` verschieben.
+- [x] Kalenderabruf einschließlich SSRF-Prüfung und iCalendar-Parsing auslagern.
 - [ ] Vorhandene Garmin-/Intervals-Adapter erweitern, ohne Sync-Use-Cases in
   Provider-Module zu verschieben.
 

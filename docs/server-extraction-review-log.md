@@ -554,9 +554,12 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - PR #684 wurde zuvor am `2026-09-19T17:49:28Z` auf dem alten Head gemergt;
   Merge-Commit `b4b4138b08abb636241d63e12709806422d60616` ist auf
   `origin/develop` erreichbar und besitzt keine offenen Review-Threads. Der
-  separate Sonar-Analysecheck blieb dort rot; die Korrektur wird deshalb als
-  eigener Folge-PR gegen genau diesen Merge veröffentlicht und P2.4 bis zu
-  dessen bestätigtem Merge nicht als abgeschlossen behandelt.
+  separate Sonar-Analysecheck blieb dort rot. Der Korrektur-PR #685 wurde nach
+  Root-Review-PASS und erfolgreichen Codex-, Sonar-, CodeQL-, Unit-, Container-,
+  Quality- und Browser-Gates am `2026-09-19T18:07:30Z` als Squash gemergt.
+  Merge-Commit `158299ce0b8f96b3ae9a88c0c9bc24a1a8c0cf77` ist auf
+  `origin/develop` erreichbar; es bestehen null Review-Threads. P2.4 ist damit
+  abgeschlossen.
 
 ### Verbleibende Risiken und nächster Schritt
 
@@ -570,6 +573,79 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - Docker-/E2E-Ausführung bleibt lokal durch den nicht erreichbaren
   Docker-Desktop-Daemon blockiert; die externen Container-/Browser-Gates sind
   deshalb verbindlich.
+
+## P2.5 — OpenAI-/Gemini-Payload- und Response-ID-Adapter
+
+- Basis: bestätigter Merge-Commit
+  `158299ce0b8f96b3ae9a88c0c9bc24a1a8c0cf77` von PR #685; `mergedAt`
+  `2026-09-19T18:07:30Z`, Erreichbarkeit auf `origin/develop`, null offene
+  Review-Threads und erfolgreiche Codex-, Sonar-, CodeQL-, Unit-, Container-,
+  Quality- und Browser-Gates bestätigt.
+- OpenAI-Worker: geprüfter Commit
+  `03b03f2d4893e9ca0dae84b97dfdb45e5b7448f6`, integriert als `7d91b00`.
+  Review: **PASS** — `response_id` validiert ausschließlich Responses-IDs und
+  `responses_payload` erzeugt nicht mutierend die öffentlichen Reasoning-,
+  Streaming- und Background-/Store-Wirefelder. Keine I/O-, Status-, Usage- oder
+  Serverabhängigkeit wurde eingeführt.
+- Gemini-Worker: geprüfter Commit `ca5e601`, integriert als `78eba05`.
+  Review: **PASS** — `input_parts` besitzt die Responses-zu-Gemini-Konvertierung
+  von Text, Data-URL-Medien und Tool-Ergebnissen; `request_payload` besitzt
+  Instruktionen, Tool-Choice, JSON-Schema, Tokenbudget und modellabhängige
+  Thinking-Konfiguration. Beide Funktionen sind rein und importieren `server`
+  weder direkt noch indirekt.
+- Geprüfter Integrationscommit `1b2ec71`: **PASS** — `server.py` delegiert alle
+  betroffenen OpenAI-Requestpfade einschließlich Background und Stream sowie die
+  Gemini-Payload-/Tool-Konvertierung. `_openai_response_id` wurde vollständig
+  entfernt; Architekturtests verhindern eine Wiedereinführung. Retry, Polling,
+  Cancellation, Netzwerkzugriff, Status-/Usage-Persistenz und Locks bleiben bei
+  ihren bisherigen Eigentümern. Gemini-Historienauswahl und atomare Speicherung
+  bleiben bis P7 in der vorhandenen Orchestrierung; es gibt keine Rückimporte,
+  Kompatibilitätswrapper oder fachlichen Provider-Callbacks.
+- Externes Sonar-Gate auf `46fd2bc`: **FAIL** — neue Cognitive-Complexity-
+  Befunde in `_gemini_request_payload`, `gemini.input_parts` und
+  `gemini.request_payload`. Der Luna-Korrekturcommit `a007afe`, integriert als
+  `c2ecfbb`, zerlegt ausschließlich die beiden reinen Gemini-Adapter; Root-
+  Diff-Review: **PASS**. Der Root-Korrekturcommit `729ba23` zerlegt die
+  serverseitige Historien-, Last-User- und Call-Name-Vorbereitung, ohne deren
+  Persistenz oder Provider-I/O zu verschieben; Integrationsreview: **PASS**.
+- `server.py`: 19.917 physische Zeilen und 1.103 verbleibende
+  Funktionen/Klassen. Das Inventar enthält 1.551 Einträge; P0 bleibt bei null
+  unklaren Zuordnungen, in P2 bleiben 87 Definitionen und 10 globale Bindungen.
+  `backend/` umfasst 51 Python-Dateien mit 7.025 physischen Zeilen; die
+  Verlagerung wird damit nicht allein über entfernte Serverzeilen bewertet.
+
+### Prüfungen
+
+- OpenAI-Worker: 22 Tests, PASS; Root-Diff-Review, Ruff, Compileall und
+  `git diff --check`: PASS.
+- Gemini-Worker: 17 Tests, PASS; Root-Diff-Review, Ruff, Compileall und
+  `git diff --check`: PASS.
+- Sonar-Korrektur: 17 Gemini-Adaptertests beim Worker sowie 41 integrierte
+  Gemini-Provider-, Anhang- und Historienregressionen beim Root, PASS. Ruff auf
+  `backend/providers/gemini.py`, Compileall und `git diff --check`: PASS.
+- Integrierte Provider-, Anhang-, Historien-, Background-, Retry- und
+  Architekturregressionen: 65 Tests, PASS in 6,168 s.
+- Vollständiger integrierter Lauf: 906 Tests, 12 übersprungen, PASS in
+  322,222 s. Ruff auf den geänderten Provider- und Provider-Testdateien,
+  Compileall, Inventar-Check und `git diff --check`: PASS. Die fünf bei einem
+  zusätzlichen Ruff-Lauf sichtbaren Befunde in `tests/test_server_architecture.py`
+  bestanden bereits vor diesem Paket und wurden nicht durch sachfremde
+  Formatierungsänderungen vermischt.
+- Vollständiger Wiederholungslauf nach der Sonar-Korrektur: 906 Tests, 12
+  übersprungen, PASS in 220,295 s; Architekturtest und Inventar-Check ebenfalls
+  PASS. Damit ersetzt dieser Lauf den zuvor geprüften Code-Stand als aktuelles
+  Root-Review-Gate für P2.5.
+
+### Verbleibende Risiken und nächster Schritt
+
+- P2 ist noch nicht abgeschlossen: `http_json`, OpenAI-Request-/Background- und
+  Stream-Transport, Gemini-Stream-Transport sowie die verbleibenden Garmin-/
+  Intervals-Adapter besitzen weiterhin fachliche Definitionen in `server.py`.
+- Persistierte Gemini-Dialoghistorie bleibt gemäß Plan Eigentum von P7 und wird
+  nicht in das Provider-Modul verschoben.
+- Lokale Docker-/E2E-Ausführung bleibt durch den nicht erreichbaren
+  Docker-Desktop-Daemon blockiert. Vor einem Merge bleiben daher die externen
+  Container-, Browser-, Sonar-, CodeQL- und Codex-Gates verbindlich.
 
 ## P2.3 — OpenAI-SSE und Gemini-Stream-Akkumulation
 
