@@ -199,13 +199,16 @@ Abhängigkeit: P1.
   ziehen. Nutzungs-Persistenz bleibt außerhalb des reinen Transports.
   - [x] Response-/Fehlerparsing, SSE-Ereignisse, Response-ID-, Payload-,
     Rate-Limit-/Usage-Berechnungen und Audio-Wire-Helfer auslagern.
+  - [x] Begrenztes SSE-Lesen einschließlich Fragmentgrenzen, finaler Response,
+    Abbruchprüfung und Bytefortschritt in den OpenAI-Adapter verschieben.
   - [ ] Request-, Background- und Stream-Transport einschließlich Abbruch und
     Polling vollständig im OpenAI-Adapter besitzen.
 - [ ] Gemini Payload-/Tool-Konvertierung und Streaming zum Gemini-Adapter ziehen;
   persistierte Dialoghistorie gehört zu `coach/conversation.py`.
   - [x] Payload-/Tool-/Medienkonvertierung und Stream-Akkumulation auslagern.
-  - [ ] Stream-Transport auslagern und persistierte Historie in P7 nach
-    `coach/conversation.py` verschieben.
+  - [x] Stream-Transport einschließlich Header-Abbruch, Response-Handle,
+    Größenlimit und SSE-Akkumulation auslagern.
+  - [ ] Persistierte Historie in P7 nach `coach/conversation.py` verschieben.
 - [x] Kalenderabruf einschließlich SSRF-Prüfung und iCalendar-Parsing auslagern.
 - [ ] Vorhandene Garmin-/Intervals-Adapter erweitern, ohne Sync-Use-Cases in
   Provider-Module zu verschieben.

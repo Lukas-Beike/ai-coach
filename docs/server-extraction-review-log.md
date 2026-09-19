@@ -483,6 +483,57 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 - Docker-/E2E-Ausführung bleibt lokal durch den nicht erreichbaren
   Docker-Desktop-Daemon blockiert; die externen PR-Gates bleiben verbindlich.
 
+## P2.7 — OpenAI- und Gemini-Stream-Reader
+
+- Basis: bestätigter Merge-Commit
+  `ab22eefac32fd1ae8c6c6e1b38f313c6a8817b4e` von PR #687; `mergedAt`
+  `2026-09-19T19:07:51Z`, Erreichbarkeit auf `origin/develop` und null offene
+  Review-Threads bestätigt.
+- OpenAI-Worker: geprüfter Commit
+  `6f4a994d9b386a2e87e4e1f72564026df0330172`, integriert als `79a61af`.
+  Review: **PASS** — SSE-Zeilengrenzen, trailing flush, Delta-/Response-ID-
+  Weitergabe, Abbruch und Bytebegrenzung liegen ohne Netzwerk- oder
+  Serverabhängigkeit im OpenAI-Adapter.
+- Gemini-Worker: geprüfte Commits
+  `ea31ae3479a5b947264f5bea0b8302c91151d637` und
+  `95da8dc55a9af0bd8830366ab49dc18d9774c6fd`, integriert als `762533c` und
+  `65eb354`. Review: zunächst **FAIL**, weil der Header-Abbruchtest das
+  Schließen einer verspäteten Response nicht bewies; nach deterministischer
+  Close-Assertion **PASS**. Der Adapter besitzt Öffnen, Header-Abbruch,
+  Response-Handle, SSE-Lesen, Größenlimit, Akkumulation und Cleanup.
+- Geprüfter Root-Integrationscommit `6adfc31`: **PASS** — beide lokalen
+  Leseschleifen sowie `_read_openai_stream_response` wurden aus `server.py`
+  entfernt. `ProviderResponseTooLarge` erhält den bestehenden 502-Vertrag;
+  `StreamReadState` bewahrt gelesene Bytes auch bei Fehlern für redigierte
+  Diagnostik. Status-, Usage- und Rate-Limit-Persistenz bleiben außerhalb des
+  reinen Readers; es gibt keine Rückimporte oder Server-Callbacks.
+- `server.py`: 19.866 physische Zeilen und 1.100 verbleibende
+  Funktionen/Klassen. Das Inventar enthält 1.547 Einträge; P2 enthält 81
+  Definitionen und 10 globale Bindungen, P0 bleibt bei null. `backend/`
+  umfasst 51 Python-Dateien mit 7.308 physischen Zeilen.
+
+### Prüfungen
+
+- OpenAI-Worker: 28 Tests, PASS; Ruff, Compileall und `git diff --check`:
+  PASS.
+- Gemini-Worker nach Testkorrektur: 24 Tests, PASS; Ruff, Compileall und
+  `git diff --check`: PASS.
+- Integrierte Provider-/Architekturregressionen: 74 Tests, PASS; zehn
+  Server-Regressionen für Stream, Fehler, Abbruch und aktives Handle: PASS.
+- Geänderte Provider- und Provider-Testdateien: Ruff PASS; PyCompile,
+  Compileall, Inventar-Check und `git diff --check`: PASS.
+- Vollständiger integrierter Lauf: 931 Tests, 12 übersprungen, PASS in
+  325,249 s.
+
+### Verbleibende Risiken und nächster Schritt
+
+- OpenAI-Request-, Background- und das verbleibende Stream-Öffnen samt
+  Statusorchestrierung liegen noch in `server.py`; diese Transportgrenze wird
+  als nächster P2-Schritt geschlossen. Gemini-Dialoghistorie folgt abhängig
+  von P7 in `coach/conversation.py`.
+- Alle externen PR-Gates sind vor Merge verbindlich. Lokale Docker-/E2E-
+  Ausführung bleibt vom nicht erreichbaren Docker-Desktop-Daemon abhängig.
+
 ## P2.4 — Provider-HTTP-Wire-Aufbau und Usage-Berechnungen
 
 - Basis: bestätigter Korrektur-Merge-Commit
