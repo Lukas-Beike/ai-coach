@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -43,6 +43,29 @@ _SAFE_LOG_REASONS = {
     "provider_unavailable": "provider_unavailable",
     "usage_limit_exceeded": "usage_limit_exceeded",
 }
+
+
+def response_id(value: Any) -> str:
+    """Normalize and validate an OpenAI Responses API response identifier."""
+    normalized = str(value or "").strip()
+    if not re.fullmatch(r"(?a:resp_[\w-]{1,200})", normalized):
+        raise AppError(502, "OpenAI hat keine gültige Response-ID zurückgegeben.", reason="invalid_response")
+    return normalized
+
+
+def responses_payload(
+    payload: Mapping[str, Any], *, thinking_level: str, stream: bool = False, background: bool = False
+) -> dict[str, Any]:
+    """Build an OpenAI Responses API payload without mutating caller state."""
+    request_payload = dict(payload)
+    request_payload.pop("_ai_provider", None)
+    request_payload.setdefault("reasoning", {"effort": thinking_level})
+    if stream:
+        request_payload["stream"] = True
+    if background:
+        request_payload["background"] = True
+        request_payload["store"] = True
+    return request_payload
 
 
 def endpoint(base_url: Any, path: str, *, default_base_url: str) -> str:

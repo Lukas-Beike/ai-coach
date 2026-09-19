@@ -1,5 +1,6 @@
 import json
 import unittest
+from types import MappingProxyType
 
 from backend.errors import AppError
 from backend.providers.openai import (
@@ -9,7 +10,9 @@ from backend.providers.openai import (
     error_diagnostic_details,
     rate_limit_snapshot,
     response_failure_reason,
+    response_id,
     response_text,
+    responses_payload,
     retry_after_seconds,
     safe_log_reason,
 )
@@ -20,6 +23,60 @@ def body(error=None):
 
 
 class OpenAIProviderErrorTests(unittest.TestCase):
+    def test_response_id_trims_and_accepts_ascii_boundary_values(self):
+        self.assertEqual(response_id("  resp_a  "), "resp_a")
+        self.assertEqual(response_id("resp_" + "a" * 200), "resp_" + "a" * 200)
+        self.assertEqual(response_id("resp_a-b_9"), "resp_a-b_9")
+
+    def test_response_id_rejects_invalid_and_non_ascii_values(self):
+        for value in (
+            None,
+            "",
+            "resp_",
+            "resp_" + "a" * 201,
+            "resp_ä",
+            "response_a",
+            "resp_a/b",
+        ):
+            with self.subTest(value=value), self.assertRaises(AppError) as raised:
+                response_id(value)
+            self.assertEqual(raised.exception.status, 502)
+            self.assertEqual(raised.exception.message, "OpenAI hat keine gültige Response-ID zurückgegeben.")
+            self.assertEqual(raised.exception.reason, "invalid_response")
+
+    def test_responses_payload_removes_internal_provider_without_mutating_mapping(self):
+        marker = object()
+        payload = MappingProxyType({"_ai_provider": "openai", "model": "gpt-test", "marker": marker})
+        result = responses_payload(payload, thinking_level="medium")
+        self.assertEqual(result["model"], "gpt-test")
+        self.assertIs(result["marker"], marker)
+        self.assertNotIn("_ai_provider", result)
+        self.assertEqual(payload["_ai_provider"], "openai")
+        self.assertIsNot(result, payload)
+
+    def test_responses_payload_defaults_reasoning_and_preserves_explicit_reasoning(self):
+        self.assertEqual(
+            responses_payload({"input": "hello"}, thinking_level="high")["reasoning"],
+            {"effort": "high"},
+        )
+        explicit = {"effort": "low", "summary": "auto"}
+        result = responses_payload({"reasoning": explicit}, thinking_level="high")
+        self.assertIs(result["reasoning"], explicit)
+        self.assertEqual(result["reasoning"], explicit)
+
+    def test_responses_payload_forces_stream_and_background_store_flags(self):
+        payload = {"stream": False, "background": False, "store": False}
+        streamed = responses_payload(payload, thinking_level="medium", stream=True)
+        self.assertTrue(streamed["stream"])
+        self.assertFalse(streamed["background"])
+        self.assertFalse(streamed["store"])
+
+        background = responses_payload(payload, thinking_level="medium", background=True)
+        self.assertFalse(background["stream"])
+        self.assertTrue(background["background"])
+        self.assertTrue(background["store"])
+        self.assertEqual(payload, {"stream": False, "background": False, "store": False})
+
     def test_endpoint_joins_base_path_and_normalizes_api_path(self):
         self.assertEqual(
             endpoint("https://foundry.example.invalid/openai/v1/", "/responses", default_base_url="https://api.openai.com/v1"),
