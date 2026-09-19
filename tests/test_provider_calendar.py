@@ -1,6 +1,6 @@
 import unittest
 from datetime import date, datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 from backend.errors import AppError
@@ -30,6 +30,133 @@ def parse(payload: bytes, *, start=date(2026, 9, 1), end=None, zone=timezone.utc
 
 
 class CalendarProviderTests(unittest.TestCase):
+    def test_external_calendar_url_validates_https_credentials_ports_and_local_hosts(self):
+        global_address = calendar_provider.ipaddress.ip_address("93.184.216.34")
+        with patch.object(calendar_provider, "_resolve_calendar_addresses", return_value=[global_address]) as resolve:
+            self.assertEqual(calendar_provider.external_calendar_url(" HTTPS://calendar.example/feed.ics?x=1 "), "HTTPS://calendar.example/feed.ics?x=1")
+        resolve.assert_called_once_with("calendar.example", status=400)
+        for value in (
+            "http://calendar.example/feed.ics",
+            "https://calendar.example:444/feed.ics",
+            "https://user:password@calendar.example/feed.ics",
+            "https://calendar.example/feed.ics#secret",
+            "https://localhost/feed.ics",
+            "https://calendar.local/feed.ics",
+            "https://calendar.example/\r\nHost:bad",
+        ):
+            with self.subTest(value=value), self.assertRaises(AppError):
+                calendar_provider.external_calendar_url(value)
+
+    def test_calendar_dns_rejects_private_mixed_and_resolution_errors(self):
+        with patch.object(calendar_provider.socket, "getaddrinfo", return_value=[(None, None, None, None, ("93.184.216.34", 443))]) as resolve:
+            addresses = calendar_provider._resolve_calendar_addresses("calendar.example", status=400)
+        self.assertEqual(addresses, [calendar_provider.ipaddress.ip_address("93.184.216.34")])
+        resolve.assert_called_once()
+        for resolved in (("192.0.2.1", 443), ("10.0.0.2", 443)):
+            with patch.object(calendar_provider.socket, "getaddrinfo", return_value=[(None, None, None, None, resolved)]), self.assertRaisesRegex(AppError, "Private"):
+                calendar_provider._resolve_calendar_addresses("calendar.example", status=400)
+        with patch.object(
+            calendar_provider.socket,
+            "getaddrinfo",
+            return_value=[
+                (None, None, None, None, ("93.184.216.34", 443)),
+                (None, None, None, None, ("10.0.0.2", 443)),
+            ],
+        ), self.assertRaisesRegex(AppError, "Private"):
+            calendar_provider._resolve_calendar_addresses("calendar.example", status=400)
+        with patch.object(calendar_provider.socket, "getaddrinfo", side_effect=OSError("resolver failed")), self.assertRaisesRegex(AppError, "aufgelöst") as raised:
+            calendar_provider._resolve_calendar_addresses("calendar.example", status=502)
+        self.assertEqual(raised.exception.status, 502)
+
+    def _fetch_mocks(self, *, status=200, payload=b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"):
+        raw_socket = Mock()
+        tls_socket = Mock()
+        tls_context = Mock()
+        tls_context.wrap_socket.return_value = tls_socket
+        response = Mock(status=status)
+        response.read.return_value = payload
+        return raw_socket, tls_socket, tls_context, response
+
+    def test_calendar_feed_resolves_once_pins_ip_and_uses_tls_hostname(self):
+        raw_socket, tls_socket, tls_context, response = self._fetch_mocks()
+        with patch.object(calendar_provider.socket, "getaddrinfo", return_value=[(None, None, None, None, ("93.184.216.34", 443))]) as resolve, patch.object(
+            calendar_provider.ssl, "create_default_context", return_value=tls_context
+        ), patch.object(calendar_provider.socket, "create_connection", return_value=raw_socket) as connect, patch.object(
+            calendar_provider, "HTTPResponse", return_value=response
+        ):
+            payload = calendar_provider.fetch_calendar_feed("https://calendar.example/feed.ics", app_version="1.2.3")
+        self.assertEqual(payload, b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
+        resolve.assert_called_once_with("calendar.example", 443, type=calendar_provider.socket.SOCK_STREAM)
+        self.assertEqual(connect.call_args.args[0], ("93.184.216.34", 443))
+        self.assertLessEqual(connect.call_args.kwargs["timeout"], calendar_provider.CALENDAR_CONNECTION_TIMEOUT_SECONDS)
+        tls_context.wrap_socket.assert_called_once_with(raw_socket, server_hostname="calendar.example")
+        self.assertIn(b"User-Agent: IntervalsCoach/1.2.3", tls_socket.sendall.call_args.args[0])
+        tls_socket.close.assert_called_once_with()
+
+    def test_calendar_feed_falls_back_only_for_network_errors(self):
+        raw_socket, tls_socket, tls_context, response = self._fetch_mocks()
+        addresses = [calendar_provider.ipaddress.ip_address("93.184.216.34"), calendar_provider.ipaddress.ip_address("93.184.216.35")]
+        with patch.object(calendar_provider, "_resolve_calendar_addresses", return_value=addresses), patch.object(
+            calendar_provider.ssl, "create_default_context", return_value=tls_context
+        ), patch.object(calendar_provider.socket, "create_connection", side_effect=[OSError("first unavailable"), raw_socket]) as connect, patch.object(
+            calendar_provider, "HTTPResponse", return_value=response
+        ):
+            self.assertTrue(calendar_provider.fetch_calendar_feed("https://calendar.example/feed.ics", app_version="test"))
+        self.assertEqual(connect.call_count, 2)
+        tls_socket.close.assert_called_once_with()
+
+    def test_calendar_feed_timeout_redirect_http_and_size_errors(self):
+        address = calendar_provider.ipaddress.ip_address("93.184.216.34")
+        for status, expected_status, payload in ((302, 400, b""), (503, 502, b""), (200, 413, b"x" * (MAX_EXTERNAL_CALENDAR_BYTES + 1))):
+            raw_socket, tls_socket, tls_context, response = self._fetch_mocks(status=status, payload=payload)
+            with self.subTest(status=status), patch.object(calendar_provider, "_resolve_calendar_addresses", return_value=[address]), patch.object(
+                calendar_provider.ssl, "create_default_context", return_value=tls_context
+            ), patch.object(calendar_provider.socket, "create_connection", return_value=raw_socket), patch.object(
+                calendar_provider, "HTTPResponse", return_value=response
+            ), self.assertRaises(AppError) as raised:
+                calendar_provider.fetch_calendar_feed("https://calendar.example/feed.ics", app_version="test")
+            self.assertEqual(raised.exception.status, expected_status)
+            tls_socket.close.assert_called_once_with()
+        with patch.object(calendar_provider, "_resolve_calendar_addresses", return_value=[address]), patch.object(
+            calendar_provider.socket, "create_connection", side_effect=TimeoutError("connect timeout")
+        ), self.assertRaises(AppError) as raised:
+            calendar_provider.fetch_calendar_feed("https://calendar.example/feed.ics", app_version="test")
+        self.assertEqual(raised.exception.status, 504)
+
+    def test_calendar_feed_closes_raw_socket_when_tls_setup_fails(self):
+        raw_socket = Mock()
+        tls_context = Mock()
+        tls_context.wrap_socket.side_effect = OSError("TLS failed")
+        address = calendar_provider.ipaddress.ip_address("93.184.216.34")
+        with patch.object(calendar_provider, "_resolve_calendar_addresses", return_value=[address]), patch.object(
+            calendar_provider.ssl, "create_default_context", return_value=tls_context
+        ), patch.object(calendar_provider.socket, "create_connection", return_value=raw_socket), self.assertRaises(AppError) as raised:
+            calendar_provider.fetch_calendar_feed("https://calendar.example/feed.ics", app_version="test")
+        self.assertEqual(raised.exception.status, 502)
+        raw_socket.close.assert_called_once_with()
+
+    def test_calendar_transport_logs_only_redacted_path(self):
+        raw_socket, _tls_socket, tls_context, response = self._fetch_mocks()
+        with patch.object(calendar_provider, "_resolve_calendar_addresses", return_value=[calendar_provider.ipaddress.ip_address("93.184.216.34")]), patch.object(
+            calendar_provider.ssl, "create_default_context", return_value=tls_context
+        ), patch.object(calendar_provider.socket, "create_connection", return_value=raw_socket), patch.object(
+            calendar_provider, "HTTPResponse", return_value=response
+        ), patch.object(calendar_provider.LOGGER, "info") as info:
+            calendar_provider.fetch_calendar_feed("https://calendar.example/private.ics?secret=calendar-data", app_version="test")
+        log_text = str(info.call_args_list)
+        self.assertIn("/redacted", log_text)
+        self.assertNotIn("calendar.example", log_text)
+        self.assertNotIn("private.ics", log_text)
+        self.assertNotIn("secret=calendar-data", log_text)
+        with patch.object(calendar_provider, "_resolve_calendar_addresses", return_value=[calendar_provider.ipaddress.ip_address("93.184.216.34")]), patch.object(
+            calendar_provider.socket, "create_connection", side_effect=OSError("https://calendar.example/private.ics?secret=calendar-data")
+        ), patch.object(calendar_provider.LOGGER, "exception") as failure_log, self.assertRaises(AppError):
+            calendar_provider.fetch_calendar_feed("https://calendar.example/private.ics?secret=calendar-data", app_version="test")
+        failure_text = str(failure_log.call_args)
+        self.assertIn("/redacted", failure_text)
+        self.assertNotIn("calendar.example", failure_text)
+        self.assertNotIn("secret=calendar-data", failure_text)
+
     def test_timing_default_relevance_and_description_markers(self):
         events = parse(
             feed(

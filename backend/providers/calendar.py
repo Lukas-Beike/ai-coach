@@ -2,16 +2,28 @@
 from __future__ import annotations
 
 import calendar as calendar_module
+import ipaddress
+import logging
 import math
 import re
+import socket
+import ssl
+import time
 import uuid
 from datetime import date, datetime, timedelta, timezone, tzinfo
+from http.client import HTTPResponse
 from typing import Any
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend.errors import UNSUPPORTED_BYDAY_ERROR, AppError
 
 MAX_EXTERNAL_CALENDAR_BYTES = 5_000_000
+CALENDAR_FETCH_TIMEOUT_SECONDS = 30
+CALENDAR_CONNECTION_TIMEOUT_SECONDS = 10
+EXTERNAL_HTTP_STARTED_EVENT = "External HTTP request started"
+EXTERNAL_HTTP_COMPLETED_EVENT = "External HTTP request completed"
+LOGGER = logging.getLogger("intervals_coach")
 EXTERNAL_CALENDAR_WINDOW_DAYS = 56
 ICAL_MAX_RECURRENCE_COUNT = 1000
 ICAL_MAX_RECURRENCE_PERIODS = 10000
@@ -20,6 +32,179 @@ ICAL_NO_INTENSITY_MARKER = "[NO_INTENSITY]"
 ICAL_SHORT_ONLY_MARKER = "[SHORT_ONLY]"
 ICAL_TRAINING_MARKERS = (ICAL_NO_TRAINING_MARKER, ICAL_NO_INTENSITY_MARKER, ICAL_SHORT_ONLY_MARKER)
 ICAL_DAY_NUMBERS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
+
+
+def _resolve_calendar_addresses(hostname: str, *, status: int) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    try:
+        addresses = [ipaddress.ip_address(hostname)]
+    except ValueError:
+        try:
+            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)]
+        except (OSError, ValueError, IndexError, TypeError) as exc:
+            raise AppError(status, "Die Kalenderadresse konnte nicht aufgelöst werden.") from exc
+    addresses = list(dict.fromkeys(addresses))
+    if not addresses or any(not address.is_global for address in addresses):
+        raise AppError(status, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
+    return addresses
+
+
+def _calendar_url_parts(value: Any) -> tuple[str, Any, str, int]:
+    raw = str(value or "").strip()
+    try:
+        parsed = urlparse(raw)
+        port = parsed.port
+        hostname = (parsed.hostname or "").rstrip(".").casefold()
+    except ValueError as exc:
+        raise AppError(400, "Die Kalenderadresse muss einen gültigen HTTPS-Port verwenden.") from exc
+    if parsed.scheme.lower() != "https" or port not in {None, 443} or not hostname or "@" in parsed.netloc or parsed.fragment:
+        raise AppError(400, "Die Kalenderadresse muss eine HTTPS-URL ohne Zugangsdaten sein.")
+    if hostname in {"localhost", "localhost.localdomain", "local"} or hostname.endswith(".local"):
+        raise AppError(400, "Lokale Kalenderadressen werden aus Sicherheitsgründen nicht abgerufen.")
+    request_target = parsed.path or "/"
+    if parsed.query:
+        request_target += "?" + parsed.query
+    if any(char in request_target for char in "\r\n"):
+        raise AppError(400, "Die Kalenderadresse enthält ungültige Zeichen.")
+    return raw, parsed, hostname, port or 443
+
+
+def _calendar_feed_request(url: str, *, app_version: str) -> tuple[str, int, bytes]:
+    _, parsed, hostname, port = _calendar_url_parts(url)
+    try:
+        host_header = hostname.encode("idna").decode("ascii")
+        request_target = parsed.path or "/"
+        if parsed.query:
+            request_target += "?" + parsed.query
+        request_bytes = (
+            f"GET {request_target} HTTP/1.1\r\n"
+            f"Host: {host_header}\r\n"
+            "Accept: text/calendar, text/plain;q=0.9\r\n"
+            f"User-Agent: IntervalsCoach/{app_version}\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("ascii")
+    except UnicodeError as exc:
+        raise AppError(400, "Die Kalenderadresse enthält ungültige Zeichen.") from exc
+    return hostname, port, request_bytes
+
+
+def _calendar_fetch_remaining(deadline: float) -> float:
+    remaining = deadline - time.perf_counter()
+    if remaining <= 0:
+        raise TimeoutError("calendar request deadline exceeded")
+    return remaining
+
+
+def _fetch_calendar_address(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    port: int,
+    hostname: str,
+    tls_context: ssl.SSLContext,
+    request_bytes: bytes,
+    deadline: float,
+) -> tuple[bytes, int]:
+    raw_socket = None
+    tls_socket = None
+    try:
+        raw_socket = socket.create_connection(
+            (str(address), port), timeout=min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, _calendar_fetch_remaining(deadline))
+        )
+        tls_socket = tls_context.wrap_socket(raw_socket, server_hostname=hostname)
+        raw_socket = None
+        tls_socket.settimeout(min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, _calendar_fetch_remaining(deadline)))
+        tls_socket.sendall(request_bytes)
+        response = HTTPResponse(tls_socket, method="GET")
+        response.begin()
+        if 300 <= response.status < 400:
+            raise AppError(400, "Der Kalender-Feed darf nicht auf eine andere Adresse weiterleiten.")
+        if response.status >= 400:
+            raise AppError(502, f"Der Kalender-Feed antwortete mit HTTP {response.status}.")
+        payload = response.read(MAX_EXTERNAL_CALENDAR_BYTES + 1)
+        if len(payload) > MAX_EXTERNAL_CALENDAR_BYTES:
+            raise AppError(413, "Der Kalender-Feed ist zu groß.")
+        return payload, response.status
+    finally:
+        if tls_socket is not None:
+            tls_socket.close()
+        if raw_socket is not None:
+            raw_socket.close()
+
+
+def _calendar_fetch_failure_log(request_context: dict[str, Any], started: float, error: AppError, timed_out: bool) -> None:
+    LOGGER.exception(
+        "External calendar request failed",
+        extra={
+            "event": "external_request_failed",
+            "context": {
+                **request_context,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                "status": error.status,
+                "error_code": "timeout" if timed_out or error.status == 504 else "provider_error",
+            },
+        },
+        exc_info=False,
+    )
+
+
+def fetch_calendar_feed(url: str, *, app_version: str) -> bytes:
+    hostname, port, request_bytes = _calendar_feed_request(url, app_version=app_version)
+    tls_context = ssl.create_default_context()
+    tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
+    started = time.perf_counter()
+    deadline = started + CALENDAR_FETCH_TIMEOUT_SECONDS
+    request_context = {
+        "service": "calendar",
+        "method": "GET",
+        "path": "/redacted",
+        "timeout_seconds": CALENDAR_FETCH_TIMEOUT_SECONDS,
+    }
+    LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": request_context})
+    timed_out = False
+    try:
+        addresses = _resolve_calendar_addresses(hostname, status=502)
+        request_context["address_count"] = len(addresses)
+        try:
+            _calendar_fetch_remaining(deadline)
+        except TimeoutError as exc:
+            timed_out = True
+            raise AppError(504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet.") from exc
+        last_network_error: OSError | None = None
+        for address in addresses:
+            try:
+                payload, status = _fetch_calendar_address(address, port, hostname, tls_context, request_bytes, deadline)
+                LOGGER.info(
+                    EXTERNAL_HTTP_COMPLETED_EVENT,
+                    extra={
+                        "event": "external_request_completed",
+                        "context": {
+                            **request_context,
+                            "status": status,
+                            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                            "response_bytes": len(payload),
+                        },
+                    },
+                )
+                return payload
+            except AppError:
+                raise
+            except TimeoutError as exc:
+                timed_out = True
+                last_network_error = exc
+                break
+            except OSError as exc:
+                last_network_error = exc
+                continue
+        if timed_out:
+            raise AppError(504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet.")
+        raise AppError(502, "Der Kalender-Feed konnte nicht geladen werden.") from last_network_error
+    except AppError as exc:
+        _calendar_fetch_failure_log(request_context, started, exc, timed_out)
+        raise
+
+
+def external_calendar_url(value: Any) -> str:
+    raw, _, hostname, _ = _calendar_url_parts(value)
+    _resolve_calendar_addresses(hostname, status=400)
+    return raw
 
 
 def parse_ics_value(value: str) -> str:
