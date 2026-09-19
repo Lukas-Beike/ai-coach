@@ -192,6 +192,8 @@ Abhängigkeit: P1.
   - [x] Request-Body/-Header-Aufbau, begrenzte Erfolgs-/Fehler-Reads,
     abbrechbares Header-Warten samt Response-Handle-Lifecycle und redigierte
     Providerfehler in reine Adapter verschieben.
+  - [x] Begrenzte JSON-Request-Ausführung einschließlich Öffnen, Lesen,
+    UTF-8-/JSON-Dekodierung, Status-/Header-Metadaten und Cleanup auslagern.
   - [ ] Netzwerk-, Retry-/Cancellation- und Statusorchestrierung vollständig
     aus `server.py` entfernen.
 - [ ] OpenAI Request/Response, Background Retrieve/Cancel, SSE-Verarbeitung,
@@ -201,8 +203,10 @@ Abhängigkeit: P1.
     Rate-Limit-/Usage-Berechnungen und Audio-Wire-Helfer auslagern.
   - [x] Begrenztes SSE-Lesen einschließlich Fragmentgrenzen, finaler Response,
     Abbruchprüfung und Bytefortschritt in den OpenAI-Adapter verschieben.
-  - [ ] Request-, Background- und Stream-Transport einschließlich Abbruch und
-    Polling vollständig im OpenAI-Adapter besitzen.
+  - [x] Stream-Transport einschließlich Öffnen, Header-Abbruch, Response-Handle,
+    Status-/Header-Metadaten, Größenlimit und Cleanup im OpenAI-Adapter besitzen.
+  - [ ] Request- und Background-Transport einschließlich Abbruch und Polling
+    vollständig im OpenAI-Adapter besitzen.
 - [ ] Gemini Payload-/Tool-Konvertierung und Streaming zum Gemini-Adapter ziehen;
   persistierte Dialoghistorie gehört zu `coach/conversation.py`.
   - [x] Payload-/Tool-/Medienkonvertierung und Stream-Akkumulation auslagern.

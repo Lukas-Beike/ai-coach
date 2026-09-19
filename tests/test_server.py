@@ -4661,6 +4661,38 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         self.assertIsNone(getattr(cancel_event, "_provider_response", None))
 
+    def test_http_json_preserves_empty_body_and_oversized_response_contracts(self):
+        class EmptyResponse:
+            status = 204
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, *_args):
+                return b""
+
+        with patch.object(server, "urlopen", return_value=EmptyResponse()):
+            self.assertIsNone(server.http_json("DELETE", "https://intervals.icu/api/v1/athlete/0", service="intervals"))
+
+        class OversizedResponse(EmptyResponse):
+            status = 200
+
+            def read(self, *_args):
+                return b"1234"
+
+        with (
+            patch.object(server, "MAX_EXTERNAL_RESPONSE_BYTES", 3),
+            patch.object(server, "urlopen", return_value=OversizedResponse()),
+            self.assertRaises(server.AppError) as raised,
+        ):
+            server.http_json("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
+        self.assertEqual(raised.exception.status, 502)
+        self.assertEqual(raised.exception.message, "Die Antwort des externen Dienstes ist zu groß.")
+
     def test_transcribe_audio_sends_bounded_multipart_request(self):
         captured = {}
 
@@ -8103,7 +8135,10 @@ class CoachTests(unittest.TestCase):
     def test_openai_stream_request_preserves_response_too_large_contract_and_byte_count(self):
         class OversizedResponse:
             status = 200
-            headers = None
+            headers = {
+                "x-ratelimit-remaining-requests": "7",
+                "x-ratelimit-remaining-tokens": "9000",
+            }
 
             def __enter__(self):
                 return self
@@ -8124,6 +8159,9 @@ class CoachTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status, 502)
         self.assertEqual(raised.exception.reason, "response_too_large")
+        summary = server.openai_usage_summary()
+        self.assertEqual(summary["rate_limits"]["remaining_requests"], "7")
+        self.assertEqual(summary["rate_limits"]["remaining_tokens"], "9000")
         captured = server.DIAGNOSTIC_CAPTURE.entries()
         failed = next(entry for entry in reversed(captured) if entry["event"] == "openai_stream_failed")
         self.assertEqual(failed["details"]["response_bytes"], len(b"data: {}\n"))
