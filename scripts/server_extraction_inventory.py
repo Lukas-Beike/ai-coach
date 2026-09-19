@@ -187,6 +187,7 @@ def _explicit_owner(name: str) -> str | None:
             "IntervalsClient": "providers/intervals_client.py",
             "serialise_conversation": COACH_CONVERSATION,
             "_gemini_request_history": COACH_CONVERSATION,
+            "_gemini_request_payload": COACH_CONVERSATION,
             "_gemini_last_user_text": COACH_CONVERSATION,
             "_gemini_call_names": COACH_CONVERSATION,
             "utc_now": RUNTIME_PACKAGE,
