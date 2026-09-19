@@ -3,6 +3,7 @@ import unittest
 
 from backend.errors import AppError
 from backend.providers.openai import (
+    consume_sse_event,
     endpoint,
     error_details,
     error_diagnostic_details,
@@ -43,6 +44,57 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(AppError) as raised:
                 endpoint(invalid, "responses", default_base_url=default)
             self.assertEqual(raised.exception.status, 500)
+
+    def test_consume_sse_event_ignores_empty_and_done(self):
+        deltas = []
+        self.assertIsNone(consume_sse_event([], "", deltas.append))
+        self.assertIsNone(consume_sse_event([" [DONE] "], "", deltas.append))
+        self.assertEqual(deltas, [])
+
+    def test_consume_sse_event_supports_multiline_json_and_deltas(self):
+        deltas = []
+        self.assertIsNone(
+            consume_sse_event(
+                ['{"type":"response.output_text.delta",', '"delta":"Hallo ☃"}'],
+                "",
+                deltas.append,
+            )
+        )
+        self.assertEqual(deltas, ["Hallo ☃"])
+        self.assertIsNone(consume_sse_event(['{"delta":""}'], "response.output_text.delta", deltas.append))
+        self.assertEqual(deltas, ["Hallo ☃"])
+
+    def test_consume_sse_event_reports_trimmed_response_ids(self):
+        response_ids = []
+        for event_name in ("response.created", "response.in_progress"):
+            with self.subTest(event_name=event_name):
+                self.assertIsNone(
+                    consume_sse_event(
+                        ['{"response":{"id":"  resp_123  "}}'],
+                        event_name,
+                        lambda _: None,
+                        response_ids.append,
+                    )
+                )
+        self.assertEqual(response_ids, ["resp_123", "resp_123"])
+
+    def test_consume_sse_event_returns_all_final_response_states(self):
+        for event_name in ("response.completed", "response.incomplete", "response.failed"):
+            with self.subTest(event_name=event_name):
+                event = {"response": {"id": "resp_123", "status": event_name.removeprefix("response.")}}
+                self.assertEqual(
+                    consume_sse_event([json.dumps(event)], event_name, lambda _: None),
+                    event["response"],
+                )
+
+    def test_consume_sse_event_rejects_invalid_json_and_non_objects(self):
+        expected_message = "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben."
+        for data_lines in (["{"], ["[]"]):
+            with self.subTest(data_lines=data_lines), self.assertRaises(AppError) as raised:
+                consume_sse_event(data_lines, "", lambda _: None)
+            self.assertEqual(raised.exception.status, 502)
+            self.assertEqual(raised.exception.message, expected_message)
+            self.assertEqual(raised.exception.reason, "invalid_response")
 
     def test_response_parsers_remain_pure(self):
         self.assertEqual(response_failure_reason("/responses", None), "invalid_response")
