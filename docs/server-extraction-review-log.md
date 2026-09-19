@@ -621,6 +621,14 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   Retry-Telemetrie aus. Promptes Stream-Cancel während des Backoffs wird auf
   den bestehenden 499-Vertrag abgebildet und weiterhin als abgebrochene
   OpenAI-Usage erfasst.
+- Externes Sonar-Review auf Head `3dd1cae`: **FAIL** wegen
+  `python:S3776` (`AaC7gesGGAbKVok_PxnX`) an
+  `request_with_conversation_retry`, Complexity 27 statt maximal 15.
+  Korrektur desselben Luna-Workers
+  `e9d67013c35d29cc4e84433fca1ecc45b5d0111a`: tatsächliches Diff- und
+  Code-Review erneut **PASS**. Drei kleine private, zustandslose Helfer tragen
+  Cancellation-Prüfung und Warten; öffentliche Schnittstelle,
+  Fehleridentität, Cause und Callback-Reihenfolge bleiben unverändert.
 - `server.py` hat 19.869 physische Zeilen und 1.090 Definitionen; im Inventar
   verbleiben 69 P2-Definitionen und 8 P2-Bindungen. Die unveränderte Zahl zeigt,
   dass dieses Paket Orchestrierung statt bloßer Zeilenmenge verlagert.
@@ -636,6 +644,10 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
   `git diff --check`: PASS.
 - Vollständiger Repository-Lauf: 972 Tests, 12 übersprungen, PASS in
   174,490 s.
+- Vollständiger Wiederholungslauf nach der Sonar-Korrektur: 972 Tests,
+  12 übersprungen, PASS in 181,657 s. Adaptertests, Ruff, Bytecode-Compile
+  und `git diff --check` wurden auf dem Korrekturstand ebenfalls erneut mit
+  PASS ausgeführt.
 
 ### Verbleibende Risiken und nächster Schritt
 
