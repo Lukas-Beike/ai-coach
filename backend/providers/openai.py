@@ -91,6 +91,54 @@ def poll_background_response(
     return current
 
 
+def _conversation_retry_cancelled(cancel_event: Any) -> bool:
+    return cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)()
+
+
+def _raise_if_conversation_retry_cancelled(cancel_event: Any, cause: BaseException) -> None:
+    if _conversation_retry_cancelled(cancel_event):
+        raise provider_http.ProviderRequestCancelled from cause
+
+
+def _wait_for_conversation_retry(
+    delay: int,
+    cancel_event: Any,
+    wait: Callable[[float], Any],
+    cause: BaseException,
+) -> None:
+    if cancel_event is None:
+        wait(delay)
+    elif cancel_event.wait(delay) or _conversation_retry_cancelled(cancel_event):
+        raise provider_http.ProviderRequestCancelled from cause
+
+
+def request_with_conversation_retry(
+    request: Callable[[], Any],
+    *,
+    cancel_event: Any = None,
+    on_retry: Callable[[int, int], None] | None = None,
+    wait: Callable[[float], Any] = time.sleep,
+    max_attempts: int = 3,
+) -> Any:
+    """Run a request, retrying only while its conversation is locked."""
+    if not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or max_attempts <= 0:
+        raise ValueError("max_attempts must be positive")
+
+    for attempt in range(max_attempts):
+        try:
+            return request()
+        except Exception as exc:
+            if getattr(exc, "reason", None) != "conversation_locked" or attempt + 1 >= max_attempts:
+                raise
+            delay = 2**attempt
+            _raise_if_conversation_retry_cancelled(cancel_event, exc)
+            if on_retry is not None:
+                on_retry(attempt + 1, delay)
+            _wait_for_conversation_retry(delay, cancel_event, wait, exc)
+
+    raise AssertionError("unreachable")
+
+
 def responses_payload(
     payload: Mapping[str, Any], *, thinking_level: str, stream: bool = False, background: bool = False
 ) -> dict[str, Any]:

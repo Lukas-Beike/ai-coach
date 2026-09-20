@@ -13205,22 +13205,17 @@ def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
         payload,
         thinking_level=SETTINGS.selected_thinking_level(),
     )
-    for attempt in range(3):
-        try:
-            return openai_request(OPENAI_RESPONSES_PATH, request_payload)
-        except AppError as exc:
-            if exc.reason != "conversation_locked" or attempt == 2:
-                raise
-            delay = 2 ** attempt
-            LOGGER.warning(
-                "OpenAI conversation is temporarily locked; retrying",
-                extra={
-                    "event": "openai_conversation_locked",
-                    "context": {"attempt": attempt + 1, "retry_in_seconds": delay},
-                },
-            )
-            time.sleep(delay)
-    raise AppError(502, "Die OpenAI-Konversationsanfrage konnte nicht abgeschlossen werden.")
+    return openai_provider.request_with_conversation_retry(
+        lambda: openai_request(OPENAI_RESPONSES_PATH, request_payload),
+        on_retry=lambda attempt, delay: LOGGER.warning(
+            "OpenAI conversation is temporarily locked; retrying",
+            extra={
+                "event": "openai_conversation_locked",
+                "context": {"attempt": attempt, "retry_in_seconds": delay},
+            },
+        ),
+        wait=time.sleep,
+    )
 
 
 def retrieve_openai_response(response_id: str) -> dict[str, Any]:
@@ -13555,17 +13550,22 @@ def responses_stream_request(
         thinking_level=SETTINGS.selected_thinking_level(),
         stream=True,
     )
-    for attempt in range(3):
-        try:
-            return openai_stream_request(request_payload, on_text_delta, cancel_event, on_response_id)
-        except AppError as exc:
-            if exc.reason != "conversation_locked" or attempt == 2:
-                raise
-            _raise_chat_cancelled(cancel_event)
-            delay = 2 ** attempt
-            LOGGER.warning("OpenAI streaming conversation is temporarily locked; retrying", extra={"event": "openai_conversation_locked", "context": {"attempt": attempt + 1, "retry_in_seconds": delay}})
-            time.sleep(delay)
-    raise AppError(502, "Die OpenAI-Konversationsanfrage konnte nicht abgeschlossen werden.")
+    try:
+        return openai_provider.request_with_conversation_retry(
+            lambda: openai_stream_request(request_payload, on_text_delta, cancel_event, on_response_id),
+            cancel_event=cancel_event,
+            on_retry=lambda attempt, delay: LOGGER.warning(
+                "OpenAI streaming conversation is temporarily locked; retrying",
+                extra={
+                    "event": "openai_conversation_locked",
+                    "context": {"attempt": attempt, "retry_in_seconds": delay},
+                },
+            ),
+            wait=time.sleep,
+        )
+    except provider_http.ProviderRequestCancelled as exc:
+        provider_state_service().record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
+        raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
 
 
 def ensure_conversation(provider: str | None = None) -> str:

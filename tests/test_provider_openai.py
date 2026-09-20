@@ -17,6 +17,7 @@ from backend.providers.openai import (
     rate_limit_snapshot,
     read_stream_response,
     request_stream_response,
+    request_with_conversation_retry,
     response_failure_reason,
     response_id,
     response_text,
@@ -69,6 +70,111 @@ class _StreamResponse:
 
 
 class OpenAIProviderErrorTests(unittest.TestCase):
+    def test_request_with_conversation_retry_returns_without_retry(self):
+        calls = []
+
+        result = request_with_conversation_retry(lambda: calls.append("request") or {"ok": True})
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(calls, ["request"])
+
+    def test_request_with_conversation_retry_retries_lock_with_delays_and_notification(self):
+        locked = AppError(409, "locked", reason="conversation_locked")
+        outcomes = iter((locked, locked, {"ok": True}))
+        waits = []
+        notifications = []
+
+        def request():
+            outcome = next(outcomes)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        result = request_with_conversation_retry(
+            request,
+            wait=waits.append,
+            on_retry=lambda attempt, delay: notifications.append((attempt, delay)),
+        )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(waits, [1, 2])
+        self.assertEqual(notifications, [(1, 1), (2, 2)])
+
+    def test_request_with_conversation_retry_reraises_non_lock_error_unchanged(self):
+        error = AppError(400, "invalid", reason="conversation_state_invalid")
+
+        with self.assertRaises(AppError) as raised:
+            request_with_conversation_retry(lambda: (_ for _ in ()).throw(error), wait=self.fail)
+
+        self.assertIs(raised.exception, error)
+
+    def test_request_with_conversation_retry_reraises_last_lock_error_unchanged(self):
+        error = AppError(409, "locked", reason="conversation_locked")
+        waits = []
+
+        with self.assertRaises(AppError) as raised:
+            request_with_conversation_retry(
+                lambda: (_ for _ in ()).throw(error),
+                wait=waits.append,
+                max_attempts=2,
+            )
+
+        self.assertIs(raised.exception, error)
+        self.assertEqual(waits, [1])
+
+    def test_request_with_conversation_retry_cancels_before_wait_with_original_cause(self):
+        error = AppError(409, "locked", reason="conversation_locked")
+        waits = []
+
+        class Event:
+            def is_set(self):
+                return True
+
+            def wait(self, _delay):
+                self.fail("already-cancelled event must not wait")
+
+        with self.assertRaises(ProviderRequestCancelled) as raised:
+            request_with_conversation_retry(
+                lambda: (_ for _ in ()).throw(error),
+                cancel_event=Event(),
+                wait=waits.append,
+            )
+
+        self.assertIs(raised.exception.__cause__, error)
+        self.assertEqual(waits, [])
+
+    def test_request_with_conversation_retry_cancels_during_event_wait_with_original_cause(self):
+        error = AppError(409, "locked", reason="conversation_locked")
+        waits = []
+
+        class Event:
+            def __init__(self):
+                self.cancelled = False
+
+            def is_set(self):
+                return self.cancelled
+
+            def wait(self, delay):
+                waits.append(delay)
+                self.cancelled = True
+                return True
+
+        event = Event()
+        with self.assertRaises(ProviderRequestCancelled) as raised:
+            request_with_conversation_retry(
+                lambda: (_ for _ in ()).throw(error),
+                cancel_event=event,
+                on_retry=lambda *_args: None,
+            )
+
+        self.assertIs(raised.exception.__cause__, error)
+        self.assertEqual(waits, [1])
+
+    def test_request_with_conversation_retry_requires_positive_max_attempts(self):
+        for max_attempts in (0, -1):
+            with self.subTest(max_attempts=max_attempts), self.assertRaises(ValueError):
+                request_with_conversation_retry(lambda: {"ok": True}, max_attempts=max_attempts)
+
     def test_response_id_trims_and_accepts_ascii_boundary_values(self):
         self.assertEqual(response_id("  resp_a  "), "resp_a")
         self.assertEqual(response_id("resp_" + "a" * 200), "resp_" + "a" * 200)

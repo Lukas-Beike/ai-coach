@@ -8310,6 +8310,29 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(request.call_count, 2)
         sleep.assert_called_once_with(1)
 
+    def test_stream_conversation_lock_retry_wait_is_cancellable(self):
+        cancel_event = threading.Event()
+
+        def cancel_during_wait(_delay):
+            cancel_event.set()
+            return True
+
+        with patch.object(
+            server,
+            "openai_stream_request",
+            side_effect=server.AppError(409, "locked", reason="conversation_locked"),
+        ) as request, patch.object(cancel_event, "wait", side_effect=cancel_during_wait):
+            with self.assertRaises(server.AppError) as raised:
+                server.responses_stream_request({"model": "gpt-5.6-sol"}, lambda _: None, cancel_event)
+
+        self.assertEqual(raised.exception.status, 499)
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(
+            server.provider_state_service().summary("openai")["last_operation"],
+            "responses_stream_cancelled",
+        )
+
 
     def test_chat_stream_registration_rejects_duplicate_stream_and_wrong_operation_id(self):
         session_key = "session-stream-test"
