@@ -84,20 +84,179 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "Redactor",
             "JsonLogFormatter",
+            "DiagnosticCapture",
             "configure_logging",
             "initialise_logging",
             "external_result_context",
             "safe_provider_path",
             "safe_url_netloc",
+            "safe_diagnostic_context",
+            "safe_diagnostic_error",
+            "diagnostic_mapping_shape",
+            "diagnostic_sequence_shape",
+            "diagnostic_response_shape",
+            "diagnostic_capture_response",
             "redact_text",
             "sanitize_log_value",
         ),
     ),
-    ("backend.providers.http", ("ProviderHTTPError",)),
+    (
+        "backend.config",
+        ("load_local_env", "security_configuration_error", "save_persistent_settings"),
+    ),
+    (
+        "backend.providers.http",
+        (
+            "ProviderHTTPError",
+            "ProviderInvalidResponse",
+            "ProviderRequestCancelled",
+            "ProviderResponseTooLarge",
+            "JsonResponse",
+            "request_body",
+            "json_request_parts",
+            "open_interruptibly",
+            "read_response",
+            "request_json",
+            "read_error_body",
+            "multipart_form_data",
+        ),
+    ),
+    (
+        "backend.providers.audio",
+        ("VOICE_AUDIO_TYPES", "normalized_audio_type", "audio_suffix"),
+    ),
+    (
+        "backend.providers.openai",
+        (
+            "OPENAI_RATE_LIMIT_HEADERS",
+            "response_id",
+            "responses_payload",
+            "consume_sse_event",
+            "StreamReadResult",
+            "StreamReadState",
+            "read_stream_response",
+            "request_stream_response",
+            "endpoint",
+            "retry_after_seconds",
+            "error_diagnostic_details",
+            "error_details",
+            "safe_log_reason",
+            "rate_limit_snapshot",
+        ),
+    ),
+    (
+        "backend.providers.gemini",
+        (
+            "StreamAccumulator",
+            "StreamReadResult",
+            "read_stream_response",
+            "response_text",
+            "function_tools",
+            "input_parts",
+            "request_payload",
+            "error_details",
+            "_provider_error_payload",
+            "_gemini_error_tokens",
+            "_gemini_error_reason",
+        ),
+    ),
+    (
+        "backend.providers.usage",
+        ("daily_summary", "usage_counts", "recorded_usage"),
+    ),
+    ("backend.providers.state", ("ProviderStateService",)),
+    (
+        "backend.providers.calendar",
+        (
+            "MAX_EXTERNAL_CALENDAR_BYTES",
+            "CALENDAR_FETCH_TIMEOUT_SECONDS",
+            "CALENDAR_CONNECTION_TIMEOUT_SECONDS",
+            "EXTERNAL_CALENDAR_WINDOW_DAYS",
+            "ICAL_MAX_RECURRENCE_COUNT",
+            "ICAL_MAX_RECURRENCE_PERIODS",
+            "parse_ics_value",
+            "parse_ics_date",
+            "unfold_ical",
+            "ical_duration",
+            "ical_training_impact",
+            "ical_training_relevant",
+            "ical_no_intensity",
+            "ical_short_only",
+            "parse_ical_calendar",
+            "external_calendar_url",
+            "fetch_calendar_feed",
+            "_resolve_calendar_addresses",
+            "_calendar_url_parts",
+            "_calendar_feed_request",
+            "_calendar_fetch_remaining",
+            "_fetch_calendar_address",
+            "_calendar_fetch_failure_log",
+            "_ical_temporal_value",
+            "_ical_rule_values",
+            "_ical_rule_integer",
+            "_ical_rule_bydays",
+            "_ical_rrule",
+            "_ical_shift_local",
+            "_ical_matches_byday",
+            "_ical_matches_date_filters",
+            "_ical_period_dates",
+            "_ical_apply_bysetpos",
+            "_ical_add_start",
+            "_ical_daily",
+            "_ical_weekly",
+            "_ical_period",
+            "_ical_recurrence_starts",
+            "_ical_duration",
+            "_ical_overlaps",
+            "_ical_instances",
+            "_ical_property_parameters",
+            "_ical_store_property",
+            "_ical_parsed_events",
+            "_ical_window",
+        ),
+    ),
     ("backend.http_api.responses", ("json_bytes",)),
     ("backend.sync.windows", ("split_date_windows",)),
+    ("backend.sync.freshness", ("provider_freshness_state",)),
     ("backend.db.schema", ("database_table_names",)),
     ("backend.db.bootstrap", ("initialize_application_database",)),
+)
+
+FORBIDDEN_SERVER_SYMBOLS = (
+    "_retry_after_seconds",
+    "openai_error_diagnostic_details",
+    "openai_error_details",
+    "safe_openai_log_reason",
+    "record_openai_rate_limits",
+    "gemini_error_details",
+    "_gemini_text",
+    "_gemini_tools",
+    "openai_endpoint",
+    "_openai_response_id",
+    "multipart_form_data",
+    "normalized_audio_type",
+    "VOICE_AUDIO_TYPES",
+    "external_calendar_url",
+    "fetch_calendar_feed",
+    "_resolve_calendar_addresses",
+    "_calendar_feed_request",
+    "_calendar_fetch_remaining",
+    "_fetch_calendar_address",
+    "_calendar_fetch_failure_log",
+    "_urlopen_interruptibly",
+    "_read_http_response",
+    "_read_openai_stream_response",
+    "record_openai_status",
+    "record_openai_success",
+    "_persist_openai_rate_limits",
+    "_openai_usage_summary_unlocked",
+    "openai_usage_summary",
+    "_record_openai_usage_unlocked",
+    "record_openai_usage",
+    "_provider_usage_summary",
+    "gemini_usage_summary",
+    "_record_gemini_status",
+    "_record_gemini_usage",
 )
 
 
@@ -243,12 +402,11 @@ def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
     implementations: dict[str, int] = {}
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if not node.name.startswith("_"):
-                implementations[node.name] = node.lineno
+            implementations[node.name] = node.lineno
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
             for target in targets:
-                if isinstance(target, ast.Name) and not target.id.startswith("_"):
+                if isinstance(target, ast.Name):
                     implementations[target.id] = node.lineno
     return implementations
 
@@ -273,6 +431,11 @@ class ServerArchitectureTests(unittest.TestCase):
             for symbol in symbols
             if symbol in implementations
         ]
+        violations.extend(
+            f"legacy extracted symbol {symbol} is redefined in server.py:{implementations[symbol]}"
+            for symbol in FORBIDDEN_SERVER_SYMBOLS
+            if symbol in implementations
+        )
         self.assertEqual(
             [],
             violations,

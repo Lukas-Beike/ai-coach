@@ -2,7 +2,173 @@
 
 from __future__ import annotations
 
+import json
+import math
+import re
+import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse, urlunparse
+from urllib.request import urlopen
+
+from backend.errors import COACH_ABORTED_ERROR, AppError
+from backend.providers import http as provider_http
+
+OPENAI_RATE_LIMIT_HEADERS = {
+    "retry-after": "retry_after",
+    "x-ratelimit-limit-requests": "limit_requests",
+    "x-ratelimit-remaining-requests": "remaining_requests",
+    "x-ratelimit-reset-requests": "reset_requests",
+    "x-ratelimit-limit-tokens": "limit_tokens",
+    "x-ratelimit-remaining-tokens": "remaining_tokens",
+    "x-ratelimit-reset-tokens": "reset_tokens",
+}
+
+_SAFE_LOG_REASONS = {
+    "chat_cancelled": "chat_cancelled",
+    "client_disconnected": "client_disconnected",
+    "conversation_locked": "conversation_locked",
+    "conversation_state_invalid": "conversation_state_invalid",
+    "credit_balance_exhausted": "credit_balance_exhausted",
+    "invalid_response": "invalid_response",
+    "provider_timeout": "provider_timeout",
+    "request_failed": "request_failed",
+    "response_error": "response_error",
+    "response_failed": "response_failed",
+    "response_too_large": "response_too_large",
+    "organization_spend_limit_exceeded": "usage_limit_exceeded",
+    "project_spend_limit_exceeded": "usage_limit_exceeded",
+    "organization_usage_limit_exceeded": "usage_limit_exceeded",
+    "insufficient_quota": "insufficient_quota",
+    "rate_limit_exceeded": "rate_limit_exceeded",
+    "authentication_or_permission": "authentication_or_permission",
+    "not_found": "not_found",
+    "provider_unavailable": "provider_unavailable",
+    "usage_limit_exceeded": "usage_limit_exceeded",
+}
+
+
+def response_id(value: Any) -> str:
+    """Normalize and validate an OpenAI Responses API response identifier."""
+    normalized = str(value or "").strip()
+    if not re.fullmatch(r"(?a:resp_[\w-]{1,200})", normalized):
+        raise AppError(502, "OpenAI hat keine gültige Response-ID zurückgegeben.", reason="invalid_response")
+    return normalized
+
+
+def poll_background_response(
+    initial_response: dict[str, Any],
+    *,
+    retrieve: Callable[[str], dict[str, Any]],
+    cancel: Callable[[str], Any],
+    cancel_event: Any = None,
+    poll_seconds: float,
+    max_seconds: float,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    """Poll one OpenAI background response until it reaches a terminal status."""
+    started = monotonic()
+    active_response_id = response_id(initial_response.get("id"))
+    current = initial_response
+
+    def abort(error: AppError) -> None:
+        try:
+            cancel(active_response_id)
+        except Exception:  # noqa: BLE001, S110 - remote cancellation is best effort
+            pass
+        raise error
+
+    while str(current.get("status") or "").casefold() in {"queued", "in_progress"}:
+        if cancel_event is not None:
+            if cancel_event.wait(poll_seconds) or getattr(cancel_event, "is_set", lambda: False)():
+                abort(AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled"))
+        else:
+            time.sleep(poll_seconds)
+        if monotonic() - started >= max_seconds:
+            abort(AppError(504, "Die Hintergrundplanung hat das Zeitlimit überschritten.", reason="provider_timeout"))
+        current = retrieve(active_response_id)
+    return current
+
+
+def _conversation_retry_cancelled(cancel_event: Any) -> bool:
+    return cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)()
+
+
+def _raise_if_conversation_retry_cancelled(cancel_event: Any, cause: BaseException) -> None:
+    if _conversation_retry_cancelled(cancel_event):
+        raise provider_http.ProviderRequestCancelled from cause
+
+
+def _wait_for_conversation_retry(
+    delay: int,
+    cancel_event: Any,
+    wait: Callable[[float], Any],
+    cause: BaseException,
+) -> None:
+    if cancel_event is None:
+        wait(delay)
+    elif cancel_event.wait(delay) or _conversation_retry_cancelled(cancel_event):
+        raise provider_http.ProviderRequestCancelled from cause
+
+
+def request_with_conversation_retry(
+    request: Callable[[], Any],
+    *,
+    cancel_event: Any = None,
+    on_retry: Callable[[int, int], None] | None = None,
+    wait: Callable[[float], Any] = time.sleep,
+    max_attempts: int = 3,
+) -> Any:
+    """Run a request, retrying only while its conversation is locked."""
+    if not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or max_attempts <= 0:
+        raise ValueError("max_attempts must be positive")
+
+    for attempt in range(max_attempts):
+        try:
+            return request()
+        except Exception as exc:
+            if getattr(exc, "reason", None) != "conversation_locked" or attempt + 1 >= max_attempts:
+                raise
+            delay = 2**attempt
+            _raise_if_conversation_retry_cancelled(cancel_event, exc)
+            if on_retry is not None:
+                on_retry(attempt + 1, delay)
+            _wait_for_conversation_retry(delay, cancel_event, wait, exc)
+
+    raise AssertionError("unreachable")
+
+
+def responses_payload(
+    payload: Mapping[str, Any], *, thinking_level: str, stream: bool = False, background: bool = False
+) -> dict[str, Any]:
+    """Build an OpenAI Responses API payload without mutating caller state."""
+    request_payload = dict(payload)
+    request_payload.pop("_ai_provider", None)
+    request_payload.setdefault("reasoning", {"effort": thinking_level})
+    if stream:
+        request_payload["stream"] = True
+    if background:
+        request_payload["background"] = True
+        request_payload["store"] = True
+    return request_payload
+
+
+def endpoint(base_url: Any, path: str, *, default_base_url: str) -> str:
+    """Resolve an OpenAI-compatible API path against a configured base URL."""
+    base = str(base_url or default_base_url).strip() or default_base_url
+    parsed = urlparse(base)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise AppError(500, "OPENAI_BASE_URL muss eine gültige HTTP(S)-Basis-URL ohne Zugangsdaten oder Query-Parameter sein.")
+    normalized_path = "/" + str(path or "").lstrip("/")
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/") + normalized_path, "", "", ""))
 
 
 def response_failure_reason(path: str, result: Any, responses_path: str = "/responses") -> str | None:
@@ -48,3 +214,316 @@ def response_text(response: dict[str, Any]) -> str:
     if isinstance(direct, str) and direct.strip():
         return direct.strip()
     return "\n".join(text for item in response.get("output", []) for text in _item_text(item)).strip()
+
+
+def consume_sse_event(
+    data_lines: list[str],
+    event_name: str,
+    on_text_delta: Callable[[str], None],
+    on_response_id: Callable[[str], None] | None = None,
+) -> dict[str, Any] | None:
+    """Interpret one OpenAI Responses API SSE event without side effects."""
+    if not data_lines:
+        return None
+    event = _decode_sse_event(data_lines)
+    if event is None:
+        return None
+    kind = event_name or str(event.get("type") or "")
+    candidate = event.get("response") if isinstance(event.get("response"), dict) else event
+    if kind in {"response.created", "response.in_progress"}:
+        response_id = str(candidate.get("id") or "").strip()
+        if response_id and on_response_id is not None:
+            on_response_id(response_id)
+    elif kind == "response.output_text.delta":
+        delta = event.get("delta")
+        if isinstance(delta, str) and delta:
+            on_text_delta(delta)
+    elif kind in {"response.completed", "response.incomplete", "response.failed"}:
+        return candidate
+    return None
+
+
+@dataclass(frozen=True)
+class StreamReadResult:
+    """The terminal response and wire bytes consumed by an SSE stream reader."""
+
+    response: dict[str, Any] | None
+    response_bytes: int
+
+
+@dataclass
+class StreamReadState:
+    """Open response metadata and observable stream progress."""
+
+    response_bytes: int = 0
+    status: int | None = None
+    headers: Any = None
+
+
+def read_stream_response(
+    response: Any,
+    *,
+    max_bytes: int,
+    cancel_event: Any = None,
+    on_text_delta: Callable[[str], None],
+    on_response_id: Callable[[str], None] | None = None,
+    state: StreamReadState | None = None,
+) -> StreamReadResult:
+    """Read and parse an OpenAI SSE response without owning its lifecycle."""
+    def check_cancelled() -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise provider_http.ProviderRequestCancelled
+
+    final_response: dict[str, Any] | None = None
+    event_name = ""
+    data_lines: list[str] = []
+    read_state = state or StreamReadState()
+    check_cancelled()
+    for raw_line in response:
+        check_cancelled()
+        read_state.response_bytes += len(raw_line)
+        if read_state.response_bytes > max_bytes:
+            raise provider_http.ProviderResponseTooLarge("provider response exceeds configured size limit")
+        line = raw_line.decode("utf-8").rstrip("\r\n")
+        if not line:
+            event_response = consume_sse_event(data_lines, event_name, on_text_delta, on_response_id)
+            check_cancelled()
+            event_name = ""
+            data_lines = []
+            if event_response is not None:
+                final_response = event_response
+        elif line.startswith("event:"):
+            event_name = line[6:].strip()
+        elif line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+    check_cancelled()
+    event_response = consume_sse_event(data_lines, event_name, on_text_delta, on_response_id)
+    check_cancelled()
+    if event_response is not None:
+        final_response = event_response
+    return StreamReadResult(final_response, read_state.response_bytes)
+
+
+def request_stream_response(
+    request: Any,
+    *,
+    timeout: int,
+    max_bytes: int,
+    cancel_event: Any = None,
+    on_text_delta: Callable[[str], None],
+    on_response_id: Callable[[str], None] | None = None,
+    opener: Any = urlopen,
+    state: StreamReadState | None = None,
+) -> StreamReadResult:
+    """Open, read, and close an OpenAI SSE response."""
+    transport_state = state or StreamReadState()
+    response = provider_http.open_interruptibly(request, timeout, cancel_event, opener=opener)
+    transport_state.status = getattr(response, "status", None) or getattr(response, "code", None) or 200
+    transport_state.headers = getattr(response, "headers", None)
+    with response:
+        if cancel_event is not None:
+            cancel_event._provider_response = response
+        try:
+            return read_stream_response(
+                response,
+                max_bytes=max_bytes,
+                cancel_event=cancel_event,
+                on_text_delta=on_text_delta,
+                on_response_id=on_response_id,
+                state=transport_state,
+            )
+        finally:
+            missing = object()
+            if cancel_event is not None and getattr(cancel_event, "_provider_response", missing) is response:
+                delattr(cancel_event, "_provider_response")
+
+
+def _decode_sse_event(data_lines: list[str]) -> dict[str, Any] | None:
+    raw_event = "\n".join(data_lines)
+    if raw_event.strip() == "[DONE]":
+        return None
+    try:
+        event = json.loads(raw_event)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise AppError(
+            502,
+            "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben.",
+            reason="invalid_response",
+        ) from exc
+    if not isinstance(event, dict):
+        raise AppError(
+            502,
+            "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben.",
+            reason="invalid_response",
+        )
+    return event
+
+
+def retry_after_seconds(headers: Any) -> int | None:
+    """Parse a bounded numeric Retry-After hint without retaining raw headers."""
+    if headers is None:
+        return None
+    try:
+        seconds = float(str(headers.get("retry-after")).strip())
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return max(1, min(math.ceil(seconds), 24 * 60 * 60))
+
+
+def _safe_openai_error_token(value: Any) -> str | None:
+    """Keep a provider error classifier without retaining provider text."""
+    token = str(value or "").strip().casefold()
+    if not token or len(token) > 160 or not re.fullmatch(r"[a-z0-9_.\[\]-]+", token):
+        return None
+    return token
+
+
+def _provider_error_payload(raw_body: bytes) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw_body) if raw_body else None
+    except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        payload = None
+    error = payload.get("error") if isinstance(payload, dict) else None
+    return error if isinstance(error, dict) else {}
+
+
+def error_diagnostic_details(raw_body: bytes, headers: Any = None, *, max_response_bytes: int) -> dict[str, Any]:
+    """Return safe OpenAI error metadata; never retain an upstream message/body."""
+    error = _provider_error_payload(raw_body)
+    max_bytes = max(0, max_response_bytes)
+    details: dict[str, Any] = {"error_body_bytes": min(len(raw_body or b""), max_bytes + 1)}
+    for source, target in (("code", "error_code"), ("type", "error_type"), ("param", "parameter")):
+        token = _safe_openai_error_token(error.get(source))
+        if token:
+            details[target] = token
+    try:
+        request_id = _safe_openai_error_token(headers.get("x-request-id")) if headers is not None else None
+    except (AttributeError, TypeError):
+        request_id = None
+    if request_id:
+        details["request_id"] = request_id
+    return details
+
+
+def _openai_error_tokens(error: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    """Return transient normalized tokens used only for OpenAI error classification."""
+    code = str(error.get("code") or "").strip().casefold()
+    error_type = str(error.get("type") or "").strip().casefold()
+    parameter = str(error.get("param") or "").strip().casefold()
+    provider_message = str(error.get("message") or "").strip().casefold()
+    searchable = f"{code} {error_type} {provider_message}"
+    return code, error_type, parameter, provider_message, searchable
+
+
+def _openai_invalid_input_state(error_type: str, parameter: str, provider_message: str) -> bool:
+    """Identify recoverable tool-output and reasoning continuation state errors."""
+    return error_type == "invalid_request_error" and parameter.startswith("input") and (
+        "no tool output found for function call" in provider_message
+        or ("reasoning" in provider_message and "required following item" in provider_message)
+    )
+
+
+def _openai_conversation_error(
+    status: int,
+    code: str,
+    error_type: str,
+    parameter: str,
+    provider_message: str,
+    searchable: str,
+) -> tuple[str, str] | None:
+    """Classify conversation locking and invalid continuation state separately."""
+    if code in {"conversation_locked", "conversation_lock_timeout", "concurrent_request"} or (
+        "conversation" in searchable and "lock" in searchable
+    ):
+        return "conversation_locked", "Die OpenAI-Konversation wird gerade von einer anderen Anfrage verwendet. Bitte kurz warten und erneut versuchen."
+    invalid_state = _openai_invalid_input_state(error_type, parameter, provider_message)
+    continuation_error = "conversation" in searchable and any(
+        marker in searchable for marker in ("state", "previous", "invalid", "not found")
+    )
+    if status == 400 and (
+        code in {"conversation_not_found", "invalid_conversation", "conversation_state_invalid", "invalid_function_call_output"}
+        or "function_call_output" in searchable
+        or invalid_state
+        or continuation_error
+    ):
+        return "conversation_state_invalid", "Der KI-Dienst konnte den bisherigen Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten."
+    return None
+
+
+def _openai_billing_error(code: str, error_type: str, searchable: str) -> tuple[str, str] | None:
+    """Classify quota and billing limits before generic rate limiting."""
+    if code == "credit_balance_exhausted":
+        return "credit_balance_exhausted", "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
+    if code in {"organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
+        return code, "Das OpenAI-Ausgaben- oder Nutzungslimit ist erreicht. Bitte das Limit im OpenAI-Konto prüfen."
+    if code in {"insufficient_quota", "billing_hard_limit_reached"} or error_type == "insufficient_quota" or any(
+        marker in searchable for marker in ("insufficient_quota", "quota", "billing_hard_limit", "credits")
+    ):
+        return "insufficient_quota", "Das OpenAI-Guthaben bzw. Kontingent ist aufgebraucht. Bitte Guthaben und Abrechnung im OpenAI-Konto prüfen."
+    return None
+
+
+def _openai_error_reason(status: int, error: dict[str, Any]) -> tuple[str, str]:
+    """Map safe OpenAI error markers to an athlete-facing recovery action."""
+    code, error_type, parameter, provider_message, searchable = _openai_error_tokens(error)
+    conversation_error = _openai_conversation_error(status, code, error_type, parameter, provider_message, searchable)
+    if conversation_error:
+        return conversation_error
+    billing_error = _openai_billing_error(code, error_type, searchable)
+    if billing_error:
+        return billing_error
+    if status == 429 or code == "rate_limit_exceeded" or error_type == "rate_limit_exceeded":
+        return "rate_limit_exceeded", "OpenAI hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen."
+    if status in {401, 403} or code in {"invalid_api_key", "invalid_organization", "permission_denied"}:
+        return "authentication_or_permission", "Der OpenAI-Zugang wurde abgelehnt. Bitte API-Schlüssel und Projektberechtigungen prüfen."
+    if status == 404 or code in {"model_not_found", "not_found"}:
+        return "not_found", "Das konfigurierte OpenAI-Modell oder der angeforderte Dienst wurde nicht gefunden."
+    if status >= 500:
+        return "provider_unavailable", "OpenAI ist vorübergehend nicht verfügbar. Bitte später erneut versuchen."
+    return "http_error", f"OpenAI konnte die Anfrage nicht verarbeiten (HTTP {status})."
+
+
+def error_details(
+    status: int,
+    raw_body: bytes,
+    headers: Any = None,
+    *,
+    updated_at: str,
+) -> dict[str, Any]:
+    """Classify an OpenAI error without exposing the provider's raw message."""
+    reason, message = _openai_error_reason(status, _provider_error_payload(raw_body))
+    details = {
+        "state": "error",
+        "reason": reason,
+        "message": message,
+        "http_status": status,
+        "updated_at": updated_at,
+    }
+    retry_after = retry_after_seconds(headers)
+    if retry_after is not None:
+        details["retry_after_seconds"] = retry_after
+    return details
+
+
+def safe_log_reason(reason: Any) -> str:
+    """Project an OpenAI status reason onto static values safe for structured logs."""
+    if not isinstance(reason, str):
+        return "http_error"
+    return _SAFE_LOG_REASONS.get(reason, "http_error")
+
+
+def rate_limit_snapshot(headers: Any, *, updated_at: str) -> dict[str, Any] | None:
+    """Project only the allowlisted OpenAI rate-limit headers."""
+    if headers is None:
+        return None
+    values: dict[str, str] = {}
+    for header_name, value_name in OPENAI_RATE_LIMIT_HEADERS.items():
+        try:
+            value = headers.get(header_name)
+        except (AttributeError, TypeError):
+            continue
+        if value not in (None, ""):
+            values[value_name] = str(value)
+    return {"updated_at": updated_at, **values} if values else None

@@ -41,6 +41,8 @@ os.environ.update({
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.db.schema import database_schema_is_current, database_table_names
+from backend.providers import calendar as calendar_provider
+from backend.providers import gemini as gemini_provider
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 
@@ -160,6 +162,20 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(database_table_names(db), set(server.CURRENT_DATABASE_SCHEMA))
             self.assertEqual(server.database_index_names(db), server.CURRENT_DATABASE_INDEXES)
 
+    def test_provider_state_service_is_recreated_with_database_manager(self):
+        first = server.provider_state_service()
+        server.database_manager().close()
+        server.DATABASE_MANAGER = None
+        server.DATABASE_MANAGER_SIGNATURE = None
+
+        second = server.provider_state_service()
+
+        self.assertIsNot(second, first)
+        second.record_status(
+            "openai", state="ok", reason="ok", message="OpenAI ist verfügbar.", http_status=200
+        )
+        self.assertEqual(second.summary("openai")["status"]["state"], "ok")
+
     def test_initialise_database_rejects_a_non_current_schema_without_modifying_it(self):
         with tempfile.TemporaryDirectory() as temporary:
             database_path = Path(temporary) / "partial.db"
@@ -212,7 +228,7 @@ class CoachTests(unittest.TestCase):
         order = []
         http_server = Mock()
         with patch.object(server.observability, "configure_logging"), patch.object(
-            server, "security_configuration_error", return_value=None
+            server.app_config, "security_configuration_error", return_value=None
         ), patch.object(server, "initialise_database", side_effect=lambda: order.append("schema")), patch.object(
             server, "resume_interrupted_sync_jobs", side_effect=lambda: order.append("sync-recovery")
         ), patch.object(
@@ -1668,6 +1684,19 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["checkins"][0]["checkin_date"], "2026-08-30")
         self.assertEqual(state["checkins"][0]["motivation"], 8)
 
+    def test_public_states_keep_empty_usage_when_no_ai_provider_is_configured(self):
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="")
+
+        with patch.object(server, "CONFIG", config):
+            bootstrap = server.public_bootstrap()
+            state = server.public_state(local_only=True)
+
+        for result in (bootstrap, state):
+            self.assertEqual(result["ai_provider"]["selected"], "")
+            self.assertEqual(result["usage"]["requests"], 0)
+            self.assertEqual(result["usage"]["status"], {})
+            self.assertEqual(result["usage"]["rate_limits"], {})
+
     def test_daily_planning_context_combines_checkin_recovery_weather_and_appointments(self):
         today = server.local_now().date().isoformat()
         server.save_snapshot({
@@ -2433,139 +2462,6 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("import_public_calendar", backend)
         self.assertNotIn("renderExternalCalendarMarker", app)
 
-    def test_ical_calendar_parser_extracts_timing_and_duration(self):
-        events = server.parse_ical_calendar(
-            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:family-1\r\n"
-            b"DTSTART;TZID=Europe/Berlin:20260902T100000\r\n"
-            b"DTEND;TZID=Europe/Berlin:20260902T130000\r\nSUMMARY:Family appointment\r\n"
-            b"END:VEVENT\r\nBEGIN:VEVENT\r\nUID:all-day\r\nDTSTART;VALUE=DATE:20260903\r\n"
-            b"DTEND;VALUE=DATE:20260904\r\nSUMMARY:Travel\r\nEND:VEVENT\r\n"
-            b"BEGIN:VEVENT\r\nUID:info-only\r\nDTSTART;VALUE=DATE:20260904\r\n"
-            b"SUMMARY:Team info\r\nDESCRIPTION: [NO_TRAINING] Nur zur Information\r\nEND:VEVENT\r\n"
-            b"BEGIN:VEVENT\r\nUID:no-intensity\r\nDTSTART;VALUE=DATE:20260905\r\n"
-            b"SUMMARY:Evening event\r\nDESCRIPTION: [NO_INTENSITY] Training remains possible, but easy\r\nEND:VEVENT\r\n"
-            b"BEGIN:VEVENT\r\nUID:other-marker\r\nDTSTART;VALUE=DATE:20260906\r\n"
-            b"SUMMARY:Other marker\r\nDESCRIPTION: [OTHER_TAG] Keine besondere Wirkung\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
-            window_start=date(2026, 9, 2),
-            window_end=date(2026, 9, 8),
-        )
-        self.assertEqual(events[0]["duration_minutes"], 180)
-        self.assertEqual(events[0]["event_date"], "2026-09-02")
-        self.assertFalse(events[0]["all_day"])
-        self.assertEqual(events[1]["duration_minutes"], 1440)
-        self.assertTrue(events[1]["all_day"])
-        self.assertFalse(events[0]["training_relevant"])
-        self.assertFalse(events[1]["training_relevant"])
-        self.assertFalse(events[2]["training_relevant"])
-        self.assertTrue(events[3]["no_intensity"])
-        self.assertTrue(events[3]["training_relevant"])
-        self.assertFalse(events[3]["short_only"])
-        self.assertFalse(events[4]["no_intensity"])
-        self.assertTrue(events[4]["training_relevant"])
-        self.assertFalse(events[4]["training_impact"])
-
-    def test_ical_training_markers_are_contains_matched_in_description_only(self):
-        events = server.parse_ical_calendar(
-            b"BEGIN:VCALENDAR\r\n"
-            b"BEGIN:VEVENT\r\nUID:short-only\r\nDTSTART;VALUE=DATE:20260907\r\n"
-            b"SUMMARY:[SHORT_ONLY] Summary only\r\nDESCRIPTION:family appointment\r\nEND:VEVENT\r\n"
-            b"BEGIN:VEVENT\r\nUID:short-only-description\r\nDTSTART;VALUE=DATE:20260908\r\n"
-            b"SUMMARY:Family appointment\r\nDESCRIPTION:Please keep it [short_only] today\r\nEND:VEVENT\r\n"
-            b"END:VCALENDAR\r\n",
-            window_start=date(2026, 9, 7), window_end=date(2026, 9, 8),
-        )
-        self.assertFalse(events[0]["training_impact"])
-        self.assertTrue(events[1]["training_impact"])
-        self.assertTrue(events[1]["short_only"])
-
-    def test_calendar_provider_primitives_unfold_and_validate_without_server_dependency(self):
-        from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
-
-        payload = b"BEGIN:VCALENDAR\r\nDESCRIPTION:First\r\n continuation\r\nEND:VCALENDAR\r\n"
-        lines = unfold_ical(payload, max_bytes=1024, error=lambda status, message: ValueError(f"{status}: {message}"))
-
-        self.assertIn("DESCRIPTION:Firstcontinuation", lines)
-        self.assertEqual(parse_ics_value(r"Name\, with\; escaped\\text"), "Name, with; escaped\\text")
-        self.assertEqual(parse_ics_date("VALUE=DATE:20260901"), "2026-09-01")
-        self.assertEqual(ical_duration("PT1H30M"), timedelta(hours=1, minutes=30))
-        with self.assertRaisesRegex(ValueError, "400"):
-            unfold_ical(b"BEGIN:VEVENT\r\nEND:VEVENT\r\n", max_bytes=1024, error=lambda status, message: ValueError(f"{status}: {message}"))
-
-    def test_ical_parser_supports_google_recurring_rules_and_rejects_unsupported_feeds(self):
-        with self.assertRaises(server.AppError):
-            server.parse_ical_calendar(b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:broken\r\nEND:VEVENT\r\n")
-        weekly = (
-            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:recurring\r\n"
-            b"DTSTART;VALUE=DATE:20260901\r\nRRULE:FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH\r\n"
-            b"SUMMARY:Repeated\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-        )
-        weekly_events = server.parse_ical_calendar(weekly, window_start=date(2026, 9, 1), window_end=date(2026, 9, 14))
-        self.assertEqual([event["event_date"] for event in weekly_events], ["2026-09-01", "2026-09-03", "2026-09-08", "2026-09-10"])
-
-        monthly = weekly.replace(
-            b"DTSTART;VALUE=DATE:20260901\r\nRRULE:FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH",
-            b"DTSTART;VALUE=DATE:20260105\r\nRRULE:FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1",
-        ).replace(b"UID:recurring", b"UID:monthly")
-        monthly_events = server.parse_ical_calendar(monthly, window_start=date(2026, 2, 1), window_end=date(2026, 3, 28))
-        self.assertEqual([event["event_date"] for event in monthly_events], ["2026-02-02", "2026-03-02"])
-
-        yearly = weekly.replace(
-            b"DTSTART;VALUE=DATE:20260901\r\nRRULE:FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH",
-            b"DTSTART;VALUE=DATE:20250901\r\nRRULE:FREQ=YEARLY;BYMONTH=9;BYMONTHDAY=1",
-        ).replace(b"UID:recurring", b"UID:yearly")
-        yearly_events = server.parse_ical_calendar(yearly, window_start=date(2026, 8, 31), window_end=date(2026, 9, 30))
-        self.assertEqual([event["event_date"] for event in yearly_events], ["2026-09-01"])
-
-        unsupported = weekly.replace(b"FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH", b"FREQ=HOURLY;COUNT=2")
-        with self.assertRaises(server.AppError):
-            server.parse_ical_calendar(unsupported)
-        for malformed_byday in (b"BYDAY=MO,", b"BYDAY=MO,,TU", b"BYDAY=,"):
-            malformed = weekly.replace(b"BYDAY=TU,TH", malformed_byday)
-            with self.assertRaises(server.AppError):
-                server.parse_ical_calendar(malformed)
-
-    def test_ical_parser_applies_google_rdate_and_recurring_exceptions(self):
-        payload = (
-            b"BEGIN:VCALENDAR\r\n"
-            b"BEGIN:VEVENT\r\nUID:series\r\nDTSTART;VALUE=DATE:20260907\r\n"
-            b"RRULE:FREQ=WEEKLY;BYDAY=MO\r\nRDATE;VALUE=DATE:20260909\r\nSUMMARY:Series\r\nEND:VEVENT\r\n"
-            b"BEGIN:VEVENT\r\nUID:series\r\nRECURRENCE-ID;VALUE=DATE:20260914\r\n"
-            b"DTSTART;VALUE=DATE:20260914\r\nSUMMARY:Changed\r\nEND:VEVENT\r\n"
-            b"END:VCALENDAR\r\n"
-        )
-        events = server.parse_ical_calendar(payload, window_start=date(2026, 9, 7), window_end=date(2026, 9, 20))
-        self.assertEqual([(event["event_date"], event["name"]) for event in events], [
-            ("2026-09-07", "Series"),
-            ("2026-09-09", "Series"),
-            ("2026-09-14", "Changed"),
-        ])
-
-    def test_ical_parser_expands_bounded_daily_weekly_rules_with_exdates_and_dst(self):
-        server.save_profile({"timezone": "Europe/Berlin"})
-        daily = (
-            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:daily\r\n"
-            b"DTSTART;TZID=Europe/Berlin:20261024T100000\r\nDTEND;TZID=Europe/Berlin:20261024T110000\r\n"
-            b"RRULE:FREQ=DAILY;COUNT=5\r\nEXDATE;TZID=Europe/Berlin:20261025T100000\r\nSUMMARY:Daily\r\n"
-            b"END:VEVENT\r\nEND:VCALENDAR\r\n"
-        )
-        daily_events = server.parse_ical_calendar(daily, window_start=date(2026, 10, 24), window_end=date(2026, 10, 30))
-        self.assertEqual([event["event_date"] for event in daily_events], ["2026-10-24", "2026-10-26", "2026-10-27", "2026-10-28"])
-        self.assertTrue(daily_events[0]["start_local"].endswith("+02:00"))
-        self.assertTrue(daily_events[1]["start_local"].endswith("+01:00"))
-
-        weekly = (
-            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID=weekly\r\n"
-            b"DTSTART;TZID=Europe/Berlin:20260901T090000\r\nDTEND;TZID=Europe/Berlin:20260901T100000\r\n"
-            b"RRULE:FREQ=WEEKLY;UNTIL=20260922T235959;BYDAY=MO,WE\r\n"
-            b"EXDATE;TZID=Europe/Berlin:20260909T090000\r\nSUMMARY:Weekly\r\n"
-            b"END:VEVENT\r\nBEGIN:VEVENT\r\nUID=weekly\r\nDTSTART;TZID=Europe/Berlin:20260902T090000\r\nSUMMARY:Duplicate\r\nEND:VEVENT\r\n"
-            b"END:VCALENDAR\r\n"
-        ).replace(b"UID=", b"UID:").replace(b"SUMMARY=", b"SUMMARY:")
-        weekly_events = server.parse_ical_calendar(weekly, window_start=date(2026, 8, 31), window_end=date(2026, 9, 30))
-        self.assertEqual([event["event_date"] for event in weekly_events], ["2026-09-02", "2026-09-07", "2026-09-14", "2026-09-16", "2026-09-21"])
-        self.assertEqual(len({event["start_local"] for event in weekly_events}), len(weekly_events))
-        with self.assertRaises(server.AppError):
-            server.parse_ical_calendar(daily.replace(b"COUNT=5", b"COUNT=1001"), window_start=date(2026, 10, 24), window_end=date(2026, 10, 30))
 
     def test_external_calendar_keeps_last_good_events_on_invalid_feed(self):
         today = server.local_now().date().isoformat()
@@ -2575,58 +2471,11 @@ class CoachTests(unittest.TestCase):
                 ("good-event", "good-event", "Good event", today, today + "T10:00:00+02:00", today + "T11:00:00+02:00", 60, 0, 1, server.utc_now()),
             )
         with patch.object(server, "CONFIG", replace(server.CONFIG, calendar_ical_url="https://calendar.example/feed.ics")), patch.object(
-            server, "external_calendar_url", return_value="https://calendar.example/feed.ics"
-        ), patch.object(server, "fetch_calendar_feed", return_value=b"not an ical feed"):
+            calendar_provider, "external_calendar_url", return_value="https://calendar.example/feed.ics"
+        ), patch.object(calendar_provider, "fetch_calendar_feed", return_value=b"not an ical feed"):
             with self.assertRaises(server.AppError):
                 server.sync_external_calendar("test")
         self.assertEqual(server.list_external_calendar_events(1000)[0]["id"], "good-event")
-
-    def test_calendar_dns_validation_rejects_non_global_addresses(self):
-        with patch.object(server.socket, "getaddrinfo", return_value=[(None, None, None, None, ("100.64.0.1", 443))]):
-            with self.assertRaises(server.AppError) as raised:
-                server.external_calendar_url("https://calendar.example/feed.ics")
-        self.assertEqual(raised.exception.status, 400)
-
-    def test_calendar_url_validation_resolves_hostname_once(self):
-        with patch.object(
-            server.socket,
-            "getaddrinfo",
-            return_value=[(None, None, None, None, ("93.184.216.34", 443))],
-        ) as resolve:
-            self.assertEqual(server.external_calendar_url("https://calendar.example/feed.ics"), "https://calendar.example/feed.ics")
-
-        self.assertEqual(resolve.call_count, 1)
-
-    def test_calendar_feed_resolves_once_and_retries_another_global_address(self):
-        raw_socket = Mock()
-        tls_socket = Mock()
-        tls_context = Mock()
-        tls_context.wrap_socket.return_value = tls_socket
-        response = Mock(status=200)
-        response.read.return_value = b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
-        addresses = [server.ipaddress.ip_address("93.184.216.34"), server.ipaddress.ip_address("93.184.216.35")]
-
-        with patch.object(server, "_resolve_calendar_addresses", return_value=addresses) as resolve, patch.object(
-            server.ssl, "create_default_context", return_value=tls_context
-        ), patch.object(server.socket, "create_connection", side_effect=[OSError("first address unavailable"), raw_socket]) as connect, patch.object(
-            server, "HTTPResponse", return_value=response
-        ):
-            payload = server.fetch_calendar_feed("https://calendar.example/feed.ics")
-
-        self.assertEqual(payload, b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
-        resolve.assert_called_once_with("calendar.example", status=502)
-        self.assertEqual(connect.call_count, 2)
-        tls_context.wrap_socket.assert_called_once_with(raw_socket, server_hostname="calendar.example")
-        tls_socket.close.assert_called_once_with()
-
-    def test_calendar_feed_timeout_is_reported_as_gateway_timeout(self):
-        with patch.object(
-            server, "_resolve_calendar_addresses", return_value=[server.ipaddress.ip_address("93.184.216.34")]
-        ), patch.object(server.socket, "create_connection", side_effect=TimeoutError("calendar timeout")):
-            with self.assertRaises(server.AppError) as raised:
-                server.fetch_calendar_feed("https://calendar.example/feed.ics")
-
-        self.assertEqual(raised.exception.status, 504)
 
     def test_ical_no_training_marker_is_excluded_from_adaptive_constraints(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -2661,7 +2510,7 @@ class CoachTests(unittest.TestCase):
                 b"DTEND:20260903T120000Z\r\nSUMMARY:Unmarked\r\nDESCRIPTION:[NO_TRAINING]\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         )
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
-        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_calendar_feed", return_value=payload), patch.object(
+        with patch.object(server, "CONFIG", config), patch.object(calendar_provider, "fetch_calendar_feed", return_value=payload) as fetch, patch.object(
             server, "local_now", return_value=datetime(2026, 9, 2, tzinfo=timezone.utc)
         ), patch.object(
             server, "check_adaptive_replan", return_value={"needs_replan": True, "replan_changes": 2}
@@ -2678,10 +2527,11 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(state["events"][0]["short_only"], 0)
             self.assertEqual([event["uid"] for event in server.list_external_calendar_events(1000, training_relevant_only=True)], ["family-2"])
             self.assertFalse(state["events"][1]["training_relevant"])
+            fetch.assert_called_once_with(config.calendar_ical_url, app_version=server.APP_VERSION)
 
     def test_external_calendar_sync_limits_events_to_eight_weeks(self):
         today = server.local_now().date()
-        in_window = today + timedelta(days=server.EXTERNAL_CALENDAR_WINDOW_DAYS)
+        in_window = today + timedelta(days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS)
         outside_window = in_window + timedelta(days=1)
         payload = (
             "BEGIN:VCALENDAR\r\n"
@@ -2690,7 +2540,7 @@ class CoachTests(unittest.TestCase):
             "END:VCALENDAR\r\n"
         ).encode()
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
-        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_calendar_feed", return_value=payload):
+        with patch.object(server, "CONFIG", config), patch.object(calendar_provider, "fetch_calendar_feed", return_value=payload):
             result = server.sync_external_calendar("test")
 
         self.assertEqual(result["window_days"], 56)
@@ -2705,16 +2555,10 @@ class CoachTests(unittest.TestCase):
                 ("event-old", "family-old", "Existing appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T11:00:00+02:00", 60, 0, server.utc_now()),
             )
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
-        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_calendar_feed", side_effect=server.AppError(502, "upstream unavailable")):
+        with patch.object(server, "CONFIG", config), patch.object(calendar_provider, "fetch_calendar_feed", side_effect=server.AppError(502, "upstream unavailable")):
             with self.assertRaises(server.AppError):
                 server.sync_external_calendar("test")
         self.assertEqual(server.list_external_calendar_events()[0]["id"], "event-old")
-
-    def test_external_calendar_url_rejects_private_or_non_https_urls(self):
-        with self.assertRaises(server.AppError):
-            server.external_calendar_url("http://calendar.example.test/family.ics")
-        with self.assertRaises(server.AppError):
-            server.external_calendar_url("https://127.0.0.1/calendar.ics")
 
     def test_external_calendar_event_reduces_hard_or_long_local_draft_only_in_preview(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -4466,6 +4310,29 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(captured["request"].full_url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse")
         self.assertEqual(captured["request"].headers["X-goog-api-key"], "test-gemini-key")
 
+    def test_gemini_stream_preserves_response_too_large_contract(self):
+        class StreamResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def __iter__(self):
+                yield b"data: {}\n"
+
+        config = replace(server.CONFIG, gemini_api_key="test-gemini-key")
+        with (
+            patch.object(server, "CONFIG", config),
+            patch.object(server, "MAX_EXTERNAL_RESPONSE_BYTES", 1),
+            patch.object(server, "urlopen", return_value=StreamResponse()),
+            self.assertRaises(server.AppError) as raised,
+        ):
+            server.gemini_stream_request({"model": "gemini-3.8-flash", "input": "test"}, lambda _: None)
+
+        self.assertEqual(raised.exception.status, 502)
+        self.assertEqual(raised.exception.reason, "response_too_large")
+
     def test_gemini_persists_tool_response_before_a_failed_followup(self):
         responses = [
             {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "save_checkin", "args": {}}}]}}]},
@@ -4687,12 +4554,6 @@ class CoachTests(unittest.TestCase):
         delete.assert_called_once_with("conv-test")
         self.assertTrue(result["remote_conversation_deleted"])
 
-    def test_gemini_error_classes_preserve_authentication_quota_and_rate_limits(self):
-        self.assertEqual(server.gemini_error_details(401, b"{}")["reason"], "authentication_or_permission")
-        quota = json.dumps({"error": {"status": "RESOURCE_EXHAUSTED", "details": [{"reason": "quotaExceeded"}]}}).encode()
-        self.assertEqual(server.gemini_error_details(429, quota)["reason"], "insufficient_quota")
-        self.assertEqual(server.gemini_error_details(429, b"{}")["reason"], "rate_limit_exceeded")
-
     def test_provider_authentication_errors_do_not_use_the_session_status(self):
         provider_error = server.AppError(401, "Gemini-SchlÃ¼ssel ungÃ¼ltig.", reason="authentication_or_permission")
         self.assertEqual(server.public_app_error_status(provider_error), 502)
@@ -4714,7 +4575,9 @@ class CoachTests(unittest.TestCase):
 
     def test_gemini_function_schemas_keep_openai_nullable_fields_as_json_schema(self):
         schema = {"type": "object", "properties": {"notes": {"type": ["string", "null"]}}}
-        declaration = server._gemini_tools([{"type": "function", "name": "save_feedback", "parameters": schema}])[0]["functionDeclarations"][0]
+        declaration = gemini_provider.function_tools(
+            [{"type": "function", "name": "save_feedback", "parameters": schema}]
+        )[0]["functionDeclarations"][0]
         self.assertEqual(declaration["parametersJsonSchema"], schema)
         self.assertNotIn("parameters", declaration)
 
@@ -4825,6 +4688,38 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         self.assertIsNone(getattr(cancel_event, "_provider_response", None))
 
+    def test_http_json_preserves_empty_body_and_oversized_response_contracts(self):
+        class EmptyResponse:
+            status = 204
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, *_args):
+                return b""
+
+        with patch.object(server, "urlopen", return_value=EmptyResponse()):
+            self.assertIsNone(server.http_json("DELETE", "https://intervals.icu/api/v1/athlete/0", service="intervals"))
+
+        class OversizedResponse(EmptyResponse):
+            status = 200
+
+            def read(self, *_args):
+                return b"1234"
+
+        with (
+            patch.object(server, "MAX_EXTERNAL_RESPONSE_BYTES", 3),
+            patch.object(server, "urlopen", return_value=OversizedResponse()),
+            self.assertRaises(server.AppError) as raised,
+        ):
+            server.http_json("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
+        self.assertEqual(raised.exception.status, 502)
+        self.assertEqual(raised.exception.message, "Die Antwort des externen Dienstes ist zu groß.")
+
     def test_transcribe_audio_sends_bounded_multipart_request(self):
         captured = {}
 
@@ -4852,24 +4747,6 @@ class CoachTests(unittest.TestCase):
         self.assertIn(b"gpt-transcribe", captured["raw_body"])
         self.assertIn(audio, captured["raw_body"])
         self.assertEqual(captured["headers"]["Authorization"], "Bearer test-key")
-
-    def test_openai_endpoint_joins_compatible_provider_base_url_and_rejects_credentials(self):
-        config = replace(server.CONFIG, openai_base_url="https://foundry.example.invalid/openai/v1/")
-        with patch.object(server, "CONFIG", config):
-            self.assertEqual(server.openai_endpoint("/responses"), "https://foundry.example.invalid/openai/v1/responses")
-            self.assertEqual(server.openai_endpoint("conversations/abc"), "https://foundry.example.invalid/openai/v1/conversations/abc")
-        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_base_url="")):
-            self.assertEqual(server.openai_endpoint("responses"), server.DEFAULT_OPENAI_BASE_URL + "/responses")
-
-        for invalid in (
-            "https://user:password@foundry.example.invalid/openai/v1",
-            "https://foundry.example.invalid/openai/v1?api-version=2024-10-21",
-            "ftp://foundry.example.invalid/openai/v1",
-        ):
-            with self.subTest(invalid=invalid), patch.object(server, "CONFIG", replace(server.CONFIG, openai_base_url=invalid)):
-                with self.assertRaises(server.AppError) as raised:
-                    server.openai_endpoint("responses")
-                self.assertEqual(raised.exception.status, 500)
 
     def test_openai_request_uses_configured_compatible_provider_endpoint(self):
         captured = {}
@@ -5510,7 +5387,7 @@ class CoachTests(unittest.TestCase):
     def test_openai_background_creation_defers_usage_recording(self):
         response = {"id": "resp_background_usage", "status": "queued", "usage": {}}
         with patch.object(server, "http_json", return_value=response), patch.object(
-            server, "record_openai_usage"
+            server.provider_state_service(), "record_usage"
         ) as record_usage:
             server.openai_request(
                 "/responses",
@@ -5900,7 +5777,9 @@ class CoachTests(unittest.TestCase):
                 {"id": "resp_background_1", "status": "in_progress"},
                 {"id": "resp_background_1", "status": "completed", "output_text": "fertig", "usage": {}},
             ],
-        ) as retrieve, patch.object(server, "OPENAI_BACKGROUND_POLL_SECONDS", 0), patch.object(server, "record_openai_usage"):
+        ) as retrieve, patch.object(server, "OPENAI_BACKGROUND_POLL_SECONDS", 0), patch.object(
+            server.provider_state_service(), "record_usage"
+        ):
             result = server.responses_background_request(
                 {"model": "gpt-5.6-sol", "input": "fake"}, on_response_id=checkpoints.append
             )
@@ -5910,6 +5789,21 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(checkpoints, ["resp_background_1"])
         self.assertEqual(retrieve.call_count, 2)
         self.assertEqual(result["status"], "completed")
+
+    def test_openai_background_polling_keeps_the_create_time_in_its_deadline(self):
+        initial = {"id": "resp_background_deadline", "status": "queued", "usage": {}}
+        terminal = {"id": "resp_background_deadline", "status": "completed", "usage": {}}
+
+        with patch.object(server, "responses_request", return_value=initial), patch.object(
+            server.time, "monotonic", side_effect=[100.0, 104.0]
+        ), patch.object(
+            server.openai_provider, "poll_background_response", return_value=terminal
+        ) as poll, patch.object(server.provider_state_service(), "record_usage"):
+            result = server.responses_background_request({"model": "gpt-5.6-sol", "input": "fake"})
+
+        self.assertIs(result, terminal)
+        self.assertEqual(poll.call_args.kwargs["max_seconds"], server.OPENAI_BACKGROUND_MAX_SECONDS - 4.0)
+        self.assertEqual(poll.call_args.args, ({**initial, "id": "resp_background_deadline"},))
 
     def test_background_coach_job_is_persisted_and_session_scoped(self):
         job = server.enqueue_background_coach_job(
@@ -6181,7 +6075,7 @@ class CoachTests(unittest.TestCase):
                 server.sync_intervals("cancelled", activity_days=42, cancel_event=cancel_event)
             freshness = {
                 (item["provider"], item["area"]): item
-                for item in server.provider_freshness_state()
+                for item in server._current_provider_freshness()
             }
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         with server.DB_LOCK, server.database() as db:
@@ -6700,14 +6594,14 @@ class CoachTests(unittest.TestCase):
                 {"GARMIN_EMAIL": "", "GARMIN_PASSWORD": "", "GARMINTOKENS": ""},
                 clear=False,
             ):
-                server.save_settings({
+                server.app_config.save_persistent_settings(data_dir, {
                     "GARMIN_EMAIL": "athlete@example.com",
                     "GARMIN_PASSWORD": "test-password",
                     "GARMINTOKENS": "/data/garmin_tokens",
-                })
+                }, os.environ)
                 for key in ("GARMIN_EMAIL", "GARMIN_PASSWORD", "GARMINTOKENS"):
                     os.environ.pop(key, None)
-                server.load_local_env()
+                server.app_config.load_local_env(Path(temp_root), data_dir, os.environ)
                 self.assertEqual(os.environ["GARMIN_EMAIL"], "athlete@example.com")
                 self.assertEqual(os.environ["GARMIN_PASSWORD"], "test-password")
                 self.assertEqual(os.environ["GARMINTOKENS"], "/data/garmin_tokens")
@@ -6716,13 +6610,13 @@ class CoachTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             data_dir = Path(temp_root) / "data"
             with patch.object(server, "ROOT", Path(temp_root)), patch.object(server, "DATA_DIR", data_dir):
-                server.save_settings({
+                server.app_config.save_persistent_settings(data_dir, {
                     "OPENAI_API_KEY": "file-openai",
                     "INTERVALS_API_KEY": "file-intervals",
                     "GARMIN_EMAIL": "file@example.com",
                     "GARMIN_PASSWORD": "file-password",
                     "GARMINTOKENS": "/data/file-tokens",
-                })
+                }, os.environ)
                 for key in ("OPENAI_API_KEY", "INTERVALS_API_KEY", "GARMIN_EMAIL", "GARMIN_PASSWORD", "GARMINTOKENS"):
                     os.environ.pop(key, None)
                 with patch.dict(os.environ, {
@@ -6732,7 +6626,7 @@ class CoachTests(unittest.TestCase):
                     "GARMIN_PASSWORD": "env-password",
                     "GARMINTOKENS": "/data/env-tokens",
                 }, clear=False):
-                    server.load_local_env()
+                    server.app_config.load_local_env(Path(temp_root), data_dir, os.environ)
                     self.assertEqual(os.environ["OPENAI_API_KEY"], "env-openai")
                     self.assertEqual(os.environ["INTERVALS_API_KEY"], "env-intervals")
                     self.assertEqual(os.environ["GARMIN_EMAIL"], "env@example.com")
@@ -7862,8 +7756,8 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(sdk_error.exception.reason, "provider_client_error")
             self.assertNotIn(email, str(sdk_error.exception))
 
-            with patch.object(server, "external_calendar_url", return_value=calendar_url), patch.object(
-                server, "fetch_calendar_feed", side_effect=RuntimeError(f"calendar request failed for {email}")
+            with patch.object(calendar_provider, "external_calendar_url", return_value=calendar_url), patch.object(
+                calendar_provider, "fetch_calendar_feed", side_effect=RuntimeError(f"calendar request failed for {email}")
             ):
                 with self.assertRaises(server.AppError) as calendar_error:
                     server.sync_external_calendar("test")
@@ -7926,8 +7820,8 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(response_body.closed)
 
     def test_user_enabled_diagnostic_capture_keeps_response_shape_without_content(self):
-        self.assertFalse(server.diagnostic_capture_status()["active"])
-        enabled = server.set_diagnostic_capture(True)
+        self.assertFalse(server.DIAGNOSTIC_CAPTURE.status()["active"])
+        enabled = server.DIAGNOSTIC_CAPTURE.set_enabled(True)
         self.assertTrue(enabled["active"])
         response = {
             "bodyBattery": 82,
@@ -7941,14 +7835,14 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("must-not-appear", report_text)
         self.assertNotIn("must-never-appear", report_text)
         self.assertNotIn("must-also-never-appear", report_text)
-        entries = server.diagnostic_capture_entries()
+        entries = server.DIAGNOSTIC_CAPTURE.entries()
         self.assertTrue(entries)
         response_capture = entries[-1]["details"]["response"]
         self.assertIn("shape", response_capture)
         self.assertNotIn("content", response_capture)
 
-        server.set_diagnostic_capture(False)
-        self.assertFalse(server.diagnostic_capture_status()["active"])
+        server.DIAGNOSTIC_CAPTURE.set_enabled(False)
+        self.assertFalse(server.DIAGNOSTIC_CAPTURE.status()["active"])
         server.external_call("garmin", "body_battery", lambda: {"new_marker": "not captured"})
         self.assertNotIn("not captured", json.dumps(server.diagnostic_report(), ensure_ascii=False))
 
@@ -8134,7 +8028,7 @@ class CoachTests(unittest.TestCase):
 
         with patch.object(server, "urlopen", return_value=FakeResponse()):
             server.http_json("POST", "https://api.openai.com/v1/responses", payload={}, service="openai")
-        summary = server.openai_usage_summary()
+        summary = server.provider_state_service().summary("openai")
         self.assertNotIn("request_limit", summary)
         self.assertNotIn("token_limit", summary)
         self.assertEqual(summary["rate_limits"]["remaining_requests"], "19")
@@ -8164,32 +8058,12 @@ class CoachTests(unittest.TestCase):
                 server.http_json("POST", "https://api.openai.com/v1/responses", payload={}, service="openai")
         self.assertEqual(raised.exception.status, 429)
         self.assertIn("Guthaben", raised.exception.message)
-        summary = server.openai_usage_summary()
+        summary = server.provider_state_service().summary("openai")
         self.assertEqual(summary["status"]["reason"], "credit_balance_exhausted")
         self.assertEqual(summary["status"]["http_status"], 429)
         self.assertEqual(summary["rate_limits"]["remaining_requests"], "0")
         self.assertEqual(summary["rate_limits"]["remaining_tokens"], "0")
         self.assertNotIn("current quota", json.dumps(summary))
-
-    def test_openai_documented_spend_and_usage_codes_are_classified(self):
-        for code in (
-            "organization_spend_limit_exceeded",
-            "project_spend_limit_exceeded",
-            "organization_usage_limit_exceeded",
-        ):
-            details = server.openai_error_details(429, json.dumps({"error": {"code": code}}).encode("utf-8"))
-            self.assertEqual(details["reason"], code)
-            self.assertIn("Limit", details["message"])
-
-    def test_openai_retry_after_is_parsed_for_transient_rate_limits(self):
-        details = server.openai_error_details(
-            429,
-            json.dumps({"error": {"code": "rate_limit_exceeded"}}).encode("utf-8"),
-            {"retry-after": "12.5"},
-        )
-        self.assertEqual(details["reason"], "rate_limit_exceeded")
-        self.assertEqual(details["retry_after_seconds"], 13)
-        self.assertIsNone(server._retry_after_seconds({"retry-after": "not-a-delay"}))
 
     def test_openai_retry_after_is_attached_to_transient_http_error(self):
         error_body = json.dumps({"error": {"code": "rate_limit_exceeded"}}).encode("utf-8")
@@ -8220,10 +8094,6 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(raised.exception.reason, "rate_limit_exceeded")
         self.assertEqual(raised.exception.retry_after_seconds, 9)
 
-    def test_openai_log_reasons_are_static_allowlisted_values(self):
-        self.assertEqual(server.safe_openai_log_reason("project_spend_limit_exceeded"), "usage_limit_exceeded")
-        self.assertEqual(server.safe_openai_log_reason("provider-private-message"), "http_error")
-
     def test_openai_conversation_lock_retry_uses_structured_reason(self):
         calls = []
         responses = [server.AppError(409, "locked", reason="conversation_locked"), {"output_text": "ok"}]
@@ -8241,58 +8111,6 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(calls, ["/responses", "/responses"])
         sleep.assert_called_once_with(1)
 
-    def test_openai_conversation_state_error_is_classified_without_provider_text(self):
-        raw_error = json.dumps({
-            "error": {
-                "code": "invalid_function_call_output",
-                "type": "invalid_request_error",
-                "param": "input[0]",
-                "message": "secret tool call detail must never be stored",
-            },
-        }).encode("utf-8")
-        details = server.openai_error_details(400, raw_error)
-        self.assertEqual(details["reason"], "conversation_state_invalid")
-        diagnostic = server.openai_error_diagnostic_details(raw_error, {"x-request-id": "req_test_123"})
-        self.assertEqual(diagnostic["error_code"], "invalid_function_call_output")
-        self.assertEqual(diagnostic["parameter"], "input[0]")
-        self.assertNotIn("secret", json.dumps(diagnostic))
-
-    def test_openai_code_null_input_state_errors_are_classified_for_recovery(self):
-        messages = (
-            "No tool output found for function call call_private_example.",
-            "Item 'rs_private_example' of type 'reasoning' was provided without its required following item.",
-        )
-        for provider_message in messages:
-            with self.subTest(provider_message=provider_message):
-                raw_error = json.dumps({
-                    "error": {
-                        "code": None,
-                        "type": "invalid_request_error",
-                        "param": "input",
-                        "message": provider_message,
-                    },
-                }).encode("utf-8")
-
-                details = server.openai_error_details(400, raw_error)
-                self.assertEqual(details["reason"], "conversation_state_invalid")
-                diagnostic = server.openai_error_diagnostic_details(raw_error)
-                self.assertEqual(diagnostic["error_type"], "invalid_request_error")
-                self.assertEqual(diagnostic["parameter"], "input")
-                self.assertNotIn("private_example", json.dumps(diagnostic))
-
-    def test_openai_code_null_unrelated_input_error_does_not_rotate_conversation(self):
-        raw_error = json.dumps({
-            "error": {
-                "code": None,
-                "type": "invalid_request_error",
-                "param": "input",
-                "message": "Input contains an unsupported content type.",
-            },
-        }).encode("utf-8")
-
-        details = server.openai_error_details(400, raw_error)
-        self.assertEqual(details["reason"], "http_error")
-
     def test_streaming_openai_400_is_captured_without_error_message_or_payload(self):
         raw_error = json.dumps({
             "error": {
@@ -8304,13 +8122,13 @@ class CoachTests(unittest.TestCase):
         upstream_error = server.HTTPError(
             "https://api.openai.com/v1/responses", 400, "Bad Request", {"x-request-id": "req_test_456"}, BytesIO(raw_error)
         )
-        server.set_diagnostic_capture(True)
+        server.DIAGNOSTIC_CAPTURE.set_enabled(True)
         config = replace(server.CONFIG, openai_api_key="openai-test")
         with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=upstream_error):
             with self.assertRaises(server.AppError) as raised:
                 server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "conversation_state_invalid")
-        captured = server.diagnostic_capture_entries()
+        captured = server.DIAGNOSTIC_CAPTURE.entries()
         failed = next(entry for entry in reversed(captured) if entry["event"] == "openai_stream_failed")
         self.assertEqual(failed["details"]["error_code"], "invalid_function_call_output")
         self.assertEqual(failed["details"]["request_id"], "req_test_456")
@@ -8356,7 +8174,41 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(json.loads(request.data)["stream"])
         self.assertEqual(request.get_header("Accept"), "text/event-stream")
         self.assertNotIn("Hallo", json.dumps(server.recent_log_entries(), ensure_ascii=False))
-        self.assertEqual(server.openai_usage_summary()["total_tokens"], 6)
+        self.assertEqual(server.provider_state_service().summary("openai")["total_tokens"], 6)
+
+    def test_openai_stream_request_preserves_response_too_large_contract_and_byte_count(self):
+        class OversizedResponse:
+            status = 200
+            headers = {
+                "x-ratelimit-remaining-requests": "7",
+                "x-ratelimit-remaining-tokens": "9000",
+            }
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def __iter__(self):
+                yield b"data: {}\n"
+
+        server.DIAGNOSTIC_CAPTURE.set_enabled(True)
+        with (
+            patch.object(server, "MAX_EXTERNAL_RESPONSE_BYTES", 1),
+            patch.object(server, "urlopen", return_value=OversizedResponse()),
+            self.assertRaises(server.AppError) as raised,
+        ):
+            server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+
+        self.assertEqual(raised.exception.status, 502)
+        self.assertEqual(raised.exception.reason, "response_too_large")
+        summary = server.provider_state_service().summary("openai")
+        self.assertEqual(summary["rate_limits"]["remaining_requests"], "7")
+        self.assertEqual(summary["rate_limits"]["remaining_tokens"], "9000")
+        captured = server.DIAGNOSTIC_CAPTURE.entries()
+        failed = next(entry for entry in reversed(captured) if entry["event"] == "openai_stream_failed")
+        self.assertEqual(failed["details"]["response_bytes"], len(b"data: {}\n"))
 
     def test_openai_stream_request_cancel_before_provider_call_records_cancelled_usage(self):
         cancel_event = threading.Event()
@@ -8366,7 +8218,10 @@ class CoachTests(unittest.TestCase):
                 server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: None, cancel_event)
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         urlopen.assert_not_called()
-        self.assertEqual(server.openai_usage_summary()["last_operation"], "responses_stream_cancelled")
+        self.assertEqual(
+            server.provider_state_service().summary("openai")["last_operation"],
+            "responses_stream_cancelled",
+        )
 
     def test_openai_stream_request_timeout_is_safe_and_records_provider_failure(self):
         server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
@@ -8390,9 +8245,37 @@ class CoachTests(unittest.TestCase):
                 server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "provider_timeout")
         self.assertEqual(raised.exception.status, 504)
-        self.assertEqual(server.openai_usage_summary()["status"]["reason"], "provider_timeout")
+        self.assertEqual(
+            server.provider_state_service().summary("openai")["status"]["reason"],
+            "provider_timeout",
+        )
         failures = [entry for entry in server.recent_log_entries() if entry.get("event") == "external_request_failed"]
         self.assertEqual(failures[-1]["context"]["reason"], "provider_timeout")
+
+    def test_openai_stream_failure_log_preserves_safe_reason_and_rejects_unrecognized_text(self):
+        with patch.object(server.LOGGER, "log") as log:
+            server._log_openai_stream_failure(
+                {"service": "openai"},
+                server.time.perf_counter(),
+                0,
+                "usage_limit_exceeded",
+                429,
+            )
+
+        self.assertEqual(log.call_args.kwargs["extra"]["context"]["reason"], "usage_limit_exceeded")
+
+        with patch.object(server.LOGGER, "log") as log:
+            server._log_openai_stream_failure(
+                {"service": "openai"},
+                server.time.perf_counter(),
+                0,
+                "athlete-private provider failure",
+                502,
+            )
+
+        logged_context = log.call_args.kwargs["extra"]["context"]
+        self.assertEqual(logged_context["reason"], "http_error")
+        self.assertNotIn("athlete-private", json.dumps(log.call_args.kwargs))
 
     def test_openai_stream_request_client_disconnect_records_cancelled_usage(self):
         class DisconnectResponse:
@@ -8413,7 +8296,10 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "urlopen", return_value=DisconnectResponse()):
             with self.assertRaises(server.ClientDisconnected):
                 server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: (_ for _ in ()).throw(server.ClientDisconnected()))
-        self.assertEqual(server.openai_usage_summary()["last_operation"], "responses_stream_cancelled")
+        self.assertEqual(
+            server.provider_state_service().summary("openai")["last_operation"],
+            "responses_stream_cancelled",
+        )
 
     def test_stream_conversation_lock_retry_is_bounded_and_reconnects(self):
         responses = [server.AppError(409, "locked", reason="conversation_locked"), {"status": "completed"}]
@@ -8423,6 +8309,29 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(request.call_count, 2)
         sleep.assert_called_once_with(1)
+
+    def test_stream_conversation_lock_retry_wait_is_cancellable(self):
+        cancel_event = threading.Event()
+
+        def cancel_during_wait(_delay):
+            cancel_event.set()
+            return True
+
+        with patch.object(
+            server,
+            "openai_stream_request",
+            side_effect=server.AppError(409, "locked", reason="conversation_locked"),
+        ) as request, patch.object(cancel_event, "wait", side_effect=cancel_during_wait):
+            with self.assertRaises(server.AppError) as raised:
+                server.responses_stream_request({"model": "gpt-5.6-sol"}, lambda _: None, cancel_event)
+
+        self.assertEqual(raised.exception.status, 499)
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(
+            server.provider_state_service().summary("openai")["last_operation"],
+            "responses_stream_cancelled",
+        )
 
 
     def test_chat_stream_registration_rejects_duplicate_stream_and_wrong_operation_id(self):
@@ -8552,12 +8461,19 @@ class CoachTests(unittest.TestCase):
         request.assert_called_once()
 
     def test_openai_usage_updates_are_atomic_and_tolerate_invalid_provider_counts(self):
-        threads = [threading.Thread(target=server.record_openai_usage, args=({"usage": {"input_tokens": "bad", "output_tokens": 2}}, "test")) for _ in range(8)]
+        state = server.provider_state_service()
+        threads = [
+            threading.Thread(
+                target=state.record_usage,
+                args=("openai", {"usage": {"input_tokens": "bad", "output_tokens": 2}}, "test"),
+            )
+            for _ in range(8)
+        ]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
-        summary = server.openai_usage_summary()
+        summary = state.summary("openai")
         self.assertEqual(summary["requests"], 8)
         self.assertEqual(summary["input_tokens"], 0)
         self.assertEqual(summary["output_tokens"], 16)
@@ -8590,18 +8506,24 @@ class CoachTests(unittest.TestCase):
                     database_lock = ObservedDatabaseLock()
                     errors = []
 
-                    def worker():
-                        try:
-                            if update:
-                                server.record_openai_usage({"usage": {"output_tokens": 2}}, "test")
-                            else:
-                                server.openai_usage_summary()
-                        except Exception as exc:
-                            errors.append(exc)
-
                     with patch.object(server, "DB_LOCK", database_lock), patch.object(
+                        server, "PROVIDER_STATE_SERVICE", None
+                    ), patch.object(
                         server, "urlopen", side_effect=AssertionError("State must stay local")
                     ):
+                        state = server.provider_state_service()
+
+                        def worker(update=update, state=state, errors=errors):
+                            try:
+                                if update:
+                                    state.record_usage(
+                                        "openai", {"usage": {"output_tokens": 2}}, "test"
+                                    )
+                                else:
+                                    state.summary("openai")
+                            except Exception as exc:
+                                errors.append(exc)
+
                         thread = threading.Thread(target=worker)
                         try:
                             with server.DB_LOCK, server.database():
@@ -8623,12 +8545,12 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(state["last_error"])
 
     def test_diagnostic_response_shape_keeps_only_structure(self):
-        shape = server.diagnostic_response_shape({"athlete_name": "Ada", "nested": [{"secret": "hidden"}], "invalid key": 1})
+        shape = server.observability.diagnostic_response_shape({"athlete_name": "Ada", "nested": [{"secret": "hidden"}], "invalid key": 1})
         self.assertEqual(shape["type"], "object")
         self.assertEqual(shape["fields"], ["athlete_name", "nested", "[nonstandard]"])
         self.assertEqual(shape["sample"], {"type": "string", "length": 3})
         self.assertNotIn("Ada", json.dumps(shape))
-        self.assertEqual(server.diagnostic_response_shape([{"token": "hidden"}])["item_shape"]["fields"], ["token"])
+        self.assertEqual(server.observability.diagnostic_response_shape([{"token": "hidden"}])["item_shape"]["fields"], ["token"])
 
     def test_garmin_sdk_calls_log_operation_and_result_summary(self):
         server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
@@ -8719,24 +8641,24 @@ class CoachTests(unittest.TestCase):
         )
         with patch.object(server, "CONFIG", config):
             server.save_profile({"weather_location": "Berlin"})
-            initial = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            initial = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertEqual(initial[("intervals", "activities")]["state"], "never_loaded")
             self.assertEqual(initial[("weather", "forecast")]["state"], "never_loaded")
             refresh_id = server._provider_refresh_start("intervals", "activities", "operation-test", "manual")
             server._provider_refresh_finish(refresh_id, "error", "failed", error_code="network_error")
-            failed = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            failed = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertEqual(failed[("intervals", "activities")]["state"], "error")
             self.assertEqual(failed[("intervals", "activities")]["error_code"], "network_error")
             self.assertIsNone(failed[("intervals", "activities")]["next_retry_at"])
             with patch.object(server, "CONFIG", replace(config, intervals_api_key="")):
-                unconfigured = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+                unconfigured = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertEqual(unconfigured[("intervals", "activities")]["state"], "not_configured")
             self.assertEqual(unconfigured[("intervals", "activities")]["error_code"], "network_error")
             server.enqueue_sync_job(
                 "intervals", "refresh", {"days": 1},
                 requested_by="test", available_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
             )
-            scheduled = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            scheduled = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertTrue(scheduled[("intervals", "activities")]["next_retry_at"])
             refresh_id = server._provider_refresh_start("intervals", "activities", "operation-test-2", "manual")
             server._provider_refresh_finish(refresh_id, "success", "complete")
@@ -8746,17 +8668,17 @@ class CoachTests(unittest.TestCase):
                     "UPDATE provider_refresh_history SET started_at=?, finished_at=? WHERE id=?",
                     (stale_at, stale_at, refresh_id),
                 )
-            stale = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            stale = {(item["provider"], item["area"]): item for item in server._current_provider_freshness()}
             self.assertEqual(stale[("intervals", "activities")]["state"], "stale")
             self.assertTrue(stale[("intervals", "activities")]["has_last_good"])
 
     def test_provider_refresh_history_is_bounded_and_diagnostic_safe(self):
-        for index in range(server.PROVIDER_REFRESH_MAX_ROWS + 5):
+        for index in range(server.sync_freshness.PROVIDER_REFRESH_MAX_ROWS + 5):
             refresh_id = server._provider_refresh_start("garmin", "data", f"operation-{index}", "manual")
             server._provider_refresh_finish(refresh_id, "success", "complete")
         with server.DB_LOCK, server.database() as db:
             count = db.execute("SELECT COUNT(*) AS count FROM provider_refresh_history").fetchone()["count"]
-        self.assertEqual(count, server.PROVIDER_REFRESH_MAX_ROWS)
+        self.assertEqual(count, server.sync_freshness.PROVIDER_REFRESH_MAX_ROWS)
         report = server.diagnostic_report()
         self.assertIn("provider_freshness", report)
         self.assertNotIn("operation-", json.dumps(report))

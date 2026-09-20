@@ -8,12 +8,13 @@ import sys
 import unittest
 import zipfile
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
+from backend.providers import calendar as calendar_provider
 from backend.runtime import maintenance as runtime_maintenance
 
 server = dialogue.server
@@ -157,11 +158,26 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
 
     def test_ongoing_calendar_event_and_nested_alarm(self):
         feed = b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:synthetic\r\nDTSTART;VALUE=DATE:20260906\r\nDTEND;VALUE=DATE:20260909\r\nSUMMARY:Trip\r\nDESCRIPTION:[SHORT_ONLY]\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-        events = server.parse_ical_calendar(feed, window_start=date(2026, 9, 7), window_end=date(2026, 9, 10))
+        events = calendar_provider.parse_ical_calendar(
+            feed,
+            local_zone=timezone.utc,
+            today=date(2026, 9, 7),
+            window_start=date(2026, 9, 7),
+            window_end=date(2026, 9, 10),
+        )
         self.assertEqual(len(events), 1)
         self.assertTrue(events[0]["short_only"])
         self.assertEqual(server.external_calendar_event_dates(events[0]), ["2026-09-06", "2026-09-07", "2026-09-08"])
-        self.assertEqual(server.parse_ical_calendar(feed, window_start=date(2026, 9, 9), window_end=date(2026, 9, 10)), [])
+        self.assertEqual(
+            calendar_provider.parse_ical_calendar(
+                feed,
+                local_zone=timezone.utc,
+                today=date(2026, 9, 9),
+                window_start=date(2026, 9, 9),
+                window_end=date(2026, 9, 10),
+            ),
+            [],
+        )
 
     def test_privacy_export_has_every_checkin_and_library_record(self):
         for offset in range(20):
@@ -187,7 +203,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
         token = create_test_session(server)
         # This temporary SQLite fixture exercises pagination and real session
         # authentication; secure startup has separate SQLCipher integration tests.
-        startup = patch.object(server, "security_configuration_error", return_value=None)
+        startup = patch.object(server.app_config, "security_configuration_error", return_value=None)
         startup.start()
         self.addCleanup(startup.stop)
         httpd = server.CoachHTTPServer(("127.0.0.1", 0), server.RequestHandler)

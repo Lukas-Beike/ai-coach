@@ -27,9 +27,11 @@ RUNTIME_EVENTS = "runtime/events.py"
 RUNTIME_MAINTENANCE = "runtime/maintenance.py"
 SYNC_PACKAGE = "sync/"
 SYNC_GARMIN = "sync/garmin.py"
+SYNC_RECONCILE = "sync/reconcile.py"
 SYNC_SCHEDULER = "sync/scheduler.py"
 COACH_PACKAGE = "coach/"
 COACH_CONVERSATION = "coach/conversation.py"
+COACH_CONTEXT = "coach/context.py"
 COACH_JOBS = "coach/jobs.py"
 COACH_MORNING = "coach/morning.py"
 COACH_PROPOSALS = "coach/proposals.py"
@@ -48,6 +50,7 @@ SETTINGS_MODULE = "settings.py"
 ACTIVITIES_PACKAGE = "activities/"
 ATHLETE_PACKAGE = "athlete/"
 PERFORMANCE_PACKAGE = "performance/"
+PERFORMANCE_ACTIVITY_VALIDATION = "performance/activity_validation.py"
 WEATHER_PACKAGE = "weather/"
 HISTORY_PACKAGE = "history/"
 PLANNING_PACKAGE = "planning/"
@@ -55,6 +58,8 @@ PLANNING_COMPETITIONS = "planning/competitions.py"
 BACKUP_PACKAGE = "backup/"
 CALENDAR_PACKAGE = "calendar/"
 PRIVACY_MODULE = "privacy.py"
+DIAGNOSTICS_REPORT = "diagnostics/report.py"
+SYNC_REFRESH = "sync/refresh.py"
 KIND_FUNCTION = "Funktion"
 KIND_CLASS = "Klasse"
 KIND_GLOBAL = "Globale Bindung"
@@ -181,6 +186,10 @@ def _explicit_owner(name: str) -> str | None:
             "garmin_operation": SYNC_GARMIN,
             "IntervalsClient": "providers/intervals_client.py",
             "serialise_conversation": COACH_CONVERSATION,
+            "_gemini_request_history": COACH_CONVERSATION,
+            "_gemini_request_payload": COACH_CONVERSATION,
+            "_gemini_last_user_text": COACH_CONVERSATION,
+            "_gemini_call_names": COACH_CONVERSATION,
             "utc_now": RUNTIME_PACKAGE,
             "AppError": ERRORS_MODULE,
             "public_app_error_status": ERRORS_MODULE,
@@ -193,6 +202,8 @@ def _explicit_owner(name: str) -> str | None:
             "external_result_context": OBSERVABILITY_MODULE,
             "provider_error": ERRORS_MODULE,
             "CoachHTTPServer": HTTP_API_PACKAGE,
+            "login_user": HTTP_AUTH,
+            "logout_user": HTTP_AUTH,
             "bootstrap_provider_states": "http_api/bootstrap.py",
             "VERSIONED_STATIC_ASSETS": HTTP_API_PACKAGE,
             "UTC_OFFSET_SUFFIX": CONFIG_MODULE,
@@ -201,7 +212,7 @@ def _explicit_owner(name: str) -> str | None:
             "OCTET_STREAM_MIME": HTTP_API_PACKAGE,
             "VO2MAX_UNIT": PERFORMANCE_PACKAGE,
             "LOCAL_INTERVALS_SCOPE": "coach/authorization.py",
-            "WORKDAY_TIME_LABEL": "coach/context.py",
+            "WORKDAY_TIME_LABEL": COACH_CONTEXT,
             "APP_NAME": CONFIG_MODULE,
             "UUID_PATTERN": HTTP_API_PACKAGE,
             "PAYLOAD_HASH_PATTERN": PLANNING_PACKAGE,
@@ -291,7 +302,7 @@ def _explicit_owner(name: str) -> str | None:
             "safe_openai_log_reason": OBSERVABILITY_MODULE,
             "_log_openai_stream_failure": OBSERVABILITY_MODULE,
             "SETTINGS_SECRET_KEYS": OBSERVABILITY_MODULE,
-            "coach_diagnostic_history": OBSERVABILITY_MODULE,
+            "coach_diagnostic_history": DIAGNOSTICS_REPORT,
             "_safe_response_headers": OBSERVABILITY_MODULE,
             "set_diagnostic_capture": OBSERVABILITY_MODULE,
             "capture_diagnostic_event": OBSERVABILITY_MODULE,
@@ -308,6 +319,101 @@ def _explicit_owner(name: str) -> str | None:
             "_paired_activity_match": ACTIVITIES_PACKAGE,
             "_unpaired_activity_match": ACTIVITIES_PACKAGE,
             "mark_daily_sync": "sync/daily.py",
+            "_add_weather_context": COACH_CONTEXT,
+            "_latest_ride_activity": PERFORMANCE_ACTIVITY_VALIDATION,
+            "latest_activity_for_validation": PERFORMANCE_ACTIVITY_VALIDATION,
+            "bounded_activity_metric": PERFORMANCE_ACTIVITY_VALIDATION,
+            "cycling_activity_validation_details": PERFORMANCE_ACTIVITY_VALIDATION,
+            "recent_log_entries": DIAGNOSTICS_REPORT,
+            "diagnostic_report": DIAGNOSTICS_REPORT,
+            "_diagnostic_frame": DIAGNOSTICS_REPORT,
+            "_diagnostic_error_metadata": DIAGNOSTICS_REPORT,
+            "_diagnostic_command_steps": DIAGNOSTICS_REPORT,
+            "_diagnostic_history_entry": DIAGNOSTICS_REPORT,
+            "_provider_refresh_cleanup": SYNC_REFRESH,
+            "_provider_refresh_start": SYNC_REFRESH,
+            "_provider_refresh_finish": SYNC_REFRESH,
+            "_provider_refresh_error_code": SYNC_REFRESH,
+            "_current_provider_freshness": "sync/freshness.py",
+            "_publish_sync_job_result_event": "sync/jobs.py",
+            "_update_local_planned_workout_in_db": "planning/calendar.py",
+            "readiness_state": PERFORMANCE_PACKAGE,
+            "save_snapshot_view": "sync/snapshots.py",
+            "set_sync_operation_state": "sync/status.py",
+            "coach_context_json_size": COACH_CONTEXT,
+            "bounded_coach_context_value": COACH_CONTEXT,
+            "bounded_coach_context_sections": COACH_CONTEXT,
+            "coach_context_projection_meta": COACH_CONTEXT,
+            "coach_intervals_context": COACH_CONTEXT,
+            "structured_athlete_context": COACH_CONTEXT,
+            "build_training_context": COACH_CONTEXT,
+            "context_preview": COACH_CONTEXT,
+            "_openai_usage_summary_unlocked": PROVIDERS_PACKAGE,
+            "openai_usage_summary": PROVIDERS_PACKAGE,
+            "_record_openai_usage_unlocked": PROVIDERS_PACKAGE,
+            "record_openai_usage": PROVIDERS_PACKAGE,
+            "_validate_openai_response": PROVIDERS_PACKAGE,
+            "openai_request": PROVIDERS_PACKAGE,
+            "transcribe_audio": PROVIDERS_PACKAGE,
+            "gemini_usage_summary": PROVIDERS_PACKAGE,
+            "_record_gemini_status": PROVIDERS_PACKAGE,
+            "_record_gemini_usage": PROVIDERS_PACKAGE,
+            "_gemini_content_has_function_response": COACH_CONVERSATION,
+            "_gemini_history_exchange_boundary": COACH_CONVERSATION,
+            "_trim_gemini_history": COACH_CONVERSATION,
+            "_gemini_history_parts_without_raw_media": COACH_CONVERSATION,
+            "_gemini_inline_media_from_history": COACH_CONVERSATION,
+            "_gemini_history": COACH_CONVERSATION,
+            "_save_gemini_history": COACH_CONVERSATION,
+            "repair_incomplete_gemini_tool_history": COACH_CONVERSATION,
+            "_gemini_selected_raw_attachments": COACH_CONVERSATION,
+            "_gemini_history_parts": COACH_CONVERSATION,
+            "_gemini_local_chat_history": COACH_CONVERSATION,
+            "_validate_structured_plan_limits": PLANNING_PACKAGE,
+            "_derived_structured_training_plan": PLANNING_PACKAGE,
+            "_resolve_structured_training_plan_reference": PLANNING_PACKAGE,
+            "_derive_structured_training_plan": PLANNING_PACKAGE,
+            "_planning_change_dependencies": PLANNING_PACKAGE,
+            "_prepare_structured_plan_replacement": PLANNING_PACKAGE,
+            "_archive_superseded_training_plans": PLANNING_PACKAGE,
+            "_replace_structured_training_plan": PLANNING_PACKAGE,
+            "_stage_structured_training_plan": PLANNING_PACKAGE,
+            "_commit_structured_training_plan": PLANNING_PACKAGE,
+            "_persist_committed_training_plan": PLANNING_PACKAGE,
+            "_validate_committed_training_plan": PLANNING_PACKAGE,
+            "_local_planning_authoritative_rows": SYNC_RECONCILE,
+            "_mark_local_planning_row_authoritative": SYNC_RECONCILE,
+            "_mark_local_planning_authoritative": SYNC_RECONCILE,
+            "_mark_local_competitions_authoritative": SYNC_RECONCILE,
+            "privacy_export": PRIVACY_MODULE,
+            "PRIVACY_EXPORT_FORMAT_VERSION": PRIVACY_MODULE,
+            "PRIVACY_EXPORT_JSONL_FILES": PRIVACY_MODULE,
+            "_export_payload": BACKUP_PACKAGE,
+            "_export_jsonl_rows": BACKUP_PACKAGE,
+            "_export_workout_library": BACKUP_PACKAGE,
+            "_export_planned_units": BACKUP_PACKAGE,
+            "_export_application_state": BACKUP_PACKAGE,
+            "_privacy_export_file": PRIVACY_MODULE,
+            "database_backup_bytes": BACKUP_PACKAGE,
+            "restore_database_backup": BACKUP_PACKAGE,
+            "_temporary_restore_database": BACKUP_PACKAGE,
+            "_validate_restore_connection": BACKUP_PACKAGE,
+            "_validate_restore_database": BACKUP_PACKAGE,
+            "_replace_database_with_restore": BACKUP_PACKAGE,
+            "_resume_after_database_restore": BACKUP_PACKAGE,
+            "_restore_database_backup": BACKUP_PACKAGE,
+            "_privacy_delete_counts": PRIVACY_MODULE,
+            "privacy_delete_preview": PRIVACY_MODULE,
+            "require_auth": HTTP_API_PACKAGE,
+            "require_csrf": HTTP_API_PACKAGE,
+            "session_cookie_headers": HTTP_API_PACKAGE,
+            "RequestHandler": HTTP_API_PACKAGE,
+            "delete_local_data": PRIVACY_MODULE,
+            "CSRF_COOKIE": HTTP_AUTH,
+            "session_token_hash": HTTP_AUTH,
+            "session_timestamp": HTTP_AUTH,
+            "cleanup_expired_sessions": HTTP_AUTH,
+            "authenticated_session": HTTP_AUTH,
         }
     return explicit.get(name)
 
@@ -393,7 +499,7 @@ def _owner_from_exact_names(name: str, lowered: str) -> str | None:
     if lowered in {"get_kv", "set_kv"}:
         return SETTINGS_MODULE
     if lowered in {"selected", "coach_quick_actions_state"}:
-        return PLANNING_PACKAGE if lowered == "selected" else "coach/context.py"
+        return PLANNING_PACKAGE if lowered == "selected" else COACH_CONTEXT
     if lowered in {"delete_duplicate_activity", "duplicate_activity_delete_preview"}:
         return ACTIVITIES_PACKAGE
     if lowered.startswith("_retry_after"):
@@ -462,7 +568,7 @@ _PHASE_RULES = (
     (("scheduler", "coach/jobs", "coach/streams", "coach/morning"), "P8"),
     (("sync",), "P6"),
     (("coach",), "P7"),
-    (("backup", "privacy"), "P9"),
+    (("backup", "privacy", "diagnostics"), "P9"),
     (("http_api",), "P10"),
 )
 

@@ -5,11 +5,9 @@ from backend.coach.attachments import (MAX_ATTACHMENT_STORAGE_BYTES, MAX_GEMINI_
                                       validate_attachments)
 
 import base64
-import calendar as calendar_module
 import difflib
 import hashlib
 import hmac
-import ipaddress
 import json
 import logging
 import math
@@ -21,7 +19,6 @@ import re
 import secrets
 import shutil
 import socket
-import ssl
 import sqlite3
 import threading
 import tempfile
@@ -33,13 +30,12 @@ from contextlib import nullcontext, contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from functools import wraps
-from http.client import HTTPResponse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any, Callable, Iterator, NoReturn
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
@@ -59,15 +55,16 @@ from backend.errors import (
     PLANNED_CALENDAR_RECHECK_ERROR,
     STALE_PLANNING_REVISION_ERROR,
     STRUCTURED_AUTHORIZATION_ERROR,
-    UNSUPPORTED_BYDAY_ERROR,
     AppError,
     ClientDisconnected,
     provider_error,
     public_app_error_status,
 )
+from backend import config as app_config
 from backend import observability
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
+from backend.sync import freshness as sync_freshness
 from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
@@ -79,14 +76,17 @@ from backend.db.schema import (
     database_index_names,
     database_schema_is_current,
 )
-from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config, load_local_env as load_config_env
+from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
-from backend.providers.gemini import function_tools as gemini_function_tools, response_text as gemini_response_text
-from backend.providers.openai import response_failure_reason as openai_response_failure_reason, response_text as openai_response_text
-from backend.providers.http import error_detail as provider_error_detail, read_bounded_response
+from backend.providers import audio as audio_provider
+from backend.providers import calendar as calendar_provider
+from backend.providers import gemini as gemini_provider
+from backend.providers import http as provider_http
+from backend.providers import openai as openai_provider
+from backend.providers import state as provider_state
+from backend.providers.http import error_detail as provider_error_detail
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
-from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
 from backend.sync.windows import split_date_windows
 from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.status import persist_sync_operation_state, project_sync_status
@@ -237,7 +237,7 @@ SELECT_COMMAND_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_tu
 SELECT_PLANNING_REVISION_SQL = "SELECT revision FROM planning_state WHERE id=1"
 SELECT_USER_MESSAGE_SQL = "SELECT id FROM messages WHERE client_turn_id=? AND role='user'"
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.11.7"
+APP_VERSION = "1.11.8"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -245,9 +245,6 @@ MAX_PRIVACY_EXPORT_BYTES = 100_000_000
 MIN_EXPORT_FREE_BYTES = 10_000_000
 EXPORT_TIME_LIMIT_SECONDS = 120
 STREAM_CHUNK_BYTES = 64 * 1024
-MAX_EXTERNAL_CALENDAR_BYTES = 5_000_000
-CALENDAR_FETCH_TIMEOUT_SECONDS = 30
-CALENDAR_CONNECTION_TIMEOUT_SECONDS = 10
 MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 # The Responses API counts both visible output and reasoning tokens against
 # max_output_tokens. Keep ordinary replies bounded, but leave enough room for
@@ -257,15 +254,6 @@ COACH_LONG_PLAN_MAX_OUTPUT_TOKENS = 32_000
 COACH_FOLLOWUP_MAX_OUTPUT_TOKENS = 2_500
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
 MESSAGE_ATTACHMENTS_QUERY = "SELECT attachments FROM messages WHERE id=?"
-# Provider error messages can echo athlete data; retain only documented codes.
-OPENAI_RESPONSE_ERROR_CODES = frozenset({
-    "server_error", "rate_limit_exceeded", "invalid_prompt", "data_residency_mismatch",
-    "bio_policy", "misalignment_policy_violation", "vector_store_timeout", "invalid_image",
-    "invalid_image_format", "invalid_base64_image", "invalid_image_url", "image_too_large",
-    "image_too_small", "image_parse_error", "image_content_policy_violation", "invalid_image_mode",
-    "image_file_too_large", "unsupported_image_media_type", "empty_image_file",
-    "failed_to_download_image", "image_file_not_found",
-})
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
@@ -281,7 +269,6 @@ PLANNED_UNIT_SYNCS: set[str] = set()
 COMPETITION_SYNC_LOCK = threading.Lock()
 PERFORMANCE_LOCK = threading.Lock()
 OPENAI_CONVERSATION_LOCK = threading.RLock()
-DIAGNOSTIC_CAPTURE_LOCK = threading.RLock()
 CHAT_STREAM_LOCK = threading.Lock()
 CHAT_STREAMS: dict[str, dict[str, Any]] = {}
 CHAT_QUEUE_LIMIT = 3
@@ -380,11 +367,6 @@ def garmin_operation(function: Any) -> Any:
         with provider_operation("garmin"):
             return function(*args, **kwargs)
     return guarded
-
-
-def load_local_env() -> None:
-    """Compatibility entrypoint for tests and settings persistence."""
-    load_config_env(ROOT, DATA_DIR)
 
 
 CONFIG = load_config(ROOT, DATA_DIR)
@@ -711,19 +693,19 @@ def external_call(
         context.update({"operation_id": operation_context["operation_id"], "trigger": operation_context["trigger"], "phase": operation})
     started = time.perf_counter()
     LOGGER.info("External call started", extra={"event": "external_call_started", "context": context})
-    capture_diagnostic_event("external_call_started", {
+    DIAGNOSTIC_CAPTURE.capture("external_call_started", {
         "service": service,
         "operation": operation,
-        "details": _safe_diagnostic_context(details),
+        "details": observability.safe_diagnostic_context(details),
     })
     try:
         result = call()
     except AppError as exc:
-        capture_diagnostic_event("external_call_failed", {
+        DIAGNOSTIC_CAPTURE.capture("external_call_failed", {
             "service": service,
             "operation": operation,
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-            "error": _safe_diagnostic_error(exc),
+            "error": observability.safe_diagnostic_error(exc),
         })
         raise
     except Exception as exc:
@@ -733,11 +715,11 @@ def external_call(
             "error_code": operation_error_code(exc),
         }
         LOGGER.exception("External call failed", extra={"event": "external_call_failed", "context": failure_context}, exc_info=True)
-        capture_diagnostic_event("external_call_failed", {
+        DIAGNOSTIC_CAPTURE.capture("external_call_failed", {
             "service": service,
             "operation": operation,
             "duration_ms": failure_context["duration_ms"],
-            "error": _safe_diagnostic_error(exc),
+            "error": observability.safe_diagnostic_error(exc),
         })
         raise provider_error(service, "client") from exc
     LOGGER.info(
@@ -751,11 +733,11 @@ def external_call(
             },
         },
     )
-    capture_diagnostic_event("external_call_completed", {
+    DIAGNOSTIC_CAPTURE.capture("external_call_completed", {
         "service": service,
         "operation": operation,
         "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-        "response": diagnostic_capture_response(result),
+        "response": observability.diagnostic_capture_response(result),
     })
     return result
 
@@ -921,40 +903,13 @@ ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(utc_now)
 SNAPSHOT_REPOSITORY = SnapshotRepository()
 
 
-def security_configuration_error() -> str | None:
-    if not CONFIG.app_password:
-        return "APP_PASSWORD ist nicht konfiguriert. Lege ein langes, zufälliges Passwort als Container-Umgebungsvariable fest."
-    if len(CONFIG.app_password) < 12:
-        return "APP_PASSWORD muss mindestens 12 Zeichen lang sein."
-    if not SQLCIPHER_AVAILABLE:
-        return "SQLCipher ist nicht verfügbar; die verschlüsselte Datenbank kann nicht geöffnet werden."
-    return None
-
-
 OPERATION_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar("operation_context", default=None)
 DATABASE_MANAGER: DatabaseManager | None = None
 DATABASE_MANAGER_SIGNATURE: tuple[str, str, bool] | None = None
+PROVIDER_STATE_SERVICE: provider_state.ProviderStateService | None = None
 
-PROVIDER_REFRESH_RETENTION_DAYS = 30
-PROVIDER_REFRESH_MAX_ROWS = 200
 PROVIDER_REFRESH_RETRY_BASE_SECONDS = 15 * 60
 PROVIDER_REFRESH_RETRY_MAX_SECONDS = 6 * 60 * 60
-PROVIDER_REFRESH_STALE_SECONDS = {
-    ("intervals", "activities"): 48 * 60 * 60,
-    ("intervals", "competitions"): 48 * 60 * 60,
-    ("intervals", "performance"): 48 * 60 * 60,
-    ("garmin", "data"): 48 * 60 * 60,
-    ("weather", "forecast"): WEATHER_CACHE_SECONDS if "WEATHER_CACHE_SECONDS" in globals() else 3 * 60 * 60,
-    ("calendar", "events"): 48 * 60 * 60,
-}
-PROVIDER_REFRESH_LABELS = {
-    ("intervals", "activities"): "Intervals.icu · Training",
-    ("intervals", "competitions"): "Intervals.icu · Wettkämpfe",
-    ("intervals", "performance"): "Intervals.icu · Leistung",
-    ("garmin", "data"): "Garmin",
-    ("weather", "forecast"): "Open-Meteo",
-    ("calendar", "events"): "Gemeinsamer Kalender",
-}
 SYNC_JOB_MAX_ATTEMPTS = 3
 SYNC_JOB_RETRY_BASE_SECONDS = 15 * 60
 SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
@@ -963,11 +918,6 @@ SYNC_JOB_LIST_LIMIT = 50
 GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
 MORNING_RETRY_SECONDS = 15 * 60
 MORNING_MAX_ATTEMPTS = 3
-DIAGNOSTIC_CAPTURE_DURATION_SECONDS = 60 * 60
-DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 1500
-DIAGNOSTIC_CAPTURE_STATE_KEY = "diagnostic_capture_state"
-DIAGNOSTIC_CAPTURE_ENTRIES_KEY = "diagnostic_capture_entries"
-
 CHANGE_HISTORY_RETENTION_DAYS = 180
 # A complete replacement can archive and recreate up to 366 sessions. Keep
 # enough bounded history rows for that operation plus normal recent changes.
@@ -1130,14 +1080,16 @@ def observed_sync(provider: str, area: str = "default"):
 
 def database_manager() -> DatabaseManager:
     """Return the manager for the active path and secure configuration."""
-    global DATABASE_MANAGER, DATABASE_MANAGER_SIGNATURE
+    global DATABASE_MANAGER, DATABASE_MANAGER_SIGNATURE, PROVIDER_STATE_SERVICE
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     signature = (str(DB_PATH.resolve()), CONFIG.app_password, SQLCIPHER_AVAILABLE)
     if DATABASE_MANAGER is not None and DATABASE_MANAGER_SIGNATURE != signature:
         DATABASE_MANAGER.close()
         DATABASE_MANAGER = None
         DATABASE_MANAGER_SIGNATURE = None
+        PROVIDER_STATE_SERVICE = None
     if DATABASE_MANAGER is None:
+        PROVIDER_STATE_SERVICE = None
         if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
             raise RuntimeError("SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich.")
         DATABASE_MANAGER = DatabaseManager(
@@ -1152,6 +1104,22 @@ def database_manager() -> DatabaseManager:
         )
         DATABASE_MANAGER_SIGNATURE = signature
     return DATABASE_MANAGER
+
+
+def provider_state_service() -> provider_state.ProviderStateService:
+    """Return provider observability state bound to the active database manager."""
+    global PROVIDER_STATE_SERVICE
+    manager = database_manager()
+    if PROVIDER_STATE_SERVICE is None:
+        PROVIDER_STATE_SERVICE = provider_state.ProviderStateService(
+            manager,
+            KEY_VALUE_REPOSITORY,
+            DB_LOCK,
+            utc_now,
+            lambda: local_now().date(),
+            LOGGER,
+        )
+    return PROVIDER_STATE_SERVICE
 
 
 @contextmanager
@@ -1174,8 +1142,11 @@ def initialise_database() -> None:
             all_sync_days=ALL_SYNC_DAYS,
         )
 def _provider_refresh_cleanup(db: Any) -> None:
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=PROVIDER_REFRESH_RETENTION_DAYS)).isoformat()
-    cleanup_refresh_history(db, cutoff=cutoff, max_rows=PROVIDER_REFRESH_MAX_ROWS)
+    cutoff = (
+        datetime.now(timezone.utc)
+        - timedelta(days=sync_freshness.PROVIDER_REFRESH_RETENTION_DAYS)
+    ).isoformat()
+    cleanup_refresh_history(db, cutoff=cutoff, max_rows=sync_freshness.PROVIDER_REFRESH_MAX_ROWS)
 
 
 def _provider_refresh_start(provider: str, area: str, operation_id: str, trigger: str) -> str:
@@ -1914,141 +1885,18 @@ def resolve_sync_job(job_id: str, payload: Any) -> dict[str, Any]:
     return sync_job_state(job_id)
 
 
-def _scheduled_provider_retry_at(db: Any, provider: str) -> str | None:
-    """Return only a future queued retry, never an advisory history timestamp."""
-    now = datetime.now(timezone.utc)
-    rows = db.execute(
-        "SELECT available_at FROM sync_jobs "
-        "WHERE provider=? AND type='refresh' "
-        "AND status='queued' AND available_at IS NOT NULL ORDER BY available_at",
-        (provider,),
-    ).fetchall()
-    for row in rows:
-        try:
-            available_at = datetime.fromisoformat(str(row["available_at"]).replace("Z", UTC_OFFSET_SUFFIX)).astimezone(timezone.utc)
-        except (TypeError, ValueError):
-            continue
-        if available_at > now:
-            return available_at.isoformat()
-    return None
-
-
-def _provider_freshness_inputs() -> tuple[dict[tuple[str, str], Any], dict[tuple[str, str], Any], dict[tuple[str, str], bool]]:
-    fallbacks = {
-        ("intervals", "activities"): get_kv("last_sync_at"),
-        ("intervals", "competitions"): get_kv("last_competition_sync_at"),
-        ("intervals", "performance"): get_kv("last_performance_refresh_at"),
-        ("garmin", "data"): get_kv("last_garmin_sync_at"),
-        ("weather", "forecast"): None,
-        ("calendar", "events"): get_kv("last_external_calendar_sync_at"),
-    }
-    fallback_errors = {
-        ("intervals", "activities"): get_kv("last_sync_error"),
-        ("intervals", "competitions"): get_kv("last_competition_sync_error"),
-        ("intervals", "performance"): get_kv("last_performance_error"),
-        ("garmin", "data"): bool(_garmin_core_error_entries()),
-        ("weather", "forecast"): get_kv(WEATHER_FAILURE_KEY),
-        ("calendar", "events"): get_kv("last_external_calendar_sync_error"),
-    }
-    try:
-        cached_weather = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
-        if isinstance(cached_weather, dict):
-            fallbacks[("weather", "forecast")] = cached_weather.get("fetched_at")
-    except (TypeError, ValueError):
-        pass
-    configured = {
-        ("intervals", "activities"): bool(CONFIG.intervals_api_key),
-        ("intervals", "competitions"): bool(CONFIG.intervals_api_key),
-        ("intervals", "performance"): bool(CONFIG.intervals_api_key),
-        ("garmin", "data"): bool(CONFIG.garmin_fixture_path or CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()),
-        ("weather", "forecast"): bool(get_profile().get("weather_location")),
-        ("calendar", "events"): bool(CONFIG.calendar_ical_url),
-    }
-    return fallbacks, fallback_errors, configured
-
-
-def _provider_freshness_last_good_state(key: tuple[str, str], last_good: Any) -> str:
-    if last_good:
-        try:
-            age = (datetime.now(timezone.utc) - datetime.fromisoformat(last_good.replace("Z", UTC_OFFSET_SUFFIX))).total_seconds()
-        except (TypeError, ValueError):
-            age = float("inf")
-        return "stale" if age > PROVIDER_REFRESH_STALE_SECONDS[key] else "fresh"
-    return "error"
-
-
-def _provider_fallback_error_code(fallback_error: bool) -> str | None:
-    return "provider_error" if fallback_error else None
-
-
-def _provider_freshness_error_code(row: dict[str, Any] | None, fallback_error: bool) -> str | None:
-    if row:
-        error_code = str(row.get("error_code") or "")
-        if error_code:
-            return error_code
-    return _provider_fallback_error_code(fallback_error)
-
-
-def _provider_freshness_status(
-    key: tuple[str, str], configured: bool, row: dict[str, Any] | None, last_good: Any, fallback_error: bool,
-) -> tuple[str, str | None]:
-    if not configured:
-        return "not_configured", _provider_freshness_error_code(row, fallback_error)
-    if row:
-        status = row["status"]
-        if status == "running":
-            return "syncing", _provider_fallback_error_code(fallback_error)
-        if status == "error":
-            state = "stale" if last_good else "error"
-            return state, row.get("error_code")
-        if status == "partial":
-            return "partial", _provider_fallback_error_code(fallback_error)
-    if last_good:
-        return _provider_freshness_last_good_state(key, last_good), _provider_fallback_error_code(fallback_error)
-    if fallback_error:
-        return "error", "provider_error"
-    return "never_loaded", None
-
-
-def provider_freshness_state() -> list[dict[str, Any]]:
-    fallbacks, fallback_errors, configured = _provider_freshness_inputs()
-    result: list[dict[str, Any]] = []
+def _current_provider_freshness() -> list[dict[str, Any]]:
+    """Wire runtime state into the backend-owned freshness projection."""
     with DB_LOCK, database() as db:
-        _provider_refresh_cleanup(db)
-        for key, label in PROVIDER_REFRESH_LABELS.items():
-            provider, area = key
-            row = db.execute(
-                "SELECT * FROM provider_refresh_history WHERE provider=? AND area=? ORDER BY started_at DESC LIMIT 1",
-                (provider, area),
-            ).fetchone()
-            last_success = db.execute(
-                "SELECT finished_at FROM provider_refresh_history WHERE provider=? AND area=? AND status IN ('success','partial') "
-                "ORDER BY finished_at DESC LIMIT 1",
-                (provider, area),
-            ).fetchone()
-            row = dict(row) if row else None
-            fallback = fallbacks[key]
-            fallback_error = bool(fallback_errors[key])
-            last_attempt = row.get("started_at") if row else fallback
-            last_good = (last_success["finished_at"] if last_success else None) or fallback
-            scheduled_retry = _scheduled_provider_retry_at(db, provider)
-            state, error_code = _provider_freshness_status(key, configured[key], row, last_good, fallback_error)
-            result.append({
-                "provider": provider,
-                "area": area,
-                "label": label,
-                "configured": configured[key],
-                "read_only": key != ("intervals", "competitions"),
-                "state": state,
-                "phase": row.get("phase") if row else None,
-                "last_attempt_at": last_attempt,
-                "last_success_at": last_good,
-                "error_code": error_code,
-                "next_retry_at": scheduled_retry,
-                "stale": state == "stale",
-                "has_last_good": bool(last_good),
-            })
-    return result
+        return sync_freshness.provider_freshness_state(
+            db,
+            config=CONFIG,
+            get_value=get_kv,
+            profile=get_profile(),
+            garmin_has_core_error=bool(_garmin_core_error_entries()),
+            garmin_tokenstore_exists=Path(CONFIG.garmin_tokenstore).exists(),
+            now=datetime.now(timezone.utc),
+        )
 
 
 def _audit_projection_fields(entity_type: str) -> set[str]:
@@ -2498,9 +2346,6 @@ SYNC_PERIOD_DEFAULTS = {"intervals": 90, "garmin": 30}
 ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
 SYNC_EARLIEST_DATE = date(2000, 1, 1)
-EXTERNAL_CALENDAR_WINDOW_DAYS = 56
-ICAL_MAX_RECURRENCE_COUNT = 1000
-ICAL_MAX_RECURRENCE_PERIODS = 10000
 ILLNESS_PAUSE_DEFAULT_DAYS = 3
 ILLNESS_PAUSE_MAX_DAYS = 21
 ILLNESS_CALENDAR_CATEGORY = "SICK"
@@ -2582,82 +2427,12 @@ def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:
 
 
 SETTINGS = SettingsService(lambda: CONFIG, get_kv, set_kv)
-
-
-def _safe_diagnostic_context(value: Any) -> dict[str, Any]:
-    """Keep request metadata useful without retaining request contents."""
-    if not isinstance(value, dict):
-        return {}
-    safe: dict[str, Any] = {}
-    for key, item in value.items():
-        key_text = str(key)[:80]
-        if key_text in {"window_start", "window_end", "date", "latest", "range_supported", "email_configured", "tokenstore_exists"}:
-            safe[key_text] = item if item is None or isinstance(item, (bool, int, float)) else str(item)[:40]
-    return safe
-
-
-def diagnostic_mapping_shape(value: dict[Any, Any], depth: int) -> dict[str, Any]:
-    fields = [
-        text[:80] if re.fullmatch(r"(?a:[A-Za-z][\w-]{0,79})", text) else "[nonstandard]"
-        for key in list(value)[:50]
-        for text in (str(key),)
-    ]
-    result: dict[str, Any] = {"type": "object", "field_count": len(value), "fields": fields}
-    if depth < 1 and value:
-        result["sample"] = diagnostic_response_shape(next(iter(value.values())), depth + 1)
-    return result
-
-
-def diagnostic_sequence_shape(value: list[Any] | tuple[Any, ...], depth: int) -> dict[str, Any]:
-    result: dict[str, Any] = {"type": "array", "items": len(value)}
-    if depth < 1 and value:
-        result["item_shape"] = diagnostic_response_shape(value[0], depth + 1)
-    return result
-
-
-def diagnostic_response_shape(value: Any, depth: int = 0) -> dict[str, Any]:
-    """Describe a response without retaining athlete or provider payload values."""
-    if value is None:
-        return {"type": "null"}
-    if isinstance(value, dict):
-        return diagnostic_mapping_shape(value, depth)
-    if isinstance(value, (list, tuple)):
-        return diagnostic_sequence_shape(value, depth)
-    if isinstance(value, bool):
-        return {"type": "boolean"}
-    if isinstance(value, (int, float)):
-        return {"type": "number"}
-    if isinstance(value, str):
-        return {"type": "string", "length": len(value)}
-    return {"type": type(value).__name__}
-
-
-def diagnostic_capture_response(value: Any) -> dict[str, Any]:
-    """Return response shape metadata without retaining response contents."""
-    return {"shape": diagnostic_response_shape(value)}
-
-
-def _safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
-    """Expose only classified technical exception metadata during user debugging."""
-    status = getattr(exc, "status", None) or getattr(exc, "code", None)
-    result: dict[str, Any] = {"type": type(exc).__name__}
-    if isinstance(status, int):
-        result["status"] = status
-    reason = str(getattr(exc, "reason", "") or "").strip()
-    if reason and re.fullmatch(r"[a-z_]{1,80}", reason):
-        result["reason"] = reason
-    validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
-    if validation_reason and re.fullmatch(r"[a-z_]{1,80}", validation_reason):
-        result["validation_reason"] = validation_reason
-    provider_code = getattr(exc, "provider_error_code", None)
-    if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
-        result["provider_error_code"] = provider_code
-    return result
+DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(get_kv, set_kv, REDACTOR, utc_now)
 
 
 def _coach_error_metadata(exc: BaseException) -> dict[str, Any]:
     """Keep technical call sites, never exception text, source lines or locals."""
-    result = _safe_diagnostic_error(exc)
+    result = observability.safe_diagnostic_error(exc)
     frames = []
     trace = exc.__traceback__
     while trace is not None:
@@ -2685,75 +2460,6 @@ def _safe_response_headers(headers: Any) -> dict[str, str]:
         if name in allowed or name.startswith("x-ratelimit-"):
             result[name] = REDACTOR.redact_text(str(value))[:160]
     return result
-
-
-def _diagnostic_capture_state() -> dict[str, Any]:
-    try:
-        value = json.loads(get_kv(DIAGNOSTIC_CAPTURE_STATE_KEY) or "{}")
-    except (TypeError, ValueError):
-        value = {}
-    return value if isinstance(value, dict) else {}
-
-
-def diagnostic_capture_status() -> dict[str, Any]:
-    state = _diagnostic_capture_state()
-    expires_at = str(state.get("expires_at") or "")
-    try:
-        active = datetime.fromisoformat(expires_at.replace("Z", UTC_OFFSET_SUFFIX)) > datetime.now(timezone.utc)
-    except (TypeError, ValueError):
-        active = False
-    if not active and state:
-        set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, "")
-    try:
-        entries = json.loads(get_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY) or "[]")
-    except (TypeError, ValueError):
-        entries = []
-    return {
-        "active": active,
-        "started_at": state.get("started_at") if active else None,
-        "expires_at": expires_at if active else None,
-        "entries": len(entries) if isinstance(entries, list) else 0,
-        "maximum_entries": DIAGNOSTIC_CAPTURE_MAX_ENTRIES,
-    }
-
-
-def diagnostic_capture_entries() -> list[dict[str, Any]]:
-    try:
-        entries = json.loads(get_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY) or "[]")
-    except (TypeError, ValueError):
-        return []
-    if not isinstance(entries, list):
-        return []
-    return [REDACTOR.sanitize_log_value(entry) for entry in entries if isinstance(entry, dict)][-DIAGNOSTIC_CAPTURE_MAX_ENTRIES:]
-
-
-def set_diagnostic_capture(enabled: Any) -> dict[str, Any]:
-    """Enable a one-hour, user-initiated technical capture or stop it early."""
-    if enabled is not True and enabled is not False:
-        raise AppError(400, "Die Diagnoseaufzeichnung erwartet enabled=true oder enabled=false.")
-    with DIAGNOSTIC_CAPTURE_LOCK:
-        if enabled:
-            now = datetime.now(timezone.utc)
-            expires_at = (now + timedelta(seconds=DIAGNOSTIC_CAPTURE_DURATION_SECONDS)).isoformat()
-            set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, json.dumps({"started_at": now.isoformat(), "expires_at": expires_at}, separators=(",", ":")))
-            set_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY, "[]")
-        else:
-            set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, "")
-    return diagnostic_capture_status()
-
-
-def capture_diagnostic_event(event: str, details: dict[str, Any]) -> None:
-    """Persist bounded response metadata only while the athlete enabled capture."""
-    # A capture is written by sync workers as well as the coach request. Keep
-    # the read-modify-write sequence atomic so concurrent providers cannot
-    # silently discard the most useful event.
-    with DIAGNOSTIC_CAPTURE_LOCK:
-        if not diagnostic_capture_status()["active"]:
-            return
-        entry = {"timestamp": utc_now(), "event": str(event)[:80], "details": REDACTOR.sanitize_log_value(details)}
-        entries = diagnostic_capture_entries()
-        entries.append(entry)
-        set_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY, json.dumps(entries[-DIAGNOSTIC_CAPTURE_MAX_ENTRIES:], ensure_ascii=False, separators=(",", ":")))
 
 
 def garmin_snapshot() -> dict[str, Any]:
@@ -4104,7 +3810,7 @@ def _sync_morning_body_battery_locked(checkin_date: date) -> dict[str, Any]:
         record = _morning_body_battery_record(checkin_date, sleep_payload, records)
     except Exception as exc:
         record = _morning_body_battery_record(checkin_date, {}, [])
-        record["error"] = _safe_diagnostic_error(exc)
+        record["error"] = observability.safe_diagnostic_error(exc)
         records = []
     return _persist_morning_body_battery(checkin_date, existing, record, records)
 
@@ -4133,7 +3839,7 @@ def refresh_morning_body_battery(checkin_date: date | None = None) -> None:
     try:
         sync_garmin_morning_body_battery(checkin_date or local_now().date())
     except Exception as exc:
-        LOGGER.warning("Morning Body Battery refresh failed", extra={"event": "morning_body_battery_sync_failed", "context": _safe_diagnostic_error(exc)})
+        LOGGER.warning("Morning Body Battery refresh failed", extra={"event": "morning_body_battery_sync_failed", "context": observability.safe_diagnostic_error(exc)})
 
 
 def _persist_garmin_sync_payload(
@@ -4776,765 +4482,6 @@ def list_competitions(limit: int | None = None) -> list[dict[str, Any]]:
         return COMPETITION_REPOSITORY.list(db, max(1, min(int(limit), 500)) if limit is not None else None)
 
 
-def _resolve_calendar_addresses(hostname: str, *, status: int) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
-    try:
-        addresses = [ipaddress.ip_address(hostname)]
-    except ValueError:
-        try:
-            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)]
-        except OSError as exc:
-            message = "Die Kalenderadresse konnte nicht aufgelöst werden."
-            raise AppError(status, message) from exc
-    addresses = list(dict.fromkeys(addresses))
-    if not addresses or any(not address.is_global for address in addresses):
-        raise AppError(status, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
-    return addresses
-
-
-def _calendar_feed_request(url: str) -> tuple[str, int, bytes]:
-    parsed = urlparse(url)
-    hostname = (parsed.hostname or "").rstrip(".").casefold()
-    port = parsed.port or 443
-    request_target = parsed.path or "/"
-    if parsed.query:
-        request_target += "?" + parsed.query
-    if any(char in request_target for char in "\r\n"):
-        raise AppError(400, "Die Kalenderadresse enthält ungültige Zeichen.")
-    try:
-        host_header = hostname.encode("idna").decode("ascii")
-        request_bytes = (
-            f"GET {request_target} HTTP/1.1\r\n"
-            f"Host: {host_header}\r\n"
-            "Accept: text/calendar, text/plain;q=0.9\r\n"
-            f"User-Agent: IntervalsCoach/{APP_VERSION}\r\n"
-            "Connection: close\r\n\r\n"
-        ).encode("ascii")
-    except UnicodeError as exc:
-        raise AppError(400, "Die Kalenderadresse enthält ungültige Zeichen.") from exc
-    return hostname, port, request_bytes
-
-
-def _calendar_fetch_remaining(deadline: float) -> float:
-    remaining = deadline - time.perf_counter()
-    if remaining <= 0:
-        raise TimeoutError("calendar request deadline exceeded")
-    return remaining
-
-
-def _fetch_calendar_address(
-    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
-    port: int,
-    hostname: str,
-    tls_context: ssl.SSLContext,
-    request_bytes: bytes,
-    deadline: float,
-) -> tuple[bytes, int]:
-    raw_socket = None
-    tls_socket = None
-    try:
-        raw_socket = socket.create_connection(
-            (str(address), port), timeout=min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, _calendar_fetch_remaining(deadline))
-        )
-        tls_socket = tls_context.wrap_socket(raw_socket, server_hostname=hostname)
-        raw_socket = None
-        tls_socket.settimeout(min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, _calendar_fetch_remaining(deadline)))
-        tls_socket.sendall(request_bytes)
-        response = HTTPResponse(tls_socket, method="GET")
-        response.begin()
-        if 300 <= response.status < 400:
-            raise AppError(400, "Der Kalender-Feed darf nicht auf eine andere Adresse weiterleiten.")
-        if response.status >= 400:
-            raise AppError(502, f"Der Kalender-Feed antwortete mit HTTP {response.status}.")
-        payload = response.read(MAX_EXTERNAL_CALENDAR_BYTES + 1)
-        if len(payload) > MAX_EXTERNAL_CALENDAR_BYTES:
-            raise AppError(413, "Der Kalender-Feed ist zu groß.")
-        return payload, response.status
-    finally:
-        if tls_socket is not None:
-            tls_socket.close()
-        if raw_socket is not None:
-            raw_socket.close()
-
-
-def _calendar_fetch_failure_log(request_context: dict[str, Any], started: float, error: AppError, timed_out: bool) -> None:
-    LOGGER.exception(
-        "External calendar request failed",
-        extra={
-            "event": "external_request_failed",
-            "context": {
-                **request_context,
-                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                "status": error.status,
-                "error_code": "timeout" if timed_out or error.status == 504 else "provider_error",
-            },
-        },
-    )
-
-
-def fetch_calendar_feed(url: str) -> bytes:
-    hostname, port, request_bytes = _calendar_feed_request(url)
-    tls_context = ssl.create_default_context()
-    tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
-    # Resolve immediately before connecting and connect only to these checked
-    # addresses. This closes the validation/fetch DNS rebinding window. Keep
-    # one resolution per fetch; resolving twice made a slow resolver multiply
-    # the calendar synchronization time.
-    started = time.perf_counter()
-    request_context = {
-        "service": "calendar",
-        "method": "GET",
-        "path": "/redacted",
-        "timeout_seconds": CALENDAR_FETCH_TIMEOUT_SECONDS,
-    }
-    LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": request_context})
-    timed_out = False
-    try:
-        addresses = _resolve_calendar_addresses(hostname, status=502)
-        request_context["address_count"] = len(addresses)
-        deadline = started + CALENDAR_FETCH_TIMEOUT_SECONDS
-        last_network_error: OSError | None = None
-        for address in addresses:
-            try:
-                payload, status = _fetch_calendar_address(address, port, hostname, tls_context, request_bytes, deadline)
-                LOGGER.info(
-                    EXTERNAL_HTTP_COMPLETED_EVENT,
-                    extra={
-                        "event": "external_request_completed",
-                        "context": {
-                            **request_context,
-                            "status": status,
-                            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                            "response_bytes": len(payload),
-                        },
-                    },
-                )
-                return payload
-            except AppError:
-                raise
-            except TimeoutError as exc:
-                timed_out = True
-                last_network_error = exc
-                break
-            except OSError as exc:
-                last_network_error = exc
-                continue
-        if timed_out:
-            raise AppError(504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet.")
-        raise AppError(502, "Der Kalender-Feed konnte nicht geladen werden.") from last_network_error
-    except AppError as exc:
-        _calendar_fetch_failure_log(request_context, started, exc, timed_out)
-        raise
-
-
-def _ical_temporal_value(raw: str, parameters: dict[str, str]) -> tuple[datetime, bool] | None:
-    value = raw.strip()
-    is_date = parameters.get("VALUE", "").upper() == "DATE" or bool(re.fullmatch(r"\d{8}", value))
-    try:
-        from zoneinfo import ZoneInfo
-        local_zone = ZoneInfo(timezone_name(get_profile().get("timezone")))
-    except Exception:
-        local_zone = datetime.now().astimezone().tzinfo or timezone.utc
-    if is_date:
-        parsed_date = datetime.strptime(value[:8], "%Y%m%d").date()
-        return datetime.combine(parsed_date, datetime.min.time(), local_zone), True
-    try:
-        if value.endswith("Z"):
-            parsed = datetime.strptime(value[:-1], "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
-        else:
-            format_value = "%Y%m%dT%H%M" if len(value) == 13 else "%Y%m%dT%H%M%S"
-            parsed = datetime.strptime(value, format_value)
-            event_timezone_name = parameters.get("TZID", "").strip('"')
-            if event_timezone_name:
-                try:
-                    parsed = parsed.replace(tzinfo=ZoneInfo(event_timezone_name))
-                except Exception:
-                    parsed = parsed.replace(tzinfo=local_zone)
-            else:
-                parsed = parsed.replace(tzinfo=local_zone)
-        return parsed.astimezone(local_zone), False
-    except (TypeError, ValueError):
-        return None
-
-
-ICAL_NO_TRAINING_MARKER = "[NO_TRAINING]"
-ICAL_NO_INTENSITY_MARKER = "[NO_INTENSITY]"
-ICAL_SHORT_ONLY_MARKER = "[SHORT_ONLY]"
-ICAL_TRAINING_MARKERS = (ICAL_NO_TRAINING_MARKER, ICAL_NO_INTENSITY_MARKER, ICAL_SHORT_ONLY_MARKER)
-
-
-def _ical_description_contains(description: Any, marker: str) -> bool:
-    return marker.casefold() in str(description or "").casefold()
-
-
-def ical_training_impact(description: Any) -> bool:
-    """Keep only events whose description explicitly contains a training marker."""
-    return any(_ical_description_contains(description, marker) for marker in ICAL_TRAINING_MARKERS)
-
-
-def ical_training_relevant(description: Any) -> bool:
-    """Treat only described events as training-relevant calendar constraints."""
-    description_text = str(description or "").strip()
-    return bool(description_text) and not _ical_description_contains(description_text, ICAL_NO_TRAINING_MARKER)
-
-
-def ical_no_intensity(description: Any) -> bool:
-    """Treat only the explicit marker as a no-intensity training constraint."""
-    return _ical_description_contains(description, ICAL_NO_INTENSITY_MARKER)
-
-
-def ical_short_only(description: Any) -> bool:
-    """Treat only the explicit marker as a short-session training constraint."""
-    return _ical_description_contains(description, ICAL_SHORT_ONLY_MARKER)
-
-
-ICAL_DAY_NUMBERS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
-
-
-def _ical_rule_values(raw: str) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for part in raw.split(";"):
-        key, separator, value = part.partition("=")
-        key = key.strip().upper()
-        if not separator or not key or key in values:
-            raise AppError(400, "Die Kalender-Wiederholung ist ungültig oder doppelt angegeben.")
-        values[key] = value.strip().upper()
-    supported = {"FREQ", "COUNT", "UNTIL", "INTERVAL", "BYDAY", "BYMONTHDAY", "BYMONTH", "BYSETPOS", "WKST"}
-    unsupported = set(values) - supported
-    if unsupported:
-        raise AppError(400, "Diese Kalender-Wiederholungsregel wird nicht unterstützt.")
-    return values
-
-
-def _ical_rule_integer(values: dict[str, str], name: str, minimum: int, maximum: int, *, allow_negative: bool = False) -> list[int]:
-    result: list[int] = []
-    if not values.get(name):
-        return result
-    for raw_value in values[name].split(","):
-        try:
-            number = int(raw_value)
-        except ValueError as exc:
-            raise AppError(400, f"{name} der Kalender-Wiederholung muss aus ganzen Zahlen bestehen.") from exc
-        if number == 0 or number < minimum or number > maximum or (number < 0 and not allow_negative):
-            raise AppError(400, f"{name} der Kalender-Wiederholung ist ungültig.")
-        if number in result:
-            raise AppError(400, f"{name} der Kalender-Wiederholung ist doppelt angegeben.")
-        result.append(number)
-    return result
-
-
-def _ical_rule_byday(token: str, frequency: str) -> tuple[int, int | None] | None:
-    if not token:
-        return None
-    match = re.fullmatch(r"([+-]?\d{1,2})?([A-Z]{2})", token)
-    if not match or match.group(2) not in ICAL_DAY_NUMBERS:
-        raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
-    ordinal = int(match.group(1)) if match.group(1) else None
-    if ordinal == 0 or (ordinal is not None and abs(ordinal) > 53):
-        raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
-    if frequency in {"DAILY", "WEEKLY"} and ordinal is not None:
-        raise AppError(400, "Eine BYDAY-Position wird nur für MONTHLY oder YEARLY unterstützt.")
-    return ICAL_DAY_NUMBERS[match.group(2)], ordinal
-
-
-def _ical_rule_bydays(values: dict[str, str], frequency: str) -> list[tuple[int, int | None]]:
-    raw_bydays = values.get("BYDAY", "")
-    if not raw_bydays:
-        return []
-    bydays: list[tuple[int, int | None]] = []
-    for token in raw_bydays.split(","):
-        if not token:
-            raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
-        item = _ical_rule_byday(token, frequency)
-        if item is None:
-            continue
-        if item in bydays:
-            raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
-        bydays.append(item)
-    return bydays
-
-
-def _ical_rule_until(values: dict[str, str]) -> datetime | None:
-    if not values.get("UNTIL"):
-        return None
-    temporal = _ical_temporal_value(values["UNTIL"], {})
-    if temporal is None:
-        raise AppError(400, "UNTIL der Kalender-Wiederholung ist ungültig.")
-    return temporal[0]
-
-
-def _ical_rrule(raw: str) -> dict[str, Any]:
-    values = _ical_rule_values(raw)
-    frequency = values.get("FREQ")
-    if frequency not in {"DAILY", "WEEKLY", "MONTHLY", "YEARLY"}:
-        raise AppError(400, "Diese Kalender-Wiederholungsfrequenz wird nicht unterstützt.")
-    try:
-        count = int(values["COUNT"]) if values.get("COUNT") else None
-    except ValueError as exc:
-        raise AppError(400, "COUNT der Kalender-Wiederholung muss eine ganze Zahl sein.") from exc
-    if count is not None and not 1 <= count <= ICAL_MAX_RECURRENCE_COUNT:
-        raise AppError(400, f"COUNT der Kalender-Wiederholung muss zwischen 1 und {ICAL_MAX_RECURRENCE_COUNT} liegen.")
-    try:
-        interval = int(values.get("INTERVAL", "1"))
-    except ValueError as exc:
-        raise AppError(400, "INTERVAL der Kalender-Wiederholung muss eine ganze Zahl sein.") from exc
-    if not 1 <= interval <= ICAL_MAX_RECURRENCE_COUNT:
-        raise AppError(400, "INTERVAL der Kalender-Wiederholung ist zu groß.")
-    bydays = _ical_rule_bydays(values, frequency)
-    bymonthday = _ical_rule_integer(values, "BYMONTHDAY", -31, 31, allow_negative=True)
-    bymonth = _ical_rule_integer(values, "BYMONTH", 1, 12)
-    bysetpos = _ical_rule_integer(values, "BYSETPOS", -366, 366, allow_negative=True)
-    if bysetpos and frequency in {"DAILY", "WEEKLY"}:
-        raise AppError(400, "BYSETPOS wird nur für MONTHLY oder YEARLY unterstützt.")
-    week_start = ICAL_DAY_NUMBERS.get(values.get("WKST", "MO"))
-    if week_start is None:
-        raise AppError(400, "WKST der Kalender-Wiederholung ist ungültig.")
-    until = _ical_rule_until(values)
-    return {
-        "frequency": frequency,
-        "count": count,
-        "interval": interval,
-        "bydays": bydays,
-        "bymonthday": bymonthday,
-        "bymonth": bymonth,
-        "bysetpos": bysetpos,
-        "wkst": week_start,
-        "until": until,
-    }
-
-
-def _ical_shift_local(value: datetime, days: int) -> datetime:
-    return datetime.combine(value.date() + timedelta(days=days), value.timetz().replace(tzinfo=None), value.tzinfo)
-
-
-def _ical_weekday_ordinal(value: date) -> int:
-    return ((value.day - 1) // 7) + 1
-
-
-def _ical_matches_byday(value: date, bydays: list[tuple[int, int | None]]) -> bool:
-    for weekday, ordinal in bydays:
-        if value.weekday() != weekday:
-            continue
-        if ordinal is None:
-            return True
-        if ordinal > 0 and _ical_weekday_ordinal(value) == ordinal:
-            return True
-        if ordinal < 0:
-            days_in_month = calendar_module.monthrange(value.year, value.month)[1]
-            reverse_ordinal = -((days_in_month - value.day) // 7 + 1)
-            if reverse_ordinal == ordinal:
-                return True
-    return False
-
-
-def _ical_matches_date_filters(value: date, rule: dict[str, Any]) -> bool:
-    if rule["bymonth"] and value.month not in rule["bymonth"]:
-        return False
-    if rule["bymonthday"]:
-        days_in_month = calendar_module.monthrange(value.year, value.month)[1]
-        valid_days = {item if item > 0 else days_in_month + item + 1 for item in rule["bymonthday"]}
-        if value.day not in valid_days:
-            return False
-    if rule["bydays"] and not _ical_matches_byday(value, rule["bydays"]):
-        return False
-    return True
-
-
-def _ical_period_dates(base_date: date, year: int, month: int, rule: dict[str, Any]) -> list[date]:
-    if rule["bymonth"] and month not in rule["bymonth"]:
-        return []
-    days_in_month = calendar_module.monthrange(year, month)[1]
-    if rule["bymonthday"]:
-        days = sorted({item if item > 0 else days_in_month + item + 1 for item in rule["bymonthday"]})
-        candidates = [date(year, month, day) for day in days if 1 <= day <= days_in_month]
-    elif rule["bydays"]:
-        candidates = [date(year, month, day) for day in range(1, days_in_month + 1)]
-    else:
-        candidates = [date(year, month, base_date.day)] if base_date.day <= days_in_month else []
-    return [item for item in candidates if _ical_matches_date_filters(item, rule)]
-
-
-def _ical_apply_bysetpos(candidates: list[date], rule: dict[str, Any]) -> list[date]:
-    ordered = sorted(set(candidates))
-    if not rule["bysetpos"]:
-        return ordered
-    selected: set[date] = set()
-    for position in rule["bysetpos"]:
-        index = position - 1 if position > 0 else len(ordered) + position
-        if 0 <= index < len(ordered):
-            selected.add(ordered[index])
-    return sorted(selected)
-
-
-def _ical_add_recurrence_start(starts: list[datetime], value: datetime, window_start: date, window_end: date) -> None:
-    if window_start <= value.date() <= window_end and value not in starts:
-        starts.append(value)
-
-
-def _ical_event_record(current: dict[str, Any], start: datetime, duration: timedelta) -> dict[str, Any]:
-    end = start + duration
-    duration_minutes = max(1, round(duration.total_seconds() / 60))
-    return {
-        "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"ical-calendar:{current['uid']}:{start.isoformat()}")),
-        "uid": current["uid"],
-        "name": current.get("name") or "Privater Kalendereintrag",
-        "event_date": start.date().isoformat(),
-        "start_local": start.isoformat(),
-        "end_local": end.isoformat(),
-        "duration_minutes": duration_minutes,
-        "all_day": bool(current.get("all_day")),
-        "training_impact": ical_training_impact(current.get("description")),
-        "training_relevant": ical_training_relevant(current.get("description")),
-        "no_intensity": ical_no_intensity(current.get("description")),
-        "short_only": ical_short_only(current.get("description")),
-    }
-
-
-def _ical_daily_recurrence_starts(base: datetime, rule: dict[str, Any], window_start: date, window_end: date) -> list[datetime]:
-    base_date = base.date()
-    starts: list[datetime] = []
-    count = rule["count"]
-    until = rule["until"]
-    interval = rule["interval"]
-    first_index = 0 if count is not None else max(0, math.ceil((window_start - base_date).days / interval) - 1)
-    index = first_index
-    occurrence_index = 0
-    while index <= first_index + ICAL_MAX_RECURRENCE_COUNT * 366:
-        start = _ical_shift_local(base, index * interval)
-        if start.date() > window_end or (until is not None and start > until):
-            break
-        if _ical_matches_date_filters(start.date(), rule):
-            if count is not None and occurrence_index >= count:
-                break
-            occurrence_index += 1
-            _ical_add_recurrence_start(starts, start, window_start, window_end)
-        index += 1
-    return starts
-
-
-def _ical_weekly_candidate_starts(base: datetime, rule: dict[str, Any], week_start: date) -> list[datetime]:
-    base_date = base.date()
-    bydays = rule["bydays"] or [(base_date.weekday(), None)]
-    starts: list[datetime] = []
-    for weekday, _ordinal in sorted(bydays):
-        start_date = week_start + timedelta(days=(weekday - rule["wkst"]) % 7)
-        if start_date < base_date or not _ical_matches_date_filters(start_date, {**rule, "bydays": []}):
-            continue
-        starts.append(_ical_shift_local(base, (start_date - base_date).days))
-    return starts
-
-
-def _ical_weekly_recurrence_starts(base: datetime, rule: dict[str, Any], window_start: date, window_end: date) -> list[datetime]:
-    base_date = base.date()
-    starts: list[datetime] = []
-    count = rule["count"]
-    until = rule["until"]
-    base_week = base_date - timedelta(days=(base_date.weekday() - rule["wkst"]) % 7)
-    target_week = window_start - timedelta(days=(window_start.weekday() - rule["wkst"]) % 7)
-    weeks_between = max(0, (target_week - base_week).days // 7)
-    first_slot = 0 if count is not None else max(0, weeks_between // rule["interval"] - 1)
-    occurrence_index = 0
-    slot_index = first_slot
-    while slot_index <= first_slot + ICAL_MAX_RECURRENCE_PERIODS:
-        week_start = base_week + timedelta(days=slot_index * rule["interval"] * 7)
-        if week_start > window_end:
-            break
-        for start in _ical_weekly_candidate_starts(base, rule, week_start):
-            if count is not None and occurrence_index >= count:
-                return starts
-            if until is not None and start > until:
-                return starts
-            occurrence_index += 1
-            _ical_add_recurrence_start(starts, start, window_start, window_end)
-        slot_index += 1
-    return starts
-
-
-def _ical_recurrence_period(base_date: date, rule: dict[str, Any], period_index: int) -> tuple[int, list[int]]:
-    if rule["frequency"] == "MONTHLY":
-        month_index = base_date.year * 12 + base_date.month - 1 + period_index * rule["interval"]
-        year, month = divmod(month_index, 12)
-        return year, [month + 1]
-    year = base_date.year + period_index * rule["interval"]
-    months = rule["bymonth"] or (range(1, 13) if rule["bydays"] or rule["bymonthday"] else [base_date.month])
-    return year, list(months)
-
-
-def _ical_period_candidates(base_date: date, rule: dict[str, Any], year: int, months: list[int]) -> list[date]:
-    candidates = [candidate for month in months for candidate in _ical_period_dates(base_date, year, month, rule)]
-    return [candidate for candidate in _ical_apply_bysetpos(candidates, rule) if candidate >= base_date]
-
-
-def _ical_period_marker(year: int, months: list[int], frequency: str) -> date:
-    return date(year, months[-1], 1) if frequency == "MONTHLY" else date(year, 1, 1)
-
-
-def _ical_first_period_index(base_date: date, rule: dict[str, Any], window_start: date) -> int:
-    if rule["count"] is not None:
-        return 0
-    frequency = rule["frequency"]
-    base_period = base_date.year * 12 + base_date.month - 1 if frequency == "MONTHLY" else base_date.year
-    target_period = window_start.year * 12 + window_start.month - 1 if frequency == "MONTHLY" else window_start.year
-    return max(0, max(0, target_period - base_period) // rule["interval"] - 1)
-
-
-def _ical_period_recurrence_starts(base: datetime, rule: dict[str, Any], window_start: date, window_end: date) -> list[datetime]:
-    base_date = base.date()
-    starts: list[datetime] = []
-    count = rule["count"]
-    until = rule["until"]
-    frequency = rule["frequency"]
-    first_period = _ical_first_period_index(base_date, rule, window_start)
-    occurrence_index = 0
-    period_index = first_period
-    while period_index <= first_period + ICAL_MAX_RECURRENCE_PERIODS:
-        year, months = _ical_recurrence_period(base_date, rule, period_index)
-        for candidate in _ical_period_candidates(base_date, rule, year, months):
-            start = _ical_shift_local(base, (candidate - base_date).days)
-            if until is not None and start > until:
-                return starts
-            if count is not None and occurrence_index >= count:
-                return starts
-            occurrence_index += 1
-            _ical_add_recurrence_start(starts, start, window_start, window_end)
-        if _ical_period_marker(year, months, frequency) > window_end:
-            break
-        period_index += 1
-    return starts
-
-
-def _ical_recurrence_starts(current: dict[str, Any], rule: dict[str, Any], window_start: date, window_end: date) -> list[datetime]:
-    base = current["start"]
-    frequency = rule["frequency"]
-    if frequency == "DAILY":
-        return _ical_daily_recurrence_starts(base, rule, window_start, window_end)
-    if frequency == "WEEKLY":
-        return _ical_weekly_recurrence_starts(base, rule, window_start, window_end)
-    return _ical_period_recurrence_starts(base, rule, window_start, window_end)
-
-
-def _ical_event_duration(current: dict[str, Any]) -> timedelta:
-    start = current["start"]
-    end = current.get("end")
-    if end is None:
-        fallback = timedelta(days=1) if current.get("all_day") else timedelta(hours=1)
-        end = start + current.get("duration", fallback)
-    if end <= start:
-        end = start + (timedelta(days=1) if current.get("all_day") else timedelta(minutes=30))
-    return end - start
-
-
-def _ical_occurrence_overlaps_window(start: datetime, duration: timedelta, window_start: date, window_end: date) -> bool:
-    end_date = (start + duration - timedelta(microseconds=1)).date()
-    return start.date() <= window_end and end_date >= window_start
-
-
-def _ical_event_rule_starts(current: dict[str, Any], duration: timedelta, window_start: date, window_end: date) -> list[datetime]:
-    start = current["start"]
-    if not current.get("rrules"):
-        return [start] if _ical_occurrence_overlaps_window(start, duration, window_start, window_end) else []
-    if current.get("unsupported_recurrence"):
-        raise AppError(400, "Diese Kalender-Wiederholung wird nicht unterstützt.")
-    starts: list[datetime] = []
-    recurrence_start = window_start - timedelta(days=duration.days + 1)
-    for raw_rule in current["rrules"]:
-        starts.extend(_ical_recurrence_starts(current, _ical_rrule(raw_rule), recurrence_start, window_end))
-    return sorted(set(starts))
-
-
-def _ical_event_rdates(current: dict[str, Any], duration: timedelta, window_start: date, window_end: date, existing: list[datetime]) -> list[datetime]:
-    return [
-        value for value in current.get("rdates", [])
-        if value not in existing and _ical_occurrence_overlaps_window(value, duration, window_start, window_end)
-    ]
-
-
-def _ical_event_instances(
-    current: dict[str, Any],
-    window_start: date,
-    window_end: date,
-    excluded_starts: set[datetime] | None = None,
-) -> list[dict[str, Any]]:
-    duration = _ical_event_duration(current)
-    starts = _ical_event_rule_starts(current, duration, window_start, window_end)
-    starts.extend(_ical_event_rdates(current, duration, window_start, window_end, starts))
-    excluded = set(current.get("exdates", [])) | set(excluded_starts or ())
-    return [
-        _ical_event_record(current, occurrence, duration)
-        for occurrence in starts
-        if occurrence not in excluded and _ical_occurrence_overlaps_window(occurrence, duration, window_start, window_end)
-    ]
-
-
-def _ical_calendar_window(window_start: date | None, window_end: date | None) -> tuple[date, date]:
-    first_day = window_start or local_now().date()
-    last_day = window_end or first_day + timedelta(days=EXTERNAL_CALENDAR_WINDOW_DAYS)
-    if last_day < first_day or (last_day - first_day).days > EXTERNAL_CALENDAR_WINDOW_DAYS:
-        raise AppError(400, "Das Kalenderfenster ist ungültig oder zu groß.")
-    return first_day, last_day
-
-
-def _ical_property_parameters(key_part: str) -> tuple[str, dict[str, str]]:
-    parts = key_part.split(";")
-    parameters = {
-        name.upper(): value
-        for parameter in parts[1:]
-        for name, separator, value in [parameter.partition("=")]
-        if separator
-    }
-    return parts[0].upper(), parameters
-
-
-def _ical_store_recurrence_dates(current: dict[str, Any], key: str, raw_value: str, parameters: dict[str, str]) -> bool:
-    if key not in {"EXDATE", "RDATE"}:
-        return False
-    if key == "RDATE" and "/" in raw_value:
-        raise AppError(400, "RDATE mit Zeiträumen wird nicht unterstützt.")
-    field = "exdates" if key == "EXDATE" else "rdates"
-    message = "EXDATE der Kalender-Wiederholung ist ungültig." if key == "EXDATE" else "RDATE der Kalender-Wiederholung ist ungültig."
-    for value in raw_value.split(","):
-        temporal = _ical_temporal_value(value, parameters)
-        if temporal is None:
-            raise AppError(400, message)
-        current.setdefault(field, []).append(temporal[0])
-    return True
-
-
-def _ical_store_temporal_property(current: dict[str, Any], key: str, raw_value: str, parameters: dict[str, str]) -> bool:
-    if key not in {"DTSTART", "DTEND"}:
-        return False
-    temporal = _ical_temporal_value(raw_value, parameters)
-    if temporal:
-        current["all_day"] = temporal[1] if key == "DTSTART" else current.get("all_day", temporal[1])
-        current["start" if key == "DTSTART" else "end"] = temporal[0]
-    return True
-
-
-def _ical_store_recurrence_id(current: dict[str, Any], raw_value: str, parameters: dict[str, str]) -> None:
-    temporal = _ical_temporal_value(raw_value, parameters)
-    if temporal is None:
-        raise AppError(400, "RECURRENCE-ID der Kalender-Wiederholung ist ungültig.")
-    current["recurrence_id"] = temporal[0]
-
-
-def _ical_store_event_property(current: dict[str, Any], key: str, raw_value: str, parameters: dict[str, str]) -> None:
-    if _ical_store_temporal_property(current, key, raw_value, parameters):
-        return
-    if _ical_store_recurrence_dates(current, key, raw_value, parameters):
-        return
-    text_fields = {"UID": ("uid", 500), "SUMMARY": ("name", 200), "DESCRIPTION": ("description", 2000), "STATUS": ("status", 30)}
-    if key in text_fields:
-        field, limit = text_fields[key]
-        current[field] = parse_ics_value(raw_value)[:limit]
-    elif key == "DURATION":
-        duration = ical_duration(raw_value)
-        if duration:
-            current["duration"] = duration
-    elif key == "RRULE":
-        current.setdefault("rrules", []).append(raw_value)
-    elif key == "RECURRENCE-ID":
-        _ical_store_recurrence_id(current, raw_value, parameters)
-    elif key == "EXRULE":
-        current["unsupported_recurrence"] = True
-
-
-def _ical_append_event(current: dict[str, Any] | None, events: list[dict[str, Any]]) -> None:
-    if current and current.get("status", "").upper() != "CANCELLED" and not (current.get("uid") and current.get("start")):
-        raise AppError(400, "Ein Kalendertermin benötigt UID und DTSTART.")
-    if current and current.get("uid") and (
-        current.get("start") or (current.get("status", "").upper() == "CANCELLED" and current.get("recurrence_id") is not None)
-    ):
-        events.append(current)
-
-
-def _ical_skip_nested_event_line(current: dict[str, Any] | None, nested_depth: int, upper: str) -> tuple[bool, int]:
-    if current is not None and upper.startswith("BEGIN:"):
-        return True, nested_depth + 1
-    if nested_depth:
-        return True, nested_depth - 1 if upper.startswith("END:") else nested_depth
-    return False, nested_depth
-
-
-def _ical_parsed_events(payload: bytes) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-    current: dict[str, Any] | None = None
-    nested_depth = 0
-    for line in unfold_ical(payload, max_bytes=MAX_EXTERNAL_CALENDAR_BYTES, error=lambda status, message: AppError(status, message)):
-        upper = line.upper()
-        if upper == "BEGIN:VEVENT":
-            current = {}
-            continue
-        nested, nested_depth = _ical_skip_nested_event_line(current, nested_depth, upper)
-        if nested:
-            continue
-        if upper == "END:VEVENT":
-            _ical_append_event(current, events)
-            current = None
-            continue
-        if current is None or ":" not in line:
-            continue
-        key_part, raw_value = line.split(":", 1)
-        key, parameters = _ical_property_parameters(key_part)
-        _ical_store_event_property(current, key, raw_value, parameters)
-    return events
-
-
-def _ical_exception_starts(events: list[dict[str, Any]], event: dict[str, Any]) -> set[datetime]:
-    return {
-        item["recurrence_id"]
-        for item in events
-        if item.get("uid") == event.get("uid") and item.get("recurrence_id") is not None
-    }
-
-
-def _ical_add_event_instances(
-    events_by_key: dict[tuple[str, str], dict[str, Any]],
-    event: dict[str, Any],
-    first_day: date,
-    last_day: date,
-    excluded_starts: set[datetime] | None = None,
-) -> None:
-    for parsed_event in _ical_event_instances(event, first_day, last_day, excluded_starts):
-        key = (parsed_event["uid"], parsed_event["start_local"])
-        if key not in events_by_key and len(events_by_key) >= ICAL_MAX_RECURRENCE_COUNT:
-            raise AppError(400, f"Der Kalender-Feed enthält mehr als {ICAL_MAX_RECURRENCE_COUNT} Termine im Syncfenster.")
-        events_by_key.setdefault(key, parsed_event)
-
-
-def _ical_expanded_events(events: list[dict[str, Any]], first_day: date, last_day: date) -> list[dict[str, Any]]:
-    events_by_key: dict[tuple[str, str], dict[str, Any]] = {}
-    for event in events:
-        if event.get("recurrence_id") is not None or event.get("status", "").upper() == "CANCELLED":
-            continue
-        _ical_add_event_instances(events_by_key, event, first_day, last_day, _ical_exception_starts(events, event))
-    for event in events:
-        if event.get("recurrence_id") is None or event.get("status", "").upper() == "CANCELLED":
-            continue
-        _ical_add_event_instances(events_by_key, event, first_day, last_day)
-    return sorted(events_by_key.values(), key=lambda item: (item["start_local"], item["name"], item["uid"]))[:1000]
-
-
-def parse_ical_calendar(payload: bytes, *, window_start: date | None = None, window_end: date | None = None) -> list[dict[str, Any]]:
-    """Parse calendar events and safely expand common Google recurrence rules."""
-    first_day, last_day = _ical_calendar_window(window_start, window_end)
-    return _ical_expanded_events(_ical_parsed_events(payload), first_day, last_day)
-
-
-def external_calendar_url(value: Any) -> str:
-    raw = str(value or "").strip()
-    parsed = urlparse(raw)
-    try:
-        port = parsed.port
-    except ValueError as exc:
-        raise AppError(400, "Die Kalenderadresse muss einen gültigen HTTPS-Port verwenden.") from exc
-    hostname = (parsed.hostname or "").rstrip(".").casefold()
-    if parsed.scheme.lower() != "https" or port not in {None, 443} or not hostname or parsed.username or parsed.password or parsed.fragment:
-        raise AppError(400, "Die Kalenderadresse muss eine HTTPS-URL ohne Zugangsdaten sein.")
-    if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
-        raise AppError(400, "Lokale Kalenderadressen werden aus Sicherheitsgründen nicht abgerufen.")
-    _resolve_calendar_addresses(hostname, status=400)
-    return raw
-
-
 def list_external_calendar_events(limit: int = 300, training_relevant_only: bool = False) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
         relevance_filter = " AND training_relevant = 1" if training_relevant_only else ""
@@ -5555,7 +4502,7 @@ def external_calendar_state() -> dict[str, Any]:
         "last_sync_at": get_kv("last_external_calendar_sync_at"),
         "last_error": get_kv("last_external_calendar_sync_error") or None,
         "events": list_external_calendar_events(),
-        "window_days": EXTERNAL_CALENDAR_WINDOW_DAYS,
+        "window_days": calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
     }
 
 
@@ -5568,16 +4515,21 @@ def sync_external_calendar(reason: str = "manual", operation_id: str | None = No
         return {"status": "already_running"}
     try:
         set_kv("external_calendar_sync_status", "Kalender: Synchronisierung läuft…")
-        url = external_calendar_url(CONFIG.calendar_ical_url)
-        payload = fetch_calendar_feed(url)
-        if len(payload) > MAX_EXTERNAL_CALENDAR_BYTES:
-            raise AppError(413, "Der Kalender-Feed ist zu groß.")
-        today = local_now().date()
-        latest = today + timedelta(days=EXTERNAL_CALENDAR_WINDOW_DAYS)
+        url = calendar_provider.external_calendar_url(CONFIG.calendar_ical_url)
+        payload = calendar_provider.fetch_calendar_feed(url, app_version=APP_VERSION)
+        current_local = local_now()
+        today = current_local.date()
+        latest = today + timedelta(days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS)
         # Store the complete bounded feed locally. Relevance is resolved by
         # the shared read model, so non-relevant appointments remain available
         # in the local source but do not become planning signals.
-        events = parse_ical_calendar(payload, window_start=today, window_end=latest)
+        events = calendar_provider.parse_ical_calendar(
+            payload,
+            local_zone=current_local.tzinfo or timezone.utc,
+            today=today,
+            window_start=today,
+            window_end=latest,
+        )
         now = utc_now()
         with DB_LOCK, database() as db:
             db.execute("DELETE FROM external_calendar_events")
@@ -5592,7 +4544,13 @@ def sync_external_calendar(reason: str = "manual", operation_id: str | None = No
         set_kv("last_external_calendar_sync_error", "")
         runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
         replan = check_adaptive_replan("external calendar")
-        return {"status": "ok", "synced_at": now, "events": len(events), "window_days": EXTERNAL_CALENDAR_WINDOW_DAYS, **replan}
+        return {
+            "status": "ok",
+            "synced_at": now,
+            "events": len(events),
+            "window_days": calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
+            **replan,
+        }
     except AppError as exc:
         set_kv("last_external_calendar_sync_error", REDACTOR.redact_text(exc.message)[:1000])
         LOGGER.exception("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason}}, exc_info=True)
@@ -5617,8 +4575,8 @@ def external_calendar_event_dates(event: dict[str, Any]) -> list[str]:
     first = start.date()
     last = (end - timedelta(microseconds=1)).date() if end > start else first
     today = local_now().date()
-    first = max(first, today - timedelta(days=EXTERNAL_CALENDAR_WINDOW_DAYS))
-    last = min(last, today + timedelta(days=EXTERNAL_CALENDAR_WINDOW_DAYS))
+    first = max(first, today - timedelta(days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS))
+    last = min(last, today + timedelta(days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS))
     return [(first + timedelta(days=offset)).isoformat() for offset in range(max(0, (last - first).days + 1))]
 
 
@@ -6861,236 +5819,7 @@ def sync_competitions(
             COMPETITION_SYNC_LOCK.release()
 
 
-OPENAI_RATE_LIMIT_HEADERS = {
-    "retry-after": "retry_after",
-    "x-ratelimit-limit-requests": "limit_requests",
-    "x-ratelimit-remaining-requests": "remaining_requests",
-    "x-ratelimit-reset-requests": "reset_requests",
-    "x-ratelimit-limit-tokens": "limit_tokens",
-    "x-ratelimit-remaining-tokens": "remaining_tokens",
-    "x-ratelimit-reset-tokens": "reset_tokens",
-}
-OPENAI_STATUS_KEY = "openai_status"
-GEMINI_STATUS_KEY = "gemini_status"
 OPENAI_MAX_RETRY_DELAY_SECONDS = 60
-
-
-def _retry_after_seconds(headers: Any) -> int | None:
-    """Parse a bounded numeric Retry-After hint without retaining raw headers."""
-    if headers is None:
-        return None
-    try:
-        value = headers.get("retry-after")
-        seconds = float(str(value).strip())
-    except (AttributeError, TypeError, ValueError, OverflowError):
-        return None
-    if not math.isfinite(seconds) or seconds < 0:
-        return None
-    return max(1, min(int(math.ceil(seconds)), 24 * 60 * 60))
-
-
-def _safe_openai_error_token(value: Any) -> str | None:
-    """Keep a provider error classifier without retaining provider text."""
-    token = str(value or "").strip().casefold()
-    if not token or len(token) > 160 or not re.fullmatch(r"[a-z0-9_.\[\]-]+", token):
-        return None
-    return token
-
-
-def openai_error_diagnostic_details(raw_body: bytes, headers: Any = None) -> dict[str, Any]:
-    """Return safe OpenAI error metadata; never retain an upstream message/body."""
-    payload: Any = None
-    try:
-        payload = json.loads(raw_body) if raw_body else None
-    except (TypeError, json.JSONDecodeError):
-        payload = None
-    error = payload.get("error") if isinstance(payload, dict) else None
-    error = error if isinstance(error, dict) else {}
-    details: dict[str, Any] = {"error_body_bytes": min(len(raw_body or b""), MAX_EXTERNAL_RESPONSE_BYTES + 1)}
-    for source, target in (("code", "error_code"), ("type", "error_type"), ("param", "parameter")):
-        token = _safe_openai_error_token(error.get(source))
-        if token:
-            details[target] = token
-    try:
-        request_id = _safe_openai_error_token(headers.get("x-request-id")) if headers is not None else None
-    except (AttributeError, TypeError):
-        request_id = None
-    if request_id:
-        details["request_id"] = request_id
-    return details
-
-
-def _openai_error_tokens(error: dict[str, Any]) -> tuple[str, str, str, str, str]:
-    """Return transient normalized tokens used only for OpenAI error classification."""
-    code = str(error.get("code") or "").strip().casefold()
-    error_type = str(error.get("type") or "").strip().casefold()
-    parameter = str(error.get("param") or "").strip().casefold()
-    provider_message = str(error.get("message") or "").strip().casefold()
-    searchable = " ".join((code, error_type, provider_message))
-    return code, error_type, parameter, provider_message, searchable
-
-
-def _openai_invalid_input_state(error_type: str, parameter: str, provider_message: str) -> bool:
-    """Identify recoverable tool-output and reasoning continuation state errors."""
-    return error_type == "invalid_request_error" and parameter.startswith("input") and (
-        "no tool output found for function call" in provider_message
-        or ("reasoning" in provider_message and "required following item" in provider_message)
-    )
-
-
-def _openai_conversation_error(status: int, code: str, error_type: str, parameter: str, provider_message: str, searchable: str) -> tuple[str, str] | None:
-    """Classify conversation locking and invalid continuation state separately."""
-    if code in {"conversation_locked", "conversation_lock_timeout", "concurrent_request"} or ("conversation" in searchable and "lock" in searchable):
-        return "conversation_locked", "Die OpenAI-Konversation wird gerade von einer anderen Anfrage verwendet. Bitte kurz warten und erneut versuchen."
-    invalid_state = _openai_invalid_input_state(error_type, parameter, provider_message)
-    continuation_error = "conversation" in searchable and any(marker in searchable for marker in ("state", "previous", "invalid", "not found"))
-    if status == 400 and (code in {"conversation_not_found", "invalid_conversation", "conversation_state_invalid", "invalid_function_call_output"} or "function_call_output" in searchable or invalid_state or continuation_error):
-        return "conversation_state_invalid", "Der KI-Dienst konnte den bisherigen Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten."
-    return None
-
-
-def _openai_billing_error(code: str, error_type: str, searchable: str) -> tuple[str, str] | None:
-    """Classify quota and billing limits before generic rate limiting."""
-    if code == "credit_balance_exhausted":
-        return "credit_balance_exhausted", "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
-    if code in {"organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
-        return code, "Das OpenAI-Ausgaben- oder Nutzungslimit ist erreicht. Bitte das Limit im OpenAI-Konto prüfen."
-    if code in {"insufficient_quota", "billing_hard_limit_reached"} or error_type == "insufficient_quota" or any(marker in searchable for marker in ("insufficient_quota", "quota", "billing_hard_limit", "credits")):
-        return "insufficient_quota", "Das OpenAI-Guthaben bzw. Kontingent ist aufgebraucht. Bitte Guthaben und Abrechnung im OpenAI-Konto prüfen."
-    return None
-
-
-def _openai_error_reason(status: int, error: dict[str, Any]) -> tuple[str, str]:
-    """Map safe OpenAI error markers to an athlete-facing recovery action."""
-    code, error_type, parameter, provider_message, searchable = _openai_error_tokens(error)
-    conversation_error = _openai_conversation_error(status, code, error_type, parameter, provider_message, searchable)
-    if conversation_error:
-        return conversation_error
-    billing_error = _openai_billing_error(code, error_type, searchable)
-    if billing_error:
-        return billing_error
-    if status == 429 or code == "rate_limit_exceeded" or error_type == "rate_limit_exceeded":
-        return "rate_limit_exceeded", "OpenAI hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen."
-    if status in {401, 403} or code in {"invalid_api_key", "invalid_organization", "permission_denied"}:
-        return "authentication_or_permission", "Der OpenAI-Zugang wurde abgelehnt. Bitte API-Schlüssel und Projektberechtigungen prüfen."
-    if status == 404 or code in {"model_not_found", "not_found"}:
-        return "not_found", "Das konfigurierte OpenAI-Modell oder der angeforderte Dienst wurde nicht gefunden."
-    if status >= 500:
-        return "provider_unavailable", "OpenAI ist vorübergehend nicht verfügbar. Bitte später erneut versuchen."
-    return "http_error", f"OpenAI konnte die Anfrage nicht verarbeiten (HTTP {status})."
-
-
-def openai_error_details(status: int, raw_body: bytes, headers: Any = None) -> dict[str, Any]:
-    """Classify an OpenAI error without exposing the provider's raw message."""
-    reason, message = _openai_error_reason(status, _provider_error_payload(raw_body))
-    details = {
-        "state": "error",
-        "reason": reason,
-        "message": message,
-        "http_status": status,
-        "updated_at": utc_now(),
-    }
-    retry_after = _retry_after_seconds(headers)
-    if retry_after is not None:
-        details["retry_after_seconds"] = retry_after
-    return details
-
-
-def safe_openai_log_reason(reason: Any) -> str:
-    """Project an OpenAI status reason onto static values safe for structured logs."""
-    if reason == "conversation_locked":
-        return "conversation_locked"
-    if reason == "conversation_state_invalid":
-        return "conversation_state_invalid"
-    if reason == "credit_balance_exhausted":
-        return "credit_balance_exhausted"
-    if reason in {"organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
-        return "usage_limit_exceeded"
-    if reason == "insufficient_quota":
-        return "insufficient_quota"
-    if reason == "rate_limit_exceeded":
-        return "rate_limit_exceeded"
-    if reason == "authentication_or_permission":
-        return "authentication_or_permission"
-    if reason == "not_found":
-        return "not_found"
-    if reason == "provider_unavailable":
-        return "provider_unavailable"
-    return "http_error"
-
-
-def _provider_error_payload(raw_body: bytes) -> dict[str, Any]:
-    try:
-        payload = json.loads(raw_body) if raw_body else None
-    except (TypeError, json.JSONDecodeError):
-        payload = None
-    error = payload.get("error") if isinstance(payload, dict) else None
-    return error if isinstance(error, dict) else {}
-
-
-def _gemini_error_tokens(error: dict[str, Any]) -> str:
-    tokens = [str(error.get("status") or "").casefold()]
-    for detail in error.get("details") if isinstance(error.get("details"), list) else []:
-        if isinstance(detail, dict):
-            tokens.extend(str(detail.get(key) or "").casefold() for key in ("reason", "@type"))
-    return " ".join(tokens)
-
-
-def _gemini_error_reason(status: int, searchable: str) -> tuple[str, str]:
-    if status in {401, 403} or "permission" in searchable or "unauthenticated" in searchable:
-        return "authentication_or_permission", "Der Gemini-Zugang wurde abgelehnt. Bitte API-Schlüssel und Berechtigungen prüfen."
-    if status == 429 and "quota" in searchable:
-        return "insufficient_quota", "Das Gemini-Kontingent ist aufgebraucht. Bitte Nutzung und Abrechnung im Google-Konto prüfen."
-    if status == 429:
-        return "rate_limit_exceeded", "Gemini hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen."
-    if status == 404:
-        return "not_found", "Das konfigurierte Gemini-Modell oder der angeforderte Dienst wurde nicht gefunden."
-    if status >= 500:
-        return "provider_unavailable", "Gemini ist vorübergehend nicht verfügbar. Bitte später erneut versuchen."
-    return "http_error", f"Gemini konnte die Anfrage nicht verarbeiten (HTTP {status})."
-
-
-def gemini_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
-    """Classify Gemini failures without retaining the provider response body."""
-    reason, message = _gemini_error_reason(status, _gemini_error_tokens(_provider_error_payload(raw_body)))
-    return {"state": "error", "reason": reason, "message": message, "http_status": status, "updated_at": utc_now()}
-
-
-def record_openai_status(status: dict[str, Any]) -> None:
-    """Persist only a safe, user-facing OpenAI connection status."""
-    safe_status = {
-        "state": str(status.get("state") or "unknown"),
-        "reason": str(status.get("reason") or "unknown"),
-        "message": str(status.get("message") or "")[:300],
-        "http_status": status.get("http_status"),
-        "updated_at": str(status.get("updated_at") or utc_now()),
-    }
-    provider_code = status.get("provider_error_code")
-    if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
-        safe_status["provider_error_code"] = provider_code
-    set_kv(OPENAI_STATUS_KEY, json.dumps(safe_status, ensure_ascii=False))
-
-
-def record_openai_success(status: int = 200) -> None:
-    record_openai_status({
-        "state": "ok",
-        "reason": "ok",
-        "message": "OpenAI ist verfügbar.",
-        "http_status": status,
-        "updated_at": utc_now(),
-    })
-
-
-def record_openai_rate_limits(response_headers: Any) -> None:
-    if response_headers is None:
-        return
-    values: dict[str, str] = {}
-    for header_name, value_name in OPENAI_RATE_LIMIT_HEADERS.items():
-        value = response_headers.get(header_name)
-        if value not in (None, ""):
-            values[value_name] = str(value)
-    if values:
-        set_kv("openai_rate_limits", json.dumps({"updated_at": utc_now(), **values}, ensure_ascii=False))
 
 
 def _provider_error_body(raw_body: bytes) -> Any:
@@ -7136,89 +5865,9 @@ def upstream_http_error_message(status: int, raw_body: bytes, service: str | Non
     return f"Anfrage an externen Dienst fehlgeschlagen ({status})."
 
 
-def _read_http_error_body(error: HTTPError) -> bytes:
-    """Read an HTTP error body and close the provider response deterministically."""
-    try:
-        try:
-            return error.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
-        except TypeError:  # Small fake responses in unit tests may not accept a size.
-            return error.read()
-    finally:
-        error.close()
-
-
-def _urlopen_interruptibly(request: Request, timeout: int, cancel_event: threading.Event | None) -> Any:
-    if cancel_event is None:
-        return urlopen(request, timeout=timeout)
-    completed = threading.Event()
-    result: dict[str, Any] = {}
-
-    def open_request() -> None:
-        try:
-            response = urlopen(request, timeout=timeout)
-            if cancel_event.is_set():
-                response.close()
-            else:
-                result["response"] = response
-        except Exception as exc:
-            result["error"] = exc
-        finally:
-            completed.set()
-
-    threading.Thread(target=open_request, name="provider-header-wait", daemon=True).start()
-    while not completed.wait(0.1):
-        _raise_chat_cancelled(cancel_event)
-    _raise_chat_cancelled(cancel_event)
-    if "error" in result:
-        raise result["error"]
-    return result["response"]
-
-
-def _http_request_body(payload: Any | None, raw_body: bytes | None) -> bytes | None:
-    if raw_body is not None and payload is not None:
-        raise ValueError("payload and raw_body are mutually exclusive")
-    if raw_body is not None:
-        return raw_body
-    return json.dumps(payload).encode("utf-8") if payload is not None else None
-
-
-def _http_request_parts(
-    method: str,
-    url: str,
-    body: bytes | None,
-    headers: dict[str, str] | None,
-    timeout: int,
-    service: str | None,
-) -> tuple[Request, Any, dict[str, str], dict[str, Any]]:
-    request_headers = {"Accept": JSON_MEDIA_TYPE, "User-Agent": f"IntervalsCoach/{APP_VERSION}"}
-    if body is not None:
-        request_headers["Content-Type"] = JSON_MEDIA_TYPE
-    request_headers.update(headers or {})
-    request = Request(url, data=body, headers=request_headers, method=method)
-    parsed_url = urlparse(url)
-    request_context: dict[str, Any] = {
-        "service": service or parsed_url.netloc,
-        "method": method.upper(),
-        "host": parsed_url.netloc,
-        "path": observability.safe_provider_path(parsed_url.path),
-        "timeout_seconds": timeout,
-        "request_bytes": len(body or b""),
-    }
-    operation_context = OPERATION_CONTEXT.get()
-    if operation_context:
-        request_context.update({
-            "operation_id": operation_context["operation_id"],
-            "trigger": operation_context["trigger"],
-            "phase": request_context["path"].rsplit("/", 1)[-1] or "request",
-        })
-    if parsed_url.query:
-        request_context["query_keys"] = sorted(parse_qs(parsed_url.query, keep_blank_values=True))
-    return request, parsed_url, request_headers, request_context
-
-
 def _log_http_request_started(request_context: dict[str, Any], parsed_url: Any, request_headers: dict[str, str]) -> None:
     LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": request_context})
-    capture_diagnostic_event("external_http_started", {
+    DIAGNOSTIC_CAPTURE.capture("external_http_started", {
         "service": request_context["service"],
         "method": request_context["method"],
         "host": observability.safe_url_netloc(parsed_url),
@@ -7229,58 +5878,41 @@ def _log_http_request_started(request_context: dict[str, Any], parsed_url: Any, 
     })
 
 
-def _read_http_response(response: Any, cancel_event: threading.Event | None) -> bytes:
-    if cancel_event is not None:
-        cancel_event._provider_response = response
-    try:
-        _raise_chat_cancelled(cancel_event)
-        try:
-            raw = read_bounded_response(response, MAX_EXTERNAL_RESPONSE_BYTES, before_read=lambda: _raise_chat_cancelled(cancel_event))
-        except ValueError as exc:
-            raise AppError(502, "Die Antwort des externen Dienstes ist zu groß.") from exc
-    finally:
-        if cancel_event is not None and getattr(cancel_event, "_provider_response", None) is response:
-            cancel_event._provider_response = None
-    return raw
-
-
 def _http_success_result(
-    response: Any,
-    cancel_event: threading.Event | None,
+    response: provider_http.JsonResponse,
     service: str | None,
     request_context: dict[str, Any],
     parsed_url: Any,
     started: float,
 ) -> Any:
-    raw = _read_http_response(response, cancel_event)
-    result = json.loads(raw) if raw else None
+    result = response.payload if response.response_bytes else None
     if service == "openai":
-        record_openai_rate_limits(getattr(response, "headers", None))
-        record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
-    status = getattr(response, "status", None) or getattr(response, "code", None) or 200
+        state = provider_state_service()
+        state.record_rate_limits(response.headers)
+        state.record_success("openai", response.status)
     LOGGER.info(
         EXTERNAL_HTTP_COMPLETED_EVENT,
         extra={
             "event": "external_request_completed",
             "context": {
                 **request_context,
-                "status": status,
+                "status": response.status,
                 "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                "response_bytes": len(raw),
+                "response_bytes": response.response_bytes,
                 **observability.external_result_context(result),
             },
         },
     )
-    capture_diagnostic_event("external_http_completed", {
+    DIAGNOSTIC_CAPTURE.capture("external_http_completed", {
         "service": request_context["service"],
         "method": request_context["method"],
         "host": observability.safe_url_netloc(parsed_url),
         "path": request_context["path"],
-        "status": status,
+        "status": response.status,
         "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-        "response_bytes": len(raw),
-        "headers": _safe_response_headers(getattr(response, "headers", None)),
-        "response": diagnostic_capture_response(result),
+        "response_bytes": response.response_bytes,
+        "headers": _safe_response_headers(response.headers),
+        "response": observability.diagnostic_capture_response(result),
     })
     return result
 
@@ -7295,13 +5927,13 @@ def _capture_http_failure(
         "host": observability.safe_url_netloc(parsed_url),
         "path": request_context["path"],
         "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-        "error": _safe_diagnostic_error(error),
+        "error": observability.safe_diagnostic_error(error),
     }
     if error_bytes is not None:
         context["error_bytes"] = error_bytes
     if headers is not None:
         context["headers"] = _safe_response_headers(headers)
-    capture_diagnostic_event("external_http_failed", context)
+    DIAGNOSTIC_CAPTURE.capture("external_http_failed", context)
 
 
 def _handle_http_error(
@@ -7311,13 +5943,26 @@ def _handle_http_error(
     parsed_url: Any,
     started: float,
 ) -> NoReturn:
-    raw_error = _read_http_error_body(exc)
+    raw_error = provider_http.read_error_body(exc, MAX_EXTERNAL_RESPONSE_BYTES)
     if service == "openai":
-        record_openai_rate_limits(getattr(exc, "headers", None))
-        error_details = openai_error_details(exc.code, raw_error, getattr(exc, "headers", None))
-        record_openai_status(error_details)
+        state = provider_state_service()
+        state.record_rate_limits(getattr(exc, "headers", None))
+        error_details = openai_provider.error_details(
+            exc.code,
+            raw_error,
+            getattr(exc, "headers", None),
+            updated_at=utc_now(),
+        )
+        state.record_status(
+            "openai",
+            state=error_details.get("state"),
+            reason=error_details.get("reason"),
+            message=error_details.get("message"),
+            http_status=error_details.get("http_status"),
+            provider_error_code=error_details.get("provider_error_code"),
+        )
     elif service == "gemini":
-        error_details = gemini_error_details(exc.code, raw_error)
+        error_details = gemini_provider.error_details(exc.code, raw_error, updated_at=utc_now())
     else:
         error_details = None
     LOGGER.exception(
@@ -7344,7 +5989,13 @@ def _handle_http_error(
     )
     if error_details:
         if service == "gemini":
-            _record_gemini_status("error", error_details["message"], reason=error_details["reason"], status=exc.code)
+            provider_state_service().record_status(
+                "gemini",
+                state="error",
+                reason=error_details["reason"],
+                message=error_details["message"],
+                http_status=exc.code,
+            )
         status = exc.code if service == "gemini" or exc.code == 429 else 502
         error = AppError(status, error_details["message"], reason=error_details["reason"])
         retry_after = error_details.get("retry_after_seconds")
@@ -7365,13 +6016,12 @@ def _handle_http_network_error(
     if cancel_event is not None and cancel_event.is_set():
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
     if service == "openai":
-        record_openai_status({
-            "state": "error",
-            "reason": "network_error",
-            "message": "OpenAI ist nicht erreichbar. Bitte Netzwerkverbindung prüfen und später erneut versuchen.",
-            "http_status": None,
-            "updated_at": utc_now(),
-        })
+        provider_state_service().record_status(
+            "openai",
+            state="error",
+            reason="network_error",
+            message="OpenAI ist nicht erreichbar. Bitte Netzwerkverbindung prüfen und später erneut versuchen.",
+        )
     LOGGER.exception(
         "Upstream service is unavailable",
         extra={
@@ -7398,13 +6048,12 @@ def _handle_http_client_error(
     exc: BaseException, service: str | None, request_context: dict[str, Any], parsed_url: Any, started: float,
 ) -> NoReturn:
     if service == "openai":
-        record_openai_status({
-            "state": "error",
-            "reason": "client_error",
-            "message": "Die OpenAI-Antwort konnte nicht verarbeitet werden. Bitte später erneut versuchen.",
-            "http_status": None,
-            "updated_at": utc_now(),
-        })
+        provider_state_service().record_status(
+            "openai",
+            state="error",
+            reason="client_error",
+            message="Die OpenAI-Antwort konnte nicht verarbeitet werden. Bitte später erneut versuchen.",
+        )
     LOGGER.exception(
         "External HTTP request failed while processing response",
         extra={
@@ -7434,19 +6083,44 @@ def http_json(
     cancel_event: threading.Event | None = None,
 ) -> Any:
     observability.configure_logging(LOGGER, DATA_DIR, LOG_PATH, REDACTOR)
-    body = _http_request_body(payload, raw_body)
-    request, parsed_url, request_headers, request_context = _http_request_parts(
-        method, url, body, headers, timeout, service,
+    request, parsed_url, request_headers, request_context = provider_http.json_request_parts(
+        method,
+        url,
+        payload=payload,
+        raw_body=raw_body,
+        headers=headers,
+        timeout=timeout,
+        service=service,
+        content_type=content_type,
+        app_version=APP_VERSION,
+        operation_context=OPERATION_CONTEXT.get(),
     )
-    if content_type is not None and body is not None:
-        request_headers["Content-Type"] = content_type
-        request = Request(url, data=body, headers=request_headers, method=method)
     started = time.perf_counter()
     _log_http_request_started(request_context, parsed_url, request_headers)
     try:
         _raise_chat_cancelled(cancel_event)
-        with _urlopen_interruptibly(request, timeout, cancel_event) as response:
-            return _http_success_result(response, cancel_event, service, request_context, parsed_url, started)
+        response = provider_http.request_json(
+            request,
+            timeout=timeout,
+            max_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+            cancel_event=cancel_event,
+            opener=urlopen,
+        )
+        return _http_success_result(response, service, request_context, parsed_url, started)
+    except provider_http.ProviderRequestCancelled as exc:
+        _handle_http_app_error(
+            AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled"),
+            request_context,
+            parsed_url,
+            started,
+        )
+    except provider_http.ProviderResponseTooLarge as exc:
+        _handle_http_app_error(
+            AppError(502, "Die Antwort des externen Dienstes ist zu groß."),
+            request_context,
+            parsed_url,
+            started,
+        )
     except HTTPError as exc:
         _handle_http_error(exc, service, request_context, parsed_url, started)
     except (OSError, ValueError) as exc:
@@ -11265,7 +9939,7 @@ def sync_public_state(
         running=running,
         get_value=get_kv,
         state_versions=state_versions(),
-        provider_freshness=freshness if freshness is not None else provider_freshness_state(),
+        provider_freshness=freshness if freshness is not None else _current_provider_freshness(),
         maintenance=runtime_maintenance.MAINTENANCE_GATE.state(),
     )
     result["jobs"] = jobs if jobs is not None else sync_jobs_state()
@@ -14003,121 +12677,57 @@ def performance_trend_average(snapshot: dict[str, Any], metrics: dict[str, dict[
     return intervals_performance_average([row for row in rows if isinstance(row, dict)], key, days, end_date)
 
 
-def _openai_usage_summary_unlocked() -> dict[str, Any]:
-    today = local_now().date().isoformat()
-    try:
-        usage = json.loads(get_kv("openai_usage") or "{}")
-    except (TypeError, json.JSONDecodeError):
-        usage = {}
-    if not isinstance(usage, dict) or usage.get("date") != today:
-        usage = {"date": today, "requests": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    try:
-        rate_limits = json.loads(get_kv("openai_rate_limits") or "{}")
-    except (TypeError, json.JSONDecodeError):
-        rate_limits = {}
-    try:
-        status = json.loads(get_kv(OPENAI_STATUS_KEY) or "{}")
-    except (TypeError, json.JSONDecodeError):
-        status = {}
-    return {
-        **usage,
-        "rate_limits": rate_limits if isinstance(rate_limits, dict) else {},
-        "status": status if isinstance(status, dict) else {},
-    }
-
-
-def openai_usage_summary() -> dict[str, Any]:
-    # Composite state readers already hold DB_LOCK. Use that same lock and
-    # connection here; a separate usage lock would invert the acquisition
-    # order between those readers and a completing Coach request.
-    with DB_LOCK, database():
-        return _openai_usage_summary_unlocked()
-
-
-def _record_openai_usage_unlocked(response: dict[str, Any], operation: str) -> None:
-    def safe_count(value: Any) -> int:
-        try:
-            return max(0, int(value or 0))
-        except (TypeError, ValueError, OverflowError):
-            return 0
-
-    usage = openai_usage_summary()
-    raw = response.get("usage") if isinstance(response, dict) else None
-    if not isinstance(raw, dict):
-        raw = {}
-    input_tokens = safe_count(raw.get("input_tokens") or raw.get("prompt_tokens"))
-    output_tokens = safe_count(raw.get("output_tokens") or raw.get("completion_tokens"))
-    total_tokens = safe_count(raw.get("total_tokens")) or input_tokens + output_tokens
-    usage.update({
-        "requests": safe_count(usage.get("requests")) + 1,
-        "input_tokens": safe_count(usage.get("input_tokens")) + input_tokens,
-        "output_tokens": safe_count(usage.get("output_tokens")) + output_tokens,
-        "total_tokens": safe_count(usage.get("total_tokens")) + total_tokens,
-        "last_operation": operation,
-        "last_request_at": utc_now(),
-    })
-    set_kv("openai_usage", json.dumps(usage, ensure_ascii=False))
-    LOGGER.info(
-        "OpenAI usage recorded",
-        extra={"event": "openai_usage", "context": {"operation": operation, "input_tokens": input_tokens, "output_tokens": output_tokens, "total_tokens": total_tokens}},
-    )
-
-
-def record_openai_usage(response: dict[str, Any], operation: str) -> None:
-    # Keep the complete read-modify-write in one transaction, including when
-    # several provider responses finish at the same time.
-    with DB_LOCK, database():
-        _record_openai_usage_unlocked(response, operation)
-
-
 def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
-    failure = openai_response_failure_reason(path, result, OPENAI_RESPONSES_PATH)
+    failure = openai_provider.response_failure_reason(path, result, OPENAI_RESPONSES_PATH)
     if failure == "invalid_response":
         raise AppError(502, "OpenAI response is not a JSON object.", reason="invalid_response")
     if failure == "response_error":
         provider_error = result["error"]
         code = provider_error.get("code") if isinstance(provider_error, dict) else None
-        code = code if isinstance(code, str) and code in OPENAI_RESPONSE_ERROR_CODES else None
-        record_openai_status({"state": "error", "reason": "response_error", "message": "OpenAI returned an error response.",
-                              "http_status": 200, "provider_error_code": code})
+        code = code if isinstance(code, str) and code in observability.OPENAI_RESPONSE_ERROR_CODES else None
+        provider_state_service().record_status(
+            "openai",
+            state="error",
+            reason="response_error",
+            message="OpenAI returned an error response.",
+            http_status=200,
+            provider_error_code=code,
+        )
         error = AppError(502, "OpenAI returned an error response.", reason="response_error")
         error.provider_error_code = code
         raise error
     if failure == "response_failed":
-        record_openai_status({"state": "error", "reason": "response_failed", "message": "OpenAI did not complete the coach response.", "http_status": 200})
+        provider_state_service().record_status(
+            "openai",
+            state="error",
+            reason="response_failed",
+            message="OpenAI did not complete the coach response.",
+            http_status=200,
+        )
         raise AppError(502, "OpenAI did not complete the coach response.", reason="response_failed")
     if failure == "invalid_response_status":
-        record_openai_status({"state": "error", "reason": "invalid_response_status", "message": "OpenAI returned an unknown response status.", "http_status": 200})
+        provider_state_service().record_status(
+            "openai",
+            state="error",
+            reason="invalid_response_status",
+            message="OpenAI returned an unknown response status.",
+            http_status=200,
+        )
         raise AppError(502, "OpenAI returned an unknown response status.", reason="invalid_response_status")
     return result
-
-
-def openai_endpoint(path: str) -> str:
-    """Resolve an OpenAI-compatible API path against the configured base URL."""
-    base_url = str(getattr(CONFIG, "openai_base_url", DEFAULT_OPENAI_BASE_URL) or DEFAULT_OPENAI_BASE_URL).strip() or DEFAULT_OPENAI_BASE_URL
-    parsed = urlparse(base_url)
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise AppError(500, "OPENAI_BASE_URL muss eine gültige HTTP(S)-Basis-URL ohne Zugangsdaten oder Query-Parameter sein.")
-    normalized_path = "/" + str(path or "").lstrip("/")
-    return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/") + normalized_path, "", "", ""))
 
 
 def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
         raise AppError(503, OPENAI_API_KEY_ERROR)
-    request_payload = dict(payload)
-    if path == OPENAI_RESPONSES_PATH:
-        request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
+    request_payload = (
+        openai_provider.responses_payload(payload, thinking_level=SETTINGS.selected_thinking_level())
+        if path == OPENAI_RESPONSES_PATH
+        else dict(payload)
+    )
     result = http_json(
         "POST",
-        openai_endpoint(path),
+        openai_provider.endpoint(CONFIG.openai_base_url, path, default_base_url=DEFAULT_OPENAI_BASE_URL),
         request_payload,
         {"Authorization": f"Bearer {CONFIG.openai_api_key}"},
         timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
@@ -14129,49 +12739,8 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     # Background Responses are billed/observed when their final result is
     # retrieved; counting the queued creation would double-count one turn.
     if not (path == OPENAI_RESPONSES_PATH and request_payload.get("background") is True):
-        record_openai_usage(result, path.strip("/") or "request")
+        provider_state_service().record_usage("openai", result, path.strip("/") or "request")
     return result
-
-
-def multipart_form_data(
-    fields: list[tuple[str, str]],
-    file_field: str,
-    filename: str,
-    file_content_type: str,
-    file_data: bytes,
-) -> tuple[bytes, str]:
-    """Build a bounded multipart request without persisting the uploaded audio."""
-    boundary = "----IntervalsCoach" + secrets.token_hex(16)
-    boundary_bytes = boundary.encode("ascii")
-    parts: list[bytes] = []
-    for name, value in fields:
-        parts.extend((b"--" + boundary_bytes + b"\r\n",))
-        parts.extend((f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"),))
-        parts.extend((value.encode("utf-8"), b"\r\n"))
-    parts.extend((b"--" + boundary_bytes + b"\r\n",))
-    parts.extend((
-        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode("ascii"),
-        f"Content-Type: {file_content_type}\r\n\r\n".encode("ascii"),
-        file_data,
-        b"\r\n--" + boundary_bytes + b"--\r\n",
-    ))
-    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
-
-
-VOICE_AUDIO_TYPES = {
-    "audio/webm": ".webm",
-    "audio/mp4": ".mp4",
-    "audio/ogg": ".ogg",
-    "audio/mpeg": ".mp3",
-    "audio/wav": ".wav",
-    "audio/x-wav": ".wav",
-    "audio/mpga": ".mpga",
-    "audio/m4a": ".m4a",
-}
-
-
-def normalized_audio_type(content_type: str) -> str:
-    return str(content_type or "").split(";", 1)[0].strip().casefold()
 
 
 def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
@@ -14180,8 +12749,8 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
         raise AppError(400, "Die Audioaufnahme ist leer.")
     if len(audio) > MAX_AUDIO_BODY_BYTES:
         raise AppError(413, "Die Audioaufnahme ist zu groß.")
-    audio_type = normalized_audio_type(content_type)
-    suffix = VOICE_AUDIO_TYPES.get(audio_type)
+    audio_type = audio_provider.normalized_audio_type(content_type)
+    suffix = audio_provider.audio_suffix(audio_type)
     if not suffix:
         raise AppError(415, "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG, MP3 und WAV.")
     if SETTINGS.selected_ai_provider() == "gemini":
@@ -14194,13 +12763,13 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
             ]}],
             "generationConfig": {"temperature": 0},
         }, operation="transcription")
-        transcript = _gemini_text(result)
+        transcript = gemini_provider.response_text(result)
         if not transcript:
             raise AppError(502, "Gemini hat kein Transkript zurückgegeben.")
         return {"transcript": transcript}
     if not CONFIG.openai_api_key:
         raise AppError(503, OPENAI_API_KEY_ERROR)
-    body, multipart_type = multipart_form_data(
+    body, multipart_type = provider_http.multipart_form_data(
         [
             ("model", "gpt-transcribe"),
             ("languages[]", "de"),
@@ -14213,7 +12782,7 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
     )
     result = http_json(
         "POST",
-        openai_endpoint("/audio/transcriptions"),
+        openai_provider.endpoint(CONFIG.openai_base_url, "/audio/transcriptions", default_base_url=DEFAULT_OPENAI_BASE_URL),
         headers={"Authorization": f"Bearer {CONFIG.openai_api_key}"},
         timeout=90,
         service="openai",
@@ -14224,53 +12793,6 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
     if not isinstance(text, str) or not text.strip():
         raise AppError(502, "OpenAI hat kein Transkript zurückgegeben.")
     return {"transcript": text.strip()}
-
-
-def _provider_usage_summary(provider: str) -> dict[str, Any]:
-    key = f"{provider}_usage"
-    status_key = GEMINI_STATUS_KEY if provider == "gemini" else OPENAI_STATUS_KEY
-    today = local_now().date().isoformat()
-    try:
-        usage = json.loads(get_kv(key) or "{}")
-    except (TypeError, json.JSONDecodeError):
-        usage = {}
-    if not isinstance(usage, dict) or usage.get("date") != today:
-        usage = {"date": today, "requests": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    try:
-        status = json.loads(get_kv(status_key) or "{}")
-    except (TypeError, json.JSONDecodeError):
-        status = {}
-    return {**usage, "rate_limits": {}, "status": status if isinstance(status, dict) else {}}
-
-
-def gemini_usage_summary() -> dict[str, Any]:
-    with DB_LOCK, database():
-        return _provider_usage_summary("gemini")
-
-
-def _record_gemini_status(state: str, message: str, *, reason: str = "ok", status: int | None = None) -> None:
-    set_kv(GEMINI_STATUS_KEY, json.dumps({
-        "state": state, "reason": reason, "message": message[:300], "http_status": status, "updated_at": utc_now(),
-    }, ensure_ascii=False))
-
-
-def _record_gemini_usage(response: dict[str, Any], operation: str) -> None:
-    raw = response.get("usageMetadata") if isinstance(response, dict) else None
-    raw = raw if isinstance(raw, dict) else {}
-    def count(value: Any) -> int:
-        try:
-            return max(0, int(value or 0))
-        except (TypeError, ValueError, OverflowError):
-            return 0
-    with DB_LOCK, database():
-        usage = _provider_usage_summary("gemini")
-        input_tokens = count(raw.get("promptTokenCount"))
-        output_tokens = count(raw.get("candidatesTokenCount"))
-        total_tokens = count(raw.get("totalTokenCount")) or input_tokens + output_tokens
-        usage.update({"requests": count(usage.get("requests")) + 1, "input_tokens": count(usage.get("input_tokens")) + input_tokens,
-                      "output_tokens": count(usage.get("output_tokens")) + output_tokens, "total_tokens": count(usage.get("total_tokens")) + total_tokens,
-                      "last_operation": operation, "last_request_at": utc_now()})
-        set_kv("gemini_usage", json.dumps(usage, ensure_ascii=False))
 
 
 def _gemini_content_has_function_response(content: dict[str, Any]) -> bool:
@@ -14420,71 +12942,48 @@ def _gemini_local_chat_history() -> list[dict[str, Any]]:
     return _trim_gemini_history(history)
 
 
-def _gemini_text(result: Any) -> str:
-    return gemini_response_text(result)
-
-
-def _gemini_tools(tools: Any) -> list[dict[str, Any]]:
-    return gemini_function_tools(tools)
-
-
-def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:  # NOSONAR - provider payload assembly is intentionally kept atomic
-    persistent = bool(payload.get("conversation"))
+def _gemini_request_history(payload: dict[str, Any], input_value: Any, persistent: bool) -> list[dict[str, Any]]:
     history = _gemini_history() if persistent else []
+    if not persistent or not isinstance(input_value, str):
+        return history
+    local_history = _gemini_local_chat_history()
+    if not local_history:
+        return history
+    replayed_media = _gemini_inline_media_from_history(local_history)
+    if replayed_media:
+        payload["_gemini_transient_images"] = replayed_media
+    return local_history
+
+
+def _gemini_last_user_text(history: list[dict[str, Any]]) -> str:
+    if not history or not isinstance(history[-1], dict) or history[-1].get("role") != "user":
+        return ""
+    parts = history[-1].get("parts") if isinstance(history[-1].get("parts"), list) else []
+    return str(parts[0].get("text") or "") if parts and isinstance(parts[0], dict) else ""
+
+
+def _gemini_call_names() -> dict[str, str]:
+    try:
+        saved = json.loads(get_kv("gemini_call_names") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return saved if isinstance(saved, dict) else {}
+
+
+def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
+    persistent = bool(payload.get("conversation"))
     input_value = payload.get("input")
-    if persistent and isinstance(input_value, str):
-        local_history = _gemini_local_chat_history()
-        if local_history:
-            history = local_history
-            replayed_media = _gemini_inline_media_from_history(local_history)
-            if replayed_media:
-                payload["_gemini_transient_images"] = replayed_media
+    history = _gemini_request_history(payload, input_value, persistent)
+    parts: list[dict[str, Any]] = []
     if isinstance(input_value, str):
-        last_text = ""
-        if history and isinstance(history[-1], dict) and history[-1].get("role") == "user":
-            parts = history[-1].get("parts") if isinstance(history[-1].get("parts"), list) else []
-            last_text = str(parts[0].get("text") or "") if parts and isinstance(parts[0], dict) else ""
-        if input_value != last_text:
+        if input_value != _gemini_last_user_text(history):
             history.append({"role": "user", "parts": [{"text": input_value}]})
     elif isinstance(input_value, list):
-        call_names: dict[str, str] = {}
-        try:
-            saved = json.loads(get_kv("gemini_call_names") or "{}")
-            call_names = saved if isinstance(saved, dict) else {}
-        except (TypeError, json.JSONDecodeError):
-            pass
-        parts = []
-        for item in input_value:
-            if isinstance(item, dict) and item.get("role") == "user" and isinstance(item.get("content"), list):
-                for part in item["content"]:
-                    if part.get("type") == "input_text":
-                        parts.append({"text": part["text"]})
-                    elif part.get("type") == "input_image":
-                        header, data = part["image_url"].split(",", 1)
-                        parts.append({"inlineData": {"mimeType": header[5:].split(";")[0], "data": data}})
-                    elif part.get("type") == "input_file":
-                        header, data = part["file_data"].split(",", 1)
-                        mime = header[5:].split(";")[0]
-                        parts.append({"inlineData": {"mimeType": mime, "data": data}})
-                continue
-            if not isinstance(item, dict) or item.get("type") != "function_call_output":
-                continue
-            call_id = str(item.get("call_id") or "")
-            try:
-                output = json.loads(item.get("output") or "{}")
-            except (TypeError, json.JSONDecodeError):
-                output = {"error": "Tool output was not JSON."}
-            parts.append({"functionResponse": {"name": call_names.get(call_id, "coach_tool"), "response": output if isinstance(output, dict) else {"result": output}}})
-        has_input_media = any(
-            isinstance(part, dict) and (
-                "inlineData" in part or "untrusted_fit_raw_base64" in str(part.get("text") or "")
-            )
-            for part in parts
+        parts = gemini_provider.input_parts(
+            input_value,
+            _gemini_call_names(),
+            payload.get("_gemini_transient_images"),
         )
-        if not has_input_media:
-            for image in payload.get("_gemini_transient_images") or []:
-                if isinstance(image, dict) and image.get("mime") and image.get("data"):
-                    parts.append({"inlineData": {"mimeType": image["mime"], "data": image["data"]}})
         if parts:
             history.append({"role": "user", "parts": parts})
     history = _trim_gemini_history(history)
@@ -14493,34 +12992,14 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
     # provider failure cannot leave the stored history malformed.
     if persistent and isinstance(input_value, list) and parts:
         _save_gemini_history(history)
-    request: dict[str, Any] = {"contents": history, "generationConfig": {"maxOutputTokens": int(payload.get("max_output_tokens") or COACH_DEFAULT_MAX_OUTPUT_TOKENS)}}
-    instructions = str(payload.get("instructions") or "")
-    if instructions:
-        request["systemInstruction"] = {"parts": [{"text": instructions}]}
-    tools = _gemini_tools(payload.get("tools"))
-    if tools:
-        request["tools"] = tools
-        choice = payload.get("tool_choice", "auto")
-        config: dict[str, Any] = {"mode": "AUTO"}
-        if choice == "none":
-            config["mode"] = "NONE"
-        elif isinstance(choice, dict) and choice.get("type") == "function":
-            config = {"mode": "ANY", "allowedFunctionNames": [str(choice.get("name"))]}
-        request["toolConfig"] = {"functionCallingConfig": config}
-    text_format = payload.get("text") if isinstance(payload.get("text"), dict) else {}
-    format_config = text_format.get("format") if isinstance(text_format.get("format"), dict) else {}
-    if format_config.get("type") == "json_schema" and isinstance(format_config.get("schema"), dict):
-        request["generationConfig"].update({"responseMimeType": JSON_MEDIA_TYPE, "responseJsonSchema": format_config["schema"]})
-    explicit_reasoning = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else {}
-    thinking_level = str(explicit_reasoning.get("effort") or SETTINGS.selected_thinking_level()).casefold()
-    if thinking_level not in {"low", "medium", "high"}:
-        thinking_level = SETTINGS.selected_thinking_level()
-    if model.startswith("gemini-3."):
-        request["generationConfig"]["thinkingConfig"] = {"thinkingLevel": thinking_level}
-    else:
-        thinking = {"low": 1024, "medium": 8192, "high": 24576}.get(thinking_level)
-        if thinking:
-            request["generationConfig"]["thinkingConfig"] = {"thinkingBudget": thinking}
+    request = gemini_provider.request_payload(
+        payload,
+        model=model,
+        contents=history,
+        default_max_output_tokens=COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+        default_thinking_level=SETTINGS.selected_thinking_level(),
+        json_media_type=JSON_MEDIA_TYPE,
+    )
     return request, history, persistent
 
 
@@ -14533,13 +13012,25 @@ def gemini_raw_request(model: str, payload: dict[str, Any], *, operation: str, c
         result = http_json("POST", f"{GEMINI_API_BASE_URL}/models/{model}:generateContent", payload,
                            {"x-goog-api-key": CONFIG.gemini_api_key}, timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS, service="gemini", cancel_event=cancel_event)
     except AppError as exc:
-        _record_gemini_status("error", exc.message, reason=exc.reason or "request_failed", status=exc.status)
+        provider_state_service().record_status(
+            "gemini",
+            state="error",
+            reason=exc.reason or "request_failed",
+            message=exc.message,
+            http_status=exc.status,
+        )
         raise
     if not isinstance(result, dict):
-        _record_gemini_status("error", "Gemini hat keine JSON-Antwort geliefert.", reason="invalid_response", status=502)
+        provider_state_service().record_status(
+            "gemini",
+            state="error",
+            reason="invalid_response",
+            message="Gemini hat keine JSON-Antwort geliefert.",
+            http_status=502,
+        )
         raise AppError(502, "Gemini hat keine gültige Antwort geliefert.", reason="invalid_response")
-    _record_gemini_status("ok", "Gemini ist verfügbar.")
-    _record_gemini_usage(result, operation)
+    provider_state_service().record_success("gemini", None)
+    provider_state_service().record_usage("gemini", result, operation)
     return result
 
 
@@ -14562,7 +13053,7 @@ def _gemini_responses_result(  # NOSONAR - provider response normalization must 
     if persistent:
         history.append(content)
         _save_gemini_history(history)
-    text = _gemini_text(result)
+    text = gemini_provider.response_text(result)
     output: list[dict[str, Any]] = []
     if text:
         output.append({"type": "message", "content": [{"type": "output_text", "text": text}]})
@@ -14622,111 +13113,82 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
     }
     started = time.perf_counter()
     LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": context})
-    aggregate: dict[str, Any] = {"candidates": []}
     stream_bytes = 0
-    data_lines: list[str] = []
-
-    def merge_chunk(chunk: Any) -> None:
-        if not isinstance(chunk, dict):
-            raise AppError(502, "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben.", reason="invalid_response")
-        usage = chunk.get("usageMetadata")
-        if isinstance(usage, dict):
-            aggregate["usageMetadata"] = usage
-        for key in ("modelVersion", "promptFeedback"):
-            if key in chunk:
-                aggregate[key] = chunk[key]
-        candidates = chunk.get("candidates") if isinstance(chunk.get("candidates"), list) else []
-        for index, candidate in enumerate(candidates):
-            if not isinstance(candidate, dict):
-                continue
-            while len(aggregate["candidates"]) <= index:
-                aggregate["candidates"].append({"content": {"role": "model", "parts": []}})
-            target = aggregate["candidates"][index]
-            for key in ("finishReason", "finishMessage", "safetyRatings", "citationMetadata"):
-                if key in candidate:
-                    target[key] = candidate[key]
-            content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
-            if content.get("role"):
-                target["content"]["role"] = content["role"]
-            target_parts = target["content"]["parts"]
-            for part in content.get("parts") if isinstance(content.get("parts"), list) else []:
-                if not isinstance(part, dict):
-                    continue
-                delta = part.get("text")
-                if isinstance(delta, str) and delta:
-                    if index == 0:
-                        on_text_delta(delta)
-                    metadata = {key: value for key, value in part.items() if key != "text"}
-                    previous = target_parts[-1] if target_parts else None
-                    if isinstance(previous, dict) and set(previous) <= {"text", *metadata} and all(
-                        previous.get(key) == value for key, value in metadata.items()
-                    ):
-                        previous["text"] = str(previous.get("text") or "") + delta
-                    else:
-                        target_parts.append(dict(part))
-                else:
-                    target_parts.append(dict(part))
-
-    def handle_event() -> None:
-        nonlocal data_lines
-        if not data_lines:
-            return
-        raw = "\n".join(data_lines)
-        data_lines = []
-        if raw.strip() == "[DONE]":
-            return
-        try:
-            merge_chunk(json.loads(raw))
-        except json.JSONDecodeError as exc:
-            raise AppError(502, "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben.", reason="invalid_response") from exc
 
     try:
         _raise_chat_cancelled(cancel_event)
-        with _urlopen_interruptibly(request, OPENAI_RESPONSE_TIMEOUT_SECONDS, cancel_event) as response:
-            if cancel_event is not None:
-                cancel_event._provider_response = response
-            try:
-                for raw_line in response:
-                    _raise_chat_cancelled(cancel_event)
-                    stream_bytes += len(raw_line)
-                    if stream_bytes > MAX_EXTERNAL_RESPONSE_BYTES:
-                        raise AppError(502, "Die Streaming-Antwort von Gemini ist zu\\u00df.", reason="response_too_large")
-                    line = raw_line.decode("utf-8").rstrip("\r\n")
-                    if not line:
-                        handle_event()
-                    elif line.startswith("data:"):
-                        data_lines.append(line[5:].lstrip())
-                handle_event()
-            finally:
-                if cancel_event is not None and getattr(cancel_event, "_provider_response", None) is response:
-                    cancel_event._provider_response = None
+        stream_result = gemini_provider.read_stream_response(
+            request,
+            timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+            max_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+            on_text_delta=on_text_delta,
+            cancel_event=cancel_event,
+            opener=urlopen,
+        )
         _raise_chat_cancelled(cancel_event)
+        stream_bytes = stream_result.response_bytes
+        aggregate = stream_result.aggregate
         if not aggregate["candidates"]:
             raise AppError(502, "Gemini hat keine Coach-Antwort geliefert.", reason="invalid_response")
-        _record_gemini_status("ok", "Gemini ist verf\\u00fcgbar.", status=200)
-        _record_gemini_usage(aggregate, "generate_content_stream")
+        provider_state_service().record_success("gemini", 200)
+        provider_state_service().record_usage("gemini", aggregate, "generate_content_stream")
         LOGGER.info(EXTERNAL_HTTP_COMPLETED_EVENT, extra={"event": "external_request_completed", "context": {
             **context, "status": 200, "duration_ms": round((time.perf_counter() - started) * 1000, 1),
             "response_bytes": stream_bytes,
         }})
         return _gemini_responses_result(payload, history, persistent, aggregate)
+    except provider_http.ProviderRequestCancelled as exc:
+        provider_state_service().record_status(
+            "gemini", state="error", reason="chat_cancelled", message=COACH_ABORTED_ERROR, http_status=499
+        )
+        raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
+    except provider_http.ProviderResponseTooLarge as exc:
+        error = AppError(502, "Die Streaming-Antwort von Gemini ist zu\\u00df.", reason="response_too_large")
+        provider_state_service().record_status(
+            "gemini", state="error", reason=error.reason, message=error.message, http_status=error.status
+        )
+        raise error from exc
     except HTTPError as exc:
-        raw_error = _read_http_error_body(exc)
-        details = gemini_error_details(int(exc.code), raw_error)
-        _record_gemini_status("error", details["message"], reason=details["reason"], status=int(exc.code))
+        raw_error = provider_http.read_error_body(exc, MAX_EXTERNAL_RESPONSE_BYTES)
+        details = gemini_provider.error_details(int(exc.code), raw_error, updated_at=utc_now())
+        provider_state_service().record_status(
+            "gemini",
+            state="error",
+            reason=details["reason"],
+            message=details["message"],
+            http_status=int(exc.code),
+        )
         raise AppError(int(exc.code), details["message"], reason=details["reason"]) from exc
     except AppError as exc:
-        _record_gemini_status("error", exc.message, reason=exc.reason or "request_failed", status=exc.status)
+        provider_state_service().record_status(
+            "gemini",
+            state="error",
+            reason=exc.reason or "request_failed",
+            message=exc.message,
+            http_status=exc.status,
+        )
         raise
     except TimeoutError as exc:
         if cancel_event is not None and cancel_event.is_set():
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-        _record_gemini_status("error", "Gemini hat nicht rechtzeitig geantwortet.", reason="provider_timeout", status=504)
+        provider_state_service().record_status(
+            "gemini",
+            state="error",
+            reason="provider_timeout",
+            message="Gemini hat nicht rechtzeitig geantwortet.",
+            http_status=504,
+        )
         raise AppError(504, "Gemini hat nicht rechtzeitig geantwortet.", reason="provider_timeout") from exc
     except (URLError, OSError, UnicodeDecodeError, ValueError) as exc:
         if cancel_event is not None and cancel_event.is_set():
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-        _record_gemini_status("error", "Gemini ist vor\\u00fcbergehend nicht verf\\u00fcgbar.", reason="provider_unavailable", status=503)
+        provider_state_service().record_status(
+            "gemini",
+            state="error",
+            reason="provider_unavailable",
+            message="Gemini ist vor\\u00fcbergehend nicht verf\\u00fcgbar.",
+            http_status=503,
+        )
         raise AppError(503, "Gemini ist vor\\u00fcbergehend nicht verf\\u00fcgbar.", reason="provider_unavailable") from exc
 
 
@@ -14739,42 +13201,31 @@ def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
     """Call Responses API and retry transient locks on the persistent conversation."""
     if request_ai_provider(payload) == "gemini":
         return gemini_responses_request(payload)
-    request_payload = dict(payload)
-    request_payload.pop("_ai_provider", None)
-    request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
-    for attempt in range(3):
-        try:
-            return openai_request(OPENAI_RESPONSES_PATH, request_payload)
-        except AppError as exc:
-            if exc.reason != "conversation_locked" or attempt == 2:
-                raise
-            delay = 2 ** attempt
-            LOGGER.warning(
-                "OpenAI conversation is temporarily locked; retrying",
-                extra={
-                    "event": "openai_conversation_locked",
-                    "context": {"attempt": attempt + 1, "retry_in_seconds": delay},
-                },
-            )
-            time.sleep(delay)
-    raise AppError(502, "Die OpenAI-Konversationsanfrage konnte nicht abgeschlossen werden.")
-
-
-def _openai_response_id(value: Any) -> str:
-    response_id = str(value or "").strip()
-    if not re.fullmatch(r"(?a:resp_[\w-]{1,200})", response_id):
-        raise AppError(502, "OpenAI hat keine gültige Response-ID zurückgegeben.", reason="invalid_response")
-    return response_id
+    request_payload = openai_provider.responses_payload(
+        payload,
+        thinking_level=SETTINGS.selected_thinking_level(),
+    )
+    return openai_provider.request_with_conversation_retry(
+        lambda: openai_request(OPENAI_RESPONSES_PATH, request_payload),
+        on_retry=lambda attempt, delay: LOGGER.warning(
+            "OpenAI conversation is temporarily locked; retrying",
+            extra={
+                "event": "openai_conversation_locked",
+                "context": {"attempt": attempt, "retry_in_seconds": delay},
+            },
+        ),
+        wait=time.sleep,
+    )
 
 
 def retrieve_openai_response(response_id: str) -> dict[str, Any]:
     """Retrieve one background response without exposing its identifier in logs."""
     if not CONFIG.openai_api_key:
         raise AppError(503, OPENAI_API_KEY_ERROR)
-    response_id = _openai_response_id(response_id)
+    response_id = openai_provider.response_id(response_id)
     result = http_json(
         "GET",
-        openai_endpoint(f"/responses/{quote(response_id, safe='')}"),
+        openai_provider.endpoint(CONFIG.openai_base_url, f"/responses/{quote(response_id, safe='')}", default_base_url=DEFAULT_OPENAI_BASE_URL),
         headers={"Authorization": f"Bearer {CONFIG.openai_api_key}"},
         timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
         service="openai",
@@ -14786,11 +13237,11 @@ def cancel_openai_response(response_id: str) -> None:
     """Best-effort cancellation for an active OpenAI background response."""
     if not CONFIG.openai_api_key:
         return
-    response_id = _openai_response_id(response_id)
+    response_id = openai_provider.response_id(response_id)
     try:
         http_json(
             "POST",
-            openai_endpoint(f"/responses/{quote(response_id, safe='')}/cancel"),
+            openai_provider.endpoint(CONFIG.openai_base_url, f"/responses/{quote(response_id, safe='')}/cancel", default_base_url=DEFAULT_OPENAI_BASE_URL),
             {},
             {"Authorization": f"Bearer {CONFIG.openai_api_key}"},
             timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
@@ -14816,24 +13267,28 @@ def responses_background_request(
     started = time.monotonic()
     if response_id:
         current = retrieve_openai_response(response_id)
-        active_response_id = _openai_response_id(current.get("id") or response_id)
+        active_response_id = openai_provider.response_id(current.get("id") or response_id)
     else:
-        request_payload = {**payload, "background": True, "store": True}
-        request_payload.pop("_ai_provider", None)
+        request_payload = openai_provider.responses_payload(
+            payload,
+            thinking_level=SETTINGS.selected_thinking_level(),
+            background=True,
+        )
         current = responses_request(request_payload)
-        active_response_id = _openai_response_id(current.get("id"))
+        active_response_id = openai_provider.response_id(current.get("id"))
         if on_response_id is not None:
             on_response_id(active_response_id)
-    while str(current.get("status") or "").casefold() in {"queued", "in_progress"}:
-        if cancel_event is not None and cancel_event.wait(OPENAI_BACKGROUND_POLL_SECONDS):
-            cancel_openai_response(active_response_id)
-            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
-        if time.monotonic() - started >= OPENAI_BACKGROUND_MAX_SECONDS:
-            cancel_openai_response(active_response_id)
-            raise AppError(504, "Die Hintergrundplanung hat das Zeitlimit überschritten.", reason="provider_timeout")
-        current = retrieve_openai_response(active_response_id)
+    remaining_seconds = max(0.0, OPENAI_BACKGROUND_MAX_SECONDS - (time.monotonic() - started))
+    current = openai_provider.poll_background_response(
+        {**current, "id": active_response_id},
+        retrieve=retrieve_openai_response,
+        cancel=cancel_openai_response,
+        cancel_event=cancel_event,
+        poll_seconds=OPENAI_BACKGROUND_POLL_SECONDS,
+        max_seconds=remaining_seconds,
+    )
     current = _validate_openai_response(OPENAI_RESPONSES_PATH, current)
-    record_openai_usage(current, "responses_background")
+    provider_state_service().record_usage("openai", current, "responses_background")
     return current
 
 
@@ -14842,100 +13297,18 @@ def _raise_chat_cancelled(cancel_event: threading.Event | None) -> None:
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
 
 
-def _notify_openai_stream_response_id(
-    event: dict[str, Any], kind: str, on_response_id: Callable[[str], None] | None,
-) -> None:
-    if kind not in {"response.created", "response.in_progress"}:
-        return
-    candidate = event.get("response") if isinstance(event.get("response"), dict) else event
-    if not isinstance(candidate, dict):
-        return
-    response_id = str(candidate.get("id") or "").strip()
-    if response_id and on_response_id is not None:
-        on_response_id(response_id)
-
-
-def _forward_openai_stream_delta(event: dict[str, Any], kind: str, on_text_delta: Any) -> None:
-    if kind != "response.output_text.delta":
-        return
-    delta = event.get("delta")
-    if isinstance(delta, str) and delta:
-        on_text_delta(delta)
-
-
-def _openai_stream_final_response(event: dict[str, Any], kind: str) -> dict[str, Any] | None:
-    if kind not in {"response.completed", "response.incomplete", "response.failed"}:
-        return None
-    candidate = event.get("response") if isinstance(event.get("response"), dict) else event
-    return candidate if isinstance(candidate, dict) else None
-
-
-def _consume_openai_sse_event(
-    data_lines: list[str], event_name: str, on_text_delta: Any,
-    on_response_id: Callable[[str], None] | None,
-) -> tuple[dict[str, Any] | None, str, list[str]]:
-    if not data_lines:
-        return None, "", []
-    raw_event = "\n".join(data_lines)
-    if raw_event.strip() == "[DONE]":
-        return None, "", []
-    try:
-        event = json.loads(raw_event)
-    except json.JSONDecodeError as exc:
-        raise AppError(502, "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben.", reason="invalid_response") from exc
-    kind = event_name or str(event.get("type") or "")
-    _notify_openai_stream_response_id(event, kind, on_response_id)
-    _forward_openai_stream_delta(event, kind, on_text_delta)
-    return _openai_stream_final_response(event, kind), "", []
-
-
-def _read_openai_stream_response(
-    request: Request, cancel_event: threading.Event | None, on_text_delta: Any,
-    on_response_id: Callable[[str], None] | None, stream_state: dict[str, int],
-) -> dict[str, Any] | None:
-    final_response: dict[str, Any] | None = None
-    event_name = ""
-    data_lines: list[str] = []
-    with urlopen(request, timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS) as response:
-        if cancel_event is not None:
-            cancel_event._openai_response = response
-        record_openai_rate_limits(getattr(response, "headers", None))
-        record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
-        for raw_line in response:
-            _raise_chat_cancelled(cancel_event)
-            stream_state["bytes"] += len(raw_line)
-            if stream_state["bytes"] > MAX_EXTERNAL_RESPONSE_BYTES:
-                raise AppError(502, "Die Streaming-Antwort von OpenAI ist zu groß.", reason="response_too_large")
-            line = raw_line.decode("utf-8").rstrip("\r\n")
-            if not line:
-                event_response, event_name, data_lines = _consume_openai_sse_event(
-                    data_lines, event_name, on_text_delta, on_response_id,
-                )
-                if event_response is not None:
-                    final_response = event_response
-            elif line.startswith("event:"):
-                event_name = line[6:].strip()
-            elif line.startswith("data:"):
-                data_lines.append(line[5:].lstrip())
-        event_response, _, _ = _consume_openai_sse_event(
-            data_lines, event_name, on_text_delta, on_response_id,
-        )
-        if event_response is not None:
-            final_response = event_response
-    return final_response
-
-
 def _log_openai_stream_failure(
     context: dict[str, Any], started: float, stream_bytes: int,
     reason: str, status: int, *, level: int = logging.WARNING,
 ) -> None:
+    safe_reason = openai_provider.safe_log_reason(reason)
     LOGGER.log(
         level,
         "External HTTP request failed",
         extra={
             "event": "external_request_failed",
             "context": {
-                **context, "status": status, "reason": reason,
+                **context, "status": status, "reason": safe_reason,
                 "duration_ms": round((time.perf_counter() - started) * 1000, 1),
                 "response_bytes": stream_bytes,
             },
@@ -14954,7 +13327,7 @@ def _capture_openai_stream_failure(
     }
     if extra:
         details.update(extra)
-    capture_diagnostic_event("openai_stream_failed", details)
+    DIAGNOSTIC_CAPTURE.capture("openai_stream_failed", details)
 
 
 def _handle_openai_stream_app_error(
@@ -14962,7 +13335,7 @@ def _handle_openai_stream_app_error(
     context: dict[str, Any], started: float, stream_bytes: int,
 ) -> NoReturn:
     if cancel_event is not None and cancel_event.is_set() and final_response is None:
-        record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        provider_state_service().record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
     reason = exc.reason or "request_failed"
     _log_openai_stream_failure(context, started, stream_bytes, reason, exc.status, level=logging.INFO if exc.reason == "chat_cancelled" else logging.WARNING)
     _capture_openai_stream_failure(exc.status, reason, started, stream_bytes)
@@ -14974,7 +13347,7 @@ def _handle_openai_stream_disconnect(
     context: dict[str, Any], started: float, stream_bytes: int,
 ) -> NoReturn:
     if final_response is None:
-        record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        provider_state_service().record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
     _log_openai_stream_failure(context, started, stream_bytes, "client_disconnected", 499, level=logging.INFO)
     _capture_openai_stream_failure(499, "client_disconnected", started, stream_bytes)
     raise ClientDisconnected()
@@ -14983,13 +13356,35 @@ def _handle_openai_stream_disconnect(
 def _handle_openai_stream_http_error(
     exc: HTTPError, context: dict[str, Any], started: float, stream_bytes: int,
 ) -> NoReturn:
-    raw_error = _read_http_error_body(exc)
+    raw_error = provider_http.read_error_body(exc, MAX_EXTERNAL_RESPONSE_BYTES)
     status = int(getattr(exc, "code", 502) or 502)
-    details = openai_error_details(status, raw_error, getattr(exc, "headers", None))
-    record_openai_status(details)
-    reason = safe_openai_log_reason(details["reason"])
+    details = openai_provider.error_details(
+        status,
+        raw_error,
+        getattr(exc, "headers", None),
+        updated_at=utc_now(),
+    )
+    provider_state_service().record_status(
+        "openai",
+        state=details.get("state"),
+        reason=details.get("reason"),
+        message=details.get("message"),
+        http_status=details.get("http_status"),
+        provider_error_code=details.get("provider_error_code"),
+    )
+    reason = openai_provider.safe_log_reason(details["reason"])
     _log_openai_stream_failure(context, started, stream_bytes, reason, status)
-    _capture_openai_stream_failure(status, details["reason"], started, stream_bytes, openai_error_diagnostic_details(raw_error, getattr(exc, "headers", None)))
+    _capture_openai_stream_failure(
+        status,
+        details["reason"],
+        started,
+        stream_bytes,
+        openai_provider.error_diagnostic_details(
+            raw_error,
+            getattr(exc, "headers", None),
+            max_response_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+        ),
+    )
     error = AppError(status, details["message"], reason=details["reason"])
     retry_after = details.get("retry_after_seconds")
     if isinstance(retry_after, int):
@@ -15002,12 +13397,18 @@ def _handle_openai_stream_timeout(
     context: dict[str, Any], started: float, stream_bytes: int,
 ) -> NoReturn:
     if cancel_event is not None and cancel_event.is_set():
-        record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        provider_state_service().record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
         _log_openai_stream_failure(context, started, stream_bytes, "chat_cancelled", 499, level=logging.INFO)
         _capture_openai_stream_failure(499, "chat_cancelled", started, stream_bytes)
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
     details = {"state": "error", "reason": "provider_timeout", "message": "OpenAI hat nicht rechtzeitig geantwortet.", "http_status": 504}
-    record_openai_status(details)
+    provider_state_service().record_status(
+        "openai",
+        state=details["state"],
+        reason=details["reason"],
+        message=details["message"],
+        http_status=details["http_status"],
+    )
     _log_openai_stream_failure(context, started, stream_bytes, "provider_timeout", 504)
     _capture_openai_stream_failure(504, "provider_timeout", started, stream_bytes)
     raise AppError(504, details["message"], reason="provider_timeout") from exc
@@ -15018,11 +13419,17 @@ def _handle_openai_stream_network_error(
     context: dict[str, Any], started: float, stream_bytes: int,
 ) -> NoReturn:
     if cancel_event is not None and cancel_event.is_set():
-        record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        provider_state_service().record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
         _log_openai_stream_failure(context, started, stream_bytes, "chat_cancelled", 499, level=logging.INFO)
         _capture_openai_stream_failure(499, "chat_cancelled", started, stream_bytes)
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-    record_openai_status({"state": "error", "reason": "provider_unavailable", "message": "OpenAI ist vorübergehend nicht verfügbar.", "http_status": 503})
+    provider_state_service().record_status(
+        "openai",
+        state="error",
+        reason="provider_unavailable",
+        message="OpenAI ist vorübergehend nicht verfügbar.",
+        http_status=503,
+    )
     _log_openai_stream_failure(context, started, stream_bytes, "provider_unavailable", 503)
     _capture_openai_stream_failure(503, "provider_unavailable", started, stream_bytes)
     raise AppError(503, "OpenAI ist vorübergehend nicht verfügbar.", reason="provider_unavailable") from exc
@@ -15036,11 +13443,13 @@ def openai_stream_request(
 ) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
         raise AppError(503, OPENAI_API_KEY_ERROR)
-    request_payload = {**payload, "stream": True}
-    request_payload.pop("_ai_provider", None)
-    request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
+    request_payload = openai_provider.responses_payload(
+        payload,
+        thinking_level=SETTINGS.selected_thinking_level(),
+        stream=True,
+    )
     body = json.dumps(request_payload).encode("utf-8")
-    endpoint = openai_endpoint(OPENAI_RESPONSES_PATH)
+    endpoint = openai_provider.endpoint(CONFIG.openai_base_url, OPENAI_RESPONSES_PATH, default_base_url=DEFAULT_OPENAI_BASE_URL)
     parsed_endpoint = urlparse(endpoint)
     request = Request(
         endpoint,
@@ -15063,7 +13472,7 @@ def openai_stream_request(
         "request_bytes": len(body),
     }
     LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": context})
-    capture_diagnostic_event("openai_stream_started", {
+    DIAGNOSTIC_CAPTURE.capture("openai_stream_started", {
         "service": "openai",
         "method": "POST",
         "host": observability.safe_url_netloc(parsed_endpoint),
@@ -15071,19 +13480,33 @@ def openai_stream_request(
         "request_bytes": len(body),
     })
     final_response: dict[str, Any] | None = None
-    stream_state = {"bytes": 0}
+    stream_state = openai_provider.StreamReadState()
     try:
         _raise_chat_cancelled(cancel_event)
-        final_response = _read_openai_stream_response(
-            request, cancel_event, on_text_delta, on_response_id, stream_state,
-        )
+        try:
+            stream_result = openai_provider.request_stream_response(
+                request,
+                timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+                max_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+                cancel_event=cancel_event,
+                on_text_delta=on_text_delta,
+                on_response_id=on_response_id,
+                opener=urlopen,
+                state=stream_state,
+            )
+        finally:
+            if stream_state.status is not None:
+                state = provider_state_service()
+                state.record_rate_limits(stream_state.headers)
+                state.record_success("openai", stream_state.status)
+        final_response = stream_result.response
         _raise_chat_cancelled(cancel_event)
         if final_response is None:
             raise AppError(502, "OpenAI hat keine vollständige Streaming-Antwort zurückgegeben.", reason="invalid_response")
         final_response = _validate_openai_response(OPENAI_RESPONSES_PATH, final_response)
-        record_openai_usage(final_response, "responses_stream")
-        stream_bytes = stream_state["bytes"]
-        capture_diagnostic_event("openai_stream_completed", {
+        provider_state_service().record_usage("openai", final_response, "responses_stream")
+        stream_bytes = stream_state.response_bytes
+        DIAGNOSTIC_CAPTURE.capture("openai_stream_completed", {
             "service": "openai", "status": 200,
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
             "response_bytes": stream_bytes,
@@ -15094,15 +13517,21 @@ def openai_stream_request(
         )
         return final_response
     except AppError as exc:
-        _handle_openai_stream_app_error(exc, cancel_event, final_response, context, started, stream_state["bytes"])
+        _handle_openai_stream_app_error(exc, cancel_event, final_response, context, started, stream_state.response_bytes)
+    except provider_http.ProviderRequestCancelled:
+        error = AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
+        _handle_openai_stream_app_error(error, cancel_event, final_response, context, started, stream_state.response_bytes)
+    except provider_http.ProviderResponseTooLarge:
+        error = AppError(502, "Die Streaming-Antwort von OpenAI ist zu groß.", reason="response_too_large")
+        _handle_openai_stream_app_error(error, cancel_event, final_response, context, started, stream_state.response_bytes)
     except ClientDisconnected:
-        _handle_openai_stream_disconnect(final_response, context, started, stream_state["bytes"])
+        _handle_openai_stream_disconnect(final_response, context, started, stream_state.response_bytes)
     except HTTPError as exc:
-        _handle_openai_stream_http_error(exc, context, started, stream_state["bytes"])
+        _handle_openai_stream_http_error(exc, context, started, stream_state.response_bytes)
     except TimeoutError as exc:
-        _handle_openai_stream_timeout(exc, cancel_event, context, started, stream_state["bytes"])
+        _handle_openai_stream_timeout(exc, cancel_event, context, started, stream_state.response_bytes)
     except (OSError, ValueError) as exc:
-        _handle_openai_stream_network_error(exc, cancel_event, context, started, stream_state["bytes"])
+        _handle_openai_stream_network_error(exc, cancel_event, context, started, stream_state.response_bytes)
 
 
 def responses_stream_request(
@@ -15116,19 +13545,27 @@ def responses_stream_request(
         result = gemini_stream_request(payload, on_text_delta, cancel_event=cancel_event)
         _raise_chat_cancelled(cancel_event)
         return result
-    request_payload = dict(payload)
-    request_payload.setdefault("reasoning", {"effort": SETTINGS.selected_thinking_level()})
-    for attempt in range(3):
-        try:
-            return openai_stream_request(request_payload, on_text_delta, cancel_event, on_response_id)
-        except AppError as exc:
-            if exc.reason != "conversation_locked" or attempt == 2:
-                raise
-            _raise_chat_cancelled(cancel_event)
-            delay = 2 ** attempt
-            LOGGER.warning("OpenAI streaming conversation is temporarily locked; retrying", extra={"event": "openai_conversation_locked", "context": {"attempt": attempt + 1, "retry_in_seconds": delay}})
-            time.sleep(delay)
-    raise AppError(502, "Die OpenAI-Konversationsanfrage konnte nicht abgeschlossen werden.")
+    request_payload = openai_provider.responses_payload(
+        payload,
+        thinking_level=SETTINGS.selected_thinking_level(),
+        stream=True,
+    )
+    try:
+        return openai_provider.request_with_conversation_retry(
+            lambda: openai_stream_request(request_payload, on_text_delta, cancel_event, on_response_id),
+            cancel_event=cancel_event,
+            on_retry=lambda attempt, delay: LOGGER.warning(
+                "OpenAI streaming conversation is temporarily locked; retrying",
+                extra={
+                    "event": "openai_conversation_locked",
+                    "context": {"attempt": attempt, "retry_in_seconds": delay},
+                },
+            ),
+            wait=time.sleep,
+        )
+    except provider_http.ProviderRequestCancelled as exc:
+        provider_state_service().record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
+        raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
 
 
 def ensure_conversation(provider: str | None = None) -> str:
@@ -15218,7 +13655,7 @@ def reset_coach_chat() -> dict[str, Any]:
 
 
 def output_text(response: dict[str, Any]) -> str:
-    return openai_response_text(response)
+    return openai_provider.response_text(response)
 
 
 COACH_ACTION_TTL_SECONDS = 10 * 60
@@ -19539,7 +17976,7 @@ def public_bootstrap() -> dict[str, Any]:
         competitions = list_competitions(limit=100)
         relevant_external = list_external_calendar_events(250, training_relevant_only=True)
         profile = get_profile()
-        freshness = provider_freshness_state()
+        freshness = _current_provider_freshness()
         jobs = sync_jobs_state()
         state_version_values = state_versions()
         return {
@@ -19570,7 +18007,7 @@ def public_bootstrap() -> dict[str, Any]:
             "daily_planning_context": [],
             "performance": {},
             "garmin": garmin_public_state(),
-            "diagnostic_capture": diagnostic_capture_status(),
+            "diagnostic_capture": DIAGNOSTIC_CAPTURE.status(),
             "intervals": intervals_public_state(snapshot),
             "provider_freshness": freshness,
             "provider_states": bootstrap_provider_states(freshness),
@@ -19598,7 +18035,7 @@ def public_bootstrap() -> dict[str, Any]:
                 "openai": bool(CONFIG.openai_api_key), "gemini": bool(CONFIG.gemini_api_key), "intervals": bool(CONFIG.intervals_api_key),
                 "weather": bool(get_profile().get("weather_location")), "external_calendar": bool(CONFIG.calendar_ical_url),
             },
-            "usage": openai_usage_summary() if SETTINGS.selected_ai_provider() != "gemini" else gemini_usage_summary(),
+            "usage": provider_state_service().summary(SETTINGS.selected_ai_provider() or "openai"),
         }
 
 
@@ -19687,7 +18124,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
         checkins = list_checkins(30)
         external_calendar = external_calendar_state()
         daily_context = daily_planning_context(snapshot, planned, weather, checkins, list_external_calendar_events(50, training_relevant_only=True))
-        freshness = provider_freshness_state()
+        freshness = _current_provider_freshness()
         sync = sync_browser_state(freshness=freshness)
         return {
             "app": {
@@ -19762,7 +18199,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
                 "weather": bool(weather.get("configured")),
                 "external_calendar": bool(CONFIG.calendar_ical_url),
             },
-            "usage": openai_usage_summary() if SETTINGS.selected_ai_provider() != "gemini" else gemini_usage_summary(),
+            "usage": provider_state_service().summary(SETTINGS.selected_ai_provider() or "openai"),
         }
 
 
@@ -19781,68 +18218,6 @@ def recent_log_entries(limit: int = 200) -> list[dict[str, Any]]:
             entry = {"level": "UNKNOWN", "event": "unparsed_log", "message": line}
         entries.append(REDACTOR.sanitize_log_value(entry))
     return entries
-
-
-SETTINGS_SECRET_KEYS = ("OPENAI_API_KEY", "GEMINI_API_KEY", "INTERVALS_API_KEY", "GARMIN_PASSWORD")
-SETTINGS_VALUE_KEYS = ("GARMIN_EMAIL", "GARMINTOKENS", "GARMIN_FIXTURE_PATH")
-SETTINGS_KEYS = SETTINGS_SECRET_KEYS + SETTINGS_VALUE_KEYS
-
-
-def _submitted_settings(values: Any) -> dict[str, str]:
-    if not isinstance(values, dict):
-        raise AppError(400, "Die Einstellungen müssen als Objekt gesendet werden.")
-    updates: dict[str, str] = {}
-    for key in SETTINGS_KEYS:
-        if key not in values:
-            continue
-        raw = str(values.get(key) or "").replace("\r", "").replace("\n", "").strip()
-        if raw:
-            updates[key] = raw
-    if not updates:
-        raise AppError(400, "Keine neuen Zugangsdaten oder Einstellungen eingegeben.")
-    return updates
-
-
-def _read_settings_file(env_path: Path) -> list[str]:
-    try:
-        return env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
-    except OSError as exc:
-        raise AppError(500, f".env konnte nicht gelesen werden: {exc}") from exc
-
-
-def _rewrite_settings_lines(lines: list[str], updates: dict[str, str]) -> list[str]:
-    seen: set[str] = set()
-    rewritten: list[str] = []
-    for line in lines:
-        match = re.match(r"^(\s*(?:export\s+)?)(?a:((?!\d)\w+))(\s*=).*$", line)
-        key = match.group(2) if match else None
-        if key in updates and match:
-            rewritten.append(f"{match.group(1)}{key}={updates[key]}")
-            seen.add(key)
-        else:
-            rewritten.append(line)
-    for key, value in updates.items():
-        if key not in seen:
-            rewritten.append(f"{key}={value}")
-        # Make a local restart inherit the newly submitted values. The value
-        # is never returned to the browser or written to an application log.
-        os.environ[key] = value
-    return rewritten
-
-
-def save_settings(values: Any) -> dict[str, Any]:
-    """Update explicitly submitted settings without ever returning their values."""
-    updates = _submitted_settings(values)
-    # The data directory is the persistent Docker/Unraid mount. A settings file
-    # there survives container restarts, unlike a file written into the image.
-    env_path = DATA_DIR / ".env"
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    rewritten = _rewrite_settings_lines(_read_settings_file(env_path), updates)
-    try:
-        env_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
-    except OSError as exc:
-        raise AppError(500, f".env konnte nicht gespeichert werden: {exc}") from exc
-    return {"status": "ok", "updated": sorted(updates), "restart_required": True}
 
 
 def _diagnostic_frame(value: Any) -> dict[str, Any] | None:
@@ -19870,7 +18245,7 @@ def _diagnostic_error_metadata(value: Any) -> dict[str, Any] | None:
         if isinstance(item, str) and re.fullmatch(r"(?a:[A-Za-z_]{1,80})", item):
             result[key] = item
     provider_code = value.get("provider_error_code")
-    if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
+    if isinstance(provider_code, str) and provider_code in observability.OPENAI_RESPONSE_ERROR_CODES:
         result["provider_error_code"] = provider_code
     if isinstance(value.get("status"), int) and 100 <= value["status"] <= 599:
         result["status"] = value["status"]
@@ -19949,8 +18324,8 @@ def diagnostic_report() -> dict[str, Any]:
             "thinking_level": SETTINGS.selected_thinking_level(),
             "available_models": [option["id"] for option in SETTINGS.available_model_options()],
         },
-        "openai": openai_usage_summary(),
-        "gemini": gemini_usage_summary(),
+        "openai": provider_state_service().summary("openai"),
+        "gemini": provider_state_service().summary("gemini"),
         "coach_commands": coach_diagnostic_history(),
         "sync": {
             "last_success": get_kv("last_sync_at"),
@@ -19968,7 +18343,7 @@ def diagnostic_report() -> dict[str, Any]:
             "running": get_kv("performance_refresh_running") == "1",
         },
         "garmin": garmin_status,
-        "provider_freshness": provider_freshness_state(),
+        "provider_freshness": _current_provider_freshness(),
         "external_calendar": {
             "configured": bool(CONFIG.calendar_ical_url),
             "last_sync_at": get_kv("last_external_calendar_sync_at"),
@@ -19979,7 +18354,7 @@ def diagnostic_report() -> dict[str, Any]:
         "morning_checkin": morning_checkin_state(),
         "database": {"messages": message_count, "workout_library": library_count, "workout_library_state": workout_library_sync_summary(), "competitions": competition_count, "athlete_checkins": checkin_count, "activity_feedback": activity_feedback_count, "external_calendar_events": len(list_external_calendar_events())},
         "logs": recent_log_entries(),
-        "debug_capture": {**diagnostic_capture_status(), "entries": diagnostic_capture_entries()},
+        "debug_capture": {**DIAGNOSTIC_CAPTURE.status(), "entries": DIAGNOSTIC_CAPTURE.entries()},
         "note": "Zugangsdaten, Tokens, Rohantworten und Athleteninhalte sind ausgeschlossen; die optionale Diagnoseaufzeichnung speichert nur technische Antwortformen und Metadaten.",
     }
 
@@ -20386,7 +18761,7 @@ def delete_remote_conversation(conversation_id: str) -> bool:
         return False
     http_json(
         "DELETE",
-        openai_endpoint("/conversations/" + quote(conversation_id, safe="")),
+        openai_provider.endpoint(CONFIG.openai_base_url, "/conversations/" + quote(conversation_id, safe=""), default_base_url=DEFAULT_OPENAI_BASE_URL),
         headers={"Authorization": f"Bearer {CONFIG.openai_api_key}"},
         timeout=30,
         service="openai",
@@ -20616,7 +18991,7 @@ def authenticated_session(handler: BaseHTTPRequestHandler) -> dict[str, Any] | N
 
 
 def login_user(handler: BaseHTTPRequestHandler, password: str) -> dict[str, Any]:
-    if security_configuration_error():
+    if app_config.security_configuration_error(CONFIG, sqlcipher_available=SQLCIPHER_AVAILABLE):
         raise AppError(503, "Die sichere App-Konfiguration ist unvollständig.")
     allowed, retry_after = allow_rate(f"login:{client_ip(handler)}", 5, 900)
     if not allowed:
@@ -20643,7 +19018,7 @@ def logout_user(handler: BaseHTTPRequestHandler) -> None:
 
 
 def require_auth(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    if security_configuration_error():
+    if app_config.security_configuration_error(CONFIG, sqlcipher_available=SQLCIPHER_AVAILABLE):
         raise AppError(503, "Die sichere App-Konfiguration ist unvollständig.")
     session = authenticated_session(handler)
     if not session:
@@ -20816,7 +19191,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, diagnostic_report())
         elif path == "/api/diagnostics/capture":
             require_auth(self)
-            self.send_json(200, diagnostic_capture_status())
+            self.send_json(200, DIAGNOSTIC_CAPTURE.status())
         elif path == "/api/privacy/export":
             require_auth(self)
             stream_privacy_export(self)
@@ -21144,7 +19519,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if path == "/api/change-history/undo/preview":
             self.send_json(200, _history_preview(self.read_json().get("change_id"), session["csrf_hash"]))
         elif path == "/api/diagnostics/capture":
-            self.send_json(200, set_diagnostic_capture(self.read_json().get("enabled")))
+            self.send_json(200, DIAGNOSTIC_CAPTURE.set_enabled(self.read_json().get("enabled")))
         elif path == "/api/privacy/delete":
             payload = self.read_json()
             if payload.get("confirm") != "LOKALE DATEN LÖSCHEN":
@@ -21226,8 +19601,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         return read_request_audio_body(
             self.headers,
             self.rfile.read,
-            allowed_types=VOICE_AUDIO_TYPES,
-            normalize_type=normalized_audio_type,
+            allowed_types=audio_provider.VOICE_AUDIO_TYPES,
+            normalize_type=audio_provider.normalized_audio_type,
             max_bytes=MAX_AUDIO_BODY_BYTES,
             error=AppError,
         )
@@ -21465,7 +19840,7 @@ def enqueue_startup_sync_jobs() -> None:
 
 def main() -> None:
     observability.configure_logging(LOGGER, DATA_DIR, LOG_PATH, REDACTOR)
-    configuration_error = security_configuration_error()
+    configuration_error = app_config.security_configuration_error(CONFIG, sqlcipher_available=SQLCIPHER_AVAILABLE)
     if configuration_error:
         LOGGER.critical("Secure startup refused", extra={"event": "secure_startup_refused", "context": {"reason": configuration_error}})
         raise SystemExit(configuration_error)

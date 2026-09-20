@@ -90,7 +90,7 @@ class CoachResponseFailureTests(unittest.TestCase):
         self.assertEqual(server.sync_job_state(receipt["sync_job_ids"][0])["status"], "queued")
         history = server.coach_diagnostic_history()
         self.assertEqual(history[0]["error"]["provider_error_code"], "server_error")
-        status = json.loads(server.get_kv(server.OPENAI_STATUS_KEY))
+        status = server.provider_state_service().summary("openai")["status"]
         self.assertEqual(status["provider_error_code"], "server_error")
         self.assertNotIn("DO_NOT_EXPORT_PROVIDER_CONTENT", json.dumps([receipt, history, status]))
 
@@ -101,8 +101,8 @@ class CoachResponseFailureTests(unittest.TestCase):
                     "code": code, "message": "DO_NOT_EXPORT_PROVIDER_CONTENT",
                 }})
             self.assertEqual(raised.exception.reason, "response_error")
-            metadata = server._safe_diagnostic_error(raised.exception)
+            metadata = server.observability.safe_diagnostic_error(raised.exception)
             self.assertNotIn("provider_error_code", metadata)
-            status = json.loads(server.get_kv(server.OPENAI_STATUS_KEY))
+            status = server.provider_state_service().summary("openai")["status"]
             self.assertNotIn("provider_error_code", status)
             self.assertNotIn("DO_NOT_EXPORT_PROVIDER_CONTENT", json.dumps([metadata, status]))

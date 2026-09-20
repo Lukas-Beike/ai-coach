@@ -163,10 +163,10 @@ Abhängigkeit: P0.
 
 - [x] `AppError`, Disconnect-Signal und Fehlerabbildung passend zwischen
   `errors.py` und HTTP aufteilen; Konstanten zum jeweiligen Eigentümer ziehen.
-- [ ] Konfiguration, Settings-Zugriff und Logging/Redaktion auslagern.
+- [x] Konfiguration, Settings-Zugriff und Logging/Redaktion auslagern.
   - [x] Anbieter-/Modell-/Thinking-/Kalenderauswahl sowie Secret-/URL-
     Redaktion, JSON-Formatter und Logging-Setup verlagern.
-  - [ ] Verbleibende Konfigurationsvalidierung, Settings-Dateischreibpfade,
+  - [x] Verbleibende Konfigurationsvalidierung, Settings-Dateischreibpfade,
     Provider-Freshness und diagnostische Observability verlagern.
 - [x] DB-Initialisierung vervollständigen; Job-Recovery von Schema-Initialisierung
   trennen und aus der Startverdrahtung explizit aufrufen.
@@ -189,12 +189,34 @@ Abhängigkeit: P1.
 
 - [ ] `http_json`, begrenzte Reads, Providerfehler und sichere HTTP-Aufrufe
   mit `providers/http.py` zusammenführen.
+  - [x] Request-Body/-Header-Aufbau, begrenzte Erfolgs-/Fehler-Reads,
+    abbrechbares Header-Warten samt Response-Handle-Lifecycle und redigierte
+    Providerfehler in reine Adapter verschieben.
+  - [x] Begrenzte JSON-Request-Ausführung einschließlich Öffnen, Lesen,
+    UTF-8-/JSON-Dekodierung, Status-/Header-Metadaten und Cleanup auslagern.
+  - [ ] Netzwerk-, Retry-/Cancellation- und Statusorchestrierung vollständig
+    aus `server.py` entfernen.
 - [ ] OpenAI Request/Response, Background Retrieve/Cancel, SSE-Verarbeitung,
   Usage-/Rate-Limit-Auswertung und Audio-Transkription in konkrete Provider-Module
   ziehen. Nutzungs-Persistenz bleibt außerhalb des reinen Transports.
+  - [x] Response-/Fehlerparsing, SSE-Ereignisse, Response-ID-, Payload-,
+    Rate-Limit-/Usage-Berechnungen und Audio-Wire-Helfer auslagern.
+  - [x] Begrenztes SSE-Lesen einschließlich Fragmentgrenzen, finaler Response,
+    Abbruchprüfung und Bytefortschritt in den OpenAI-Adapter verschieben.
+  - [x] Stream-Transport einschließlich Öffnen, Header-Abbruch, Response-Handle,
+    Status-/Header-Metadaten, Größenlimit und Cleanup im OpenAI-Adapter besitzen.
+  - [x] Persistierten OpenAI-/Gemini-Status, tägliche Usage und OpenAI-
+    Rate-Limits in einem transaktionalen Provider-State-Service besitzen;
+    DB-Lock, Manager-Lebenszyklus und redigiertes Logging bleiben eindeutig.
+  - [ ] Request- und Background-Transport einschließlich Abbruch und Polling
+    vollständig im OpenAI-Adapter besitzen.
 - [ ] Gemini Payload-/Tool-Konvertierung und Streaming zum Gemini-Adapter ziehen;
   persistierte Dialoghistorie gehört zu `coach/conversation.py`.
-- [ ] Kalenderabruf einschließlich SSRF-Prüfung und iCalendar-Parsing auslagern.
+  - [x] Payload-/Tool-/Medienkonvertierung und Stream-Akkumulation auslagern.
+  - [x] Stream-Transport einschließlich Header-Abbruch, Response-Handle,
+    Größenlimit und SSE-Akkumulation auslagern.
+  - [ ] Persistierte Historie in P7 nach `coach/conversation.py` verschieben.
+- [x] Kalenderabruf einschließlich SSRF-Prüfung und iCalendar-Parsing auslagern.
 - [ ] Vorhandene Garmin-/Intervals-Adapter erweitern, ohne Sync-Use-Cases in
   Provider-Module zu verschieben.
 
