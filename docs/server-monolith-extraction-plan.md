@@ -562,6 +562,9 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
   - [x] Lokalen Bootstrap-Lesevorlauf und Wetter-Follow-up mit
     bestehender UOW-/Lock-Grenze in konkrete `http_api/`-Eigentümer
     verschieben; übrige `public_state`-Projektionen bleiben offen.
+  - [x] Kalender-, Wettkampf- und Tageskontext-Projektion als konkreten
+    Service innerhalb der bestehenden Bootstrap-UOW zuordnen; die
+    verbleibenden öffentlichen Felder bleiben offen.
 - [ ] `RequestHandler`, Route-Dispatch, Body-Limits, statische Dateien und SSE
   transportseitig auslagern; vorhandene `requests.py`/`responses.py` nutzen.
   - [x] Sync-POST-Fachentscheidungen in `SyncCommandEndpoint` verlagern;

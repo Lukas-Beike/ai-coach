@@ -4544,6 +4544,33 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   tests, Ruff und die neu gebaute Container-Suite **PASS**. Sonar/CI
   dieses Korrekturstands müssen nach Veröffentlichung erneut bestehen.
 
+## P10 — Kalender- und Tageskontext-Bootstrap
+
+- Erstes GPT-6-Luna-Diff `cd2b5996` anhand des tatsächlichen Codes
+  **FAIL**: Der neue Service berechnete die schon vom lokalen Prelude
+  bereitgestellte kanonische Planliste erneut und konnte damit einen
+  anderen Snapshot an den Tageskontext übergeben. Konkreter Auftrag an
+  denselben Worker; Korrektur `4ea53759` entfernt die zweite Projektion
+  und übergibt `prelude.canonical_planned` unverändert. Regression prüft
+  die Objektidentität. Beide Diffs erneut geprüft: **PASS**.
+- Sequenziell als `00fb89c0`/`3f8b5a9d` auf dem bestätigten PR-#706-
+  Merge-Commit `45dd27f2` integriert und die tatsächliche Codegrenze
+  erneut geprüft: **PASS**. `PublicStateCalendarProjection` besitzt
+  Check-in-/Wettkampf-/externe Kalender-/Tageskontext-Orchestrierung;
+  der vorhandene `DB_LOCK` und dieselbe UOW umschließen den Aufruf.
+  Keine Server-Rückimporte oder Fachcallbacks, JSON-Felder und Offline-
+  Bootstrap-Grenzen unverändert. `public_state` enthält weitere offene
+  Projektionen, daher bleibt P10 unvollständig.
+- Worker nach Korrektur: direkter Test 1, Server 462/3 Skips,
+  Architektur 4, volle Python-Suite 2.277/12 Skips, Ruff der neuen
+  Dateien, Compile und Diff-Check **PASS**. Im integrierten Worktree:
+  vier fokussierte, vier Architekturtests, Ruff, Compile und Diff-
+  Check **PASS**. Neu gebautes Read-only-Container-Image und volle
+  Container-Suite **PASS**: 2.277 Tests, 10 Skips in 20,464 s.
+  Inventar: `server.py` 6.861 Zeilen; P10 weiterhin 26 Definitionen
+  und 37 globale Bindungen. Die neue Factory erhöht die Definitionszahl,
+  ohne den ausgelagerten fachlichen Ablauf wieder in den Server zu holen.
+  CI/Sonar des veröffentlichten PR-Stands bleiben abzuwarten.
 ## PR #706 — bestätigter Merge
 
 - Korrektur-Head `af77f5a5`: Root-Code-/Diff-Review **PASS**,
@@ -4576,3 +4603,24 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Gesamtsuite auf `2d27cd3b` **PASS**: 2.279 Tests, 10 Skips in
   19,993 s. CI/Sonar dieses PR-Stands stehen noch aus; Diagnosebericht,
   Capture und Privacy-/Backup-Pfade bleiben P9-Risiken.
+
+## P10 — erneuter Integrationsstand nach PR #707
+
+- Vor Veröffentlichung `origin/develop` mit bestätigtem PR-#707-Merge
+  `ff0bd755db41c1a58bfce8333e3fbe4f2cc835ac` in den P10-Branch
+  übernommen (`c07b6a4c`). Überschneidungen im Review-Protokoll
+  wurden unter Erhalt beider Befunde aufgelöst; das Inventar wurde aus
+  dem kombinierten Code neu erzeugt. Root-Review von Server-Aufrufern,
+  Kalender-UOW, Logprojektion und tatsächlichem Merge-Diff **PASS**.
+- Sieben kombinierte fokussierte Tests, vier Architekturtests, Ruff der
+  neuen Module/Tests, Compile, Inventar- und Diff-Check **PASS**.
+  Neu gebautes Read-only-Container-Image: vollständige Suite **PASS**
+  mit 2.280 Tests und 10 Skips in 21,223 s. Inventar:
+  `server.py` 6.849 Zeilen, 319 Definitionen; P9 und P10 bleiben
+  fachlich offen. Der erste veröffentlichte PR-Head scheiterte nur an
+  der Conventional-Commit-Prüfung des technischen Merge-Titels.
+  Der Merge wurde mit identischen Eltern und identischem Dateibaum als
+  `c07b6a4c` mit gültigem Titel neu erzeugt; der folgende Docs-Commit
+  wurde erneut aufgesetzt. Alter und neuer geprüfter Head haben bis
+  auf diese Review-Log-ID denselben Dateibaum. CI/Sonar des korrigierten
+  PR-Heads stehen noch aus.
