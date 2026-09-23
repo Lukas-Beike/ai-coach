@@ -50,10 +50,10 @@ class CoachReviewTests(unittest.TestCase):
     def test_waited_full_refresh_preserves_all_time_window(self):
         server.set_kv("last_sync_at", "old-sync")
         server.set_kv("last_sync_activity_days", str(server.ALL_SYNC_DAYS))
-        INTERVALS_SYNC_LOCK.acquire()
         previous_sync_read = threading.Event()
         service = server.intervals_sync_service()
-        original_get_value = service._get_value
+        original_get_value = service._status.get
+        INTERVALS_SYNC_LOCK.acquire()
 
         def observe_previous_sync_read(key):
             value = original_get_value(key)
@@ -71,7 +71,7 @@ class CoachReviewTests(unittest.TestCase):
         worker = threading.Thread(target=finish_active_sync)
         worker.start()
         try:
-            with patch.object(service, "_get_value", side_effect=observe_previous_sync_read):
+            with patch.object(service._status, "get", side_effect=observe_previous_sync_read):
                 result = service.sync(
                     "full refresh test",
                     activity_days=server.ALL_SYNC_DAYS,
