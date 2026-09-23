@@ -66,6 +66,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     ("backend.coach.receipt_reads", ("CoachCommandReceiptService",)),
+    ("backend.coach.request_payload", ("CoachRequestPayloadService",)),
     (
         "backend.coach.context",
         (
@@ -1676,6 +1677,7 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_structured_command_failure_response",
     "_persist_structured_command_failure_pending_request",
     "_persist_structured_command_failure",
+    "_structured_coach_request_payload",
     "_background_coach_request",
     "_background_coach_provider_settings",
     "_existing_background_coach_job_response",
