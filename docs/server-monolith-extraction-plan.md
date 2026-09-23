@@ -525,7 +525,7 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
     read-only Statusprojektion ihren konkreten Coach-Services zuordnen.
   - [ ] Verbleibende Background-Receipt-/Fehlerzustände mit dem Coach-Job-
     Eigentümer zusammenführen und Restart-/Cancellation-Verträge prüfen.
-- [ ] Tages-/Startup-Scheduler nach `sync/scheduler.py` ziehen; die Composition
+- [x] Tages-/Startup-Scheduler nach `sync/scheduler.py` ziehen; die Composition
   Root registriert die konkreten Sync-Dienste ohne Importzyklus. Automatische
   Morning-Check-ins sind seit dem `develop`-Abgleich kein Scheduler-Auftrag.
   - [x] Die vier täglichen Providerentscheidungen einschließlich Due-Marker,
@@ -534,7 +534,9 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   - [x] Startup-Provider- und Historical-Backfill-Entscheidungen einem
     konkreten `StartupSyncScheduler` zuordnen; Reihenfolge und aktive Jobs
     bleiben erhalten.
-  - [ ] Verbleibende Tages-Loop-Lifecycle-Steuerung vollständig zuordnen.
+  - [x] Verbleibende Tages-Loop-Lifecycle-Steuerung einschließlich
+    300-Sekunden-Takt, Fehlerbehandlung und Morning-Battery-Refresh
+    dem konkreten `DailySyncLoop` zuordnen.
 
 Abnahme: SSE liefert inkrementelle Texte und finale Receipts; Disconnect,
 Cancel, Retry nach bereits ausgeführtem Tool und Neustart verursachen keine
