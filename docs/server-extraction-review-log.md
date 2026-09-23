@@ -5926,7 +5926,7 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `7ab9b982de26ddf04c92f40215cab5b488186100` am
   `2026-09-23T21:33:08Z` bestätigt und auf `origin/develop` erreichbar.
   Der nicht erforderliche Browser-Smoke-Check war beim Merge noch
-  unterwegs und wird gesondert nachkontrolliert.
+  unterwegs und wurde danach **PASS** (5m29s) nachkontrolliert.
 
 ## P7 Read-only Coach-Tools — erster integrierter Patch
 
@@ -5943,3 +5943,28 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   fokussierte Service-/Architekturtests 10/10, Ruff, Compile,
   Inventar- und Diff-Check **PASS**. Der zweite P7-Patch und die
   gemeinsame Vollregression stehen noch aus.
+
+## P7 Planartefakt-Werkzeug — zweiter integrierter Patch
+
+- Luna-Ausgangscommit `caf05e09` wurde nach dem Read-Tool-Stand
+  sequenziell integriert (`ee5760d2`). Der Konflikt mit dem älteren
+  Server-Read-Dispatcher wurde durch Entfernung beider bereits
+  ausgelagerter Funktionsblöcke gelöst; das Inventar wurde auf dem
+  kombinierten Code erneut generiert. Root prüfte den tatsächlichen
+  Code/Diff beider P7-Bausteine: **PASS**.
+- `CoachPlanArtifactToolService` besitzt Operation-, Scope- und
+  Artifact-ID-Prüfung vor jedem Planning-Service-Aufruf. Der konkrete
+  `TrainingPlanArtifactService` behält Speicherung, Revisionprüfung und
+  atomaren Commit; `server.py` injiziert nur seine Factory. Keine
+  Rückimporte, keine neuen Remote-Schreibrechte oder dauerhaften
+  Kompatibilitätsfunktionen.
+- Acht direkte Tests prüfen Stage/Commit samt Autorisierung, fehlender
+  und fremder Artifact-ID, explizitem Flag und unbekanntem Tool. Zusammen
+  mit bestehenden Planning-Integrationen für diese Grenze angemessen.
+  Nach Integration: fokussierte Service-/Architekturtests 18/18, Ruff,
+  Compile, Inventar- und Diff-Check **PASS**. Gemeinsame native
+  Vollsuite **PASS**, 2.412 Tests/12 Skips; frisch gebautes Read-only-
+  Docker-Image **PASS**, 2.412 Tests/11 Skips. Root-Gate für den
+  kombinierten Stand `ee5760d2` samt Integrations-/Dokumentationsdiff
+  **PASS**; PR-CI und externer Review stehen noch aus. `server.py`:
+  5.023 Zeilen, 240 Definitionen; P0-Inventar 0.
