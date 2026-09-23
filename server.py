@@ -144,6 +144,7 @@ from backend.http_api.public_performance import (
     PublicFeedbackStateService,
     PublicPerformanceStateService,
 )
+from backend.http_api.public_weather import PublicWeatherStateService
 from backend.http_api.state_prelude import (
     CalendarWindowRange,
     PublicStateLocalPrelude,
@@ -1176,6 +1177,11 @@ def weather_sync_service() -> WeatherSyncService:
         sync_operation_observer(),
         LOGGER,
     )
+
+
+def public_weather_state_service() -> PublicWeatherStateService:
+    """Compose the public weather endpoint projection."""
+    return PublicWeatherStateService(weather_service())
 
 
 def morning_body_battery_service() -> MorningBodyBatteryService:
@@ -4546,13 +4552,6 @@ def public_plan_state_service() -> PublicPlanStateService:
     )
 
 
-def public_weather_state(local_only: bool = False) -> dict[str, Any]:
-    """Return the configured forecast without loading the complete plan state."""
-    result = weather_service().state(refresh=not local_only)
-    result.pop("_refreshed", None)
-    return result
-
-
 def public_state_local_prelude_service() -> PublicStateLocalPrelude:
     """Compose the local bootstrap read with its existing transaction owner."""
     return PublicStateLocalPrelude(
@@ -4915,7 +4914,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/weather":
             self.auth_service.require_auth(self)
             query = parse_qs(urlparse(self.path).query)
-            self.send_json(200, public_weather_state(local_only=query.get("local", ["0"])[0] == "1"))
+            self.send_json(200, public_weather_state_service().state(local_only=query.get("local", ["0"])[0] == "1"))
         elif path == "/api/library":
             self.auth_service.require_auth(self)
             query = parse_qs(urlparse(self.path).query)

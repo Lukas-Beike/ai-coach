@@ -29,6 +29,7 @@ from backend.http_api.readiness import ReadinessService
 from backend.http_api.public_state import PublicStateService
 from backend.http_api import readiness as readiness_module
 from backend.http_api import auth as http_auth
+from backend.http_api.public_weather import PublicWeatherStateService
 from backend.http_api import server as http_server_module
 from backend.http_api.rate_limit import RateLimiter
 from backend import privacy as privacy_module
@@ -197,6 +198,38 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
 
 class CoachTests(unittest.TestCase):
+    def test_public_weather_state_service_refreshes_only_when_not_local_and_hides_marker(self):
+        weather = Mock()
+        weather.state.return_value = {"configured": True, "_refreshed": True}
+        endpoint = PublicWeatherStateService(weather)
+
+        self.assertEqual(endpoint.state(local_only=True), {"configured": True})
+        weather.state.assert_called_once_with(refresh=False)
+        weather.state.reset_mock()
+        weather.state.return_value = {"configured": True, "_refreshed": True}
+
+        self.assertEqual(endpoint.state(), {"configured": True})
+        weather.state.assert_called_once_with(refresh=True)
+
+    def test_weather_handler_calls_public_weather_service_after_auth(self):
+        handler = object.__new__(server.RequestHandler)
+        handler.path = "/api/weather?local=1"
+        handler.send_json = Mock()
+        endpoint = Mock()
+        endpoint.state.return_value = {"configured": True, "loading": True}
+
+        with patch.object(server, "require_auth") as auth, patch.object(
+            server, "public_weather_state_service", return_value=endpoint
+        ) as factory:
+            self.assertTrue(handler._handle_training_get("/api/weather"))
+
+        auth.assert_called_once_with(handler)
+        factory.assert_called_once_with()
+        endpoint.state.assert_called_once_with(local_only=True)
+        handler.send_json.assert_called_once_with(
+            200, {"configured": True, "loading": True}
+        )
+
     def test_sync_post_handler_keeps_bodyless_routes_and_unknown_posts_transport_only(self):
         handler = object.__new__(server.RequestHandler)
         handler.read_json = Mock(return_value={"ignored": True})
@@ -1575,7 +1608,7 @@ class CoachTests(unittest.TestCase):
     def test_local_weather_state_does_not_fetch_without_complete_plan_state(self):
         server.profile_service().save({"weather_location": "Berlin"})
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=AssertionError("weather must stay local")):
-            weather = server.public_weather_state(local_only=True)
+            weather = server.public_weather_state_service().state(local_only=True)
         self.assertTrue(weather["configured"])
         self.assertTrue(weather["loading"])
 
