@@ -2392,29 +2392,6 @@ def _structured_coach_read_result(name: str, arguments: dict[str, Any]) -> dict[
     return None
 
 
-def _structured_coach_training_template_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
-    if "manage_training_templates" not in _structured_authorized_operations(intent):
-        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-    templates = arguments.get("templates")
-    if not isinstance(templates, list) or not 1 <= len(templates) <= 28 or not all(isinstance(item, dict) for item in templates):
-        raise AppError(400, "Ein Coach-Kommando darf 1 bis 28 Vorlagenänderungen enthalten.", reason="template_limit")
-    # Nested domain writes share one transaction; any invalid element rolls back the batch.
-    with DB_LOCK, database():
-        results = []
-        for template in templates:
-            action = str(template.get("action") or "create").strip().casefold()
-            if action in {"update", "archive", "restore", "delete"}:
-                local_id = str(template.get("local_id") or "").strip()
-                require_coach_scope(intent, f"library_workout:{local_id}", "local_template")
-                results.append(workout_library_service().update(local_id, template))
-                continue
-            if action != "create":
-                raise AppError(400, "Unbekannte Aktion für die Bibliothekseinheit.", reason="invalid_template_action")
-            require_coach_scope(intent, "local_template")
-            results.append(workout_library_service().create_template(template))
-    return {"ok": True, "stored_locally": True, "templates": results, "template": results[0] if len(results) == 1 else None}
-
-
 def _structured_coach_apply_library_plan_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
     if "apply_workout_library_plan" not in _structured_authorized_operations(intent):
         raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")

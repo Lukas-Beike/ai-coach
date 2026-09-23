@@ -510,6 +510,12 @@ Abhängigkeit: P2–P6.
     Prüfung und Job-ID-Buchführung dem konkreten Sync-Tool-Service zuordnen.
   - [x] Adaptive Apply-Freigabe mit späterem Nutzerturn und atomare
     Coach-Profiländerungen in eigene konkrete Services verlagern.
+  - [x] Die fünf lokalen Athletenakten-Werkzeuge (Check-in,
+    Aktivitätsfeedback, Wettkampf) samt Operation-/Objekt-Scope-Prüfung
+    einem konkreten `CoachAthleteRecordToolService` zuordnen.
+  - [x] Lokale Trainingsvorlagen-Batches mit 1–28-Eintragsgrenze,
+    Objekt-Scope und gemeinsamem Rollback einem konkreten
+    `TrainingTemplateToolService` zuordnen.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.
