@@ -558,6 +558,10 @@ Abhängigkeit: P2–P6.
     Scope, Session-/Conversation-Claim, Replay, atomarer Tool-Ausführung
     und finalem Receipt `CoachPlanningCommandService` zuordnen; der
     HTTP-Handler delegiert direkt.
+  - [x] Strukturierte Tool-Call-Metadaten einschließlich Allowlist,
+    Schrittlimit, Argumentprüfung und stabiler Replay-/Reparatur-Schlüssel
+    als reine Backend-Projektion `structured_tool_call_metadata` verlagern;
+    die restliche Turn-Orchestrierung bleibt bis zur folgenden Auslagerung offen.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.
