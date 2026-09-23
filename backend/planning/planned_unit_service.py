@@ -121,25 +121,9 @@ class PlannedUnitService:
             )
 
         restore_date = str(target.get("date") or current_payload.get("date") or "")[:10]
-        restoring_deletion = history_action == "delete"
-        archived = (
-            bool(target["archived"])
-            if "archived" in target
-            else not restoring_deletion and bool(current_payload.get("archived"))
-        )
-        local_deleted = (
-            bool(target["local_deleted"])
-            if "local_deleted" in target
-            else not restoring_deletion and bool(current_payload.get("local_deleted"))
-        )
         current_date = str(current_payload.get("date") or "")[:10]
-        restored_from_hidden = (
-            (
-                bool(current_payload.get("archived"))
-                or bool(current_payload.get("local_deleted"))
-            )
-            and not archived
-            and not local_deleted
+        archived, local_deleted, restored_from_hidden = (
+            self._restore_visibility_state(current_payload, target, history_action)
         )
         if restore_date != current_date or restored_from_hidden:
             self._reject_restore_conflict(entity_id, restore_date)
@@ -172,6 +156,33 @@ class PlannedUnitService:
             (json.dumps(restored, ensure_ascii=False), self._now(), entity_id),
         )
         return restored
+
+    @staticmethod
+    def _restore_visibility_state(
+        current_payload: dict[str, Any],
+        target: dict[str, Any],
+        history_action: str,
+    ) -> tuple[bool, bool, bool]:
+        restoring_deletion = history_action == "delete"
+        archived = (
+            bool(target["archived"])
+            if "archived" in target
+            else not restoring_deletion and bool(current_payload.get("archived"))
+        )
+        local_deleted = (
+            bool(target["local_deleted"])
+            if "local_deleted" in target
+            else not restoring_deletion and bool(current_payload.get("local_deleted"))
+        )
+        restored_from_hidden = (
+            (
+                bool(current_payload.get("archived"))
+                or bool(current_payload.get("local_deleted"))
+            )
+            and not archived
+            and not local_deleted
+        )
+        return archived, local_deleted, restored_from_hidden
 
     def _reject_restore_conflict(self, entity_id: str, restore_date: str) -> None:
         if restore_date and self._calendar_conflict_service.conflicts(
