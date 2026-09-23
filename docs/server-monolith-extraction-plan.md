@@ -551,6 +551,9 @@ Abhängigkeit: P2–P6.
   - [x] Provenienz-/Textprüfung und KV-Persistenz einer konkreten Coach-
     Rückfrage `CoachClarificationService` zuordnen; ungültige oder fremde
     Quellen verändern den ausstehenden Auftrag nicht.
+  - [x] Atomaren Coach-Trainings-Patch mit Revisions- und Kalenderprüfung,
+    gemeinsamer Planänderung/-erstellung, Constraints und Rollback in
+    `CoachTrainingPatchService` verlagern; Planung bleibt Zustandseigentümer.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.

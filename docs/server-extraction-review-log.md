@@ -6182,3 +6182,46 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Root prüfte den korrigierten integrierten Code/Diff erneut:
   **PASS**. Keine verbleibende P0-Zuordnung; `server.py` 4.741
   physische Zeilen, 225 Definitionen. PR-CI und Merge stehen aus.
+
+## P7 Rückfrage-Persistenz — bestätigter #755-Merge
+
+- #755 auf Head `6b32e9c3` bestand Root-Gate, native und
+  Read-only-Docker-Vollsuite, CI-Testshards, Container, Qualität,
+  Sonar und CodeQL. Einmalig angeforderter Codex-Code-/Security-
+  Review **PASS**; null offene Review-Threads. Der zum Mergezeitpunkt
+  noch laufende optionale Browser-Smoke-/Accessibility-Check wurde
+  anschließend **PASS** (5m41s).
+- Squash-Merge `255c21e12e0831d4b09c96418c0df743efc36a79` am
+  `2026-09-23T23:13:36Z` mit `state=MERGED`, `mergedAt` und
+  Erreichbarkeit auf `origin/develop` bestätigt.
+
+## P7 atomarer Trainings-Patch — integrierter Prüfstand
+
+- Root-Ausgangscommit `06431c23` wurde auf den bestätigten #755-
+  Merge als `de3915b0` integriert. Root prüfte tatsächlichen Code,
+  Diff und Konfliktauflösung: **PASS** für vollständige Verlagerung
+  der Schedule-/Revisions-/Constraint-Orchestrierung nach
+  `CoachTrainingPatchService`, direkte Delegation aus `server.py`,
+  gemeinsame `DatabaseManager`-UOW und `DB_LOCK`, unveränderten
+  Planning-Revision/Hash-Vertrag, atomaren Rollback und Event-Ausgabe.
+  Keine Backend-Server-Rückimporte oder Fachcallbacks. Der
+  bestehende lokale Planungsdienst bleibt Eigentümer seiner Daten.
+- Sechs direkte Tests prüfen Erfolg/Revision, stale Revision ohne
+  Schreibzugriff, fehlenden Scope, Batch-Limit, Kalenderkonflikt mit
+  Rollback sowie Plan-Constraints. Bestehende Regressionen decken
+  zusätzlich gescheiterte Creation nach Änderungen und Retry/Replay
+  ohne doppelte Effekte ab; Test-Patchziel und direkter Testaufruf
+  wurden migriert. Für diese risikoreiche Transaktionsgrenze
+  angemessen. Auf dem Root-Ausgangsstand: native Vollsuite 2.463
+  Tests/12 Skips **PASS**, frisches Read-only-Docker-Image 2.463
+  Tests/11 Skips **PASS**, fokussierte 37 + 7 Tests **PASS**.
+  Integrierte Vollsuite, Inventar und PR-CI stehen noch aus.
+- Nach Integration: 40 fokussierte Tool-/Transaktions-/Architekturtests
+  **PASS**; Inventar-`--check`, Ruff für neue Dateien und Generator,
+  Compile und Diff-Check **PASS**. Native Vollsuite 2.466 Tests/
+  12 Skips **PASS** (224,129 s), frisch gebautes Read-only-Docker-
+  Image 2.466 Tests/11 Skips **PASS** (23,009 s). Root prüfte den
+  integrierten Code/Diff nach der Konfliktauflösung erneut: **PASS**.
+  `server.py` 4.691 physische Zeilen, 223 Definitionen; P7
+  verbleiben 48 Definitionen/28 globale Bindungen, P0=0. PR-CI und
+  Merge stehen aus.
