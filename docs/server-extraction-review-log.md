@@ -4160,3 +4160,27 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   ausgelagerten Modulen und Inventarskript. Keine Regel oder Prüfung
   wird umgangen; Befunde werden fachlich geprüft und in unabhängigen
   Schreibbereichen korrigiert. Auto-Merge bleibt deaktiviert.
+
+## PR #706 — Sonar-Korrekturen und erneutes Root-Gate
+
+- `d99d643` behebt ausschließlich die Container-Quellpfade der drei
+  AST-Tests. Der CI-Containerlauf auf diesem Head ist **PASS**; der
+  Codex-Bot meldete für den vorherigen Stand `d0ee5f8` keine größeren
+  Codeprobleme. Der aktuelle Pflichtcheck ist weiterhin rot, weil die
+  abgeschlossene Bot-Reaktion nicht dem neuen Head zugeordnet ist.
+- Worker-Diffs `3dcfd33` (Provider), `7603c667` (Inventar), `94dfbab`
+  (Sync) und `ccf1193` (SQL-Literale/Coach-Bindung) wurden von Root
+  tatsächlich geprüft und sequenziell als `6133b6c`, `e786e8b`,
+  `f980be7`, `c4795fa` integriert: **PASS**. Öffentliche Schnittstellen,
+  DB-/Hash-Rechecks, Lock- und Fehlerpfade sind unverändert. Der eigene
+  Kontext-Diff `6ce1fb5` wurde auf Auswahlreihenfolge und Kürzungsgrenzen
+  geprüft: **PASS**. Dies ist noch kein vollständiger P2/P7-Abschluss.
+- Nach Integration: 3 Inventar-/Architekturtests, 109 Provider-Tests,
+  34 Sync-Tests, 145 Planning-/Kalender-/Coach-Tests und 9
+  Coach-Katalog-/Architekturtests **PASS**; Compile, Ruff für geänderte
+  Module, Generator-Check und Diff-Check **PASS**. Gesamtsuite auf
+  `c4795fa` plus `6ce1fb5` und diesem Log-Nachtrag: 2.242 Tests,
+  12 Skips, **PASS** in 211,574 s. Abschließendes Root-Code-Review
+  der integrierten Sonar-Patches **PASS**. Neuer Sonar-Lauf steht aus.
+  Rest-Risiken:
+  komplexe Fachmethoden und Konstruktoren, offener Review-Pflichtcheck.
