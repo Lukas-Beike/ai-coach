@@ -1,8 +1,9 @@
 # Plan: server.py vollständig in fachliche Backend-Module aufteilen
 
-Stand: 14.09.2026. Arbeitsbranch: `docs/backend-logic-boundary`.
-Ausgangscommit: `58e352d`. Status: Plan erstellt, Umsetzung noch nicht begonnen.
-Die Architekturregel in der Root-`AGENTS.md` ist bereits lokal ergänzt.
+Stand: 23.09.2026. P0–P6 integriert; P7–P11 in Arbeit.
+Historischer Ausgangscommit: `58e352d`. Die Architekturregel in der
+Root-`AGENTS.md` ist integriert. Aktuelle Commits und offene Befunde stehen
+im `docs/server-extraction-review-log.md`; das Inventar wird pro Stand erzeugt.
 
 ## 1. Ziel und verbindliche Abnahmekriterien
 
@@ -504,6 +505,9 @@ Abhängigkeit: P2–P6.
     Usage-Zuordnung bleiben offen.
 - [ ] Vorschläge, Scope-/Owner-Prüfungen, explizite Bestätigung, TTL sowie
   Replay-/Repair-Schlüssel ihren Coach-Modulen zuordnen.
+  - [x] Sitzungsgebundene Command-Receipt-Lesefunktion mit 400/403/404-
+    Grenzen, aktuellen Vorschlägen, TTL-Projektion und Entfernung des
+    Session-Schlüssels einem konkreten `CoachCommandReceiptService` zuordnen.
 - [ ] Tool-Dispatch samt Ergebnis-/Fehlerprojektion verschieben; Planmutationen
   rufen die in P4 abgeschlossenen Planungs-Use-Cases auf.
   - [x] Strukturierte Coach-Sync-Werkzeuge einschließlich Scope-/Remote-
