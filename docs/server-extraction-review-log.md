@@ -5370,3 +5370,14 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Fokussierte Coach-/Architekturtests, Compile, Inventar- und
   Diff-Check **PASS**. Rebase, kombinierte Vollsuite und PR-Gate
   stehen noch aus; P8-Worker/Turn/Resume/Cancel bleiben offen.
+- Nach bestätigtem #733-Merge `eb69cffd` sequenziell auf
+  `develop` rebased: finaler Root-Code-/Diffstand `d6682506`.
+  Der Konflikt mit der Auth-Auslagerung wurde ohne Wiedereinführung
+  der entfernten Session-Recovery-Serverfunktion gelöst; alle
+  Architekturverbote und beide Checklistenpunkte blieben erhalten.
+  Root-Gate für den tatsächlich integrierten Stand **PASS**:
+  neu gebautes Read-only-Docker-Image mit vollständiger Suite
+  **PASS**, 2.344 Tests, 11 Skips; Coach-Review 16/16,
+  Architektur 4/4, gezielte Submissiontests, Inventar-, Compile-
+  und Diff-Check **PASS**. `server.py` umfasst 5.744 physische
+  Zeilen und 267 Definitionen. Externe PR-/CI-Prüfung steht aus.
