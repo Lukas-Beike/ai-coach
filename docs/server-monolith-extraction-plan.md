@@ -525,6 +525,11 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
 - [ ] Tages-/Startup-Scheduler nach `sync/scheduler.py` ziehen; die Composition
   Root registriert die konkreten Sync-Dienste ohne Importzyklus. Automatische
   Morning-Check-ins sind seit dem `develop`-Abgleich kein Scheduler-Auftrag.
+  - [x] Die vier täglichen Providerentscheidungen einschließlich Due-Marker,
+    Queue-/Resync-/Maintenance-Gates und Payload-Reihenfolge gehören einem
+    konkreten `DailySyncScheduler`; `server.py` komponiert nur noch.
+  - [ ] Startup-Scheduler und verbleibende Tages-Loop-Lifecycle-Steuerung
+    vollständig zuordnen.
 
 Abnahme: SSE liefert inkrementelle Texte und finale Receipts; Disconnect,
 Cancel, Retry nach bereits ausgeführtem Tool und Neustart verursachen keine

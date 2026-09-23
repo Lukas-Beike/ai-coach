@@ -4676,3 +4676,48 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Response-Router und Testpatches sind P8/P11-Restaudit, nicht P2-
   Adapterlogik. P2-Hauptpunkt geschlossen; CI/Sonar des
   veröffentlichten PR-Stands bleiben abzuwarten.
+
+## PR #709 — bestätigter Merge; P8 täglicher Scheduler
+
+- PR #709 mit Root-Review-PASS, Sonar (`new_violations=0`), Codex-Review,
+  Backend- und Browser-CI **PASS**. Squash-Merge am
+  `2026-09-23T12:49:07Z`, Commit
+  `b1f1ceb1f8e444182248156e498f35718fe362bd`, auf
+  `origin/develop` erreichbar. Der Browserlauf endete kurz nach dem
+  Merge mit **SUCCESS**; keine neuen Befunde.
+- P8-Worker-Stand `3df4ecf` im tatsächlichen Code **FAIL**: `server.py`
+  behielt einen dauerhaften `schedule_daily_sync_jobs`-Wrapper.
+  Korrektur `352869b4` entfernt ihn; nur die reine
+  `daily_sync_scheduler`-Factory bleibt. Erneutes Root-Review **PASS**
+  für Orchestrierung, Maintenance-/Resync-/DB-Locks, Queue-Reihenfolge,
+  Marker, Payloads und keine automatischen Morning-Check-ins.
+- Erstes integriertes Container-Review **FAIL**: 2.286 Tests,
+  10 Skips, genau ein Fehler im migrierten Architekturtest, weil
+  dessen Quellpfad fälschlich aus `/review/tests` statt dem geladenen
+  `/app/backend`-Modul abgeleitet wurde. Korrektur desselben Workers
+  `f3c88b4` wurde als `c81cf54e` sequenziell integriert und im
+  tatsächlichen Diff **PASS** geprüft. Das Testziel ist jetzt das
+  importierte Scheduler-Modul; Assertions bleiben unverändert.
+  Neu gebautes Read-only-Container-Image, erneut vollständige Suite
+  **PASS**: 2.286 Tests, 10 Skips in 19,304 s; fünf fokussierte
+  Scheduler- und vier Architekturtests, scoped Ruff, Compile,
+  Inventar- und Diff-Check **PASS**. Inventar: `server.py` 6.777
+  physische Zeilen; P8-Hauptphase bleibt für Startup, Coach-Turn,
+  Streaming/Background-Lifecycle offen. CI/Sonar des veröffentlichten
+  P8-PR-Stands bleiben abzuwarten.
+
+- Nach Veröffentlichung von PR #710 meldete SonarCloud für Head
+  `2368be93` **FAIL**: neues `python:S107` in
+  `DailySyncScheduler.__init__` (16 Parameter bei Limit 13).
+  Korrekturauftrag an denselben GPT-6-Luna-Worker; Commit `4c8e46a0`
+  bündelt ausschließlich die sechs skalaren Konfigurationswerte in
+  `DailySyncSchedulerConfig(frozen=True)` und lässt die konkreten
+  Zustandseigentümer einzeln injiziert. AST zählt nun 12 Parameter
+  einschließlich `self`. Im Root-Diff als `18331ade` **PASS** geprüft:
+  Reihenfolge, Marker, Queue-/Reset-/Maintenance-/DB-Gates und Payloads
+  unverändert. Worker-Gesamtsuite 2.284 Tests, 12 Skips; fünf
+  Scheduler- und vier Architekturtests, scoped Ruff/Compile/Diff
+  **PASS**. Neu gebautes Read-only-Container-Image auf dem korrigierten
+  Integrationsstand: vollständige Suite **PASS** mit 2.286 Tests und
+  10 Skips in 22,182 s. Inventar-Check **PASS**; erneute Sonar/CI-
+  Prüfung des veröffentlichten PR-Heads steht noch aus.

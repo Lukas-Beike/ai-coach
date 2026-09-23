@@ -162,7 +162,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
     def test_garmin_daily_schedule_is_independent_of_intervals(self):
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="", calendar_ical_url="")), patch.object(garmin_sync.GarminFixtureLoader, "path", return_value=Path("synthetic")), patch.object(server, "daily_sync_marker_service") as marker_service:
             marker_service.return_value.is_due.return_value = True
-            server.schedule_daily_sync_jobs()
+            server.daily_sync_scheduler().schedule()
         with server.DB_LOCK, server.database() as db:
             rows = db.execute("SELECT provider, payload FROM sync_jobs").fetchall()
         self.assertEqual([row["provider"] for row in rows], ["garmin"])

@@ -2239,13 +2239,18 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(daily_sync_is_due("intervals", current + timedelta(hours=2), get_value=values.get))
         self.assertTrue(daily_sync_is_due("intervals", current + timedelta(hours=3), get_value=values.get))
 
-    def test_daily_sync_loop_uses_local_provider_markers(self):
-        source = Path(server.__file__).read_text(encoding="utf-8")
-        loop = source[source.index("def daily_sync_loop"):source.index("def _startup_historical_backfill_payload")]
-        self.assertIn('daily_sync_marker_service().is_due("calendar")', loop)
-        self.assertIn('daily_sync_marker_service().is_due("garmin")', loop)
-        self.assertIn('daily_sync_marker_service().is_due("intervals")', loop)
-        self.assertNotIn('[:10]', loop)
+    def test_daily_sync_scheduler_uses_local_provider_markers(self):
+        from backend.sync.scheduler import DailySyncScheduler
+
+        self.assertEqual(DailySyncScheduler.__module__, "backend.sync.scheduler")
+        source = Path(sys.modules[DailySyncScheduler.__module__].__file__).resolve()
+        scheduler = source.read_text(encoding="utf-8")
+        self.assertIn('self._markers.is_due("calendar")', scheduler)
+        self.assertIn('self._markers.is_due("garmin")', scheduler)
+        self.assertIn('self._markers.is_due("intervals")', scheduler)
+        self.assertNotIn("import server", scheduler)
+        self.assertNotIn("from server", scheduler)
+        self.assertNotIn('[:10]', scheduler)
 
     def test_coach_projection_helpers_are_dependency_light_and_bounded(self):
         from backend.coach.context import (
