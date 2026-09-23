@@ -8284,7 +8284,7 @@ class CoachTests(unittest.TestCase):
             server.provider_http_client().request("POST", "https://intervals.icu/api/v1/athlete/0", payload={"body_marker": "do-not-log-request-body"}, service="intervals")
         for handler in server.LOGGER.handlers:
             handler.flush()
-        log_text = json.dumps(server.recent_log_entries(), ensure_ascii=False)
+        log_text = json.dumps(server.recent_log_entries_service().list(), ensure_ascii=False)
         self.assertNotIn("do-not-log-request-body", log_text)
         self.assertNotIn("do-not-log-response-body", log_text)
 
@@ -8352,7 +8352,7 @@ class CoachTests(unittest.TestCase):
                 server.provider_http_client().request("GET", "https://intervals.icu/api/v1/athlete/0")
         for handler in server.LOGGER.handlers:
             handler.flush()
-        entries = server.recent_log_entries()
+        entries = server.recent_log_entries_service().list()
         self.assertTrue(any(entry.get("event") == "upstream_network_error" for entry in entries))
 
     def test_intervals_validation_error_includes_safe_provider_detail(self):
@@ -8468,7 +8468,7 @@ class CoachTests(unittest.TestCase):
             )
         for handler in server.LOGGER.handlers:
             handler.flush()
-        entries = server.recent_log_entries(200)
+        entries = server.recent_log_entries_service().list(200)
         correlated = [entry for entry in entries if entry.get("context", {}).get("operation_id") == operation_id]
         events = {entry.get("event") for entry in correlated}
         self.assertTrue({"operation_started", "operation_completed", "operation_count"}.issubset(events))
@@ -8499,7 +8499,7 @@ class CoachTests(unittest.TestCase):
             )
         for handler in server.LOGGER.handlers:
             handler.flush()
-        entries = server.recent_log_entries()
+        entries = server.recent_log_entries_service().list()
         started = [entry for entry in entries if entry.get("event") == "external_request_started"][-1]
         completed = [entry for entry in entries if entry.get("event") == "external_request_completed"][-1]
         self.assertEqual(result["activities"], [1, 2])
@@ -8673,7 +8673,7 @@ class CoachTests(unittest.TestCase):
         request = urlopen.call_args.args[0]
         self.assertTrue(json.loads(request.data)["stream"])
         self.assertEqual(request.get_header("Accept"), "text/event-stream")
-        self.assertNotIn("Hallo", json.dumps(server.recent_log_entries(), ensure_ascii=False))
+        self.assertNotIn("Hallo", json.dumps(server.recent_log_entries_service().list(), ensure_ascii=False))
         self.assertEqual(server.provider_state_service().summary("openai")["total_tokens"], 6)
 
     def test_responses_stream_request_preserves_response_too_large_contract_and_byte_count(self):
@@ -8749,7 +8749,7 @@ class CoachTests(unittest.TestCase):
             server.provider_state_service().summary("openai")["status"]["reason"],
             "provider_timeout",
         )
-        failures = [entry for entry in server.recent_log_entries() if entry.get("event") == "external_request_failed"]
+        failures = [entry for entry in server.recent_log_entries_service().list() if entry.get("event") == "external_request_failed"]
         self.assertEqual(failures[-1]["context"]["reason"], "provider_timeout")
 
     def test_openai_stream_client_uses_runtime_state_and_diagnostics(self):
@@ -9040,7 +9040,7 @@ class CoachTests(unittest.TestCase):
         )
         for handler in server.LOGGER.handlers:
             handler.flush()
-        entries = server.recent_log_entries()
+        entries = server.recent_log_entries_service().list()
         completed = [entry for entry in entries if entry.get("event") == "external_call_completed"][-1]
         self.assertEqual(result[0]["sleepScore"], 80)
         self.assertEqual(completed["context"]["service"], "garmin")

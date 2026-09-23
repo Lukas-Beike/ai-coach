@@ -37,6 +37,7 @@ from urllib.request import urlopen
 
 from backend.db import row_factory as database_row_factory
 from backend.diagnostics.history import CoachDiagnosticHistoryService
+from backend.diagnostics.logs import RecentLogEntriesService
 from backend.errors import (
     COACH_ABORTED_ERROR,
     INTERNAL_SERVER_ERROR,
@@ -5207,21 +5208,8 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
         }
 
 
-def recent_log_entries(limit: int = 200) -> list[dict[str, Any]]:
-    if not LOG_PATH.is_file():
-        return []
-    try:
-        lines = LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]
-    except OSError as exc:
-        return [{"timestamp": utc_now(), "level": "ERROR", "event": "log_read_failed", "message": REDACTOR.redact_text(str(exc))}]
-    entries: list[dict[str, Any]] = []
-    for line in lines:
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            entry = {"level": "UNKNOWN", "event": "unparsed_log", "message": line}
-        entries.append(REDACTOR.sanitize_log_value(entry))
-    return entries
+def recent_log_entries_service() -> RecentLogEntriesService:
+    return RecentLogEntriesService(LOG_PATH, REDACTOR, utc_now)
 
 
 def coach_diagnostic_history_service() -> CoachDiagnosticHistoryService:
@@ -5297,7 +5285,7 @@ def diagnostic_report() -> dict[str, Any]:
         },
         "morning_checkin": morning_checkin_state_service().state(),
         "database": {"messages": message_count, "workout_library": library_count, "workout_library_state": workout_library_sync_state_service().summary(), "competitions": competition_count, "athlete_checkins": checkin_count, "activity_feedback": activity_feedback_count, "external_calendar_events": len(external_calendar_reader().list_events())},
-        "logs": recent_log_entries(),
+        "logs": recent_log_entries_service().list(),
         "debug_capture": {**DIAGNOSTIC_CAPTURE.status(), "entries": DIAGNOSTIC_CAPTURE.entries()},
         "note": "Zugangsdaten, Tokens, Rohantworten und Athleteninhalte sind ausgeschlossen; die optionale Diagnoseaufzeichnung speichert nur technische Antwortformen und Metadaten.",
     }
@@ -6143,7 +6131,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 limit = max(1, min(int(raw_limit), 500))
             except ValueError:
                 limit = 200
-            self.send_json(200, {"entries": recent_log_entries(limit)})
+            self.send_json(200, {"entries": recent_log_entries_service().list(limit)})
         elif path == "/api/diagnostics":
             require_auth(self)
             self.send_json(200, diagnostic_report())
