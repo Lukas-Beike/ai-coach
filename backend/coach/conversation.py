@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -18,7 +19,7 @@ from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError
 from backend.providers import gemini as gemini_provider
 from backend.runtime.events import StateEventBuffer
-
+from backend.settings import SettingsService
 
 MESSAGE_ATTACHMENTS_QUERY = "SELECT attachments FROM messages WHERE id=?"
 
@@ -398,6 +399,70 @@ class GeminiRequestPayloadService:
     ) -> None:
         if persistent and isinstance(input_value, list) and parts:
             self._conversation_history.save(history)
+
+
+class GeminiConversationResponseService:
+    """Run one Gemini response through request building, transport, and normalization."""
+
+    def __init__(
+        self,
+        request_payload_service: GeminiRequestPayloadService,
+        response_normalization_service: GeminiResponseNormalizationService,
+        json_client: gemini_provider.GeminiJsonClient,
+        stream_client: gemini_provider.GeminiStreamClient,
+        settings_service: SettingsService,
+        *,
+        default_thinking_level: str,
+        default_max_output_tokens: int,
+        json_media_type: str,
+    ):
+        self._request_payload_service = request_payload_service
+        self._response_normalization_service = response_normalization_service
+        self._json_client = json_client
+        self._stream_client = stream_client
+        self._settings_service = settings_service
+        self._default_thinking_level = default_thinking_level
+        self._default_max_output_tokens = default_max_output_tokens
+        self._json_media_type = json_media_type
+
+    def request(
+        self, payload: dict[str, Any], *, cancel_event: threading.Event | None = None
+    ) -> dict[str, Any]:
+        model = str(payload.get("model") or self._settings_service.selected_model("gemini"))
+        request, history, persistent = self._request_payload_service.build(
+            payload,
+            model,
+            default_max_output_tokens=self._default_max_output_tokens,
+            default_thinking_level=self._default_thinking_level,
+            json_media_type=self._json_media_type,
+        )
+        result = self._json_client.generate(
+            model, request, operation="generate_content", cancel_event=cancel_event
+        )
+        return self._response_normalization_service.normalize(
+            payload, history, persistent, result
+        )
+
+    def stream(
+        self,
+        payload: dict[str, Any],
+        on_text_delta: Callable[[str], None],
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
+        model = str(payload.get("model") or self._settings_service.selected_model("gemini"))
+        request, history, persistent = self._request_payload_service.build(
+            payload,
+            model,
+            default_max_output_tokens=self._default_max_output_tokens,
+            default_thinking_level=self._default_thinking_level,
+            json_media_type=self._json_media_type,
+        )
+        result = self._stream_client.stream(
+            model, request, on_text_delta, cancel_event=cancel_event
+        )
+        return self._response_normalization_service.normalize(
+            payload, history, persistent, result
+        )
 
 
 def _content_has_function_response(content: dict[str, Any]) -> bool:

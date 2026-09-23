@@ -237,6 +237,7 @@ from backend.coach.conversation import (
     CoachAttachmentContextService,
     CoachMessageService,
     GeminiConversationHistoryService,
+    GeminiConversationResponseService,
     GeminiLocalChatHistoryService,
     GeminiRequestPayloadService,
     GeminiResponseNormalizationService,
@@ -1974,6 +1975,20 @@ def gemini_response_normalization_service() -> GeminiResponseNormalizationServic
     )
 
 
+def gemini_conversation_response_service() -> GeminiConversationResponseService:
+    """Compose Gemini conversation response orchestration."""
+    return GeminiConversationResponseService(
+        gemini_request_payload_service(),
+        gemini_response_normalization_service(),
+        gemini_json_client(),
+        gemini_stream_client(),
+        settings_service=SETTINGS,
+        default_thinking_level=SETTINGS.selected_thinking_level(),
+        default_max_output_tokens=COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+        json_media_type=JSON_MEDIA_TYPE,
+    )
+
+
 CHAT_PAGE_MAX = 100
 
 
@@ -2113,44 +2128,6 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
     )
 
 
-def gemini_responses_request(payload: dict[str, Any], *, cancel_event: threading.Event | None = None) -> dict[str, Any]:
-    model = str(payload.get("model") or SETTINGS.selected_model("gemini"))
-    request, history, persistent = gemini_request_payload_service().build(
-        payload, model,
-        default_max_output_tokens=COACH_DEFAULT_MAX_OUTPUT_TOKENS,
-        default_thinking_level=SETTINGS.selected_thinking_level(),
-        json_media_type=JSON_MEDIA_TYPE,
-    )
-    result = gemini_json_client().generate(
-        model,
-        request,
-        operation="generate_content",
-        cancel_event=cancel_event,
-    )
-    return gemini_response_normalization_service().normalize(payload, history, persistent, result)
-
-
-def gemini_stream_request(
-    payload: dict[str, Any], on_text_delta: Callable[[str], None],
-    cancel_event: threading.Event | None = None,
-) -> dict[str, Any]:
-    """Adapt a Responses request around the owned Gemini stream client."""
-    model = str(payload.get("model") or SETTINGS.selected_model("gemini"))
-    request_payload, history, persistent = gemini_request_payload_service().build(
-        payload, model,
-        default_max_output_tokens=COACH_DEFAULT_MAX_OUTPUT_TOKENS,
-        default_thinking_level=SETTINGS.selected_thinking_level(),
-        json_media_type=JSON_MEDIA_TYPE,
-    )
-    aggregate = gemini_stream_client().stream(
-        model,
-        request_payload,
-        on_text_delta,
-        cancel_event=cancel_event,
-    )
-    return gemini_response_normalization_service().normalize(payload, history, persistent, aggregate)
-
-
 def request_ai_provider(payload: dict[str, Any]) -> str:
     provider = str(payload.get("_ai_provider") or "").casefold()
     return provider if provider in {"openai", "gemini"} else SETTINGS.selected_ai_provider()
@@ -2159,7 +2136,7 @@ def request_ai_provider(payload: dict[str, Any]) -> str:
 def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
     """Call Responses API and retry transient locks on the persistent conversation."""
     if request_ai_provider(payload) == "gemini":
-        return gemini_responses_request(payload)
+        return gemini_conversation_response_service().request(payload)
     return openai_responses_client().responses(payload)
 
 
@@ -2173,7 +2150,7 @@ def responses_background_request(
     """Create or resume a bounded OpenAI background response and poll it."""
     if request_ai_provider(payload) == "gemini":
         _raise_chat_cancelled(cancel_event)
-        result = gemini_responses_request(payload, cancel_event=cancel_event)
+        result = gemini_conversation_response_service().request(payload, cancel_event=cancel_event)
         _raise_chat_cancelled(cancel_event)
         return result
     return openai_responses_client().background(
@@ -2197,7 +2174,7 @@ def responses_stream_request(
 ) -> dict[str, Any]:
     if request_ai_provider(payload) == "gemini":
         _raise_chat_cancelled(cancel_event)
-        result = gemini_stream_request(payload, on_text_delta, cancel_event=cancel_event)
+        result = gemini_conversation_response_service().stream(payload, on_text_delta, cancel_event)
         _raise_chat_cancelled(cancel_event)
         return result
     return openai_stream_client().stream(

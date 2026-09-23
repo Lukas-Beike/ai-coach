@@ -4555,9 +4555,9 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
         tool = {"type": "function", "name": "save_checkin", "description": "Save check-in", "parameters": {"type": "object", "properties": {"payload": {"type": "object"}}}}
         with patch.object(server, "CONFIG", config), patch.object(server.provider_http_client(), "request", side_effect=fake_http_json):
-            initial = server.gemini_responses_request({"model": "gemini-3.8-flash", "conversation": "gemini_test", "instructions": "Coach rules", "input": "Speichere meine Tagesform.", "tools": [tool], "tool_choice": "auto", "max_output_tokens": 321})
+            initial = server.gemini_conversation_response_service().request({"model": "gemini-3.8-flash", "conversation": "gemini_test", "instructions": "Coach rules", "input": "Speichere meine Tagesform.", "tools": [tool], "tool_choice": "auto", "max_output_tokens": 321})
             call = next(item for item in initial["output"] if item["type"] == "function_call")
-            followup = server.gemini_responses_request({"conversation": "gemini_test", "instructions": "Coach rules", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "tools": [tool], "tool_choice": "auto"})
+            followup = server.gemini_conversation_response_service().request({"conversation": "gemini_test", "instructions": "Coach rules", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "tools": [tool], "tool_choice": "auto"})
 
         self.assertEqual(captured[0]["url"], "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent")
         self.assertEqual(captured[0]["headers"]["x-goog-api-key"], "test-gemini-key")
@@ -4628,7 +4628,7 @@ class CoachTests(unittest.TestCase):
             patch.object(server, "urlopen", return_value=StreamResponse()),
             self.assertRaises(server.AppError) as raised,
         ):
-            server.gemini_stream_request({"model": "gemini-3.8-flash", "input": "test"}, lambda _: None)
+            server.gemini_conversation_response_service().stream({"model": "gemini-3.8-flash", "input": "test"}, lambda _: None)
 
         self.assertEqual(raised.exception.status, 502)
         self.assertEqual(raised.exception.reason, "response_too_large")
@@ -4647,10 +4647,10 @@ class CoachTests(unittest.TestCase):
 
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
         with patch.object(server, "CONFIG", config), patch.object(server.provider_http_client(), "request", side_effect=fake_http_json):
-            initial = server.gemini_responses_request({"conversation": "gemini-persist-response", "input": "Speichere meine Tagesform.", "parallel_tool_calls": False})
+            initial = server.gemini_conversation_response_service().request({"conversation": "gemini-persist-response", "input": "Speichere meine Tagesform.", "parallel_tool_calls": False})
             call = next(item for item in initial["output"] if item["type"] == "function_call")
             with self.assertRaises(server.AppError):
-                server.gemini_responses_request({"conversation": "gemini-persist-response", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "parallel_tool_calls": False})
+                server.gemini_conversation_response_service().request({"conversation": "gemini-persist-response", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "parallel_tool_calls": False})
 
         history = json.loads(server.get_kv("gemini_conversation_history") or "[]")
         self.assertEqual(history[-2]["parts"][0]["functionCall"]["name"], "save_checkin")
@@ -4779,7 +4779,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
         with patch.object(server, "CONFIG", config), patch.object(server.provider_http_client(), "request", return_value=response):
             with self.assertRaises(server.AppError) as raised:
-                server.gemini_responses_request({"conversation": "gemini-single-tool", "input": "Aktualisiere meine Daten.", "parallel_tool_calls": False})
+                server.gemini_conversation_response_service().request({"conversation": "gemini-single-tool", "input": "Aktualisiere meine Daten.", "parallel_tool_calls": False})
 
         self.assertEqual(raised.exception.reason, "parallel_tool_calls_unsupported")
         self.assertEqual(json.loads(server.get_kv("gemini_conversation_history") or "[]"), [])
@@ -4823,9 +4823,10 @@ class CoachTests(unittest.TestCase):
     def test_gemini_turn_uses_its_captured_provider_and_reasoning_level(self):
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
         payload = {"_ai_provider": "gemini", "model": "gemini-3.8-flash", "input": "Prüfe die Form.", "reasoning": {"effort": "low"}}
-        with patch.object(server, "CONFIG", config), patch.object(server, "gemini_responses_request", return_value={"output_text": "ok"}) as gemini, patch.object(server.openai_provider.OpenAIResponsesClient, "responses") as openai:
+        with patch.object(server, "CONFIG", config), patch.object(server, "gemini_conversation_response_service") as service_factory, patch.object(server.openai_provider.OpenAIResponsesClient, "responses") as openai:
+            service_factory.return_value.request.return_value = {"output_text": "ok"}
             self.assertEqual(server.responses_request(payload)["output_text"], "ok")
-        gemini.assert_called_once_with(payload)
+        service_factory.return_value.request.assert_called_once_with(payload)
         openai.assert_not_called()
         request, _, _ = build_gemini_request_payload(server, payload, "gemini-3.8-flash")
         self.assertEqual(request["generationConfig"]["thinkingConfig"], {"thinkingLevel": "low"})

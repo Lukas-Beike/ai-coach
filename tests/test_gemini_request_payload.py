@@ -3,11 +3,12 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from backend.coach import conversation
 from backend.coach.conversation import (
     GeminiConversationHistoryService,
+    GeminiConversationResponseService,
     GeminiLocalChatHistoryService,
     GeminiRequestPayloadService,
 )
@@ -173,6 +174,64 @@ class GeminiRequestPayloadServiceTests(unittest.TestCase):
         self.assertEqual(observed["history"], history)
         self.assertEqual(request["contents"], history)
         self.assertEqual(json.loads(self.get_value("gemini_conversation_history")), history)
+
+
+class GeminiConversationResponseServiceTests(unittest.TestCase):
+    def test_model_setting_is_read_only_when_request_model_is_missing(self):
+        payload_service = Mock()
+        payload_service.build.return_value = ({"contents": []}, [], False)
+        normalization_service = Mock()
+        normalization_service.normalize.side_effect = (
+            lambda _payload, _history, _persistent, result: result
+        )
+        json_client = Mock()
+        json_client.generate.return_value = {"path": "json"}
+        stream_client = Mock()
+        stream_client.stream.return_value = {"path": "stream"}
+        settings_service = Mock()
+        settings_service.selected_model.return_value = "configured-gemini"
+        service = GeminiConversationResponseService(
+            payload_service,
+            normalization_service,
+            json_client,
+            stream_client,
+            settings_service,
+            default_thinking_level="medium",
+            default_max_output_tokens=6000,
+            json_media_type="application/json",
+        )
+
+        self.assertEqual(service.request({"model": "explicit-gemini"}), {"path": "json"})
+        settings_service.selected_model.assert_not_called()
+        json_client.generate.assert_called_once_with(
+            "explicit-gemini",
+            {"contents": []},
+            operation="generate_content",
+            cancel_event=None,
+        )
+
+        settings_service.reset_mock()
+        json_client.reset_mock()
+        self.assertEqual(service.request({}), {"path": "json"})
+        settings_service.selected_model.assert_called_once_with("gemini")
+        json_client.generate.assert_called_once_with(
+            "configured-gemini",
+            {"contents": []},
+            operation="generate_content",
+            cancel_event=None,
+        )
+
+        settings_service.reset_mock()
+        self.assertEqual(service.stream({"model": "explicit-gemini"}, lambda _delta: None), {"path": "stream"})
+        settings_service.selected_model.assert_not_called()
+        stream_client.stream.assert_called_once()
+        self.assertEqual(stream_client.stream.call_args.args[:2], ("explicit-gemini", {"contents": []}))
+
+        settings_service.reset_mock()
+        stream_client.reset_mock()
+        self.assertEqual(service.stream({}, lambda _delta: None), {"path": "stream"})
+        settings_service.selected_model.assert_called_once_with("gemini")
+        self.assertEqual(stream_client.stream.call_args.args[:2], ("configured-gemini", {"contents": []}))
 
 
 if __name__ == "__main__":
