@@ -4184,3 +4184,43 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   der integrierten Sonar-Patches **PASS**. Neuer Sonar-Lauf steht aus.
   Rest-Risiken:
   komplexe Fachmethoden und Konstruktoren, offener Review-Pflichtcheck.
+
+## PR #706 — zweite Sonar-Runde (integrierter Zwischenstand)
+
+- Auf `b495ffe` sind die vier Test-Shards, Container-Unit-Tests und der
+  Codex-Pflichtcheck **PASS**. SonarCloud meldet nun 26 statt 46 neue
+  Befunde; Browser-Check und übrige technische Gates waren zuletzt
+  grün. Der PR bleibt **OPEN/BLOCKED**, Auto-Merge aus.
+- Root-Diff `51d0481`: ungenutzten Parameter aus `SyncStateRepository`
+  und allen Aufrufern entfernt; HTTP-Fehlerdetails nach Provider
+  abgegrenzt, ohne Status-/Redaktions-/Retry-Vertrag zu ändern.
+  7 Sync-State-, 2 Server- und 109 Provider-Tests, Ruff/Compile/Diff:
+  **PASS**. Code-Review **PASS**.
+- Worker-Diffs `bfcd3bf` (Body-Battery und Planersatz), `a8a2bb1`
+  (Plan-Auswahl und Remote-missing-CAS), `bb4cce5` (Restore-Sichtbarkeit)
+  und `8574135` (Gemini-Historie/Normalisierung) wurden am tatsächlichen
+  Code und Diff von Root geprüft: **PASS**. Sequenziell integriert als
+  `8e554b7`, `6e4ad45`, `356bc83`, `cecad30`. Die zugehörigen
+  46, 21, 55 und 74 fokussierten Tests sowie Ruff im geänderten Umfang
+  **PASS**; bestehende Ruff-Funde in unveränderten Conversation-Zeilen
+  sind dokumentiert, nicht unterdrückt oder als behoben ausgegeben.
+- Root-Diff `c4611a2`: Sync-Job-Normalisierung, Ergebniszuordnung und
+  Hash-Erzeugung innerhalb von `backend/sync/jobs.py` fachlich getrennt;
+  dieselbe DB-Transaktion, Redaction, Retry-/Status- und JSON-Fehlerpfade
+  bleiben erhalten. 34 Job-/Outcome-Tests, Ruff, Compile und Diff **PASS**;
+  Root-Code-Review **PASS**. Die Gesamtsuite und neue Sonar-Analyse
+  stehen für diesen erweiterten Stand noch aus.
+- Worker-Diff `195eb73` der täglichen Planungskontext-Projektion von Root
+  am tatsächlichen Code geprüft und sequenziell als `d5bd759` integriert:
+  **PASS**. Öffentliche Signatur, Kalenderfenster, Feldselektion,
+  Sortierung und Bereinigung bleiben unverändert; die neue Regression
+  erhält instruction-artigen Terminnamen als wörtliche Daten. 21 direkte
+  Planungs-/Kalendertests und Diff-Check **PASS**. Ein erster lokaler
+  Testaufruf enthielt zwei nicht existierende Modulnamen und wurde mit
+  den tatsächlichen Testmodulen erfolgreich wiederholt. Gesamtsuite
+  für den integrierten Stand **PASS**: 2.242 Tests, 12 Skips in
+  206,184 s. Der Root hat den Gesamt-Diff `b495ffe..d5bd759`
+  (14 Code-/Testdateien, 512 Einfügungen, 324 Entfernungen) und dessen
+  Konfliktfreiheit erneut geprüft: **PASS**. Sonar-Analyse auf dem
+  veröffentlichten Head steht noch aus; dieser Review-PASS allein
+  autorisiert bei rotem Pflichtcheck keinen Merge.
