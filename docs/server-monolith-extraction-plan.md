@@ -601,7 +601,8 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     Handler behält ausschließlich Transport, Body-Lesen und Antwort.
 - [ ] Handler mit den konkret benötigten Services verbinden; keine Weitergabe
   des `server`-Moduls als Pseudo-Servicecontainer.
-- [ ] `CoachHTTPServer` dem HTTP-Bereich zuordnen.
+- [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
+  und Queue-Vertrag bleiben unverändert.
 
 Abnahme: Endpunkte, Statuscodes, JSON-Formate, Cookies, SSE-Events und statische
 Assets bestehen die Vertrags-/Browserprüfungen. HTTP enthält keine eigene

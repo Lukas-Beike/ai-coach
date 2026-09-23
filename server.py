@@ -25,7 +25,7 @@ from contextlib import nullcontext, contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from functools import partial, wraps
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any, Callable
@@ -135,6 +135,7 @@ from backend.providers import state as provider_state
 from backend.providers import weather as weather_provider
 from backend.providers.garmin import GarminClientFactory
 from backend.providers.garmin_morning import fetch_morning_body_battery
+from backend.http_api import server as http_server
 from backend.http_api.state_versions import StateVersionService
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.state_prelude import (
@@ -6263,11 +6264,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.log_client_disconnect()
 
 
-class CoachHTTPServer(ThreadingHTTPServer):
-    daemon_threads = True
-    request_queue_size = 32
-
-
 def daily_sync_loop_service() -> DailySyncLoop:
     return DailySyncLoop(
         daily_sync_scheduler(),
@@ -6328,7 +6324,7 @@ def main() -> None:
     initialise_database()
     sync_job_queue_service().resume_interrupted()
     resume_interrupted_coach_jobs()
-    server = CoachHTTPServer(("0.0.0.0", CONFIG.port), RequestHandler)
+    server = http_server.CoachHTTPServer(("0.0.0.0", CONFIG.port), RequestHandler)
     server.allow_reuse_address = True
     sync_job_worker().start()
     start_coach_job_worker()
