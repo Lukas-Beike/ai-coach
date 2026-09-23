@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import inspect
 import json
 import sqlite3
 import unittest
@@ -321,12 +322,7 @@ class LocalPlanCreationServiceTests(unittest.TestCase):
         self.assertEqual(self.revisions.service.read(self.db), 0)
 
     def test_ast_forbids_server_imports_and_callback_bundles(self) -> None:
-        source = (
-            Path(__file__).parents[1]
-            / "backend"
-            / "planning"
-            / "local_plan_creation_service.py"
-        )
+        source = Path(inspect.getfile(LocalTrainingPlanCreationService))
         tree = ast.parse(source.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):

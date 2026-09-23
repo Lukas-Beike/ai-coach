@@ -1,4 +1,5 @@
 import ast
+import inspect
 import json
 import unittest
 from contextlib import contextmanager
@@ -269,12 +270,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
         )
 
     def test_module_has_explicit_dependencies_and_no_server_or_callback_bundle(self):
-        source_path = (
-            Path(__file__).parents[1]
-            / "backend"
-            / "planning"
-            / "daily_context_service.py"
-        )
+        source_path = Path(inspect.getfile(DailyPlanningContextService))
         tree = ast.parse(source_path.read_text(encoding="utf-8"))
         imports = {
             node.module

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import inspect
 import json
 import sqlite3
 import unittest
@@ -540,12 +541,7 @@ class ReplacementServiceTest(unittest.TestCase):
                 self.assertEqual(self.snapshot(), before)
 
     def test_service_has_no_server_provider_or_event_imports(self):
-        source_path = (
-            Path(__file__).parents[1]
-            / "backend"
-            / "planning"
-            / "replacement_service.py"
-        )
+        source_path = Path(inspect.getfile(StructuredTrainingPlanReplacementService))
         tree = ast.parse(source_path.read_text(encoding="utf-8"))
         modules = {
             node.module if isinstance(node, ast.ImportFrom) else alias.name

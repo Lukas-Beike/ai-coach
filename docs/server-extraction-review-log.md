@@ -4142,3 +4142,21 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   gegenüber dem getesteten Stand unverändert; `git diff --cached --check`,
   Inventar-Check und Compile **PASS**. PR, CI, Codex-Review und Merge
   sind noch offen.
+
+## PR #706 — CI-Folgeprüfung (Root)
+
+- GitHub-Head `d0ee5f8`: vier Test-Shards, CodeQL, Syntax, SBOM und
+  Conventional-Commit-Gate **PASS**. Container-Unit-Tests **FAIL** mit
+  genau drei `FileNotFoundError`-Befunden: AST-Architekturtests suchten
+  Backend-Quelltext relativ zu `/review/tests`, während das Image die
+  importierten Module unter `/app/backend` enthält. Root stellte nur
+  die Quellpfad-Auflösung der drei Tests auf `inspect.getfile` der
+  tatsächlich importierten Serviceklasse um; AST-Prüfungen und
+  Assertions bleiben unverändert. 26 gezielte lokale Tests und die
+  exakt nachgestellte read-only Container-Suite (2.242 Tests,
+  10 Skips) **PASS**. Code-Diff **PASS**; CI-Neulauf ausstehend.
+- SonarCloud Code Analysis **FAIL** mit 46 neuen Code-Smells, darunter
+  Komplexität, zu breite Konstruktoren und duplizierte Literale in
+  ausgelagerten Modulen und Inventarskript. Keine Regel oder Prüfung
+  wird umgangen; Befunde werden fachlich geprüft und in unabhängigen
+  Schreibbereichen korrigiert. Auto-Merge bleibt deaktiviert.
