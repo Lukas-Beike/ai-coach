@@ -289,6 +289,7 @@ from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COA
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.coach.clarification import CoachClarificationService
+from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
 from backend.coach.turn_failures import (
@@ -1693,6 +1694,17 @@ def structured_training_change_service() -> planning_changes.StructuredTrainingC
     )
 
 
+def coach_training_patch_service() -> CoachTrainingPatchService:
+    """Compose the atomic local Coach training-patch owner."""
+    return CoachTrainingPatchService(
+        database_manager(), DB_LOCK, structured_training_change_validator(),
+        structured_training_change_service(), local_plan_creation_service(),
+        calendar_conflict_service(), KEY_VALUE_REPOSITORY,
+        runtime_events.STATE_EVENT_BUFFER, lambda: local_now().date(),
+        COACH_TRAINING_CHANGE_LIMIT,
+    )
+
+
 def structured_training_plan_replacement_service() -> StructuredTrainingPlanReplacementService:
     """Compose atomic structured training-plan replacement."""
     return StructuredTrainingPlanReplacementService(
@@ -2406,68 +2418,6 @@ def coach_tool_dispatch_service() -> CoachToolDispatchService:
 
 
 
-def _validate_training_patch_schedule(
-    changes: list[dict[str, Any]], workouts: list[dict[str, Any]], ids: list[str], db: Any,
-) -> None:
-    """Reject patch combinations that would overlap local planned dates."""
-    structured_training_change_validator().validate_batch(changes, db)
-    final_dates = set()
-    for change in changes:
-        if change.get("action") not in {"delete", "archive"}:
-            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (change["local_id"],)).fetchone()
-            final_dates.add(str(change.get("date") or json.loads(row["payload"])["date"])[:10])
-    for workout in workouts:
-        day = workout["date"][:10]
-        if day in final_dates or calendar_conflict_service().conflicts(
-            {"date": day}, set(ids)
-        ):
-            raise AppError(409, f"Für den {day} besteht ein Kalenderkonflikt.", reason="plan_date_conflict")
-        final_dates.add(day)
-
-
-def _store_training_patch_constraints(
-    created: list[dict[str, Any]], ids: list[str], constraints: list[str], db: Any,
-) -> None:
-    """Attach the approved request constraints to every affected plan."""
-    plan_ids = {str(item.get("plan_id") or "") for item in created}
-    for local_id in ids:
-        row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
-        plan_ids.add(str(json.loads(row["payload"]).get("plan_id") or ""))
-    if constraints:
-        for plan_id in plan_ids - {""}:
-            set_kv(planning_training_plans.COACH_PLAN_CONSTRAINTS_PREFIX + plan_id, json.dumps(constraints, ensure_ascii=False), db)
-
-
-def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
-    """Validate the final schedule, then commit all related changes together."""
-    changes, raw_workouts = arguments.get("changes", []), arguments.get("workouts", [])
-    if not isinstance(changes, list) or not isinstance(raw_workouts, list) or not 1 <= len(changes) + len(raw_workouts) <= COACH_TRAINING_CHANGE_LIMIT:
-        raise AppError(400, "Der Änderungssatz ist leer oder zu groß.", reason="change_limit")
-    workouts = [
-        planning_workouts.normalize_workout(item, today=local_now().date())
-        for item in raw_workouts
-    ]
-    if workouts:
-        require_coach_scope(action, "local_plan")
-    ids = [str(item.get("local_id") or "") for item in changes]
-    if len(set(ids)) != len(ids):
-        raise AppError(400, "Eine Einheit darf nur einmal im Änderungssatz vorkommen.", reason="invalid_change")
-    with DB_LOCK, database() as db:
-        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
-        if type(arguments.get("expected_revision")) is not int or arguments["expected_revision"] != revision:
-            raise AppError(409, "Der Plan wurde inzwischen geändert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
-        _validate_training_patch_schedule(changes, workouts, ids, db)
-        changed = structured_training_change_service().apply_in_db(db, arguments, require_revision=True) if changes else {"changes": []}
-        plan_name = str(arguments.get("plan_name") or ("Coach-Plan" if action["request"]["constraints"] else ""))
-        created = local_plan_creation_service().save(
-            workouts, plan_name, str(arguments.get("goal") or ""), db=db,
-        ) if workouts else []
-        _store_training_patch_constraints(created, ids, action["request"]["constraints"], db)
-        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
-    runtime_events.STATE_EVENT_BUFFER.publish("planning", {"status": "changed"})
-    return {"ok": True, "status": "applied", "planning_revision": revision, "changes": changed["changes"], "library_entry_ids": [item["id"] for item in created]}
-
-
 def _append_template_command_scope(intent: dict[str, Any], templates: Any) -> None:
     if not isinstance(templates, list):
         raise AppError(400, "Vorlagenaenderungen benoetigen eine Liste.", reason="template_limit")
@@ -3084,7 +3034,7 @@ def _execute_structured_coach_tool(
             set_kv("coach_pending_request", "null")
             return {"ok": True, "status": "cancelled"}
         if name == "apply_training_patch":
-            return _apply_training_patch(arguments, action)
+            return coach_training_patch_service().apply(arguments, action)
         if name == "inspect_activity_duplicates":
             duplicate = latest_wahoo_garmin_duplicate(
                 sync_state_repository().latest_snapshot() or {}

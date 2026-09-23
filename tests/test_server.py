@@ -6682,7 +6682,7 @@ class CoachTests(unittest.TestCase):
             side_effect=RuntimeError("creation failed"),
         ):
             with self.assertRaises(RuntimeError):
-                server._apply_training_patch(arguments, {
+                server.coach_training_patch_service().apply(arguments, {
                     "authorization_scope": ["local_plan"],
                     "request": {"constraints": []},
                 })
