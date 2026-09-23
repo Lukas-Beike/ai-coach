@@ -1012,7 +1012,10 @@ def garmin_sync_service() -> GarminSyncService:
     state_service = garmin_sync_state_service()
     return GarminSyncService(
         GarminSyncSource(
-            garmin_fixture_loader(), garmin_remote_reader(), SYNC_EARLIEST_DATE
+            garmin_fixture_loader(),
+            garmin_remote_reader(),
+            SYNC_EARLIEST_DATE,
+            lambda: local_now().date(),
         ),
         garmin_payload_service(),
         state_service,

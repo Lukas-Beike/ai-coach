@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import unittest
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import date
@@ -166,6 +167,7 @@ class GarminSyncServiceTests(unittest.TestCase):
         state: _StateService | None = None,
         lock: threading.Lock | None = None,
         wait_seconds: float = 0.1,
+        local_today: Callable[[], date] | None = None,
     ):
         self.database = _Database()
         self.key_values = _KeyValues()
@@ -184,7 +186,12 @@ class GarminSyncServiceTests(unittest.TestCase):
             Mock(),
         )
         return GarminSyncService(
-            GarminSyncSource(self.fixture, self.remote, date(2000, 1, 1)),
+            GarminSyncSource(
+                self.fixture,
+                self.remote,
+                date(2000, 1, 1),
+                local_today or (lambda: date(2026, 9, 20)),
+            ),
             self.payload,
             self.state,
             self.writer,
@@ -242,6 +249,42 @@ class GarminSyncServiceTests(unittest.TestCase):
             ),
         )
         self.assertEqual(self.key_values.values["garmin_sync_status"], "")
+
+    def test_fixture_fallback_end_uses_local_today_after_payload_preparation(self):
+        for fixture_payload in (
+            {
+                "synced_at": "2026-08-01T10:00:00+00:00",
+                "end": "2026-08-01",
+                "activities": [],
+            },
+            {"synced_at": "2026-08-01T10:00:00+00:00", "activities": []},
+        ):
+            with self.subTest(fixture_payload=fixture_payload):
+                sequence = []
+
+                class TrackingPayload(_PayloadService):
+                    def __init__(self, events):
+                        super().__init__()
+                        self.events = events
+
+                    def prepare_fixture(self, payload):
+                        self.events.append("prepare")
+                        return payload
+
+                def local_today(events=sequence):
+                    events.append("local_today")
+                    return date(2026, 9, 20)
+
+                service = self.make_service(
+                    fixture=_FixtureLoader(Path("fixture.json"), fixture_payload),
+                    payload=TrackingPayload(sequence),
+                    local_today=local_today,
+                )
+
+                service.sync()
+
+                self.assertEqual(self.state.persisted[2], date(2026, 9, 20))
+                self.assertEqual(sequence, ["prepare", "local_today"])
 
     def test_unavailable_and_unconfigured_remote_persist_configuration_error(self):
         for remote, expected in (

@@ -181,10 +181,12 @@ class GarminSyncSource:
         fixture_loader: Any,
         remote_reader: GarminRemoteReader,
         earliest_date: date,
+        local_today: Callable[[], date],
     ) -> None:
         self._fixture_loader = fixture_loader
         self._remote_reader = remote_reader
         self._earliest_date = earliest_date
+        self._local_today = local_today
 
     def available(self) -> bool:
         return self._fixture_loader.path() is not None or self._remote_reader.available()
@@ -202,17 +204,23 @@ class GarminSyncSource:
         *,
         status: Callable[[str], None],
         cancel_event: threading.Event | None,
-    ) -> tuple[dict[str, Any], date, str | None, str]:
+    ) -> tuple[dict[str, Any], list[tuple[date, date]] | None, str | None, str]:
         if self.fixture_enabled():
             payload = self._fixture_loader.load(days)
-            fallback_end = date.fromisoformat(
-                str(payload.get("end") or payload["synced_at"])[:10]
-            )
-            return payload, fallback_end, "fixture", self._earliest_date.isoformat()
+            return payload, None, "fixture", self._earliest_date.isoformat()
         payload, windows = self._remote_reader.fetch(
             days, end_date, status=status, cancel_event=cancel_event
         )
-        return payload, windows[-1][1], None, windows[0][0].isoformat()
+        return payload, windows, None, windows[0][0].isoformat()
+
+    def fallback_end(
+        self, source: str | None, windows: list[tuple[date, date]] | None
+    ) -> date:
+        if source == "fixture":
+            return self._local_today()
+        if windows is None:
+            raise ValueError("Remote Garmin sync is missing its date windows.")
+        return windows[-1][1]
 
 
 class GarminSyncCoordination:
@@ -412,7 +420,7 @@ class GarminSyncService:
     ) -> dict[str, Any]:
         self._lifecycle_state.record_sync_started()
         self._set_status(operation_id, "fetching", 10, "Garmin-Daten werden gelesen…")
-        payload, fallback_end, source, historical_cursor = self._source.read(
+        payload, windows, source, historical_cursor = self._source.read(
             days,
             end_date,
             status=self._lifecycle_state.set_sync_status,
@@ -424,6 +432,7 @@ class GarminSyncService:
             if source == "fixture"
             else self._payload_service.prepare_remote(payload)
         )
+        fallback_end = self._source.fallback_end(source, windows)
         self._raise_if_cancelled(cancel_event)
         self._set_status(
             operation_id, "storing", 75, "Lokale Garmin-Daten werden aktualisiert…"
