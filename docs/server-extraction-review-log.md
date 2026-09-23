@@ -4603,3 +4603,18 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Gesamtsuite auf `2d27cd3b` **PASS**: 2.279 Tests, 10 Skips in
   19,993 s. CI/Sonar dieses PR-Stands stehen noch aus; Diagnosebericht,
   Capture und Privacy-/Backup-Pfade bleiben P9-Risiken.
+
+## P10 — erneuter Integrationsstand nach PR #707
+
+- Vor Veröffentlichung `origin/develop` mit bestätigtem PR-#707-Merge
+  `ff0bd755db41c1a58bfce8333e3fbe4f2cc835ac` in den P10-Branch
+  übernommen (`85b52884`). Überschneidungen im Review-Protokoll
+  wurden unter Erhalt beider Befunde aufgelöst; das Inventar wurde aus
+  dem kombinierten Code neu erzeugt. Root-Review von Server-Aufrufern,
+  Kalender-UOW, Logprojektion und tatsächlichem Merge-Diff **PASS**.
+- Sieben kombinierte fokussierte Tests, vier Architekturtests, Ruff der
+  neuen Module/Tests, Compile, Inventar- und Diff-Check **PASS**.
+  Neu gebautes Read-only-Container-Image: vollständige Suite **PASS**
+  mit 2.280 Tests und 10 Skips in 21,223 s. Inventar:
+  `server.py` 6.849 Zeilen, 319 Definitionen; P9 und P10 bleiben
+  fachlich offen. CI/Sonar des folgenden PR-Heads stehen noch aus.
