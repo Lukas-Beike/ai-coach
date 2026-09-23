@@ -298,13 +298,6 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
                 finally:
                     server.database_manager().close()
 
-    def test_failed_morning_answer_is_not_marked_ready(self):
-        server.MORNING_CHECKIN_LOCK.acquire()
-        with patch.object(server, "sync_intervals", return_value={"status": "ok"}), patch.object(server, "chat_with_coach", return_value={"status": "failed"}), patch.object(server, "garmin_fixture_path", return_value=None):
-            server.run_morning_checkin("2026-09-07")
-        self.assertEqual(server.get_kv("morning_checkin_status"), "error")
-        self.assertNotEqual(server.get_kv("morning_checkin_date"), "2026-09-07")
-
     def test_chat_reset_changes_history_generation(self):
         before = server.paged_chat_history()["generation"]
         server.reset_coach_chat()

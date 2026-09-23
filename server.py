@@ -91,6 +91,7 @@ from backend.sync.windows import split_date_windows
 from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.status import persist_sync_operation_state, project_sync_status
 from backend.sync.daily import daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
+from backend.sync.daily import mark_daily_sync_attempt as mark_daily_sync_attempt_value
 from backend.sync.refresh import cleanup_refresh_history, create_refresh_record, finish_refresh_record
 from backend.sync.snapshots import latest_snapshot as latest_snapshot_in_transaction, save_snapshot as save_snapshot_in_transaction
 from backend.sync.reconcile import ReconcileDependencies, persist_planned_unit_state
@@ -279,7 +280,6 @@ COACH_JOB_WAKE = threading.Event()
 COACH_JOB_STOP = threading.Event()
 COACH_JOB_WORKER: threading.Thread | None = None
 COACH_JOB_CANCEL_EVENTS: dict[str, threading.Event] = {}
-MORNING_CHECKIN_LOCK = threading.Lock()
 GARMIN_LOCK = threading.Lock()
 EXTERNAL_CALENDAR_LOCK = threading.Lock()
 WEATHER_LOCK = threading.Lock()
@@ -1515,6 +1515,8 @@ def enqueue_sync_job(
     SYNC_JOB_WAKE.set()
     result = sync_job_state(job_id)
     _publish_created_sync_job(job_id, result)
+    if requested in {"startup", "scheduler"} and envelope["type"] == "refresh" and envelope["provider"] in {"intervals", "garmin", "calendar"}:
+        mark_daily_sync_attempt(envelope["provider"])
     return result
 
 
@@ -3856,7 +3858,8 @@ def _persist_garmin_sync_payload(
     complete = garmin_collection_complete(payload)
     set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     set_kv("last_garmin_sync_at", synced_at)
-    mark_daily_sync("garmin")
+    if end_date is None:
+        mark_daily_sync("garmin")
     set_kv("last_garmin_error", "" if not payload.get("errors") else json.dumps(payload["errors"], ensure_ascii=False))
     if complete:
         update_provider_sync_cursor("garmin", "data", str(payload.get("end") or fallback_end.isoformat())[:10], synced_at)
@@ -11172,15 +11175,13 @@ def _execute_intervals_sync(
     snapshot = IntervalsClient().fetch_snapshot(**fetch_kwargs)
     set_sync_operation_state(operation_id, "running", "storing", 75, "Lokale Trainingsdaten werden aktualisiert…")
     snapshot, planned_import = _store_intervals_snapshot(snapshot, activity_days, end_date)
-    mark_daily_sync("intervals")
+    if end_date is None:
+        mark_daily_sync("intervals")
     # Seed the local template catalog from the provider once. This is a
     # read-only, idempotent import: existing local templates are preserved
     # and pending local entries are still pushed only by the dedicated,
     # explicitly confirmed library action.
     library_imported, library_error, library_count = _seed_intervals_workout_library(reason, cancel_event)
-    # A successful full sync supersedes a transient morning-check-in
-    # network error that may otherwise keep the global status in warning.
-    set_kv("morning_checkin_error", "")
     sync_window, pagination = _record_intervals_sync_window(activity_days, end_date, snapshot)
     set_sync_operation_state(operation_id, "completed", "complete", 100, "Intervals.icu-Synchronisierung abgeschlossen.")
     set_kv("sync_operation_finished_at", utc_now())
@@ -17600,7 +17601,6 @@ def _persist_completed_morning_coach_job(client_turn_id: str) -> dict[str, Any] 
     with DB_LOCK, database() as db:
         set_kv("morning_checkin_date", local_now().date().isoformat(), db)
         set_kv("morning_checkin_status", "ready", db)
-        set_kv("morning_checkin_error", "", db)
     quick_actions = coach_quick_actions_state()
     with DB_LOCK, database() as db:
         row = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
@@ -17625,7 +17625,7 @@ def _execute_background_coach_job(
         worker_phase["phase"] = "preparing"
     _merge_coach_command_receipt(client_turn_id, worker_phase)
     if receipt.get("request_kind") == "morning_checkin":
-        refresh_morning_body_battery(local_now().date())
+        _prepare_manual_morning_checkin()
     result = chat_with_coach(
         message,
         on_text_delta=_background_coach_delta_callback(operation_id, receipt, stream_attached),
@@ -17753,9 +17753,24 @@ def mark_daily_sync(source: str, now: datetime | None = None) -> None:
     )
 
 
-def morning_checkin_date() -> str | None:
-    now = local_now()
-    return now.date().isoformat() if now.hour >= 5 else None
+def mark_daily_sync_attempt(source: str, now: datetime | None = None) -> None:
+    mark_daily_sync_attempt_value(source, now or local_now(), set_value=set_kv)
+
+
+def _prepare_manual_morning_checkin() -> None:
+    checkin_date = local_now().date()
+    configured = garmin_fixture_path() is not None or (
+        Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())
+    )
+    if not configured:
+        return
+    try:
+        sync_garmin(days=GARMIN_AUTOMATIC_SYNC_DAYS, reason="Morgen-Check-in", wait_for_existing=True)
+    except Exception:
+        LOGGER.warning("Morning Garmin synchronization failed", extra={"event": "morning_garmin_sync_failed"}, exc_info=True)
+    if not garmin_sleep_ready_for_checkin(checkin_date):
+        raise AppError(503, "Der Morgen-Check-in wartet auf Garmins Schlafdaten für heute.", reason="garmin_sleep_not_ready")
+    refresh_morning_body_battery(checkin_date)
 
 
 def morning_checkin_state() -> dict[str, Any]:
@@ -17764,173 +17779,7 @@ def morning_checkin_state() -> dict[str, Any]:
     status = get_kv("morning_checkin_status") or "waiting"
     if status == "ready" and not current:
         status = "waiting"
-    return {"status": status, "running": get_kv("morning_checkin_running") == "1",
-            "date": completed_date, "current_for_today": current,
-            "last_error": REDACTOR.redact_text(get_kv("morning_checkin_error") or "") or None}
-
-
-MORNING_CHECKIN_PROMPT = (
-    "Gib mir den heutigen Morgen-Check-in auf Basis des frisch aktualisierten Snapshots. "
-    "Bewerte Trainingsbelastung, Schlaf, Erholung und geplante Einheiten. Empfiehl das heutige Vorgehen "
-    "und nenne mögliche Anpassungen nur als Vorschlag; nimm keine Änderungen an Einheiten vor. "
-    "Stelle am Ende zusätzlich eine kurze, optionale Rückfrage: Wie ist die Tagesform "
-    "(zum Beispiel Muskelkater, schwere Beine, Müdigkeit oder ungewöhnliche Erschöpfung) und liegt eine Krankheit "
-    "oder ein Krankheitssymptom vor? Die Angaben sollen im Tages-Check-in gespeichert werden können. "
-    "Die Rückfrage soll keine Diagnose nahelegen und darf unbeantwortet bleiben. Eine gemeldete Krankheit "
-    "ist für die Trainingsplanung eine wichtige Einschränkung. Wenn Krankheit gemeldet ist, gib zusätzlich "
-    "eine vorsichtige Prognose für die notwendige Sportpause in ganzen Tagen als Vorschlag aus und stelle klar, "
-    "dass der Athlet sie bestätigen muss."
-)
-MORNING_GARMIN_SYNC_DAYS = 2
-
-
-def _start_morning_checkin() -> None:
-    set_kv("morning_checkin_running", "1")
-    set_kv("morning_checkin_status", "working")
-    set_kv("morning_checkin_error", "")
-    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
-
-
-def _morning_checkin_garmin_ready(checkin_day: date) -> bool | None:
-    configured = garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
-    if not configured:
-        return False
-    try:
-        sync_garmin(days=MORNING_GARMIN_SYNC_DAYS, reason="Morgen-Check-in", wait_for_existing=True)
-    except Exception:
-        LOGGER.warning("Morning Garmin synchronization failed", extra={"event": "morning_garmin_sync_failed"}, exc_info=True)
-    if garmin_sleep_ready_for_checkin(checkin_day):
-        return True
-    set_kv("morning_checkin_status", "waiting")
-    if not get_kv("morning_checkin_attempt_count"):
-        set_kv("morning_checkin_attempt_count", "0")
-    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
-    return None
-
-
-def _morning_checkin_attempt() -> int:
-    attempt = int(get_kv("morning_checkin_attempt_count") or 0) + 1
-    set_kv("morning_checkin_attempt_count", str(attempt))
-    return attempt
-
-
-def _wait_for_morning_intervals_sync(sync_result: dict[str, Any]) -> None:
-    if sync_result.get("status") != "already_running":
-        return
-    deadline = time.monotonic() + 120
-    while get_kv("sync_running") == "1" and time.monotonic() < deadline:
-        time.sleep(1)
-
-
-def _complete_morning_checkin(checkin_date: str, attempt: int) -> None:
-    result = chat_with_coach(
-        MORNING_CHECKIN_PROMPT, allow_mutations=False,
-        client_turn_id=f"morning:{checkin_date}" + (f":attempt:{attempt}" if attempt > 1 else ""),
-    )
-    if result.get("status") != "completed" or not result.get("message") or result.get("awaiting_clarification"):
-        raise AppError(502, "Der Morgen-Check-in konnte nicht abgeschlossen werden.")
-    set_kv("morning_checkin_date", checkin_date)
-    set_kv("morning_checkin_status", "ready")
-
-
-@runtime_maintenance.maintenance_operation
-def run_morning_checkin(checkin_date: str) -> None:
-    try:
-        _start_morning_checkin()
-        checkin_day = date.fromisoformat(checkin_date)
-        garmin_ready = _morning_checkin_garmin_ready(checkin_day)
-        if garmin_ready is None:
-            return
-        attempt = _morning_checkin_attempt()
-        if garmin_ready:
-            refresh_morning_body_battery(date.fromisoformat(checkin_date))
-        sync_result = sync_intervals(
-            "Morgen-Check-in",
-            activity_days=sync_period("intervals"),
-            wait_for_performance=True,
-        )
-        _wait_for_morning_intervals_sync(sync_result)
-        _complete_morning_checkin(checkin_date, attempt)
-    except Exception as exc:
-        error = REDACTOR.redact_text(str(exc))[:1000]
-        set_kv("morning_checkin_status", "error")
-        set_kv("morning_checkin_error", error)
-        runtime_events.STATE_EVENT_BUFFER.publish("coach", {"status": "changed"})
-        LOGGER.exception(
-            "Morning check-in failed",
-            extra={"event": "morning_checkin_failed", "context": {"date": checkin_date}},
-            exc_info=True,
-        )
-    finally:
-        set_kv("morning_checkin_running", "0")
-        MORNING_CHECKIN_LOCK.release()
-
-
-def _reserve_morning_checkin(checkin_date: str) -> bool:
-    with DB_LOCK, database() as db:
-        pending_job = db.execute(
-            "SELECT 1 FROM coach_commands WHERE status IN ('queued', 'running') "
-            "AND json_extract(receipt, '$.request_kind')='morning_checkin' LIMIT 1"
-        ).fetchone()
-        if pending_job:
-            return False
-        same_day = get_kv("morning_checkin_attempted", db) == checkin_date
-        attempts = int(get_kv("morning_checkin_attempt_count", db) or 0) if same_day else 0
-        last_attempt = _garmin_timestamp(get_kv("morning_checkin_attempted_at", db)) if same_day else None
-        retry_pending = bool(last_attempt and (datetime.now(timezone.utc) - last_attempt).total_seconds() < MORNING_RETRY_SECONDS)
-        if attempts >= MORNING_MAX_ATTEMPTS or retry_pending:
-            return False
-        if not same_day:
-            set_kv("morning_checkin_attempt_count", "0", db)
-        set_kv("morning_checkin_attempted", checkin_date, db)
-        set_kv("morning_checkin_attempted_at", utc_now(), db)
-    return True
-
-
-def _run_scheduled_morning_checkin(checkin_date: str, generation: int) -> None:
-    admitted = False
-    try:
-        with runtime_maintenance.MAINTENANCE_GATE.operation(generation):
-            admitted = True
-            run_morning_checkin(checkin_date)
-    except AppError as exc:
-        if exc.reason not in {"maintenance", "operation_invalidated"}:
-            raise
-    finally:
-        if not admitted:
-            MORNING_CHECKIN_LOCK.release()
-
-
-def _start_scheduled_morning_checkin(checkin_date: str) -> None:
-    generation = runtime_maintenance.MAINTENANCE_GATE.current_generation()
-    try:
-        threading.Thread(
-            target=lambda: _run_scheduled_morning_checkin(checkin_date, generation),
-            daemon=True,
-        ).start()
-    except Exception:
-        MORNING_CHECKIN_LOCK.release()
-        raise
-
-
-@runtime_maintenance.maintenance_operation
-def schedule_morning_checkin() -> None:
-    checkin_date = morning_checkin_date()
-    if not checkin_date or not SETTINGS.selected_ai_provider() or not CONFIG.intervals_api_key:
-        return
-    if get_kv("morning_checkin_date") == checkin_date:
-        return
-    if not MORNING_CHECKIN_LOCK.acquire(blocking=False):
-        return
-    try:
-        reserved = _reserve_morning_checkin(checkin_date)
-    except Exception:
-        MORNING_CHECKIN_LOCK.release()
-        raise
-    if not reserved:
-        MORNING_CHECKIN_LOCK.release()
-        return
-    _start_scheduled_morning_checkin(checkin_date)
+    return {"status": status, "date": completed_date, "current_for_today": current, "last_error": None}
 
 
 def bootstrap_provider_states(freshness: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:

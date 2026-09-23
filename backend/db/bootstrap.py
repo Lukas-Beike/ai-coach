@@ -51,11 +51,6 @@ def initialize_application_database(
         key_values.set(db, provider_keys["running"], "0")
         key_values.set(db, provider_keys["status"], "")
 
-    key_values.set(db, "morning_checkin_running", "0")
-    if key_values.get(db, "morning_checkin_status") == "working":
-        key_values.set(db, "morning_checkin_status", "waiting")
-        key_values.set(db, "morning_checkin_attempted", "")
-
     if retention_days != all_sync_days:
         bounded_retention_days = max(30, min(retention_days, 3650))
         cutoff = (current_time - timedelta(days=bounded_retention_days)).isoformat()

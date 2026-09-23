@@ -321,11 +321,8 @@ Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
 visible view also refreshes it when the cache has expired. The current forecast
 can be forced manually from the Open-Meteo card in the More tab.
-The morning check-in is generated once per local calendar day when its required
-integrations are configured. From 05:00 onward, startup and the background loop
-also catch up on a missed check-in, including after 11:00. Failed attempts may
-retry after 15 minutes, up to three attempts per day. Yesterday's completed
-check-in is not reported as today's completed check-in.
+The Morgen-Check-in remains available as a manual Coach quick action and is not
+generated automatically in the background.
 
 The four main views use stable hash links: `#coach`, `#plan`, `#analysis`,
 and `#more`. Navigation is implemented with real
