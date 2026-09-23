@@ -8,6 +8,7 @@ from backend.coach.attachments import (
 )
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.profile_update import CoachProfileUpdateService
+from backend.coach.training_template_tools import TrainingTemplateToolService
 from backend.coach import streams as coach_streams
 
 import hashlib
@@ -249,6 +250,7 @@ from backend.sync.scheduler import (
     StartupSyncSchedulerConfig,
 )
 from backend.coach.activity_read_tools import CoachActivityReadToolService
+from backend.coach.athlete_record_tools import CoachAthleteRecordToolService
 from backend.coach.context import (
     CoachContextPreviewLimits,
     CoachContextPreviewService,
@@ -289,7 +291,14 @@ from backend.coach.service import (
     dialogue_plan_effect_key, dialogue_request_binding_key,
     dialogue_scope_repair_key,
 )
-from backend.coach.authorization import authorized_operations, coach_execution_scope, coach_session_key, require_coach_scope, require_operation, scope_values
+from backend.coach.authorization import (
+    authorized_operations,
+    coach_execution_scope,
+    coach_session_key,
+    require_coach_scope,
+    scope_values,
+    structured_action_payload,
+)
 from backend.coach.outcomes import COACH_ACTION_LABELS, coach_effect_label, coach_failure_lines, coach_observed_sync_lines, unresolved_coach_steps
 from backend.http_api.responses import (
     header_items as response_header_items,
@@ -830,6 +839,13 @@ def coach_sync_tool_service() -> CoachSyncToolService:
         sync_conflict_command_service(), structured_plan_sync_service(),
         plan_repair_manifest_service(), plan_push_command_service(),
         provider_refresh_command_service(),
+    )
+
+
+def coach_athlete_record_tool_service() -> CoachAthleteRecordToolService:
+    """Compose concrete local services for Coach athlete-record mutations."""
+    return CoachAthleteRecordToolService(
+        checkin_service(), activity_feedback_service(), competition_service()
     )
 
 
@@ -2332,13 +2348,6 @@ COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, 
     training_plan_statuses=planning_training_plans.TRAINING_PLAN_STATUSES,
     dialogue_tools=dialogue_tools,
 )
-def _structured_action_payload(arguments: dict[str, Any]) -> dict[str, Any]:
-    payload = arguments.get("payload")
-    if isinstance(payload, dict):
-        return payload
-    raise AppError(400, "Diese Aktion benoetigt payload.", reason="invalid_action")
-
-
 def _structured_bounded_integer(
     arguments: dict[str, Any], key: str, default: int, maximum: int, error: str,
 ) -> int:
@@ -2381,96 +2390,6 @@ def _structured_coach_read_result(name: str, arguments: dict[str, Any]) -> dict[
     if name == "list_training_plans":
         return {"ok": True, "training_plans": training_plan_service().list(100)}
     return None
-
-
-def _authorized_coach_athlete_operation(intent: dict[str, Any], operation: str, message: str) -> None:
-    if not require_operation(intent, operation):
-        raise AppError(403, message, reason="intent_scope_denied")
-
-
-def _structured_coach_checkin_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
-    _authorized_coach_athlete_operation(intent, "save_checkin", "Die strukturierte Coach-Autorisierung erlaubt diesen Check-in nicht.")
-    require_coach_scope(intent, "local_checkin")
-    return {"ok": True, **checkin_service().save_coach(_structured_action_payload(arguments))}
-
-
-def _structured_coach_activity_feedback_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
-    _authorized_coach_athlete_operation(intent, "save_activity_feedback", "Die strukturierte Coach-Autorisierung erlaubt dieses Aktivitätsfeedback nicht.")
-    require_coach_scope(intent, "activity_feedback")
-    payload = _structured_action_payload(arguments)
-    return {
-        "ok": True,
-        "stored_locally": True,
-        **activity_feedback_service().save_coach(
-            payload.get("activity_id"),
-            {key: payload.get(key) for key in ("activity_name", "activity_date", "notes")},
-        ),
-    }
-
-
-def _structured_coach_delete_activity_feedback_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
-    _authorized_coach_athlete_operation(intent, "delete_activity_feedback", "Die strukturierte Coach-Autorisierung erlaubt diese Feedbackänderung nicht.")
-    require_coach_scope(intent, "activity_feedback")
-    activity_id = str(arguments.get("activity_id") or "").strip()
-    return {
-        "ok": True,
-        "stored_locally": True,
-        **activity_feedback_service().save(activity_id, {"notes": ""}),
-    }
-
-
-def _structured_coach_save_competition_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
-    _authorized_coach_athlete_operation(intent, "save_competition", "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.")
-    payload = _structured_action_payload(arguments)
-    competition_id = str(payload.get("competition_id") or "").strip()
-    require_coach_scope(intent, f"competition:{competition_id}" if competition_id else "local_competitions")
-    return {"ok": True, **competition_service().save(payload)}
-
-
-def _structured_coach_delete_competition_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
-    _authorized_coach_athlete_operation(intent, "delete_competition", "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.")
-    competition_id = str(arguments.get("competition_id") or "").strip()
-    require_coach_scope(intent, f"competition:{competition_id}")
-    return {"ok": True, **competition_service().delete(competition_id)}
-
-
-ATHLETE_RECORD_HANDLERS: dict[str, Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]] = {
-    "save_checkin": _structured_coach_checkin_result,
-    "save_activity_feedback": _structured_coach_activity_feedback_result,
-    "delete_activity_feedback": _structured_coach_delete_activity_feedback_result,
-    "save_competition": _structured_coach_save_competition_result,
-    "delete_competition": _structured_coach_delete_competition_result,
-}
-
-
-def _structured_coach_athlete_record_result(
-    name: str, arguments: dict[str, Any], intent: dict[str, Any],
-) -> dict[str, Any] | None:
-    handler = ATHLETE_RECORD_HANDLERS.get(name)
-    return handler(arguments, intent) if handler else None
-
-
-def _structured_coach_training_template_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
-    if "manage_training_templates" not in _structured_authorized_operations(intent):
-        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-    templates = arguments.get("templates")
-    if not isinstance(templates, list) or not 1 <= len(templates) <= 28 or not all(isinstance(item, dict) for item in templates):
-        raise AppError(400, "Ein Coach-Kommando darf 1 bis 28 Vorlagenänderungen enthalten.", reason="template_limit")
-    # Nested domain writes share one transaction; any invalid element rolls back the batch.
-    with DB_LOCK, database():
-        results = []
-        for template in templates:
-            action = str(template.get("action") or "create").strip().casefold()
-            if action in {"update", "archive", "restore", "delete"}:
-                local_id = str(template.get("local_id") or "").strip()
-                require_coach_scope(intent, f"library_workout:{local_id}", "local_template")
-                results.append(workout_library_service().update(local_id, template))
-                continue
-            if action != "create":
-                raise AppError(400, "Unbekannte Aktion für die Bibliothekseinheit.", reason="invalid_template_action")
-            require_coach_scope(intent, "local_template")
-            results.append(workout_library_service().create_template(template))
-    return {"ok": True, "stored_locally": True, "templates": results, "template": results[0] if len(results) == 1 else None}
 
 
 def _structured_coach_apply_library_plan_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
@@ -2602,10 +2521,13 @@ def _structured_coach_plan_tool_result(
     )
     if artifact_result is not None:
         return artifact_result
+    if name == "manage_training_templates":
+        return TrainingTemplateToolService(
+            database_manager, DB_LOCK, workout_library_service
+        ).execute(arguments, intent)
     handlers: dict[str, Callable[[], dict[str, Any]]] = {
         "replace_training_plan": lambda: _replace_structured_coach_training_plan(arguments, intent),
         "apply_training_changes": lambda: _apply_structured_coach_training_changes(arguments, intent),
-        "manage_training_templates": lambda: _structured_coach_training_template_result(arguments, intent),
         "apply_workout_library_plan": lambda: _structured_coach_apply_library_plan_result(arguments, intent),
     }
     handler = handlers.get(name)
@@ -2626,7 +2548,7 @@ def _structured_coach_misc_tool_result(
     if name == "update_training_plan":
         if "update_training_plan" not in _structured_authorized_operations(intent):
             raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        payload = _structured_action_payload(arguments)
+        payload = structured_action_payload(arguments)
         plan_id = str(payload.get("plan_id") or "").strip()
         require_coach_scope(intent, f"{TRAINING_PLAN_SCOPE_PREFIX}{plan_id}", "local_plan")
         return {"ok": True, **training_plan_service().update(plan_id, payload)}
@@ -2663,7 +2585,7 @@ def _structured_coach_tool_result(
         return read_result
     if name == "update_profile":
         return coach_profile_update_service().apply(arguments, intent)
-    athlete_record_result = _structured_coach_athlete_record_result(name, arguments, intent)
+    athlete_record_result = coach_athlete_record_tool_service().execute(name, arguments, intent)
     if athlete_record_result is not None:
         return athlete_record_result
     plan_result = _structured_coach_plan_tool_result(

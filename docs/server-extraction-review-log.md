@@ -5547,3 +5547,34 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Suite **PASS**, 2.357 Tests, 11 Skips; Architekturtests 4/4 und
   Diff-Check **PASS**. #740 ohne Merge geschlossen; ein Ersatz-PR mit
   neuem Head braucht eigene CI- und Review-Freigabe.
+
+## P10 öffentliche Projektionen — bestätigter #741-Merge
+
+- #741 auf Head `1ba976fc`: Sonar-, Container-, Browser- und Codex-
+  Checks **PASS**, 0 offene Review-Threads. Squash-Merge
+  `5c3f8f49d13127f15ffbe704342199713aa4d003` am
+  `2026-09-23T19:16:11Z` bestätigt und auf `origin/develop` erreichbar.
+
+## P7 lokale Athletenakten und Trainingsvorlagen — Integrationsreview
+
+- GPT-6-Luna/high-Athletenakten-Patch `acce8573` auf #741-Basis
+  rebased; Root prüfte den tatsächlichen Diff und Code: **PASS**.
+  `CoachAthleteRecordToolService` besitzt die fünf lokalen
+  Operationen samt Operation-/Scope-Prüfung; keine Remote-Schreibwege
+  oder Server-Fachcallbacks.
+- GPT-6-Luna/high-Vorlagenpatch `909f1911`: Root-Review **FAIL**
+  wegen redundanter Backend-Factory und unwirksamem unerwartetem
+  Testpfad (`self.fail` auf Library). Derselbe Worker korrigierte
+  in `ef0a8a96`; Worker-Vollsuite erneut **PASS**, 2.352 Tests,
+  12 Skips. Root integrierte sequenziell als `20ed1aae` und
+  `32f6f223`. Ein Cherry-Pick-Konflikt ließ zunächst die alte
+  `server.py`-Vorlagenfunktion stehen; Root entfernte sie als
+  Integrationskorrektur. Die konkrete Klasse besitzt nun Batch-UOW,
+  1–28-Eintragsgrenze, Objekt-Scope und Rollback.
+- Root prüfte den kombinierten Code-/Diffstand inklusive der
+  Konfliktkorrektur: fokussierte Service-Tests 5/5,
+  Architekturtests 4/4, Ruff, Compile, Inventar- und Diff-Check
+  **PASS**. Neu gebautes Read-only-Docker-Image mit vollständiger
+  Suite **PASS**, 2.362 Tests, 11 Skips. Root-Gate des kombinierten
+  lokalen Stands **PASS**. `server.py`: 5.439 physische Zeilen,
+  258 Definitionen. PR-CI, externer Review und Merge stehen aus.
