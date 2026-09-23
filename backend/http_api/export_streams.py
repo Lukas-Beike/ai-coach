@@ -14,19 +14,19 @@ class ExportStreamTransport:
 
     def __init__(
         self,
-        database_backup: DatabaseBackupService,
-        privacy_export: PrivacyArchiveExportService,
+        database_backup_factory: Callable[[], DatabaseBackupService],
+        privacy_export_factory: Callable[[], PrivacyArchiveExportService],
         *,
         monotonic: Callable[[], float],
         time_limit_seconds: int,
     ) -> None:
-        self._database_backup = database_backup
-        self._privacy_export = privacy_export
+        self._database_backup_factory = database_backup_factory
+        self._privacy_export_factory = privacy_export_factory
         self._monotonic = monotonic
         self._time_limit_seconds = time_limit_seconds
 
     def stream_database_backup(self, handler: Any) -> None:
-        with self._database_backup.stream_file() as (path, deadline):
+        with self._database_backup_factory().stream_file() as (path, deadline):
             handler.send_file_stream(
                 path,
                 "application/octet-stream",
@@ -35,7 +35,7 @@ class ExportStreamTransport:
             )
 
     def stream_privacy_export(self, handler: Any) -> None:
-        temporary = self._privacy_export.create_file()
+        temporary = self._privacy_export_factory().create_file()
         handler.send_file_stream(
             temporary,
             "application/zip",

@@ -4597,8 +4597,8 @@ def database_backup_service() -> DatabaseBackupService:
 def export_stream_transport() -> ExportStreamTransport:
     """Wire backup/export use cases into their HTTP download transport."""
     return ExportStreamTransport(
-        database_backup_service(),
-        privacy_archive_export_service(),
+        database_backup_service,
+        privacy_archive_export_service,
         monotonic=time.monotonic,
         time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
     )

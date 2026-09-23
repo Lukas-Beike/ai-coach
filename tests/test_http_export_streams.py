@@ -45,10 +45,10 @@ class ExportStreamTransportTests(unittest.TestCase):
                 logging.getLogger(__name__),
             )
             backup._checkpoint_locked = Mock()
-            privacy_export = Mock()
+            privacy_export_factory = Mock(side_effect=RuntimeError("unused privacy export construction failed"))
             transport = ExportStreamTransport(
-                backup,
-                privacy_export,
+                lambda: backup,
+                privacy_export_factory,
                 monotonic=lambda: 50,
                 time_limit_seconds=20,
             )
@@ -64,6 +64,7 @@ class ExportStreamTransportTests(unittest.TestCase):
 
             self.assertFalse(lock.held)
             backup._checkpoint_locked.assert_called_once()
+            privacy_export_factory.assert_not_called()
 
     def test_database_backup_releases_lock_when_send_raises(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -85,7 +86,12 @@ class ExportStreamTransportTests(unittest.TestCase):
                 logging.getLogger(__name__),
             )
             backup._checkpoint_locked = Mock()
-            transport = ExportStreamTransport(backup, Mock(), monotonic=lambda: 50, time_limit_seconds=20)
+            transport = ExportStreamTransport(
+                lambda: backup,
+                Mock(side_effect=RuntimeError("unused privacy export construction failed")),
+                monotonic=lambda: 50,
+                time_limit_seconds=20,
+            )
             handler = Mock()
             handler.send_file_stream.side_effect = RuntimeError("send failed")
 
@@ -98,11 +104,12 @@ class ExportStreamTransportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             archive_path = Path(temporary) / "export.zip"
             archive_path.write_bytes(b"archive")
+            database_backup_factory = Mock(side_effect=RuntimeError("unused backup construction failed"))
             privacy_export = Mock()
             privacy_export.create_file.return_value = archive_path
             transport = ExportStreamTransport(
-                Mock(),
-                privacy_export,
+                database_backup_factory,
+                lambda: privacy_export,
                 monotonic=lambda: 12.5,
                 time_limit_seconds=7,
             )
@@ -122,6 +129,7 @@ class ExportStreamTransportTests(unittest.TestCase):
                 transport.stream_privacy_export(handler)
 
             privacy_export.create_file.assert_called_once_with()
+            database_backup_factory.assert_not_called()
             self.assertFalse(archive_path.exists())
 
 
