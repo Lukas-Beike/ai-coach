@@ -7,6 +7,7 @@ from unittest import mock
 from urllib.error import HTTPError
 
 from backend.errors import AppError, ClientDisconnected
+from backend.providers import openai as openai_provider
 from backend.providers.http import ProviderRequestCancelled, ProviderResponseTooLarge
 from backend.providers.openai import (
     OpenAIResponseFailure,
@@ -1394,6 +1395,58 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertNotIn("private", repr(capture.events))
         self.assertNotIn("sk-test-secret", repr(capture.events))
         self.assertEqual(state.rate_limits, [{"retry-after": "1.2", "x-request-id": "req_test"}])
+
+    def test_stream_client_records_http_failure_in_safe_order(self):
+        events = []
+        original_read_error_body = openai_provider.provider_http.read_error_body
+
+        class OrderedState(_StreamStateService):
+            def record_rate_limits(self, headers):
+                events.append("rate_limits")
+                super().record_rate_limits(headers)
+
+            def record_status(self, *args, **kwargs):
+                events.append("status")
+                super().record_status(*args, **kwargs)
+
+        class OrderedLogger(_ClientLogger):
+            def log(self, level, message, *, extra):
+                events.append("log")
+                super().log(level, message, extra=extra)
+
+        class OrderedCapture(_DiagnosticCapture):
+            def capture(self, name, details):
+                events.append("diagnostic")
+                super().capture(name, details)
+
+        error = HTTPError(
+            "https://api.example.test/v1/responses",
+            429,
+            "rate limited",
+            {"retry-after": "1"},
+            io.BytesIO(body({"code": "rate_limit_exceeded"})),
+        )
+        state = OrderedState()
+
+        def opener(*_args, **_kwargs):
+            events.clear()
+            raise error
+
+        client = self._stream_client(
+            opener,
+            state=state,
+            capture=OrderedCapture(),
+            logger=OrderedLogger(),
+        )
+
+        with mock.patch(
+            "backend.providers.openai.provider_http.read_error_body",
+            side_effect=lambda exc, max_bytes: events.append("parse")
+            or original_read_error_body(exc, max_bytes),
+        ), self.assertRaises(AppError):
+            client.stream({"input": "hello"}, lambda _delta: None)
+
+        self.assertEqual(events, ["rate_limits", "parse", "status", "log", "diagnostic"])
 
     def test_stream_client_requires_final_response_and_records_usage_once_on_success(self):
         state = _StreamStateService()

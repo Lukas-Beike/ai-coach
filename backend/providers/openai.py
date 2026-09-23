@@ -626,9 +626,12 @@ class OpenAIStreamTelemetry:
 
     def record_transport(self, state: StreamReadState) -> None:
         if state.headers is not None:
-            self.provider_state.record_rate_limits(state.headers)
+            self.record_rate_limits(state.headers)
         if state.status is not None:
             self.provider_state.record_success("openai", state.status)
+
+    def record_rate_limits(self, headers: Any) -> None:
+        self.provider_state.record_rate_limits(headers)
 
     def record_started(self, context: dict[str, Any]) -> None:
         self.logger.info(
@@ -711,7 +714,26 @@ class OpenAIStreamTelemetry:
             },
         )
 
-    def record_failure(
+    def capture_failure(
+        self,
+        status: int,
+        reason: str,
+        started: float,
+        response_bytes: int,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        details: dict[str, Any] = {
+            "service": "openai",
+            "status": status,
+            "reason": reason,
+            "duration_ms": round((self.clock() - started) * 1000, 1),
+            "response_bytes": response_bytes,
+        }
+        if extra:
+            details.update(extra)
+        self.diagnostic_capture.capture("openai_stream_failed", details)
+
+    def record_app_error(
         self,
         context: dict[str, Any],
         started: float,
@@ -720,36 +742,86 @@ class OpenAIStreamTelemetry:
         status: int,
         *,
         level: int = logging.WARNING,
-        rate_limit_headers: Any = None,
-        status_record: Mapping[str, Any] | None = None,
-        diagnostic_reason: str | None = None,
-        diagnostic_extra: dict[str, Any] | None = None,
-        usage_event: str | None = None,
     ) -> None:
-        if rate_limit_headers is not None:
-            self.provider_state.record_rate_limits(rate_limit_headers)
-        if status_record is not None:
-            self.provider_state.record_status(
-                "openai",
-                state=status_record["state"],
-                reason=status_record["reason"],
-                message=status_record["message"],
-                http_status=status_record["http_status"],
-                provider_error_code=status_record.get("provider_error_code"),
-            )
-        if usage_event is not None:
-            self.record_usage({"usage": {}}, usage_event)
         self.log_failure(context, started, response_bytes, reason, status, level=level)
-        details: dict[str, Any] = {
-            "service": "openai",
-            "status": status,
-            "reason": diagnostic_reason or reason,
-            "duration_ms": round((self.clock() - started) * 1000, 1),
-            "response_bytes": response_bytes,
-        }
-        if diagnostic_extra:
-            details.update(diagnostic_extra)
-        self.diagnostic_capture.capture("openai_stream_failed", details)
+        self.capture_failure(status, reason, started, response_bytes)
+
+    def record_cancelled(
+        self,
+        context: dict[str, Any],
+        started: float,
+        response_bytes: int,
+    ) -> None:
+        self.record_usage({"usage": {}}, "responses_stream_cancelled")
+        self.log_failure(context, started, response_bytes, "chat_cancelled", 499, level=logging.INFO)
+        self.capture_failure(499, "chat_cancelled", started, response_bytes)
+
+    def record_disconnect(
+        self,
+        context: dict[str, Any],
+        started: float,
+        response_bytes: int,
+    ) -> None:
+        self.log_failure(context, started, response_bytes, "client_disconnected", 499, level=logging.INFO)
+        self.capture_failure(499, "client_disconnected", started, response_bytes)
+
+    def record_timeout(
+        self,
+        context: dict[str, Any],
+        started: float,
+        response_bytes: int,
+    ) -> None:
+        self.provider_state.record_status(
+            "openai",
+            state="error",
+            reason="provider_timeout",
+            message="OpenAI hat nicht rechtzeitig geantwortet.",
+            http_status=504,
+        )
+        self.log_failure(context, started, response_bytes, "provider_timeout", 504)
+        self.capture_failure(504, "provider_timeout", started, response_bytes)
+
+    def record_network_failure(
+        self,
+        context: dict[str, Any],
+        started: float,
+        response_bytes: int,
+    ) -> None:
+        self.provider_state.record_status(
+            "openai",
+            state="error",
+            reason="provider_unavailable",
+            message="OpenAI ist vorübergehend nicht verfügbar.",
+            http_status=503,
+        )
+        self.log_failure(context, started, response_bytes, "provider_unavailable", 503)
+        self.capture_failure(503, "provider_unavailable", started, response_bytes)
+
+    def record_http_error(
+        self,
+        context: dict[str, Any],
+        started: float,
+        response_bytes: int,
+        status: int,
+        details: Mapping[str, Any],
+        diagnostic: dict[str, Any],
+    ) -> None:
+        self.provider_state.record_status(
+            "openai",
+            state=details["state"],
+            reason=details["reason"],
+            message=details["message"],
+            http_status=details["http_status"],
+            provider_error_code=details.get("provider_error_code"),
+        )
+        self.log_failure(
+            context,
+            started,
+            response_bytes,
+            safe_log_reason(details["reason"]),
+            status,
+        )
+        self.capture_failure(status, details["reason"], started, response_bytes, diagnostic)
 
 class OpenAIStreamClient:
     """Own one complete OpenAI Responses SSE request."""
@@ -802,18 +874,15 @@ class OpenAIStreamClient:
         stream_bytes: int,
     ) -> NoReturn:
         reason = safe_log_reason(exc.reason or "request_failed")
-        self.telemetry.record_failure(
+        if cancel_event is not None and cancel_event.is_set() and final_response is None:
+            self.telemetry.record_usage({"usage": {}}, "responses_stream_cancelled")
+        self.telemetry.record_app_error(
             context,
             started,
             stream_bytes,
             reason,
             exc.status,
             level=logging.INFO if exc.reason == "chat_cancelled" else logging.WARNING,
-            usage_event=(
-                "responses_stream_cancelled"
-                if cancel_event is not None and cancel_event.is_set() and final_response is None
-                else None
-            ),
         )
         raise exc
 
@@ -824,15 +893,9 @@ class OpenAIStreamClient:
         started: float,
         stream_bytes: int,
     ) -> NoReturn:
-        self.telemetry.record_failure(
-            context,
-            started,
-            stream_bytes,
-            "client_disconnected",
-            499,
-            level=logging.INFO,
-            usage_event="responses_stream_cancelled" if final_response is None else None,
-        )
+        if final_response is None:
+            self.telemetry.record_usage({"usage": {}}, "responses_stream_cancelled")
+        self.telemetry.record_disconnect(context, started, stream_bytes)
         raise ClientDisconnected()
 
     def _http_error(
@@ -842,9 +905,10 @@ class OpenAIStreamClient:
         started: float,
         stream_bytes: int,
     ) -> NoReturn:
+        headers = getattr(exc, "headers", None)
+        self.telemetry.record_rate_limits(headers)
         raw_error = provider_http.read_error_body(exc, self.config.max_bytes)
         status = int(getattr(exc, "code", 502) or 502)
-        headers = getattr(exc, "headers", None)
         details = error_details(status, raw_error, headers, updated_at=self.telemetry.now())
         diagnostic = error_diagnostic_details(
             raw_error,
@@ -854,17 +918,14 @@ class OpenAIStreamClient:
         provider_code = diagnostic.get("error_code")
         if provider_code not in observability.OPENAI_RESPONSE_ERROR_CODES:
             provider_code = None
-        reason = safe_log_reason(details["reason"])
-        self.telemetry.record_failure(
+        details["provider_error_code"] = provider_code
+        self.telemetry.record_http_error(
             context,
             started,
             stream_bytes,
-            reason,
             status,
-            rate_limit_headers=headers,
-            status_record={**details, "provider_error_code": provider_code},
-            diagnostic_reason=details["reason"],
-            diagnostic_extra=diagnostic,
+            details,
+            diagnostic,
         )
         error = AppError(status, details["message"], reason=details["reason"])
         retry_after = details.get("retry_after_seconds")
@@ -881,15 +942,9 @@ class OpenAIStreamClient:
         stream_bytes: int,
     ) -> NoReturn:
         if cancel_event is not None and cancel_event.is_set():
-            self.telemetry.record_failure(
-                context, started, stream_bytes, "chat_cancelled", 499,
-                level=logging.INFO, usage_event="responses_stream_cancelled",
-            )
+            self.telemetry.record_cancelled(context, started, stream_bytes)
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-        self.telemetry.record_failure(
-            context, started, stream_bytes, "provider_timeout", 504,
-            status_record={"state": "error", "reason": "provider_timeout", "message": "OpenAI hat nicht rechtzeitig geantwortet.", "http_status": 504},
-        )
+        self.telemetry.record_timeout(context, started, stream_bytes)
         raise AppError(504, "OpenAI hat nicht rechtzeitig geantwortet.", reason="provider_timeout") from exc
 
     def _network(
@@ -901,15 +956,9 @@ class OpenAIStreamClient:
         stream_bytes: int,
     ) -> NoReturn:
         if cancel_event is not None and cancel_event.is_set():
-            self.telemetry.record_failure(
-                context, started, stream_bytes, "chat_cancelled", 499,
-                level=logging.INFO, usage_event="responses_stream_cancelled",
-            )
+            self.telemetry.record_cancelled(context, started, stream_bytes)
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-        self.telemetry.record_failure(
-            context, started, stream_bytes, "provider_unavailable", 503,
-            status_record={"state": "error", "reason": "provider_unavailable", "message": "OpenAI ist vorübergehend nicht verfügbar.", "http_status": 503},
-        )
+        self.telemetry.record_network_failure(context, started, stream_bytes)
         raise AppError(503, "OpenAI ist vorübergehend nicht verfügbar.", reason="provider_unavailable") from exc
 
     def _stream_once(
@@ -1037,10 +1086,7 @@ class OpenAIStreamClient:
             context = attempt_state.get("context", {"service": "openai", "method": "POST"})
             started = attempt_state.get("started", self.telemetry.clock())
             stream_bytes = attempt_state.get("stream_bytes", 0)
-            self.telemetry.record_failure(
-                context, started, stream_bytes, "chat_cancelled", 499,
-                level=logging.INFO, usage_event="responses_stream_cancelled",
-            )
+            self.telemetry.record_cancelled(context, started, stream_bytes)
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
 
 
