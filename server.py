@@ -214,6 +214,7 @@ from backend.sync.jobs import (
 )
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.queue import SyncJobQueueService
+from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.context import (
     CoachContextPreviewLimits,
     CoachContextPreviewService,
@@ -802,6 +803,16 @@ def coach_sync_tool_service() -> CoachSyncToolService:
         sync_conflict_command_service(), structured_plan_sync_service(),
         plan_repair_manifest_service(), plan_push_command_service(),
         provider_refresh_command_service(),
+    )
+
+
+def coach_activity_read_tool_service() -> CoachActivityReadToolService:
+    """Compose the read-only activity tools from their owning services."""
+    return CoachActivityReadToolService(
+        activity_read_service(),
+        garmin_payload_service(),
+        profile_service(),
+        lambda: local_now().date(),
     )
 
 
@@ -2596,17 +2607,8 @@ def _structured_coach_read_result(name: str, arguments: dict[str, Any]) -> dict[
                 limit=arguments.get("limit"),
             ),
         }
-    if name == "list_recent_activities":
-        days = _structured_bounded_integer(arguments, "days", 30, 3660, "Aktivitätszeitraum oder Limit ist ungültig.")
-        limit = _structured_bounded_integer(arguments, "limit", 100, 500, "Aktivitätszeitraum oder Limit ist ungültig.")
-        return {"ok": True, **activity_read_service().recent(days, limit, today=local_now().date())}
-    if name == "get_activity_details":
-        return activity_read_service().detail(
-            arguments.get("activity_id"),
-            garmin_snapshot=garmin_payload_service().snapshot(),
-            profile=profile_service().get(),
-            today=local_now().date(),
-        )
+    if name in {"list_recent_activities", "get_activity_details"}:
+        return coach_activity_read_tool_service().execute(name, arguments)
     if name == "list_workout_library":
         limit = _structured_bounded_integer(arguments, "limit", 100, 500, "Bibliothekslimit ist ungültig.")
         return {
