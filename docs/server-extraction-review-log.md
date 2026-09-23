@@ -5151,5 +5151,9 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Container-Image: vollständige Suite **PASS**, 2.320 Tests,
   10 Skips in 22,403 s. `server.py` hat 6.219 physische Zeilen.
   Nach #721-Merge auf `d922e506` rebased; beide Owner-Assertions
-  im Architekturtest erhalten. Erneutes Root-Gate und PR-CI folgen;
-  P8-Job- und Turn-Eigentümer bleiben offen.
+  im Architekturtest erhalten. `git range-diff` zeigte keine Änderung
+  an der Fachlogik oder den Regressionstests; Root-Review des
+  kombinierten Diffs **PASS**. Neu gebautes Read-only-Container-Image:
+  Vollsuite **PASS**, 2.323 Tests, 11 Skips in 19,996 s;
+  Inventar- und Diff-Check **PASS**. PR-CI für den rebasierten Stand
+  folgt; P8-Job- und Turn-Eigentümer bleiben offen.
