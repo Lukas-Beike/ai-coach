@@ -5044,3 +5044,9 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Dateibaum gegenüber dem mit 2.313 Container-Tests geprüften Stand
   ist identisch; Inventar- und Diff-Check bleiben **PASS**. Root-Gate
   für diesen integrierten Stand: **PASS**; PR-CI und Review folgen.
+- Nach #718-Merge wurde #719 auf `7673a1f8` rebased
+  (`36553d7e`, `0aac8a2e`). Root-Review des tatsächlichen Produkt-
+  und Testdiffs **PASS**; ausschließlich generiertes Inventar und
+  Review-Text hatten Konflikte. Neu gebautes kombiniertes Read-only-
+  Container-Image: vollständige Suite **PASS**, 2.314 Tests,
+  10 Skips in 21,452 s. Inventar- und Diff-Check **PASS**.
