@@ -317,7 +317,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
                         "intervals", "refresh", {"days": 1}
                     )
                     server.sync_job_store().claim()
-                    backup = server.database_backup_bytes()
+                    backup = server.database_backup_service().read_bytes()
                     server.sync_job_outcome_service().update(job["id"], "completed")
                     self.assertTrue(server.restore_database_backup(backup)["restored"])
                     self.assertEqual(

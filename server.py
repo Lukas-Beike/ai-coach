@@ -297,6 +297,7 @@ from backend.backup.export import (
     PrivacyArchiveExportConfig,
     PrivacyArchiveExportService,
 )
+from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 
 try:
     from sqlcipher3 import dbapi2 as sqlite_backend
@@ -5266,51 +5267,34 @@ def privacy_archive_export_service() -> PrivacyArchiveExportService:
     )
 
 
+def database_backup_service() -> DatabaseBackupService:
+    """Compose the locked, bounded database-backup resource owner."""
+    return DatabaseBackupService(
+        database_manager(),
+        DB_LOCK,
+        DatabaseBackupConfig(
+            database_path=DB_PATH,
+            data_dir=DATA_DIR,
+            maximum_bytes=MAX_BACKUP_BYTES,
+            minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
+            time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
+        ),
+        LOGGER,
+    )
+
+
 # Transitional names for restore/test consumers; implementation ownership is
 # in backend.db.schema.
 _configure_cipher = configure_cipher
 
 
-def _checkpoint_database_locked() -> None:
-    """Checkpoint WAL content while DB_LOCK prevents concurrent writers."""
-    if not DB_PATH.exists():
-        return
-    try:
-        with database() as db:
-            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    except Exception:
-        # A restore must remain possible even if the current database is
-        # damaged. The pre-restore copy is still useful for manual recovery.
-        LOGGER.warning("Database WAL checkpoint failed", extra={"event": "database_wal_checkpoint_failed"}, exc_info=True)
-
-
-def database_backup_bytes() -> bytes:
-    with DB_LOCK:
-        _checkpoint_database_locked()
-        try:
-            return DB_PATH.read_bytes()
-        except OSError as exc:
-            raise AppError(500, "Die Datenbank konnte nicht als Backup gelesen werden.") from exc
-
-
 def stream_database_backup(handler: Any) -> None:
-    started = time.monotonic()
-    with DB_LOCK:
-        _checkpoint_database_locked()
-        try:
-            size = DB_PATH.stat().st_size
-            free_bytes = shutil.disk_usage(DATA_DIR).free
-        except OSError as exc:
-            raise AppError(503, "Der Backup-Speicher ist nicht verfügbar.") from exc
-        if size > MAX_BACKUP_BYTES:
-            raise AppError(413, "Das Datenbank-Backup überschreitet das Größenlimit.")
-        if free_bytes < max(MIN_EXPORT_FREE_BYTES, size):
-            raise AppError(507, "Für den Backup-Download ist nicht ausreichend freier Speicher verfügbar.")
+    with database_backup_service().stream_file() as (path, deadline):
         handler.send_file_stream(
-            DB_PATH,
+            path,
             OCTET_STREAM_MIME,
             "intervals-coach-database.backup",
-            deadline=started + EXPORT_TIME_LIMIT_SECONDS,
+            deadline=deadline,
         )
 
 
@@ -5371,7 +5355,7 @@ def _validate_restore_database(temporary_path: Path) -> None:
 def _replace_database_with_restore(temporary_path: Path) -> str | None:
     previous_backup_name: str | None = None
     with DB_LOCK:
-        _checkpoint_database_locked()
+        database_backup_service().checkpoint()
         with database_manager().restore_drain():
             backup_path = DATA_DIR / f"{DB_PATH.name}.pre-restore-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
             if DB_PATH.exists():

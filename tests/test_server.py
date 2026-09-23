@@ -7137,7 +7137,7 @@ class CoachTests(unittest.TestCase):
                         "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                         ("token", "csrf", 9999999999, "now", "now"),
                     )
-                valid_backup = server.database_backup_bytes()
+                valid_backup = server.database_backup_service().read_bytes()
                 restored = server.restore_database_backup(valid_backup)
                 self.assertEqual(restored["status"], "ok")
                 self.assertEqual(server.get_kv("restore-marker"), "preserved")
