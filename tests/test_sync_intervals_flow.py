@@ -241,6 +241,27 @@ class IntervalsSyncServiceTests(unittest.TestCase):
         )
         self.followup.wait.assert_called_once_with(cancel_event=None)
 
+    def test_wait_for_existing_redacts_persisted_error_before_raising(self):
+        self.set_value("last_sync_at", "unchanged")
+        self.set_value("last_sync_error", "secret provider detail")
+        self.lock.acquire()
+        calls = 0
+
+        def monotonic():
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                self.lock.release()
+            return float(calls)
+
+        service = self.make_service(monotonic=monotonic)
+        with self.assertRaises(AppError) as raised:
+            service.sync("manual", activity_days=7, wait_for_existing=True)
+
+        self.assertEqual(raised.exception.reason, "provider_refresh_failed")
+        self.assertIn("[REDACTED] provider detail", raised.exception.message)
+        self.assertNotIn("secret", raised.exception.message)
+
     def test_cancellation_before_lock_has_no_provider_or_status_side_effect(self):
         cancel_event = threading.Event()
         cancel_event.set()

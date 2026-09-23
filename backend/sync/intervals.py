@@ -499,6 +499,9 @@ class IntervalsSyncJournal:
             "Lokale Trainingsdaten werden aktualisiert…",
         )
 
+    def redacted_error(self, error: str) -> str:
+        return self._redactor(error)
+
     def complete(self, operation_id: str) -> None:
         self._writer.write(
             operation_id,
@@ -581,6 +584,7 @@ class IntervalsSyncRuntime:
         self,
         status: IntervalsSyncStatus,
         followup: PerformanceRefreshFollowupService,
+        journal: IntervalsSyncJournal,
         all_sync_days: int,
         wait_for_performance: bool,
         cancel_event: threading.Event | None,
@@ -603,7 +607,9 @@ class IntervalsSyncRuntime:
                         wait_for_performance,
                         cancel_event,
                     )
-                last_error = status.get("last_sync_error") or ""
+                last_error = journal.redacted_error(
+                    status.get("last_sync_error") or ""
+                )
                 detail = f" {last_error[:300]}" if last_error else ""
                 raise AppError(
                     503,
@@ -716,6 +722,7 @@ class IntervalsSyncService:
             return self._runtime.wait_for_existing(
                 self._status,
                 self._performance_followup_service,
+                self._journal,
                 self._workflow.all_sync_days,
                 wait_for_performance,
                 cancel_event,
