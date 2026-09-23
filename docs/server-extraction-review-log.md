@@ -5104,4 +5104,9 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Nach #720-Merge auf `2a57b317` rebased. Der einzige Produkt-/
   Testkonflikt war die Registrierung beider neuen Modul-Owner im
   Architekturtest; beide Assertions bleiben erhalten. Inventar und
-  Review-Text neu erzeugt. Kombinierte Tests und PR-CI folgen.
+  Review-Text neu erzeugt. Root-Review des kombinierten Diffs **PASS**.
+  Neu gebautes Read-only-Container-Image: vollständige Suite **PASS**,
+  2.319 Tests, 10 Skips in 21,453 s; Inventar- und Diff-Check
+  **PASS**. #720 wurde am `2026-09-23T15:12:16Z` als
+  `2a57b31706fb37f7ea73cfee066c4538427d66ae` gemerged und ist
+  auf `origin/develop` erreichbar. PR-CI für den Rate-Limiter folgt.
