@@ -5465,4 +5465,10 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `server.py` umfasst 5.656 physische Zeilen. Die frühere
   `public_state()`-Funktion hatte nur Testaufrufer; produktives
   `/api/bootstrap` bleibt ein separater begrenzter Local-Only-Read.
-  Externe PR-/CI-/Review-Prüfung des kombinierten Stands folgt.
+  #738 auf Head `c0e6eaaa`: Sonar-, Container-, Browser- und Codex-
+  Checks **PASS**, 0 offene Review-Threads. Root fand danach im
+  zusätzlichen Ruff-Lauf einen reinen Import-Sortierbefund im neuen
+  Modul; der Ein-Modul-Diff `ac4eab44` ist erneut geprüft, Ruff,
+  Compile und Diff-Check **PASS**. Wegen der Einmal-Review-Regel
+  wird #738 ohne Merge durch einen neuen PR mit dem korrigierten
+  Head ersetzt; kein alter PASS wird auf eine neue Head-SHA übertragen.
