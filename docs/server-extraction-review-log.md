@@ -5110,3 +5110,15 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   **PASS**. #720 wurde am `2026-09-23T15:12:16Z` als
   `2a57b31706fb37f7ea73cfee066c4538427d66ae` gemerged und ist
   auf `origin/develop` erreichbar. PR-CI für den Rate-Limiter folgt.
+- PR #721, erster Head `3ba49b34`: Codex-Review fand einen echten
+  **P1** — `e2e/fixture_runtime.py` überschrieb noch den entfernten
+  `server.allow_rate`-Namen. Root-Gate für den PR-Stand **FAIL**;
+  Auto-Merge blieb aus. Derselbe GPT-6-Luna-Worker reparierte nur die
+  disposable Fixture (`9fa1c97a`, integriert als `926a8871`): sie
+  überschreibt nun die tatsächlich verwendete `RATE_LIMITER.allow`-
+  Instanz. Root-Follow-up-Diffreview **PASS**, produktive Limits
+  unverändert. Im isolierten Fixture-Container bestanden 10 Login-
+  und 200 authentifizierte API-Anfragen ohne 429; vier normale
+  Limiter-Tests, Compile, scoped Ruff und Diff-Check **PASS**.
+  Aktualisierte PR-CI und einmaliges zulässiges Codex-Folgereview
+  nach P1 stehen noch aus.
