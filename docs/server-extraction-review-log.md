@@ -5271,3 +5271,23 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Inventar-, Architektur- und Diff-Check **PASS**. `server.py` hat
   6.099 physische Zeilen und 288 Definitionen. P7-Rest bleibt
   umfangreich; PR-CI und externer Review folgen.
+
+## P9 Restore-Validierung — integrierter lokaler Prüfstand
+
+- GPT-6-Luna/high-Patch `91bf1d1e`, nach Rebase auf dem bestätigten
+  #730-Merge `67b4b377` als `1605961e`: `DatabaseRestoreValidationService`
+  besitzt Payload-Grenze und exklusives temporäres Staging, SQLCipher-/
+  Schema-/Integritäts-/Fremdschlüsselprüfung sowie das Entfernen der
+  Backup-Sessions. Der Server komponiert den Service und behält bis zum
+  folgenden Restore-Schritt Austausch und Worker-Wiederaufnahme.
+- Root prüfte tatsächlichen Diff und Code einschließlich Fehler-Cleanup,
+  Maintenance-Gate, bestehender DB-Lock-/Drain-Grenze und Rollback vor
+  Datenbankaustausch: **PASS**. Keine Backend-Rückimporte oder Server-
+  Callbacks; der einzige neue Servername ist eine Compose-Funktion.
+  Rebase-Konflikt im Architekturtest wurde unter Erhalt beider
+  Verbotslisten gelöst. Neu gebautes Read-only-Docker-Image:
+  vollständige Suite **PASS**, 2.340 Tests, 11 Skips; fokussierte
+  Validierungs-/Architekturtests **PASS**, 10/10; Inventar-, Compile-
+  und Diff-Check **PASS**. `server.py` umfasst 6.023 physische Zeilen
+  und 284 Definitionen. Offen bleiben Restore-Austausch, atomare
+  Ressourcen-/Worker-Wiederaufnahme und PR-CI/Review.

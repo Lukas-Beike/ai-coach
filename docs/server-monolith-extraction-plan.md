@@ -566,6 +566,9 @@ Abhängigkeit: P1 sowie Ressourcen-/Worker-Verträge aus P6 und P8.
     HTTP-Dateiausgabe gehaltenen Lock mit Platz-/Größen-/Zeitgrenzen
     einem konkreten `DatabaseBackupService` zuordnen; Restore bleibt
     für die P8-Job-Wiederaufnahme offen.
+  - [x] Restore-Payload-Staging, Schema-/Integritäts-/Fremdschlüsselprüfung
+    und Session-Bereinigung einem konkreten `DatabaseRestoreValidationService`
+    zuordnen; Austausch und Worker-Wiederaufnahme bleiben offen.
 - [x] Lokalen Privacy-Export/-Delete und autorisierte Remote-Konversations-
   löschung nach `privacy.py` bzw. zum zuständigen Provider aufteilen.
   - [x] Lokale JSON-Datenprojektion einschließlich sensibler KV-Ausnahmen,
