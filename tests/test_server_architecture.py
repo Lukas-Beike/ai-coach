@@ -130,6 +130,10 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("coach_execution_scope", "coach_session_key", "require_coach_scope", "structured_action_payload", "_require_coach_scope", "_coach_scope_values"),
     ),
     (
+        "backend.coach.training_template_tools",
+        ("TrainingTemplateToolService", "training_template_tool_service"),
+    ),
+    (
         "backend.coach.attachments",
         ("gemini_selected_raw_attachments", "gemini_history_parts", "_gemini_selected_raw_attachments", "_gemini_history_parts"),
     ),
@@ -1627,6 +1631,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
+    "_structured_coach_training_template_result",
     "public_state",
     "SESSION_LOCK",
     "SESSION_LAST_CLEANUP_MONOTONIC",

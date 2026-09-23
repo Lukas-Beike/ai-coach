@@ -8,6 +8,7 @@ from backend.coach.attachments import (
 )
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.profile_update import CoachProfileUpdateService
+from backend.coach.training_template_tools import training_template_tool_service
 from backend.coach import streams as coach_streams
 
 import hashlib
@@ -2543,10 +2544,13 @@ def _structured_coach_plan_tool_result(
     )
     if artifact_result is not None:
         return artifact_result
+    if name == "manage_training_templates":
+        return training_template_tool_service(
+            database_manager, DB_LOCK, workout_library_service
+        ).execute(arguments, intent)
     handlers: dict[str, Callable[[], dict[str, Any]]] = {
         "replace_training_plan": lambda: _replace_structured_coach_training_plan(arguments, intent),
         "apply_training_changes": lambda: _apply_structured_coach_training_changes(arguments, intent),
-        "manage_training_templates": lambda: _structured_coach_training_template_result(arguments, intent),
         "apply_workout_library_plan": lambda: _structured_coach_apply_library_plan_result(arguments, intent),
     }
     handler = handlers.get(name)
