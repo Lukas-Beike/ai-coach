@@ -216,7 +216,7 @@ Abhängigkeit: P1.
   - [x] Audio-Validierung, providerabhängige Transkriptionsorchestrierung,
     transiente Base64-/Multipart-Payloads und Response-Prüfung im konkreten
     Audio-Client besitzen; `server.py` komponiert nur noch.
-- [ ] Gemini Payload-/Tool-Konvertierung und Streaming zum Gemini-Adapter ziehen;
+- [x] Gemini Payload-/Tool-Konvertierung und Streaming zum Gemini-Adapter ziehen;
   persistierte Dialoghistorie gehört zu `coach/conversation.py`.
   - [x] Payload-/Tool-/Medienkonvertierung und Stream-Akkumulation auslagern.
   - [x] Stream-Transport einschließlich Header-Abbruch, Response-Handle,

@@ -4648,3 +4648,31 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   für den P11-Composition-Root-/Restcode-Audit sichtbar, nicht als
   ausgelagerte Fachlogik. P6-Hauptpunkt daher geschlossen. Rest-Risiko:
   der finale Importgraph- und Testpatch-Audit bleibt P11.
+
+## P2 — Gemini-Antwort-Orchestrierung
+
+- Explizit als GPT-6 Luna/high delegierter Worker-Commit
+  `5a9716c2894cbe32218af71c26ca1d878517b350` im tatsächlichen
+  Diff zunächst **FAIL**: Die Factory las die gespeicherte
+  Default-Modellauswahl auch bei explizitem Modell und änderte damit
+  Fehler-/Lock- und Latenzverhalten. Korrekturauftrag an denselben
+  Worker; der finale Commit injiziert den konkreten `SettingsService`
+  und liest die Auswahl nur im Fallback. Der Fake-Test belegt JSON-
+  und Stream-Pfad. Erneutes Root-Code-Review des committed Diffs
+  **PASS**: Payload-/Historien-Persistenz, konkrete Adapter,
+  Cancellation, SSE/Usage und Response-Normalisierung bleiben bei
+  ihren Eigentümern; kein `server.py`-Rückimport oder Fachcallback.
+  Der Worker meldete 2.277 Tests, 12 Skips, fokussierte Tests,
+  Architektur/Compile/Diff **PASS**; Ruff der neuen/geänderten
+  fokussierten Module nur unter Ausnahme eines bestehenden `UP031`.
+- Sequenziell nach PR #708 auf `origin/develop` als `2f285f41`
+  integriert. Fünf Payload-/Service-Tests, 44 Provider-/Normalisierungs-
+  Tests und vier Architekturtests **PASS**. Neu gebautes Read-only-
+  Container-Image mit vollständiger integrierter Suite **PASS**:
+  2.281 Tests, 10 Skips in 21,789 s. Inventar neu erzeugt:
+  `server.py` 6.826 physische Zeilen; P2 enthält noch neun
+  Routing-/Kompositions-Definitionen und sieben Konfigurationsbindungen,
+  aber keine Gemini-Transport-/Antwort-Orchestrierung. Die verbliebenen
+  Response-Router und Testpatches sind P8/P11-Restaudit, nicht P2-
+  Adapterlogik. P2-Hauptpunkt geschlossen; CI/Sonar des
+  veröffentlichten PR-Stands bleiben abzuwarten.
