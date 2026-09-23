@@ -171,23 +171,46 @@ class GeminiResponseNormalizationService:
         persistent: bool,
         result: dict[str, Any],
     ) -> dict[str, Any]:
+        content = self._response_content(result)
+        function_calls = self._function_calls(content)
+        self._validate_function_calls(payload, function_calls)
+        if persistent:
+            history.append(content)
+            self._conversation_history.save(history)
+        text = gemini_provider.response_text(result)
+        output, call_names = self._normalized_output(text, function_calls)
+        self._save_call_names(call_names)
+        return self._response(output, text, result)
+
+    @staticmethod
+    def _response_content(result: dict[str, Any]) -> dict[str, Any]:
         candidates = result.get("candidates") if isinstance(result.get("candidates"), list) else []
         candidate = candidates[0] if candidates and isinstance(candidates[0], dict) else None
         content = candidate.get("content") if isinstance(candidate, dict) and isinstance(candidate.get("content"), dict) else None
         if not content:
             raise AppError(502, "Gemini hat keine Coach-Antwort geliefert.", reason="invalid_response")
+
+        return content
+
+    @staticmethod
+    def _function_calls(content: dict[str, Any]) -> list[dict[str, Any]]:
         content_parts = content.get("parts") if isinstance(content.get("parts"), list) else []
-        function_calls = [
+        return [
             part["functionCall"]
             for part in content_parts
             if isinstance(part, dict) and isinstance(part.get("functionCall"), dict)
         ]
+
+    @staticmethod
+    def _validate_function_calls(
+        payload: dict[str, Any], function_calls: list[dict[str, Any]]
+    ) -> None:
         if payload.get("parallel_tool_calls") is False and len(function_calls) > 1:
             raise AppError(502, "Gemini hat mehrere Tool-Aufrufe für eine einzelne Coach-Aktion zurückgegeben.", reason="parallel_tool_calls_unsupported")
-        if persistent:
-            history.append(content)
-            self._conversation_history.save(history)
-        text = gemini_provider.response_text(result)
+
+    def _normalized_output(
+        self, text: str, function_calls: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
         output: list[dict[str, Any]] = []
         if text:
             output.append({"type": "message", "content": [{"type": "output_text", "text": text}]})
@@ -200,9 +223,17 @@ class GeminiResponseNormalizationService:
             call_names[call_id] = name
             output.append({"type": "function_call", "call_id": call_id, "name": name,
                            "arguments": json.dumps(function_call.get("args") if isinstance(function_call.get("args"), dict) else {}, ensure_ascii=False)})
+
+        return output, call_names
+
+    def _save_call_names(self, call_names: dict[str, str]) -> None:
         if call_names:
             with self._database_manager.unit_of_work() as db:
                 self._key_values.set(db, self._CALL_NAMES_KEY, json.dumps(call_names, ensure_ascii=False))
+
+    def _response(
+        self, output: list[dict[str, Any]], text: str, result: dict[str, Any]
+    ) -> dict[str, Any]:
         usage = result.get("usageMetadata") if isinstance(result.get("usageMetadata"), dict) else {}
         return {"id": "gemini_" + self._uuid_factory().hex, "status": "completed", "output": output, "output_text": text,
                 "usage": {"input_tokens": usage.get("promptTokenCount", 0), "output_tokens": usage.get("candidatesTokenCount", 0), "total_tokens": usage.get("totalTokenCount", 0)}}
@@ -291,41 +322,10 @@ class GeminiRequestPayloadService:
     ) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
         persistent = bool(payload.get("conversation"))
         input_value = payload.get("input")
-        history = self._conversation_history.load() if persistent else []
-        if persistent and isinstance(input_value, str):
-            local_history = self._local_chat_history.build()
-            if local_history:
-                replayed_media = gemini_inline_media_from_history(local_history)
-                if replayed_media:
-                    payload["_gemini_transient_images"] = replayed_media
-                history = local_history
-
-        parts: list[dict[str, Any]] = []
-        if isinstance(input_value, str):
-            last_user_text = ""
-            if history and isinstance(history[-1], dict) and history[-1].get("role") == "user":
-                last_parts = history[-1].get("parts") if isinstance(history[-1].get("parts"), list) else []
-                if last_parts and isinstance(last_parts[0], dict):
-                    last_user_text = str(last_parts[0].get("text") or "")
-            if input_value != last_user_text:
-                history.append({"role": "user", "parts": [{"text": input_value}]})
-        elif isinstance(input_value, list):
-            with self._database_manager.reader() as db:
-                try:
-                    call_names = json.loads(self._key_values.get(db, self._CALL_NAMES_KEY) or "{}")
-                except (TypeError, json.JSONDecodeError):
-                    call_names = {}
-            if not isinstance(call_names, dict):
-                call_names = {}
-            parts = gemini_provider.input_parts(
-                input_value, call_names, payload.get("_gemini_transient_images")
-            )
-            if parts:
-                history.append({"role": "user", "parts": parts})
-
+        history = self._history_for_input(payload, persistent, input_value)
+        parts = self._append_input(input_value, history, payload)
         history = trim_gemini_history(history)
-        if persistent and isinstance(input_value, list) and parts:
-            self._conversation_history.save(history)
+        self._save_tool_response_history(persistent, input_value, parts, history)
         request = gemini_provider.request_payload(
             payload,
             model=model,
@@ -335,6 +335,69 @@ class GeminiRequestPayloadService:
             json_media_type=json_media_type,
         )
         return request, history, persistent
+
+    def _history_for_input(
+        self, payload: dict[str, Any], persistent: bool, input_value: Any
+    ) -> list[dict[str, Any]]:
+        history = self._conversation_history.load() if persistent else []
+        if persistent and isinstance(input_value, str):
+            local_history = self._local_chat_history.build()
+            if local_history:
+                replayed_media = gemini_inline_media_from_history(local_history)
+                if replayed_media:
+                    payload["_gemini_transient_images"] = replayed_media
+                history = local_history
+
+        return history
+
+    def _append_input(
+        self, input_value: Any, history: list[dict[str, Any]], payload: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        if isinstance(input_value, str):
+            last_user_text = self._last_user_text(history)
+            if input_value != last_user_text:
+                history.append({"role": "user", "parts": [{"text": input_value}]})
+            return []
+        if isinstance(input_value, list):
+            return self._append_tool_response(input_value, history, payload)
+        return []
+
+    @staticmethod
+    def _last_user_text(history: list[dict[str, Any]]) -> str:
+        if not history or not isinstance(history[-1], dict) or history[-1].get("role") != "user":
+            return ""
+        parts = history[-1].get("parts") if isinstance(history[-1].get("parts"), list) else []
+        if not parts or not isinstance(parts[0], dict):
+            return ""
+        return str(parts[0].get("text") or "")
+
+    def _append_tool_response(
+        self, input_value: list[Any], history: list[dict[str, Any]], payload: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        parts = gemini_provider.input_parts(
+            input_value, self._call_names(), payload.get("_gemini_transient_images")
+        )
+        if parts:
+            history.append({"role": "user", "parts": parts})
+        return parts
+
+    def _call_names(self) -> dict[str, Any]:
+        with self._database_manager.reader() as db:
+            try:
+                call_names = json.loads(self._key_values.get(db, self._CALL_NAMES_KEY) or "{}")
+            except (TypeError, json.JSONDecodeError):
+                call_names = {}
+        return call_names if isinstance(call_names, dict) else {}
+
+    def _save_tool_response_history(
+        self,
+        persistent: bool,
+        input_value: Any,
+        parts: list[dict[str, Any]],
+        history: list[dict[str, Any]],
+    ) -> None:
+        if persistent and isinstance(input_value, list) and parts:
+            self._conversation_history.save(history)
 
 
 def _content_has_function_response(content: dict[str, Any]) -> bool:
