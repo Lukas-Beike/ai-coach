@@ -18,7 +18,6 @@ import os
 import queue
 import re
 import secrets
-import shutil
 import sqlite3
 import threading
 import time
@@ -330,6 +329,7 @@ from backend.backup.export import (
     PrivacyArchiveExportService,
 )
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
+from backend.backup.restore import DatabaseRestoreConfig, DatabaseRestoreService
 from backend.backup.restore_validation import (
     DatabaseRestoreValidationConfig,
     DatabaseRestoreValidationService,
@@ -4361,11 +4361,6 @@ def export_stream_transport() -> ExportStreamTransport:
     )
 
 
-def restore_database_backup(payload: bytes) -> dict[str, Any]:
-    with runtime_maintenance.MAINTENANCE_GATE.restore():
-        return _restore_database_backup(payload)
-
-
 def database_restore_validation_service() -> DatabaseRestoreValidationService:
     return DatabaseRestoreValidationService(
         DatabaseRestoreValidationConfig(
@@ -4381,51 +4376,22 @@ def database_restore_validation_service() -> DatabaseRestoreValidationService:
     )
 
 
-def _replace_database_with_restore(temporary_path: Path) -> str | None:
-    previous_backup_name: str | None = None
-    with DB_LOCK:
-        database_backup_service().checkpoint()
-        with database_manager().restore_drain():
-            backup_path = DATA_DIR / f"{DB_PATH.name}.pre-restore-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-            if DB_PATH.exists():
-                shutil.copy2(DB_PATH, backup_path)
-                previous_backup_name = backup_path.name
-            for sidecar in (Path(f"{DB_PATH}-wal"), Path(f"{DB_PATH}-shm")):
-                try:
-                    sidecar.unlink()
-                except FileNotFoundError:
-                    pass
-            os.replace(temporary_path, DB_PATH)
-    return previous_backup_name
-
-
-def _resume_after_database_restore() -> None:
-    sync_job_queue_service().resume_interrupted()
-    coach_job_store().resume_interrupted(coach_turn_failure_service())
-    shared_sync_job_wake_event().set()
-    COACH_JOB_WAKE.set()
-
-
-def _restore_database_backup(payload: bytes) -> dict[str, Any]:
-    temporary_path: Path | None = None
-    try:
-        restore_validation = database_restore_validation_service()
-        temporary_path = restore_validation.stage(payload)
-        restore_validation.validate(temporary_path)
-        previous_backup_name = _replace_database_with_restore(temporary_path)
-        temporary_path = None
-        _resume_after_database_restore()
-        return {"status": "ok", "restored": True, "previous_database_backup": previous_backup_name}
-    except AppError:
-        raise
-    except Exception as exc:
-        raise AppError(400, f"Das Datenbank-Backup konnte nicht validiert werden: {REDACTOR.redact_text(str(exc))[:300]}") from exc
-    finally:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink()
-            except FileNotFoundError:
-                pass
+def database_restore_service() -> DatabaseRestoreService:
+    """Compose the validated, maintenance-bound database restore owner."""
+    return DatabaseRestoreService(
+        database_restore_validation_service(),
+        database_backup_service(),
+        database_manager,
+        DB_LOCK,
+        runtime_maintenance.MAINTENANCE_GATE,
+        sync_job_queue_service(),
+        coach_job_store(),
+        coach_turn_failure_service(),
+        shared_sync_job_wake_event(),
+        COACH_JOB_WAKE,
+        DatabaseRestoreConfig(DATA_DIR, DB_PATH),
+        REDACTOR.redact_text,
+    )
 
 
 def readiness_service() -> ReadinessService:
@@ -4655,7 +4621,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/privacy/restore":
                 session = self.auth_service.require_auth(self)
                 self.auth_service.require_csrf(self, session)
-                result = restore_database_backup(self.read_body(MAX_BACKUP_BYTES))
+                payload = self.read_body(MAX_BACKUP_BYTES)
+                result = database_restore_service().restore(payload)
                 self.send_json(200, result, {"Set-Cookie": [
                     self.auth_service.session_cookie_headers(clear=True)[0], self.auth_service.session_cookie_headers(clear=True)[1],
                 ]})

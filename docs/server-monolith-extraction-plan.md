@@ -591,18 +591,22 @@ Tages, bevor davon abhängiger Sync oder Coach-Analyse startet.
 
 Abhängigkeit: P1 sowie Ressourcen-/Worker-Verträge aus P6 und P8.
 
-- [ ] Archivaufbau, Exportgrenzen, Backupvalidierung, Restore und
+- [x] Archivaufbau, Exportgrenzen, Backupvalidierung, Restore und
   Wiederaufnahme nach `backup/` verschieben.
   - [x] Begrenzten lokalen Privacy-ZIP-Aufbau einschließlich SQL-/KV-
     Auswahl, Manifest, Zeit-/Platz-/Größenlimits und Temp-Datei-Cleanup
     einem konkreten `PrivacyArchiveExportService` zuordnen.
   - [x] Datenbank-WAL-Checkpoint, Byte-Backup und den über die gesamte
     HTTP-Dateiausgabe gehaltenen Lock mit Platz-/Größen-/Zeitgrenzen
-    einem konkreten `DatabaseBackupService` zuordnen; Restore bleibt
-    für die P8-Job-Wiederaufnahme offen.
+    einem konkreten `DatabaseBackupService` zuordnen; die Wiederaufnahme
+    nach Restore gehört dem `DatabaseRestoreService`.
   - [x] Restore-Payload-Staging, Schema-/Integritäts-/Fremdschlüsselprüfung
     und Session-Bereinigung einem konkreten `DatabaseRestoreValidationService`
-    zuordnen; Austausch und Worker-Wiederaufnahme bleiben offen.
+    zuordnen; Austausch und Worker-Wiederaufnahme gehören dem folgenden
+    Restore-Eigentümer.
+  - [x] Wartungsgate, WAL-Checkpoint, DB-Drain, vorherige Sicherung,
+    atomaren Dateiaustausch, temporäres Cleanup und anschließende Sync-/
+    Coach-Job-Wiederaufnahme `DatabaseRestoreService` zuordnen.
 - [x] Lokalen Privacy-Export/-Delete und autorisierte Remote-Konversations-
   löschung nach `privacy.py` bzw. zum zuständigen Provider aufteilen.
   - [x] Lokale JSON-Datenprojektion einschließlich sensibler KV-Ausnahmen,

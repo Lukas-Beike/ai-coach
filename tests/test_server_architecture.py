@@ -1635,9 +1635,14 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.db.bootstrap", ("initialize_application_database",)),
     ("backend.http_api.bootstrap_state", ("PublicBootstrapService", "bootstrap_provider_states")),
     ("backend.http_api.state_events_transport", ("StateEventTransport",)),
+    ("backend.backup.restore", ("DatabaseRestoreService",)),
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
+    "restore_database_backup",
+    "_replace_database_with_restore",
+    "_resume_after_database_restore",
+    "_restore_database_backup",
     "_structured_coach_training_template_result",
     "public_state",
     "stream_database_backup",
@@ -2052,6 +2057,11 @@ def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
 
 
 class ServerArchitectureTests(unittest.TestCase):
+    def test_extraction_inventory_has_no_unassigned_p0_symbols(self) -> None:
+        inventory = (REPOSITORY_ROOT / "docs" / "server-extraction-inventory.md").read_text(encoding="utf-8")
+        self.assertIn("| P0 (Zuordnung offen) | 0 | 0 | 0 |", inventory)
+        self.assertNotIn("| P0 (Zuordnung offen) | offen |", inventory)
+
     def test_backend_does_not_import_or_reach_server_namespace(self) -> None:
         self.assertTrue(BACKEND_ROOT.is_dir(), "Backend source must be available")
         violations: list[str] = []
