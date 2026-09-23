@@ -4608,7 +4608,7 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 
 - Vor Veröffentlichung `origin/develop` mit bestätigtem PR-#707-Merge
   `ff0bd755db41c1a58bfce8333e3fbe4f2cc835ac` in den P10-Branch
-  übernommen (`85b52884`). Überschneidungen im Review-Protokoll
+  übernommen (`c07b6a4c`). Überschneidungen im Review-Protokoll
   wurden unter Erhalt beider Befunde aufgelöst; das Inventar wurde aus
   dem kombinierten Code neu erzeugt. Root-Review von Server-Aufrufern,
   Kalender-UOW, Logprojektion und tatsächlichem Merge-Diff **PASS**.
@@ -4617,4 +4617,10 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Neu gebautes Read-only-Container-Image: vollständige Suite **PASS**
   mit 2.280 Tests und 10 Skips in 21,223 s. Inventar:
   `server.py` 6.849 Zeilen, 319 Definitionen; P9 und P10 bleiben
-  fachlich offen. CI/Sonar des folgenden PR-Heads stehen noch aus.
+  fachlich offen. Der erste veröffentlichte PR-Head scheiterte nur an
+  der Conventional-Commit-Prüfung des technischen Merge-Titels.
+  Der Merge wurde mit identischen Eltern und identischem Dateibaum als
+  `c07b6a4c` mit gültigem Titel neu erzeugt; der folgende Docs-Commit
+  wurde erneut aufgesetzt. Alter und neuer geprüfter Head haben bis
+  auf diese Review-Log-ID denselben Dateibaum. CI/Sonar des korrigierten
+  PR-Heads stehen noch aus.
