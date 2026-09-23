@@ -1621,6 +1621,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     ("backend.db.schema", ("database_table_names",)),
     ("backend.db.bootstrap", ("initialize_application_database",)),
+    ("backend.http_api.bootstrap_state", ("PublicBootstrapService", "bootstrap_provider_states")),
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
@@ -1637,6 +1638,8 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_restore_coach_session_csrf_hash",
     "public_performance_state",
     "public_feedback_state",
+    "public_bootstrap",
+    "bootstrap_provider_states",
     "_delete_reset_coach_conversation",
     "_cancel_reset_coach_commands",
     "_reset_local_coach_chat_state",

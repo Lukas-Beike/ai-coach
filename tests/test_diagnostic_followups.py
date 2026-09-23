@@ -27,7 +27,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
     def test_yesterdays_ready_status_is_not_todays_success(self):
         server.set_kv("morning_checkin_status", "ready")
         server.set_kv("morning_checkin_date", "2026-09-06")
-        result = server.public_bootstrap()["morning_checkin"]
+        result = server.public_bootstrap_service().read()["morning_checkin"]
         self.assertEqual(result["status"], "waiting")
         self.assertFalse(result["current_for_today"])
         self.assertEqual(server.diagnostic_report_service().report()["morning_checkin"], result)

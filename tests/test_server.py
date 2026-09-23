@@ -2156,7 +2156,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="")
 
         with patch.object(server, "CONFIG", config):
-            bootstrap = server.public_bootstrap()
+            bootstrap = server.public_bootstrap_service().read()
             state = server.public_state_service().read(local_only=True)
 
         for result in (bootstrap, state):
@@ -2346,7 +2346,23 @@ class CoachTests(unittest.TestCase):
         })
         for index in range(500):
             server.coach_message_service().add("user", f"message {index}")
-        bootstrap = server.public_bootstrap()
+        bootstrap = server.public_bootstrap_service().read()
+        self.assertEqual(
+            list(bootstrap),
+            [
+                "schema_version", "state_versions", "plan_revision", "app", "skeleton",
+                "messages", "messages_next_cursor", "plans", "library", "activities",
+                "planned", "training_calendar", "calendar", "planning_view",
+                "planning_compliance", "weather", "parallel_cycling", "profile",
+                "competitions", "checkins", "local_feedback", "activity_feedback",
+                "planning", "external_calendar", "daily_planning_context", "performance",
+                "garmin", "diagnostic_capture", "intervals", "provider_freshness",
+                "provider_states", "garmin_sync", "provider_resync", "sync", "running_jobs",
+                "library_sync", "sync_settings", "calendar_display", "competition_sync",
+                "performance_refresh", "morning_checkin", "coach_quick_actions",
+                "ai_provider", "model", "thinking_level", "configured", "usage",
+            ],
+        )
         self.assertEqual(bootstrap["schema_version"], 3)
         self.assertEqual(len(bootstrap["messages"]), 100)
         self.assertEqual(bootstrap["activities"], [])
@@ -2362,7 +2378,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(server.provider_http_client(), "request", side_effect=AssertionError("network")), patch.object(
             server.provider_http, "external_call", side_effect=AssertionError("network")
         ):
-            bootstrap = server.public_bootstrap()
+            bootstrap = server.public_bootstrap_service().read()
         self.assertEqual(bootstrap["schema_version"], 3)
         self.assertIn(bootstrap["provider_states"]["intervals"]["status"], {"not_configured", "loading", "ready", "stale", "degraded", "error"})
 
@@ -2405,8 +2421,22 @@ class CoachTests(unittest.TestCase):
 
     def test_bootstrap_reuses_one_database_connection_for_local_reads(self):
         with patch.object(server.sqlite3, "connect", wraps=sqlite3.connect) as connect:
-            server.public_bootstrap()
+            server.public_bootstrap_service().read()
         self.assertEqual(connect.call_count, 1)
+
+    def test_bootstrap_resolves_database_manager_inside_shared_lock(self):
+        real_manager = server.database_manager
+        lock_states = []
+
+        def manager_factory():
+            lock_states.append(server.DB_LOCK._is_owned())
+            return real_manager()
+
+        with patch.object(server, "database_manager", side_effect=manager_factory):
+            server.public_bootstrap_service().read()
+
+        self.assertTrue(lock_states)
+        self.assertTrue(all(lock_states))
 
     def test_frontend_loads_domain_areas_instead_of_monolithic_state(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
@@ -2488,7 +2518,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(status["operation_id"], "operation-test")
         self.assertEqual(status["phase"], "fetching")
         self.assertEqual(status["progress"], 35)
-        bootstrap = server.public_bootstrap()
+        bootstrap = server.public_bootstrap_service().read()
         self.assertEqual(bootstrap["sync"]["progress"], 35)
         self.assertEqual(bootstrap["sync"]["message"], "Daten werden gelesen…")
 
@@ -9753,7 +9783,7 @@ class CoachTests(unittest.TestCase):
                 self.lock.release()
 
         for state_reader in (
-            server.public_bootstrap,
+            lambda: server.public_bootstrap_service().read(),
             lambda: server.public_state_service().read(),
         ):
             for update in (False, True):

@@ -136,6 +136,10 @@ from backend.providers import weather as weather_provider
 from backend.providers.garmin import GarminClientFactory
 from backend.providers.garmin_morning import fetch_morning_body_battery
 from backend.http_api import server as http_server
+from backend.http_api.bootstrap_state import (
+    PublicBootstrapDependencies,
+    PublicBootstrapService,
+)
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.auth import SessionAuthService
@@ -4471,158 +4475,52 @@ def local_now() -> datetime:
         return datetime.now().astimezone()
 
 
-def bootstrap_provider_states(freshness: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Project provider freshness into the small, stable bootstrap contract."""
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for item in freshness:
-        if isinstance(item, dict) and item.get("provider"):
-            grouped.setdefault(str(item["provider"]), []).append(item)
-    state_map = {
-        "not_configured": "not_configured",
-        "syncing": "loading",
-        "never_loaded": "loading",
-        "fresh": "ready",
-        "connected": "ready",
-        "partial": "degraded",
-        "stale": "stale",
-        "error": "error",
-    }
-    result: dict[str, dict[str, Any]] = {}
-    priority = {"error": 5, "stale": 4, "degraded": 3, "loading": 2, "ready": 1, "not_configured": 0}
-    for provider, areas in grouped.items():
-        projected = [state_map.get(str(item.get("state")), "error") for item in areas]
-        status = max(projected, key=lambda value: priority[value]) if projected else "not_configured"
-        result[provider] = {
-            "status": status,
-            "areas": {
-                str(item.get("area")): {
-                    "status": state_map.get(str(item.get("state")), "error"),
-                    "last_success_at": item.get("last_success_at"),
-                }
-                for item in areas
-            },
-        }
-    return result
-
-
-def public_bootstrap() -> dict[str, Any]:
-    """Return bounded local state without waiting for any provider network call."""
-    # The startup screen waits for this response. Keep all of its local reads
-    # on one connection so SQLCipher is keyed once instead of once per helper.
-    # The nested helpers reuse the active DatabaseManager unit of work.
-    with DB_LOCK, database() as db:
-        snapshot = sync_state_repository().latest_snapshot()
-        local_planned = planned_unit_service().list(250)
-        competitions = competition_service().list(limit=100)
-        relevant_external = external_calendar_reader().list_events(
-            250, training_relevant_only=True
+def public_bootstrap_service() -> PublicBootstrapService:
+    """Compose the local bootstrap read from its owning backend services."""
+    return PublicBootstrapService(
+        PublicBootstrapDependencies(
+            database_manager=database_manager,
+            database_lock=DB_LOCK,
+            config=CONFIG,
+            app_name=APP_NAME,
+            app_version=APP_VERSION,
+            key_values=KEY_VALUE_REPOSITORY,
+            sync_state_repository=sync_state_repository,
+            planned_unit_service=planned_unit_service,
+            competition_service=competition_service,
+            external_calendar_reader=external_calendar_reader,
+            profile_service=profile_service,
+            provider_freshness_service=provider_freshness_service,
+            garmin_sync_state_service=garmin_sync_state_service,
+            garmin_sync_service=garmin_sync_service,
+            sync_job_queue_service=sync_job_queue_service,
+            state_version_service=state_version_service,
+            coach_message_service=coach_message_service,
+            training_plan_service=training_plan_service,
+            local_calendar_events=calendar_local.local_calendar_events,
+            planning_state=planning_season.planning_state,
+            adaptive_replan_preview_service=adaptive_replan_preview_service,
+            external_calendar_sync_service=external_calendar_sync_service,
+            external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
+            planned_calendar_history_days=PLANNED_CALENDAR_HISTORY_DAYS,
+            planned_calendar_future_days=PLANNED_CALENDAR_FUTURE_DAYS,
+            garmin_projection_service=garmin_projection_service,
+            diagnostic_capture=DIAGNOSTIC_CAPTURE,
+            intervals_public_state=intervals_state.public_state,
+            intervals_sync_lock=INTERVALS_SYNC_LOCK,
+            workout_library_sync_running=workout_library_sync_running,
+            workout_library_sync_state_service=workout_library_sync_state_service,
+            full_provider_resync_service=full_provider_resync_service,
+            sync_public_state_service=sync_public_state_service,
+            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+            all_sync_days=ALL_SYNC_DAYS,
+            settings=SETTINGS,
+            local_date=lambda: local_now().date(),
+            morning_checkin_state_service=morning_checkin_state_service,
+            coach_quick_actions_service=coach_quick_actions_service,
+            provider_state_service=provider_state_service,
         )
-        profile = profile_service().get()
-        freshness = provider_freshness_service().current(
-            profile=profile_service().get(),
-            garmin_has_core_error=bool(
-                garmin_sync_state_service().core_error_entries()
-            ),
-            garmin_tokenstore_exists=Path(CONFIG.garmin_tokenstore).exists(),
-        )
-        jobs = sync_job_queue_service().list()
-        state_version_values = state_version_service().versions()
-        return {
-            "schema_version": 3,
-            "state_versions": state_version_values,
-            "plan_revision": state_version_values.get("plan"),
-            "app": {"name": APP_NAME, "version": APP_VERSION},
-            "skeleton": dict.fromkeys(("chat", "activities", "plan", "library", "performance", "feedback", "profile"), True),
-            "messages": coach_message_service().list(limit=100),
-            "messages_next_cursor": None,
-            "plans": training_plan_service().list(limit=30),
-            "library": [],
-            "activities": [],
-            "planned": local_planned,
-            "training_calendar": local_planned,
-            "calendar": calendar_local.local_calendar_events(local_planned, competitions, relevant_external),
-            "planning_view": {"source": "local", "local_count": len(local_planned), "remote_count": 0, "items": local_planned, "provider_window": {}},
-            "planning_compliance": [],
-            "weather": {},
-            "parallel_cycling": [],
-            "profile": profile,
-            "competitions": competitions,
-            "checkins": [],
-            "local_feedback": {"today": None, "recent": [], "scope": "Only athlete-entered subjective feedback and constraints; wearable/provider values remain in their source sections."},
-            "activity_feedback": {"recent": [], "scope": "Only athlete-entered notes about completed activities; this feedback is separate from daily check-ins and provider values."},
-            "planning": planning_season.planning_state(
-                competition_service().list(),
-                local_now().date(),
-                adaptive_replan_preview_service().latest_preview(),
-                adaptive_replan_preview_service().status(),
-            ),
-            "external_calendar": external_calendar_reader().state(
-                configured=bool(CONFIG.calendar_ical_url),
-                running=external_calendar_sync_service().running(),
-                window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
-            ),
-            "daily_planning_context": [],
-            "performance": {},
-            "garmin": garmin_projection_service().public_state(),
-            "diagnostic_capture": DIAGNOSTIC_CAPTURE.status(),
-            "intervals": intervals_state.public_state(
-                configured=bool(CONFIG.intervals_api_key),
-                running=INTERVALS_SYNC_LOCK.locked() or workout_library_sync_running(),
-                status=get_kv("sync_status") or None,
-                last_sync_at=get_kv("last_sync_at"),
-                last_sync_error=get_kv("last_sync_error") or None,
-                last_library_sync_at=get_kv("last_library_sync_at"),
-                last_library_sync_error=get_kv("last_library_sync_error") or None,
-                pagination_value=get_kv("last_sync_pagination"),
-                snapshot=snapshot,
-                library_sync_state=workout_library_sync_state_service().summary(),
-                today=local_now().date(),
-                history_days=PLANNED_CALENDAR_HISTORY_DAYS,
-                future_days=PLANNED_CALENDAR_FUTURE_DAYS,
-            ),
-            "provider_freshness": freshness,
-            "provider_states": bootstrap_provider_states(freshness),
-            "garmin_sync": {
-                "running": garmin_sync_service().running(),
-                "status": get_kv("garmin_sync_status") or None,
-            },
-            "provider_resync": {
-                "intervals": full_provider_resync_service().state("intervals", db),
-                "garmin": full_provider_resync_service().state("garmin", db),
-            },
-            "sync": sync_public_state_service().browser_state(
-                freshness=freshness, jobs=jobs
-            ),
-            "running_jobs": [job for job in jobs if job.get("status") in {"queued", "running"}],
-            "library_sync": {"last_sync_at": get_kv("last_library_sync_at"), "last_error": get_kv("last_library_sync_error") or None, "state": workout_library_sync_state_service().summary()},
-            "sync_settings": {
-                "intervals_days": sync_state_repository().sync_period(
-                    "intervals", SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS
-                ),
-                "garmin_days": sync_state_repository().sync_period(
-                    "garmin", SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS
-                ),
-            },
-            "calendar_display": SETTINGS.calendar_display_settings(),
-            "competition_sync": {
-                "last_sync_at": get_kv("last_competition_sync_at"), "last_error": get_kv("last_competition_sync_error") or None,
-                "running": get_kv("competition_sync_running") == "1", "status": get_kv("competition_sync_status") or None,
-            },
-            "performance_refresh": {
-                "last_refresh_at": get_kv("last_performance_refresh_at"), "last_error": get_kv("last_performance_error") or None,
-                "running": get_kv("performance_refresh_running") == "1",
-            },
-            "morning_checkin": morning_checkin_state_service().state(),
-            "coach_quick_actions": coach_quick_actions_service().state(),
-            "ai_provider": {"selected": SETTINGS.selected_ai_provider(), "options": SETTINGS.available_ai_providers()},
-            "model": {"selected": SETTINGS.selected_model(), "options": SETTINGS.available_model_options()},
-            "thinking_level": {"selected": SETTINGS.selected_thinking_level(), "options": SETTINGS.available_thinking_level_options()},
-            "configured": {
-                "openai": bool(CONFIG.openai_api_key), "gemini": bool(CONFIG.gemini_api_key), "intervals": bool(CONFIG.intervals_api_key),
-                "weather": bool(profile_service().get().get("weather_location")), "external_calendar": bool(CONFIG.calendar_ical_url),
-            },
-            "usage": provider_state_service().summary(SETTINGS.selected_ai_provider() or "openai"),
-        }
+    )
 
 
 def public_plan_state(local_only: bool = False) -> dict[str, Any]:
@@ -4997,7 +4895,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, result)
         elif path == "/api/bootstrap":
             self.auth_service.require_auth(self)
-            self.send_json(200, public_bootstrap())
+            self.send_json(200, public_bootstrap_service().read())
         else:
             return False
         return True
