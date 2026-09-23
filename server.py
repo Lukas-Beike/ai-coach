@@ -135,13 +135,14 @@ from backend.providers import weather as weather_provider
 from backend.providers.garmin import GarminClientFactory
 from backend.providers.garmin_morning import fetch_morning_body_battery
 from backend.http_api import server as http_server
-from backend.http_api.state_versions import StateVersionService
-from backend.http_api.sync_commands import SyncCommandEndpoint
+from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.state_prelude import (
     CalendarWindowRange,
     PublicStateLocalPrelude,
     PublicStateWeatherPrelude,
 )
+from backend.http_api.state_versions import StateVersionService
+from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
@@ -366,8 +367,7 @@ COACH_JOB_CANCEL_EVENTS: dict[str, threading.Event] = {}
 SYNC_JOB_WORKER: SyncJobWorker | None = None
 SESSION_LOCK = threading.RLock()
 SESSIONS: dict[str, dict[str, Any]] = {}
-RATE_LIMIT_LOCK = threading.Lock()
-RATE_LIMITS: dict[str, list[float]] = {}
+RATE_LIMITER = RateLimiter()
 SYNC_JOB_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)$")
 
 
@@ -5374,39 +5374,10 @@ SESSION_TOUCH_INTERVAL_SECONDS = 5 * 60
 SESSION_CLEANUP_INTERVAL_SECONDS = 15 * 60
 SESSION_CLEANUP_BATCH_SIZE = 100
 SESSION_LAST_CLEANUP_MONOTONIC = 0.0
-RATE_LIMIT_CLEANUP_INTERVAL_SECONDS = 15 * 60
-RATE_LIMIT_CLEANUP_BATCH_SIZE = 100
-RATE_LIMIT_BUCKET_MAX_AGE_SECONDS = 15 * 60
-RATE_LIMIT_LAST_CLEANUP_MONOTONIC = 0.0
 
 
 def client_ip(handler: BaseHTTPRequestHandler) -> str:
     return str(handler.client_address[0]) if handler.client_address else "unknown"
-
-
-def allow_rate(key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
-    global RATE_LIMIT_LAST_CLEANUP_MONOTONIC
-    now = time.monotonic()
-    with RATE_LIMIT_LOCK:
-        if now - RATE_LIMIT_LAST_CLEANUP_MONOTONIC >= RATE_LIMIT_CLEANUP_INTERVAL_SECONDS:
-            inspected = 0
-            for bucket_key in tuple(RATE_LIMITS):
-                if inspected >= RATE_LIMIT_CLEANUP_BATCH_SIZE:
-                    break
-                inspected += 1
-                recent_bucket = [stamp for stamp in RATE_LIMITS[bucket_key] if now - stamp < RATE_LIMIT_BUCKET_MAX_AGE_SECONDS]
-                if recent_bucket:
-                    RATE_LIMITS[bucket_key] = recent_bucket
-                else:
-                    RATE_LIMITS.pop(bucket_key, None)
-            RATE_LIMIT_LAST_CLEANUP_MONOTONIC = now
-        recent = [stamp for stamp in RATE_LIMITS.get(key, []) if now - stamp < window_seconds]
-        allowed = len(recent) < limit
-        if allowed:
-            recent.append(now)
-        RATE_LIMITS[key] = recent
-        retry_after = max(1, int(window_seconds - (now - min(recent or [now]))))
-        return allowed, retry_after
 
 
 def cookie_value(handler: BaseHTTPRequestHandler, name: str) -> str:
@@ -5518,7 +5489,7 @@ def authenticated_session(handler: BaseHTTPRequestHandler) -> dict[str, Any] | N
 def login_user(handler: BaseHTTPRequestHandler, password: str) -> dict[str, Any]:
     if app_config.security_configuration_error(CONFIG, sqlcipher_available=SQLCIPHER_AVAILABLE):
         raise AppError(503, "Die sichere App-Konfiguration ist unvollständig.")
-    allowed, retry_after = allow_rate(f"login:{client_ip(handler)}", 5, 900)
+    allowed, retry_after = RATE_LIMITER.allow(f"login:{client_ip(handler)}", 5, 900)
     if not allowed:
         raise AppError(429, f"Zu viele Anmeldeversuche. Erneut versuchen in etwa {retry_after} Sekunden.")
     if not hmac.compare_digest(str(password).encode("utf-8"), CONFIG.app_password.encode("utf-8")):
@@ -5548,7 +5519,7 @@ def require_auth(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     session = authenticated_session(handler)
     if not session:
         raise AppError(401, "Anmeldung erforderlich.")
-    allowed, retry_after = allow_rate(f"api:{client_ip(handler)}", 180, 60)
+    allowed, retry_after = RATE_LIMITER.allow(f"api:{client_ip(handler)}", 180, 60)
     if not allowed:
         raise AppError(429, f"Zu viele Anfragen. Erneut versuchen in etwa {retry_after} Sekunden.")
     return session

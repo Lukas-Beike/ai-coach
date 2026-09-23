@@ -747,6 +747,7 @@ def _explicit_owner(name: str) -> str | None:
             "privacy_archive_export_service": COMPOSITION_ROOT,
             "privacy_delete_service": COMPOSITION_ROOT,
             "database_backup_service": COMPOSITION_ROOT,
+            "RATE_LIMITER": COMPOSITION_ROOT,
             "coach_proposal_read_service": COMPOSITION_ROOT,
             "coach_proposal_creation_service": COMPOSITION_ROOT,
             "coach_proposal_execution_service": COMPOSITION_ROOT,

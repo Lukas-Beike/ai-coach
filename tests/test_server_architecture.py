@@ -1413,6 +1413,15 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "STATIC_IMMUTABLE_MAX_AGE",
         ),
     ),
+    (
+        "backend.http_api.rate_limit",
+        (
+            "RateLimiter",
+            "RATE_LIMIT_CLEANUP_INTERVAL_SECONDS",
+            "RATE_LIMIT_CLEANUP_BATCH_SIZE",
+            "RATE_LIMIT_BUCKET_MAX_AGE_SECONDS",
+        ),
+    ),
     ("backend.sync.windows", ("split_date_windows",)),
     (
         "backend.sync.daily",
@@ -1601,6 +1610,13 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
+    "RATE_LIMIT_LOCK",
+    "RATE_LIMITS",
+    "RATE_LIMIT_CLEANUP_INTERVAL_SECONDS",
+    "RATE_LIMIT_CLEANUP_BATCH_SIZE",
+    "RATE_LIMIT_BUCKET_MAX_AGE_SECONDS",
+    "RATE_LIMIT_LAST_CLEANUP_MONOTONIC",
+    "allow_rate",
     "_enqueue_coach_plan_push",
     "_resolve_structured_sync_conflict",
     "check_adaptive_replan",

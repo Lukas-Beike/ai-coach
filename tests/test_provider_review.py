@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import test_server as fixtures
+from backend.http_api.rate_limit import RateLimiter
 from backend.performance import context as performance_context
 from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import history as performance_history
@@ -197,11 +198,12 @@ class ProviderReviewTests(unittest.TestCase):
         for password in ("synthetic-ascii-123", "synthetic-\u00e4\u00f6\u00fc-123", "synthetic-\U0001f6b4-123"):
             with self.subTest(kind="utf8"), patch.object(server, "CONFIG", replace(server.CONFIG, app_password=password)), \
                     patch.object(server.app_config, "security_configuration_error", return_value=None), \
-                    patch.object(server, "allow_rate", return_value=(True, 0)):
+                    patch.object(RateLimiter, "allow", autospec=True, return_value=(True, 0)) as rate_limit:
                 # The storage fixture stays SQLite; login uses the real comparison and session SQL.
                 with patch.object(server, "database_manager", return_value=self.manager_for_login()):
                     result = server.login_user(Mock(client_address=("127.0.0.1", 0)), password)
                     self.assertTrue(result["authenticated"])
+                    rate_limit.assert_called_with(server.RATE_LIMITER, "login:127.0.0.1", 5, 900)
                     with self.assertRaises(server.AppError) as error:
                         server.login_user(Mock(client_address=("127.0.0.1", 0)), password + "x")
                     self.assertEqual(error.exception.status, 401)
@@ -370,11 +372,12 @@ class ProviderReviewTests(unittest.TestCase):
         encrypted_path = Path(self.directory.name) / "encrypted.db"
         configured = replace(server.CONFIG, app_password="synthetic-\u00e4-\U0001f6b4-123")
         with patch.object(server, "DB_PATH", encrypted_path), patch.object(server, "CONFIG", configured), \
-                patch.object(server, "allow_rate", return_value=(True, 0)):
+                patch.object(RateLimiter, "allow", autospec=True, return_value=(True, 0)) as rate_limit:
             server.initialise_database()
             server.set_kv("marker", "fresh")
             result = server.login_user(Mock(client_address=("127.0.0.1", 0)), configured.app_password)
             self.assertTrue(result["authenticated"])
+            rate_limit.assert_called_with(server.RATE_LIMITER, "login:127.0.0.1", 5, 900)
             server.database_manager().close()
             server.DATABASE_MANAGER = None
             server.DATABASE_MANAGER_SIGNATURE = None
