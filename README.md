@@ -292,10 +292,12 @@ instructions do not delete or convert its data.
 After login, the chat and all data already stored locally are rendered first.
 The browser then loads the current remote-enriched view in the background. The
 authentication request itself does not force a new Intervals.icu, Garmin, or
-calendar synchronization: those providers are synchronized at server
-startup, once per calendar day in the background, or on demand from the More
-tab. The selected activity windows (Intervals.icu and Garmin) are retained
-locally and can be changed in that tab.
+calendar synchronization: those providers are synchronized at server startup,
+hourly in the background, or on demand from the More tab. Automatic Garmin
+refreshes fetch the latest two days. The Garmin period in the More tab remains
+30 days by default, so a manual sync can catch up after an outage or repair
+older records. Selected activity windows (Intervals.icu and Garmin) are
+retained locally and can be changed in that tab.
 
 The browser refreshes the local/remote view every minute while the PWA is
 visible and polls more frequently while a manual synchronization is running.
@@ -319,11 +321,8 @@ Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
 visible view also refreshes it when the cache has expired. The current forecast
 can be forced manually from the Open-Meteo card in the More tab.
-The morning check-in is generated once per local calendar day when its required
-integrations are configured. From 05:00 onward, startup and the background loop
-also catch up on a missed check-in, including after 11:00. Failed attempts may
-retry after 15 minutes, up to three attempts per day. Yesterday's completed
-check-in is not reported as today's completed check-in.
+The Morgen-Check-in remains available as a manual Coach quick action and is not
+generated automatically in the background.
 
 The four main views use stable hash links: `#coach`, `#plan`, `#analysis`,
 and `#more`. Navigation is implemented with real
@@ -555,10 +554,10 @@ stores bounded event metadata locally, and never writes to the calendar. The
 URL stays in the server environment and is excluded from browser state,
 exports, and logs.
 
-The feed is read at startup, once per day, or on demand with **Synchronisieren**
-in the More tab. Daily synchronization uses the athlete's validated
-IANA timezone and stores a separate local execution date for each provider.
-Successful manual synchronization counts for the provider's current local day. Events
+The feed is read at startup, hourly, or on demand with **Synchronisieren**
+in the More tab. Automatic synchronization uses the athlete's validated
+IANA timezone and stores a separate last-success time for each provider.
+Successful manual synchronization counts for the current hour. Events
 are supplied to the Coach as read-only scheduling context.
 A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and

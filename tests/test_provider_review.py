@@ -212,8 +212,14 @@ class ProviderReviewTests(unittest.TestCase):
                     payload = {"synced_at": "2026-09-05T00:00:00+00:00", "start": "2026-08-01", "end": "2026-09-05",
                                "errors": [{"source": source, "message": "synthetic outage"}],
                                "provider_sync": {"pagination": {"activities": {"complete": source != "activities"}}}}
-                    with patch.object(server, "Garmin", return_value=client), patch.object(server, "collect_garmin_data", return_value=payload):
+                    with patch.object(server, "mark_daily_sync") as mark, patch.object(
+                        server, "Garmin", return_value=client
+                    ), patch.object(server, "collect_garmin_data", return_value=payload):
                         result = server.sync_garmin(days=2, end_date=date(2026, 8, 30) if historical else None)
+                    if historical:
+                        mark.assert_not_called()
+                    else:
+                        mark.assert_called_once_with("garmin")
                     saved = server.garmin_snapshot()
                     self.assertEqual(saved[source], previous[source])
                     self.assertEqual(saved["source_freshness"][source]["fetched_at"], previous["source_freshness"][source]["fetched_at"])
