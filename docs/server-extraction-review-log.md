@@ -4384,3 +4384,69 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   in 254,981 s. Erneutes Root-Review **PASS**. Inventar: `server.py`
   6.914 Zeilen, P7 102 Definitionen/31 globale Bindungen; P7 bleibt
   offen. Sonar-Prüfung nach Push ausstehend.
+
+## PR #706 — Sync-Job-Executor-Eigentümer
+
+- GPT-6-Luna-Diff `f485cc9`, sequenziell als `b983c30` integriert.
+  Root hat den tatsächlichen Worker-Diff und die integrierte Factory
+  einschließlich aller Provider-Routen, Plan-Push-Grenze, historischen
+  Backfill-Continuation, Morning-Followup, Outcome und Gate-/Lock-
+  Eigentümern geprüft: **PASS**. `HistoricalSyncJobOwner`, konkrete
+  Provider-Owner und Dispatcher halten Fachabläufe; `SyncJobExecutor`
+  normalisiert den Job und persistiert das Outcome. Keine Server-
+  Rückimporte oder fachtragenden Callbacks.
+- 31 direkte Sync-/Queue-/Worker-/Architekturtests, 15 Provider-
+  Regressionen (ein Skip) und sieben gezielte Server-Jobtests, Ruff,
+  Compile und Diff-Check **PASS**. Ein anfänglich falsch benannter
+  Testmodulaufruf und ein separater Importversuch ohne den erforderlichen
+  Test-Suchpfad waren reine Aufruffehler; die identischen gültigen
+  Auswahlen liefen anschließend grün. Gesamtsuite und Sonar-Prüfung
+  des erweiterten Stands stehen noch aus.
+
+## PR #706 — Full-Resync-Eigentümer
+
+- Erstes GPT-6-Luna-Diff `cb6ee3d` im tatsächlichen Code **FAIL**:
+  die Cleanup-Bedingung war versehentlich an eine wahrheitswertige
+  Operations-ID gekoppelt. Korrekturauftrag an denselben Worker;
+  Korrektur-Diff `b848fbd` mit Empty-ID-Regression erneut geprüft:
+  **PASS**. Beide Commits sequenziell als `7b9682b` und `23d5d79`
+  integriert und am integrierten Code erneut geprüft: **PASS**.
+  Konkrete Eigentümer besitzen Provider/Gates, dauerhaften KV-/DB-
+  Status und Operation-Journal/Redaction. Status-Cleanup, Gate-Release,
+  Context-Reset und Ereignisfolge auch bei Fehlern bleiben erhalten;
+  keine Server-Rückimporte oder fachtragenden Callbacks.
+- Zwölf direkte Full-Resync-, drei Architektur- und sechs gezielte
+  Server-Resync-Regressionen, Ruff, Compile und Diff-Check **PASS**.
+  Gesamtsuite und Sonar-Prüfung des erweiterten Stands stehen noch aus.
+
+## PR #706 — Garmin-Sync-Lifecycle-Eigentümer
+
+- Erstes GPT-6-Luna-Diff `4a76c7a` im tatsächlichen Code **FAIL**:
+  der Fixture-Fallback für das Sync-Enddatum war von der lokalen Uhr
+  auf potentiell alte/fehlende Fixture-Metadaten umgestellt worden.
+  Korrekturauftrag an denselben Worker; Korrektur-Diff `8ff5932`
+  samt Regression für alte und fehlende Datumsfelder erneut geprüft:
+  **PASS**. Beide Commits sequenziell als `a645d43` und `28a8834`
+  integriert und den integrierten Pfad erneut geprüft: **PASS**.
+  Quelle, gemeinsames Garmin/Morning-Lock und Provider-Gate sowie
+  Status-/Timestamp-/Log-Besitzer sind fachlich getrennt. Die Fixture-
+  Uhr wird wieder nach Payload-Vorbereitung gelesen; Snapshot-/Fehler-
+  Persistenz, Cancellation und Redaction bleiben erhalten. Keine
+  Server-Rückimporte oder fachtragenden Factory-Callbacks.
+- Neun direkte Garmin-, drei Architektur- und vier gezielte Server-
+  Regressionen, Ruff, Compile und Diff-Check **PASS**. Gesamtsuite
+  und Sonar-Prüfung des erweiterten Stands stehen noch aus.
+
+## PR #706 — kombinierter Integrationsstand nach Garmin
+
+- Integrierter Stand `28a8834` (Executor `b983c30`, Full-Resync
+  `7b9682b`/`23d5d79`, Garmin `a645d43`/`28a8834`) im tatsächlichen
+  Code erneut auf Provider-Routen, geteilten Lock, Gate-Reihenfolge,
+  Backfill, Fixture-Datum, Cleanup, Cancellation, Transaktion und
+  Remote-Schreibgrenzen geprüft: **PASS**. Alle betroffenen direkten,
+  Architektur- und Server-Regressionen oben **PASS**; kombinierte
+  Gesamtsuite **PASS**: 2.259 Tests, 12 Skips in 231,630 s.
+  Inventar: `server.py` 6.952 Zeilen; P7 102 Definitionen/31 globale
+  Bindungen. Zeilenzunahme durch Composition-Factories zählt nicht
+  als Phasenabschluss. Sonar/CI des nächsten veröffentlichten Heads
+  noch ausstehend.
