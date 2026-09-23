@@ -21,7 +21,6 @@ import threading
 import tempfile
 import time
 import uuid
-import zipfile
 from contextlib import nullcontext, contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -67,6 +66,7 @@ from backend.calendar import local as calendar_local
 from backend.calendar import public_events as public_event_calendar
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.read_service import ActivityReadService
+from backend.privacy import PrivacyDataExportDependencies, PrivacyDataExportService
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -288,11 +288,8 @@ from backend.http_api.requests import (
     read_json as read_request_json,
 )
 from backend.backup.export import (
-    application_state as export_application_state,
-    decode_payload as export_decode_payload,
-    iter_workout_library as export_workout_library,
-    manifest as export_manifest,
-    write_jsonl_rows as export_jsonl_rows,
+    PrivacyArchiveExportConfig,
+    PrivacyArchiveExportService,
 )
 
 try:
@@ -1694,6 +1691,27 @@ def adaptive_replan_preview_service() -> AdaptiveReplanPreviewService:
         CHECKIN_TEXT_LIMITS["illness"],
         planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS,
         planning_adaptive.WEATHER_ADAPTIVE_MAX_MINUTES,
+    )
+
+
+def privacy_data_export_service() -> PrivacyDataExportService:
+    """Compose the local JSON privacy-data projection use case."""
+    return PrivacyDataExportService(
+        PrivacyDataExportDependencies(
+            database_manager=database_manager(),
+            database_lock=DB_LOCK,
+            key_value_repository=KEY_VALUE_REPOSITORY,
+            profile_service=profile_service(),
+            workout_library_service=workout_library_service(),
+            competition_service=competition_service(),
+            training_plan_service=training_plan_service(),
+            checkin_service=checkin_service(),
+            activity_feedback_service=activity_feedback_service(),
+            adaptive_preview_service=adaptive_replan_preview_service(),
+            external_calendar_reader=external_calendar_reader(),
+            local_now=local_now,
+            utc_now=utc_now,
+        )
     )
 
 
@@ -5206,270 +5224,25 @@ def diagnostic_report_service() -> DiagnosticReportService:
     ))
 
 
-def privacy_export() -> dict[str, Any]:
-    with DB_LOCK, database() as db:
-        messages = [dict(row) for row in db.execute("SELECT role, content, attachments, created_at FROM messages ORDER BY id").fetchall()]
-        snapshots = [json.loads(row["payload"]) for row in db.execute("SELECT payload FROM snapshots ORDER BY id").fetchall()]
-        library = workout_library_service().list(include_archived=True)
-        competitions = competition_service().list()
-        tombstones = [dict(row) for row in db.execute("SELECT intervals_event_id, external_id, created_at FROM competition_sync_tombstones ORDER BY created_at").fetchall()]
-        adjustments = [dict(row) for row in db.execute("SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at").fetchall()]
-        public_calendar = public_event_calendar.state(db)
-        kv_rows = db.execute("SELECT key, value FROM kv ORDER BY key").fetchall()
-    application_state: dict[str, Any] = {}
-    excluded_state = {"profile", "garmin_snapshot", weather_cache.CACHE_KEY}
-    for row in kv_rows:
-        key = str(row["key"])
-        if key in excluded_state or key.endswith("_running") or key.endswith("_status"):
-            continue
-        value = row["value"]
-        try:
-            application_state[key] = json.loads(value)
-        except (TypeError, ValueError):
-            application_state[key] = value
-    try:
-        garmin_data = json.loads(get_kv("garmin_snapshot") or "{}")
-    except (TypeError, ValueError):
-        garmin_data = {}
-    try:
-        weather_data = json.loads(get_kv(weather_cache.CACHE_KEY) or "{}")
-    except (TypeError, ValueError):
-        weather_data = {}
-    return {
-        "exported_at": utc_now(),
-        "profile": profile_service().get(),
-        "application_state": application_state,
-        "competitions": competitions,
-        "competition_sync_tombstones": tombstones,
-        "messages": messages,
-        "snapshots": snapshots,
-        "workout_library": library,
-        "training_plans": training_plan_service().list(),
-        "plan_adjustments": adjustments,
-        "local_feedback": checkin_service().context(),
-        "activity_feedback": activity_feedback_service().context(),
-        "planning": planning_season.planning_state(
-            competition_service().list(),
-            local_now().date(),
-            adaptive_replan_preview_service().latest_preview(),
-            adaptive_replan_preview_service().status(),
+def privacy_archive_export_service() -> PrivacyArchiveExportService:
+    """Compose the local privacy archive use case."""
+    return PrivacyArchiveExportService(
+        database_manager(),
+        DB_LOCK,
+        KEY_VALUE_REPOSITORY,
+        profile_service(),
+        competition_service(),
+        adaptive_replan_preview_service(),
+        PrivacyArchiveExportConfig(
+            DATA_DIR,
+            DB_PATH,
+            lambda: local_now().date(),
+            utc_now,
+            maximum_bytes=MAX_PRIVACY_EXPORT_BYTES,
+            minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
+            time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
         ),
-        "external_calendar": external_calendar_reader().list_events(),
-        "public_calendar": public_calendar,
-        "garmin_snapshot": garmin_data,
-        "weather_cache": weather_data,
-    }
-
-
-PRIVACY_EXPORT_FORMAT_VERSION = 1
-PRIVACY_EXPORT_JSONL_FILES = {
-    "athlete_checkins.jsonl",
-    "activity_feedback.jsonl",
-    "external_calendar_events.jsonl",
-    "public_event_sources.jsonl",
-    "public_event_candidates.jsonl",
-    "competitions.jsonl",
-    "competition_sync_tombstones.jsonl",
-    "messages.jsonl",
-    "coach_plan_artifacts.jsonl",
-    "coach_commands.jsonl",
-    "snapshots.jsonl",
-    "workout_library.jsonl",
-    "planned_units.jsonl",
-    "training_plans.jsonl",
-    "plan_adjustments.jsonl",
-    "change_history.jsonl",
-    "provider_refresh_history.jsonl",
-    "sync_jobs.jsonl",
-    "sync_job_items.jsonl",
-    "provider_sync_cursors.jsonl",
-}
-
-
-def _export_payload(value: Any) -> Any:
-    return export_decode_payload(value)
-
-
-def _export_jsonl_rows(archive: zipfile.ZipFile, name: str, rows: Any, deadline: float) -> None:
-    export_jsonl_rows(
-        archive,
-        name,
-        rows,
-        deadline,
-        now=time.monotonic,
-        timeout_error=lambda: AppError(408, "Der Export überschreitet das Zeitlimit."),
     )
-
-
-def _export_workout_library(db: Any) -> Any:
-    yield from export_workout_library(db, decode=_export_payload)
-
-
-def _export_planned_units(db: Any) -> Any:
-    yield from (
-        {**dict(row), "payload": _export_payload(row["payload"])}
-        for row in db.execute(
-            "SELECT id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, sync_conflict, baseline_hash, last_synced_at, plan_id, revision, tombstone, command_id, created_at, updated_at "
-            "FROM planned_units ORDER BY updated_at"
-        )
-    )
-
-
-def _export_application_state(db: Any) -> dict[str, Any]:
-    return export_application_state(
-        db,
-        excluded_keys={"profile", "garmin_snapshot", weather_cache.CACHE_KEY},
-        decode=_export_payload,
-    )
-
-
-def _privacy_export_file() -> Path:
-    started = time.monotonic()
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    try:
-        database_size = DB_PATH.stat().st_size
-        free_bytes = shutil.disk_usage(DATA_DIR).free
-    except OSError as exc:
-        raise AppError(503, "Der Export-Speicher ist nicht verfügbar.") from exc
-    required_free = max(MIN_EXPORT_FREE_BYTES, min(MAX_PRIVACY_EXPORT_BYTES, database_size * 2))
-    if free_bytes < required_free:
-        raise AppError(507, "Für den Export ist nicht ausreichend freier Speicher verfügbar.")
-    descriptor, temporary_path = tempfile.mkstemp(prefix=".intervals-coach-export-", suffix=".zip", dir=DATA_DIR)
-    os.close(descriptor)
-    temporary = Path(temporary_path)
-    deadline = started + EXPORT_TIME_LIMIT_SECONDS
-    try:
-        with DB_LOCK, database() as db, zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-            archive.writestr("profile.json", json.dumps(profile_service().get(), ensure_ascii=False, separators=(",", ":")))
-            archive.writestr("application_state.json", json.dumps(_export_application_state(db), ensure_ascii=False, separators=(",", ":")))
-            _export_jsonl_rows(
-                archive,
-                "competitions.jsonl",
-                (dict(row) for row in db.execute(
-                    "SELECT id, name, event_date, start_date_local, sport, priority, category, distance, target, "
-                    "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
-                    "sync_state, sync_conflict, last_synced_at FROM competitions ORDER BY event_date, priority, name"
-                )),
-                deadline,
-            )
-            _export_jsonl_rows(
-                archive,
-                "competition_sync_tombstones.jsonl",
-                (dict(row) for row in db.execute("SELECT intervals_event_id, external_id, created_at FROM competition_sync_tombstones ORDER BY created_at")),
-                deadline,
-            )
-            _export_jsonl_rows(
-                archive,
-                "messages.jsonl",
-                (dict(row) for row in db.execute("SELECT role, content, attachments, created_at FROM messages ORDER BY id")),
-                deadline,
-            )
-            _export_jsonl_rows(
-                archive,
-                "coach_plan_artifacts.jsonl",
-                (dict(row) for row in db.execute("SELECT id, conversation_id, client_turn_id, base_revision, status, payload, created_at, updated_at FROM coach_plan_artifacts ORDER BY created_at")),
-                deadline,
-            )
-            _export_jsonl_rows(
-                archive,
-                "coach_commands.jsonl",
-                (dict(row) for row in db.execute("SELECT id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, receipt, error_class, created_at, updated_at FROM coach_commands ORDER BY created_at")),
-                deadline,
-            )
-            _export_jsonl_rows(
-                archive,
-                "snapshots.jsonl",
-                (_export_payload(row["payload"]) for row in db.execute("SELECT payload FROM snapshots ORDER BY id")),
-                deadline,
-            )
-            _export_jsonl_rows(archive, "workout_library.jsonl", _export_workout_library(db), deadline)
-            _export_jsonl_rows(archive, "planned_units.jsonl", _export_planned_units(db), deadline)
-            _export_jsonl_rows(
-                archive,
-                "training_plans.jsonl",
-                (dict(row) for row in db.execute(
-                    "SELECT id, name, goal, start_date, end_date, status, created_at, updated_at "
-                    "FROM training_plans ORDER BY created_at DESC"
-                )),
-                deadline,
-            )
-            _export_jsonl_rows(
-                archive,
-                "plan_adjustments.jsonl",
-                (dict(row) for row in db.execute("SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at")),
-                deadline,
-            )
-            _export_jsonl_rows(
-                archive,
-                "change_history.jsonl",
-                (change_history.public_view(dict(row)) for row in db.execute("SELECT id, entity_type, entity_id, action, source, created_at, before_hash, after_hash, diff FROM change_history ORDER BY created_at")),
-                deadline,
-            )
-            _export_jsonl_rows(
-                archive,
-                "provider_refresh_history.jsonl",
-                (dict(row) for row in db.execute("SELECT id, provider, area, operation_id, trigger, started_at, finished_at, phase, status, error_code, next_retry_at FROM provider_refresh_history ORDER BY started_at")),
-                deadline,
-            )
-            _export_jsonl_rows(
-                archive,
-                "sync_jobs.jsonl",
-                (dict(row) for row in db.execute("SELECT id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, error_class, available_at, started_at, finished_at, created_at, updated_at FROM sync_jobs ORDER BY created_at")),
-                deadline,
-            )
-            _export_jsonl_rows(
-                archive,
-                "sync_job_items.jsonl",
-                (dict(row) for row in db.execute("SELECT id, job_id, item_key, operation, payload_hash, remote_id, status, attempts, error_class, error_detail, created_at, updated_at FROM sync_job_items ORDER BY created_at")),
-                deadline,
-            )
-            _export_jsonl_rows(
-                archive,
-                "provider_sync_cursors.jsonl",
-                (dict(row) for row in db.execute("SELECT provider, stream, cursor, high_water_mark, updated_at FROM provider_sync_cursors ORDER BY provider, stream")),
-                deadline,
-            )
-            for table in ("athlete_checkins", "activity_feedback", "external_calendar_events", "public_event_sources", "public_event_candidates"):
-                _export_jsonl_rows(archive, table + ".jsonl", (dict(row) for row in db.execute(f"SELECT * FROM {table}")), deadline)
-            archive.writestr(
-                "planning.json",
-                json.dumps(
-                    planning_season.planning_state(
-                        competition_service().list(),
-                        local_now().date(),
-                        adaptive_replan_preview_service().latest_preview(),
-                        adaptive_replan_preview_service().status(),
-                    ),
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
-            )
-            archive.writestr("garmin_snapshot.json", json.dumps(_export_payload(get_kv("garmin_snapshot", db)), ensure_ascii=False, separators=(",", ":")))
-            archive.writestr("weather_cache.json", json.dumps(_export_payload(get_kv(weather_cache.CACHE_KEY, db)), ensure_ascii=False, separators=(",", ":")))
-            if time.monotonic() > deadline:
-                raise AppError(408, "Der Export überschreitet das Zeitlimit.")
-            archive.writestr(
-                "manifest.json",
-                json.dumps(
-                    export_manifest(
-                        archive.namelist(),
-                        exported_at=utc_now(),
-                        format_version=PRIVACY_EXPORT_FORMAT_VERSION,
-                        jsonl_files=PRIVACY_EXPORT_JSONL_FILES,
-                    ),
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
-            )
-        if temporary.stat().st_size > MAX_PRIVACY_EXPORT_BYTES:
-            raise AppError(413, "Der Export überschreitet das Größenlimit.")
-        return temporary
-    except Exception:
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
 
 
 # Transitional names for restore/test consumers; implementation ownership is
@@ -5521,7 +5294,7 @@ def stream_database_backup(handler: Any) -> None:
 
 
 def stream_privacy_export(handler: Any) -> None:
-    temporary = _privacy_export_file()
+    temporary = privacy_archive_export_service().create_file()
     handler.send_file_stream(
         temporary,
         "application/zip",

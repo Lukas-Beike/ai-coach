@@ -549,9 +549,15 @@ Abhängigkeit: P1 sowie Ressourcen-/Worker-Verträge aus P6 und P8.
 
 - [ ] Archivaufbau, Exportgrenzen, Backupvalidierung, Restore und
   Wiederaufnahme nach `backup/` verschieben.
+  - [x] Begrenzten lokalen Privacy-ZIP-Aufbau einschließlich SQL-/KV-
+    Auswahl, Manifest, Zeit-/Platz-/Größenlimits und Temp-Datei-Cleanup
+    einem konkreten `PrivacyArchiveExportService` zuordnen.
 - [ ] Lokalen Privacy-Export/-Delete und autorisierte Remote-Konversations-
   löschung nach `privacy.py` bzw. zum zuständigen Provider aufteilen.
-- [ ] Diagnosehistorie/-report und Logprojektion vollständig auslagern.
+  - [x] Lokale JSON-Datenprojektion einschließlich sensibler KV-Ausnahmen,
+    fehlerhaftem JSON und getrennter DB-Lesegrenzen einem konkreten
+    `PrivacyDataExportService` zuordnen; Delete bleibt offen.
+- [x] Diagnosehistorie/-report und Logprojektion vollständig auslagern.
   - [x] Begrenzte, datensparsame Coach-Command-Historie samt SQL-Read und
     Fehlerprojektion zu `diagnostics/history.py` verschieben.
   - [x] Begrenzte, redigierte Logprojektion und alle Aufrufer zu

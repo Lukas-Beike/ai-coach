@@ -208,7 +208,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
             )
         with server.DB_LOCK, server.database() as db:
             db.executemany("INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)", [(str(i), str(i), json.dumps({"id": str(i), "name": "Synthetic"}), server.utc_now()) for i in range(1001)])
-        temporary = server._privacy_export_file()
+        temporary = server.privacy_archive_export_service().create_file()
         try:
             with zipfile.ZipFile(temporary) as archive:
                 self.assertEqual(len(archive.read("athlete_checkins.jsonl").splitlines()), 20)
