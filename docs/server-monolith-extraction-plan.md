@@ -542,6 +542,12 @@ Abhängigkeit: P2–P6.
     strukturierten Adaptive-, Planupdate- und Undo-Werkzeuge einem konkreten
     `CoachPlanningActionToolService` zuordnen; die zuständigen Preview-, Apply-, Plan-,
     History- und Proposal-Services bleiben Zustandseigentümer.
+  - [x] Dialogbezogene Datums-, Planned-Unit-, Library- und Draft-Scopes in
+    `CoachDialoguePlanScopeService` verlagern; lokale SQL-Lesegrenzen und der
+    gemeinsame DatabaseManager/DB-Lock bleiben unverändert.
+  - [x] Dialog-Request-Bindung, Anbieter-/Remote-Schreibgrenzen, lebende
+    Objekt-Scopes und Reparaturzeitraum in `CoachDialogueActionService`
+    verlagern; `server.py` komponiert nur die bestehenden Zustandseigentümer.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.

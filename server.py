@@ -285,7 +285,9 @@ from backend.coach.proposals import (
     coach_action_view,
 )
 from backend.coach.receipt_reads import CoachCommandReceiptService
-from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools, validate_request
+from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools
+from backend.coach.dialogue_action import CoachDialogueActionService
+from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
 from backend.coach.turn_failures import (
@@ -303,7 +305,6 @@ from backend.coach.service import (
     dialogue_scope_repair_key,
 )
 from backend.coach.authorization import (
-    authorized_operations,
     coach_execution_scope,
     coach_session_key,
     require_coach_scope,
@@ -363,7 +364,6 @@ SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?
 UPDATE_COMMAND_RECEIPT_SQL = "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?"
 SELECT_COMMAND_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
 SELECT_PLANNING_REVISION_SQL = "SELECT revision FROM planning_state WHERE id=1"
-SELECT_USER_MESSAGE_SQL = "SELECT id FROM messages WHERE client_turn_id=? AND role='user'"
 APP_VERSION = "1.11.11"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
@@ -2096,6 +2096,19 @@ def coach_dialogue_read_service() -> CoachDialogueReadService:
     )
 
 
+def coach_dialogue_action_service() -> CoachDialogueActionService:
+    """Compose live dialogue authorization with its existing state owners."""
+    manager = database_manager()
+    return CoachDialogueActionService(
+        manager,
+        DB_LOCK,
+        sync_job_queue_service,
+        CoachDialoguePlanScopeService(manager, DB_LOCK),
+        lambda: local_now().date(),
+        TRAINING_PLAN_SCOPE_PREFIX,
+    )
+
+
 def coach_attachment_context_service() -> CoachAttachmentContextService:
     """Compose local attachment reads for the current Coach turn."""
     return CoachAttachmentContextService(database_manager())
@@ -2383,165 +2396,6 @@ def coach_tool_dispatch_service() -> CoachToolDispatchService:
             TRAINING_PLAN_SCOPE_PREFIX,
         ),
     )
-
-
-def _structured_authorized_operations(intent: dict[str, Any]) -> set[str]:
-    return authorized_operations(intent)
-
-
-def _dialogue_retry_metadata(
-    name: str, arguments: dict[str, Any], target: str,
-) -> tuple[bool, bool]:
-    retry_job = None
-    if name == "resolve_training_sync_conflict" and arguments.get("job_id"):
-        if arguments.get("local_id"):
-            raise AppError(400, "Wähle entweder einen lokalen Konflikt oder einen Synchronisationsjob.", reason="tool_arguments_invalid")
-        retry_job = sync_job_queue_service().state(str(arguments["job_id"]))
-        if target != retry_job["provider"]:
-            raise AppError(403, "Die Wiederholung benötigt den Anbieter des ursprünglichen Jobs.", reason="request_target")
-    retry_push = bool(retry_job and retry_job["type"] in {"plan_push", "competition_push"})
-    remote_write = retry_push or name in {"start_intervals_plan_sync", "sync_competitions"} or (name == "apply_adaptive_replan" and arguments.get("sync_illness_to_intervals"))
-    refresh = bool(retry_job and not retry_push) or name in {"start_provider_refresh", "refresh_current_performance"}
-    return remote_write, refresh
-
-
-def _validate_dialogue_request_target(
-    request: dict[str, Any], target: str, scope: set[str], remote_write: bool, refresh: bool,
-) -> None:
-    if remote_write and (not request["remote_write"] or target != "intervals" or "intervals_sync" not in scope):
-        raise AppError(403, "Für diesen Schritt fehlt der zugehörige Synchronisierungsauftrag.", reason="remote_scope_denied")
-    if request["remote_write"] != bool(remote_write) or (not remote_write and not refresh and target != "local"):
-        raise AppError(403, "Das Ziel passt nicht zu diesem Auftragsschritt.", reason="request_target")
-    if refresh and (target not in {"intervals", "garmin", "calendar", "weather"} or f"{target}_refresh" not in scope):
-        raise AppError(403, "Der Datenabruf benötigt ein eindeutiges Anbieterziel.", reason="request_target")
-
-
-def _validate_dialogue_scope_objects(name: str, scope: set[str]) -> None:
-    tables = {"planned_unit": ("planned_units", "local_id"), "library_workout": ("workout_library", "local_id"),
-              "training_plan": ("training_plans", "id"), "competition": ("competitions", "id"),
-              "artifact": ("coach_plan_artifacts", "id"), "adaptive_replan": ("plan_adjustments", "id"),
-              "change": ("change_history", "id"), "sync_job": ("sync_jobs", "id")}
-    broad = {"local_profile", "local_plan", "local_template", "local_competitions", "local_checkin", "activity_feedback", "adaptive_replan",
-             "intervals_sync", "intervals_refresh", "garmin_refresh", "calendar_refresh", "weather_refresh"}
-    with DB_LOCK, database() as db:
-        for token in scope:
-            kind, _, object_id = token.partition(":")
-            if kind in tables and object_id:
-                table, column = tables[kind]
-                if not db.execute(f"SELECT 1 FROM {table} WHERE {column}=?", (object_id,)).fetchone():
-                    raise AppError(409, "Das ausgewählte Objekt ist nicht mehr verfügbar. Lies den aktuellen Stand erneut.", reason="request_object_missing")
-                if kind == "training_plan" and name == "replace_training_plan" and db.execute(
-                    "SELECT status FROM training_plans WHERE id=?", (object_id,),
-                ).fetchone()["status"] == "archived":
-                    raise AppError(409, "Dieser Plan ist archiviert. Wähle den aktuellen Plan oder erstelle einen neuen.", reason="request_object_missing")
-            elif token not in broad:
-                raise AppError(400, "Der Auftrag enthält einen ungültigen Objektbezug.", reason="request_scope")
-
-
-def _validate_dialogue_repair_scope(arguments: dict[str, Any], request: dict[str, Any], action: dict[str, Any]) -> None:
-    if not arguments.get("repair"):
-        return
-    period = request.get("period")
-    if request["sync_scope"] != "selected" or not period:
-        raise AppError(400, "Reparatur-Sync benoetigt eine Auswahl und einen Zeitraum.", reason="request_sync")
-    action["_repair_period"] = {**period, "start": max(period["start"], local_now().date().isoformat())}
-    with DB_LOCK, database() as db:
-        for entry in arguments.get("entries") or []:
-            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (str(entry.get("library_workout_id") or ""),)).fetchone()
-            day = str(json.loads(row["payload"]).get("date") or "") if row else ""
-            if not action["_repair_period"]["start"] <= day <= period["end"]:
-                raise AppError(403, "Die Reparaturauswahl liegt ausserhalb des beauftragten Zeitraums.", reason="request_period")
-
-
-def _apply_dialogue_operation_scope(name: str, arguments: dict[str, Any], action: dict[str, Any]) -> None:
-    if name in {"apply_training_patch", "apply_training_changes", "replace_training_plan", "stage_training_plan", "commit_training_plan", "apply_workout_library_plan"}:
-        period = action["request"]["period"]
-        if not period or period["end"] < local_now().date().isoformat():
-            raise AppError(400, "Für die Planung fehlt ein gültiger zukünftiger Zeitraum.", reason="request_period")
-        action["period"] = {**period, "start": max(period["start"], local_now().date().isoformat())}
-        _validate_dialogue_plan_scope(name, arguments, action)
-    if name == "start_intervals_plan_sync":
-        if action["request"]["sync_scope"] not in {"created", "selected", "all_pending"}:
-            raise AppError(400, "Der Umfang der Synchronisierung fehlt.", reason="request_sync")
-        action["_sync_all_pending"] = action["request"]["sync_scope"] == "all_pending"
-        _validate_dialogue_repair_scope(arguments, action["request"], action)
-    if name == "update_training_plan":
-        require_coach_scope(action, TRAINING_PLAN_SCOPE_PREFIX + str((arguments.get("payload") or {}).get("plan_id") or ""))
-    if name == "apply_adaptive_replan":
-        require_coach_scope(action, "adaptive_replan:" + str(arguments.get("adjustment_id") or ""))
-
-
-def _dialogue_action(name: str, arguments: dict[str, Any], context: dict[str, Any], *, allow_mutations: bool) -> dict[str, Any]:
-    """Bind one model-selected action to user messages and live object scopes."""
-    if not allow_mutations:
-        raise AppError(403, "Dieser Coach-Lauf dient ausschließlich der Beratung.", reason="intent_scope_denied")
-    user_ids = {item["id"] for item in context["messages"] if item["role"] == "user"}
-    # A referenced draft may predate the bounded recent dialogue. Its source
-    # message is returned by the read tool, and must still exist locally.
-    with DB_LOCK, database() as db:
-        user_ids.update(row["id"] for row in db.execute(
-            "SELECT m.id FROM messages m JOIN coach_plan_artifacts a ON a.client_turn_id=m.client_turn_id "
-            "WHERE m.role='user' AND a.status='draft'"
-        ).fetchall())
-    try:
-        request = validate_request(arguments.pop("_request", None), user_ids, context["current_user_message_id"])
-    except (TypeError, ValueError) as exc:
-        error = AppError(400, "Der Schritt benötigt einen gültigen Bezug zum aktuellen Auftrag. Prüfe die Werkzeugargumente erneut.", reason="request_invalid")
-        error.validation_reason = str(exc)
-        raise error from exc
-    target = request["target"]
-    scope = set(request["scope"])
-    remote_write, refresh = _dialogue_retry_metadata(name, arguments, target)
-    _validate_dialogue_request_target(request, target, scope, remote_write, refresh)
-    _validate_dialogue_scope_objects(name, scope)
-    action = {"intent": "remote_sync" if remote_write or refresh else "local_action", "operation": name,
-              "target_system": target, "authorization_scope": sorted(scope), "follow_up_operations": [],
-              "artifact_id": arguments.get("artifact_id"), "request": request, "bulk_change": True}
-    _apply_dialogue_operation_scope(name, arguments, action)
-    return action
-
-
-def _check_dialogue_plan_date(value: Any, start: str, end: str) -> None:
-    value = str(value or "")[:10]
-    if not start <= value <= end:
-        raise AppError(403, "Die Änderung liegt außerhalb des beauftragten Zeitraums.", reason="request_period")
-
-
-def _validate_dialogue_plan_changes(
-    arguments: dict[str, Any], action: dict[str, Any], start: str, end: str, db: Any,
-) -> None:
-    for change in arguments.get("changes", []):
-        local_id = str(change.get("local_id") or "")
-        require_coach_scope(action, f"planned_unit:{local_id}")
-        row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
-        if not row:
-            raise AppError(404, "Die ausgewählte Einheit fehlt.", reason="request_object_missing")
-        _check_dialogue_plan_date(json.loads(row["payload"]).get("date"), start, end)
-        if change.get("date"):
-            _check_dialogue_plan_date(change["date"], start, end)
-
-
-def _validate_dialogue_plan_artifact(action: dict[str, Any], start: str, end: str, db: Any) -> None:
-    artifact = db.execute("SELECT client_turn_id, payload FROM coach_plan_artifacts WHERE id=?", (action.get("artifact_id"),)).fetchone()
-    origin = db.execute(SELECT_USER_MESSAGE_SQL, (artifact["client_turn_id"],)).fetchone() if artifact else None
-    if not origin or origin["id"] not in action["request"]["source_message_ids"]:
-        raise AppError(409, "Dieser Entwurf gehört nicht zum aktuellen lokalen Gespräch.", reason="artifact_conversation_conflict")
-    for workout in json.loads(artifact["payload"]).get("workouts", []):
-        _check_dialogue_plan_date(workout.get("date"), start, end)
-    action["_artifact_explicit"] = True  # Resolved local dialogue reference, not literal ID matching.
-
-
-def _validate_dialogue_plan_scope(name: str, arguments: dict[str, Any], action: dict[str, Any]) -> None:
-    start, end = action["period"]["start"], action["period"]["end"]
-    workouts = arguments.get("workouts", []) or (arguments.get("payload") or {}).get("workouts", [])
-    for workout in workouts:
-        _check_dialogue_plan_date(workout.get("date"), start, end)
-    with DB_LOCK, database() as db:
-        _validate_dialogue_plan_changes(arguments, action, start, end, db)
-        if name == "commit_training_plan":
-            _validate_dialogue_plan_artifact(action, start, end, db)
-        for entry in arguments.get("entries", []) if name == "apply_workout_library_plan" else []:
-            _check_dialogue_plan_date(entry.get("date"), start, end)
 
 
 def _save_coach_question(arguments: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -3191,7 +3045,9 @@ def _prepare_structured_tool_execution(
     if (question or cancelled) and name not in STRUCTURED_READ_ONLY_TOOLS:
         raise AppError(409, "Der Auftrag wartet auf deine Antwort oder wurde abgebrochen.", reason="request_paused")
     if name not in STRUCTURED_READ_ONLY_TOOLS and name not in {"clarify_coach_request", "cancel_coach_request"}:
-        action = _dialogue_action(name, arguments, context, allow_mutations=allow_mutations)
+        action = coach_dialogue_action_service().classify(
+            name, arguments, context, allow_mutations=allow_mutations
+        )
     if (action.get("request") or {}).get("remote_write") and any(
         entry["tool"] != name and entry["tool"] not in STRUCTURED_READ_ONLY_TOOLS
         for entry in unresolved_coach_steps(command_receipts)

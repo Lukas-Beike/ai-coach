@@ -294,7 +294,47 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 inspect(tool["parameters"], tool["name"])
                 if tool["name"] not in server.STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}:
                     with self.assertRaises(server.AppError):
-                        server._dialogue_action(tool["name"], {}, context, allow_mutations=False)
+                        server.coach_dialogue_action_service().classify(
+                            tool["name"], {}, context, allow_mutations=False
+                        )
+
+    def test_dialogue_action_service_enforces_live_request_and_remote_boundaries(self):
+        with server.database() as db:
+            server.CHAT_REPOSITORY.add(db, "user", "Synthetic scoped request", client_turn_id="scope-check")
+        context = server.coach_dialogue_read_service().context("scope-check")
+        service = server.coach_dialogue_action_service()
+
+        def classify(name, scope, *, target="local", remote_write=False, sync_scope=None, extra=None):
+            request = self.request(scope, target, remote_write=remote_write, sync_scope=sync_scope)
+            return service.classify(name, {"_request": request, **(extra or {})}, context, allow_mutations=True)
+
+        with self.assertRaises(server.AppError) as denied:
+            service.classify("save_coach_activity_feedback", {}, context, allow_mutations=False)
+        self.assertEqual(denied.exception.reason, "intent_scope_denied")
+        with self.assertRaises(server.AppError) as invalid:
+            foreign_request = self.request(["activity_feedback"]) | {"source_message_ids": [999999]}
+            service.classify(
+                "save_coach_activity_feedback", {"_request": foreign_request}, context,
+                allow_mutations=True,
+            )
+        self.assertEqual(invalid.exception.reason, "request_invalid")
+        with self.assertRaises(server.AppError) as remote:
+            classify("start_intervals_plan_sync", ["intervals_sync"], target="intervals", sync_scope="selected")
+        self.assertEqual(remote.exception.reason, "remote_scope_denied")
+        with self.assertRaises(server.AppError) as provider:
+            classify("start_provider_refresh", ["garmin_refresh"], target="intervals")
+        self.assertEqual(provider.exception.reason, "request_target")
+        with self.assertRaises(server.AppError) as missing:
+            classify("save_coach_activity_feedback", ["planned_unit:missing"])
+        self.assertEqual(missing.exception.reason, "request_object_missing")
+        with self.assertRaises(server.AppError) as repair:
+            classify("start_intervals_plan_sync", ["intervals_sync"], target="intervals", remote_write=True,
+                     sync_scope="selected", extra={"repair": True})
+        self.assertEqual(repair.exception.reason, "request_sync")
+        action = classify("save_coach_activity_feedback", ["activity_feedback"])
+        self.assertEqual(action["authorization_scope"], ["activity_feedback"])
+        self.assertEqual(action["intent"], "local_action")
+
     @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
     def test_receipt_cards_show_only_unresolved_failures(self):
         subprocess.run(["node", "--test", str(Path(__file__).with_name("coach-receipts.test.cjs"))], check=True)
