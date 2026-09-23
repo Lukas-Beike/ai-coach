@@ -7,6 +7,7 @@ from datetime import date
 from typing import Any
 
 from backend.calendar import canonical as calendar_canonical
+from backend.db.manager import DatabaseManager
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
 from backend.weather import cache as weather_cache
@@ -23,7 +24,8 @@ class PublicPlanStateService:
         activity_feedback: Any,
         weather: Any,
         adaptive_followup: Any,
-        database_manager: Any,
+        database_manager_factory: Callable[[], DatabaseManager],
+        db_lock: Any,
         key_values: Any,
         training_plans: Any,
         external_calendar: Any,
@@ -44,7 +46,8 @@ class PublicPlanStateService:
         self._activity_feedback = activity_feedback
         self._weather = weather
         self._adaptive_followup = adaptive_followup
-        self._database_manager = database_manager
+        self._database_manager_factory = database_manager_factory
+        self._db_lock = db_lock
         self._key_values = key_values
         self._training_plans = training_plans
         self._external_calendar = external_calendar
@@ -73,7 +76,7 @@ class PublicPlanStateService:
         weather = self._weather.state(canonical_planned, refresh=not local_only)
         if weather.pop("_refreshed", False):
             self._adaptive_followup.check("weather")
-        with self._database_manager.unit_of_work() as db:
+        with self._db_lock, self._database_manager_factory().unit_of_work() as db:
             history = self._key_values.get(db, weather_cache.HISTORY_KEY)
         weather = weather_history.calendar_state(history, weather, today=self._today())
         provider_sync = (

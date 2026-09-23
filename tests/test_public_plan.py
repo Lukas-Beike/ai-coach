@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
+from threading import Lock
 from unittest.mock import MagicMock, Mock, call, patch
 
 from backend.http_api.public_plan import PublicPlanStateService
@@ -28,6 +29,7 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             "weather": Mock(),
             "followup": Mock(),
             "manager": Mock(),
+            "db_lock": Lock(),
             "key_values": Mock(),
             "plans": Mock(),
             "external": Mock(),
@@ -46,6 +48,7 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             "_refreshed": False,
         }
         services["manager"].unit_of_work.return_value = MagicMock()
+        services["manager_factory"] = Mock(return_value=services["manager"])
         services["key_values"].get.return_value = "{}"
         services["plans"].list.return_value = []
         services["external"].list_events.side_effect = [external_1000, external_50]
@@ -64,7 +67,8 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             services["feedback"],
             services["weather"],
             services["followup"],
-            services["manager"],
+            services["manager_factory"],
+            services["db_lock"],
             services["key_values"],
             services["plans"],
             services["external"],
@@ -150,6 +154,25 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             unittest.mock.ANY, refresh=True
         )
         services["followup"].check.assert_called_once_with("weather")
+
+    def test_history_manager_factory_is_resolved_while_database_lock_is_held(self):
+        service, services, _projection, *_ = self.make_service()
+        resolved_while_locked = []
+
+        def resolve_manager():
+            resolved_while_locked.append(services["db_lock"].locked())
+            return services["manager"]
+
+        services["manager_factory"].side_effect = resolve_manager
+        with patch(
+            "backend.http_api.public_plan.calendar_read_model.project_planning_calendar",
+            return_value={},
+        ):
+            service.read(local_only=True)
+
+        services["manager_factory"].assert_called_once_with()
+        self.assertEqual(resolved_while_locked, [True])
+        self.assertFalse(services["db_lock"].locked())
 
 
 if __name__ == "__main__":
