@@ -23,7 +23,7 @@ const pr = {
 };
 const p1Review = { id: 10, user: { login: bot }, submitted_at: '2026-09-23T15:19:04Z', body: '[P1] Fix fixture' };
 
-async function reviewRequired({ completedAt, reviewedHead = head, reaction = true, unresolved = false } = {}) {
+async function reviewRequired({ completedAt, reviewedHead = head, reaction = true, unresolved = false, sameDiff = true, differentContext = false, movedHunk = false } = {}) {
   const outputs = {};
   const github = {
     rest: {
@@ -40,8 +40,22 @@ async function reviewRequired({ completedAt, reviewedHead = head, reaction = tru
       reactions: { listForIssue: async () => reaction ? [{
         user: { login: bot }, content: '+1', created_at: '2026-09-23T15:32:01Z',
       }] : [] },
+      repos: {
+        getCommit: async () => ({ data: { sha: reviewedHead } }),
+        compareCommits: async ({ head: comparedHead }) => ({
+          data: {
+            merge_base_commit: { sha: comparedHead === reviewedHead ? 'c'.repeat(40) : 'd'.repeat(40) },
+            files: [{ filename: 'server.py' }],
+          },
+        }),
+      },
     },
     paginate: async (method, args) => method(args),
+    request: async (_route, { basehead }) => {
+      const oldPatch = basehead.endsWith(reviewedHead);
+      const contextLine = !oldPatch && differentContext ? 'different function' : 'context';
+      return { data: `diff --git a/server.py b/server.py\nindex ${oldPatch ? 'abcdef0..1234567' : '4567890..7654321'} 100644\n--- a/server.py\n+++ b/server.py\n@@ -${!oldPatch && movedHunk ? 101 : 1},2 +${!oldPatch && movedHunk ? 101 : 1},2 @@\n ${contextLine}\n-old\n+${sameDiff || oldPatch ? 'new' : 'unreviewed'}\n` };
+    },
     graphql: async () => ({ repository: { pullRequest: { reviewThreads: {
       nodes: unresolved ? [{ isResolved: false, comments: { nodes: [{ author: { login: bot }, pullRequestReview: { databaseId: 10 } }] } }] : [],
     } } } }),
@@ -56,10 +70,31 @@ test('a completed clean follow-up on the current head clears a previous P1', asy
   assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:31:54Z' }), false);
 });
 
-test('an old or different-head clean reaction cannot clear a P1', async () => {
+test('an old or missing clean reaction cannot clear a P1', async () => {
   assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:18:00Z' }), true);
-  assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:31:54Z', reviewedHead: 'b'.repeat(40) }), true);
   assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:31:54Z', reaction: false }), true);
+});
+
+test('a clean follow-up remains valid after develop advances and the PR is rebased', async () => {
+  assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:31:54Z', reviewedHead: 'b'.repeat(40) }), false);
+});
+
+test('a new unreviewed change after the clean follow-up remains blocked', async () => {
+  assert.equal(await reviewRequired({
+    completedAt: '2026-09-23T15:31:54Z', reviewedHead: 'b'.repeat(40), sameDiff: false,
+  }), true);
+});
+
+test('the same replacement at a different code location remains blocked', async () => {
+  assert.equal(await reviewRequired({
+    completedAt: '2026-09-23T15:31:54Z', reviewedHead: 'b'.repeat(40), differentContext: true,
+  }), true);
+});
+
+test('identical context cannot hide a relocated hunk', async () => {
+  assert.equal(await reviewRequired({
+    completedAt: '2026-09-23T15:31:54Z', reviewedHead: 'b'.repeat(40), movedHunk: true,
+  }), true);
 });
 
 test('a clean follow-up still requires all Codex threads to be resolved', async () => {
