@@ -6179,7 +6179,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.log_client_disconnect()
 
     def send_static(self, path: str) -> None:
-        response = self.static_asset_service.render(path, self.path, self.headers.get("If-None-Match"))
+        response = self.static_asset_service.render(
+            path,
+            getattr(self, "path", ""),
+            getattr(self, "headers", {}).get("If-None-Match"),
+        )
         self.send_response(response.status)
         for name, value in response.headers:
             self.send_header(name, value)

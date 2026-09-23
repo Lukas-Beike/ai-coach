@@ -8140,6 +8140,14 @@ class CoachTests(unittest.TestCase):
                     static_assets.render(path, path, None)
                 self.assertEqual(error.exception.status, 403)
 
+    def test_static_handler_rejects_path_traversal_without_request_attributes(self):
+        handler = object.__new__(server.request_handler_class())
+
+        with self.assertRaises(server.AppError) as error:
+            server.RequestHandler.send_static(handler, "/../server.py")
+
+        self.assertEqual(error.exception.status, 403)
+
     def test_static_files_reject_absolute_path(self):
         static_assets = server.StaticAssetService(server.PUBLIC_DIR)
 
@@ -8159,6 +8167,23 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(cached.status, 304)
         self.assertEqual(cached.body, b"")
         self.assertEqual(dict(cached.headers)["ETag"], headers["ETag"])
+
+        handler = object.__new__(server.request_handler_class())
+        handler.path = "/views.js?v=133"
+        handler.headers = {"If-None-Match": headers["ETag"]}
+        handler.send_response = Mock()
+        handler.send_header = Mock()
+        handler.end_headers = Mock()
+        handler.wfile = Mock()
+
+        server.RequestHandler.send_static(handler, "/views.js")
+
+        handler.send_response.assert_called_once_with(304)
+        response_headers = {call.args[0]: call.args[1] for call in handler.send_header.call_args_list}
+        self.assertEqual(response_headers["ETag"], headers["ETag"])
+        self.assertEqual(response_headers["Cache-Control"], "public, max-age=31536000, immutable")
+        handler.end_headers.assert_called_once_with()
+        handler.wfile.write.assert_not_called()
 
     def test_html_and_service_worker_remain_revalidatable(self):
         for path in ("/", "/service-worker.js", "/manifest.webmanifest"):
