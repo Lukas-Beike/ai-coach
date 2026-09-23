@@ -554,6 +554,10 @@ Abhängigkeit: P2–P6.
   - [x] Atomaren Coach-Trainings-Patch mit Revisions- und Kalenderprüfung,
     gemeinsamer Planänderung/-erstellung, Constraints und Rollback in
     `CoachTrainingPatchService` verlagern; Planung bleibt Zustandseigentümer.
+  - [x] Explizite lokale Planungskommandos einschließlich Vorbereitung,
+    Scope, Session-/Conversation-Claim, Replay, atomarer Tool-Ausführung
+    und finalem Receipt `CoachPlanningCommandService` zuordnen; der
+    HTTP-Handler delegiert direkt.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.

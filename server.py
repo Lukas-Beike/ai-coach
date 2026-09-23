@@ -48,7 +48,6 @@ from backend.errors import (
     INVALID_LIBRARY_ID_ERROR,
     NOT_FOUND_ERROR,
     PLANNED_CALENDAR_RECHECK_ERROR,
-    STALE_PLANNING_REVISION_ERROR,
     AppError,
     ClientDisconnected,
     provider_error,
@@ -290,6 +289,7 @@ from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.coach.clarification import CoachClarificationService
 from backend.coach.training_patch import CoachTrainingPatchService
+from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
 from backend.coach.turn_failures import (
@@ -2416,124 +2416,12 @@ def coach_tool_dispatch_service() -> CoachToolDispatchService:
     )
 
 
-
-
-def _append_template_command_scope(intent: dict[str, Any], templates: Any) -> None:
-    if not isinstance(templates, list):
-        raise AppError(400, "Vorlagenaenderungen benoetigen eine Liste.", reason="template_limit")
-    for template in templates:
-        if not isinstance(template, dict):
-            raise AppError(400, "Jede Vorlagenaenderung muss ein Objekt sein.", reason="template_limit")
-        if str(template.get("action") or "create") in {"update", "archive", "restore", "delete"}:
-            intent["authorization_scope"].append(f"library_workout:{template.get('local_id') or ''}")
-        else:
-            intent["authorization_scope"].append("local_template")
-
-
-def _append_planning_command_scope(intent: dict[str, Any], operation: str, arguments: dict[str, Any]) -> None:
-    if operation == "apply_training_changes":
-        changes = arguments.get("changes") if isinstance(arguments.get("changes"), list) else []
-        for change in changes:
-            if isinstance(change, dict) and change.get("local_id"):
-                intent["authorization_scope"].append(f"planned_unit:{change['local_id']}")
-            elif isinstance(change, dict) and str(change.get("action") or "update").strip().casefold() == "create":
-                intent["authorization_scope"].append("local_plan")
-    elif operation == "replace_training_plan":
-        intent["authorization_scope"].append("local_plan")
-    elif operation == "manage_training_templates":
-        _append_template_command_scope(intent, arguments.get("templates"))
-
-
-def _planning_command_intent(payload: dict[str, Any], operation: str) -> dict[str, Any]:
-    return {
-        "intent": "local_action", "operation": operation, "target_system": "local",
-        "artifact_id": str(payload.get("artifact_id") or "").strip() or None,
-        "ambiguities": [], "authorization_scope": [], "follow_up_operations": [],
-    }
-
-
-def _prepare_commit_planning_command(
-    payload: dict[str, Any], arguments: dict[str, Any], intent: dict[str, Any],
-) -> dict[str, Any]:
-    artifact_id = str(payload.get("artifact_id") or "").strip()
-    if not artifact_id:
-        raise AppError(400, "Zum Speichern wird ein Planartefakt benötigt.", reason="artifact_required")
-    intent["authorization_scope"].append(f"artifact:{artifact_id}")
-    expected_revision = payload.get("expected_revision")
-    with DB_LOCK, database() as db:
-        row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
-    if expected_revision is not None and int(expected_revision) != int((row or {}).get("revision") or 0):
-        raise AppError(409, STALE_PLANNING_REVISION_ERROR, reason="planning_revision_conflict")
-    return {**arguments, "artifact_id": artifact_id}
-
-
-def _prepare_planning_command(payload: Any) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
-    if not isinstance(payload, dict):
-        raise AppError(400, "Das Planungskommando muss ein Objekt sein.", reason="invalid_planning_command")
-    client_turn_id = str(payload.get("client_turn_id") or "").strip()
-    operation = str(payload.get("operation") or "").strip()
-    if not client_turn_id or len(client_turn_id) > 120:
-        raise AppError(400, "client_turn_id ist für Planungskommandos erforderlich.", reason="invalid_client_turn")
-    if operation not in {"commit_training_plan", "replace_training_plan", "apply_training_changes", "manage_training_templates"}:
-        raise AppError(400, "Das Planungskommando ist nicht zulässig.", reason="invalid_planning_command")
-    arguments = payload.get("arguments")
-    if not isinstance(arguments, dict):
-        raise AppError(400, "Das Planungskommando benoetigt arguments.", reason="invalid_planning_command")
-    intent = _planning_command_intent(payload, operation)
-    if operation == "commit_training_plan":
-        arguments = _prepare_commit_planning_command(payload, arguments, intent)
-    else:
-        _append_planning_command_scope(intent, operation, arguments)
-    return client_turn_id, operation, arguments, intent
-
-
-def _claim_planning_command(
-    client_turn_id: str, conversation_id: str, session_csrf_hash: str,
-    payload: dict[str, Any], intent: dict[str, Any], command_identity: dict[str, Any],
-) -> dict[str, Any] | None:
-    with DB_LOCK, database() as db:
-        existing = db.execute("SELECT conversation_id, status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
-        if existing:
-            previous = command_receipt(existing["receipt"])
-            coach_command_receipt_service().require_owner(previous, session_csrf_hash)
-            if previous.get("effect_key") != command_identity["effect_key"]:
-                raise AppError(409, "Die Auftragskennung wurde fuer andere Argumente verwendet.", reason="command_conflict")
-        if existing and existing.get("status") == "completed" and existing.get("receipt"):
-            if str(existing.get("conversation_id") or "") != str(conversation_id):
-                raise AppError(403, "Dieses Planungskommando gehört zu einer anderen Conversation.", reason="command_scope_denied")
-            return coach_command_receipt_service().read(client_turn_id, session_csrf_hash)
-        if existing:
-            raise AppError(409, "Dieses Planungskommando wird bereits verarbeitet.", reason="client_turn_in_progress")
-        db.execute(
-            "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, 'local', ?, 'running', ?, ?, ?)",
-            (uuid.uuid4().hex, client_turn_id, conversation_id, json.dumps(intent, separators=(",", ":")), payload.get("artifact_id"), json.dumps(command_identity), utc_now(), utc_now()),
-        )
-    return None
-
-
-def _execute_claimed_planning_command(
-    client_turn_id: str, operation: str, arguments: dict[str, Any], intent: dict[str, Any],
-    conversation_id: str, session_csrf_hash: str, command_identity: dict[str, Any],
-) -> None:
-    try:
-        with DB_LOCK, database() as db:
-            sync_job_ids: list[str] = []
-            result = coach_tool_dispatch_service().execute(operation, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids)
-            receipt = {**command_identity, "message": None, "command_receipts": [{"tool": operation, "result": result}], "sync_job_ids": sync_job_ids, "intent": intent, "tool_rounds": 1, "status": "completed"}
-            db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'", (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id))
-    except Exception as exc:
-        coach_turn_failure_service().persist(client_turn_id, intent, exc)
-
-
-def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf_hash: str = "") -> dict[str, Any]:
-    """Execute one explicitly validated local planning command idempotently."""
-    client_turn_id, operation, arguments, intent = _prepare_planning_command(payload)
-    command_identity = {"client_turn_id": client_turn_id, "session_key": coach_session_key(session_csrf_hash), "effect_key": coach_action_hash({"operation": operation, "arguments": arguments})}
-    existing_receipt = _claim_planning_command(client_turn_id, conversation_id, session_csrf_hash, payload, intent, command_identity)
-    if existing_receipt:
-        return existing_receipt
-    _execute_claimed_planning_command(client_turn_id, operation, arguments, intent, conversation_id, session_csrf_hash, command_identity)
-    return coach_command_receipt_service().read(client_turn_id, session_csrf_hash)
+def coach_planning_command_service() -> CoachPlanningCommandService:
+    """Compose the durable, session-bound local planning command owner."""
+    return CoachPlanningCommandService(
+        database_manager(), DB_LOCK, coach_command_receipt_service(),
+        coach_tool_dispatch_service(), coach_turn_failure_service(), utc_now,
+    )
 
 
 def _structured_coach_receipt(
@@ -4368,7 +4256,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             content_type = self.headers.get("Content-Type", "")
             self.send_json(200, transcribe_audio(self.read_audio_body(), content_type))
         elif path == "/api/planning/commands":
-            self.send_json(200, execute_planning_command(
+            self.send_json(200, coach_planning_command_service().execute(
                 self.read_json(), conversation_id=coach_conversation_provision_service().ensure(), session_csrf_hash=session["csrf_hash"],
             ))
         elif path == "/api/coach/actions/confirm":
