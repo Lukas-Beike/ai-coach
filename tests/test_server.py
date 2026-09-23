@@ -15,6 +15,7 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.error import URLError
 from urllib.parse import quote
 from unittest.mock import Mock, call, patch
@@ -25,6 +26,7 @@ from backend.coach.attachments import gemini_history_parts
 from backend.coach.proposals import validated_coach_action_preview_input
 from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.readiness import ReadinessService
+from backend.http_api.public_state import PublicStateService
 from backend.http_api import readiness as readiness_module
 from backend.http_api import auth as http_auth
 from backend.http_api import server as http_server_module
@@ -1439,6 +1441,106 @@ class CoachTests(unittest.TestCase):
         ):
             server.public_state_service()
         self.assertTrue(calls)
+
+    def test_public_state_resolves_active_manager_after_weather_restore(self):
+        class Manager:
+            def __init__(self):
+                self.closed = False
+                self.unit_of_work_calls = 0
+
+            @contextmanager
+            def unit_of_work(self):
+                self.unit_of_work_calls += 1
+                if self.closed:
+                    raise RuntimeError("database manager is closed")
+                yield object()
+
+        old_manager = Manager()
+        new_manager = Manager()
+        active_manager = [old_manager]
+        database_lock = threading.RLock()
+
+        def manager_factory():
+            self.assertTrue(database_lock._is_owned())
+            return active_manager[0]
+
+        def owner(**methods):
+            result = Mock()
+            for name, value in methods.items():
+                getattr(result, name).return_value = value
+            return result
+
+        settings = Mock()
+        settings.selected_ai_provider.return_value = ""
+        settings.available_ai_providers.return_value = []
+        settings.selected_model.return_value = ""
+        settings.available_model_options.return_value = []
+        settings.selected_thinking_level.return_value = ""
+        settings.available_thinking_level_options.return_value = []
+        settings.calendar_display_settings.return_value = {}
+        weather_prelude = Mock()
+
+        def restore_during_weather(*_args):
+            old_manager.closed = True
+            active_manager[0] = new_manager
+            return {"configured": False}
+
+        weather_prelude.project.side_effect = restore_during_weather
+        dependencies = SimpleNamespace(
+            local_prelude=owner(read=SimpleNamespace(
+                snapshot={}, activities=[], local_planned=[], canonical_planned=[],
+                calendar_window={}, weather={},
+            )),
+            weather_prelude=weather_prelude,
+            calendar_projection=owner(read=SimpleNamespace(
+                checkins=[], competitions=[], external_calendar={}, daily_context=[],
+                calendar_projection={},
+            )),
+            database_manager=manager_factory,
+            database_lock=database_lock,
+            key_values=owner(get=""),
+            app_name="Intervals Coach",
+            app_version="test",
+            config=SimpleNamespace(
+                garmin_tokenstore=str(Path("missing-garmin-tokenstore")),
+                intervals_api_key="", openai_api_key="", gemini_api_key="",
+                calendar_ical_url="",
+            ),
+            settings=settings,
+            coach_messages=owner(list=[]),
+            training_plans=owner(list=[]),
+            workout_library=owner(list=[]),
+            profile=owner(get={}),
+            checkins=owner(context=[]),
+            activity_feedback=owner(context=[]),
+            sync_state=owner(sync_period=30),
+            provider_freshness=owner(current={}),
+            garmin_sync_state=owner(core_error_entries=[]),
+            sync_public_state=owner(browser_state={}),
+            garmin_payload=owner(snapshot={}),
+            garmin_projection=owner(public_state={}),
+            intervals_sync_lock=owner(locked=False),
+            workout_library_sync_running=lambda: False,
+            workout_library_sync_state=owner(summary={}),
+            garmin_sync=owner(running=False),
+            provider_resync=owner(state={}),
+            planning_preview=owner(latest_preview={}, status={}),
+            morning_checkin=owner(state={}),
+            coach_quick_actions=owner(state={}),
+            provider_state=owner(summary={}),
+            sync_period_defaults={"intervals": 90, "garmin": 30},
+            all_sync_days=3650,
+            calendar_history_days=30,
+            calendar_future_days=90,
+            local_now=lambda: datetime(2026, 9, 23),
+        )
+        service = PublicStateService(dependencies)
+
+        result = service.read(local_only=True)
+
+        self.assertIn("configured", result)
+        self.assertEqual(old_manager.unit_of_work_calls, 0)
+        self.assertGreater(new_manager.unit_of_work_calls, 0)
 
     def test_changing_weather_location_clears_negative_cache(self):
         server.profile_service().save({"weather_location": "Berlin"})

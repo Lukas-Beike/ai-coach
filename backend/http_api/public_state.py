@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -49,7 +50,7 @@ class PublicStateDependencies:
     local_prelude: PublicStateLocalPrelude
     weather_prelude: PublicStateWeatherPrelude
     calendar_projection: PublicStateCalendarProjection
-    database_manager: DatabaseManager
+    database_manager: Callable[[], DatabaseManager]
     database_lock: Any
     key_values: KeyValueRepository
     app_name: str
@@ -90,9 +91,17 @@ class PublicStateService:
     def __init__(self, dependencies: PublicStateDependencies) -> None:
         self._deps = dependencies
 
-    def _get_value(self, key: str) -> str | None:
+    @contextmanager
+    def _unit_of_work(self) -> Iterator[tuple[DatabaseManager, Any]]:
         deps = self._deps
-        with deps.database_lock, deps.database_manager.unit_of_work() as db:
+        with deps.database_lock:
+            manager = deps.database_manager()
+            with manager.unit_of_work() as db:
+                yield manager, db
+
+    def _get_value(self, key: str, manager: DatabaseManager) -> str | None:
+        deps = self._deps
+        with deps.database_lock, manager.unit_of_work() as db:
             return deps.key_values.get(db, key)
 
     def read(self, local_only: bool = False) -> dict[str, Any]:
@@ -105,7 +114,7 @@ class PublicStateService:
         calendar_window = prelude.calendar_window
         weather = deps.weather_prelude.project(canonical_planned, prelude.weather)
 
-        with deps.database_lock, deps.database_manager.unit_of_work() as db:
+        with self._unit_of_work() as (manager, db):
             calendar_data = deps.calendar_projection.read(
                 snapshot,
                 canonical_planned,
@@ -157,12 +166,12 @@ class PublicStateService:
                     configured=bool(deps.config.intervals_api_key),
                     running=deps.intervals_sync_lock.locked()
                     or deps.workout_library_sync_running(),
-                    status=self._get_value("sync_status") or None,
-                    last_sync_at=self._get_value("last_sync_at"),
-                    last_sync_error=self._get_value("last_sync_error") or None,
-                    last_library_sync_at=self._get_value("last_library_sync_at"),
-                    last_library_sync_error=self._get_value("last_library_sync_error") or None,
-                    pagination_value=self._get_value("last_sync_pagination"),
+                    status=self._get_value("sync_status", manager) or None,
+                    last_sync_at=self._get_value("last_sync_at", manager),
+                    last_sync_error=self._get_value("last_sync_error", manager) or None,
+                    last_library_sync_at=self._get_value("last_library_sync_at", manager),
+                    last_library_sync_error=self._get_value("last_library_sync_error", manager) or None,
+                    pagination_value=self._get_value("last_sync_pagination", manager),
                     snapshot=snapshot,
                     library_sync_state=deps.workout_library_sync_state.summary(),
                     today=deps.local_now().date(),
@@ -172,7 +181,7 @@ class PublicStateService:
                 "provider_freshness": freshness,
                 "garmin_sync": {
                     "running": deps.garmin_sync.running(),
-                    "status": self._get_value("garmin_sync_status") or None,
+                    "status": self._get_value("garmin_sync_status", manager) or None,
                 },
                 "provider_resync": {
                     "intervals": deps.provider_resync.state("intervals", db),
@@ -180,8 +189,8 @@ class PublicStateService:
                 },
                 "sync": sync,
                 "library_sync": {
-                    "last_sync_at": self._get_value("last_library_sync_at"),
-                    "last_error": self._get_value("last_library_sync_error") or None,
+                    "last_sync_at": self._get_value("last_library_sync_at", manager),
+                    "last_error": self._get_value("last_library_sync_error", manager) or None,
                     "state": deps.workout_library_sync_state.summary(),
                 },
                 "sync_settings": {
@@ -194,15 +203,15 @@ class PublicStateService:
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {
-                    "last_sync_at": self._get_value("last_competition_sync_at"),
-                    "last_error": self._get_value("last_competition_sync_error") or None,
-                    "running": self._get_value("competition_sync_running") == "1",
-                    "status": self._get_value("competition_sync_status") or None,
+                    "last_sync_at": self._get_value("last_competition_sync_at", manager),
+                    "last_error": self._get_value("last_competition_sync_error", manager) or None,
+                    "running": self._get_value("competition_sync_running", manager) == "1",
+                    "status": self._get_value("competition_sync_status", manager) or None,
                 },
                 "performance_refresh": {
-                    "last_refresh_at": self._get_value("last_performance_refresh_at"),
-                    "last_error": self._get_value("last_performance_error") or None,
-                    "running": self._get_value("performance_refresh_running") == "1",
+                    "last_refresh_at": self._get_value("last_performance_refresh_at", manager),
+                    "last_error": self._get_value("last_performance_error", manager) or None,
+                    "running": self._get_value("performance_refresh_running", manager) == "1",
                 },
                 "morning_checkin": deps.morning_checkin.state(),
                 "coach_quick_actions": deps.coach_quick_actions.state(),

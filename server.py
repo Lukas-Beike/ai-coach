@@ -4727,13 +4727,12 @@ def public_state_calendar_projection_service() -> PublicStateCalendarProjection:
 def public_state_service() -> PublicStateService:
     """Compose the public state projection from concrete backend owners."""
     with DB_LOCK:
-        manager = database_manager()
         return PublicStateService(
             PublicStateDependencies(
                 local_prelude=public_state_local_prelude_service(),
                 weather_prelude=public_state_weather_prelude_service(),
                 calendar_projection=public_state_calendar_projection_service(),
-                database_manager=manager,
+                database_manager=database_manager,
                 database_lock=DB_LOCK,
                 key_values=KEY_VALUE_REPOSITORY,
                 app_name=APP_NAME,
