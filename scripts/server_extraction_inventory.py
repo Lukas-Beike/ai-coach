@@ -741,6 +741,7 @@ def _explicit_owner(name: str) -> str | None:
             "session_auth_service": COMPOSITION_ROOT,
             "public_performance_state_service": COMPOSITION_ROOT,
             "public_feedback_state_service": COMPOSITION_ROOT,
+            "public_state_service": COMPOSITION_ROOT,
             "daily_sync_scheduler": COMPOSITION_ROOT,
             "daily_sync_loop_service": COMPOSITION_ROOT,
             "startup_sync_scheduler": COMPOSITION_ROOT,

@@ -12,17 +12,18 @@ from typing import TYPE_CHECKING, Any
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
+from backend.http_api.public_performance import (
+    PublicFeedbackStateService,
+    PublicPerformanceStateService,
+)
 from backend.http_api.state_prelude import (
     PublicStateLocalPrelude,
     PublicStateWeatherPrelude,
 )
-from backend.performance import context as performance_context
 from backend.planning import season as planning_season
 from backend.sync import intervals_state
 
 if TYPE_CHECKING:
-    from backend.activities.feedback import ActivityFeedbackService
-    from backend.athlete.checkins import CheckinService
     from backend.coach.context import CoachQuickActionsService
     from backend.coach.conversation import CoachMessageService
     from backend.coach.morning import MorningCheckinStateService
@@ -34,8 +35,7 @@ if TYPE_CHECKING:
     from backend.settings import SettingsService
     from backend.sync.full_resync import FullProviderResyncService
     from backend.sync.freshness import ProviderFreshnessService
-    from backend.sync.garmin import GarminPayloadService, GarminSyncStateService
-    from backend.sync.garmin_projection_service import GarminProjectionService
+    from backend.sync.garmin import GarminSyncStateService
     from backend.sync.garmin_service import GarminSyncService
     from backend.sync.library import WorkoutLibrarySyncStateService
     from backend.sync.state import SyncStateRepository
@@ -61,14 +61,12 @@ class PublicStateDependencies:
     training_plans: TrainingPlanService
     workout_library: WorkoutLibraryService
     profile: ProfileService
-    checkins: CheckinService
-    activity_feedback: ActivityFeedbackService
+    public_feedback: PublicFeedbackStateService
+    public_performance: PublicPerformanceStateService
     sync_state: SyncStateRepository
     provider_freshness: ProviderFreshnessService
     garmin_sync_state: GarminSyncStateService
     sync_public_state: SyncPublicStateService
-    garmin_payload: GarminPayloadService
-    garmin_projection: GarminProjectionService
     intervals_sync_lock: Any
     workout_library_sync_running: Callable[[], bool]
     workout_library_sync_state: WorkoutLibrarySyncStateService
@@ -144,9 +142,7 @@ class PublicStateService:
                 "weather": weather,
                 "profile": deps.profile.get(),
                 "competitions": competitions,
-                "checkins": checkins,
-                "local_feedback": deps.checkins.context(),
-                "activity_feedback": deps.activity_feedback.context(),
+                **deps.public_feedback.feedback_state(checkins),
                 "planning": planning_season.planning_state(
                     competitions,
                     deps.local_now().date(),
@@ -155,13 +151,7 @@ class PublicStateService:
                 ),
                 "external_calendar": external_calendar,
                 "daily_planning_context": daily_context,
-                "performance": performance_context.current_performance_context(
-                    snapshot,
-                    deps.garmin_payload.snapshot(),
-                    deps.profile.get(),
-                    deps.local_now().date(),
-                ),
-                "garmin": deps.garmin_projection.public_state(),
+                **deps.public_performance.from_snapshot(snapshot),
                 "intervals": intervals_state.public_state(
                     configured=bool(deps.config.intervals_api_key),
                     running=deps.intervals_sync_lock.locked()

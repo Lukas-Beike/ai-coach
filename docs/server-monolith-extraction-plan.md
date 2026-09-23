@@ -619,8 +619,12 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
 - [ ] Öffentliche Bootstrap-/State-Projektionen und Pagination zuordnen;
   Projektionen erhalten Daten über Domänenlesefunktionen.
   - [x] Begrenzte Performance-/Garmin- und lokale Feedback-/Check-in-
-    Projektionen konkreten `http_api/`-Services zuordnen; übrige
-    `public_state`-Felder bleiben offen.
+    Projektionen konkreten `http_api/`-Services zuordnen.
+  - [x] Die vollständige bisherige `public_state`-Projektion in einen
+    konkreten Service verschieben und Performance-/Feedback-Felder
+    über dieselben Projektionseigentümer erzeugen; die frühere Funktion
+    hatte nur Testaufrufer, aber keinen produktiven HTTP-Route-Caller.
+    Bootstrap und weitere P10-Transportaufgaben bleiben offen.
   - [x] Lokalen Bootstrap-Lesevorlauf und Wetter-Follow-up mit
     bestehender UOW-/Lock-Grenze in konkrete `http_api/`-Eigentümer
     verschieben; übrige `public_state`-Projektionen bleiben offen.

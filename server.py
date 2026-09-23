@@ -80,7 +80,6 @@ from backend.athlete.checkins import (
 )
 from backend.athlete.context import AthleteContextService
 from backend.athlete.profile import DEFAULT_PROFILE, ProfileService, normalize_profile, timezone_name
-from backend.performance import context as performance_context
 from backend.performance import morning_battery as performance_morning_battery
 from backend.performance.morning_battery_service import (
     MorningBatteryClock,
@@ -4743,14 +4742,12 @@ def public_state_service() -> PublicStateService:
                 training_plans=training_plan_service(),
                 workout_library=workout_library_service(),
                 profile=profile_service(),
-                checkins=checkin_service(),
-                activity_feedback=activity_feedback_service(),
+                public_feedback=public_feedback_state_service(),
+                public_performance=public_performance_state_service(),
                 sync_state=sync_state_repository(),
                 provider_freshness=provider_freshness_service(),
                 garmin_sync_state=garmin_sync_state_service(),
                 sync_public_state=sync_public_state_service(),
-                garmin_payload=garmin_payload_service(),
-                garmin_projection=garmin_projection_service(),
                 intervals_sync_lock=INTERVALS_SYNC_LOCK,
                 workout_library_sync_running=workout_library_sync_running,
                 workout_library_sync_state=workout_library_sync_state_service(),
