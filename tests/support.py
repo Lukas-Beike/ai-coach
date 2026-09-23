@@ -7,6 +7,8 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
+from backend.coach import streams as coach_streams
+
 
 def build_gemini_request_payload(server, payload, model):
     """Exercise the concrete Gemini request owner with active test settings."""
@@ -161,7 +163,5 @@ def reset_application_state(server) -> None:
         for table in tables:
             db.execute(f"DELETE FROM {table}")
     server.profile_service().save({})
-    with server.CHAT_STREAM_LOCK:
-        server.CHAT_STREAMS.clear()
-        server.COACH_JOB_CANCEL_EVENTS.clear()
+    coach_streams.CHAT_STREAM_REGISTRY.clear_state()
 

@@ -5120,5 +5120,40 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   unverändert. Im isolierten Fixture-Container bestanden 10 Login-
   und 200 authentifizierte API-Anfragen ohne 429; vier normale
   Limiter-Tests, Compile, scoped Ruff und Diff-Check **PASS**.
-  Aktualisierte PR-CI und einmaliges zulässiges Codex-Folgereview
-  nach P1 stehen noch aus.
+  Das einmalige Codex-Folgereview war ohne größere Befunde; der
+  geprüfte Produkt-/Testdiff blieb nach Rebase und Bot-Update
+  inhaltlich identisch. Root-Review **PASS**; Read-only-Docker-
+  Vollsuite nach Rebase **PASS**, 2.320 Tests, 11 Skips.
+  #721 wurde am `2026-09-23T16:17:03Z` als
+  `d922e5068ed67565d2d24b59de741d3913d4cd72` gemergt;
+  der Commit ist auf `origin/develop` erreichbar. Erforderliche
+  Checks und Review-Threads **PASS** (0 offen); der nicht erforderliche
+  Browser-Smoke-Test lief zum Zeitpunkt dieses Eintrags noch.
+
+## P8 Chat-Stream-Zustand — integrierter Prüfstand
+
+- GPT-6-Luna/high-Patch `6eb20b8d`: `ChatStreamRegistry` besitzt
+  allein Lock, angehängte SSE-Queues und Background-Cancel-Events.
+  Erstes Root-Diffreview **FAIL**: Tests referenzierten den Owner
+  indirekt über `server.coach_streams`; außerdem erzeugte ein
+  Background-Cancel nach Restart neu ein In-Memory-Event statt nur
+  das durable Receipt-Flag zu setzen. Derselbe Worker korrigierte
+  beides in `e6482200`. Root-Review des tatsächlichen Follow-up-
+  und Gesamtdiffs danach **PASS**: Tests importieren das konkrete
+  Modul; Reset und Jobstart verwenden weiterhin get-or-create,
+  regulärer Cancel ohne Event erzeugt keinen Zustand.
+- Worker-Vollsuite nach Korrektur **PASS**: 2.317 Tests, 12 Skips;
+  fokussierte SSE-/Cancel-/Restart-/Architekturtests sowie Compile,
+  scoped Ruff und Diff-Check **PASS**. Sequenzielle konfliktfreie
+  Integration auf #720-Merge `2a57b317` als `6ffd7198` und
+  `1f97a3eb`; fünf gezielte Architektur-/Restart-Tests und
+  Inventar-/Diff-Check **PASS**. Neu gebautes kombiniertes Read-only-
+  Container-Image: vollständige Suite **PASS**, 2.320 Tests,
+  10 Skips in 22,403 s. `server.py` hat 6.219 physische Zeilen.
+  Nach #721-Merge auf `d922e506` rebased; beide Owner-Assertions
+  im Architekturtest erhalten. `git range-diff` zeigte keine Änderung
+  an der Fachlogik oder den Regressionstests; Root-Review des
+  kombinierten Diffs **PASS**. Neu gebautes Read-only-Container-Image:
+  Vollsuite **PASS**, 2.323 Tests, 11 Skips in 19,996 s;
+  Inventar- und Diff-Check **PASS**. PR-CI für den rebasierten Stand
+  folgt; P8-Job- und Turn-Eigentümer bleiben offen.

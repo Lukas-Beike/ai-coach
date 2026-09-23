@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 from unittest.mock import Mock, patch
 
+from backend.coach import streams as coach_streams
 import test_coach_dialogue as dialogue
 from backend.http_api import server as http_server_module
 from backend.providers import calendar as calendar_provider
@@ -295,9 +296,15 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
     def test_restart_job_observes_cancel_during_session_restore(self):
         server.enqueue_background_coach_job("Synthetic request", "cancel-race", "synthetic-session", operation_id="cancel-operation")
         job = server._claim_background_coach_job()
-        server.COACH_JOB_CANCEL_EVENTS.clear()  # Process restart loses in-memory events.
+        coach_streams.CHAT_STREAM_REGISTRY.clear_state()  # Process restart loses in-memory events.
         def restore(_):
             self.assertEqual(server.cancel_chat_stream("synthetic-session", "cancel-operation")["status"], "cancelling")
+            self.assertIsNone(coach_streams.CHAT_STREAM_REGISTRY.get_background_event("cancel-operation"))
+            with server.database() as db:
+                receipt = db.execute(
+                    "SELECT receipt FROM coach_commands WHERE client_turn_id='cancel-race'"
+                ).fetchone()
+            self.assertTrue(json.loads(receipt["receipt"])["cancel_requested"])
             return "synthetic-session"
         def coach(*args, **kwargs):
             self.assertTrue(kwargs["cancel_event"].is_set())

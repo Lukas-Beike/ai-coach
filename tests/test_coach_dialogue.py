@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from backend.coach import streams as coach_streams
 import test_server as fixtures
 from support import isolated_server, reset_application_state
 from backend.coach.dialogue import validate_request
@@ -778,7 +779,11 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             ).fetchone()
         self.assertEqual(command["status"], "completed")
         self.assertEqual(json.loads(command["receipt"])["status"], "cancelled")
-        self.assertTrue(server.COACH_JOB_CANCEL_EVENTS["operation-before-reset"].is_set())
+        self.assertTrue(
+            coach_streams.CHAT_STREAM_REGISTRY.get_background_event(
+                "operation-before-reset"
+            ).is_set()
+        )
 
     def test_same_effect_and_call_are_idempotent_inside_turn(self):
         def save(_):
