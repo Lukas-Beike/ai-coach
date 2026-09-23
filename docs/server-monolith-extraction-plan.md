@@ -397,7 +397,7 @@ Konflikterkennung und Rollback. Keine Rückabhängigkeit auf HTTP oder Coach.
 
 Abhängigkeit: P2–P5.
 
-- [ ] Garmin-, Intervals-, Library-, Planned-Unit- und Wettkampf-Sync mit
+- [x] Garmin-, Intervals-, Library-, Planned-Unit- und Wettkampf-Sync mit
   ihren vollständigen Abläufen nach `sync/` ziehen.
   - [x] Wettkampf-Reconciliation, Provider-Orchestrierung, Cleanup und
     gemeinsamer Single-flight-Lock liegen vollständig in `sync/competitions.py`.

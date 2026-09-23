@@ -4624,3 +4624,27 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   wurde erneut aufgesetzt. Alter und neuer geprüfter Head haben bis
   auf diese Review-Log-ID denselben Dateibaum. CI/Sonar des korrigierten
   PR-Heads stehen noch aus.
+
+## PR #708 — bestätigter Merge und P6-Abschlussprüfung
+
+- PR-Head `051848b7d29ff5ed1d9f909c73b0d4f4cb6d431a` nach dem
+  zuvor dokumentierten Root-Code-Review erneut geprüft: alle erforderlichen
+  Checks einschließlich Browser, Container, Sonar (`new_violations=0`) und
+  Codex-Review-Gate **PASS**; keine offenen Review-Threads. Der vorzeitige
+  Review-Gate-Fehler wurde durch erneuten Lauf des unveränderten geschützten
+  Workflows behoben, ohne eine zweite Review-Anforderung zu stellen.
+  `develop` war Vorfahr des PR-Heads. Squash-Merge am
+  `2026-09-23T12:35:42Z`, Commit
+  `072162c3e2e4651549455d71f9177b6b75003d3d`, auf `origin/develop`
+  erreichbar. Integrierte Read-only-Container-Suite zuvor **PASS**:
+  2.280 Tests, 10 Skips; spätere P2-/P8-Diffs benötigen eigene Reviews.
+- P6-Abschluss-Audit auf diesem gemergten Stand **PASS**: Im Inventar
+  verbleiben unter P6 nur `sync_command_endpoint` und
+  `coach_sync_tool_service` als reine Kompositions-Factorys sowie 15
+  Konfigurationsbindungen. Die fachlichen Sync-Abläufe, Gates, Queue,
+  Reconciliation, Retry und Worker liegen bei konkreten `backend/sync/`-
+  Eigentümern; sämtliche P6-Unterpunkte sind bereits abgenommen.
+  Die beiden Factorys und ungenutzte/duplizierte Konfiguration bleiben
+  für den P11-Composition-Root-/Restcode-Audit sichtbar, nicht als
+  ausgelagerte Fachlogik. P6-Hauptpunkt daher geschlossen. Rest-Risiko:
+  der finale Importgraph- und Testpatch-Audit bleibt P11.
