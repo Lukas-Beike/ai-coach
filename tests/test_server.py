@@ -6291,7 +6291,7 @@ class CoachTests(unittest.TestCase):
         repository = server.sync_state_repository()
         self.assertEqual(
             repository.set_sync_period(
-                "intervals", -1, server.SYNC_PERIOD_DEFAULTS, server.ALL_SYNC_DAYS
+                "intervals", -1, server.ALL_SYNC_DAYS
             ),
             -1,
         )
@@ -6303,7 +6303,7 @@ class CoachTests(unittest.TestCase):
         )
         self.assertEqual(
             repository.set_sync_period(
-                "garmin", -1, server.SYNC_PERIOD_DEFAULTS, server.ALL_SYNC_DAYS
+                "garmin", -1, server.ALL_SYNC_DAYS
             ),
             -1,
         )
@@ -6349,7 +6349,7 @@ class CoachTests(unittest.TestCase):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
         config = replace(server.CONFIG, intervals_api_key="test-key")
         server.sync_state_repository().set_sync_period(
-            "intervals", 65, server.SYNC_PERIOD_DEFAULTS, server.ALL_SYNC_DAYS
+            "intervals", 65, server.ALL_SYNC_DAYS
         )
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot

@@ -58,7 +58,7 @@ class SyncStateRepositoryTests(unittest.TestCase):
         )
         self.assertEqual(self.repository.sync_period("garmin", DEFAULTS, ALL_DAYS), 30)
 
-        self.repository.set_sync_period("intervals", ALL_DAYS, DEFAULTS, ALL_DAYS)
+        self.repository.set_sync_period("intervals", ALL_DAYS, ALL_DAYS)
         self.assertEqual(
             self.repository.sync_period("intervals", DEFAULTS, ALL_DAYS), ALL_DAYS
         )
@@ -78,7 +78,7 @@ class SyncStateRepositoryTests(unittest.TestCase):
         ):
             with self.subTest(source=source, value=value):
                 self.assertEqual(
-                    self.repository.set_sync_period(source, value, DEFAULTS, ALL_DAYS),
+                    self.repository.set_sync_period(source, value, ALL_DAYS),
                     int(value),
                 )
                 self.assertEqual(
@@ -95,11 +95,11 @@ class SyncStateRepositoryTests(unittest.TestCase):
                 self.subTest(source=source, value=value),
                 self.assertRaises(ValueError),
             ):
-                self.repository.set_sync_period(source, value, DEFAULTS, ALL_DAYS)
+                self.repository.set_sync_period(source, value, ALL_DAYS)
         with self.assertRaises(KeyError):
             self.repository.sync_period("other", DEFAULTS, ALL_DAYS)
         self.assertEqual(
-            self.repository.set_sync_period("other", 90, DEFAULTS, ALL_DAYS), 90
+            self.repository.set_sync_period("other", 90, ALL_DAYS), 90
         )
         with self.database_manager.unit_of_work() as db:
             self.assertEqual(self.key_values.get(db, "other_sync_days"), "90")

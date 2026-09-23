@@ -6473,7 +6473,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 days = repository.set_sync_period(
                     "intervals",
                     requested_days,
-                    SYNC_PERIOD_DEFAULTS,
                     ALL_SYNC_DAYS,
                 )
             except ValueError as exc:
@@ -6504,7 +6503,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 days = repository.set_sync_period(
                     "garmin",
                     requested_days,
-                    SYNC_PERIOD_DEFAULTS,
                     ALL_SYNC_DAYS,
                 )
             except ValueError as exc:

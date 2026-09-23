@@ -566,29 +566,7 @@ class JsonHttpClient:
         raw_body = read_error_body(error, self.max_response_bytes)
         if cancel_event is not None and cancel_event.is_set():
             raise self._cancelled_error(request_context, parsed_url, started) from error
-        details: dict[str, Any] | None = None
-        if service == "openai":
-            from backend.providers import openai as openai_provider
-
-            self.provider_state.record_rate_limits(getattr(error, "headers", None))
-            details = openai_provider.error_details(
-                error.code,
-                raw_body,
-                getattr(error, "headers", None),
-                updated_at=self.now(),
-            )
-            self.provider_state.record_status(
-                "openai",
-                state=details.get("state"),
-                reason=details.get("reason"),
-                message=details.get("message"),
-                http_status=details.get("http_status"),
-                provider_error_code=details.get("provider_error_code"),
-            )
-        elif service == "gemini":
-            from backend.providers import gemini as gemini_provider
-
-            details = gemini_provider.error_details(error.code, raw_body, updated_at=self.now())
+        details = self._provider_error_details(service, error, raw_body)
         self.logger.exception(
             "Upstream HTTP request failed",
             extra={
@@ -632,6 +610,34 @@ class JsonHttpClient:
             else f"Anfrage an externen Dienst fehlgeschlagen ({error.code})."
         )
         raise AppError(502, message, reason="provider_http_error") from error
+
+    def _provider_error_details(
+        self, service: str | None, error: HTTPError, raw_body: bytes
+    ) -> dict[str, Any] | None:
+        if service == "openai":
+            from backend.providers import openai as openai_provider
+
+            self.provider_state.record_rate_limits(getattr(error, "headers", None))
+            details = openai_provider.error_details(
+                error.code,
+                raw_body,
+                getattr(error, "headers", None),
+                updated_at=self.now(),
+            )
+            self.provider_state.record_status(
+                "openai",
+                state=details.get("state"),
+                reason=details.get("reason"),
+                message=details.get("message"),
+                http_status=details.get("http_status"),
+                provider_error_code=details.get("provider_error_code"),
+            )
+            return details
+        if service == "gemini":
+            from backend.providers import gemini as gemini_provider
+
+            return gemini_provider.error_details(error.code, raw_body, updated_at=self.now())
+        return None
 
     def _interval_error_detail(self, raw_body: bytes) -> str:
         return error_detail(

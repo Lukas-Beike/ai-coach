@@ -43,7 +43,6 @@ class SyncStateRepository:
         self,
         source: str,
         value: Any,
-        defaults: Mapping[str, int],
         all_days: int,
     ) -> int:
         try:
