@@ -5685,3 +5685,22 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   11 Skips. `server.py` umfasst 5.705 physische Zeilen und
   263 Definitionen auf dieser älteren Basis. Rebase auf aktuelles
   `develop`, erneutes Integrationsreview, PR-CI und Merge stehen aus.
+## P8 terminale Coach-Fehler — lokaler Zwischenstand
+
+- Root-Worktree `refactor/p8-failure-state-20260923` auf #741-Basis:
+  `CoachTurnFailureService` übernimmt vollständige Fehlerprojektion,
+  Pending-Request und atomare Receipt-/Nachrichtenpersistenz. Die
+  technischen Diagnosemetadaten liegen ebenfalls im Backend; `server.py`
+  komponiert nur Ressourcen und delegiert alle bisherigen Aufrufer.
+- Root-Code-/Diffreview **PASS** auf diesem lokalen Stand: keine
+  `server.py`-Rückimporte oder fachlichen Server-Callbacks; DB-Lock und
+  Manager-Auflösung liegen in derselben UOW, Rollback bei Schreibfehler,
+  Event erst nach Commit. Neue Tests decken partielle Effekte, sensible
+  Checkpoint-Bereinigung, Cancellation/Replay und Rollback ab. Die drei
+  bestehenden Antworttexttests und der Privacy-Worker-Patch wurden auf den
+  neuen Eigentümer umgestellt.
+- Native vollständige Suite **PASS**, 2.360 Tests, 12 Skips; fokussierte
+  Failure-Tests 3/3, bestehende Response-/Privacy-Tests 18/18 (1 Skip),
+  Architektur 4/4, Ruff, Compile und Diff-Check **PASS**. Der Stand ist
+  noch nicht auf das aktuelle `develop` rebased oder als PR veröffentlicht;
+  danach sind erneutes Review und vollständige Integrationstests nötig.
