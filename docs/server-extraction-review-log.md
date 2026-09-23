@@ -5968,3 +5968,35 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   kombinierten Stand `ee5760d2` samt Integrations-/Dokumentationsdiff
   **PASS**; PR-CI und externer Review stehen noch aus. `server.py`:
   5.023 Zeilen, 240 Definitionen; P0-Inventar 0.
+
+## P7 Read-/Planartefakt-Werkzeuge — bestätigter #751-Merge
+
+- #751 auf Head `c50e1854` bestand Root-Gate und alle CI-/Review-Prüfungen
+  einschließlich Browser, Qualität und Security; keine offenen Review-Threads.
+  Squash-Merge `a8cad23b5f74b6704b1efbc5eec892f5612ce3e5` am
+  `2026-09-23T21:47:52Z` bestätigt und als Vorfahr von `origin/develop`
+  geprüft.
+
+## P7 strukturierte Planmutationen — integrierter Patch
+
+- Luna-Ausgangscommit `f611bf0b` wurde auf dem bestätigten #751-Stand ohne
+  Konflikt als `d4de9e68` integriert. Root prüfte den tatsächlichen Diff und
+  Code: **PASS** für Operation-/Objekt-Scope, unveränderte
+  Perioden-/Constraint-Projektion und Revision-Flag. Die atomaren
+  Replacement-/Change-Services bleiben Eigentümer von Revision, Hash und
+  Rollback; keine Backend-Rückimporte, Server-Fachcallbacks, neuen Remote-
+  Schreibrechte oder Kompatibilitäts-Wrapper.
+- 13 neue direkte Tests prüfen erlaubte und abgelehnte Operationen,
+  Mehrfach-/Fremdplan- und Unit-Scopes, Argumentprojektion und unbekannte
+  Werkzeuge. Die vorhandenen DB-Integrationstests prüfen Revision,
+  Payload-Hash und Rollback. Diese Kombination ist für die ausgelagerte
+  Autorisierungsgrenze angemessen; die gesamte P7-Orchestrierung bleibt
+  ausdrücklich offen.
+- Integrierte fokussierte Service-/Architekturtests **PASS** (19/19),
+  Inventargenerator `--check`, Ruff der geänderten Backend-/Testdateien,
+  Compile und Diff-Check **PASS**. Frisch gebautes Read-only-Docker-Image:
+  Vollsuite **PASS**, 2.425 Tests/11 Skips. Native Vollsuite **PASS**,
+  2.425 Tests/12 Skips. Finaler integrierter Code/Diff **PASS**.
+  `server.py`: 4.964 physische Zeilen, 237 Definitionen; P0-Inventar 0.
+  Nächster Schritt: PR gegen `develop` veröffentlichen und
+  CI/Review/Merge verifizieren.
