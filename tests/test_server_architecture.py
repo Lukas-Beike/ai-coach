@@ -27,6 +27,7 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.prompt", ("COACH_PROMPT",)),
+    ("backend.http_api.readiness", ("ReadinessService",)),
     ("backend.http_api.library_page", ("LibraryPageService", "paged_library")),
     (
         "backend.coach.proposals",
@@ -1625,6 +1626,7 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "publish_chat_stream_event",
     "chat_stream_events",
     "unregister_chat_stream",
+    "readiness_state",
     "_enqueue_coach_plan_push",
     "_resolve_structured_sync_conflict",
     "check_adaptive_replan",

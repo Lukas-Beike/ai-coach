@@ -594,6 +594,9 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
   - [x] Den Login-/API-Rate-Limiter einschließlich Lock, Buckets,
     begrenztem Cleanup und Retry-After einem konkreten
     `http_api/`-Zustandseigentümer zuordnen.
+  - [x] Öffentliche Readiness-Prüfung mit bestehender DB-UOW,
+    kurzlebiger Verzeichnisprobe und Wartungsstatus einem konkreten
+    `ReadinessService` zuordnen; Handler sendet nur Status und JSON.
 - [ ] Öffentliche Bootstrap-/State-Projektionen und Pagination zuordnen;
   Projektionen erhalten Daten über Domänenlesefunktionen.
   - [x] Lokalen Bootstrap-Lesevorlauf und Wetter-Follow-up mit

@@ -5156,4 +5156,63 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   kombinierten Diffs **PASS**. Neu gebautes Read-only-Container-Image:
   Vollsuite **PASS**, 2.323 Tests, 11 Skips in 19,996 s;
   Inventar- und Diff-Check **PASS**. PR-CI für den rebasierten Stand
-  folgt; P8-Job- und Turn-Eigentümer bleiben offen.
+  #726 wurde nach frischem Codex-Erstreview am
+  `2026-09-23T16:38:31Z` als
+  `9c7ae8730adc921e27294493a62165fd62802ee6` gemergt;
+  der Commit ist auf `origin/develop` erreichbar, 0 Review-Threads
+  offen. P8-Job- und Turn-Eigentümer bleiben offen.
+
+## P10 Readiness — integrierter Prüfstand
+
+- GPT-6-Luna/high-Patch `c075f454`: öffentliche DB-/Schema-/
+  Verzeichnis-/Wartungsprojektion als `ReadinessService.state()`.
+  Erstes Root-Diffreview **FAIL**: unaufgeforderter Wechsel von
+  `DatabaseManager.unit_of_work()` auf eine Reader-Lease und fehlender
+  Handler-Level-Vertrag für 200/503. Derselbe Worker korrigierte
+  beides in `339b4c6c`; Root-Follow-up- und Gesamtdiffreview
+  danach **PASS**. Die DB-Prüfung bleibt unter `DB_LOCK` in der
+  ursprünglichen Writer-/UOW-Grenze; der Handler-Test prüft den
+  komponierten Service, vollständige JSON-Payloads und Statuscodes.
+- Worker-Vollsuite nach Korrektur **PASS**: 2.319 Tests, 12 Skips;
+  sechs gezielte Readiness- und vier Architekturtests, Compile,
+  scoped Ruff und Diff-Check **PASS**. Konfliktfreie Integration auf
+  bestätigtem #720-Merge `2a57b317` als `479c3de3` und
+  `2cfd1be1`. Neu gebautes kombiniertes Read-only-Container-Image:
+  vollständige Suite **PASS**, 2.319 Tests, 10 Skips in 20,149 s;
+  Inventar- und Diff-Check **PASS**. `server.py` hat 6.250
+  physische Zeilen. Nach #726-Merge auf `9c7ae873` rebased;
+  die Owner-Assertions für Limiter, Stream und Readiness bleiben
+  erhalten. Der Importkonflikt enthüllte zwei doppelte bestehende
+  Compose-Imports im Worker-Patch; sie wurden bei der Integration
+  entfernt. Root-Diffreview des rebasierten Stands zunächst **FAIL**:
+  der Handler band einen `ReadinessService` bei Handler-Klassenerzeugung
+  dauerhaft und hätte nach einem Backup-Restore den geschlossenen alten
+  `DatabaseManager` weiterverwendet. Root-Integrationskorrektur:
+  pro Readiness-Anfrage wird der Service aus dem aktuellen Manager
+  komponiert; der Handler-Vertragstest wechselt den Manager zwischen
+  zwei Requests und prüft die vollständigen 200/503-Payloads.
+  Erneutes Root-Diffreview **PASS**. Neu gebautes Read-only-Docker-Image:
+  vollständige Suite **PASS**, 2.325 Tests, 11 Skips; Inventar-/Diff-
+  Check **PASS**. Ersatz-PR #727 erhielt bei `bfc451d9` einen
+  berechtigten Codex-**P2**: `database_manager()` konnte beim
+  Verzeichnisfehler schon außerhalb des abgesicherten Probe-Pfads
+  werfen, wodurch 500 statt 503 zurückkäme. Root-Gate erneut
+  **FAIL**. Korrektur: Der Service erhält eine Manager-Factory und
+  löst sie unter `DB_LOCK` innerhalb seines `try` auf. Ein neuer
+  Handler-Regressionstest erzwingt einen Fehler bei der Komposition
+  und prüft 503 samt datensparsamer `not_ready`-Payload. Gezielte
+  Tests **PASS** (3/3); neu gebautes Read-only-Docker-Image:
+  vollständige Suite **PASS**, 2.326 Tests, 11 Skips. Root-Review des
+  tatsächlichen Korrekturdiffs **PASS**. Der P2-Thread wurde mit Test-
+  und Commitnachweis beantwortet und aufgelöst. Die Codex-Gate-Prüfung
+  verlangt nach der Head-Änderung eine neue Erstprüfung; gemäß der
+  Repository-Regel (kein zusätzliches Review ohne P1) wird #727
+  ersetzt, nicht durch einen regelwidrigen Folgereview umgangen.
+  Ersatz-PR #728, Head `312faeb7`: Codex meldete einen berechtigten
+  **P2** ausschließlich im Inventar — `readiness_service()` war als
+  offene P3-Fachlogik statt als reine Composition-Root-Funktion
+  klassifiziert. Root-Gate **FAIL**. Der Generator ordnet den Namen
+  nun explizit `COMPOSITION_ROOT` zu; das Inventar wurde regeneriert.
+  Root-Review des konkreten Diffs **PASS**; Inventar-Check, vier
+  Architekturtests, Compile und Diff-Check **PASS**. Laufzeitcode
+  und das bereits mit 2.326 Tests geprüfte Verhalten sind unverändert.
