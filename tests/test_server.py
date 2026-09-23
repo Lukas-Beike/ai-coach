@@ -2166,12 +2166,7 @@ class CoachTests(unittest.TestCase):
         from backend.sync.scheduler import DailySyncScheduler
 
         self.assertEqual(DailySyncScheduler.__module__, "backend.sync.scheduler")
-        source = (
-            Path(__file__).resolve().parents[1]
-            / "backend"
-            / "sync"
-            / "scheduler.py"
-        )
+        source = Path(sys.modules[DailySyncScheduler.__module__].__file__).resolve()
         scheduler = source.read_text(encoding="utf-8")
         self.assertIn('self._markers.is_due("calendar")', scheduler)
         self.assertIn('self._markers.is_due("garmin")', scheduler)
