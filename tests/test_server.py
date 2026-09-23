@@ -1587,7 +1587,7 @@ class CoachTests(unittest.TestCase):
                 "INSERT INTO plan_adjustments(id, payload, status, created_at, applied_at) VALUES (?, ?, ?, ?, ?)",
                 ("adjustment-1", json.dumps({"reason": "test"}), "preview", server.utc_now(), None),
             )
-        exported = server.privacy_export()
+        exported = server.privacy_data_export_service().export()
         self.assertTrue(any(item.get("name") == "Archived template" for item in exported["workout_library"]))
         self.assertEqual(exported["garmin_snapshot"]["source"], "Garmin")
         self.assertEqual(exported["weather_cache"]["query"], "Berlin")
@@ -1599,6 +1599,33 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("test-openai-key", export_text)
         self.assertNotIn("test-intervals-key", export_text)
         self.assertNotIn("test-password-123", export_text)
+
+    def test_privacy_json_projection_filters_runtime_keys_and_preserves_malformed_json_fallbacks(self):
+        server.set_kv("profile", json.dumps({"name": "Private profile"}))
+        server.set_kv("garmin_snapshot", "{")
+        server.set_kv(weather_cache.CACHE_KEY, "{")
+        server.set_kv("ordinary_state", "{")
+        server.set_kv("job_running", "true")
+        server.set_kv("job_status", "done")
+
+        exported = server.privacy_data_export_service().export()
+
+        self.assertNotIn("profile", exported["application_state"])
+        self.assertNotIn("garmin_snapshot", exported["application_state"])
+        self.assertNotIn(weather_cache.CACHE_KEY, exported["application_state"])
+        self.assertNotIn("job_running", exported["application_state"])
+        self.assertNotIn("job_status", exported["application_state"])
+        self.assertEqual(exported["application_state"]["ordinary_state"], "{")
+        self.assertEqual(exported["garmin_snapshot"], {})
+        self.assertEqual(exported["weather_cache"], {})
+
+    def test_privacy_json_projection_uses_composed_local_clock(self):
+        fixed_local_time = datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc)
+        with patch.object(server, "local_now", return_value=fixed_local_time) as local_clock:
+            exported = server.privacy_data_export_service().export()
+
+        self.assertEqual(exported["planning"]["season"]["as_of"], "2026-01-02")
+        self.assertGreaterEqual(local_clock.call_count, 2)
 
     def test_privacy_export_zip_streams_collections_and_contains_complete_manifest(self):
         server.sync_state_repository().save_snapshot({"export-test": True, "synced_at": "2026-09-01", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})

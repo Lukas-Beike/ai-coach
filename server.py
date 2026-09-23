@@ -67,6 +67,7 @@ from backend.calendar import local as calendar_local
 from backend.calendar import public_events as public_event_calendar
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.read_service import ActivityReadService
+from backend.privacy import PrivacyDataExportDependencies, PrivacyDataExportService
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -1694,6 +1695,27 @@ def adaptive_replan_preview_service() -> AdaptiveReplanPreviewService:
         CHECKIN_TEXT_LIMITS["illness"],
         planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS,
         planning_adaptive.WEATHER_ADAPTIVE_MAX_MINUTES,
+    )
+
+
+def privacy_data_export_service() -> PrivacyDataExportService:
+    """Compose the local JSON privacy-data projection use case."""
+    return PrivacyDataExportService(
+        PrivacyDataExportDependencies(
+            database_manager=database_manager(),
+            database_lock=DB_LOCK,
+            key_value_repository=KEY_VALUE_REPOSITORY,
+            profile_service=profile_service(),
+            workout_library_service=workout_library_service(),
+            competition_service=competition_service(),
+            training_plan_service=training_plan_service(),
+            checkin_service=checkin_service(),
+            activity_feedback_service=activity_feedback_service(),
+            adaptive_preview_service=adaptive_replan_preview_service(),
+            external_calendar_reader=external_calendar_reader(),
+            local_now=local_now,
+            utc_now=utc_now,
+        )
     )
 
 
@@ -5204,61 +5226,6 @@ def diagnostic_report_service() -> DiagnosticReportService:
         recent_logs=recent_log_entries_service(),
         diagnostic_capture=DIAGNOSTIC_CAPTURE,
     ))
-
-
-def privacy_export() -> dict[str, Any]:
-    with DB_LOCK, database() as db:
-        messages = [dict(row) for row in db.execute("SELECT role, content, attachments, created_at FROM messages ORDER BY id").fetchall()]
-        snapshots = [json.loads(row["payload"]) for row in db.execute("SELECT payload FROM snapshots ORDER BY id").fetchall()]
-        library = workout_library_service().list(include_archived=True)
-        competitions = competition_service().list()
-        tombstones = [dict(row) for row in db.execute("SELECT intervals_event_id, external_id, created_at FROM competition_sync_tombstones ORDER BY created_at").fetchall()]
-        adjustments = [dict(row) for row in db.execute("SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at").fetchall()]
-        public_calendar = public_event_calendar.state(db)
-        kv_rows = db.execute("SELECT key, value FROM kv ORDER BY key").fetchall()
-    application_state: dict[str, Any] = {}
-    excluded_state = {"profile", "garmin_snapshot", weather_cache.CACHE_KEY}
-    for row in kv_rows:
-        key = str(row["key"])
-        if key in excluded_state or key.endswith("_running") or key.endswith("_status"):
-            continue
-        value = row["value"]
-        try:
-            application_state[key] = json.loads(value)
-        except (TypeError, ValueError):
-            application_state[key] = value
-    try:
-        garmin_data = json.loads(get_kv("garmin_snapshot") or "{}")
-    except (TypeError, ValueError):
-        garmin_data = {}
-    try:
-        weather_data = json.loads(get_kv(weather_cache.CACHE_KEY) or "{}")
-    except (TypeError, ValueError):
-        weather_data = {}
-    return {
-        "exported_at": utc_now(),
-        "profile": profile_service().get(),
-        "application_state": application_state,
-        "competitions": competitions,
-        "competition_sync_tombstones": tombstones,
-        "messages": messages,
-        "snapshots": snapshots,
-        "workout_library": library,
-        "training_plans": training_plan_service().list(),
-        "plan_adjustments": adjustments,
-        "local_feedback": checkin_service().context(),
-        "activity_feedback": activity_feedback_service().context(),
-        "planning": planning_season.planning_state(
-            competition_service().list(),
-            local_now().date(),
-            adaptive_replan_preview_service().latest_preview(),
-            adaptive_replan_preview_service().status(),
-        ),
-        "external_calendar": external_calendar_reader().list_events(),
-        "public_calendar": public_calendar,
-        "garmin_snapshot": garmin_data,
-        "weather_cache": weather_data,
-    }
 
 
 PRIVACY_EXPORT_FORMAT_VERSION = 1
