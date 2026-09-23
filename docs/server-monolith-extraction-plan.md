@@ -588,6 +588,9 @@ Ressourcen. Tests laufen ausschließlich mit temporären Datenbanken/Archiven.
 Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Cases beginnen.
 
 - [ ] Auth, Session-Cookies, CSRF, Rate-Limits und Readiness in `http_api/` ziehen.
+  - [x] Den Login-/API-Rate-Limiter einschließlich Lock, Buckets,
+    begrenztem Cleanup und Retry-After einem konkreten
+    `http_api/`-Zustandseigentümer zuordnen.
 - [ ] Öffentliche Bootstrap-/State-Projektionen und Pagination zuordnen;
   Projektionen erhalten Daten über Domänenlesefunktionen.
   - [x] Lokalen Bootstrap-Lesevorlauf und Wetter-Follow-up mit

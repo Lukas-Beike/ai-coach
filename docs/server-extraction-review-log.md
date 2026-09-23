@@ -5084,3 +5084,24 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Container-Image: vollständige Suite **PASS**, 2.317 Tests,
   10 Skips in 20,316 s. Inventar- und Diff-Check **PASS**;
   `server.py` hat 6.283 physische Zeilen.
+
+## P10 Rate-Limiter — integrierter Prüfstand
+
+- GPT-6-Luna/high-Worker-Commit `42a78abe`: `RateLimiter` besitzt
+  Lock, Buckets, Cleanup-Uhr und die unveränderte Limit-/Retry-
+  Entscheidung; `server.py` komponiert eine Instanz für Login und
+  API-Auth. Erstes Root-Diffreview **FAIL**, weil drei Tests den
+  Owner indirekt über `server.RATE_LIMITER.allow` patchten. Derselbe
+  Worker korrigierte nur die Test-Patch-Ziele in `88a979f5` auf die
+  direkt importierte Klasse mit `autospec`; Root-Follow-up- und
+  Gesamtdiffreview danach **PASS**.
+- Sequenzielle Integration auf bestätigtem #719-Merge-Stand
+  `0694a844` als `43357d73` und `a6811065`: Konflikte nur in
+  Importzeilen, keine Änderung der Entscheidungslogik. Gezielte
+  sieben Rate-/Architekturtests, scoped Ruff, Inventar- und
+  Diff-Check **PASS**. Neu gebautes Read-only-Container-Image:
+  vollständige Suite **PASS**, 2.316 Tests, 10 Skips in 20,496 s.
+- Nach #720-Merge auf `2a57b317` rebased. Der einzige Produkt-/
+  Testkonflikt war die Registrierung beider neuen Modul-Owner im
+  Architekturtest; beide Assertions bleiben erhalten. Inventar und
+  Review-Text neu erzeugt. Kombinierte Tests und PR-CI folgen.
