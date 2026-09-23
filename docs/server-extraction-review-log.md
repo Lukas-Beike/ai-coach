@@ -5472,3 +5472,78 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Compile und Diff-Check **PASS**. Wegen der Einmal-Review-Regel
   wird #738 ohne Merge durch einen neuen PR mit dem korrigierten
   Head ersetzt; kein alter PASS wird auf eine neue Head-SHA übertragen.
+
+## P10 öffentliche Planprojektion — integrierter lokaler Prüfstand
+
+- GPT-6-Luna/high-Patch `f8f77ddd` mit Korrektur `b83ac404`, nach
+  Rebase auf bestätigtem #730-Merge `67b4b377` als `09579637` und
+  `7c602be1`: `PublicPlanStateService` besitzt den vollständigen
+  `/api/plan`-Leseablauf einschließlich Bounded Reads, Wetter-Follow-up,
+  geschütztem History-Read, Kalender- und Tageskontextprojektion.
+  `server.py` komponiert nur und der Handler delegiert direkt.
+- Root-Diffreview des Erststands **FAIL**, da History ohne `DB_LOCK`
+  gelesen und der Manager zu früh gebunden wurde. Derselbe Worker
+  korrigierte beides. Root prüfte den tatsächlichen korrigierten und
+  rebasierten Gesamtdiff: **PASS**. Managerauflösung erfolgt innerhalb
+  des Locks; keine Backend-Rückimporte oder fachlichen Server-
+  Callbacks. Neu gebautes Read-only-Docker-Image: vollständige Suite
+  **PASS**, 2.338 Tests, 11 Skips; fokussierte Plan-/Architekturtests
+  **PASS**, 7/7; Inventar- und Diff-Check **PASS**. `server.py` hat
+  6.010 physische Zeilen und 286 Definitionen. Andere P10-Projektionen,
+  PR-CI und externer Review bleiben offen.
+
+## P10 Bootstrap-/Plan-/Wetterprojektionen — kombinierter lokaler Prüfstand
+
+- GPT-6-Luna/high-Bootstrap-Patch `d80149a9` auf bestätigtem
+  #735-Merge `f6f310ec` als `dcf0ecc4`, Plan-Patches
+  `09579637`/`7c602be1` als `949a2fbc`/`118b3f17` und
+  Wetter-Patch `32567c8c` als `2c0e16b6` sequenziell integriert.
+  Root prüfte die tatsächlichen Code-/Konfliktdiffs: **PASS**.
+  `PublicBootstrapService` besitzt die komplette bounded Local-Only-
+  Antwort unter einer DB-Lock-/UOW-Grenze; `PublicPlanStateService`
+  hält den geschützten History-Read nach Wetter-Follow-up, und
+  `PublicWeatherStateService` besitzt die Refresh-/Marker-Regel.
+  Handler authentifizieren dynamisch und delegieren unmittelbar;
+  keine Server-Rückimporte oder Kompatibilitätswrapper.
+- Drei veraltete Testaufrufer/Patchziele wurden auf konkrete Services
+  beziehungsweise `session_auth_service` migriert. Gezielte Handler-/
+  Privacy-Tests **PASS** (3/3), Architekturtests **PASS** (4/4),
+  Ruff, Compile, Inventar- und Diff-Check **PASS**. Neu gebautes
+  Read-only-Docker-Image auf dem kombinierten #735-Basisstand:
+  vollständige Suite **PASS**, 2.351 Tests, 11 Skips.
+  `server.py` umfasst 5.605 physische Zeilen. Dieser Stand wird
+  nach dem #739-Merge gegen aktuelles `develop` neu integriert und
+  erneut geprüft, bevor ein PR veröffentlicht wird.
+
+## P10 öffentliche Projektionen — bestätigter #739-Merge und Rebase-Gate
+
+- #739 auf Head `ee1fd8da`: Container-, Sonar-, Browser- und Codex-Code-/
+  Security-Checks **PASS**, 0 offene Review-Threads. Squash-Merge
+  `62f77b11ee543511a9c56849521562b2c70bc785` am
+  `2026-09-23T18:54:39Z` bestätigt und auf `origin/develop` erreichbar.
+- Bootstrap-/Plan-/Wetterstand auf diesen Merge rebased: `738fa014`.
+  Konflikte in Testaufrufen, Architekturliste, Importen und dem generierten
+  Inventar wurden anhand der kombinierten konkreten Service-Eigentümer
+  aufgelöst. Root prüfte den tatsächlichen neuen Gesamtdiff samt
+  Handler-Delegation, Lock-/Manager-Auflösung, Local-Only- und
+  Wetter-Follow-up-Grenze erneut: **PASS**. Neu gebautes Read-only-
+  Docker-Image: vollständige Suite **PASS**, 2.357 Tests, 11 Skips;
+  Ruff für neue Module, Compile, Inventar- und Diff-Check **PASS**.
+  `server.py`: 5.517 physische Zeilen, 266 Definitionen. PR-CI,
+  externer Review und Merge dieses neuen Stands stehen noch aus.
+
+## P10 Planprojektion — #740 Quality-Gate-Korrektur
+
+- #740 auf Head `4d8eaa93`: Container-, CodeQL- und Codex-Checks
+  **PASS**, 0 offene Review-Threads; SonarCloud Code Analysis **FAIL**
+  wegen 20 Parametern in `PublicPlanStateService.__init__`
+  (`backend/http_api/public_plan.py:21`). Kein Merge und kein
+  Übertrag des vorherigen PASS auf einen geänderten Stand.
+- Root führte die konkrete Abhängigkeitsstruktur `PublicPlanDependencies`
+  im selben Fachmodul ein, ohne UOW-, Lock-, Auth- oder Response-Ablauf
+  zu ändern. Fokussierte Projektionstests 3/3, Ruff, Compile und
+  Inventar-Check **PASS**. Root prüfte den tatsächlichen Korrektur-Diff
+  erneut: **PASS**. Neu gebautes Read-only-Docker-Image: vollständige
+  Suite **PASS**, 2.357 Tests, 11 Skips; Architekturtests 4/4 und
+  Diff-Check **PASS**. #740 ohne Merge geschlossen; ein Ersatz-PR mit
+  neuem Head braucht eigene CI- und Review-Freigabe.

@@ -29,6 +29,7 @@ from backend.http_api.readiness import ReadinessService
 from backend.http_api.public_state import PublicStateService
 from backend.http_api import readiness as readiness_module
 from backend.http_api import auth as http_auth
+from backend.http_api.public_weather import PublicWeatherStateService
 from backend.http_api import server as http_server_module
 from backend.http_api.rate_limit import RateLimiter
 from backend import privacy as privacy_module
@@ -197,6 +198,39 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
 
 class CoachTests(unittest.TestCase):
+    def test_public_weather_state_service_refreshes_only_when_not_local_and_hides_marker(self):
+        weather = Mock()
+        weather.state.return_value = {"configured": True, "_refreshed": True}
+        endpoint = PublicWeatherStateService(weather)
+
+        self.assertEqual(endpoint.state(local_only=True), {"configured": True})
+        weather.state.assert_called_once_with(refresh=False)
+        weather.state.reset_mock()
+        weather.state.return_value = {"configured": True, "_refreshed": True}
+
+        self.assertEqual(endpoint.state(), {"configured": True})
+        weather.state.assert_called_once_with(refresh=True)
+
+    def test_weather_handler_calls_public_weather_service_after_auth(self):
+        handler = object.__new__(server.RequestHandler)
+        handler.path = "/api/weather?local=1"
+        handler.send_json = Mock()
+        endpoint = Mock()
+        endpoint.state.return_value = {"configured": True, "loading": True}
+
+        auth = Mock()
+        with patch.object(server, "session_auth_service", return_value=auth), patch.object(
+            server, "public_weather_state_service", return_value=endpoint
+        ) as factory:
+            self.assertTrue(handler._handle_training_get("/api/weather"))
+
+        auth.require_auth.assert_called_once_with(handler)
+        factory.assert_called_once_with()
+        endpoint.state.assert_called_once_with(local_only=True)
+        handler.send_json.assert_called_once_with(
+            200, {"configured": True, "loading": True}
+        )
+
     def test_sync_post_handler_keeps_bodyless_routes_and_unknown_posts_transport_only(self):
         handler = object.__new__(server.RequestHandler)
         handler.read_json = Mock(return_value={"ignored": True})
@@ -210,6 +244,24 @@ class CoachTests(unittest.TestCase):
         handler.read_json.assert_not_called()
         endpoint.execute.assert_called_once_with("/api/weather/sync", None)
         handler.send_json.assert_called_once_with(202, {"id": "job-3"})
+
+    def test_plan_handler_delegates_local_and_refresh_reads_to_service(self):
+        for local_only in (True, False):
+            with self.subTest(local_only=local_only):
+                handler = object.__new__(server.RequestHandler)
+                handler.path = "/api/plan?local=1" if local_only else "/api/plan"
+                handler.send_json = Mock()
+                service = Mock()
+                service.read.return_value = {"plans": []}
+                auth = Mock()
+                with (
+                    patch.object(server, "session_auth_service", return_value=auth),
+                    patch.object(server, "public_plan_state_service", return_value=service),
+                ):
+                    self.assertTrue(handler._handle_training_get("/api/plan"))
+                auth.require_auth.assert_called_once_with(handler)
+                service.read.assert_called_once_with(local_only=local_only)
+                handler.send_json.assert_called_once_with(200, {"plans": []})
 
     @classmethod
     def setUpClass(cls):
@@ -1393,7 +1445,7 @@ class CoachTests(unittest.TestCase):
             server.weather_service().state([], force=True)
             server.profile_service().save({"weather_location": "Emsdetten"})
             server.initialise_database()
-            calendar = server.public_plan_state(local_only=True)
+            calendar = server.public_plan_state_service().read(local_only=True)
         self.assertEqual(fetch.call_count, 2)
         history = calendar["weather"]["days"]
         self.assertEqual(len(history), 1)
@@ -1559,7 +1611,7 @@ class CoachTests(unittest.TestCase):
     def test_local_weather_state_does_not_fetch_without_complete_plan_state(self):
         server.profile_service().save({"weather_location": "Berlin"})
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=AssertionError("weather must stay local")):
-            weather = server.public_weather_state(local_only=True)
+            weather = server.public_weather_state_service().state(local_only=True)
         self.assertTrue(weather["configured"])
         self.assertTrue(weather["loading"])
 
@@ -2156,7 +2208,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="")
 
         with patch.object(server, "CONFIG", config):
-            bootstrap = server.public_bootstrap()
+            bootstrap = server.public_bootstrap_service().read()
             state = server.public_state_service().read(local_only=True)
 
         for result in (bootstrap, state):
@@ -2346,7 +2398,23 @@ class CoachTests(unittest.TestCase):
         })
         for index in range(500):
             server.coach_message_service().add("user", f"message {index}")
-        bootstrap = server.public_bootstrap()
+        bootstrap = server.public_bootstrap_service().read()
+        self.assertEqual(
+            list(bootstrap),
+            [
+                "schema_version", "state_versions", "plan_revision", "app", "skeleton",
+                "messages", "messages_next_cursor", "plans", "library", "activities",
+                "planned", "training_calendar", "calendar", "planning_view",
+                "planning_compliance", "weather", "parallel_cycling", "profile",
+                "competitions", "checkins", "local_feedback", "activity_feedback",
+                "planning", "external_calendar", "daily_planning_context", "performance",
+                "garmin", "diagnostic_capture", "intervals", "provider_freshness",
+                "provider_states", "garmin_sync", "provider_resync", "sync", "running_jobs",
+                "library_sync", "sync_settings", "calendar_display", "competition_sync",
+                "performance_refresh", "morning_checkin", "coach_quick_actions",
+                "ai_provider", "model", "thinking_level", "configured", "usage",
+            ],
+        )
         self.assertEqual(bootstrap["schema_version"], 3)
         self.assertEqual(len(bootstrap["messages"]), 100)
         self.assertEqual(bootstrap["activities"], [])
@@ -2362,7 +2430,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(server.provider_http_client(), "request", side_effect=AssertionError("network")), patch.object(
             server.provider_http, "external_call", side_effect=AssertionError("network")
         ):
-            bootstrap = server.public_bootstrap()
+            bootstrap = server.public_bootstrap_service().read()
         self.assertEqual(bootstrap["schema_version"], 3)
         self.assertIn(bootstrap["provider_states"]["intervals"]["status"], {"not_configured", "loading", "ready", "stale", "degraded", "error"})
 
@@ -2405,8 +2473,22 @@ class CoachTests(unittest.TestCase):
 
     def test_bootstrap_reuses_one_database_connection_for_local_reads(self):
         with patch.object(server.sqlite3, "connect", wraps=sqlite3.connect) as connect:
-            server.public_bootstrap()
+            server.public_bootstrap_service().read()
         self.assertEqual(connect.call_count, 1)
+
+    def test_bootstrap_resolves_database_manager_inside_shared_lock(self):
+        real_manager = server.database_manager
+        lock_states = []
+
+        def manager_factory():
+            lock_states.append(server.DB_LOCK._is_owned())
+            return real_manager()
+
+        with patch.object(server, "database_manager", side_effect=manager_factory):
+            server.public_bootstrap_service().read()
+
+        self.assertTrue(lock_states)
+        self.assertTrue(all(lock_states))
 
     def test_frontend_loads_domain_areas_instead_of_monolithic_state(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
@@ -2488,7 +2570,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(status["operation_id"], "operation-test")
         self.assertEqual(status["phase"], "fetching")
         self.assertEqual(status["progress"], 35)
-        bootstrap = server.public_bootstrap()
+        bootstrap = server.public_bootstrap_service().read()
         self.assertEqual(bootstrap["sync"]["progress"], 35)
         self.assertEqual(bootstrap["sync"]["message"], "Daten werden gelesen…")
 
@@ -3502,7 +3584,7 @@ class CoachTests(unittest.TestCase):
             patch.object(server.weather_service(), "state", return_value={"days": []}),
             patch.object(server, "local_now", return_value=datetime(2026, 8, 26, 12, 0)),
         ):
-            result = server.public_plan_state(local_only=True)
+            result = server.public_plan_state_service().read(local_only=True)
 
         self.assertEqual(result["planned"][0]["compliance"]["status"], "completed")
         self.assertEqual(result["training_calendar"][0]["compliance"]["actual_activity"]["icu_rpe"], 8)
@@ -9753,7 +9835,7 @@ class CoachTests(unittest.TestCase):
                 self.lock.release()
 
         for state_reader in (
-            server.public_bootstrap,
+            lambda: server.public_bootstrap_service().read(),
             lambda: server.public_state_service().read(),
         ):
             for update in (False, True):

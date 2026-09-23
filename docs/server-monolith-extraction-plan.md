@@ -634,6 +634,14 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
   - [x] Begrenzte Chat-History-Pagination einschließlich Suche, Cursor,
     Generation und sitzungsgebundener Vorschläge einem konkreten
     `http_api/`-Service mit unveränderter DB-UOW zuordnen.
+  - [x] Öffentliche Plan-/Kalender-/Wetterprojektion mit bestehenden
+    Datenlimits und geschütztem History-Read in `PublicPlanStateService`
+    verlagern; andere öffentliche Projektionen bleiben offen.
+  - [x] Den vollständigen bounded Local-Only-Bootstrap einschließlich
+    Providerstatus und aller Felder in `PublicBootstrapService` verlagern;
+    der Handler authentifiziert und sendet nur die Antwort.
+  - [x] Den separaten `/api/weather`-Read mit unveränderter
+    Refresh-/Local-Only-Regel in `PublicWeatherStateService` verlagern.
 - [ ] `RequestHandler`, Route-Dispatch, Body-Limits, statische Dateien und SSE
   transportseitig auslagern; vorhandene `requests.py`/`responses.py` nutzen.
   - [x] Sync-POST-Fachentscheidungen in `SyncCommandEndpoint` verlagern;
