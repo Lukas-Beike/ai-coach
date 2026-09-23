@@ -4270,3 +4270,36 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Erneuter Root-Diff-/Code-Gate für `9803c30..662615c` **PASS**.
   Sonar und GitHub-Gates müssen auf dem aktualisierten PR-Head neu
   laufen; bis dahin bleibt der PR offen und Auto-Merge aus.
+- Sonar auf Head `4b99cde` meldet elf statt 13 New-Code-Befunde;
+  Wetter und Kontextvorschau sind nicht mehr betroffen. Sieben
+  Konstruktoren und vier Server-Orchestrierungen bleiben offen.
+- Root-Diff `4a5f2dd`, sequenziell als `7940314` integriert:
+  `CoachPlanningContextReader` besitzt lokale Plan-/Kalenderprojektion,
+  `CoachPerformanceContextReader` Profil-/Providerprojektion;
+  `CoachStructuredContextService` koordiniert sechs konkrete Quellen.
+  Der Root hat die tatsächlichen Aufrufpfade und den Diff auf
+  wiederholte autoritative Reads, unveränderte Quellenlabels,
+  Datensparsamkeit und fehlende Server-Rückimporte geprüft: **PASS**.
+  Sieben gezielte Struktur-/Preview-/Server-Tests, Ruff, Compile und
+  Diff-Check **PASS**. Gesamtsuite für `7940314` **PASS**: 2.246 Tests,
+  12 Skips in 208,403 s; Root-Code-Gate erneut **PASS**. Der neue
+  Sonar-Lauf steht noch aus.
+
+## P7.19 — strukturierte Coach-Sync-Werkzeuge
+
+- Root-Diff `268df22`, sequenziell als `5dcf937` integriert: Der neue
+  konkrete `CoachSyncToolService` besitzt Plan-Push, Job-Lookup,
+  Wettkampf-Push und Konfliktwiederholung samt Scope-/Target- und
+  Remote-Write-Prüfung. `server.py` komponiert die sechs betroffenen
+  Dienste und ruft den Besitzer nur für diese vier Toolnamen; die
+  bisherige Fachorchestrierung ist entfernt, ohne Server-Callbacks.
+  Sync-Use-Cases behalten Transaktion, Revision/Hash und Queue-
+  Eigentümerschaft; Sync-Job-IDs bleiben turn-lokal. Root-Diff- und
+  Code-Review der Berechtigungs- und Schreibgrenzen **PASS**.
+- Vier neue direkte Sicherheitsregressionen und 68 Dialogregressionen
+  **PASS** (72 gesamt), Ruff, Compile, Diff- und Inventar-Check
+  **PASS**. Die Gesamtsuite dieses erweiterten PR-Stands ebenfalls
+  **PASS**: 2.250 Tests, 12 Skips in 207,822 s. Erneuter Root-Code-
+  Review des integrierten P7-Diffs **PASS**. Inventar: `server.py`
+  6.929 Zeilen; P7 103 Definitionen/31
+  globale Bindungen, also weiterhin offen.
