@@ -209,13 +209,6 @@ class CoachTests(unittest.TestCase):
                 connection.close()
             self.assertEqual(tables, {"unexpected_records"})
 
-    def test_initialise_database_clears_interrupted_morning_checkin_marker(self):
-        server.set_kv("morning_checkin_running", "1")
-        server.set_kv("morning_checkin_status", "working")
-        server.initialise_database()
-        self.assertEqual(server.get_kv("morning_checkin_running"), "0")
-        self.assertEqual(server.get_kv("morning_checkin_status"), "waiting")
-
     def test_database_initialization_does_not_recover_jobs(self):
         with patch.object(server, "resume_interrupted_sync_jobs") as sync_recovery, patch.object(
             server, "resume_interrupted_coach_jobs"
@@ -237,9 +230,7 @@ class CoachTests(unittest.TestCase):
             server, "start_sync_job_worker", side_effect=lambda: order.append("sync-worker")
         ), patch.object(
             server, "start_coach_job_worker", side_effect=lambda: order.append("coach-worker")
-        ), patch.object(server, "enqueue_startup_sync_jobs"), patch.object(
-            server, "schedule_morning_checkin"
-        ), patch.object(server.threading, "Thread"):
+        ), patch.object(server, "enqueue_startup_sync_jobs"), patch.object(server.threading, "Thread"):
             server.main()
         self.assertEqual(
             order,
@@ -687,9 +678,10 @@ class CoachTests(unittest.TestCase):
             server.IntervalsClient, "fetch_snapshot", return_value=snapshot
         ), patch.object(server, "refresh_workout_library", return_value={"workouts": 0}), patch.object(
             server, "_enqueue_automatic_performance_refresh"
-        ) as enqueue:
+        ) as enqueue, patch.object(server, "mark_daily_sync") as mark:
             server.sync_intervals("startup historical backfill", activity_days=90, end_date=date(2026, 1, 1))
         enqueue.assert_not_called()
+        mark.assert_not_called()
 
     def test_explicit_competition_push_preserves_provider_id_for_ordinary_edits(self):
         competition = server.save_coach_competition({
@@ -1964,23 +1956,32 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("activities", json.dumps(status["message"]))
 
 
-    def test_daily_sync_markers_are_separate_per_provider(self):
-        local_day = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
-        server.mark_daily_sync("intervals", local_day)
-        self.assertFalse(server.daily_sync_due("intervals", local_day))
-        self.assertTrue(server.daily_sync_due("garmin", local_day))
-        self.assertTrue(server.daily_sync_due("calendar", local_day))
+    def test_automatic_sync_markers_are_separate_per_provider_and_hourly(self):
+        current = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
+        server.mark_daily_sync("intervals", current)
+        self.assertFalse(server.daily_sync_due("intervals", current))
+        self.assertTrue(server.daily_sync_due("intervals", current + timedelta(hours=1)))
+        self.assertTrue(server.daily_sync_due("garmin", current))
+        self.assertTrue(server.daily_sync_due("calendar", current))
+        with patch.object(server, "local_now", return_value=current):
+            server.enqueue_sync_job("calendar", "refresh", {}, requested_by="scheduler")
+        self.assertFalse(server.daily_sync_due("calendar", current))
+        self.assertTrue(server.daily_sync_due("calendar", current + timedelta(hours=1)))
 
     def test_daily_sync_marker_module_is_dependency_light(self):
-        from backend.sync.daily import daily_sync_is_due, mark_daily_sync
+        from backend.sync.daily import daily_sync_is_due, mark_daily_sync, mark_daily_sync_attempt
 
         values = {}
         current = datetime(2026, 3, 30, 0, 30, tzinfo=timezone.utc)
 
         self.assertTrue(daily_sync_is_due("intervals", current, get_value=values.get))
         mark_daily_sync("intervals", current, set_value=values.__setitem__)
-        self.assertEqual(values["daily_sync_intervals_local_date"], "2026-03-30")
+        self.assertEqual(values["sync_intervals_last_success_at"], current.isoformat())
         self.assertFalse(daily_sync_is_due("intervals", current, get_value=values.get))
+        self.assertTrue(daily_sync_is_due("intervals", current + timedelta(hours=1), get_value=values.get))
+        mark_daily_sync_attempt("intervals", current + timedelta(hours=2), set_value=values.__setitem__)
+        self.assertFalse(daily_sync_is_due("intervals", current + timedelta(hours=2), get_value=values.get))
+        self.assertTrue(daily_sync_is_due("intervals", current + timedelta(hours=3), get_value=values.get))
 
     def test_daily_sync_loop_uses_local_provider_markers(self):
         source = Path(server.__file__).read_text(encoding="utf-8")
@@ -4036,18 +4037,50 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(start, datetime(2026, 9, 3, 21, 30, tzinfo=timezone.utc))
         self.assertEqual(end, datetime(2026, 9, 4, 5, 45, tzinfo=timezone.utc))
 
-    def test_morning_checkin_garmin_gate_waits_for_fresh_sleep(self):
-        events = []
-        with patch.object(server, "garmin_fixture_path", return_value="fixture.json"), \
-             patch.object(server, "sync_garmin") as sync_garmin, \
-             patch.object(server, "garmin_sleep_ready_for_checkin", return_value=False), \
-             patch.object(runtime_events.STATE_EVENT_BUFFER, "publish", side_effect=lambda *args: events.append(args)):
-            ready = server._morning_checkin_garmin_ready(date(2026, 9, 4))
-        self.assertIsNone(ready)
-        sync_garmin.assert_called_once_with(days=server.MORNING_GARMIN_SYNC_DAYS, reason="Morgen-Check-in", wait_for_existing=True)
-        self.assertEqual(server.get_kv("morning_checkin_status"), "waiting")
-        self.assertEqual(server.get_kv("morning_checkin_attempt_count"), "0")
-        self.assertTrue(events)
+    def test_manual_morning_checkin_waits_for_fresh_sleep_before_coach_analysis(self):
+        config = replace(server.CONFIG, garmin_email="athlete@example.invalid")
+        with patch.object(server, "CONFIG", config), patch.object(
+            server, "garmin_fixture_path", return_value=None
+        ), patch.object(server, "Garmin", Mock()), patch.object(server, "sync_garmin") as sync, patch.object(
+            server, "garmin_sleep_ready_for_checkin", return_value=False
+        ), patch.object(server, "refresh_morning_body_battery") as body_battery:
+            with self.assertRaisesRegex(server.AppError, "Schlafdaten für heute"):
+                server._prepare_manual_morning_checkin()
+        sync.assert_called_once_with(
+            days=server.GARMIN_AUTOMATIC_SYNC_DAYS,
+            reason="Morgen-Check-in",
+            wait_for_existing=True,
+        )
+        body_battery.assert_not_called()
+
+    def test_manual_morning_checkin_refreshes_body_battery_after_current_sleep(self):
+        config = replace(server.CONFIG, garmin_email="athlete@example.invalid")
+        with patch.object(server, "CONFIG", config), patch.object(
+            server, "garmin_fixture_path", return_value=None
+        ), patch.object(server, "Garmin", Mock()), patch.object(server, "sync_garmin") as sync, patch.object(
+            server, "garmin_sleep_ready_for_checkin", return_value=True
+        ), patch.object(server, "refresh_morning_body_battery") as body_battery:
+            server._prepare_manual_morning_checkin()
+        sync.assert_called_once_with(
+            days=server.GARMIN_AUTOMATIC_SYNC_DAYS,
+            reason="Morgen-Check-in",
+            wait_for_existing=True,
+        )
+        body_battery.assert_called_once_with(server.local_now().date())
+
+    def test_manual_morning_quick_action_stops_before_coach_when_sleep_is_not_ready(self):
+        receipt = {"request_kind": "morning_checkin"}
+        error = server.AppError(503, "Garmin sleep is not ready", reason="garmin_sleep_not_ready")
+        with patch.object(server, "_background_coach_message", return_value="Morgen-Check-in"), patch.object(
+            server, "_merge_coach_command_receipt"
+        ), patch.object(server, "_prepare_manual_morning_checkin", side_effect=error), patch.object(
+            server, "chat_with_coach"
+        ) as chat:
+            with self.assertRaises(server.AppError):
+                server._execute_background_coach_job(
+                    {}, receipt, "operation", "client-turn", "session", threading.Event(), False
+                )
+        chat.assert_not_called()
 
     def test_garmin_source_observed_at_uses_latest_nested_valid_date(self):
         observed_at = server.garmin_source_observed_at({
@@ -8734,4 +8767,3 @@ class CoachTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

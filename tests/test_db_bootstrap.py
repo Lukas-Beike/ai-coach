@@ -49,9 +49,6 @@ class DatabaseBootstrapTests(unittest.TestCase):
         self.key_values.set(db, "intervals_resync_status", "failed")
         self.key_values.set(db, "garmin_resync_running", "1")
         self.key_values.set(db, "garmin_resync_status", "failed")
-        self.key_values.set(db, "morning_checkin_running", "1")
-        self.key_values.set(db, "morning_checkin_status", "working")
-        self.key_values.set(db, "morning_checkin_attempted", "2026-09-15")
 
         self.bootstrap(db)
 
@@ -61,9 +58,6 @@ class DatabaseBootstrapTests(unittest.TestCase):
         self.assertEqual(self.key_values.get(db, "intervals_resync_status"), "")
         self.assertEqual(self.key_values.get(db, "garmin_resync_running"), "0")
         self.assertEqual(self.key_values.get(db, "garmin_resync_status"), "")
-        self.assertEqual(self.key_values.get(db, "morning_checkin_running"), "0")
-        self.assertEqual(self.key_values.get(db, "morning_checkin_status"), "waiting")
-        self.assertEqual(self.key_values.get(db, "morning_checkin_attempted"), "")
         self.assertEqual(db.execute("SELECT revision, updated_at FROM planning_state WHERE id=1").fetchone()["revision"], 0)
         self.assertEqual(db.execute("SELECT updated_at FROM planning_state WHERE id=1").fetchone()["updated_at"], self.now)
 
