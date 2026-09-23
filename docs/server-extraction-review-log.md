@@ -5916,3 +5916,30 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Vollsuite **PASS**, 2.400 Tests/12 Skips; frisch gebautes Read-only-
   Docker-Image **PASS**, 2.400 Tests/11 Skips. Review-Thread-Auflösung,
   aktualisierte PR-CI und Merge stehen noch aus.
+
+## P9 Restore — bestätigter #750-Merge
+
+- #750 auf korrigiertem Head `7dd86a33`: Root-Gate **PASS**;
+  P2-Review-Thread beantwortet und gelöst, geschützter Codex-Gate-
+  Workflow regulär erneut ausgewertet und **PASS**. Alle erforderlichen
+  Checks **PASS**. Squash-Merge
+  `7ab9b982de26ddf04c92f40215cab5b488186100` am
+  `2026-09-23T21:33:08Z` bestätigt und auf `origin/develop` erreichbar.
+  Der nicht erforderliche Browser-Smoke-Check war beim Merge noch
+  unterwegs und wird gesondert nachkontrolliert.
+
+## P7 Read-only Coach-Tools — erster integrierter Patch
+
+- Luna-Ausgangscommit `bca00d69` wurde als einzelner Patch auf #750
+  integriert (`7b1d1c24`). Root prüfte den tatsächlichen integrierten
+  Diff und Code erneut: **PASS**. Auswahl, Limits und Antwortprojektion
+  aller Read-Tools liegen im konkreten Backend-Eigentümer; die
+  Domänendienste behalten Zustand, und `server.py` delegiert ohne Rückimport.
+  Neue Factory im Inventargenerator als Composition-Root-Verdrahtung
+  erfasst, P0 bleibt 0.
+- Vier neue direkte Unit-Tests decken alle Toolnamen, Filter und Cursor,
+  obere/untere Grenzwerte, fehlerhafte Limits und unbekannte Namen ab.
+  Für diese lokale Leseschnittstelle angemessen. Nach Integration:
+  fokussierte Service-/Architekturtests 10/10, Ruff, Compile,
+  Inventar- und Diff-Check **PASS**. Der zweite P7-Patch und die
+  gemeinsame Vollregression stehen noch aus.
