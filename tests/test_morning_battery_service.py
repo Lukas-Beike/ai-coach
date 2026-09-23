@@ -11,6 +11,12 @@ from unittest.mock import Mock
 
 from backend.performance.morning_battery_service import (
     MORNING_BATTERY_HISTORY_KEY,
+    MorningBatteryClock,
+    MorningBatteryEvents,
+    MorningBatteryExecutionGate,
+    MorningBatteryRetryPolicy,
+    MorningBatterySource,
+    MorningBatteryStore,
     MorningBodyBatteryService,
 )
 
@@ -37,10 +43,10 @@ class FakeLock:
 
 class FakeLogger:
     def __init__(self) -> None:
-        self.warnings: list[tuple[str, dict[str, object], bool]] = []
+        self.warnings: list[tuple[str, dict[str, object], object]] = []
 
     def warning(
-        self, message: str, *, extra: dict[str, object], exc_info: bool
+        self, message: str, *, extra: dict[str, object], exc_info: object
     ) -> None:
         self.warnings.append((message, extra, exc_info))
 
@@ -134,23 +140,28 @@ class Harness:
         self.events.append((topic, payload))
 
     def make_service(self, **overrides: object) -> MorningBodyBatteryService:
-        dependencies: dict[str, object] = {
-            "manager": self,
-            "key_values": self,
-            "fixture_loader": self,
-            "remote_configured": lambda: self.is_remote_configured,
-            "fetch_remote": self.fetch_remote,
-            "lock": self.lock,
-            "maintenance_gate": FakeGate(self.trace, "maintenance"),
-            "provider_gate": FakeGate(self.trace, "provider"),
-            "now": lambda: NOW,
-            "local_now": lambda: NOW,
-            "publish_event": self.publish_event,
-            "safe_error": self.safe_error,
-            "logger": self.logger,
-        }
-        dependencies.update(overrides)
-        return MorningBodyBatteryService(**dependencies)  # type: ignore[arg-type]
+        fixture_loader = overrides.get("fixture_loader", self)
+        return MorningBodyBatteryService(
+            MorningBatteryStore(self, self),
+            MorningBatterySource(
+                fixture_loader,
+                lambda: self.is_remote_configured,
+                self.fetch_remote,
+                self.safe_error,
+            ),
+            MorningBatteryExecutionGate(
+                self.lock,
+                FakeGate(self.trace, "maintenance"),
+                FakeGate(self.trace, "provider"),
+                120,
+            ),
+            MorningBatteryClock(
+                lambda: NOW,
+                overrides.get("local_now", lambda: NOW),  # type: ignore[arg-type]
+            ),
+            MorningBatteryEvents(self.publish_event, self.logger),
+            MorningBatteryRetryPolicy(),
+        )
 
 
 def sleep_payload() -> dict[str, object]:
@@ -432,7 +443,7 @@ class MorningBodyBatteryServiceTests(unittest.TestCase):
                 "context": "sanitized fake error",
             },
         )
-        self.assertIs(later.logger.warnings[0][2], True)
+        self.assertEqual(later.logger.warnings[0][2][0], RuntimeError)  # type: ignore[index]
         self.assertEqual(later.safe_errors[0].args, ("fake fixture failure",))
 
 

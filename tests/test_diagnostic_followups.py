@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
+
 from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import morning_battery as performance_morning_battery
 from backend.sync import garmin as garmin_sync
@@ -95,7 +96,11 @@ class DiagnosticFollowupTests(unittest.TestCase):
         snapshot = {"morning_body_battery": {"sleep_date": "2026-09-06", "status": "ready", "morning": {"value": 70}}}
         server.set_kv("garmin_snapshot", json.dumps(snapshot))
         service = server.morning_body_battery_service()
-        with patch.object(service, "_lock", Mock(acquire=Mock(return_value=False))):
+        with patch.object(
+            service._execution_gate,
+            "_lock",
+            Mock(acquire=Mock(return_value=False)),
+        ):
             self.assertEqual(service.sync(server.local_now().date())["status"], "already_running")
         self.assertEqual(server.garmin_payload_service().snapshot(), snapshot)
 
@@ -112,7 +117,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
                 patch.object(server.provider_http, "external_call", return_value=None) as external_call:
             token = sync_observation.OPERATION_CONTEXT.set(context)
             try:
-                server.morning_body_battery_service()._fetch_remote(day)
+                server.morning_body_battery_service().source.fetch_remote(day)
             finally:
                 sync_observation.OPERATION_CONTEXT.reset(token)
 

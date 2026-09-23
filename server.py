@@ -70,7 +70,15 @@ from backend.athlete.context import AthleteContextService
 from backend.athlete.profile import DEFAULT_PROFILE, ProfileService, normalize_profile, timezone_name
 from backend.performance import context as performance_context
 from backend.performance import morning_battery as performance_morning_battery
-from backend.performance.morning_battery_service import MorningBodyBatteryService
+from backend.performance.morning_battery_service import (
+    MorningBatteryClock,
+    MorningBatteryEvents,
+    MorningBatteryExecutionGate,
+    MorningBatteryRetryPolicy,
+    MorningBatterySource,
+    MorningBatteryStore,
+    MorningBodyBatteryService,
+)
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync import freshness as sync_freshness
@@ -1088,15 +1096,13 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
     manager = database_manager()
     if MORNING_BODY_BATTERY_SERVICE is None:
         client_factory = garmin_client_factory()
-        MORNING_BODY_BATTERY_SERVICE = MorningBodyBatteryService(
-            manager=manager,
-            key_values=KEY_VALUE_REPOSITORY,
-            fixture_loader=garmin_fixture_loader(),
-            remote_configured=lambda: bool(
+        source = MorningBatterySource(
+            garmin_fixture_loader(),
+            lambda: bool(
                 client_factory.available()
                 and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())
             ),
-            fetch_remote=lambda checkin_date: fetch_morning_body_battery(
+            lambda checkin_date: fetch_morning_body_battery(
                 client_factory.create(
                     CONFIG.garmin_email or None, CONFIG.garmin_password or None
                 ),
@@ -1117,17 +1123,20 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
                 ),
                 sleep_bounds=performance_morning_battery.sleep_bounds,
             ),
-            lock=shared_garmin_sync_lock(),
-            maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-            provider_gate=GARMIN_RESYNC_GATE,
-            now=lambda: datetime.now(timezone.utc),
-            local_now=lambda: local_now(),
-            publish_event=runtime_events.STATE_EVENT_BUFFER.publish,
-            safe_error=observability.safe_diagnostic_error,
-            logger=LOGGER,
-            lock_wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
-            max_attempts=MORNING_MAX_ATTEMPTS,
-            retry_seconds=MORNING_RETRY_SECONDS,
+            observability.safe_diagnostic_error,
+        )
+        MORNING_BODY_BATTERY_SERVICE = MorningBodyBatteryService(
+            MorningBatteryStore(manager, KEY_VALUE_REPOSITORY),
+            source,
+            MorningBatteryExecutionGate(
+                shared_garmin_sync_lock(),
+                runtime_maintenance.MAINTENANCE_GATE,
+                GARMIN_RESYNC_GATE,
+                GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
+            ),
+            MorningBatteryClock(lambda: datetime.now(timezone.utc), local_now),
+            MorningBatteryEvents(runtime_events.STATE_EVENT_BUFFER.publish, LOGGER),
+            MorningBatteryRetryPolicy(MORNING_MAX_ATTEMPTS, MORNING_RETRY_SECONDS),
         )
     return MORNING_BODY_BATTERY_SERVICE
 
