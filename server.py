@@ -5179,11 +5179,10 @@ class RequestHandler(BaseHTTPRequestHandler):
     server_version = f"IntervalsCoach/{APP_VERSION}"
     client_disconnect_errors = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
     static_asset_service: StaticAssetService
-    auth_service: SessionAuthService
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.auth_service = session_auth_service()
-        super().__init__(*args, **kwargs)
+    @property
+    def auth_service(self) -> SessionAuthService:
+        return session_auth_service()
 
     def log_message(self, fmt: str, *args: Any) -> None:
         LOGGER.info(

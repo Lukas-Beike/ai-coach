@@ -1497,21 +1497,19 @@ class CoachTests(unittest.TestCase):
 
     def test_composed_handler_resolves_current_auth_service_after_database_manager_change(self):
         handler_class = server.request_handler_class()
+        handler_class.protocol_version = "HTTP/1.1"
         httpd = http_server_module.CoachHTTPServer(("127.0.0.1", 0), handler_class)
         worker = threading.Thread(target=httpd.serve_forever, daemon=True)
         worker.start()
+        connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)
 
         def library_status(token):
-            connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)
-            try:
-                connection.request(
-                    "GET", "/api/library?limit=1",
-                    headers={"Cookie": f"ic_session={token}"},
-                )
-                response = connection.getresponse()
-                return response.status, json.loads(response.read())
-            finally:
-                connection.close()
+            connection.request(
+                "GET", "/api/library?limit=1",
+                headers={"Cookie": f"ic_session={token}"},
+            )
+            response = connection.getresponse()
+            return response.status, json.loads(response.read())
 
         try:
             with patch.object(server.app_config, "security_configuration_error", return_value=None):
@@ -1520,6 +1518,8 @@ class CoachTests(unittest.TestCase):
                 status, _payload = library_status(original_token)
                 self.assertEqual(status, 200)
                 original_auth = server.session_auth_service()
+                keep_alive_socket = connection.sock
+                self.assertIsNotNone(keep_alive_socket)
 
                 with tempfile.TemporaryDirectory(prefix="session-auth-manager-switch-") as directory:
                     switched_db = Path(directory) / "switched.db"
@@ -1554,11 +1554,13 @@ class CoachTests(unittest.TestCase):
                             status, payload = library_status(switched_token)
                             self.assertEqual(status, 200)
                             self.assertIn("workouts", payload)
+                            self.assertIs(connection.sock, keep_alive_socket)
                         finally:
                             switched_manager.close()
                             server.DATABASE_MANAGER = None
                             server.DATABASE_MANAGER_SIGNATURE = None
         finally:
+            connection.close()
             httpd.shutdown()
             worker.join(5)
             httpd.server_close()
