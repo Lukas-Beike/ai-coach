@@ -1953,6 +1953,37 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(handler.payload.startswith(b"PK"))
         self.assertFalse(handler.path.exists())
 
+    def test_privacy_download_routes_require_auth_before_streaming(self):
+        routes = {
+            "/api/privacy/export": "stream_privacy_export",
+            "/api/privacy/backup": "stream_database_backup",
+        }
+        for path, stream_method in routes.items():
+            with self.subTest(path=path):
+                handler = object.__new__(server.RequestHandler)
+                handler.path = path
+                auth = Mock()
+                transport = Mock()
+                with patch.object(server, "session_auth_service", return_value=auth), patch.object(
+                    server, "export_stream_transport", return_value=transport
+                ) as transport_factory:
+                    self.assertTrue(handler._handle_diagnostics_get(path))
+                    auth.require_auth.assert_called_once_with(handler)
+                    getattr(transport, stream_method).assert_called_once_with(handler)
+                    transport_factory.assert_called_once_with()
+
+                denied = server.AppError(401, "unauthorized")
+                auth.require_auth.side_effect = denied
+                transport.reset_mock()
+                with patch.object(server, "session_auth_service", return_value=auth), patch.object(
+                    server, "export_stream_transport", return_value=transport
+                ) as transport_factory:
+                    with self.assertRaises(server.AppError) as caught:
+                        handler._handle_diagnostics_get(path)
+                    self.assertIs(caught.exception, denied)
+                    transport_factory.assert_not_called()
+                    getattr(transport, stream_method).assert_not_called()
+
     def test_privacy_archive_export_enforces_free_space_size_timeout_and_cleanup(self):
         service = server.privacy_archive_export_service()
         with tempfile.TemporaryDirectory() as temporary:
