@@ -4754,3 +4754,22 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   6.756 physische Zeilen. Neu gebautes Read-only-Container-Image:
   vollständige integrierte Suite **PASS**, 2.288 Tests, 10 Skips
   in 19,666 s. CI/Sonar des künftigen P10-PR-Stands stehen noch aus.
+
+## P7 Konversations-ID-Bereitstellung — integrierter Prüfstand
+
+- GPT-6-Luna/high-Worker-Commit `0cdbad9b`, nach dem geprüften P10-Stand
+  als `71d56c56` integriert. Der frühe Zwischen-Diff hielt den Remote-POST
+  unter DB-Lock/Transaktion und wurde mit **FAIL** zurückgegeben. Der
+  committed Korrekturstand trennt kurze KV-Lese-/Schreib-UOWs vom OpenAI-
+  Request; ein Fake-Test beweist, dass während des Requests weder Lock noch
+  UOW gehalten werden. Root-Diffprüfung **PASS**: `ensure_conversation` ist
+  entfernt, beide produktiven Aufrufer und sämtliche bekannten Test-/E2E-
+  Patch-Ziele nutzen den konkreten Service; keine Backend-Rückimporte oder
+  neue dauerhaften Kompatibilitäts-Wrapper. Persistenzschlüssel, OpenAI-
+  Metadaten und Fehlermeldung bleiben erhalten.
+- Integrierte sieben Service- und vier Architekturtests **PASS**;
+  vollständige lokale Suite **PASS**, 2.295 Tests, 12 Skips in 297,618 s.
+  Inventar-Check, Diff-Check und scoped Ruff (vorbestehendes `UP031` in
+  `conversation.py` ausgeschlossen) **PASS**. CI-/Sonar-Prüfung des noch zu
+  veröffentlichenden PR-Stands steht aus. Die weiteren P7-History-, Reset-,
+  Vorschlags- und Tool-Use-Cases bleiben offen.
