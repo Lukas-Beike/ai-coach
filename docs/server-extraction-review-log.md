@@ -5050,3 +5050,29 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Review-Text hatten Konflikte. Neu gebautes kombiniertes Read-only-
   Container-Image: vollständige Suite **PASS**, 2.314 Tests,
   10 Skips in 21,452 s. Inventar- und Diff-Check **PASS**.
+
+## P10 statische Assets — integrierter Prüfstand
+
+- GPT-6-Luna-Patch `f82ffe4c` hatte im ersten Root-Diffreview **FAIL**:
+  Der Handler-Level-Test für 304/ETag/Cache-Control/keinen Body war
+  durch eine reine Service-Assertion ersetzt. Korrekturauftrag an
+  denselben Worker; Follow-up `0a5d03e2` ergänzt wieder den konkreten
+  Handler-Transporttest und die Traversal-Sperre ohne Request-Attribute.
+- Root prüfte den tatsächlichen Follow-up- und Gesamtdiff: **PASS**.
+  `StaticAssetService` besitzt Allowlist, Dateiauflösung, ETag,
+  Cache- und Sicherheitsheader; `server.py` behält nur den
+  Antworttransport. Kein Rückimport, Server-Callback oder zusätzlicher
+  Zustandseigentümer. Die Integration auf HTTP-Server-Stand `a70be088`
+  ergab `62ba899b` und `366b3e69`; der eine Produktkonflikt wurde
+  zugunsten von `backend.http_api.server.CoachHTTPServer` mit einem
+  komponierten Handler gelöst. Der Startup-Test prüft nun dessen
+  konkreten Static-Service statt nur eine unveränderte Klassenidentität.
+- Gezielte 11 Handler-/Architekturtests, Inventar- und Diff-Check
+  **PASS**. Neu gebautes Read-only-Container-Image: vollständige Suite
+  **PASS**, 2.314 Tests, 10 Skips in 20,586 s. `server.py` hatte
+  6.299 physische Zeilen. PR-Veröffentlichung und CI stehen noch aus.
+- PR #718 (HTTP-Server-Eigentümer) wurde separat nach Root-PASS und
+  grünen erforderlichen Checks am `2026-09-23T15:00:24Z` als
+  `7673a1f8512c50530d9f83420cee67e4e136931a` gemerged; der
+  Commit ist auf `origin/develop` erreichbar und sein Dateibaum
+  identisch mit dem integrierten Parent `a70be088`.
