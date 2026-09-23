@@ -534,6 +534,9 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
 
 - [ ] Die gesamte strukturierte Response-/Tool-Rundenschleife einschließlich
   Retry, Fehler-Recovery, Receipts und finaler Persistenz nach `coach/` ziehen.
+  - [x] Terminale Turn-Fehlerprojektion einschließlich bestätigter Effekte,
+    Pending-Request, atomarem Receipt, Checkpoint-Bereinigung und Event nach
+    Commit einem `CoachTurnFailureService` zuordnen; der übrige Turn bleibt offen.
 - [ ] `chat_with_coach`, Background-Claim/Resume/Cancel und Stream-Register
   auslagern; synchrone und Hintergrundausführung teilen denselben Turn-Use-Case.
   - [x] Process-lokales Chat-Stream-Register, SSE-Queues und Background-
@@ -546,6 +549,11 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
     Anhangsquote und atomarer Command-/Message-Persistenz einem
     `CoachJobSubmissionService` zuordnen; Worker-/Turn-Ausführung,
     Resume und Cancel bleiben offen.
+  - [x] Sessiongebundene Attached-/Background-Cancellation samt
+    persistierter Cancel-Markierung, Provider-Response-Close und
+    Restart-Verhalten einem `CoachCancellationService` zuordnen;
+    Receipt-Merge gehört dem `CoachJobStore`. Turn-Ausführung und
+    Resume bleiben offen.
 - [ ] Manuellen Morning Check-in mit Frische-Gate auslagern; die auf `develop`
   entfernte automatische Reservierungs-/Retry-Steuerung nicht wieder einführen.
   - [x] Manuellen Garmin-Schlaf-/Body-Battery-Vorbereitungspfad und

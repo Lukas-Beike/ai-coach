@@ -298,7 +298,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
         job = server.coach_job_store().claim()
         coach_streams.CHAT_STREAM_REGISTRY.clear_state()  # Process restart loses in-memory events.
         def restore(_):
-            self.assertEqual(server.cancel_chat_stream("synthetic-session", "cancel-operation")["status"], "cancelling")
+            self.assertEqual(server.coach_cancellation_service().cancel("synthetic-session", "cancel-operation")["status"], "cancelling")
             self.assertIsNone(coach_streams.CHAT_STREAM_REGISTRY.get_background_event("cancel-operation"))
             with server.database() as db:
                 receipt = db.execute(

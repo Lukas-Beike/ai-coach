@@ -4836,8 +4836,8 @@ class CoachTests(unittest.TestCase):
     def test_manual_morning_quick_action_stops_before_coach_when_sleep_is_not_ready(self):
         receipt = {"request_kind": "morning_checkin"}
         error = server.AppError(503, "Garmin sleep is not ready", reason="garmin_sleep_not_ready")
-        with patch("backend.coach.job_store.CoachJobStore.message", return_value="Morgen-Check-in"), patch.object(
-            server, "_merge_coach_command_receipt"
+        with patch("backend.coach.job_store.CoachJobStore.message", return_value="Morgen-Check-in"), patch(
+            "backend.coach.job_store.CoachJobStore.merge_receipt"
         ), patch.object(server.ManualMorningCheckinService, "prepare", side_effect=error), patch.object(
             server, "chat_with_coach"
         ) as chat:
@@ -5173,7 +5173,7 @@ class CoachTests(unittest.TestCase):
 
     def test_structured_command_failure_response_keeps_confirmed_sync_effects(self):
         commands = [{"tool": "start_intervals_plan_sync", "result": {"ok": True, "status": "queued"}}]
-        status, text, question, cancelled = server._structured_command_failure_response(
+        status, text, question, cancelled = server.coach_turn_failure_service()._response(
             server.AppError(429, "Provider limit", reason="rate_limit_exceeded"), commands, commands, [], ["start_intervals_plan_sync"],
         )
         self.assertEqual(status, "partial")
@@ -5188,7 +5188,7 @@ class CoachTests(unittest.TestCase):
             {"tool": "save_checkin", "result": {"ok": True, "status": "saved"}},
             {"tool": "clarify_coach_request", "result": {"ok": True, "question": "Wie fühlst du dich?"}},
         ]
-        status, text, question, cancelled = server._structured_command_failure_response(
+        status, text, question, cancelled = server.coach_turn_failure_service()._response(
             server.AppError(502, "Provider error", reason="provider_unavailable"), commands, commands[:1], [], [],
         )
         self.assertEqual(status, "completed")
@@ -5202,7 +5202,7 @@ class CoachTests(unittest.TestCase):
             {"tool": "save_checkin", "result": {"ok": True, "status": "saved"}},
             {"tool": "clarify_coach_request", "result": {"ok": True, "question": "Wie fühlst du dich?"}},
         ]
-        status, _text, question, cancelled = server._structured_command_failure_response(
+        status, _text, question, cancelled = server.coach_turn_failure_service()._response(
             server.AppError(499, "Cancelled", reason="chat_cancelled"), commands, commands[:1], [], [],
         )
         self.assertEqual(status, "partial")
@@ -6938,7 +6938,7 @@ class CoachTests(unittest.TestCase):
             operation_id="operation-background-recovery-phase",
         )
         job = server.coach_job_store().claim()
-        server._merge_coach_command_receipt(
+        server.coach_job_store().merge_receipt(
             "turn-background-recovery-phase",
             {"openai_response_id": "resp-recovery-phase", "phase": "waiting_final_response", "tool_rounds": 1},
         )
@@ -6947,7 +6947,7 @@ class CoachTests(unittest.TestCase):
                 "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
                 ("turn-background-recovery-phase",),
             ).fetchone()
-        job["receipt"] = server._coach_command_receipt(row["receipt"])
+        job["receipt"] = server.command_receipt(row["receipt"])
         seen = {}
 
         def capture_phase(*_args, **_kwargs):
@@ -9646,9 +9646,9 @@ class CoachTests(unittest.TestCase):
                 coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
             self.assertEqual(duplicate.exception.reason, "chat_already_running")
             with self.assertRaises(server.AppError) as raised:
-                server.cancel_chat_stream(session_key, "other-operation")
+                server.coach_cancellation_service().cancel(session_key, "other-operation")
             self.assertEqual(raised.exception.status, 409)
-            result = server.cancel_chat_stream(session_key, operation_id)
+            result = server.coach_cancellation_service().cancel(session_key, operation_id)
             self.assertEqual(result["status"], "cancelling")
             self.assertTrue(cancel_event.is_set())
         finally:
@@ -9709,7 +9709,7 @@ class CoachTests(unittest.TestCase):
         response = Mock()
         cancel_event._provider_response = response
 
-        result = server.cancel_chat_stream(session_key, operation_id)
+        result = server.coach_cancellation_service().cancel(session_key, operation_id)
 
         self.assertEqual(result, {"status": "cancelling", "operation_id": operation_id})
         self.assertTrue(cancel_event.is_set())
@@ -9781,7 +9781,7 @@ class CoachTests(unittest.TestCase):
         response = Mock()
         cancel_event._openai_response = response
         try:
-            result = server.cancel_chat_stream(session_key, operation_id)
+            result = server.coach_cancellation_service().cancel(session_key, operation_id)
             self.assertEqual(result["status"], "cancelling")
             response.close.assert_called_once_with()
             self.assertTrue(cancel_event.is_set())

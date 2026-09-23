@@ -284,6 +284,12 @@ from backend.coach.proposals import (
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools, validate_request
 from backend.coach.job_store import CoachJobStore
+from backend.coach.cancellation import CoachCancellationService
+from backend.coach.turn_failures import (
+    CoachTurnFailureDependencies,
+    CoachTurnFailureService,
+    coach_error_metadata,
+)
 from backend.coach.job_submission import CoachJobSubmissionService
 from backend.coach.morning import ManualMorningCheckinService, MorningCheckinStateService
 from backend.coach.tools import build_tool_contracts
@@ -301,7 +307,7 @@ from backend.coach.authorization import (
     scope_values,
     structured_action_payload,
 )
-from backend.coach.outcomes import COACH_ACTION_LABELS, coach_effect_label, coach_failure_lines, coach_observed_sync_lines, unresolved_coach_steps
+from backend.coach.outcomes import coach_effect_label, coach_failure_lines, unresolved_coach_steps
 from backend.http_api.responses import (
     header_items as response_header_items,
     json_bytes as response_json_bytes,
@@ -1985,21 +1991,6 @@ def openai_stream_client() -> openai_provider.OpenAIStreamClient:
     )
 
 
-def _coach_error_metadata(exc: BaseException) -> dict[str, Any]:
-    """Keep technical call sites, never exception text, source lines or locals."""
-    result = observability.safe_diagnostic_error(exc)
-    frames = []
-    trace = exc.__traceback__
-    while trace is not None:
-        filename = Path(trace.tb_frame.f_code.co_filename).resolve()
-        if filename == ROOT / "server.py" or filename.is_relative_to(ROOT / "backend"):
-            frames.append({"file": filename.relative_to(ROOT).as_posix(),
-                           "function": trace.tb_frame.f_code.co_name, "line": trace.tb_lineno})
-        trace = trace.tb_next
-    result["frames"] = frames[-8:]
-    return result
-
-
 def external_calendar_events_for_date(target_date: str) -> list[dict[str, Any]]:
     today = local_now().date()
     return [
@@ -2038,8 +2029,25 @@ def coach_message_service() -> CoachMessageService:
 def coach_job_store() -> CoachJobStore:
     """Compose durable Coach background-job persistence."""
     return CoachJobStore(
-        database_manager(), DB_LOCK, COACH_JOB_WAKE,
+        database_manager, DB_LOCK, COACH_JOB_WAKE,
         runtime_maintenance.MAINTENANCE_GATE, utc_now,
+    )
+
+
+def coach_turn_failure_service() -> CoachTurnFailureService:
+    """Compose durable terminal Coach failure handling from current resources."""
+    return CoachTurnFailureService(
+        CoachTurnFailureDependencies(
+            database_manager=database_manager,
+            database_lock=DB_LOCK,
+            chat_repository=CHAT_REPOSITORY,
+            key_values=KEY_VALUE_REPOSITORY,
+            event_buffer=runtime_events.STATE_EVENT_BUFFER,
+            redactor=REDACTOR,
+            utc_now=utc_now,
+            repository_root=ROOT,
+            read_only_tools=frozenset(STRUCTURED_READ_ONLY_TOOLS),
+        )
     )
 
 
@@ -2051,6 +2059,14 @@ def coach_job_submission_service() -> CoachJobSubmissionService:
         COACH_JOB_WAKE, utc_now, background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS,
         max_attachment_storage_bytes=MAX_ATTACHMENT_STORAGE_BYTES,
         max_gemini_inline_image_bytes=MAX_GEMINI_INLINE_IMAGE_BYTES,
+    )
+
+
+def coach_cancellation_service() -> CoachCancellationService:
+    """Compose session-scoped Coach cancellation from its state owners."""
+    return CoachCancellationService(
+        coach_job_submission_service(), coach_job_store(),
+        coach_streams.CHAT_STREAM_REGISTRY,
     )
 
 
@@ -2301,54 +2317,6 @@ def responses_stream_request(
 
 def output_text(response: dict[str, Any]) -> str:
     return openai_provider.response_text(response)
-
-
-def _coach_command_receipt(value: Any) -> dict[str, Any]:
-    return command_receipt(value)
-
-
-def _merge_coach_command_receipt(client_turn_id: str, updates: dict[str, Any]) -> dict[str, Any]:
-    with DB_LOCK, database() as db:
-        row = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
-        receipt = _coach_command_receipt((row or {}).get("receipt"))
-        receipt.update(updates)
-        db.execute(
-            "UPDATE coach_commands SET receipt=?, updated_at=? WHERE client_turn_id=? AND status IN ('queued', 'running')",
-            (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
-        )
-    return receipt
-
-
-def _close_chat_provider_response(response: Any) -> None:
-    if response is None:
-        return
-    try:
-        response.close()
-    except (OSError, ValueError):
-        pass
-
-
-def _cancel_background_chat_job(session_csrf_hash: str, operation_id: Any) -> dict[str, Any]:
-    job = coach_job_submission_service().active(session_csrf_hash, str(operation_id or "") or None)
-    if not job:
-        return {"status": "not_running"}
-    receipt = job["receipt"]
-    _merge_coach_command_receipt(job["client_turn_id"], {"cancel_requested": True, "phase": "cancelling"})
-    _, response = coach_streams.CHAT_STREAM_REGISTRY.cancel_existing_background_event(
-        str(receipt.get("operation_id") or "")
-    )
-    _close_chat_provider_response(response)
-    return {"status": "cancelling", "operation_id": receipt.get("operation_id")}
-
-
-def cancel_chat_stream(session_csrf_hash: str, operation_id: Any = None) -> dict[str, Any]:
-    result, response = coach_streams.CHAT_STREAM_REGISTRY.cancel_attached(
-        session_csrf_hash, operation_id
-    )
-    if result is None:
-        return _cancel_background_chat_job(session_csrf_hash, operation_id)
-    _close_chat_provider_response(response)
-    return result
 
 
 COACH_TOOL_MAX_ROUNDS = 12
@@ -2918,7 +2886,7 @@ def _claim_planning_command(
     with DB_LOCK, database() as db:
         existing = db.execute("SELECT conversation_id, status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
         if existing:
-            previous = _coach_command_receipt(existing["receipt"])
+            previous = command_receipt(existing["receipt"])
             coach_command_receipt_service().require_owner(previous, session_csrf_hash)
             if previous.get("effect_key") != command_identity["effect_key"]:
                 raise AppError(409, "Die Auftragskennung wurde fuer andere Argumente verwendet.", reason="command_conflict")
@@ -2946,7 +2914,7 @@ def _execute_claimed_planning_command(
             receipt = {**command_identity, "message": None, "command_receipts": [{"tool": operation, "result": result}], "sync_job_ids": sync_job_ids, "intent": intent, "tool_rounds": 1, "status": "completed"}
             db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'", (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id))
     except Exception as exc:
-        _persist_structured_command_failure(client_turn_id, intent, exc)
+        coach_turn_failure_service().persist(client_turn_id, intent, exc)
 
 
 def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf_hash: str = "") -> dict[str, Any]:
@@ -2972,7 +2940,7 @@ def _structured_coach_receipt(
 ) -> dict[str, Any]:
     with DB_LOCK, database() as db:
         existing = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
-        receipt = _coach_command_receipt(existing["receipt"]) if existing else {}
+        receipt = command_receipt(existing["receipt"]) if existing else {}
         if existing:
             coach_command_receipt_service().require_owner(receipt, session_csrf_hash)
         else:
@@ -3091,7 +3059,7 @@ def _recover_structured_coach_conversation(
         "confirmed_steps": command_receipts,
     }, ensure_ascii=False), attachments)
     payload["instructions"] += "\nThe remote conversation was unavailable. Continue only unfinished work using local dialogue and confirmed_steps. Earlier image pixels may be unavailable; ask for missing evidence only if essential. Never invent attachment details."
-    _merge_coach_command_receipt(client_turn_id, {
+    coach_job_store().merge_receipt(client_turn_id, {
         "openai_response_id": None,
         "previous_response_id": None,
         "pending_tool_outputs": [],
@@ -3257,7 +3225,7 @@ def _structured_coach_response(
 
     def checkpoint(response_id: str) -> None:
         state["resume_id"] = response_id
-        _merge_coach_command_receipt(client_turn_id, {
+        coach_job_store().merge_receipt(client_turn_id, {
             "status": "running",
             "phase": "waiting_openai",
             "openai_response_id": response_id,
@@ -3554,7 +3522,7 @@ def _structured_tool_call_failure(
         result["validation_reason"] = validation_reason
     if not result["reason"]:
         result["reason"] = "tool_arguments_invalid" if isinstance(exc, AppError) and exc.status == 400 else "tool_failed"
-    technical_error = _coach_error_metadata(exc)
+    technical_error = coach_error_metadata(exc, ROOT)
     command_receipts.append({
         "call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key,
         "repair_key": repair_key, "scope_repair_key": scope_repair_key,
@@ -3629,13 +3597,13 @@ def _execute_structured_coach_tool_call(
                     "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key,
                     "request": action.get("request"), "result": result,
                 })
-                _merge_coach_command_receipt(state.client_turn_id, {"command_receipts": state.command_receipts, "sync_job_ids": state.sync_job_ids})
+                coach_job_store().merge_receipt(state.client_turn_id, {"command_receipts": state.command_receipts, "sync_job_ids": state.sync_job_ids})
         if result.get("synchronous_refresh") or (name == "get_sync_job" and result.get("ok")):
             model_instructions = coach_training_context_service().build() + "\n\n" + COACH_DIALOGUE_INSTRUCTIONS
         if action.get("period"):
             scope = coach_execution_scope(action, background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS)
             state.request_payload["max_output_tokens"] = COACH_LONG_PLAN_MAX_OUTPUT_TOKENS if scope["planning"] else COACH_DEFAULT_MAX_OUTPUT_TOKENS
-            _merge_coach_command_receipt(state.client_turn_id, {"plan_scope": scope})
+            coach_job_store().merge_receipt(state.client_turn_id, {"plan_scope": scope})
     except (AppError, ValueError, TypeError, KeyError) as exc:
         result = _structured_tool_call_failure(
             exc, name=name, call_id=call_id, effect_key=effect_key, step_key=step_key,
@@ -3658,7 +3626,7 @@ def _record_structured_coach_tool_output(
 ) -> tuple[str, bool, list[dict[str, str]]]:
     outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False)})
     pending = [entry for entry in pending if entry["call_id"] != call_id]
-    _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "pending_tool_calls": pending,
+    coach_job_store().merge_receipt(client_turn_id, {"command_receipts": command_receipts, "pending_tool_calls": pending,
         "phase": "executing_tools" if pending else "waiting_final_response", "pending_tool_outputs": outputs if not pending else []})
     if name == "clarify_coach_request" and result.get("ok"):
         question = result["question"]
@@ -3692,7 +3660,7 @@ def _run_structured_coach_tool_rounds(
         if not calls:
             break
         pending = [{"call_id": str(item.get("call_id") or ""), "tool": str(item.get("name") or "")} for item in calls]
-        _merge_coach_command_receipt(state.client_turn_id, {"phase": "executing_tools", "pending_tool_calls": pending, "pending_tool_outputs": []})
+        coach_job_store().merge_receipt(state.client_turn_id, {"phase": "executing_tools", "pending_tool_calls": pending, "pending_tool_outputs": []})
         outputs = []
         for item in calls:
             _raise_chat_cancelled(state.cancel_event)
@@ -3705,11 +3673,11 @@ def _run_structured_coach_tool_rounds(
                 question=question, cancelled=cancelled,
             )
         rounds += 1
-        _merge_coach_command_receipt(state.client_turn_id, {"tool_rounds": rounds})
+        coach_job_store().merge_receipt(state.client_turn_id, {"tool_rounds": rounds})
         response = _structured_coach_followup_response(
             response, outputs=outputs, state=state, question=question, cancelled=cancelled, rounds=rounds,
         )
-        _merge_coach_command_receipt(state.client_turn_id, {"pending_tool_outputs": []})
+        coach_job_store().merge_receipt(state.client_turn_id, {"pending_tool_outputs": []})
         if question or cancelled:
             break
     return response, rounds, question, cancelled, state.model_instructions
@@ -3804,7 +3772,7 @@ def _persist_structured_coach_final_receipt(
             "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,),
         ).fetchone()
         if current_command and current_command["status"] == "completed":
-            return _coach_command_receipt(current_command["receipt"])
+            return command_receipt(current_command["receipt"])
         final_receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", final_receipt["text"], client_turn_id=client_turn_id)
         for step in command_receipts:
             if step["tool"] == "preview_adaptive_replan" and step.get("result", {}).get("ok"):
@@ -3898,127 +3866,6 @@ def _chat_with_structured_coach_impl(
     )
 
 
-def _structured_command_failure_steps(
-    receipt: dict[str, Any], intent: dict[str, Any],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
-    commands = list(receipt.get("command_receipts") or [])
-    internal = STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}
-    successes = [step for step in commands if step.get("result", {}).get("ok") and step["tool"] not in internal]
-    failures = unresolved_coach_steps(commands)
-    for step in commands:
-        if not step.get("result", {}).get("ok"):
-            step["resolved"] = not any(step is failure for failure in failures)
-    pending = sorted(
-        {step["tool"] for step in failures}
-        | {step["tool"] for step in receipt.get("pending_tool_calls", []) if step.get("tool")}
-        | (_structured_authorized_operations(intent) - {step["tool"] for step in successes} - {""})
-    )
-    return commands, successes, failures, pending
-
-
-def _structured_command_failure_base_response(
-    error: BaseException, commands: list[dict[str, Any]],
-) -> tuple[str, str, str | None, bool]:
-    cancelled = isinstance(error, AppError) and error.reason == "chat_cancelled"
-    status = "cancelled" if cancelled else "failed"
-    reason = getattr(error, "reason", None)
-    explanations = {
-        "conversation_state_invalid": "Der KI-Dienst konnte den Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten.",
-        "conversation_locked": "Der KI-Dienst verarbeitet noch eine andere Anfrage. Bitte warte kurz und versuche es erneut.",
-        "authentication_or_permission": "Der KI-Dienst hat den Zugriff abgelehnt. Bitte prüfe den API-Zugang in den Einstellungen.",
-        "insufficient_quota": "Das KI-Kontingent ist aufgebraucht. Bitte prüfe Guthaben und Abrechnung beim KI-Anbieter.",
-        "credit_balance_exhausted": "Das KI-Guthaben ist aufgebraucht. Bitte prüfe die Abrechnung beim KI-Anbieter.",
-        "provider_unavailable": "Der KI-Dienst ist vorübergehend nicht verfügbar. Bitte versuche es in Kürze erneut.",
-        "response_error": "Der KI-Dienst konnte die Antwort nicht fertigstellen. Bitte versuche es erneut.",
-        "response_failed": "Der KI-Dienst konnte die Antwort nicht fertigstellen. Bitte versuche es erneut.",
-    }
-    text = "Die Coach-Verarbeitung wurde abgebrochen." if cancelled else explanations.get(
-        reason, "Bei der Coach-Verarbeitung ist ein technischer Fehler aufgetreten. Bitte versuche es erneut. Wenn der Fehler wieder auftritt, exportiere die Diagnose in den Einstellungen.")
-    question = next((step["result"].get("question") for step in reversed(commands)
-                     if step["tool"] == "clarify_coach_request" and step.get("result", {}).get("ok")), None)
-    if question and not cancelled:
-        status = "completed"
-        text = question
-    rate_limited = isinstance(error, AppError) and (error.reason == "rate_limit_exceeded" or getattr(error, "provider_error_code", None) == "rate_limit_exceeded")
-    if rate_limited and not question:
-        text = "Der KI-Dienst hat sein Anfragelimit erreicht. Die Antwort konnte noch nicht abgeschlossen werden. Bitte versuche es in Kürze erneut."
-    return status, text, question, cancelled
-
-
-def _structured_command_failure_effect_text(
-    text: str, commands: list[dict[str, Any]], successes: list[dict[str, Any]],
-    failures: list[dict[str, Any]], pending: list[str],
-) -> str:
-    if successes:
-        text += "\nBereits erfolgreich ausgefuehrt: " + "; ".join(coach_effect_label(step) for step in successes) + ". Diese Schritte bleiben gespeichert."
-        if any(step["tool"] in {"start_intervals_plan_sync", "sync_competitions"}
-               and step["result"].get("status") == "queued" for step in successes):
-            text += "\nDer Sync-Auftrag bleibt bestehen und wird unabhängig vom Coach verarbeitet. Sein Abschluss ist in dieser Antwort noch nicht bestätigt."
-    if failures:
-        text += "\n" + coach_failure_lines(failures, set(pending))
-    observed_sync = coach_observed_sync_lines(commands)
-    if observed_sync:
-        text += "\n" + observed_sync
-    if pending:
-        text += "\nNoch offen: " + ", ".join(COACH_ACTION_LABELS.get(name, "Angeforderter Schritt") for name in pending) + "."
-    return text
-
-
-def _structured_command_failure_response(
-    error: BaseException, commands: list[dict[str, Any]], successes: list[dict[str, Any]],
-    failures: list[dict[str, Any]], pending: list[str],
-) -> tuple[str, str, str | None, bool]:
-    status, text, question, cancelled = _structured_command_failure_base_response(error, commands)
-    if successes and (cancelled or not question):
-        status = "partial"
-    return status, _structured_command_failure_effect_text(text, commands, successes, failures, pending), question, cancelled
-
-
-def _persist_structured_command_failure_pending_request(
-    db: Any, receipt: dict[str, Any], *, question: str | None, cancelled: bool, successes: list[dict[str, Any]],
-) -> None:
-    if cancelled:
-        set_kv("coach_pending_request", "null", db)
-    elif receipt.get("user_message_id") and not question:
-        user = db.execute("SELECT content FROM messages WHERE id=? AND role='user'", (receipt["user_message_id"],)).fetchone()
-        if user:
-            set_kv("coach_pending_request", json.dumps({
-                "summary": user["content"], "source_message_ids": [receipt["user_message_id"]],
-                "status": "failed", "question": None,
-                "completed_steps": [{"tool": step["tool"], "status": step["result"].get("status")} for step in successes],
-            }, ensure_ascii=False), db)
-
-
-def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, Any], error: BaseException) -> dict[str, Any]:
-    """Report confirmed effects without claiming an unfinished request succeeded."""
-    safe_error = REDACTOR.redact_text(error.message)[:1000] if isinstance(error, AppError) else "Die Coach-Verarbeitung wurde unterbrochen."
-    with DB_LOCK, database() as db:
-        row = db.execute("SELECT receipt, status FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
-        if not row:
-            return {}
-        receipt = _coach_command_receipt(row["receipt"])
-        if row["status"] == "completed":
-            return receipt
-        commands, successes, failures, pending = _structured_command_failure_steps(receipt, intent)
-        status, text, question, cancelled = _structured_command_failure_response(error, commands, successes, failures, pending)
-        _persist_structured_command_failure_pending_request(
-            db, receipt, question=question, cancelled=cancelled, successes=successes,
-        )
-        receipt.update({"status": status, "awaiting_clarification": bool(question) and not cancelled,
-            "error": safe_error, "diagnostic_error": _coach_error_metadata(error), "client_turn_id": client_turn_id,
-            "command_receipts": commands, "sync_job_ids": receipt.get("sync_job_ids") or [], "intent": intent,
-            "pending_operations": pending,
-            "proposed_actions": [step["result"]["proposed_action"] for step in commands if step.get("result", {}).get("proposed_action")]})
-        # A terminal failure is no longer resumable. Drop provider checkpoints,
-        # which may contain inline image data, before persisting the receipt.
-        for key in ("openai_response_id", "pending_tool_outputs", "pending_tool_calls", "response_input", "previous_response_id"):
-            receipt.pop(key, None)
-        receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", text, client_turn_id=client_turn_id)
-        db.execute(UPDATE_COMMAND_RECEIPT_SQL,
-                   (json.dumps(receipt, ensure_ascii=False), utc_now(), client_turn_id))
-    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"message_id": receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
-    return receipt
-
 
 
 def _chat_with_structured_coach(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -4029,8 +3876,8 @@ def _chat_with_structured_coach(*args: Any, **kwargs: Any) -> dict[str, Any]:
     except Exception as exc:
         if isinstance(exc, AppError) and exc.reason in {"command_scope_denied", "client_turn_in_progress"}:
             raise
-        LOGGER.warning("Coach command failed", extra={"event": "coach_command_failed", "context": _coach_error_metadata(exc)})
-        receipt = _persist_structured_command_failure(client_turn_id, intent, exc)
+        LOGGER.warning("Coach command failed", extra={"event": "coach_command_failed", "context": coach_error_metadata(exc, ROOT)})
+        receipt = coach_turn_failure_service().persist(client_turn_id, intent, exc)
         if not receipt:
             raise
     return {key: value for key, value in receipt.items() if key != "session_key"}
@@ -4099,7 +3946,7 @@ def _chat_command_state(
             "SELECT conversation_id, intent, receipt, status, updated_at FROM coach_commands WHERE client_turn_id=?",
             (client_turn_id,),
         ).fetchone()
-        background_receipt = _coach_command_receipt((existing_command or {}).get("receipt"))
+        background_receipt = command_receipt((existing_command or {}).get("receipt"))
         if existing_command:
             coach_command_receipt_service().require_owner(background_receipt, session_csrf_hash)
         background_owned = bool(background_job and background_receipt.get("mode") == "background")
@@ -4162,7 +4009,7 @@ def resume_interrupted_coach_jobs() -> int:
     with DB_LOCK, database() as db:
         interrupted = db.execute("SELECT client_turn_id, intent FROM coach_commands WHERE status='running' AND COALESCE(json_extract(receipt, '$.mode'), '') != 'background'").fetchall()
     for command in interrupted:
-        _persist_structured_command_failure(command["client_turn_id"], json.loads(command["intent"] or "{}"), AppError(503, "Die vorherige Verarbeitung wurde durch einen Prozessneustart unterbrochen.", reason="process_interrupted"))
+        coach_turn_failure_service().persist(command["client_turn_id"], json.loads(command["intent"] or "{}"), AppError(503, "Die vorherige Verarbeitung wurde durch einen Prozessneustart unterbrochen.", reason="process_interrupted"))
     resumed = 0
     interrupted_gemini: list[tuple[str, dict[str, Any]]] = []
     now = utc_now()
@@ -4171,7 +4018,7 @@ def resume_interrupted_coach_jobs() -> int:
             "SELECT client_turn_id, status, receipt FROM coach_commands WHERE status IN ('queued', 'running') ORDER BY created_at"
         ).fetchall()
         for row in rows:
-            receipt = _coach_command_receipt(row.get("receipt"))
+            receipt = command_receipt(row.get("receipt"))
             if receipt.get("mode") != "background":
                 continue
             if row.get("status") == "running" and receipt.get("ai_provider") == "gemini":
@@ -4187,7 +4034,7 @@ def resume_interrupted_coach_jobs() -> int:
             )
             resumed += 1
     for client_turn_id, intent in interrupted_gemini:
-        _persist_structured_command_failure(
+        coach_turn_failure_service().persist(
             client_turn_id,
             intent,
             AppError(503, "Die Gemini-Hintergrundverarbeitung wurde durch einen Prozessneustart unterbrochen und nicht erneut ausgeführt.", reason="process_interrupted"),
@@ -4219,7 +4066,7 @@ def _background_coach_cancel_event(operation_id: str, client_turn_id: str) -> th
     cancel_event = coach_streams.CHAT_STREAM_REGISTRY.get_or_create_background_event(operation_id)
     with DB_LOCK, database() as db:
         current = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
-    if current and _coach_command_receipt(current["receipt"]).get("cancel_requested"):
+    if current and command_receipt(current["receipt"]).get("cancel_requested"):
         coach_streams.CHAT_STREAM_REGISTRY.cancel_background_event(operation_id)
     return cancel_event
 
@@ -4231,7 +4078,7 @@ def _persist_completed_morning_coach_job(client_turn_id: str) -> dict[str, Any] 
     quick_actions = coach_quick_actions_service().state()
     with DB_LOCK, database() as db:
         row = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
-        completed_receipt = _coach_command_receipt((row or {}).get("receipt"))
+        completed_receipt = command_receipt((row or {}).get("receipt"))
         completed_receipt["coach_quick_actions"] = quick_actions
         db.execute(
             "UPDATE coach_commands SET receipt=?, updated_at=? WHERE client_turn_id=? AND status='completed'",
@@ -4250,7 +4097,7 @@ def _execute_background_coach_job(
     worker_phase = {"status": "running"}
     if not receipt.get("openai_response_id"):
         worker_phase["phase"] = "preparing"
-    _merge_coach_command_receipt(client_turn_id, worker_phase)
+    coach_job_store().merge_receipt(client_turn_id, worker_phase)
     if receipt.get("request_kind") == "morning_checkin":
         manual_morning_checkin_service().prepare()
     result = chat_with_coach(
@@ -4284,7 +4131,7 @@ def _handle_background_coach_error(
             "status": "queued", "mode": "background", "operation_id": operation_id,
         })
         return
-    failed = _persist_structured_command_failure(client_turn_id, {}, exc)
+    failed = coach_turn_failure_service().persist(client_turn_id, {}, exc)
     if failed:
         _background_coach_stream_receipt(operation_id, failed)
         return
@@ -4294,7 +4141,7 @@ def _handle_background_coach_error(
 
 
 def _handle_background_coach_exception(client_turn_id: str, operation_id: str, exc: Exception) -> None:
-    failed = _persist_structured_command_failure(client_turn_id, {}, exc)
+    failed = coach_turn_failure_service().persist(client_turn_id, {}, exc)
     if failed:
         _background_coach_stream_receipt(operation_id, failed)
     else:
@@ -4911,7 +4758,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     # Cancellation must remain reachable while the streaming
                     # request holds the maintenance gate for its lifetime.
                     payload = self.read_json()
-                    self.send_json(200, cancel_chat_stream(session["csrf_hash"], payload.get("operation_id")))
+                    self.send_json(200, coach_cancellation_service().cancel(session["csrf_hash"], payload.get("operation_id")))
                 else:
                     with runtime_maintenance.MAINTENANCE_GATE.operation():
                         self.handle_authenticated_post(path, session)

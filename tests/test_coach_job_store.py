@@ -42,7 +42,7 @@ class CoachJobStoreTests(unittest.TestCase):
 
     def _store(self):
         return CoachJobStore(
-            self.manager, self.lock, self.wake, self.gate,
+            lambda: self.manager, self.lock, self.wake, self.gate,
             lambda: "2026-09-23T12:00:00+00:00",
         )
 
@@ -135,6 +135,27 @@ class CoachJobStoreTests(unittest.TestCase):
         self.manager = self._manager()
         self.store = self._store()
         self.assertIsNone(self.store.claim())
+
+    def test_receipt_merge_keeps_active_status_guard_and_uses_current_manager(self):
+        self._insert("active", {"mode": "background", "phase": "queued"})
+        self._insert("done", {"mode": "background"}, status="completed")
+        self.manager.close()
+        self.manager = self._manager()  # The same store must resolve this manager.
+
+        merged = self.store.merge_receipt("active", {"cancel_requested": True})
+        self.assertEqual(merged["phase"], "queued")
+        self.assertTrue(merged["cancel_requested"])
+        self.store.merge_receipt("done", {"cancel_requested": True})
+
+        with self.manager.unit_of_work() as db:
+            active = db.execute(
+                "SELECT receipt FROM coach_commands WHERE client_turn_id='active'"
+            ).fetchone()
+            done = db.execute(
+                "SELECT receipt FROM coach_commands WHERE client_turn_id='done'"
+            ).fetchone()
+        self.assertTrue(json.loads(active["receipt"])["cancel_requested"])
+        self.assertNotIn("cancel_requested", json.loads(done["receipt"]))
 
 
 if __name__ == "__main__":
