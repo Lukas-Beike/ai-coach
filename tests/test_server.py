@@ -23,6 +23,7 @@ from backend.coach.attachments import gemini_history_parts
 from backend.coach.proposals import validated_coach_action_preview_input
 from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api import server as http_server_module
+from backend.http_api.rate_limit import RateLimiter
 from backend import privacy as privacy_module
 
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
@@ -8645,15 +8646,31 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(readiness["maintenance"]["active"])
 
     def test_rate_limit_cleanup_removes_old_bounded_buckets(self):
-        with server.RATE_LIMIT_LOCK:
-            server.RATE_LIMITS.clear()
-            server.RATE_LIMITS["expired"] = [0.0]
-            server.RATE_LIMIT_LAST_CLEANUP_MONOTONIC = 0.0
-        with patch.object(server.time, "monotonic", return_value=20 * 60):
-            server.allow_rate("fresh", 1, 60)
-        with server.RATE_LIMIT_LOCK:
-            self.assertNotIn("expired", server.RATE_LIMITS)
-            self.assertIn("fresh", server.RATE_LIMITS)
+        limiter = RateLimiter()
+        limiter.buckets = {f"expired:{index}": [0.0] for index in range(101)}
+        with patch("backend.http_api.rate_limit.time.monotonic", return_value=20 * 60):
+            self.assertEqual(limiter.allow("fresh", 1, 60), (True, 60))
+        self.assertNotIn("expired:0", limiter.buckets)
+        self.assertIn("expired:100", limiter.buckets)
+        self.assertIn("fresh", limiter.buckets)
+
+    def test_rate_limiter_enforces_limit_retry_after_and_independent_keys(self):
+        limiter = RateLimiter()
+        with patch("backend.http_api.rate_limit.time.monotonic", side_effect=(1000.0, 1002.0, 1002.0)):
+            self.assertEqual(limiter.allow("login:one", 1, 10), (True, 10))
+            self.assertEqual(limiter.allow("login:one", 1, 10), (False, 8))
+            self.assertEqual(limiter.allow("login:two", 1, 10), (True, 10))
+
+    def test_api_auth_uses_rate_limiter_and_preserves_retry_response(self):
+        handler = Mock(client_address=("203.0.113.7", 0))
+        with patch.object(server.app_config, "security_configuration_error", return_value=None), \
+                patch.object(server, "authenticated_session", return_value={"csrf_hash": "unused"}), \
+                patch.object(server.RATE_LIMITER, "allow", return_value=(False, 17)) as rate_limit, \
+                self.assertRaises(server.AppError) as raised:
+            server.require_auth(handler)
+        self.assertEqual(raised.exception.status, 429)
+        self.assertIn("17 Sekunden", raised.exception.message)
+        rate_limit.assert_called_once_with("api:203.0.113.7", 180, 60)
 
     def test_parallel_operations_keep_distinct_safe_correlation_ids(self):
         barrier = threading.Barrier(2)
