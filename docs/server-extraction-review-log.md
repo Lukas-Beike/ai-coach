@@ -4849,6 +4849,12 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   vier Architekturtests und Inventar-/Diff-Check **PASS**. CI/Sonar des
   künftigen PR-Stands stehen aus.
 
+- PR #714 auf Head `1594524c`: SonarCloud `new_violations=0`,
+  Python-/Container-/Browser-CI und Codex-Review **PASS**, keine offenen
+  Threads; Squash-Merge am `2026-09-23T14:00:08Z`, Commit
+  `894407586abcd85e52b3791f3c5b275be427a221` auf
+  `origin/develop` erreichbar.
+
 ## P9 Diagnosebericht — integrierter Prüfstand
 
 - GPT-6-Luna/high-Worker-Commit `f18dc66c`, nach dem geprüften
@@ -4875,4 +4881,8 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Backup/Restore offen. Neu gebautes
   kombiniertes Read-only-Container-Image: vollständige Suite **PASS**,
   2.303 Tests, 10 Skips in 19,917 s. CI/Sonar des künftigen PR-Stands
-  stehen noch aus.
+  stehen noch aus. Nach PR #714 `origin/develop` mit `65c74549`
+  integriert; nur generiertes Inventar und Review-Text hatten Konflikte.
+  Finaler Tree-Diff gegenüber dem vollständig getesteten Stand leer;
+  erneut zwei Service-, 14 Follow-up-, vier Architekturtests sowie
+  Inventar-/Diff-Check **PASS**.
