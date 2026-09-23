@@ -4782,3 +4782,27 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Log hatten erwartete Textkonflikte. Der finale Tree-Diff gegenüber dem
   bereits getesteten P7-Stand ist leer. Erneute sieben Service- und vier
   Architekturtests sowie Inventar-/Diff-Check **PASS**.
+
+## P8 Startup-Scheduler — integrierter Prüfstand
+
+- GPT-6-Luna/high-Worker-Commit `66c47bcf`, nach dem geprüften P7-/P10-
+  Stand als `ea40c78b` integriert. Root-Review des tatsächlichen Diffs
+  **PASS**: Calendar → Intervals → Garmin → Weather, Refresh und
+  Historical Backfill samt aktiver Jobs, Cursor-/Frühgrenze und Payloads
+  liegen vollständig in `StartupSyncScheduler`; die sieben alten
+  `server.py`-Fachfunktionen sind entfernt. `main()` ruft den konkreten
+  Service auf; `server.py` erstellt lediglich dessen Abhängigkeiten.
+  Queue, Sync-State, Garmin-Konfiguration und Profil behalten jeweils
+  ihren bestehenden Zustandseigentümer. Keine Backend-Rückimporte oder
+  permanenten Wrapper.
+- Worker-Host-Suite **PASS**: 2.288 Tests, 12 Skips; neu gebautes
+  Read-only-Container-Image **PASS**: 2.288 Tests, 10 Skips. Der erste
+  isolierte Containerlauf scheiterte nur am fehlenden read-only Docs-Mount;
+  nach korrektem Mount keine Produkt-/Teständerung. Vier neue Startup-,
+  ein `main()`-Reihenfolge-, vier Architekturtests, scoped Ruff,
+  Compile und Diff-Check **PASS**. Integriert erneut vier Startup- und
+  vier Architekturtests, Inventar und scoped Ruff **PASS**. `server.py`
+  hat 6.677 physische Zeilen; die Tages-Loop-Lifecycle-Steuerung und
+  weitere P8-Use-Cases bleiben offen. Neu gebautes kombiniertes
+  Read-only-Container-Image **PASS**: 2.297 Tests, 10 Skips in
+  20,563 s. CI/Sonar des künftigen PR-Stands stehen noch aus.
