@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -16,12 +17,12 @@ class ReadinessService:
 
     def __init__(
         self,
-        manager: DatabaseManager,
+        manager_factory: Callable[[], DatabaseManager],
         db_lock: Any,
         data_dir: Path,
         maintenance_gate: MaintenanceGate,
     ) -> None:
-        self._manager = manager
+        self._manager_factory = manager_factory
         self._db_lock = db_lock
         self._data_dir = data_dir
         self._maintenance_gate = maintenance_gate
@@ -34,7 +35,7 @@ class ReadinessService:
             "maintenance": False,
         }
         try:
-            with self._db_lock, self._manager.unit_of_work() as db:
+            with self._db_lock, self._manager_factory().unit_of_work() as db:
                 checks["database"] = bool(db.execute("SELECT 1").fetchone())
                 checks["schema"] = database_schema_is_current(db)
         except Exception:  # noqa: BLE001, S110 - an infrastructure probe must fail closed.

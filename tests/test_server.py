@@ -8617,7 +8617,7 @@ class CoachTests(unittest.TestCase):
     def test_readiness_is_safe_and_separate_from_liveness(self):
         with tempfile.TemporaryDirectory() as data_dir:
             readiness = ReadinessService(
-                server.database_manager(), server.DB_LOCK, Path(data_dir),
+                server.database_manager, server.DB_LOCK, Path(data_dir),
                 runtime_maintenance.MAINTENANCE_GATE,
             ).state()
             self.assertEqual([], list(Path(data_dir).glob(".readiness-*.probe")))
@@ -8660,7 +8660,7 @@ class CoachTests(unittest.TestCase):
         seen_managers = []
 
         def projected_state(service):
-            seen_managers.append(service._manager)
+            seen_managers.append(service._manager_factory())
             return ready if len(seen_managers) == 1 else not_ready
 
         with patch.object(server, "database_manager", side_effect=[original_manager, switched_manager]), \
@@ -8678,7 +8678,7 @@ class CoachTests(unittest.TestCase):
         manager = server.database_manager()
         with patch.object(manager, "unit_of_work", side_effect=OSError("database unavailable")):
             readiness = ReadinessService(
-                manager, server.DB_LOCK, Path(os.environ["DATA_DIR"]),
+                lambda: manager, server.DB_LOCK, Path(os.environ["DATA_DIR"]),
                 runtime_maintenance.MAINTENANCE_GATE,
             ).state()
         self.assertEqual(readiness["status"], "not_ready")
@@ -8686,13 +8686,27 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(readiness["checks"]["database"])
         self.assertFalse(readiness["checks"]["schema"])
 
+    def test_readiness_handler_returns_503_when_manager_composition_fails(self):
+        handler = object.__new__(server.request_handler_class())
+        handler.send_json = Mock()
+        with tempfile.TemporaryDirectory() as data_dir, \
+                patch.object(server, "DATA_DIR", Path(data_dir)), \
+                patch.object(server, "database_manager", side_effect=OSError("mount unavailable")):
+            self.assertTrue(handler._handle_public_get("/api/readiness"))
+        status, payload = handler.send_json.call_args.args
+        self.assertEqual(status, 503)
+        self.assertEqual(payload["status"], "not_ready")
+        self.assertFalse(payload["checks"]["database"])
+        self.assertFalse(payload["checks"]["schema"])
+        self.assertNotIn("mount unavailable", json.dumps(payload))
+
     def test_readiness_fails_when_data_directory_is_read_only(self):
         with tempfile.TemporaryDirectory() as data_dir, patch.object(
             readiness_module.tempfile, "NamedTemporaryFile",
             side_effect=OSError("read-only"),
         ):
             readiness = ReadinessService(
-                server.database_manager(), server.DB_LOCK, Path(data_dir),
+                server.database_manager, server.DB_LOCK, Path(data_dir),
                 runtime_maintenance.MAINTENANCE_GATE,
             ).state()
         self.assertEqual(readiness["status"], "not_ready")
@@ -8725,7 +8739,7 @@ class CoachTests(unittest.TestCase):
                 readiness_module.tempfile, "NamedTemporaryFile", side_effect=broken_probe
             ):
                 readiness = ReadinessService(
-                    server.database_manager(), server.DB_LOCK, Path(data_dir),
+                    server.database_manager, server.DB_LOCK, Path(data_dir),
                     runtime_maintenance.MAINTENANCE_GATE,
                 ).state()
             self.assertFalse(readiness["checks"]["data_directory"])
@@ -8735,7 +8749,7 @@ class CoachTests(unittest.TestCase):
         maintenance_gate = runtime_maintenance.MaintenanceGate()
         with tempfile.TemporaryDirectory() as data_dir, maintenance_gate.restore():
             readiness = ReadinessService(
-                server.database_manager(), server.DB_LOCK, Path(data_dir),
+                server.database_manager, server.DB_LOCK, Path(data_dir),
                 maintenance_gate,
             ).state()
         self.assertEqual(readiness["status"], "not_ready")

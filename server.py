@@ -5357,7 +5357,7 @@ def cleanup_expired_sessions(db: Any, now: float, *, force: bool = False) -> int
 def readiness_service() -> ReadinessService:
     """Compose the public readiness probe from its concrete dependencies."""
     return ReadinessService(
-        database_manager(), DB_LOCK, DATA_DIR, runtime_maintenance.MAINTENANCE_GATE
+        database_manager, DB_LOCK, DATA_DIR, runtime_maintenance.MAINTENANCE_GATE
     )
 
 

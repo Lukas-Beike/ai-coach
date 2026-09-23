@@ -5193,4 +5193,14 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   zwei Requests und prüft die vollständigen 200/503-Payloads.
   Erneutes Root-Diffreview **PASS**. Neu gebautes Read-only-Docker-Image:
   vollständige Suite **PASS**, 2.325 Tests, 11 Skips; Inventar-/Diff-
-  Check **PASS**. PR-CI für den korrigierten Stand folgt.
+  Check **PASS**. Ersatz-PR #727 erhielt bei `bfc451d9` einen
+  berechtigten Codex-**P2**: `database_manager()` konnte beim
+  Verzeichnisfehler schon außerhalb des abgesicherten Probe-Pfads
+  werfen, wodurch 500 statt 503 zurückkäme. Root-Gate erneut
+  **FAIL**. Korrektur: Der Service erhält eine Manager-Factory und
+  löst sie unter `DB_LOCK` innerhalb seines `try` auf. Ein neuer
+  Handler-Regressionstest erzwingt einen Fehler bei der Komposition
+  und prüft 503 samt datensparsamer `not_ready`-Payload. Gezielte
+  Tests **PASS** (3/3); neu gebautes Read-only-Docker-Image:
+  vollständige Suite **PASS**, 2.326 Tests, 11 Skips. Root-Review des
+  tatsächlichen Korrekturdiffs **PASS**; PR-CI folgt.
