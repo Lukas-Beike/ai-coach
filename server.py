@@ -4004,46 +4004,6 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     )
 
 
-def resume_interrupted_coach_jobs() -> int:
-    """Requeue persisted background turns after a process restart."""
-    with DB_LOCK, database() as db:
-        interrupted = db.execute("SELECT client_turn_id, intent FROM coach_commands WHERE status='running' AND COALESCE(json_extract(receipt, '$.mode'), '') != 'background'").fetchall()
-    for command in interrupted:
-        coach_turn_failure_service().persist(command["client_turn_id"], json.loads(command["intent"] or "{}"), AppError(503, "Die vorherige Verarbeitung wurde durch einen Prozessneustart unterbrochen.", reason="process_interrupted"))
-    resumed = 0
-    interrupted_gemini: list[tuple[str, dict[str, Any]]] = []
-    now = utc_now()
-    with DB_LOCK, database() as db:
-        rows = db.execute(
-            "SELECT client_turn_id, status, receipt FROM coach_commands WHERE status IN ('queued', 'running') ORDER BY created_at"
-        ).fetchall()
-        for row in rows:
-            receipt = command_receipt(row.get("receipt"))
-            if receipt.get("mode") != "background":
-                continue
-            if row.get("status") == "running" and receipt.get("ai_provider") == "gemini":
-                # GenerateContent has no resumable response ID. Replaying a
-                # completed model/tool turn after restart could repeat effects.
-                interrupted_gemini.append((row["client_turn_id"], json.loads(row.get("intent") or "{}")))
-                continue
-            receipt["status"] = "queued"
-            receipt["phase"] = "resuming" if receipt.get("openai_response_id") else "queued"
-            db.execute(
-                "UPDATE coach_commands SET status='queued', receipt=?, updated_at=? WHERE client_turn_id=?",
-                (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), now, row["client_turn_id"]),
-            )
-            resumed += 1
-    for client_turn_id, intent in interrupted_gemini:
-        coach_turn_failure_service().persist(
-            client_turn_id,
-            intent,
-            AppError(503, "Die Gemini-Hintergrundverarbeitung wurde durch einen Prozessneustart unterbrochen und nicht erneut ausgeführt.", reason="process_interrupted"),
-        )
-    if resumed:
-        COACH_JOB_WAKE.set()
-    return resumed
-
-
 def _background_coach_stream_delta(operation_id: str, text: str) -> None:
     coach_streams.CHAT_STREAM_REGISTRY.publish(operation_id, "delta", {"text": text})
 
@@ -4490,7 +4450,7 @@ def _replace_database_with_restore(temporary_path: Path) -> str | None:
 
 def _resume_after_database_restore() -> None:
     sync_job_queue_service().resume_interrupted()
-    resume_interrupted_coach_jobs()
+    coach_job_store().resume_interrupted(coach_turn_failure_service())
     shared_sync_job_wake_event().set()
     COACH_JOB_WAKE.set()
 
@@ -5220,7 +5180,7 @@ def main() -> None:
     LOGGER.info(f"{APP_NAME} starting", extra={"event": "server_start", "context": {"version": APP_VERSION, "port": CONFIG.port}})
     initialise_database()
     sync_job_queue_service().resume_interrupted()
-    resume_interrupted_coach_jobs()
+    coach_job_store().resume_interrupted(coach_turn_failure_service())
     server = http_server.CoachHTTPServer(("0.0.0.0", CONFIG.port), request_handler_class())
     server.allow_reuse_address = True
     sync_job_worker().start()

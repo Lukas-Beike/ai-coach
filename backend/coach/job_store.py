@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.coach.service import command_receipt
+from backend.coach.turn_failures import CoachTurnFailureService
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
@@ -131,3 +132,68 @@ class CoachJobStore:
                 ),
             )
         return receipt
+
+    def resume_interrupted(self, failures: CoachTurnFailureService) -> int:
+        """Recover durable turns without replaying an interrupted Gemini turn."""
+        with self._database_lock, self._database_manager().unit_of_work() as db:
+            interrupted = db.execute(
+                "SELECT client_turn_id, intent FROM coach_commands "
+                "WHERE status='running' "
+                "AND COALESCE(json_extract(receipt, '$.mode'), '') != 'background'"
+            ).fetchall()
+        for command in interrupted:
+            failures.persist(
+                command["client_turn_id"],
+                json.loads(command["intent"] or "{}"),
+                AppError(
+                    503,
+                    "Die vorherige Verarbeitung wurde durch einen Prozessneustart unterbrochen.",
+                    reason="process_interrupted",
+                ),
+            )
+
+        resumed = 0
+        interrupted_gemini: list[tuple[str, dict[str, Any]]] = []
+        now = self._utc_now()
+        with self._database_lock, self._database_manager().unit_of_work() as db:
+            rows = db.execute(
+                "SELECT client_turn_id, status, receipt, intent FROM coach_commands "
+                "WHERE status IN ('queued', 'running') ORDER BY created_at"
+            ).fetchall()
+            for row in rows:
+                receipt = command_receipt(row.get("receipt"))
+                if receipt.get("mode") != "background":
+                    continue
+                if row.get("status") == "running" and receipt.get("ai_provider") == "gemini":
+                    # GenerateContent has no resumable response ID. Replaying a
+                    # completed model/tool turn after restart could repeat effects.
+                    interrupted_gemini.append(
+                        (row["client_turn_id"], json.loads(row.get("intent") or "{}"))
+                    )
+                    continue
+                receipt["status"] = "queued"
+                receipt["phase"] = "resuming" if receipt.get("openai_response_id") else "queued"
+                db.execute(
+                    "UPDATE coach_commands SET status='queued', receipt=?, updated_at=? "
+                    "WHERE client_turn_id=?",
+                    (
+                        json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
+                        now,
+                        row["client_turn_id"],
+                    ),
+                )
+                resumed += 1
+
+        for client_turn_id, intent in interrupted_gemini:
+            failures.persist(
+                client_turn_id,
+                intent,
+                AppError(
+                    503,
+                    "Die Gemini-Hintergrundverarbeitung wurde durch einen Prozessneustart unterbrochen und nicht erneut ausgeführt.",
+                    reason="process_interrupted",
+                ),
+            )
+        if resumed:
+            self._wake_event.set()
+        return resumed

@@ -1697,6 +1697,7 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "unregister_chat_stream",
     "_claim_background_coach_job",
     "_requeue_background_coach_job",
+    "resume_interrupted_coach_jobs",
     "_background_coach_message",
     "_coach_command_receipt",
     "_merge_coach_command_receipt",
