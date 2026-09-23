@@ -344,9 +344,14 @@ class CoachTests(unittest.TestCase):
             server.SyncJobWorker, "start", side_effect=lambda _worker: order.append("sync-worker"), autospec=True
         ), patch.object(
             server, "start_coach_job_worker", side_effect=lambda: order.append("coach-worker")
-        ), patch.object(server, "startup_sync_scheduler") as startup_scheduler, patch.object(server.threading, "Thread"):
+        ), patch.object(server, "startup_sync_scheduler") as startup_scheduler, patch.object(
+            server, "daily_sync_loop_service"
+        ) as daily_loop_factory, patch.object(server.threading, "Thread") as thread_factory:
             startup_scheduler.return_value.schedule.side_effect = lambda: order.append("startup-sync")
+            daily_loop = Mock()
+            daily_loop_factory.return_value = daily_loop
             server.main()
+        thread_factory.assert_called_once_with(target=daily_loop.run, daemon=True)
         self.assertEqual(
             order,
             ["schema", "sync-recovery", "coach-recovery", "sync-worker", "coach-worker", "startup-sync"],

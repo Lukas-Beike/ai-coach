@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import logging
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -10,6 +11,8 @@ from typing import Any
 from backend.athlete.profile import ProfileService
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
+from backend.errors import AppError
+from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_service import GarminSyncService
@@ -134,6 +137,36 @@ class DailySyncScheduler:
     def _sync_running(self) -> bool:
         with self._database_lock, self._database.unit_of_work() as db:
             return self._key_values.get(db, "sync_running") == "1"
+
+
+class DailySyncLoop:
+    """Run daily scheduling and morning battery refresh on a fixed cadence."""
+
+    def __init__(
+        self,
+        daily_scheduler: DailySyncScheduler,
+        morning_battery: MorningBodyBatteryService,
+        *,
+        sleep: Callable[[float], None],
+        logger: logging.Logger,
+    ) -> None:
+        self._daily_scheduler = daily_scheduler
+        self._morning_battery = morning_battery
+        self._sleep = sleep
+        self._logger = logger
+
+    def run(self) -> None:
+        while True:
+            self._sleep(300)
+            try:
+                self._daily_scheduler.schedule()
+                self._morning_battery.refresh()
+            except AppError as exc:
+                if exc.reason != "maintenance":
+                    self._logger.error(
+                        "Automatic synchronization scheduling failed",
+                        extra={"event": "daily_sync_failed"},
+                    )
 
 
 @dataclass(frozen=True)
