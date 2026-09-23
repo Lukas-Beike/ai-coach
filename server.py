@@ -5090,6 +5090,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
     with DB_LOCK, database() as db:
         calendar_data = public_state_calendar_projection_service().read(
             snapshot,
+            canonical_planned,
             local_planned,
             activities,
             weather,

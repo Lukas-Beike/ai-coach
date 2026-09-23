@@ -8,7 +8,6 @@ from datetime import date
 from typing import Any
 
 from backend.athlete.checkins import CheckinService
-from backend.calendar import canonical as calendar_canonical
 from backend.calendar.external import ExternalCalendarReader
 from backend.planning import calendar_read_model
 from backend.planning.competition_service import CompetitionService
@@ -54,6 +53,7 @@ class PublicStateCalendarProjection:
     def read(
         self,
         snapshot: dict[str, Any],
+        canonical_planned: list[dict[str, Any]],
         local_planned: list[dict[str, Any]],
         activities: list[dict[str, Any]],
         weather: dict[str, Any],
@@ -69,7 +69,7 @@ class PublicStateCalendarProjection:
         )
         daily_context = self._daily_context.build(
             snapshot,
-            calendar_canonical.canonical_planned_workouts([], local_planned),
+            canonical_planned,
             weather,
             checkins,
             self._external_calendar.list_events(

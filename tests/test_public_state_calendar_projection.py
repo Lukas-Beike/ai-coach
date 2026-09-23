@@ -16,6 +16,7 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
         daily_context = [{"date": "2026-09-23"}]
         calendar_result = {"calendar": [{"name": "Camp"}]}
         snapshot = {"recent_activities": [{"id": "activity-1"}]}
+        canonical_planned = [{"canonical": True}]
         local_planned = [{"id": "planned-1"}]
         activities = [{"id": "activity-1"}]
         weather = {"days": []}
@@ -62,18 +63,17 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
             today=lambda: date(2026, 9, 23),
         )
 
-        with (
-            patch(
-                "backend.http_api.bootstrap_calendar.calendar_canonical.canonical_planned_workouts",
-                return_value=[{"canonical": True}],
-            ) as canonical,
-            patch(
-                "backend.http_api.bootstrap_calendar.calendar_read_model.project_planning_calendar",
-                return_value=calendar_result,
-            ) as project_calendar,
-        ):
+        with patch(
+            "backend.http_api.bootstrap_calendar.calendar_read_model.project_planning_calendar",
+            return_value=calendar_result,
+        ) as project_calendar:
             result = projection.read(
-                snapshot, local_planned, activities, weather, calendar_window
+                snapshot,
+                canonical_planned,
+                local_planned,
+                activities,
+                weather,
+                calendar_window,
             )
 
         self.assertEqual(
@@ -96,20 +96,20 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
             ),
         )
         self.assertEqual(calls[4], ("external_events", (50, True)))
-        canonical.assert_called_once_with([], local_planned)
         self.assertEqual(
             calls[5],
             (
                 "daily_context",
                 (
                     snapshot,
-                    [{"canonical": True}],
+                    canonical_planned,
                     weather,
                     checkins,
                     [{"name": "Relevant event"}],
                 ),
             ),
         )
+        self.assertIs(calls[5][1][1], canonical_planned)
         project_calendar.assert_called_once_with(
             local_planned,
             activities,
