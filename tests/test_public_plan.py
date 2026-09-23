@@ -7,7 +7,7 @@ from datetime import date
 from threading import Lock
 from unittest.mock import MagicMock, Mock, call, patch
 
-from backend.http_api.public_plan import PublicPlanStateService
+from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 
 
 class PublicPlanStateServiceTests(unittest.TestCase):
@@ -62,26 +62,28 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         services["quick_actions"].state.return_value = []
         projection = Mock(return_value={"planned": planned, "training_calendar": []})
         service = PublicPlanStateService(
-            services["sync"],
-            services["planned"],
-            services["feedback"],
-            services["weather"],
-            services["followup"],
-            services["manager_factory"],
-            services["db_lock"],
-            services["key_values"],
-            services["plans"],
-            services["external"],
-            services["external_sync"],
-            services["daily"],
-            services["checkins"],
-            services["competitions"],
-            services["adaptive"],
-            services["quick_actions"],
-            lambda: date(2026, 1, 1),
-            external_calendar_configured=True,
-            external_calendar_window_days=35,
-            default_workout_name="Geplante Einheit",
+            PublicPlanDependencies(
+                sync_state=services["sync"],
+                planned_units=services["planned"],
+                activity_feedback=services["feedback"],
+                weather=services["weather"],
+                adaptive_followup=services["followup"],
+                database_manager_factory=services["manager_factory"],
+                db_lock=services["db_lock"],
+                key_values=services["key_values"],
+                training_plans=services["plans"],
+                external_calendar=services["external"],
+                external_calendar_sync=services["external_sync"],
+                daily_context=services["daily"],
+                checkins=services["checkins"],
+                competitions=services["competitions"],
+                adaptive_preview=services["adaptive"],
+                coach_quick_actions=services["quick_actions"],
+                today=lambda: date(2026, 1, 1),
+                external_calendar_configured=True,
+                external_calendar_window_days=35,
+                default_workout_name="Geplante Einheit",
+            ),
         )
         return (
             service,

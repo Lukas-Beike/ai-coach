@@ -5,11 +5,11 @@
 ## Ausgangsstand
 
 - Geprüfter P0-Basiscommit: `362d6caa4c27951af86b82b11b3a43d48dadceee`
-- Inventarisierter `server.py`-Quelltext (SHA-256): `80c89e2813cb99e6571441ae49d54bbe6e34fa3df9ece4a0db1eb3a86ff22fa7`; dieser Fingerprint ist unabhängig von HEAD und Arbeitsbaum stabil.
+- Inventarisierter `server.py`-Quelltext (SHA-256): `f0f5719e475f524204a758b8f13fde3c7a1dd0f34616651a05c0b3701a859b5e`; dieser Fingerprint ist unabhängig von HEAD und Arbeitsbaum stabil.
 - `server.py`: 5.517 physische Zeilen
-- Inventareinträge: 682
+- Inventareinträge: 683
 - Definitionen (Funktionen/Klassen): 266
-- Globale Bindungen einschließlich Imports: 111 Zuweisungen. 305 Imports
+- Globale Bindungen einschließlich Imports: 111 Zuweisungen. 306 Imports
 - Planbereich: bis Zeile 21.702; Einträge dahinter: 0 (zielbestimmt über Symbol-/Verantwortungsanalyse)
 - Status dieses Stands: P0 ist integriert; bereits ausgelagerte Namen erscheinen als Importbindungen. `offen` bedeutet, dass die fachliche Eigentümerschaft noch migriert werden muss.
 
@@ -31,7 +31,7 @@ Der Generator führt selbst keine Tests und keine Laufzeitinitialisierung aus. S
 | Phase | Funktionen/Klassen | Globale Bindungen | Importbindungen |
 | --- | ---: | ---: | ---: |
 | P0 (Zuordnung offen) | 3 | 0 | 0 |
-| P1 | 14 | 28 | 273 |
+| P1 | 14 | 28 | 274 |
 | P2 | 9 | 7 | 0 |
 | P3 | 1 | 0 | 0 |
 | P4 | 0 | 0 | 0 |
@@ -688,6 +688,7 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | Importbindung | `CalendarWindowRange` | 148 | `backend/http_api/state_prelude` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `PublicStateLocalPrelude` | 148 | `backend/http_api/state_prelude` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `PublicStateWeatherPrelude` | 148 | `backend/http_api/state_prelude` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PublicPlanDependencies` | 153 | `backend/http_api/public_plan` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `PublicPlanStateService` | 153 | `backend/http_api/public_plan` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `StateVersionService` | 154 | `backend/http_api/state_versions` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `SyncCommandEndpoint` | 155 | `backend/http_api/sync_commands` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
@@ -1274,7 +1275,7 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | `backend/http_api/chat_page` | 1 |
 | `backend/http_api/library_page` | 1 |
 | `backend/http_api/public_performance` | 2 |
-| `backend/http_api/public_plan` | 1 |
+| `backend/http_api/public_plan` | 2 |
 | `backend/http_api/public_state` | 2 |
 | `backend/http_api/public_weather` | 1 |
 | `backend/http_api/rate_limit` | 1 |

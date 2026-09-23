@@ -150,7 +150,7 @@ from backend.http_api.state_prelude import (
     PublicStateLocalPrelude,
     PublicStateWeatherPrelude,
 )
-from backend.http_api.public_plan import PublicPlanStateService
+from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 from backend.http_api.state_versions import StateVersionService
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
@@ -4528,7 +4528,7 @@ def public_bootstrap_service() -> PublicBootstrapService:
 
 def public_plan_state_service() -> PublicPlanStateService:
     """Compose the public planning projection from its concrete read owners."""
-    return PublicPlanStateService(
+    return PublicPlanStateService(PublicPlanDependencies(
         sync_state=sync_state_repository(),
         planned_units=planned_unit_service(),
         activity_feedback=activity_feedback_service(),
@@ -4549,7 +4549,7 @@ def public_plan_state_service() -> PublicPlanStateService:
         external_calendar_configured=bool(CONFIG.calendar_ical_url),
         external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
         default_workout_name=PLANNED_WORKOUT_LABEL,
-    )
+    ))
 
 
 def public_state_local_prelude_service() -> PublicStateLocalPrelude:

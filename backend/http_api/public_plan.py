@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
@@ -14,53 +15,54 @@ from backend.weather import cache as weather_cache
 from backend.weather import history as weather_history
 
 
+@dataclass(frozen=True)
+class PublicPlanDependencies:
+    sync_state: Any
+    planned_units: Any
+    activity_feedback: Any
+    weather: Any
+    adaptive_followup: Any
+    database_manager_factory: Callable[[], DatabaseManager]
+    db_lock: Any
+    key_values: Any
+    training_plans: Any
+    external_calendar: Any
+    external_calendar_sync: Any
+    daily_context: Any
+    checkins: Any
+    competitions: Any
+    adaptive_preview: Any
+    coach_quick_actions: Any
+    today: Callable[[], date]
+    external_calendar_configured: bool
+    external_calendar_window_days: int
+    default_workout_name: str
+
+
 class PublicPlanStateService:
     """Compose bounded local planning reads into the public plan response."""
 
-    def __init__(
-        self,
-        sync_state: Any,
-        planned_units: Any,
-        activity_feedback: Any,
-        weather: Any,
-        adaptive_followup: Any,
-        database_manager_factory: Callable[[], DatabaseManager],
-        db_lock: Any,
-        key_values: Any,
-        training_plans: Any,
-        external_calendar: Any,
-        external_calendar_sync: Any,
-        daily_context: Any,
-        checkins: Any,
-        competitions: Any,
-        adaptive_preview: Any,
-        coach_quick_actions: Any,
-        today: Callable[[], date],
-        *,
-        external_calendar_configured: bool,
-        external_calendar_window_days: int,
-        default_workout_name: str,
-    ) -> None:
-        self._sync_state = sync_state
-        self._planned_units = planned_units
-        self._activity_feedback = activity_feedback
-        self._weather = weather
-        self._adaptive_followup = adaptive_followup
-        self._database_manager_factory = database_manager_factory
-        self._db_lock = db_lock
-        self._key_values = key_values
-        self._training_plans = training_plans
-        self._external_calendar = external_calendar
-        self._external_calendar_sync = external_calendar_sync
-        self._daily_context = daily_context
-        self._checkins = checkins
-        self._competitions = competitions
-        self._adaptive_preview = adaptive_preview
-        self._coach_quick_actions = coach_quick_actions
-        self._today = today
-        self._external_calendar_configured = external_calendar_configured
-        self._external_calendar_window_days = external_calendar_window_days
-        self._default_workout_name = default_workout_name
+    def __init__(self, dependencies: PublicPlanDependencies) -> None:
+        self._sync_state = dependencies.sync_state
+        self._planned_units = dependencies.planned_units
+        self._activity_feedback = dependencies.activity_feedback
+        self._weather = dependencies.weather
+        self._adaptive_followup = dependencies.adaptive_followup
+        self._database_manager_factory = dependencies.database_manager_factory
+        self._db_lock = dependencies.db_lock
+        self._key_values = dependencies.key_values
+        self._training_plans = dependencies.training_plans
+        self._external_calendar = dependencies.external_calendar
+        self._external_calendar_sync = dependencies.external_calendar_sync
+        self._daily_context = dependencies.daily_context
+        self._checkins = dependencies.checkins
+        self._competitions = dependencies.competitions
+        self._adaptive_preview = dependencies.adaptive_preview
+        self._coach_quick_actions = dependencies.coach_quick_actions
+        self._today = dependencies.today
+        self._external_calendar_configured = dependencies.external_calendar_configured
+        self._external_calendar_window_days = dependencies.external_calendar_window_days
+        self._default_workout_name = dependencies.default_workout_name
 
     def read(self, local_only: bool = False) -> dict[str, Any]:
         snapshot = self._sync_state.latest_snapshot() or {}

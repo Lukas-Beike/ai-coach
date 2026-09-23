@@ -5531,3 +5531,19 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Ruff für neue Module, Compile, Inventar- und Diff-Check **PASS**.
   `server.py`: 5.517 physische Zeilen, 266 Definitionen. PR-CI,
   externer Review und Merge dieses neuen Stands stehen noch aus.
+
+## P10 Planprojektion — #740 Quality-Gate-Korrektur
+
+- #740 auf Head `4d8eaa93`: Container-, CodeQL- und Codex-Checks
+  **PASS**, 0 offene Review-Threads; SonarCloud Code Analysis **FAIL**
+  wegen 20 Parametern in `PublicPlanStateService.__init__`
+  (`backend/http_api/public_plan.py:21`). Kein Merge und kein
+  Übertrag des vorherigen PASS auf einen geänderten Stand.
+- Root führte die konkrete Abhängigkeitsstruktur `PublicPlanDependencies`
+  im selben Fachmodul ein, ohne UOW-, Lock-, Auth- oder Response-Ablauf
+  zu ändern. Fokussierte Projektionstests 3/3, Ruff, Compile und
+  Inventar-Check **PASS**. Root prüfte den tatsächlichen Korrektur-Diff
+  erneut: **PASS**. Neu gebautes Read-only-Docker-Image: vollständige
+  Suite **PASS**, 2.357 Tests, 11 Skips; Architekturtests 4/4 und
+  Diff-Check **PASS**. #740 ohne Merge geschlossen; ein Ersatz-PR mit
+  neuem Head braucht eigene CI- und Review-Freigabe.
