@@ -26,6 +26,7 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.streams", ("ChatStreamRegistry",)),
+    ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.coach.conversation", ("CoachConversationResetService",)),
     ("backend.coach.prompt", ("COACH_PROMPT",)),
     ("backend.http_api.readiness", ("ReadinessService",)),
@@ -1633,6 +1634,9 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "publish_chat_stream_event",
     "chat_stream_events",
     "unregister_chat_stream",
+    "_claim_background_coach_job",
+    "_requeue_background_coach_job",
+    "_background_coach_message",
     "readiness_state",
     "_enqueue_coach_plan_push",
     "_resolve_structured_sync_conflict",

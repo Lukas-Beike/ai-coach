@@ -5222,6 +5222,30 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   offen. Der nicht erforderliche Browser-Smoke-Test lief bei diesem
   Eintrag noch.
 
+## P8 Coach-Job-Store — integrierter Prüfstand
+
+- GPT-6-Luna/high-Patch `875e32b2`, nach Rebase auf bestätigtem
+  #729-Merge `7e064b19` als `a7fc93fa`: `CoachJobStore` besitzt
+  durable Claim-, Contention-Requeue- und gespeicherte
+  Nutzernachrichten-Leseentscheidungen. Die vorherigen Server-
+  Fachfunktionen sind entfernt; die Composition Root injiziert
+  Manager, DB-Lock, Wake-Event, Maintenance-Gate und Uhrzeit.
+- Root prüfte tatsächlichen Modul-, Aufrufer- und Testdiff:
+  **PASS**. Claim bleibt unter Maintenance-Gate und atomarer UOW,
+  Statuswechsel verwendet einen bedingten Update; Retry-Backoff,
+  20-Kandidaten-Grenze, Worker-Wakeup, Restart und fehlende
+  Nachrichten behalten ihre Verträge. Integration bewahrte die
+  P7-Reset-Testmigration; Architekturtest verbietet alle drei
+  alten Server-Namen, Inventar weist die reine Compose-Funktion
+  explizit der Composition Root zu. Worker-Vollsuite auf altem
+  Stand **PASS**, 2.326 Tests, 12 Skips; Root-Vollsuite auf
+  #726-Stand **PASS**, 2.329 Tests, 11 Skips. Neu gebautes
+  kombiniertes Read-only-Docker-Image auf #729-Merge:
+  vollständige Suite **PASS**, 2.334 Tests, 11 Skips; Inventar-,
+  Architektur-, Compile- und Diff-Check **PASS**. PR-CI folgt.
+  Enqueue/Resume/
+  Cancel/Turn bleiben P8-offen.
+
 ## P7 Coach-Chat-Reset — lokaler Prüfstand
 
 - Root-Commit `c37eeb87` (Rebase des inhaltlich identischen
