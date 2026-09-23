@@ -607,6 +607,11 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
   - [x] Öffentliche Readiness-Prüfung mit bestehender DB-UOW,
     kurzlebiger Verzeichnisprobe und Wartungsstatus einem konkreten
     `ReadinessService` zuordnen; Handler sendet nur Status und JSON.
+  - [x] Session-Lebenszyklus, Cookie-/CSRF-Prüfung, Login-/Logout-
+    Autorisierung und persistierten Coach-Session-Binding-Read einem
+    konkreten `SessionAuthService` zuordnen. Der Handler löst den
+    aktuellen Eigentümer auch auf Keep-Alive-Verbindungen dynamisch
+    auf; Rate-Limit-Zustand bleibt bei `RateLimiter`.
 - [ ] Öffentliche Bootstrap-/State-Projektionen und Pagination zuordnen;
   Projektionen erhalten Daten über Domänenlesefunktionen.
   - [x] Lokalen Bootstrap-Lesevorlauf und Wetter-Follow-up mit
