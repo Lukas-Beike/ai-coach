@@ -137,8 +137,8 @@ jobs:
               const completedCodeReview = (latestSummary.body || '').split('\n').find((line) =>
                 line.includes('**Code Review**') && line.includes('**Completed**'));
               const reviewCompletedAt = Date.parse(completedCodeReview?.match(/datetime="([^"]+)"/)?.[1] || '');
-              // A protected-base update changes the PR head without requiring another
-              // review after a clean follow-up; only review ordering is significant.
+              // A protected-base update may change the head; the reviewed diff
+              // still has to match before the clean result carries forward.
               if (!(reviewCompletedAt > after)) return false;
               const summaryUpdatedAt = Date.parse(latestSummary.updated_at || latestSummary.created_at);
               return reactions.some((reaction) => codexBotLogins.has(reaction.user?.login) &&
@@ -181,7 +181,6 @@ jobs:
                 if (fileCount(oldDiff) !== oldFiles.length || fileCount(newDiff) !== newFiles.length) return false;
                 const reviewedPatch = (value) => value.split('\n')
                   .filter((line) => !/^index [0-9a-f]+\.\.[0-9a-f]+/.test(line))
-                  .map((line) => line.replace(/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/, '@@'))
                   .join('\n');
                 return reviewedPatch(oldDiff) === reviewedPatch(newDiff);
               } catch (_error) {
