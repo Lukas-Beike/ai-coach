@@ -5428,4 +5428,14 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   **PASS**; fokussierte Architektur-/Service-Tests 6/6, Inventar- und
   Diff-Check **PASS**, neues Read-only-Docker-Image mit vollständiger
   Suite **PASS**, 2.346 Tests, 11 Skips. `server.py` hat 5.743
-  physische Zeilen. Ersatz-PR-CI und externer Review folgen.
+  physische Zeilen. #737-Container-, Sonar- und Browser-Checks
+  **PASS**; Codex-Check scheiterte geschlossen mit externem
+  `Unexpected error`, und das abgeschlossene Review meldete einen
+  P2-Befund: `public_state()` dupliziert die Performance-/Feedback-
+  Projektionen noch in `server.py`. Die behauptete produktive
+  `/api/bootstrap`-Verknüpfung existiert zwar nicht, die doppelte
+  Eigentümerschaft aber schon. Review-Gate deshalb **FAIL**;
+  #737 ohne Merge geschlossen. Nächster Schritt: denselben
+  `public_state`-Eigentümer auf die konkreten Performance-/Feedback-
+  Services verdrahten, integrierten Diff und Vollsuite neu prüfen und
+  erst dann einen Ersatz-PR gegen aktuelles `develop` eröffnen.
