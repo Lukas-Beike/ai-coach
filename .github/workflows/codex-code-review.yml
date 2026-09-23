@@ -115,7 +115,7 @@ jobs:
               }
               return unresolvedReviewIds;
             };
-            const hasCompletedCleanReaction = async (pullRequest) => {
+            const hasCompletedCleanReaction = async (pullRequest, after = 0) => {
               const comments = await github.paginate(github.rest.issues.listComments, {
                 owner: context.repo.owner, repo: context.repo.repo,
                 issue_number: pullRequest.number, per_page: 100,
@@ -134,6 +134,12 @@ jobs:
                 owner: context.repo.owner, repo: context.repo.repo,
                 issue_number: pullRequest.number, per_page: 100,
               });
+              const completedCodeReview = (latestSummary.body || '').split('\n').find((line) =>
+                line.includes('**Code Review**') && line.includes('**Completed**'));
+              const reviewCompletedAt = Date.parse(completedCodeReview?.match(/datetime="([^"]+)"/)?.[1] || '');
+              const reviewedCommit = completedCodeReview?.match(/`([0-9a-f]{7,40})`/)?.[1];
+              if (!reviewedCommit || !pullRequest.head.sha.startsWith(reviewedCommit) ||
+                !(reviewCompletedAt > after)) return false;
               const summaryUpdatedAt = Date.parse(latestSummary.updated_at || latestSummary.created_at);
               return reactions.some((reaction) => codexBotLogins.has(reaction.user?.login) &&
                 reaction.content === '+1' && Date.parse(reaction.created_at) >= summaryUpdatedAt);
@@ -153,12 +159,13 @@ jobs:
               }
               const latestReview = [...codexReviews]
                 .sort((left, right) => Date.parse(right.submitted_at) - Date.parse(left.submitted_at))[0];
+              const cleanFollowUp = await hasCompletedCleanReaction(pullRequest, Date.parse(latestReview.submitted_at));
               const latestReviewHasP1 = /\[P1\]/i.test(latestReview.body || '') || comments.some((comment) => (
                 codexBotLogins.has(comment.user?.login) &&
                 comment.pull_request_review_id === latestReview.id &&
                 /\[P1\]/i.test(comment.body || '')
               ));
-              if (latestReviewHasP1) return 'p1';
+              if (latestReviewHasP1 && !cleanFollowUp) return 'p1';
               const unresolvedReviewIds = await getUnresolvedCodexReviewIds(pullRequest);
               return unresolvedReviewIds.size > 0 ? 'unresolved' : 'none';
             };
