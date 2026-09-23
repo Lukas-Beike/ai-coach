@@ -163,7 +163,14 @@ from backend.sync.external_calendar import (
     ExternalCalendarSyncService,
     shared_external_calendar_sync_lock,
 )
-from backend.sync.executor import SyncJobExecutor
+from backend.sync.executor import (
+    CalendarWeatherSyncJobOwner,
+    GarminSyncJobOwner,
+    HistoricalSyncJobOwner,
+    IntervalsSyncJobOwner,
+    SyncJobExecutor,
+    SyncJobProviderDispatcher,
+)
 from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import SyncJobWorker, shared_sync_job_wake_event
 from backend.planning import adaptive as planning_adaptive
@@ -1392,26 +1399,42 @@ def selected_workout_sync_service() -> SelectedWorkoutSyncService:
 
 def sync_job_executor() -> SyncJobExecutor:
     """Compose the concrete persistent provider-job dispatcher."""
-    return SyncJobExecutor(
-        intervals_sync_service=intervals_sync_service(),
-        garmin_sync_service=garmin_sync_service(),
-        external_calendar_sync_service=external_calendar_sync_service(),
-        weather_sync_service=weather_sync_service(),
-        performance_refresh_service=performance_refresh_service(),
-        selected_workout_sync_service=selected_workout_sync_service(),
-        competition_sync_service=competition_sync_service(),
-        sync_operation_observer=sync_operation_observer(),
-        intervals_resync_gate=INTERVALS_RESYNC_GATE,
+    historical_sync = HistoricalSyncJobOwner(
         sync_state_repository=sync_state_repository(),
-        outcome_service=sync_job_outcome_service(),
         queue_service=sync_job_queue_service(),
-        morning_body_battery_service=morning_body_battery_service(),
-        garmin_fixture_loader=garmin_fixture_loader(),
         local_now=local_now,
         sync_period_defaults=SYNC_PERIOD_DEFAULTS,
         all_sync_days=ALL_SYNC_DAYS,
         sync_chunk_days=SYNC_CHUNK_DAYS,
         sync_earliest_date=SYNC_EARLIEST_DATE,
+    )
+    provider_dispatcher = SyncJobProviderDispatcher(
+        intervals_jobs=IntervalsSyncJobOwner(
+            historical_sync=historical_sync,
+            intervals_sync_service=intervals_sync_service(),
+            performance_refresh_service=performance_refresh_service(),
+            selected_workout_sync_service=selected_workout_sync_service(),
+            competition_sync_service=competition_sync_service(),
+            sync_operation_observer=sync_operation_observer(),
+            intervals_resync_gate=INTERVALS_RESYNC_GATE,
+        ),
+        garmin_jobs=GarminSyncJobOwner(
+            historical_sync=historical_sync,
+            garmin_sync_service=garmin_sync_service(),
+            morning_body_battery_service=morning_body_battery_service(),
+            garmin_fixture_loader=garmin_fixture_loader(),
+            all_sync_days=ALL_SYNC_DAYS,
+        ),
+        calendar_weather_jobs=CalendarWeatherSyncJobOwner(
+            external_calendar_sync_service=external_calendar_sync_service(),
+            weather_sync_service=weather_sync_service(),
+        ),
+    )
+    return SyncJobExecutor(
+        provider_dispatcher=provider_dispatcher,
+        historical_sync=historical_sync,
+        outcome_service=sync_job_outcome_service(),
+        all_sync_days=ALL_SYNC_DAYS,
     )
 
 

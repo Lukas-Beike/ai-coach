@@ -5,12 +5,20 @@ from __future__ import annotations
 import unittest
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
+from inspect import signature
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 from backend.errors import AppError
-from backend.sync.executor import SyncJobExecutor
+from backend.sync.executor import (
+    CalendarWeatherSyncJobOwner,
+    GarminSyncJobOwner,
+    HistoricalSyncJobOwner,
+    IntervalsSyncJobOwner,
+    SyncJobExecutor,
+    SyncJobProviderDispatcher,
+)
 
 
 class RecordingService:
@@ -126,26 +134,49 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.executor = self.make_executor()
 
     def make_executor(self) -> SyncJobExecutor:
-        return SyncJobExecutor(
-            intervals_sync_service=self.intervals,
-            garmin_sync_service=self.garmin,
-            external_calendar_sync_service=self.calendar,
-            weather_sync_service=self.weather,
-            performance_refresh_service=self.performance,
-            selected_workout_sync_service=self.selected,
-            competition_sync_service=self.competitions,
-            sync_operation_observer=self.observer,
-            intervals_resync_gate=self.gate,
+        historical_sync = HistoricalSyncJobOwner(
             sync_state_repository=self.state,
-            outcome_service=self.outcomes,
             queue_service=self.queue,
-            morning_body_battery_service=self.morning,
-            garmin_fixture_loader=self.fixture,
             local_now=lambda: datetime(2026, 9, 20, 12, tzinfo=timezone.utc),
             sync_period_defaults={"intervals": 90, "garmin": 30},
             all_sync_days=-1,
             sync_chunk_days=90,
             sync_earliest_date=date(2000, 1, 1),
+        )
+        return SyncJobExecutor(
+            provider_dispatcher=SyncJobProviderDispatcher(
+                intervals_jobs=IntervalsSyncJobOwner(
+                    historical_sync=historical_sync,
+                    intervals_sync_service=self.intervals,
+                    performance_refresh_service=self.performance,
+                    selected_workout_sync_service=self.selected,
+                    competition_sync_service=self.competitions,
+                    sync_operation_observer=self.observer,
+                    intervals_resync_gate=self.gate,
+                ),
+                garmin_jobs=GarminSyncJobOwner(
+                    historical_sync=historical_sync,
+                    garmin_sync_service=self.garmin,
+                    morning_body_battery_service=self.morning,
+                    garmin_fixture_loader=self.fixture,
+                    all_sync_days=-1,
+                ),
+                calendar_weather_jobs=CalendarWeatherSyncJobOwner(
+                    external_calendar_sync_service=self.calendar,
+                    weather_sync_service=self.weather,
+                ),
+            ),
+            historical_sync=historical_sync,
+            outcome_service=self.outcomes,
+            all_sync_days=-1,
+        )
+
+    def test_executor_has_concrete_owner_dependencies_not_parameter_bag(self) -> None:
+        parameters = signature(SyncJobExecutor).parameters
+        self.assertLessEqual(len(parameters), 7)
+        self.assertEqual(
+            set(parameters),
+            {"provider_dispatcher", "historical_sync", "outcome_service", "all_sync_days"},
         )
 
     @staticmethod
