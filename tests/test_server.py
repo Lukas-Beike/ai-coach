@@ -218,12 +218,13 @@ class CoachTests(unittest.TestCase):
         endpoint = Mock()
         endpoint.state.return_value = {"configured": True, "loading": True}
 
-        with patch.object(server, "require_auth") as auth, patch.object(
+        auth = Mock()
+        with patch.object(server, "session_auth_service", return_value=auth), patch.object(
             server, "public_weather_state_service", return_value=endpoint
         ) as factory:
             self.assertTrue(handler._handle_training_get("/api/weather"))
 
-        auth.assert_called_once_with(handler)
+        auth.require_auth.assert_called_once_with(handler)
         factory.assert_called_once_with()
         endpoint.state.assert_called_once_with(local_only=True)
         handler.send_json.assert_called_once_with(
@@ -252,11 +253,13 @@ class CoachTests(unittest.TestCase):
                 handler.send_json = Mock()
                 service = Mock()
                 service.read.return_value = {"plans": []}
+                auth = Mock()
                 with (
-                    patch.object(server, "require_auth"),
+                    patch.object(server, "session_auth_service", return_value=auth),
                     patch.object(server, "public_plan_state_service", return_value=service),
                 ):
                     self.assertTrue(handler._handle_training_get("/api/plan"))
+                auth.require_auth.assert_called_once_with(handler)
                 service.read.assert_called_once_with(local_only=local_only)
                 handler.send_json.assert_called_once_with(200, {"plans": []})
 

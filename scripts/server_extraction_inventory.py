@@ -743,6 +743,8 @@ def _explicit_owner(name: str) -> str | None:
             "public_feedback_state_service": COMPOSITION_ROOT,
             "public_state_service": COMPOSITION_ROOT,
             "public_plan_state_service": COMPOSITION_ROOT,
+            "public_bootstrap_service": COMPOSITION_ROOT,
+            "public_weather_state_service": COMPOSITION_ROOT,
             "daily_sync_scheduler": COMPOSITION_ROOT,
             "daily_sync_loop_service": COMPOSITION_ROOT,
             "startup_sync_scheduler": COMPOSITION_ROOT,

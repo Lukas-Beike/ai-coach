@@ -5491,3 +5491,26 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   **PASS**, 7/7; Inventar- und Diff-Check **PASS**. `server.py` hat
   6.010 physische Zeilen und 286 Definitionen. Andere P10-Projektionen,
   PR-CI und externer Review bleiben offen.
+
+## P10 Bootstrap-/Plan-/Wetterprojektionen — kombinierter lokaler Prüfstand
+
+- GPT-6-Luna/high-Bootstrap-Patch `d80149a9` auf bestätigtem
+  #735-Merge `f6f310ec` als `dcf0ecc4`, Plan-Patches
+  `09579637`/`7c602be1` als `949a2fbc`/`118b3f17` und
+  Wetter-Patch `32567c8c` als `2c0e16b6` sequenziell integriert.
+  Root prüfte die tatsächlichen Code-/Konfliktdiffs: **PASS**.
+  `PublicBootstrapService` besitzt die komplette bounded Local-Only-
+  Antwort unter einer DB-Lock-/UOW-Grenze; `PublicPlanStateService`
+  hält den geschützten History-Read nach Wetter-Follow-up, und
+  `PublicWeatherStateService` besitzt die Refresh-/Marker-Regel.
+  Handler authentifizieren dynamisch und delegieren unmittelbar;
+  keine Server-Rückimporte oder Kompatibilitätswrapper.
+- Drei veraltete Testaufrufer/Patchziele wurden auf konkrete Services
+  beziehungsweise `session_auth_service` migriert. Gezielte Handler-/
+  Privacy-Tests **PASS** (3/3), Architekturtests **PASS** (4/4),
+  Ruff, Compile, Inventar- und Diff-Check **PASS**. Neu gebautes
+  Read-only-Docker-Image auf dem kombinierten #735-Basisstand:
+  vollständige Suite **PASS**, 2.351 Tests, 11 Skips.
+  `server.py` umfasst 5.605 physische Zeilen. Dieser Stand wird
+  nach dem #739-Merge gegen aktuelles `develop` neu integriert und
+  erneut geprüft, bevor ein PR veröffentlicht wird.
