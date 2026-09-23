@@ -247,47 +247,62 @@ class RemotePlannedUnitReconciler:
         conflicts = 0
         mutated = False
         for row in rows:
-            try:
-                payload = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError):
-                continue
-            remote_id = str(payload.get("remote_event_id") or "")
-            row_date = str(payload.get("date") or "")[:10]
-            if (
-                not remote_id
-                or remote_id in seen_ids
-                or not window_start
-                or not window_end
-                or not (window_start <= row_date <= window_end)
-            ):
-                continue
-            state = str(row.get("sync_state") or "synced")
-            if state == "synced":
-                payload["sync_status"] = "remote_missing"
-                updated = _update_if_unchanged(
-                    db,
-                    row,
-                    "UPDATE planned_units SET sync_state='remote_missing', sync_dirty=0, "
-                    "payload=?, updated_at=? WHERE local_id=?",
-                    (json.dumps(payload, ensure_ascii=False), now, row["local_id"]),
-                )
-                mutated = mutated or updated
-            elif state in {"local", "sync_error"}:
-                payload["sync_status"] = "conflict"
-                conflict = {"type": "remote_missing", "detected_at": now}
-                updated = _update_if_unchanged(
-                    db,
-                    row,
-                    "UPDATE planned_units SET sync_state='conflict', sync_dirty=1, "
-                    "sync_conflict=?, payload=?, updated_at=? WHERE local_id=?",
-                    (
-                        json.dumps(conflict, ensure_ascii=False),
-                        json.dumps(payload, ensure_ascii=False),
-                        now,
-                        row["local_id"],
-                    ),
-                )
-                if updated:
-                    conflicts += 1
-                mutated = mutated or updated
+            conflict_delta, row_mutated = RemotePlannedUnitReconciler._mark_missing_row(
+                db, row, seen_ids, window_start, window_end, now
+            )
+            conflicts += conflict_delta
+            mutated = mutated or row_mutated
         return conflicts, mutated
+
+    @staticmethod
+    def _mark_missing_row(
+        db: Any,
+        row: Any,
+        seen_ids: set[str],
+        window_start: str | None,
+        window_end: str | None,
+        now: str,
+    ) -> tuple[int, bool]:
+        try:
+            payload = json.loads(row.get("payload") or "{}")
+        except (TypeError, ValueError):
+            return 0, False
+        remote_id = str(payload.get("remote_event_id") or "")
+        row_date = str(payload.get("date") or "")[:10]
+        if (
+            not remote_id
+            or remote_id in seen_ids
+            or not window_start
+            or not window_end
+            or not (window_start <= row_date <= window_end)
+        ):
+            return 0, False
+        state = str(row.get("sync_state") or "synced")
+        if state == "synced":
+            payload["sync_status"] = "remote_missing"
+            updated = _update_if_unchanged(
+                db,
+                row,
+                "UPDATE planned_units SET sync_state='remote_missing', sync_dirty=0, "
+                "payload=?, updated_at=? WHERE local_id=?",
+                (json.dumps(payload, ensure_ascii=False), now, row["local_id"]),
+            )
+            return 0, updated
+        if state not in {"local", "sync_error"}:
+            return 0, False
+
+        payload["sync_status"] = "conflict"
+        conflict = {"type": "remote_missing", "detected_at": now}
+        updated = _update_if_unchanged(
+            db,
+            row,
+            "UPDATE planned_units SET sync_state='conflict', sync_dirty=1, "
+            "sync_conflict=?, payload=?, updated_at=? WHERE local_id=?",
+            (
+                json.dumps(conflict, ensure_ascii=False),
+                json.dumps(payload, ensure_ascii=False),
+                now,
+                row["local_id"],
+            ),
+        )
+        return int(updated), updated

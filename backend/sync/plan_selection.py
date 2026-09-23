@@ -57,34 +57,37 @@ class StructuredPlanSyncService:
         self, entries: list[dict[str, Any]] | None, intent: dict[str, Any]
     ) -> PreparedPlanSync:
         if entries is None:
-            if intent.get("_sync_created_entries_only"):
-                raise AppError(409, _CREATED_ENTRIES_ERROR, reason="plan_commit_required")
-            if not intent.get("_sync_changed_entries_only"):
-                return PreparedPlanSync("all", [], (("local_plan",),))
+            return self._prepare_implicit_selection(intent)
+        return self._prepare_explicit_selection(entries, intent)
 
-            changed_ids = {
-                str(value).strip()
-                for value in intent.get("_changed_sync_entry_ids") or []
-                if str(value).strip()
-            }
-            if not changed_ids:
-                raise AppError(409, _CHANGED_ENTRIES_ERROR, reason="plan_changes_required")
-            pending_by_id = {
-                entry["library_workout_id"]: entry
-                for entry in self._authority.pending_plan_push_entries()
-            }
-            if not changed_ids.issubset(pending_by_id):
-                raise AppError(403, _CHANGED_SCOPE_ERROR, reason="intent_scope_denied")
-            selected = [pending_by_id[local_id] for local_id in sorted(changed_ids)]
-            groups = tuple(
-                (
-                    f"planned_unit:{entry['library_workout_id']}",
-                    f"library_workout:{entry['library_workout_id']}",
-                )
-                for entry in selected
-            )
-            return PreparedPlanSync("changed", selected, groups)
+    def _prepare_implicit_selection(self, intent: dict[str, Any]) -> PreparedPlanSync:
+        if intent.get("_sync_created_entries_only"):
+            raise AppError(409, _CREATED_ENTRIES_ERROR, reason="plan_commit_required")
+        if not intent.get("_sync_changed_entries_only"):
+            return PreparedPlanSync("all", [], (("local_plan",),))
+        return self._prepare_changed_selection(intent)
 
+    def _prepare_changed_selection(self, intent: dict[str, Any]) -> PreparedPlanSync:
+        changed_ids = {
+            str(value).strip()
+            for value in intent.get("_changed_sync_entry_ids") or []
+            if str(value).strip()
+        }
+        if not changed_ids:
+            raise AppError(409, _CHANGED_ENTRIES_ERROR, reason="plan_changes_required")
+        pending_by_id = {
+            entry["library_workout_id"]: entry
+            for entry in self._authority.pending_plan_push_entries()
+        }
+        if not changed_ids.issubset(pending_by_id):
+            raise AppError(403, _CHANGED_SCOPE_ERROR, reason="intent_scope_denied")
+        selected = [pending_by_id[local_id] for local_id in sorted(changed_ids)]
+        groups = self._scope_groups(selected)
+        return PreparedPlanSync("changed", selected, groups)
+
+    def _prepare_explicit_selection(
+        self, entries: list[dict[str, Any]], intent: dict[str, Any]
+    ) -> PreparedPlanSync:
         authorized_ids = {
             str(value).strip()
             for key in (
@@ -114,16 +117,20 @@ class StructuredPlanSyncService:
                 raise AppError(403, _ALL_PENDING_SCOPE_ERROR, reason="intent_scope_denied")
             groups = (("local_plan",),)
         else:
-            groups = tuple(
-                (
-                    f"planned_unit:{entry['library_workout_id']}",
-                    f"library_workout:{entry['library_workout_id']}",
-                )
-                for entry in normalized
-            )
+            groups = self._scope_groups(normalized)
         if authorized_ids and normalized_ids != authorized_ids:
             raise AppError(403, _SELECTED_SCOPE_ERROR, reason="intent_scope_denied")
         return PreparedPlanSync("selected", normalized, groups)
+
+    @staticmethod
+    def _scope_groups(entries: list[dict[str, Any]]) -> tuple[tuple[str, ...], ...]:
+        return tuple(
+            (
+                f"planned_unit:{entry['library_workout_id']}",
+                f"library_workout:{entry['library_workout_id']}",
+            )
+            for entry in entries
+        )
 
     def execute(
         self,
