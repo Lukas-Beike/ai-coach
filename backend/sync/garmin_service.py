@@ -6,13 +6,12 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from datetime import date, datetime
+from contextlib import AbstractContextManager, nullcontext
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from backend.config import Config
-from backend.db.manager import DatabaseManager
-from backend.db.repositories import KeyValueRepository
 from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.providers import http as provider_http
 from backend.providers.garmin import (
@@ -174,62 +173,170 @@ class GarminRemoteReader:
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
 
 
-class GarminSyncService:
-    """Own fixture and remote Garmin synchronization from gate to cleanup."""
+class GarminSyncSource:
+    """Choose and read the configured fixture or authenticated Garmin source."""
 
     def __init__(
         self,
-        config: Config,
         fixture_loader: Any,
         remote_reader: GarminRemoteReader,
-        payload_service: Any,
-        state_service: Any,
-        operation_state_writer: SyncOperationStateWriter,
-        observer: SyncOperationObserver,
-        provider_resync_gate: ProviderResyncGate,
-        database_manager: DatabaseManager,
-        key_value_repository: KeyValueRepository,
-        logger: logging.Logger,
-        utc_now: Callable[[], str],
-        local_now: Callable[[], datetime],
         earliest_date: date,
-        all_sync_days: int,
+    ) -> None:
+        self._fixture_loader = fixture_loader
+        self._remote_reader = remote_reader
+        self._earliest_date = earliest_date
+
+    def available(self) -> bool:
+        return self._fixture_loader.path() is not None or self._remote_reader.available()
+
+    def configured(self) -> bool:
+        return self._fixture_loader.path() is not None or self._remote_reader.configured()
+
+    def fixture_enabled(self) -> bool:
+        return self._fixture_loader.path() is not None
+
+    def read(
+        self,
+        days: int,
+        end_date: date | None,
         *,
+        status: Callable[[str], None],
+        cancel_event: threading.Event | None,
+    ) -> tuple[dict[str, Any], date, str | None, str]:
+        if self.fixture_enabled():
+            payload = self._fixture_loader.load(days)
+            fallback_end = date.fromisoformat(
+                str(payload.get("end") or payload["synced_at"])[:10]
+            )
+            return payload, fallback_end, "fixture", self._earliest_date.isoformat()
+        payload, windows = self._remote_reader.fetch(
+            days, end_date, status=status, cancel_event=cancel_event
+        )
+        return payload, windows[-1][1], None, windows[0][0].isoformat()
+
+
+class GarminSyncCoordination:
+    """Own Garmin's shared operation gate, Morning lock, and wait policy."""
+
+    def __init__(
+        self,
         lock: Any = GARMIN_SYNC_LOCK,
+        gate: ProviderResyncGate | None = None,
+        *,
         monotonic: Callable[[], float] = time.monotonic,
         wait_seconds: float = 120.0,
     ) -> None:
-        self._config = config
-        self._fixture_loader = fixture_loader
-        self._remote_reader = remote_reader
-        self._payload_service = payload_service
-        self._state_service = state_service
-        self._operation_state_writer = operation_state_writer
-        self._observer = observer
-        self._provider_resync_gate = provider_resync_gate
-        self._database_manager = database_manager
-        self._key_value_repository = key_value_repository
-        self._logger = logger
-        self._utc_now = utc_now
-        self._local_now = local_now
-        self._earliest_date = earliest_date
-        self._all_sync_days = all_sync_days
         self._lock = lock
+        self._gate = gate
         self._monotonic = monotonic
         self._wait_seconds = wait_seconds
 
     def running(self) -> bool:
         return self._lock.locked()
 
-    def available(self) -> bool:
-        return (
-            self._fixture_loader.path() is not None or self._remote_reader.available()
+    def operation(self) -> AbstractContextManager[None]:
+        return self._gate.operation() if self._gate is not None else nullcontext()
+
+    def acquire(self, *, timeout: float | None = None) -> bool:
+        if timeout is None:
+            return self._lock.acquire(blocking=False)
+        return self._lock.acquire(timeout=timeout)
+
+    def release(self) -> None:
+        self._lock.release()
+
+    def wait_deadline(self) -> float:
+        return self._monotonic() + self._wait_seconds
+
+    def monotonic(self) -> float:
+        return self._monotonic()
+
+
+class GarminSyncLifecycleState:
+    """Own durable lifecycle timestamps, visible status, and lifecycle logs."""
+
+    def __init__(
+        self,
+        database_manager: Any,
+        key_value_repository: Any,
+        utc_now: Callable[[], str],
+        logger: logging.Logger,
+    ) -> None:
+        self._database_manager = database_manager
+        self._key_value_repository = key_value_repository
+        self._utc_now = utc_now
+        self._logger = logger
+
+    def last_sync_at(self) -> str | None:
+        return self._get("last_garmin_sync_at")
+
+    def set_sync_status(self, message: str) -> None:
+        self._set("garmin_sync_status", message)
+
+    def record_sync_started(self) -> None:
+        self._set("sync_operation_started_at", self._utc_now())
+
+    def record_sync_finished(self) -> None:
+        self._set("sync_operation_finished_at", self._utc_now())
+
+    def log_configuration_skip(self, reason: str) -> None:
+        self._logger.warning(
+            "External Garmin call skipped",
+            extra={
+                "event": "external_call_skipped",
+                "context": {
+                    "service": "garmin",
+                    "operation": "sync",
+                    "reason": reason,
+                },
+            },
         )
 
-    def configured(self) -> bool:
-        return (
-            self._fixture_loader.path() is not None or self._remote_reader.configured()
+    def log_failure(self, reason: str, error: Exception) -> None:
+        self._logger.error(
+            "Garmin synchronization failed",
+            extra={"event": "garmin_sync_failed", "context": {"reason": reason}},
+            exc_info=(type(error), error, error.__traceback__),
         )
+
+    def _get(self, key: str) -> str | None:
+        with self._database_manager.unit_of_work() as db:
+            return self._key_value_repository.get(db, key)
+
+    def _set(self, key: str, value: str) -> None:
+        with self._database_manager.unit_of_work() as db:
+            self._key_value_repository.set(db, key, value)
+
+
+class GarminSyncService:
+    """Own fixture and remote Garmin synchronization from gate to cleanup."""
+
+    def __init__(
+        self,
+        source: GarminSyncSource,
+        payload_service: Any,
+        state_service: Any,
+        operation_state_writer: SyncOperationStateWriter,
+        observer: SyncOperationObserver,
+        coordination: GarminSyncCoordination,
+        lifecycle_state: GarminSyncLifecycleState,
+    ) -> None:
+        self._source = source
+        self._payload_service = payload_service
+        self._state_service = state_service
+        self._operation_state_writer = operation_state_writer
+        self._observer = observer
+        self._coordination = coordination
+        self._lifecycle_state = lifecycle_state
+
+    def running(self) -> bool:
+        return self._coordination.running()
+
+    def available(self) -> bool:
+        return self._source.available()
+
+    def configured(self) -> bool:
+        return self._source.configured()
 
     def snapshot(self) -> dict[str, Any]:
         return self._payload_service.snapshot()
@@ -245,7 +352,7 @@ class GarminSyncService:
     ) -> dict[str, Any]:
         with (
             self._observer.observe("garmin", "data", reason, operation_id) as scope,
-            self._provider_resync_gate.operation(),
+            self._coordination.operation(),
         ):
             result = self._sync_inner(
                 days,
@@ -267,15 +374,15 @@ class GarminSyncService:
         wait_for_existing: bool,
         cancel_event: threading.Event | None,
     ) -> dict[str, Any]:
-        fixture = self._fixture_loader.path()
-        if not self._remote_reader.available() and fixture is None:
+        fixture = self._source.fixture_enabled()
+        if not self._source.available():
             self._configuration_error(
                 "library_unavailable",
                 "Die optionale Garmin-Bibliothek ist nicht installiert.",
                 "Die optionale Garmin-Bibliothek ist nicht installiert. Für lokale "
                 "Tests kann GARMIN_FIXTURE_PATH gesetzt werden.",
             )
-        if fixture is None and not self._remote_reader.configured():
+        if not fixture and not self._source.configured():
             message = (
                 "GARMIN_EMAIL oder ein bestehender GARMINTOKENS-Tokenstore ist "
                 "nicht konfiguriert."
@@ -283,49 +390,40 @@ class GarminSyncService:
             self._configuration_error("not_configured", message, message)
 
         self._raise_if_cancelled(cancel_event)
-        if not self._lock.acquire(blocking=False):
-            if fixture is not None or not wait_for_existing:
+        if not self._coordination.acquire():
+            if fixture or not wait_for_existing:
                 return {"status": "already_running"}
             return self._wait_for_existing(cancel_event)
         try:
-            return self._execute(
-                days, operation_id, end_date, fixture is not None, cancel_event
-            )
+            return self._execute(days, operation_id, end_date, cancel_event)
         except Exception as error:
             self._record_failure(operation_id, reason, error)
             raise
         finally:
-            self._set_value("garmin_sync_status", "")
-            self._lock.release()
+            self._lifecycle_state.set_sync_status("")
+            self._coordination.release()
 
     def _execute(
         self,
         days: int,
         operation_id: str,
         end_date: date | None,
-        fixture: bool,
         cancel_event: threading.Event | None,
     ) -> dict[str, Any]:
-        self._set_value("sync_operation_started_at", self._utc_now())
+        self._lifecycle_state.record_sync_started()
         self._set_status(operation_id, "fetching", 10, "Garmin-Daten werden gelesen…")
-        if fixture:
-            payload = self._fixture_loader.load(days)
-            self._raise_if_cancelled(cancel_event)
-            payload = self._payload_service.prepare_fixture(payload)
-            fallback_end = self._local_now().date()
-            source = "fixture"
-            historical_cursor = self._earliest_date.isoformat()
-        else:
-            payload, windows = self._remote_reader.fetch(
-                days,
-                end_date,
-                status=lambda message: self._set_value("garmin_sync_status", message),
-                cancel_event=cancel_event,
-            )
-            payload = self._payload_service.prepare_remote(payload)
-            fallback_end = windows[-1][1]
-            source = None
-            historical_cursor = windows[0][0].isoformat()
+        payload, fallback_end, source, historical_cursor = self._source.read(
+            days,
+            end_date,
+            status=self._lifecycle_state.set_sync_status,
+            cancel_event=cancel_event,
+        )
+        self._raise_if_cancelled(cancel_event)
+        payload = (
+            self._payload_service.prepare_fixture(payload)
+            if source == "fixture"
+            else self._payload_service.prepare_remote(payload)
+        )
         self._raise_if_cancelled(cancel_event)
         self._set_status(
             operation_id, "storing", 75, "Lokale Garmin-Daten werden aktualisiert…"
@@ -344,13 +442,13 @@ class GarminSyncService:
             100,
             "Garmin-Synchronisierung abgeschlossen.",
         )
-        self._set_value("sync_operation_finished_at", self._utc_now())
+        self._lifecycle_state.record_sync_finished()
         return result
 
     def _set_status(
         self, operation_id: str, phase: str, progress: int, message: str
     ) -> None:
-        self._set_value("garmin_sync_status", message)
+        self._lifecycle_state.set_sync_status(message)
         self._operation_state_writer.write(
             operation_id, "running", phase, progress, message
         )
@@ -358,15 +456,17 @@ class GarminSyncService:
     def _wait_for_existing(
         self, cancel_event: threading.Event | None
     ) -> dict[str, Any]:
-        previous_sync_at = self._get_value("last_garmin_sync_at")
-        deadline = self._monotonic() + self._wait_seconds
-        while self._monotonic() < deadline:
+        previous_sync_at = self._lifecycle_state.last_sync_at()
+        deadline = self._coordination.wait_deadline()
+        while self._coordination.monotonic() < deadline:
             self._raise_if_cancelled(cancel_event)
-            remaining = max(0.05, min(1.0, deadline - self._monotonic()))
-            if not self._lock.acquire(timeout=remaining):
+            remaining = max(
+                0.05, min(1.0, deadline - self._coordination.monotonic())
+            )
+            if not self._coordination.acquire(timeout=remaining):
                 continue
             try:
-                current_sync_at = self._get_value("last_garmin_sync_at")
+                current_sync_at = self._lifecycle_state.last_sync_at()
                 if current_sync_at and current_sync_at != previous_sync_at:
                     return {
                         "status": "ok",
@@ -374,7 +474,7 @@ class GarminSyncService:
                         "synced_at": current_sync_at,
                     }
             finally:
-                self._lock.release()
+                self._coordination.release()
             break
         raise AppError(
             503,
@@ -385,17 +485,7 @@ class GarminSyncService:
     def _configuration_error(
         self, log_reason: str, stored_message: str, public_message: str
     ) -> None:
-        self._logger.warning(
-            "External Garmin call skipped",
-            extra={
-                "event": "external_call_skipped",
-                "context": {
-                    "service": "garmin",
-                    "operation": "sync",
-                    "reason": log_reason,
-                },
-            },
-        )
+        self._lifecycle_state.log_configuration_skip(log_reason)
         self._state_service.persist_error(stored_message, "configuration")
         raise AppError(503, public_message)
 
@@ -418,23 +508,8 @@ class GarminSyncService:
                 "Garmin-Synchronisierung fehlgeschlagen.",
                 str(error),
             )
-            self._logger.error(
-                "Garmin synchronization failed",
-                extra={
-                    "event": "garmin_sync_failed",
-                    "context": {"reason": reason},
-                },
-                exc_info=(type(error), error, error.__traceback__),
-            )
-        self._set_value("sync_operation_finished_at", self._utc_now())
-
-    def _get_value(self, key: str) -> str | None:
-        with self._database_manager.unit_of_work() as db:
-            return self._key_value_repository.get(db, key)
-
-    def _set_value(self, key: str, value: str) -> None:
-        with self._database_manager.unit_of_work() as db:
-            self._key_value_repository.set(db, key, value)
+            self._lifecycle_state.log_failure(reason, error)
+        self._lifecycle_state.record_sync_finished()
 
     @staticmethod
     def _raise_if_cancelled(cancel_event: threading.Event | None) -> None:

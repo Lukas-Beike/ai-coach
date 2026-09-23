@@ -6,13 +6,19 @@ import threading
 import unittest
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import date
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from backend.config import Config
 from backend.errors import AppError
-from backend.sync.garmin_service import GarminRemoteReader, GarminSyncService
+from backend.sync.garmin_service import (
+    GarminRemoteReader,
+    GarminSyncCoordination,
+    GarminSyncLifecycleState,
+    GarminSyncService,
+    GarminSyncSource,
+)
 
 
 class _Database:
@@ -171,24 +177,24 @@ class GarminSyncServiceTests(unittest.TestCase):
         self.observer = _Observer()
         self.gate = _Gate()
         self.lock = lock or threading.Lock()
+        self.lifecycle_state = GarminSyncLifecycleState(
+            self.database,
+            self.key_values,
+            lambda: "2026-09-20T12:00:00+00:00",
+            Mock(),
+        )
         return GarminSyncService(
-            _config(),
-            self.fixture,
-            self.remote,
+            GarminSyncSource(self.fixture, self.remote, date(2000, 1, 1)),
             self.payload,
             self.state,
             self.writer,
             self.observer,
-            self.gate,
-            self.database,
-            self.key_values,
-            Mock(),
-            lambda: "2026-09-20T12:00:00+00:00",
-            lambda: datetime(2026, 9, 20, 14, tzinfo=timezone.utc),
-            date(2000, 1, 1),
-            -1,
-            lock=self.lock,
-            wait_seconds=wait_seconds,
+            GarminSyncCoordination(
+                self.lock,
+                self.gate,
+                wait_seconds=wait_seconds,
+            ),
+            self.lifecycle_state,
         )
 
     def test_fixture_flow_owns_status_persistence_and_cleanup(self):

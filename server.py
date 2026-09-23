@@ -154,7 +154,10 @@ from backend.sync.performance import (
 from backend.sync.garmin_service import (
     GARMIN_AUTOMATIC_SYNC_DAYS,
     GarminRemoteReader,
+    GarminSyncCoordination,
+    GarminSyncLifecycleState,
     GarminSyncService,
+    GarminSyncSource,
     shared_garmin_sync_lock,
 )
 from backend.sync.garmin_projection_service import GarminProjectionService
@@ -1006,12 +1009,13 @@ def garmin_remote_reader() -> GarminRemoteReader:
 
 def garmin_sync_service() -> GarminSyncService:
     """Compose the complete Garmin synchronization use case."""
+    state_service = garmin_sync_state_service()
     return GarminSyncService(
-        CONFIG,
-        garmin_fixture_loader(),
-        garmin_remote_reader(),
+        GarminSyncSource(
+            garmin_fixture_loader(), garmin_remote_reader(), SYNC_EARLIEST_DATE
+        ),
         garmin_payload_service(),
-        garmin_sync_state_service(),
+        state_service,
         SyncOperationStateWriter(
             database_manager(),
             KEY_VALUE_REPOSITORY,
@@ -1019,16 +1023,14 @@ def garmin_sync_service() -> GarminSyncService:
             REDACTOR.redact_text,
         ),
         sync_operation_observer(),
-        GARMIN_RESYNC_GATE,
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        LOGGER,
-        utc_now,
-        local_now,
-        SYNC_EARLIEST_DATE,
-        ALL_SYNC_DAYS,
-        lock=shared_garmin_sync_lock(),
-        wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
+        GarminSyncCoordination(
+            shared_garmin_sync_lock(),
+            GARMIN_RESYNC_GATE,
+            wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
+        ),
+        GarminSyncLifecycleState(
+            database_manager(), KEY_VALUE_REPOSITORY, utc_now, LOGGER
+        ),
     )
 
 
