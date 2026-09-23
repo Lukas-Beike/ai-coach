@@ -127,6 +127,7 @@ from backend.providers import weather as weather_provider
 from backend.providers.garmin import GarminClientFactory
 from backend.providers.garmin_morning import fetch_morning_body_battery
 from backend.http_api.state_versions import StateVersionService
+from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
@@ -376,7 +377,6 @@ SESSIONS: dict[str, dict[str, Any]] = {}
 RATE_LIMIT_LOCK = threading.Lock()
 RATE_LIMITS: dict[str, list[float]] = {}
 SYNC_JOB_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)$")
-SYNC_JOB_RESOLVE_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)/resolve$")
 
 
 CONFIG = load_config(ROOT, DATA_DIR)
@@ -756,6 +756,15 @@ def sync_job_queue_service() -> SyncJobQueueService:
         shared_sync_job_wake_event(),
         ALL_SYNC_DAYS,
         daily_sync_marker_service(),
+    )
+
+
+def sync_command_endpoint() -> SyncCommandEndpoint:
+    """Compose authenticated manual synchronization POST commands."""
+    return SyncCommandEndpoint(
+        sync_job_queue_service(), sync_state_repository(),
+        performance_refresh_service(), full_provider_resync_service(),
+        lambda: uuid.uuid4().hex, SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS,
     )
 
 
@@ -6417,104 +6426,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         return True
 
     def _handle_sync_post(self, path: str) -> bool:
-        if path == "/api/sync/jobs":
-            payload = self.read_json()
-            if not isinstance(payload, dict):
-                raise AppError(400, "Ein Synchronisationsjob muss als Objekt gesendet werden.", reason="invalid_job_request")
-            envelope = payload.get("payload")
-            if envelope is None:
-                envelope = {key: payload[key] for key in ("days", "force", "reason") if key in payload}
-            self.send_json(202, sync_job_queue_service().enqueue(
-                payload.get("provider"), payload.get("type", "refresh"), envelope, requested_by="user",
-            ))
-        elif match := SYNC_JOB_RESOLVE_RE.match(path):
-            self.send_json(
-                200,
-                sync_job_queue_service().resolve(match.group(1), self.read_json()),
-            )
-        elif path == "/api/sync":
-            payload = self.read_json()
-            repository = sync_state_repository()
-            requested_days = payload.get(
-                "days",
-                repository.sync_period(
-                    "intervals", SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS
-                ),
-            )
-            try:
-                days = repository.set_sync_period(
-                    "intervals",
-                    requested_days,
-                    ALL_SYNC_DAYS,
-                )
-            except ValueError as exc:
-                try:
-                    int(requested_days)
-                except (TypeError, ValueError):
-                    message = "Der Synchronisationszeitraum muss eine ganze Zahl sein."
-                else:
-                    message = "Der Zeitraum für intervals muss -1 oder zwischen 1 und 365 Tagen liegen."
-                raise AppError(400, message) from exc
-            self.send_json(202, sync_job_queue_service().enqueue(
-                "intervals", "refresh", {"days": days, "reason": "manual"}, requested_by="user",
-            ))
-        elif path == "/api/intervals/full-resync":
-            self._handle_full_resync("intervals")
-        elif path == "/api/performance/refresh":
-            self.send_json(200, performance_refresh_service().refresh())
-        elif path == "/api/garmin/sync":
-            payload = self.read_json()
-            repository = sync_state_repository()
-            requested_days = payload.get(
-                "days",
-                repository.sync_period(
-                    "garmin", SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS
-                ),
-            )
-            try:
-                days = repository.set_sync_period(
-                    "garmin",
-                    requested_days,
-                    ALL_SYNC_DAYS,
-                )
-            except ValueError as exc:
-                try:
-                    int(requested_days)
-                except (TypeError, ValueError):
-                    message = "Der Synchronisationszeitraum muss eine ganze Zahl sein."
-                else:
-                    message = "Der Zeitraum für garmin muss -1 oder zwischen 1 und 90 Tagen liegen."
-                raise AppError(400, message) from exc
-            self.send_json(202, sync_job_queue_service().enqueue(
-                "garmin", "refresh", {"days": days, "reason": "manual"}, requested_by="user",
-            ))
-        elif path == "/api/external-calendar/sync":
-            self.send_json(
-                202,
-                sync_job_queue_service().enqueue(
-                    "calendar", "refresh", {"reason": "manuell"}, requested_by="user"
-                ),
-            )
-        elif path == "/api/weather/sync":
-            self.send_json(202, sync_job_queue_service().enqueue(
-                "weather", "refresh", {"reason": "manuell", "force": True}, requested_by="user",
-            ))
-        elif path == "/api/garmin/full-resync":
-            self._handle_full_resync("garmin")
-        else:
+        if not SyncCommandEndpoint.handles(path):
             return False
+        payload = self.read_json() if SyncCommandEndpoint.needs_body(path) else None
+        status, result = sync_command_endpoint().execute(path, payload)
+        self.send_json(status, result)
         return True
-
-    def _handle_full_resync(self, provider: str) -> None:
-        payload = self.read_json()
-        if payload.get("confirm") != "FULL_RESYNC":
-            raise AppError(400, "Zum vollständigen Resync muss FULL_RESYNC bestätigt werden.")
-        self.send_json(
-            200,
-            full_provider_resync_service().resync(
-                provider, operation_id=uuid.uuid4().hex
-            ),
-        )
 
     def _handle_data_post(self, path: str, session: dict[str, Any]) -> bool:
         if path == "/api/change-history/undo/preview":
