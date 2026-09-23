@@ -12,7 +12,6 @@ import json
 import logging
 import mimetypes
 import os
-import platform
 import queue
 import re
 import secrets
@@ -38,6 +37,10 @@ from urllib.request import urlopen
 from backend.db import row_factory as database_row_factory
 from backend.diagnostics.history import CoachDiagnosticHistoryService
 from backend.diagnostics.logs import RecentLogEntriesService
+from backend.diagnostics.report import (
+    DiagnosticReportDependencies,
+    DiagnosticReportService,
+)
 from backend.errors import (
     COACH_ABORTED_ERROR,
     INTERNAL_SERVER_ERROR,
@@ -5173,73 +5176,34 @@ def coach_diagnostic_history_service() -> CoachDiagnosticHistoryService:
     )
 
 
-def diagnostic_report() -> dict[str, Any]:
-    snapshot = sync_state_repository().latest_snapshot()
-    garmin_status = garmin_projection_service().public_state()
-    with DB_LOCK, database() as db:
-        message_count = db.execute("SELECT COUNT(*) AS count FROM messages").fetchone()["count"]
-        library_count = db.execute("SELECT COUNT(*) AS count FROM workout_library").fetchone()["count"]
-        competition_count = db.execute("SELECT COUNT(*) AS count FROM competitions").fetchone()["count"]
-        checkin_count = db.execute("SELECT COUNT(*) AS count FROM athlete_checkins").fetchone()["count"]
-        activity_feedback_count = db.execute("SELECT COUNT(*) AS count FROM activity_feedback").fetchone()["count"]
-    return {
-        "generated_at": utc_now(),
-        "app": {"name": APP_NAME, "version": APP_VERSION},
-        "runtime": {
-            "python": platform.python_version(),
-            "platform": platform.platform(),
-        },
-        "configuration": {
-            "openai_configured": bool(CONFIG.openai_api_key),
-            "gemini_configured": bool(CONFIG.gemini_api_key),
-            "ai_provider": SETTINGS.selected_ai_provider(),
-            "intervals_configured": bool(CONFIG.intervals_api_key),
-            "garmin_library_available": garmin_client_factory().available(),
-            "garmin_configured": garmin_status["configured"],
-            "garmin_fixture_configured": garmin_fixture_loader().path() is not None,
-            "model": SETTINGS.selected_model(),
-            "thinking_level": SETTINGS.selected_thinking_level(),
-            "available_models": [option["id"] for option in SETTINGS.available_model_options()],
-        },
-        "openai": provider_state_service().summary("openai"),
-        "gemini": provider_state_service().summary("gemini"),
-        "coach_commands": coach_diagnostic_history_service().history(),
-        "sync": {
-            "last_success": get_kv("last_sync_at"),
-            "last_error": REDACTOR.redact_text(get_kv("last_sync_error") or "") or None,
-            "running": get_kv("sync_running") == "1",
-            "snapshot_counts": {
-                "activities": len(snapshot.get("recent_activities", [])) if snapshot else 0,
-                "wellness": len(snapshot.get("recent_wellness", [])) if snapshot else 0,
-                "calendar_events": len(snapshot.get("upcoming_calendar", [])) if snapshot else 0,
-            },
-        },
-        "performance_refresh": {
-            "last_refresh": get_kv("last_performance_refresh_at"),
-            "last_error": REDACTOR.redact_text(get_kv("last_performance_error") or "") or None,
-            "running": get_kv("performance_refresh_running") == "1",
-        },
-        "garmin": garmin_status,
-        "provider_freshness": provider_freshness_service().current(
-            profile=profile_service().get(),
-            garmin_has_core_error=bool(
-                garmin_sync_state_service().core_error_entries()
-            ),
-            garmin_tokenstore_exists=Path(CONFIG.garmin_tokenstore).exists(),
-        ),
-        "external_calendar": {
-            "configured": bool(CONFIG.calendar_ical_url),
-            "last_sync_at": get_kv("last_external_calendar_sync_at"),
-            "last_error": REDACTOR.redact_text(get_kv("last_external_calendar_sync_error") or "") or None,
-            "running": external_calendar_sync_service().running(),
-            "events": len(external_calendar_reader().list_events()),
-        },
-        "morning_checkin": morning_checkin_state_service().state(),
-        "database": {"messages": message_count, "workout_library": library_count, "workout_library_state": workout_library_sync_state_service().summary(), "competitions": competition_count, "athlete_checkins": checkin_count, "activity_feedback": activity_feedback_count, "external_calendar_events": len(external_calendar_reader().list_events())},
-        "logs": recent_log_entries_service().list(),
-        "debug_capture": {**DIAGNOSTIC_CAPTURE.status(), "entries": DIAGNOSTIC_CAPTURE.entries()},
-        "note": "Zugangsdaten, Tokens, Rohantworten und Athleteninhalte sind ausgeschlossen; die optionale Diagnoseaufzeichnung speichert nur technische Antwortformen und Metadaten.",
-    }
+def diagnostic_report_service() -> DiagnosticReportService:
+    """Compose the privacy-safe diagnostics report from its owning services."""
+    return DiagnosticReportService(DiagnosticReportDependencies(
+        database_manager=database_manager(),
+        db_lock=DB_LOCK,
+        key_values=KEY_VALUE_REPOSITORY,
+        config=CONFIG,
+        settings=SETTINGS,
+        app_name=APP_NAME,
+        app_version=APP_VERSION,
+        utc_now=utc_now,
+        sync_state=sync_state_repository(),
+        garmin_projection=garmin_projection_service(),
+        garmin_client_factory=garmin_client_factory(),
+        garmin_fixture_loader=garmin_fixture_loader(),
+        provider_state=provider_state_service(),
+        coach_history=coach_diagnostic_history_service(),
+        redactor=REDACTOR,
+        provider_freshness=provider_freshness_service(),
+        profile=profile_service(),
+        garmin_sync_state=garmin_sync_state_service(),
+        external_calendar_sync=external_calendar_sync_service(),
+        external_calendar_reader=external_calendar_reader(),
+        morning_checkin=morning_checkin_state_service(),
+        workout_library_sync_state=workout_library_sync_state_service(),
+        recent_logs=recent_log_entries_service(),
+        diagnostic_capture=DIAGNOSTIC_CAPTURE,
+    ))
 
 
 def privacy_export() -> dict[str, Any]:
@@ -6085,7 +6049,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, {"entries": recent_log_entries_service().list(limit)})
         elif path == "/api/diagnostics":
             require_auth(self)
-            self.send_json(200, diagnostic_report())
+            self.send_json(200, diagnostic_report_service().report())
         elif path == "/api/diagnostics/capture":
             require_auth(self)
             self.send_json(200, DIAGNOSTIC_CAPTURE.status())

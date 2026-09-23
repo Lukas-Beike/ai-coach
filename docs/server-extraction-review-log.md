@@ -4848,3 +4848,41 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   getesteten kombinierten Stand leer; erneut vier Loop-, vier Startup-,
   vier Architekturtests und Inventar-/Diff-Check **PASS**. CI/Sonar des
   künftigen PR-Stands stehen aus.
+
+- PR #714 auf Head `1594524c`: SonarCloud `new_violations=0`,
+  Python-/Container-/Browser-CI und Codex-Review **PASS**, keine offenen
+  Threads; Squash-Merge am `2026-09-23T14:00:08Z`, Commit
+  `894407586abcd85e52b3791f3c5b275be427a221` auf
+  `origin/develop` erreichbar.
+
+## P9 Diagnosebericht — integrierter Prüfstand
+
+- GPT-6-Luna/high-Worker-Commit `f18dc66c`, nach dem geprüften
+  P8-/P7-/P10-Stand als `58dae268` integriert. Frühes Root-Diffreview
+  stellte einen unnötig vorgezogenen Kalender-Read fest (**FAIL**);
+  Korrekturauftrag an denselben Worker, committed Stand erhält beide
+  getrennten Event-Reads an ihren ursprünglichen Projektionsstellen.
+  Root-Review des tatsächlichen committed Diffs **PASS**:
+  `DiagnosticReportService.report()` besitzt den gesamten Report,
+  einschließlich fünf DB-Zählern, acht KV-Reads, Provider-Frische,
+  redigierten Logs und Capture-Status/Entries. `server.py` enthält nur
+  eine Composition-Factory; der Handler ruft den Service. Keine Backend-
+  Rückimporte, Server-Callbacks, Remote-Writes oder neuen Rohdatenfelder.
+  DB-Lock/UOW, Datenschutz-/Redaktionsgrenzen und API-Shape bleiben
+  erhalten. Root-Audit der eigenständigen Capture-Endpunkte: `status()`
+  und `set_enabled()` gehören bereits `DiagnosticCapture`; der Handler
+  übernimmt nur Auth, Body-Lesen und Transport. Damit ist die P9-
+  Diagnose-/Capture-Projektion vollständig zugeordnet.
+- Worker-Gesamtsuite **PASS**: 2.297 Tests, 12 Skips; 14 Diagnose-
+  Follow-ups, zwei neue Service-, vier Architekturtests, scoped Ruff,
+  Compile/Diff **PASS**. Integriert erneut 14 Follow-ups, zwei Service-,
+  vier Architekturtests, Inventar/Compile/Ruff/Diff **PASS**.
+  `server.py` hat 6.639 physische Zeilen, P9 bleibt für Privacy und
+  Backup/Restore offen. Neu gebautes
+  kombiniertes Read-only-Container-Image: vollständige Suite **PASS**,
+  2.303 Tests, 10 Skips in 19,917 s. CI/Sonar des künftigen PR-Stands
+  stehen noch aus. Nach PR #714 `origin/develop` mit `65c74549`
+  integriert; nur generiertes Inventar und Review-Text hatten Konflikte.
+  Finaler Tree-Diff gegenüber dem vollständig getesteten Stand leer;
+  erneut zwei Service-, 14 Follow-up-, vier Architekturtests sowie
+  Inventar-/Diff-Check **PASS**.

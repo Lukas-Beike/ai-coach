@@ -557,7 +557,13 @@ Abhängigkeit: P1 sowie Ressourcen-/Worker-Verträge aus P6 und P8.
   - [x] Begrenzte, redigierte Logprojektion und alle Aufrufer zu
     `diagnostics/logs.py` verschieben; Diagnosebericht und Capture bleiben
     bis zu ihrem eigenen Service-Umzug offen.
-  - [ ] Diagnosebericht, Capture-Projektion und Aufrufer auslagern.
+  - [x] Diagnosebericht, Capture-Projektion und Aufrufer auslagern;
+    Capture-Status und Enable bleiben bereits dem konkreten
+    `DiagnosticCapture` zugeordnet, die HTTP-Aufrufer sind nur Transport.
+    - [x] Vollständigen Diagnosebericht einschließlich redigierter Logs,
+      Capture-Status/Entries, DB-Zähler und Provider-Frische einem
+      konkreten `DiagnosticReportService` zuordnen; der eigenständige
+      Capture-Endpunkt delegiert unverändert an `DiagnosticCapture`.
 - [ ] HTTP-Streaming von Exportdateien bleibt im HTTP-Adapter.
 
 Abnahme: Ungültige Backups verändern keine Daten; Restore blockiert

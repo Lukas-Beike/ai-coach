@@ -8260,10 +8260,10 @@ class CoachTests(unittest.TestCase):
         server.LOGGER.error("failed request with sk-test-secret-value")
         for handler in server.LOGGER.handlers:
             handler.flush()
-        report_text = json.dumps(server.diagnostic_report())
+        report_text = json.dumps(server.diagnostic_report_service().report())
         self.assertNotIn("sk-test-secret-value", report_text)
-        self.assertIn("logs", server.diagnostic_report())
-        self.assertIn("openai", server.diagnostic_report())
+        self.assertIn("logs", server.diagnostic_report_service().report())
+        self.assertIn("openai", server.diagnostic_report_service().report())
 
     def test_redaction_covers_garmin_email_encoded_url_and_structural_credentials(self):
         email = "Athlete.Redaction@example.invalid"
@@ -8317,7 +8317,7 @@ class CoachTests(unittest.TestCase):
 
             server.set_kv("last_garmin_error", json.dumps([{"source": "login", "message": f"{email} {calendar_url}"}]))
             state = server.garmin_projection_service().public_state()
-            report = json.dumps(server.diagnostic_report(), ensure_ascii=False)
+            report = json.dumps(server.diagnostic_report_service().report(), ensure_ascii=False)
         self.assertNotIn(email, json.dumps(state, ensure_ascii=False))
         self.assertNotIn(calendar_url, report)
         self.assertIn("calendar.example.invalid", report)
@@ -8387,7 +8387,7 @@ class CoachTests(unittest.TestCase):
             diagnostic_capture=server.DIAGNOSTIC_CAPTURE,
             operation_context=sync_observation.operation_context(),
         )
-        report = server.diagnostic_report()
+        report = server.diagnostic_report_service().report()
         report_text = json.dumps(report, ensure_ascii=False)
         self.assertIn("bodyBattery", report_text)
         self.assertNotIn("must-not-appear", report_text)
@@ -8409,7 +8409,7 @@ class CoachTests(unittest.TestCase):
             diagnostic_capture=server.DIAGNOSTIC_CAPTURE,
             operation_context=sync_observation.operation_context(),
         )
-        self.assertNotIn("not captured", json.dumps(server.diagnostic_report(), ensure_ascii=False))
+        self.assertNotIn("not captured", json.dumps(server.diagnostic_report_service().report(), ensure_ascii=False))
 
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
         server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
@@ -9247,7 +9247,7 @@ class CoachTests(unittest.TestCase):
         with server.DB_LOCK, server.database() as db:
             count = db.execute("SELECT COUNT(*) AS count FROM provider_refresh_history").fetchone()["count"]
         self.assertEqual(count, server.sync_freshness.PROVIDER_REFRESH_MAX_ROWS)
-        report = server.diagnostic_report()
+        report = server.diagnostic_report_service().report()
         self.assertIn("provider_freshness", report)
         self.assertNotIn("operation-", json.dumps(report))
 
