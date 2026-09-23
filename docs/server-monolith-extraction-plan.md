@@ -614,6 +614,9 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     auf; Rate-Limit-Zustand bleibt bei `RateLimiter`.
 - [ ] Öffentliche Bootstrap-/State-Projektionen und Pagination zuordnen;
   Projektionen erhalten Daten über Domänenlesefunktionen.
+  - [x] Begrenzte Performance-/Garmin- und lokale Feedback-/Check-in-
+    Projektionen konkreten `http_api/`-Services zuordnen; übrige
+    `public_state`-Felder bleiben offen.
   - [x] Lokalen Bootstrap-Lesevorlauf und Wetter-Follow-up mit
     bestehender UOW-/Lock-Grenze in konkrete `http_api/`-Eigentümer
     verschieben; übrige `public_state`-Projektionen bleiben offen.
