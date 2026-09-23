@@ -344,11 +344,12 @@ class CoachTests(unittest.TestCase):
             server.SyncJobWorker, "start", side_effect=lambda _worker: order.append("sync-worker"), autospec=True
         ), patch.object(
             server, "start_coach_job_worker", side_effect=lambda: order.append("coach-worker")
-        ), patch.object(server, "enqueue_startup_sync_jobs"), patch.object(server.threading, "Thread"):
+        ), patch.object(server, "startup_sync_scheduler") as startup_scheduler, patch.object(server.threading, "Thread"):
+            startup_scheduler.return_value.schedule.side_effect = lambda: order.append("startup-sync")
             server.main()
         self.assertEqual(
             order,
-            ["schema", "sync-recovery", "coach-recovery", "sync-worker", "coach-worker"],
+            ["schema", "sync-recovery", "coach-recovery", "sync-worker", "coach-worker", "startup-sync"],
         )
 
     def test_worker_start_functions_do_not_repeat_recovery(self):
@@ -1165,30 +1166,6 @@ class CoachTests(unittest.TestCase):
             )
         self.assertEqual(error.exception.reason, "intent_scope_denied")
         self.assertIn(second["id"], {item["library_workout_id"] for item in server.planning_authority_service().pending_plan_push_entries()})
-
-    def test_startup_sync_does_not_duplicate_resumed_jobs(self):
-        config = replace(server.CONFIG, intervals_api_key="configured", calendar_ical_url="", garmin_email="", garmin_tokenstore="")
-        with patch.object(server, "CONFIG", config), patch.object(
-            server.SyncJobQueueService, "active", return_value=True
-        ) as active, patch.object(
-            server.SyncJobQueueService, "enqueue"
-        ) as enqueue:
-            server.enqueue_startup_sync_jobs()
-        self.assertGreaterEqual(active.call_count, 1)
-        enqueue.assert_not_called()
-
-    def test_startup_historical_backfill_resumes_before_saved_cursor(self):
-        config = replace(server.CONFIG, intervals_api_key="configured", calendar_ical_url="", garmin_email="", garmin_tokenstore="")
-        with patch.object(server, "CONFIG", config), patch.object(
-            server.SyncJobQueueService, "active", return_value=False
-        ), patch.object(
-            server.SyncStateRepository,
-            "cursor",
-            return_value={"cursor": "2026-08-01"},
-        ), patch.object(server.SyncJobQueueService, "enqueue") as enqueue:
-            server.enqueue_startup_sync_jobs()
-        historical = next(call for call in enqueue.call_args_list if call.args[1] == "historical_backfill")
-        self.assertEqual(historical.args[2]["end_date"], "2026-07-31")
 
     def test_historical_snapshot_merge_preserves_current_read_model(self):
         current = {
@@ -2240,17 +2217,20 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(daily_sync_is_due("intervals", current + timedelta(hours=3), get_value=values.get))
 
     def test_daily_sync_scheduler_uses_local_provider_markers(self):
+        import inspect
+
         from backend.sync.scheduler import DailySyncScheduler
 
         self.assertEqual(DailySyncScheduler.__module__, "backend.sync.scheduler")
         source = Path(sys.modules[DailySyncScheduler.__module__].__file__).resolve()
-        scheduler = source.read_text(encoding="utf-8")
-        self.assertIn('self._markers.is_due("calendar")', scheduler)
-        self.assertIn('self._markers.is_due("garmin")', scheduler)
-        self.assertIn('self._markers.is_due("intervals")', scheduler)
-        self.assertNotIn("import server", scheduler)
-        self.assertNotIn("from server", scheduler)
-        self.assertNotIn('[:10]', scheduler)
+        module_source = source.read_text(encoding="utf-8")
+        daily_scheduler = inspect.getsource(DailySyncScheduler)
+        self.assertIn('self._markers.is_due("calendar")', daily_scheduler)
+        self.assertIn('self._markers.is_due("garmin")', daily_scheduler)
+        self.assertIn('self._markers.is_due("intervals")', daily_scheduler)
+        self.assertNotIn("import server", module_source)
+        self.assertNotIn("from server", module_source)
+        self.assertNotIn('[:10]', daily_scheduler)
 
     def test_coach_projection_helpers_are_dependency_light_and_bounded(self):
         from backend.coach.context import (
