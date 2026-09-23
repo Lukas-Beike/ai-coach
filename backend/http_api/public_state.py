@@ -24,6 +24,7 @@ from backend.planning import season as planning_season
 from backend.sync import intervals_state
 
 if TYPE_CHECKING:
+    from backend.athlete.profile import ProfileService
     from backend.coach.context import CoachQuickActionsService
     from backend.coach.conversation import CoachMessageService
     from backend.coach.morning import MorningCheckinStateService
@@ -33,14 +34,13 @@ if TYPE_CHECKING:
     from backend.planning.training_plans import TrainingPlanService
     from backend.providers.state import ProviderStateService
     from backend.settings import SettingsService
-    from backend.sync.full_resync import FullProviderResyncService
     from backend.sync.freshness import ProviderFreshnessService
+    from backend.sync.full_resync import FullProviderResyncService
     from backend.sync.garmin import GarminSyncStateService
     from backend.sync.garmin_service import GarminSyncService
     from backend.sync.library import WorkoutLibrarySyncStateService
     from backend.sync.state import SyncStateRepository
     from backend.sync.status import SyncPublicStateService
-    from backend.athlete.profile import ProfileService
 
 
 @dataclass(frozen=True)
