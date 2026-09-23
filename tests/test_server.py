@@ -1964,12 +1964,13 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("activities", json.dumps(status["message"]))
 
 
-    def test_daily_sync_markers_are_separate_per_provider(self):
-        local_day = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
-        server.mark_daily_sync("intervals", local_day)
-        self.assertFalse(server.daily_sync_due("intervals", local_day))
-        self.assertTrue(server.daily_sync_due("garmin", local_day))
-        self.assertTrue(server.daily_sync_due("calendar", local_day))
+    def test_automatic_sync_markers_are_separate_per_provider_and_hourly(self):
+        current = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
+        server.mark_daily_sync("intervals", current)
+        self.assertFalse(server.daily_sync_due("intervals", current))
+        self.assertTrue(server.daily_sync_due("intervals", current + timedelta(hours=1)))
+        self.assertTrue(server.daily_sync_due("garmin", current))
+        self.assertTrue(server.daily_sync_due("calendar", current))
 
     def test_daily_sync_marker_module_is_dependency_light(self):
         from backend.sync.daily import daily_sync_is_due, mark_daily_sync
@@ -1979,8 +1980,9 @@ class CoachTests(unittest.TestCase):
 
         self.assertTrue(daily_sync_is_due("intervals", current, get_value=values.get))
         mark_daily_sync("intervals", current, set_value=values.__setitem__)
-        self.assertEqual(values["daily_sync_intervals_local_date"], "2026-03-30")
+        self.assertEqual(values["sync_intervals_last_success_at"], current.isoformat())
         self.assertFalse(daily_sync_is_due("intervals", current, get_value=values.get))
+        self.assertTrue(daily_sync_is_due("intervals", current + timedelta(hours=1), get_value=values.get))
 
     def test_daily_sync_loop_uses_local_provider_markers(self):
         source = Path(server.__file__).read_text(encoding="utf-8")

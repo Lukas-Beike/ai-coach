@@ -154,7 +154,9 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="", calendar_ical_url="")), patch.object(server, "garmin_fixture_path", return_value="synthetic"), patch.object(server, "daily_sync_due", return_value=True):
             server.schedule_daily_sync_jobs()
         with server.DB_LOCK, server.database() as db:
-            self.assertEqual([row["provider"] for row in db.execute("SELECT provider FROM sync_jobs")], ["garmin"])
+            rows = db.execute("SELECT provider, payload FROM sync_jobs").fetchall()
+        self.assertEqual([row["provider"] for row in rows], ["garmin"])
+        self.assertEqual(json.loads(rows[0]["payload"])["days"], 2)
 
     def test_ongoing_calendar_event_and_nested_alarm(self):
         feed = b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:synthetic\r\nDTSTART;VALUE=DATE:20260906\r\nDTEND;VALUE=DATE:20260909\r\nSUMMARY:Trip\r\nDESCRIPTION:[SHORT_ONLY]\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
