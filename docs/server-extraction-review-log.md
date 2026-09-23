@@ -4863,13 +4863,16 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   eine Composition-Factory; der Handler ruft den Service. Keine Backend-
   Rückimporte, Server-Callbacks, Remote-Writes oder neuen Rohdatenfelder.
   DB-Lock/UOW, Datenschutz-/Redaktionsgrenzen und API-Shape bleiben
-  erhalten.
+  erhalten. Root-Audit der eigenständigen Capture-Endpunkte: `status()`
+  und `set_enabled()` gehören bereits `DiagnosticCapture`; der Handler
+  übernimmt nur Auth, Body-Lesen und Transport. Damit ist die P9-
+  Diagnose-/Capture-Projektion vollständig zugeordnet.
 - Worker-Gesamtsuite **PASS**: 2.297 Tests, 12 Skips; 14 Diagnose-
   Follow-ups, zwei neue Service-, vier Architekturtests, scoped Ruff,
   Compile/Diff **PASS**. Integriert erneut 14 Follow-ups, zwei Service-,
   vier Architekturtests, Inventar/Compile/Ruff/Diff **PASS**.
-  `server.py` hat 6.639 physische Zeilen, P9 bleibt für eigenständigen
-  Capture-Endpunkt, Privacy und Backup/Restore offen. Neu gebautes
+  `server.py` hat 6.639 physische Zeilen, P9 bleibt für Privacy und
+  Backup/Restore offen. Neu gebautes
   kombiniertes Read-only-Container-Image: vollständige Suite **PASS**,
   2.303 Tests, 10 Skips in 19,917 s. CI/Sonar des künftigen PR-Stands
   stehen noch aus.
