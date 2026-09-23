@@ -6225,3 +6225,46 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `server.py` 4.691 physische Zeilen, 223 Definitionen; P7
   verbleiben 48 Definitionen/28 globale Bindungen, P0=0. PR-CI und
   Merge stehen aus.
+
+## P7 atomarer Trainings-Patch — bestätigter #756-Merge
+
+- #756 auf Head `c1bb12d5` bestand Root-Gate, native und frische
+  Read-only-Docker-Vollsuite, CI-Testshards, Container, Qualität,
+  Sonar und CodeQL. Einmalig angeforderter Codex-Code-/Security-
+  Review **PASS**, null offene Threads. Der zum Mergezeitpunkt noch
+  laufende optionale Browser-Smoke-/Accessibility-Check wurde
+  anschließend **PASS** (5m46s).
+- Squash-Merge `77551f689c2deec9b980f48f40e0ad8223217336` am
+  `2026-09-23T23:25:21Z` mit `state=MERGED`, `mergedAt` und
+  Erreichbarkeit auf `origin/develop` bestätigt.
+- Nächster Schritt: P7-Planungskommando-Claim/Ausführung/Receipt als
+  zusammenhängenden Use Case verlagern; ein einzelner GPT-6-Luna-
+  Worker übernimmt unabhängig davon nur die stateless
+  Tool-Call-Metadaten. Deren Patches werden sequenziell integriert.
+
+## P7 strukturierte Planungskommandos — Root-Ausgangsstand
+
+- Auf bestätigtem #756-Merge `77551f68` hat Root die acht zusammen-
+  hängenden Planungsbefehl-Funktionen einschließlich Scope-
+  Vorbereitung, Artifact-/Revisionsprüfung, sessiongebundenem
+  Claim/Replay, atomarer Tool-Ausführung und finalem Receipt
+  vollständig in `CoachPlanningCommandService.execute` verlagert.
+  Der HTTP-Handler delegiert direkt; kein Server-Wrapper oder
+  Backend-Rückimport. `DatabaseManager` und `DB_LOCK` bleiben
+  Transaktionseigentümer; Tool-Dispatcher, Receipt- und
+  Fehlerdienste sind konkrete injizierte Backend-Eigentümer.
+- Sechs neue direkte Tests prüfen HTTP-Delegation, Replay und
+  Session-/Conversation-Isolation ohne doppelte Wirkung,
+  einen laufenden Claim ohne Doppeleffekt, unzulässige Kommandos
+  ohne Claim, stale Revision vor Claim und
+  Rollback mit dauerhaftem Fehler-Receipt. Dies deckt die neuen
+  risikoreichen Grenzen gezielt ab, ergänzt durch bestehende
+  Coach-Tool-/Dialog-Integrationen; Testanzahl allein ist nicht
+  das Abnahmekriterium. Fokussiert 111 Tests **PASS**;
+  native Vollsuite 2.472 Tests/12 Skips **PASS** und finales
+  frisches Read-only-Docker-Image 2.472 Tests/11 Skips **PASS**;
+  Ruff/Compile, Inventar-`--check` und Diff-Check **PASS**.
+  Root prüfte das tatsächliche Diff samt Transaktions-, Autorisierungs-
+  und Fehlergrenzen: **PASS**; PR-CI und Review stehen noch aus.
+  `server.py` 4.579 physische Zeilen nach letzter Leerzeilenkorrektur;
+  P7-Rest 40 Definitionen. P7 bleibt offen.
