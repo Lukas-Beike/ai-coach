@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 import test_server as fixtures
 from backend.planning import workouts as planning_workouts
 from backend.coach.proposals import COACH_ACTION_TTL_SECONDS, prune_expired_coach_proposals
+from backend.coach.authorization import coach_session_key
 from backend.sync.intervals import IntervalsSyncService
 from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
 from support import reset_application_state
@@ -133,9 +134,9 @@ class CoachReviewTests(unittest.TestCase):
         client_turn_id = "summary-recovery"
         intent = self.intent("manage_training_templates", ["local_template"])
         message = "Speichere die Vorlage und erstelle einen Trainingsplan fuer die naechsten acht Wochen."
-        server.enqueue_background_coach_job(message, client_turn_id, csrf_hash, operation_id="summary-recovery-op")
+        server.coach_job_submission_service().enqueue(message, client_turn_id, csrf_hash, operation_id="summary-recovery-op")
         persisted_receipt = {
-            "mode": "background", "phase": "preparing", "session_key": server._coach_session_key(csrf_hash),
+            "mode": "background", "phase": "preparing", "session_key": coach_session_key(csrf_hash),
             "command_receipts": [{
                 "call_id": "template-success", "tool": "manage_training_templates", "effect_key": "template-success",
                 "result": {"ok": True, "status": "completed"},
@@ -249,7 +250,7 @@ class CoachReviewTests(unittest.TestCase):
 
 
     def test_running_foreign_command_is_neither_executed_nor_closed(self):
-        identity = {"session_key": server._coach_session_key("owner"), "status": "running"}
+        identity = {"session_key": coach_session_key("owner"), "status": "running"}
         with server.database() as db:
             db.execute("INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES ('foreign', 'foreign', 'review-conversation', '{}', 'local', 'running', ?, ?, ?)", (json.dumps(identity), server.utc_now(), server.utc_now()))
         with self.assertRaises(server.AppError) as error:

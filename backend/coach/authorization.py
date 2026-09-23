@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 from datetime import date
 from typing import Any
 
 from backend.errors import AppError
+
+
+def coach_session_key(session_csrf_hash: str) -> str:
+    """Bind persisted Coach work to a session without storing its CSRF hash."""
+    return hashlib.sha256(str(session_csrf_hash or "").encode("utf-8")).hexdigest()
 
 
 REQUEST_SCHEMA = {

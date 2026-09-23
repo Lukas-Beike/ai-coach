@@ -529,6 +529,10 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   - [x] Durable Background-Claims, Contention-Requeue und gespeicherte
     Nutzernachrichten einem konkreten `CoachJobStore` zuordnen; Enqueue,
     Resume, Cancel und Worker-Turn-Orchestrierung bleiben offen.
+  - [x] Background-Enqueue samt Validierung, Session-Bindung, Replay,
+    Anhangsquote und atomarer Command-/Message-Persistenz einem
+    `CoachJobSubmissionService` zuordnen; Worker-/Turn-Ausführung,
+    Resume und Cancel bleiben offen.
 - [ ] Manuellen Morning Check-in mit Frische-Gate auslagern; die auf `develop`
   entfernte automatische Reservierungs-/Retry-Steuerung nicht wieder einführen.
   - [x] Manuellen Garmin-Schlaf-/Body-Battery-Vorbereitungspfad und

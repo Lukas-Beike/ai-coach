@@ -294,7 +294,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
         self.assertTrue(model.call_args.args[0]["instructions"].startswith("Fresh Garmin data"))
 
     def test_restart_job_observes_cancel_during_session_restore(self):
-        server.enqueue_background_coach_job("Synthetic request", "cancel-race", "synthetic-session", operation_id="cancel-operation")
+        server.coach_job_submission_service().enqueue("Synthetic request", "cancel-race", "synthetic-session", operation_id="cancel-operation")
         job = server.coach_job_store().claim()
         coach_streams.CHAT_STREAM_REGISTRY.clear_state()  # Process restart loses in-memory events.
         def restore(_):

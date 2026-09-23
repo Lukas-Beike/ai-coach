@@ -1,8 +1,11 @@
 from __future__ import annotations
-from backend.coach.attachments import (MAX_ATTACHMENT_STORAGE_BYTES, MAX_GEMINI_INLINE_IMAGE_BYTES,
-                                      MAX_REQUEST_BYTES, gemini_inline_image_bytes, model_input,
-                                      provider_attachment_data,
-                                      validate_attachments)
+from backend.coach.attachments import (
+    MAX_ATTACHMENT_STORAGE_BYTES,
+    MAX_GEMINI_INLINE_IMAGE_BYTES,
+    MAX_REQUEST_BYTES,
+    model_input,
+    provider_attachment_data,
+)
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.profile_update import CoachProfileUpdateService
 from backend.coach import streams as coach_streams
@@ -271,6 +274,7 @@ from backend.coach.proposals import (
 )
 from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools, validate_request
 from backend.coach.job_store import CoachJobStore
+from backend.coach.job_submission import CoachJobSubmissionService
 from backend.coach.morning import ManualMorningCheckinService, MorningCheckinStateService
 from backend.coach.tools import build_tool_contracts
 from backend.coach.service import (
@@ -279,7 +283,7 @@ from backend.coach.service import (
     dialogue_plan_effect_key, dialogue_request_binding_key,
     dialogue_scope_repair_key,
 )
-from backend.coach.authorization import authorized_operations, coach_execution_scope, require_coach_scope, require_operation, scope_values
+from backend.coach.authorization import authorized_operations, coach_execution_scope, coach_session_key, require_coach_scope, require_operation, scope_values
 from backend.coach.outcomes import COACH_ACTION_LABELS, coach_effect_label, coach_failure_lines, coach_observed_sync_lines, unresolved_coach_steps
 from backend.http_api.responses import (
     header_items as response_header_items,
@@ -1989,6 +1993,17 @@ def coach_job_store() -> CoachJobStore:
     )
 
 
+def coach_job_submission_service() -> CoachJobSubmissionService:
+    """Compose validation and committed side effects for background submissions."""
+    return CoachJobSubmissionService(
+        database_manager, CHAT_REPOSITORY, DB_LOCK, SETTINGS,
+        runtime_events.STATE_EVENT_BUFFER, coach_streams.CHAT_STREAM_REGISTRY,
+        COACH_JOB_WAKE, utc_now, background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS,
+        max_attachment_storage_bytes=MAX_ATTACHMENT_STORAGE_BYTES,
+        max_gemini_inline_image_bytes=MAX_GEMINI_INLINE_IMAGE_BYTES,
+    )
+
+
 def coach_dialogue_read_service() -> CoachDialogueReadService:
     """Compose local, read-only Coach dialogue projections."""
     manager = database_manager()
@@ -2231,10 +2246,6 @@ def output_text(response: dict[str, Any]) -> str:
     return openai_provider.response_text(response)
 
 
-def _coach_session_key(session_csrf_hash: str) -> str:
-    return hashlib.sha256(str(session_csrf_hash or "").encode("utf-8")).hexdigest()
-
-
 def _coach_command_receipt(value: Any) -> dict[str, Any]:
     return command_receipt(value)
 
@@ -2251,162 +2262,6 @@ def _merge_coach_command_receipt(client_turn_id: str, updates: dict[str, Any]) -
     return receipt
 
 
-def _active_background_coach_job(session_csrf_hash: str, operation_id: str | None = None) -> dict[str, Any] | None:
-    session_key = _coach_session_key(session_csrf_hash)
-    with DB_LOCK, database() as db:
-        rows = db.execute(
-            "SELECT client_turn_id, status, receipt, updated_at FROM coach_commands "
-            "WHERE status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 50"
-        ).fetchall()
-    for row in rows:
-        receipt = _coach_command_receipt(row.get("receipt"))
-        if receipt.get("mode") != "background" or receipt.get("session_key") != session_key:
-            continue
-        if operation_id and str(receipt.get("operation_id") or "") != str(operation_id):
-            continue
-        return {**dict(row), "receipt": receipt}
-    return None
-
-
-def _background_coach_request(
-    message: str,
-    client_turn_id: str,
-    request_kind: str | None,
-    attachments: Any,
-) -> tuple[str, str, str | None, list[dict[str, Any]], dict[str, Any]]:
-    message = str(message or "").strip()
-    client_turn_id = str(client_turn_id or "").strip()
-    request_kind = str(request_kind or "").strip() or None
-    if request_kind not in {None, "morning_checkin"}:
-        raise AppError(400, "Unbekannte Coach-Schnellaktion.", reason="invalid_request_kind")
-    try:
-        validated_attachments = validate_attachments(attachments)
-    except ValueError:
-        raise AppError(400, "Ungültiger Anhang. Erlaubt: bis zu 4 GPX-, FIT-, PNG-, JPEG- oder WebP-Dateien mit je höchstens 5 MB.", reason="invalid_attachment") from None
-    if validated_attachments and not message:
-        message = "Bitte analysiere die angehängten Dateien."
-    scope = coach_execution_scope(None, background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS)
-    if not message or len(message) > 12_000:
-        raise AppError(400, "Die Coach-Nachricht ist leer oder zu lang.", reason="invalid_chat_message")
-    if not client_turn_id or len(client_turn_id) > 120:
-        raise AppError(400, "client_turn_id muss eine begrenzte, nicht leere Kennung sein.", reason="invalid_client_turn")
-    if not scope["background"]:
-        raise AppError(400, "Diese Coach-Anfrage benötigt keinen Hintergrundauftrag.", reason="background_not_required")
-    return message, client_turn_id, request_kind, validated_attachments, scope
-
-
-def _background_coach_provider_settings(attachments: list[dict[str, Any]]) -> tuple[str, str, str]:
-    ai_provider = SETTINGS.selected_ai_provider()
-    model = SETTINGS.selected_model(ai_provider)
-    thinking_level = SETTINGS.selected_thinking_level()
-    if ai_provider == "gemini" and gemini_inline_image_bytes(attachments) > MAX_GEMINI_INLINE_IMAGE_BYTES:
-        raise AppError(413, "Die ausgewählten Dateien sind für eine Gemini-Anfrage zusammen zu groß. Sende weniger Dateien oder wähle OpenAI.", reason="gemini_attachment_request_too_large")
-    return ai_provider, model, thinking_level
-
-
-def _existing_background_coach_job_response(
-    existing: dict[str, Any],
-    session_csrf_hash: str,
-    scope: dict[str, Any],
-) -> dict[str, Any]:
-    receipt = _coach_command_receipt(existing.get("receipt"))
-    _require_command_owner(receipt, session_csrf_hash)
-    if receipt.get("mode") != "background":
-        raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
-    return {
-        "status": "completed" if existing.get("status") == "completed" else "queued",
-        "mode": "background",
-        "operation_id": receipt.get("operation_id"),
-        "plan_scope": receipt.get("plan_scope") or scope,
-    }
-
-
-def _persist_background_coach_job(
-    message: str,
-    client_turn_id: str,
-    session_csrf_hash: str,
-    operation_id: str,
-    request_kind: str | None,
-    attachments: list[dict[str, Any]],
-    scope: dict[str, Any],
-    session_key: str,
-    ai_provider: str,
-    model: str,
-    thinking_level: str,
-) -> tuple[dict[str, Any] | None, int | None]:
-    now = utc_now()
-    with DB_LOCK, database() as db:
-        existing = db.execute(
-            "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)
-        ).fetchone()
-        if existing:
-            return _existing_background_coach_job_response(existing, session_csrf_hash, scope), None
-        user_message = CHAT_REPOSITORY.add(db, "user", message, client_turn_id=client_turn_id)
-        attachment_json = json.dumps(attachments, ensure_ascii=False, separators=(",", ":"))
-        stored_attachment_bytes = db.execute("SELECT COALESCE(SUM(length(attachments)), 0) AS total FROM messages").fetchone()["total"]
-        stored_gemini_history_row = db.execute(
-            "SELECT COALESCE(length(value), 0) AS total FROM kv WHERE key='gemini_conversation_history'"
-        ).fetchone()
-        stored_gemini_history_bytes = stored_gemini_history_row["total"] if stored_gemini_history_row else 0
-        if int(stored_attachment_bytes or 0) + int(stored_gemini_history_bytes or 0) + len(attachment_json.encode("utf-8")) > MAX_ATTACHMENT_STORAGE_BYTES:
-            raise AppError(413, "Der lokale Speicher für Chat-Anhänge ist ausgeschöpft. Entferne alte Chat-Daten, bevor du weitere Bilder sendest.", reason="attachment_storage_quota")
-        db.execute("UPDATE messages SET attachments=? WHERE id=?", (attachment_json, user_message["id"]))
-        receipt = {
-            "status": "queued",
-            "mode": "background",
-            "phase": "queued",
-            "operation_id": operation_id,
-            "session_key": session_key,
-            "user_message_id": user_message["id"],
-            "client_turn_id": client_turn_id,
-            "plan_scope": scope,
-            "ai_provider": ai_provider,
-            "model": model,
-            "thinking_level": thinking_level,
-            "request_kind": request_kind,
-        }
-        db.execute(
-            "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) "
-            "VALUES (?, ?, NULL, '{}', 'local', 'queued', ?, ?, ?)",
-            (uuid.uuid4().hex, client_turn_id, json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), now, now),
-        )
-    return None, user_message["id"]
-
-
-def enqueue_background_coach_job(
-    message: str,
-    client_turn_id: str,
-    session_csrf_hash: str,
-    *,
-    operation_id: str | None = None,
-    cancel_event: threading.Event | None = None,
-    request_kind: str | None = None,
-    attachments: Any = None,
-) -> dict[str, Any]:
-    """Persist a long Coach turn before returning control to the browser."""
-    message, client_turn_id, request_kind, attachments, scope = _background_coach_request(
-        message, client_turn_id, request_kind, attachments
-    )
-    active = _active_background_coach_job(session_csrf_hash)
-    if active and active["client_turn_id"] != client_turn_id:
-        raise AppError(409, "Für diese Sitzung läuft bereits eine Coach-Anfrage.", reason="chat_already_running")
-    operation_id = operation_id or uuid.uuid4().hex
-    session_key = _coach_session_key(session_csrf_hash)
-    ai_provider, model, thinking_level = _background_coach_provider_settings(attachments)
-    existing_response, user_message_id = _persist_background_coach_job(
-        message, client_turn_id, session_csrf_hash, operation_id, request_kind, attachments,
-        scope, session_key, ai_provider, model, thinking_level,
-    )
-    if existing_response:
-        return existing_response
-    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"message_id": user_message_id, "role": "user", "client_turn_id": client_turn_id})
-    coach_streams.CHAT_STREAM_REGISTRY.set_background_event(
-        operation_id, cancel_event or threading.Event()
-    )
-    COACH_JOB_WAKE.set()
-    return {"status": "queued", "mode": "background", "operation_id": operation_id, "plan_scope": scope}
-
-
 def _close_chat_provider_response(response: Any) -> None:
     if response is None:
         return
@@ -2417,7 +2272,7 @@ def _close_chat_provider_response(response: Any) -> None:
 
 
 def _cancel_background_chat_job(session_csrf_hash: str, operation_id: Any) -> dict[str, Any]:
-    job = _active_background_coach_job(session_csrf_hash, str(operation_id or "") or None)
+    job = coach_job_submission_service().active(session_csrf_hash, str(operation_id or "") or None)
     if not job:
         return {"status": "not_running"}
     receipt = job["receipt"]
@@ -3151,7 +3006,7 @@ def _execute_claimed_planning_command(
 def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf_hash: str = "") -> dict[str, Any]:
     """Execute one explicitly validated local planning command idempotently."""
     client_turn_id, operation, arguments, intent = _prepare_planning_command(payload)
-    command_identity = {"client_turn_id": client_turn_id, "session_key": _coach_session_key(session_csrf_hash), "effect_key": coach_action_hash({"operation": operation, "arguments": arguments})}
+    command_identity = {"client_turn_id": client_turn_id, "session_key": coach_session_key(session_csrf_hash), "effect_key": coach_action_hash({"operation": operation, "arguments": arguments})}
     existing_receipt = _claim_planning_command(client_turn_id, conversation_id, session_csrf_hash, payload, intent, command_identity)
     if existing_receipt:
         return existing_receipt
@@ -3176,7 +3031,7 @@ def _structured_coach_receipt(
             _require_command_owner(receipt, session_csrf_hash)
         else:
             user = CHAT_REPOSITORY.add(db, "user", message, client_turn_id=client_turn_id)
-            receipt = {"client_turn_id": client_turn_id, "session_key": _coach_session_key(session_csrf_hash),
+            receipt = {"client_turn_id": client_turn_id, "session_key": coach_session_key(session_csrf_hash),
                        "user_message_id": user["id"], "status": "running", "command_receipts": [],
                        "ai_provider": ai_provider, "model": model}
             db.execute("INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, 'none', 'running', ?, ?, ?)",
@@ -4098,7 +3953,7 @@ def _chat_with_structured_coach_impl(
 
 
 def _require_command_owner(receipt: dict[str, Any], session_csrf_hash: str) -> None:
-    if receipt.get("session_key") != _coach_session_key(session_csrf_hash):
+    if receipt.get("session_key") != coach_session_key(session_csrf_hash):
         raise AppError(403, "Dieser Coach-Auftrag gehoert zu einer anderen Sitzung.", reason="command_scope_denied")
 
 
@@ -4272,7 +4127,7 @@ def chat_stream_status(session_csrf_hash: str) -> dict[str, Any]:
     attached = coach_streams.CHAT_STREAM_REGISTRY.attached_status(session_csrf_hash)
     if attached:
         return attached
-    job = _active_background_coach_job(session_csrf_hash)
+    job = coach_job_submission_service().active(session_csrf_hash)
     if not job:
         return {"status": "idle", "operation_id": None}
     receipt = job["receipt"]
@@ -5517,7 +5372,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 send_event("started", {"operation_id": operation_id})
             except ClientDisconnected:
                 client_connected = False
-            job = enqueue_background_coach_job(
+            job = coach_job_submission_service().enqueue(
                 message, client_turn_id, session["csrf_hash"],
                 operation_id=operation_id, cancel_event=cancel_event, request_kind=request_kind, attachments=payload.get("attachments"),
             )
@@ -5536,7 +5391,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     try:
                         event, data = events.get(timeout=15)
                     except queue.Empty:
-                        active = _active_background_coach_job(session["csrf_hash"], operation_id)
+                        active = coach_job_submission_service().active(session["csrf_hash"], operation_id)
                         if active:
                             send_event("heartbeat", {"operation_id": operation_id})
                             continue
@@ -5585,7 +5440,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             client_turn_id = str(payload.get("client_turn_id") or "").strip()
             if not client_turn_id:
                 raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
-            self.send_json(202, enqueue_background_coach_job(
+            self.send_json(202, coach_job_submission_service().enqueue(
                 str(payload.get("message", "")), client_turn_id, session["csrf_hash"],
                 request_kind=payload.get("request_kind"), attachments=payload.get("attachments"),
             ))

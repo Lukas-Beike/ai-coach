@@ -25,6 +25,7 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 # backend-owned implementations, not server callbacks or compatibility
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("backend.coach.job_submission", ("CoachJobSubmissionService",)),
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
@@ -120,7 +121,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "backend.coach.authorization",
-        ("coach_execution_scope", "require_coach_scope", "_require_coach_scope", "_coach_scope_values"),
+        ("coach_execution_scope", "coach_session_key", "require_coach_scope", "_require_coach_scope", "_coach_scope_values"),
     ),
     (
         "backend.coach.attachments",
@@ -1635,6 +1636,13 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_temporary_restore_database",
     "_validate_restore_connection",
     "_validate_restore_database",
+    "_coach_session_key",
+    "_active_background_coach_job",
+    "_background_coach_request",
+    "_background_coach_provider_settings",
+    "_existing_background_coach_job_response",
+    "_persist_background_coach_job",
+    "enqueue_background_coach_job",
     "RATE_LIMIT_LOCK",
     "RATE_LIMITS",
     "RATE_LIMIT_CLEANUP_INTERVAL_SECONDS",

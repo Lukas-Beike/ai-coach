@@ -5156,6 +5156,7 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   kombinierten Diffs **PASS**. Neu gebautes Read-only-Container-Image:
   Vollsuite **PASS**, 2.323 Tests, 11 Skips in 19,996 s;
   Inventar- und Diff-Check **PASS**. PR-CI für den rebasierten Stand
+  folgte.
   #726 wurde nach frischem Codex-Erstreview am
   `2026-09-23T16:38:31Z` als
   `9c7ae8730adc921e27294493a62165fd62802ee6` gemergt;
@@ -5345,3 +5346,50 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   auf `origin/develop` erreichbar; alle CI-/Browser-/Codex-Checks
   **PASS**, 0 Review-Threads offen. Offen bleiben Restore-Austausch
   und atomare Ressourcen-/Worker-Wiederaufnahme.
+## P8 Coach-Job-Submission — lokaler Prüfstand
+
+- GPT-6-Luna/high-Patches `cb0e70bc`, `d3b32172`, `1bfb2cee`
+  verlagern Background-Enqueue, Session-Active-Lookup, Replay,
+  Attachment-Validierung und -Quote sowie atomare Message-/Command-
+  Persistenz in `CoachJobSubmissionService`. Die Handler delegieren
+  direkt; der Service besitzt keine Server-Rückimporte oder globale
+  Worker-/Stream-Zustände. Der konkrete `ChatStreamRegistry` bleibt
+  Eigentümer der Cancel-Events; Wake und State-Event erfolgen erst
+  nach erfolgreichem Commit.
+- Root-Diffreview des Erststands **FAIL**: zwei konkurrierende Turns
+  konnten zwischen Active-Read und Insert durchlaufen. Derselbe
+  Worker verlagerte die Prüfung in die DB-Lock-/UOW-Grenze und
+  ergänzte einen deterministischen Race-Test. Zweites Review
+  **FAIL**: ein vor dem Lock gebundener Datenbankmanager konnte nach
+  Restore geschlossen sein. Der Worker injiziert nun eine Fabrik
+  und löst sie unter dem Lock auf; ein Managerwechseltest belegt
+  Active-Lookup und Replay. Worker-Vollsuite auf seinem Stand
+  **PASS**, 2.332 Tests, 12 Skips. Root führte zusätzlich den
+  Session-Bindungs-Hash in `coach/authorization.py` zusammen,
+  migrierte die Test-Lookups und verbot den alten Servernamen.
+  Fokussierte Coach-/Architekturtests, Compile, Inventar- und
+  Diff-Check **PASS**. Rebase, kombinierte Vollsuite und PR-Gate
+  stehen noch aus; P8-Worker/Turn/Resume/Cancel bleiben offen.
+- Nach bestätigtem #733-Merge `eb69cffd` sequenziell auf
+  `develop` rebased: finaler Root-Code-/Diffstand `d6682506`.
+  Der Konflikt mit der Auth-Auslagerung wurde ohne Wiedereinführung
+  der entfernten Session-Recovery-Serverfunktion gelöst; alle
+  Architekturverbote und beide Checklistenpunkte blieben erhalten.
+  Root-Gate für den tatsächlich integrierten Stand **PASS**:
+  neu gebautes Read-only-Docker-Image mit vollständiger Suite
+  **PASS**, 2.344 Tests, 11 Skips; Coach-Review 16/16,
+  Architektur 4/4, gezielte Submissiontests, Inventar-, Compile-
+  und Diff-Check **PASS**. `server.py` umfasst 5.744 physische
+  Zeilen und 267 Definitionen. Externe PR-/CI-Prüfung steht aus.
+- #734 auf Head `e1c9ae35`: SonarCloud-Gate **FAIL** mit genau einem
+  neuen `python:S3776`-Befund in `enqueue` (kognitive Komplexität
+  20 statt höchstens 15). Derselbe GPT-6-Luna-Worker zerlegte
+  Validierung und Provider-Limits ohne Schnittstellen- oder
+  Reihenfolgeänderung in `69b221e8`. Root prüfte den tatsächlichen
+  Ein-Modul-Diff: **PASS**; atomare Session-/Replay-UOW, Manager-
+  Auflösung unter Lock und Post-Commit-Side-Effects bleiben gleich.
+  23 fokussierte Tests, Ruff einschließlich `C901`, Compile und
+  Diff-Check **PASS**. Ein neu gebautes Read-only-Docker-Image auf
+  `69b221e8` bestand die vollständige kombinierte Suite erneut:
+  **PASS**, 2.344 Tests, 11 Skips. Root-Gate des korrigierten Diffs
+  **PASS**; die erneute Sonar-/Browser-/Codex-Prüfung steht noch aus.
