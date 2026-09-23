@@ -552,6 +552,10 @@ Abhängigkeit: P1 sowie Ressourcen-/Worker-Verträge aus P6 und P8.
   - [x] Begrenzten lokalen Privacy-ZIP-Aufbau einschließlich SQL-/KV-
     Auswahl, Manifest, Zeit-/Platz-/Größenlimits und Temp-Datei-Cleanup
     einem konkreten `PrivacyArchiveExportService` zuordnen.
+  - [x] Datenbank-WAL-Checkpoint, Byte-Backup und den über die gesamte
+    HTTP-Dateiausgabe gehaltenen Lock mit Platz-/Größen-/Zeitgrenzen
+    einem konkreten `DatabaseBackupService` zuordnen; Restore bleibt
+    für die P8-Job-Wiederaufnahme offen.
 - [x] Lokalen Privacy-Export/-Delete und autorisierte Remote-Konversations-
   löschung nach `privacy.py` bzw. zum zuständigen Provider aufteilen.
   - [x] Lokale JSON-Datenprojektion einschließlich sensibler KV-Ausnahmen,
