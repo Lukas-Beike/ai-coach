@@ -181,7 +181,7 @@ jobs:
                 if (fileCount(oldDiff) !== oldFiles.length || fileCount(newDiff) !== newFiles.length) return false;
                 const changes = (value) => value.split('\n').filter((line) =>
                   line.startsWith('diff --git ') ||
-                  /^(?:new file mode|deleted file mode|rename from|rename to|old mode|new mode) /.test(line) ||
+                  /^(?:new file mode|deleted file mode|rename from|rename to|copy from|copy to|old mode|new mode) /.test(line) ||
                   ((line.startsWith('+') || line.startsWith('-')) &&
                    !line.startsWith('+++ ') && !line.startsWith('--- '))).join('\n');
                 return changes(oldDiff) === changes(newDiff);
