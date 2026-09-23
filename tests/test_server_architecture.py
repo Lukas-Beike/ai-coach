@@ -25,10 +25,12 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 # backend-owned implementations, not server callbacks or compatibility
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("backend.coach.read_tools", ("CoachReadToolService",)),
     ("backend.coach.turn_failures", ("CoachTurnFailureService", "coach_error_metadata")),
     ("backend.coach.job_submission", ("CoachJobSubmissionService",)),
     ("backend.coach.athlete_record_tools", ("CoachAthleteRecordToolService",)),
     ("backend.coach.library_plan_tools", ("CoachLibraryPlanToolService",)),
+    ("backend.coach.plan_artifact_tools", ("CoachPlanArtifactToolService",)),
     ("backend.coach.cancellation", ("CoachCancellationService",)),
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
@@ -1643,6 +1645,8 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_replace_database_with_restore",
     "_resume_after_database_restore",
     "_restore_database_backup",
+    "_structured_bounded_integer",
+    "_structured_coach_read_result",
     "_structured_coach_training_template_result",
     "public_state",
     "stream_database_backup",
@@ -1664,6 +1668,7 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_delete_reset_coach_conversation",
     "_cancel_reset_coach_commands",
     "_structured_coach_apply_library_plan_result",
+    "_structured_coach_plan_artifact_result",
     "_reset_local_coach_chat_state",
     "_request_coach_operation_cancellation",
     "_clear_coach_conversation_state",

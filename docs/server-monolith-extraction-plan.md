@@ -510,6 +510,9 @@ Abhängigkeit: P2–P6.
     Session-Schlüssels einem konkreten `CoachCommandReceiptService` zuordnen.
 - [ ] Tool-Dispatch samt Ergebnis-/Fehlerprojektion verschieben; Planmutationen
   rufen die in P4 abgeschlossenen Planungs-Use-Cases auf.
+  - [x] Read-only Coach-Toolauswahl, begrenzte Limits und Antwortprojektion
+    einem zustandslosen `CoachReadToolService` zuordnen; konkrete Profil-,
+    Planning-, Activity- und History-Dienste bleiben ihre Zustandseigentümer.
   - [x] Strukturierte Coach-Sync-Werkzeuge einschließlich Scope-/Remote-
     Prüfung und Job-ID-Buchführung dem konkreten Sync-Tool-Service zuordnen.
   - [x] Adaptive Apply-Freigabe mit späterem Nutzerturn und atomare
@@ -523,6 +526,10 @@ Abhängigkeit: P2–P6.
   - [x] Lokales Bibliotheksplan-Werkzeug mit Operation-/Objekt-Scope und
     Eingabeprüfung `CoachLibraryPlanToolService` zuordnen; atomare
     Planung und Remote-Schreibgrenze verbleiben bei `WorkoutLibraryPlanService`.
+  - [x] Stage-/Commit-Autorisierung, Artifact-ID-Prüfung und Scope des
+    strukturierten Planartefakt-Werkzeugs `CoachPlanArtifactToolService`
+    zuordnen; `TrainingPlanArtifactService` bleibt Eigentümer von Zustand,
+    lokaler Speicherung und atomarem Commit.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.
