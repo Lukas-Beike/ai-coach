@@ -283,7 +283,7 @@ from backend.coach.service import (
     dialogue_plan_effect_key, dialogue_request_binding_key,
     dialogue_scope_repair_key,
 )
-from backend.coach.authorization import authorized_operations, coach_execution_scope, require_coach_scope, require_operation, scope_values
+from backend.coach.authorization import authorized_operations, coach_execution_scope, coach_session_key, require_coach_scope, require_operation, scope_values
 from backend.coach.outcomes import COACH_ACTION_LABELS, coach_effect_label, coach_failure_lines, coach_observed_sync_lines, unresolved_coach_steps
 from backend.http_api.responses import (
     header_items as response_header_items,
@@ -2246,10 +2246,6 @@ def output_text(response: dict[str, Any]) -> str:
     return openai_provider.response_text(response)
 
 
-def _coach_session_key(session_csrf_hash: str) -> str:
-    return hashlib.sha256(str(session_csrf_hash or "").encode("utf-8")).hexdigest()
-
-
 def _coach_command_receipt(value: Any) -> dict[str, Any]:
     return command_receipt(value)
 
@@ -3010,7 +3006,7 @@ def _execute_claimed_planning_command(
 def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf_hash: str = "") -> dict[str, Any]:
     """Execute one explicitly validated local planning command idempotently."""
     client_turn_id, operation, arguments, intent = _prepare_planning_command(payload)
-    command_identity = {"client_turn_id": client_turn_id, "session_key": _coach_session_key(session_csrf_hash), "effect_key": coach_action_hash({"operation": operation, "arguments": arguments})}
+    command_identity = {"client_turn_id": client_turn_id, "session_key": coach_session_key(session_csrf_hash), "effect_key": coach_action_hash({"operation": operation, "arguments": arguments})}
     existing_receipt = _claim_planning_command(client_turn_id, conversation_id, session_csrf_hash, payload, intent, command_identity)
     if existing_receipt:
         return existing_receipt
@@ -3035,7 +3031,7 @@ def _structured_coach_receipt(
             _require_command_owner(receipt, session_csrf_hash)
         else:
             user = CHAT_REPOSITORY.add(db, "user", message, client_turn_id=client_turn_id)
-            receipt = {"client_turn_id": client_turn_id, "session_key": _coach_session_key(session_csrf_hash),
+            receipt = {"client_turn_id": client_turn_id, "session_key": coach_session_key(session_csrf_hash),
                        "user_message_id": user["id"], "status": "running", "command_receipts": [],
                        "ai_provider": ai_provider, "model": model}
             db.execute("INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, 'none', 'running', ?, ?, ?)",
@@ -3957,7 +3953,7 @@ def _chat_with_structured_coach_impl(
 
 
 def _require_command_owner(receipt: dict[str, Any], session_csrf_hash: str) -> None:
-    if receipt.get("session_key") != _coach_session_key(session_csrf_hash):
+    if receipt.get("session_key") != coach_session_key(session_csrf_hash):
         raise AppError(403, "Dieser Coach-Auftrag gehoert zu einer anderen Sitzung.", reason="command_scope_denied")
 
 

@@ -121,7 +121,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "backend.coach.authorization",
-        ("coach_execution_scope", "require_coach_scope", "_require_coach_scope", "_coach_scope_values"),
+        ("coach_execution_scope", "coach_session_key", "require_coach_scope", "_require_coach_scope", "_coach_scope_values"),
     ),
     (
         "backend.coach.attachments",
@@ -1636,6 +1636,7 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_temporary_restore_database",
     "_validate_restore_connection",
     "_validate_restore_database",
+    "_coach_session_key",
     "_active_background_coach_job",
     "_background_coach_request",
     "_background_coach_provider_settings",

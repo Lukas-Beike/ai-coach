@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import threading
 import uuid
@@ -15,7 +14,7 @@ from backend.coach.attachments import (
     gemini_inline_image_bytes,
     validate_attachments,
 )
-from backend.coach.authorization import coach_execution_scope
+from backend.coach.authorization import coach_execution_scope, coach_session_key
 from backend.coach.service import command_receipt
 from backend.coach.streams import ChatStreamRegistry
 from backend.db.manager import DatabaseManager
@@ -58,7 +57,7 @@ class CoachJobSubmissionService:
     def active(
         self, session_csrf_hash: str, operation_id: str | None = None
     ) -> dict[str, Any] | None:
-        session_key = _coach_session_key(session_csrf_hash)
+        session_key = coach_session_key(session_csrf_hash)
         with self._database_lock:
             database_manager = self._database_manager()
             with database_manager.unit_of_work() as db:
@@ -124,7 +123,7 @@ class CoachJobSubmissionService:
         if active and active["client_turn_id"] != client_turn_id:
             raise AppError(409, "Für diese Sitzung läuft bereits eine Coach-Anfrage.", reason="chat_already_running")
         operation_id = operation_id or uuid.uuid4().hex
-        session_key = _coach_session_key(session_csrf_hash)
+        session_key = coach_session_key(session_csrf_hash)
         ai_provider = self._settings_service.selected_ai_provider()
         model = self._settings_service.selected_model(ai_provider)
         thinking_level = self._settings_service.selected_thinking_level()
@@ -180,7 +179,7 @@ class CoachJobSubmissionService:
                 ).fetchone()
                 if existing:
                     receipt = command_receipt(existing.get("receipt"))
-                    if receipt.get("session_key") != _coach_session_key(session_csrf_hash):
+                    if receipt.get("session_key") != coach_session_key(session_csrf_hash):
                         raise AppError(
                             403,
                             "Dieser Coach-Auftrag gehoert zu einer anderen Sitzung.",
@@ -249,7 +248,3 @@ class CoachJobSubmissionService:
                     ),
                 )
         return None, user_message["id"]
-
-
-def _coach_session_key(session_csrf_hash: str) -> str:
-    return hashlib.sha256(str(session_csrf_hash or "").encode("utf-8")).hexdigest()

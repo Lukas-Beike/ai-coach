@@ -5156,6 +5156,7 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   kombinierten Diffs **PASS**. Neu gebautes Read-only-Container-Image:
   Vollsuite **PASS**, 2.323 Tests, 11 Skips in 19,996 s;
   Inventar- und Diff-Check **PASS**. PR-CI für den rebasierten Stand
+  folgte.
   #726 wurde nach frischem Codex-Erstreview am
   `2026-09-23T16:38:31Z` als
   `9c7ae8730adc921e27294493a62165fd62802ee6` gemergt;
@@ -5345,3 +5346,27 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   auf `origin/develop` erreichbar; alle CI-/Browser-/Codex-Checks
   **PASS**, 0 Review-Threads offen. Offen bleiben Restore-Austausch
   und atomare Ressourcen-/Worker-Wiederaufnahme.
+## P8 Coach-Job-Submission — lokaler Prüfstand
+
+- GPT-6-Luna/high-Patches `cb0e70bc`, `d3b32172`, `1bfb2cee`
+  verlagern Background-Enqueue, Session-Active-Lookup, Replay,
+  Attachment-Validierung und -Quote sowie atomare Message-/Command-
+  Persistenz in `CoachJobSubmissionService`. Die Handler delegieren
+  direkt; der Service besitzt keine Server-Rückimporte oder globale
+  Worker-/Stream-Zustände. Der konkrete `ChatStreamRegistry` bleibt
+  Eigentümer der Cancel-Events; Wake und State-Event erfolgen erst
+  nach erfolgreichem Commit.
+- Root-Diffreview des Erststands **FAIL**: zwei konkurrierende Turns
+  konnten zwischen Active-Read und Insert durchlaufen. Derselbe
+  Worker verlagerte die Prüfung in die DB-Lock-/UOW-Grenze und
+  ergänzte einen deterministischen Race-Test. Zweites Review
+  **FAIL**: ein vor dem Lock gebundener Datenbankmanager konnte nach
+  Restore geschlossen sein. Der Worker injiziert nun eine Fabrik
+  und löst sie unter dem Lock auf; ein Managerwechseltest belegt
+  Active-Lookup und Replay. Worker-Vollsuite auf seinem Stand
+  **PASS**, 2.332 Tests, 12 Skips. Root führte zusätzlich den
+  Session-Bindungs-Hash in `coach/authorization.py` zusammen,
+  migrierte die Test-Lookups und verbot den alten Servernamen.
+  Fokussierte Coach-/Architekturtests, Compile, Inventar- und
+  Diff-Check **PASS**. Rebase, kombinierte Vollsuite und PR-Gate
+  stehen noch aus; P8-Worker/Turn/Resume/Cancel bleiben offen.
