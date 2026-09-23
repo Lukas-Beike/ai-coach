@@ -79,6 +79,76 @@ class DialogueHarness:
 
 class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
+    def test_clarification_service_persists_valid_user_provenance_and_limits(self):
+        messages = [{"id": item, "role": "user"} for item in range(1, 25)]
+        context = {"messages": messages, "current_user_message_id": 24}
+        summary, question = "s" * 4000, "Zurück? " + "ä" * 992
+        arguments = {
+            "source_message_ids": list(range(1, 25)),
+            "summary": summary,
+            "question": question,
+        }
+
+        result = server.coach_clarification_service().save_question(arguments, context)
+
+        self.assertEqual(result, {"ok": True, "status": "needs_clarification", "question": question})
+        stored = server.get_kv("coach_pending_request")
+        self.assertIn("ä", stored)
+        self.assertNotIn("\\u00e4", stored)
+        self.assertEqual(json.loads(stored), {
+            "summary": summary,
+            "question": question,
+            "source_message_ids": list(range(1, 25)),
+            "status": "needs_clarification",
+        })
+
+    def test_clarification_service_rejects_unbound_message_ids_without_writing(self):
+        context = {
+            "messages": [
+                {"id": 1, "role": "user"},
+                {"id": 2, "role": "user"},
+                {"id": 3, "role": "assistant"},
+            ],
+            "current_user_message_id": 2,
+        }
+        server.set_kv("coach_pending_request", json.dumps({"summary": "previous"}))
+        service = server.coach_clarification_service()
+        invalid_ids = (None, [], [1], [2, 3], [2, 99], [True, 2], [2] * 25)
+        for ids in invalid_ids:
+            with self.subTest(ids=ids), self.assertRaises(server.AppError) as raised:
+                service.save_question(
+                    {"source_message_ids": ids, "summary": "Synthetic", "question": "When?"},
+                    context,
+                )
+            self.assertEqual((raised.exception.status, raised.exception.reason), (400, "request_provenance"))
+        self.assertEqual(json.loads(server.get_kv("coach_pending_request")), {"summary": "previous"})
+
+        assistant_current = {**context, "current_user_message_id": 3}
+        with self.assertRaises(server.AppError) as raised:
+            service.save_question(
+                {"source_message_ids": [2, 3], "summary": "Synthetic", "question": "When?"},
+                assistant_current,
+            )
+        self.assertEqual((raised.exception.status, raised.exception.reason), (400, "request_provenance"))
+
+    def test_clarification_service_rejects_empty_or_oversized_text_without_writing(self):
+        context = {"messages": [{"id": 8, "role": "user"}], "current_user_message_id": 8}
+        service = server.coach_clarification_service()
+        server.set_kv("coach_pending_request", json.dumps({"summary": "previous"}))
+        invalid_text = (
+            {"summary": "", "question": "When?"},
+            {"summary": " " * 3, "question": "When?"},
+            {"summary": "s" * 4001, "question": "When?"},
+            {"summary": "Synthetic", "question": ""},
+            {"summary": "Synthetic", "question": " "},
+            {"summary": "Synthetic", "question": "q" * 1001},
+        )
+        for text in invalid_text:
+            with self.subTest(summary_length=len(text["summary"]), question_length=len(text["question"])), self.assertRaises(server.AppError) as raised:
+                service.save_question({"source_message_ids": [8], **text}, context)
+            self.assertEqual((raised.exception.status, raised.exception.reason), (400, "request_question"))
+        self.assertEqual(json.loads(server.get_kv("coach_pending_request")), {"summary": "previous"})
+
     def test_question_survives_final_provider_failure_and_reply_continues(self):
         def question(_):
             return self.call("clarify_coach_request", {

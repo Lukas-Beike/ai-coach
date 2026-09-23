@@ -288,6 +288,7 @@ from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
+from backend.coach.clarification import CoachClarificationService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
 from backend.coach.turn_failures import (
@@ -2109,6 +2110,11 @@ def coach_dialogue_action_service() -> CoachDialogueActionService:
     )
 
 
+def coach_clarification_service() -> CoachClarificationService:
+    """Compose persistence for validated pending Coach questions."""
+    return CoachClarificationService(database_manager(), KEY_VALUE_REPOSITORY, DB_LOCK)
+
+
 def coach_attachment_context_service() -> CoachAttachmentContextService:
     """Compose local attachment reads for the current Coach turn."""
     return CoachAttachmentContextService(database_manager())
@@ -2398,17 +2404,6 @@ def coach_tool_dispatch_service() -> CoachToolDispatchService:
     )
 
 
-def _save_coach_question(arguments: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    ids = arguments.get("source_message_ids")
-    user_ids = {item["id"] for item in context["messages"] if item["role"] == "user"}
-    if not isinstance(ids, list) or not 1 <= len(ids) <= 24 or context["current_user_message_id"] not in ids or any(type(item) is not int or item not in user_ids for item in ids):
-        raise AppError(400, "Die Rückfrage benötigt den zugehörigen Nutzerauftrag.", reason="request_provenance")
-    summary, question = arguments.get("summary"), arguments.get("question")
-    if not isinstance(summary, str) or not summary.strip() or len(summary) > 4000 or not isinstance(question, str) or not question.strip() or len(question) > 1000:
-        raise AppError(400, "Bitte formuliere eine konkrete Rückfrage zum Auftrag.", reason="request_question")
-    pending = {"summary": summary, "question": question, "source_message_ids": ids, "status": "needs_clarification"}
-    set_kv("coach_pending_request", json.dumps(pending, ensure_ascii=False))
-    return {"ok": True, "status": "needs_clarification", "question": question}
 
 
 def _validate_training_patch_schedule(
@@ -3084,7 +3079,7 @@ def _execute_structured_coach_tool(
     local_transaction = name not in {"start_provider_refresh", "apply_adaptive_replan"}
     with (DB_LOCK if local_transaction else nullcontext()), (database() if local_transaction else nullcontext()):
         if name == "clarify_coach_request":
-            return _save_coach_question(arguments, context)
+            return coach_clarification_service().save_question(arguments, context)
         if name == "cancel_coach_request":
             set_kv("coach_pending_request", "null")
             return {"ok": True, "status": "cancelled"}

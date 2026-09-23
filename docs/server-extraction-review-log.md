@@ -6135,3 +6135,50 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   P7 verbleiben 52 Definitionen/28 globale Bindungen. Nächster
   Schritt: Root-Gate auf finalem Diff, dann PR gegen aktuellen
   `develop` veröffentlichen.
+
+## P7 Dialog-Scopes und Autorisierung — bestätigter #754-Merge
+
+- Root-Gate **PASS** auf Commit `a63a28c7`; native und frisch
+  gebaute Read-only-Docker-Vollsuiten **PASS** (je 2.457 Tests,
+  12/11 Skips). CI-Testshards, Container, Quality, Sonar, CodeQL und
+  der einmalig angeforderte Codex-Code-/Security-Review **PASS**;
+  null offene Review-Threads. Der zum Mergezeitpunkt noch laufende
+  optionale Browser-Smoke-/Accessibility-Check wurde anschließend
+  **PASS** (5m46s).
+- Squash-Merge `df885603c3162f57e88979ce5768d835dba25fd0` am
+  `2026-09-23T22:57:03Z` mit `state=MERGED`, `mergedAt` und
+  Erreichbarkeit auf `origin/develop` bestätigt.
+- P7 bleibt offen: Rückfrage-Persistenz, atomare Trainings-Patches,
+  strukturierte Coach-Turn-Orchestrierung und weitere Eigentümer.
+
+## P7 Rückfrage-Persistenz — integrierter Prüfstand
+
+- GPT-6-Luna/high-Worker `6f2cd806` wurde auf bestätigtem #754-Stand
+  `df885603` als `0c1169f7` integriert. Root prüfte den tatsächlichen
+  Worker-Code/Diff und die Konfliktauflösung selbst: **PASS**.
+  `CoachClarificationService.save_question` übernimmt vollständig
+  Userturn-Provenienz, Textgrenzen und dauerhafte KV-Persistenz unter
+  demselben `DB_LOCK` und `DatabaseManager`-UOW. Der Server komponiert
+  nur den konkreten Service und ruft ihn direkt auf; kein Rückimport,
+  Fachcallback oder Kompatibilitätswrapper.
+- Drei direkte Testmethoden mit Grenzwert und Negativ-Matrix prüfen
+  24 Message-IDs, Unicode-Persistenz, fremde/Assistant-/Bool-IDs,
+  aktuellen Userturn, Leer-/Überlängen und unveränderten KV-Zustand bei
+  Ablehnung. Zusammen mit dem Dialog-Harness für Rückfrage-Fortsetzung
+  ist die Abdeckung dieser kleinen Grenze angemessen. Worker-Vollsuite
+  **PASS** (2.450 Tests/12 Skips), Dialog-Harness 71/71,
+  Architektur 6/6, Ruff/Compile/Diff-Check **PASS**. Integrierte
+  Vollsuite, Inventar und PR-CI stehen noch aus. Nächster Schritt:
+  integrierten Stand vollständig prüfen und als eigenen PR
+  veröffentlichen; danach atomaren Trainings-Patch sequenziell
+  integrieren.
+- Erstes integriertes Architektur-Gate: **FAIL**, da die neue reine
+  `coach_clarification_service`-Factory im Inventargenerator noch
+  nicht als Composition Root erfasst war (P0=1). Root ergänzte die
+  konkrete Zuordnung und regenerierte das Inventar. Danach
+  Dialog-/Architekturtests 79/79, Inventar-`--check`, Ruff/Compile
+  **PASS**; Read-only-Docker-Vollsuite 2.460 Tests/11 Skips **PASS**;
+  native Vollsuite 2.460 Tests/12 Skips **PASS** (232,168 s).
+  Root prüfte den korrigierten integrierten Code/Diff erneut:
+  **PASS**. Keine verbleibende P0-Zuordnung; `server.py` 4.741
+  physische Zeilen, 225 Definitionen. PR-CI und Merge stehen aus.
