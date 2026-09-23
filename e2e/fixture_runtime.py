@@ -26,7 +26,14 @@ def blocked_provider(*args, **kwargs):
 
 
 server.provider_http.JsonHttpClient.request = blocked_provider
-server.ensure_conversation = lambda *args, **kwargs: "fixture-conversation"
+
+
+class FixtureConversationProvisionService:
+    def ensure(self, *args, **kwargs):
+        return "fixture-conversation"
+
+
+server.coach_conversation_provision_service = FixtureConversationProvisionService
 # Browser scenarios deliberately poll and reload the single disposable fixture
 # far more aggressively than one athlete does. Rate limiting has dedicated unit
 # coverage; keeping it active here makes unrelated UI scenarios order-dependent.

@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import test_server as fixtures
 from support import isolated_server, reset_application_state
@@ -65,7 +65,7 @@ class DialogueHarness:
         def response(payload, *args, **extra):
             step = next(steps)
             return step(payload) if callable(step) else step
-        with patch.object(server, "ensure_conversation", return_value="synthetic-conversation"), patch(
+        with patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))), patch(
             "backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic local data"
         ), patch.object(server, "responses_request", side_effect=response) as model, patch.object(server, "responses_background_request", side_effect=response) as background_model:
             receipt = server.chat_with_coach(message, client_turn_id=turn or f"turn-{self.counter}", session_csrf_hash="synthetic-session", **kwargs)
