@@ -4753,7 +4753,11 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   falschen offenen Fachdefinitionen ausweisen. `server.py` hat
   6.756 physische Zeilen. Neu gebautes Read-only-Container-Image:
   vollständige integrierte Suite **PASS**, 2.288 Tests, 10 Skips
-  in 19,666 s. CI/Sonar des künftigen P10-PR-Stands stehen noch aus.
+  in 19,666 s. PR #711: SonarCloud `new_violations=0`, alle Python-,
+  Container-, Browser- und Review-Gates **PASS**, keine offenen Threads;
+  Squash-Merge am `2026-09-23T13:31:14Z`, Commit
+  `e66ca4e3184cdff2e525f0eae0d4cb7616e9489a` auf
+  `origin/develop` erreichbar.
 
 ## P7 Konversations-ID-Bereitstellung — integrierter Prüfstand
 
@@ -4773,3 +4777,8 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `conversation.py` ausgeschlossen) **PASS**. CI-/Sonar-Prüfung des noch zu
   veröffentlichenden PR-Stands steht aus. Die weiteren P7-History-, Reset-,
   Vorschlags- und Tool-Use-Cases bleiben offen.
+- Nach Squash-Merge von PR #711 `origin/develop` mit `dd83d1f2`
+  integriert; nur generiertes Inventar, Script-Owner-Eintrag und Review-
+  Log hatten erwartete Textkonflikte. Der finale Tree-Diff gegenüber dem
+  bereits getesteten P7-Stand ist leer. Erneute sieben Service- und vier
+  Architekturtests sowie Inventar-/Diff-Check **PASS**.
