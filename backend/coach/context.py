@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
@@ -22,7 +23,6 @@ from backend.planning import library as planning_library
 from backend.planning import season as planning_season
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.library_service import WorkoutLibraryService
-from backend.planning.planned_unit_service import PlannedUnitService
 from backend.sync.state import SyncStateRepository
 
 COACH_RECENT_ACTIVITIES_PER_SPORT = 5
@@ -563,6 +563,20 @@ class CoachTrainingContextService:
         return context
 
 
+@dataclass(frozen=True)
+class CoachContextPreviewLimits:
+    library_limit: int
+    library_description_limit: int
+    section_limits: Mapping[str, int]
+    total_char_limit: int
+    local_planned_limit: int
+    activity_limit_per_sport: int
+    planned_event_limit: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "section_limits", dict(self.section_limits))
+
+
 class CoachContextPreviewService:
     """Build the read-only context preview shown before the next Coach turn."""
 
@@ -573,16 +587,8 @@ class CoachContextPreviewService:
         coach_training_context_service: CoachTrainingContextService,
         coach_structured_context_service: CoachStructuredContextService,
         workout_library_service: WorkoutLibraryService,
-        planned_unit_service: PlannedUnitService,
+        limits: CoachContextPreviewLimits,
         *,
-        library_limit: int,
-        library_description_limit: int,
-        section_limits: Mapping[str, int],
-        total_char_limit: int,
-        local_planned_limit: int,
-        activity_limit_per_sport: int,
-        planned_event_limit: int,
-        today: Callable[[], date],
         utc_now: Callable[[], datetime],
     ) -> None:
         self._sync_state_repository = sync_state_repository
@@ -590,15 +596,7 @@ class CoachContextPreviewService:
         self._coach_training_context_service = coach_training_context_service
         self._coach_structured_context_service = coach_structured_context_service
         self._workout_library_service = workout_library_service
-        self._planned_unit_service = planned_unit_service
-        self._library_limit = library_limit
-        self._library_description_limit = library_description_limit
-        self._section_limits = dict(section_limits)
-        self._total_char_limit = total_char_limit
-        self._local_planned_limit = local_planned_limit
-        self._activity_limit_per_sport = activity_limit_per_sport
-        self._planned_event_limit = planned_event_limit
-        self._today = today
+        self._limits = limits
         self._utc_now = utc_now
 
     def preview(self, selected_ai_provider: str) -> dict[str, Any]:
@@ -619,12 +617,12 @@ class CoachContextPreviewService:
         preview_prompt_context = dict(preview_structured_context)
         preview_local_plans = compact_coach_local_planned_workouts(
             preview_prompt_context.get("local_planned_workouts"),
-            limit=self._local_planned_limit,
+            limit=self._limits.local_planned_limit,
             select=planning_context.selected,
         )
         preview_prompt_context["local_planned_workouts"] = preview_local_plans
         preview_prompt_context, preview_truncations = bounded_coach_context_sections(
-            preview_prompt_context, section_limits=self._section_limits
+            preview_prompt_context, section_limits=self._limits.section_limits
         )
         projection = coach_context_projection_meta(
             preview_prompt_context,
@@ -632,19 +630,19 @@ class CoachContextPreviewService:
             len(
                 coach_workout_library(
                     self._workout_library_service.list(),
-                    limit=self._library_limit,
-                    description_limit=self._library_description_limit,
+                    limit=self._limits.library_limit,
+                    description_limit=self._limits.library_description_limit,
                 )
             ),
-            section_limits=self._section_limits,
-            total_limit=self._total_char_limit,
-            local_activity_limit=self._activity_limit_per_sport,
-            planned_event_limit=self._planned_event_limit,
-            local_planned_limit=self._local_planned_limit,
+            section_limits=self._limits.section_limits,
+            total_limit=self._limits.total_char_limit,
+            local_activity_limit=self._limits.activity_limit_per_sport,
+            planned_event_limit=self._limits.planned_event_limit,
+            local_planned_limit=self._limits.local_planned_limit,
             truncations=preview_truncations,
         )
         projection["context_characters"] = len(context_text)
-        projection["within_total_budget"] = len(context_text) <= self._total_char_limit
+        projection["within_total_budget"] = len(context_text) <= self._limits.total_char_limit
         return {
             "generated_at": self._utc_now().isoformat(),
             "snapshot_truncated": False,
@@ -675,16 +673,12 @@ class CoachContextPreviewService:
                 "note": "Diese Eingabe wird getrennt vom Coach-Kontext/instructions an den ausgewählten KI-Anbieter übergeben.",
             },
             "structured_athlete_context": preview_structured_context,
-            "latest_intervals_snapshot": CoachIntervalsContextService().project(
-                snapshot,
-                self._planned_unit_service.list(250, future_only=True),
-                self._today(),
-            ),
+            "latest_intervals_snapshot": preview_structured_context["intervals"],
             "projection": projection,
             "context_text": context_text,
             "local_training_library": coach_workout_library(
                 self._workout_library_service.list(),
-                limit=self._library_limit,
-                description_limit=self._library_description_limit,
+                limit=self._limits.library_limit,
+                description_limit=self._limits.library_description_limit,
             ),
         }

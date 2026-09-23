@@ -2,7 +2,11 @@ import unittest
 from datetime import date, datetime, timezone
 from unittest.mock import Mock
 
-from backend.coach.context import CoachContextPreviewService
+from backend.coach.context import (
+    CoachContextPreviewLimits,
+    CoachContextPreviewService,
+    CoachIntervalsContextService,
+)
 
 
 class CoachContextPreviewServiceTests(unittest.TestCase):
@@ -41,6 +45,9 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
                 }
             ],
             "activity_feedback": {"note": "x" * 200},
+            "intervals": CoachIntervalsContextService().project(
+                self.snapshot, [], date(2026, 9, 23)
+            ),
         }
         self.library = Mock()
         self.library.list.return_value = [
@@ -54,23 +61,21 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
             },
             {"id": "library-2", "name": "Unused", "type": "Run"},
         ]
-        self.planned_units = Mock()
-        self.planned_units.list.return_value = []
         self.service = CoachContextPreviewService(
             self.sync_state,
             self.messages,
             self.training_context,
             self.structured_context,
             self.library,
-            self.planned_units,
-            library_limit=1,
-            library_description_limit=12,
-            section_limits={"activity_feedback": 32},
-            total_char_limit=100,
-            local_planned_limit=1,
-            activity_limit_per_sport=5,
-            planned_event_limit=50,
-            today=lambda: date(2026, 9, 23),
+            CoachContextPreviewLimits(
+                library_limit=1,
+                library_description_limit=12,
+                section_limits={"activity_feedback": 32},
+                total_char_limit=100,
+                local_planned_limit=1,
+                activity_limit_per_sport=5,
+                planned_event_limit=50,
+            ),
             utc_now=lambda: datetime(2026, 9, 23, 10, 30, tzinfo=timezone.utc),
         )
 
@@ -101,7 +106,10 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
         self.sync_state.latest_snapshot.assert_called_once_with()
         self.messages.list.assert_called_once_with()
         self.structured_context.build.assert_called_once_with(self.snapshot)
-        self.planned_units.list.assert_called_once_with(250, future_only=True)
+        self.assertIs(
+            preview["latest_intervals_snapshot"],
+            preview["structured_athlete_context"]["intervals"],
+        )
 
     def test_projection_bounds_and_privacy(self):
         preview = self.service.preview("openai")

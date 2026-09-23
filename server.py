@@ -185,6 +185,7 @@ from backend.sync.jobs import (
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.queue import SyncJobQueueService
 from backend.coach.context import (
+    CoachContextPreviewLimits,
     CoachContextPreviewService,
     CoachStructuredContextService,
     CoachTrainingContextService,
@@ -1966,15 +1967,16 @@ def coach_context_preview_service() -> CoachContextPreviewService:
     """Compose read-only, user-inspectable Coach context preview."""
     return CoachContextPreviewService(
         sync_state_repository(), coach_message_service(), coach_training_context_service(),
-        coach_structured_context_service(), workout_library_service(), planned_unit_service(),
-        library_limit=COACH_LIBRARY_LIMIT,
-        library_description_limit=COACH_LIBRARY_DESCRIPTION_LIMIT,
-        section_limits=COACH_CONTEXT_SECTION_LIMITS,
-        total_char_limit=COACH_CONTEXT_TOTAL_CHAR_LIMIT,
-        local_planned_limit=COACH_LOCAL_PLANNED_LIMIT,
-        activity_limit_per_sport=COACH_RECENT_ACTIVITIES_PER_SPORT,
-        planned_event_limit=COACH_PLANNED_EVENT_LIMIT,
-        today=lambda: local_now().date(),
+        coach_structured_context_service(), workout_library_service(),
+        CoachContextPreviewLimits(
+            library_limit=COACH_LIBRARY_LIMIT,
+            library_description_limit=COACH_LIBRARY_DESCRIPTION_LIMIT,
+            section_limits=COACH_CONTEXT_SECTION_LIMITS,
+            total_char_limit=COACH_CONTEXT_TOTAL_CHAR_LIMIT,
+            local_planned_limit=COACH_LOCAL_PLANNED_LIMIT,
+            activity_limit_per_sport=COACH_RECENT_ACTIVITIES_PER_SPORT,
+            planned_event_limit=COACH_PLANNED_EVENT_LIMIT,
+        ),
         utc_now=lambda: datetime.now(timezone.utc),
     )
 
