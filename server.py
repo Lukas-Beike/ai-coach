@@ -225,6 +225,7 @@ from backend.sync.queue import SyncJobQueueService
 from backend.sync.scheduler import (
     DailySyncScheduler,
     DailySyncSchedulerConfig,
+    DailySyncLoop,
     StartupSyncScheduler,
     StartupSyncSchedulerConfig,
 )
@@ -6595,16 +6596,13 @@ class CoachHTTPServer(ThreadingHTTPServer):
     request_queue_size = 32
 
 
-def daily_sync_loop() -> None:
-    """Schedule new work after maintenance without killing the daily scheduler."""
-    while True:
-        time.sleep(300)
-        try:
-            daily_sync_scheduler().schedule()
-            morning_body_battery_service().refresh()
-        except AppError as exc:
-            if exc.reason != "maintenance":
-                LOGGER.error("Automatic synchronization scheduling failed", extra={"event": "daily_sync_failed"})
+def daily_sync_loop_service() -> DailySyncLoop:
+    return DailySyncLoop(
+        daily_sync_scheduler(),
+        morning_body_battery_service(),
+        sleep=time.sleep,
+        logger=LOGGER,
+    )
 
 
 def daily_sync_scheduler() -> DailySyncScheduler:
@@ -6663,7 +6661,7 @@ def main() -> None:
     sync_job_worker().start()
     start_coach_job_worker()
     startup_sync_scheduler().schedule()
-    threading.Thread(target=daily_sync_loop, daemon=True).start()
+    threading.Thread(target=daily_sync_loop_service().run, daemon=True).start()
     LOGGER.info(f"{APP_NAME} listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
     try:
         server.serve_forever()  # NOSONAR - HTTP is intentionally LAN-only behind the documented HTTPS proxy.
