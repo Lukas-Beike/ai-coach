@@ -25,7 +25,6 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from functools import partial, wraps
 from http.server import BaseHTTPRequestHandler
-from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError
@@ -137,6 +136,7 @@ from backend.providers.garmin_morning import fetch_morning_body_battery
 from backend.http_api import server as http_server
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
+from backend.http_api.auth import SessionAuthService
 from backend.http_api.state_prelude import (
     CalendarWindowRange,
     PublicStateLocalPrelude,
@@ -285,7 +285,6 @@ from backend.http_api.responses import (
     header_items as response_header_items,
     json_bytes as response_json_bytes,
     response_headers,
-    session_cookies,
 )
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
@@ -323,7 +322,6 @@ LOG_PATH = DATA_DIR / "intervals-coach.log"
 PROVIDER_INTERVALS_NAME = "Intervals.icu"
 PROVIDER_GARMIN_NAME = "Garmin Connect"
 PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
-UTC_OFFSET_SUFFIX = "+00:00"
 JSON_MEDIA_TYPE = "application/json"
 OCTET_STREAM_MIME = "application/octet-stream"
 OPENAI_RESPONSES_PATH = "/responses"
@@ -369,8 +367,6 @@ COACH_JOB_WAKE = threading.Event()
 COACH_JOB_STOP = threading.Event()
 COACH_JOB_WORKER: threading.Thread | None = None
 SYNC_JOB_WORKER: SyncJobWorker | None = None
-SESSION_LOCK = threading.RLock()
-SESSIONS: dict[str, dict[str, Any]] = {}
 RATE_LIMITER = RateLimiter()
 SYNC_JOB_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)$")
 
@@ -631,6 +627,8 @@ SNAPSHOT_REPOSITORY = SnapshotRepository()
 
 DATABASE_MANAGER: DatabaseManager | None = None
 DATABASE_MANAGER_SIGNATURE: tuple[str, str, bool] | None = None
+SESSION_AUTH_SERVICE: SessionAuthService | None = None
+SESSION_AUTH_SIGNATURE: tuple[Any, Config, bool] | None = None
 PROVIDER_STATE_SERVICE: provider_state.ProviderStateService | None = None
 PROVIDER_HTTP_CLIENT: provider_http.JsonHttpClient | None = None
 PROVIDER_REFRESH_TRACKER: ProviderRefreshTracker | None = None
@@ -683,6 +681,19 @@ def database_manager() -> DatabaseManager:
         )
         DATABASE_MANAGER_SIGNATURE = signature
     return DATABASE_MANAGER
+
+
+def session_auth_service() -> SessionAuthService:
+    """Compose the HTTP session owner from the active persistence and security configuration."""
+    global SESSION_AUTH_SERVICE, SESSION_AUTH_SIGNATURE
+    manager = database_manager()
+    signature = (manager, CONFIG, SQLCIPHER_AVAILABLE)
+    if SESSION_AUTH_SERVICE is None or SESSION_AUTH_SIGNATURE != signature:
+        SESSION_AUTH_SERVICE = SessionAuthService(
+            manager, DB_LOCK, CONFIG, SQLCIPHER_AVAILABLE, RATE_LIMITER
+        )
+        SESSION_AUTH_SIGNATURE = signature
+    return SESSION_AUTH_SERVICE
 
 
 def provider_state_service() -> provider_state.ProviderStateService:
@@ -2221,23 +2232,6 @@ def output_text(response: dict[str, Any]) -> str:
 
 def _coach_session_key(session_csrf_hash: str) -> str:
     return hashlib.sha256(str(session_csrf_hash or "").encode("utf-8")).hexdigest()
-
-
-def _restore_coach_session_csrf_hash(session_key: str) -> str:
-    """Resolve a persisted session binding without storing a raw CSRF token."""
-    normalized_key = str(session_key or "").strip()
-    if not normalized_key:
-        return ""
-    now = time.time()
-    with SESSION_LOCK, DB_LOCK, database() as db:
-        rows = db.execute("SELECT csrf_hash, expires_at FROM sessions").fetchall()
-    for row in rows:
-        csrf_hash = str(row.get("csrf_hash") or "")
-        if not csrf_hash or float(row.get("expires_at") or 0) <= now:
-            continue
-        if hmac.compare_digest(_coach_session_key(csrf_hash), normalized_key):
-            return csrf_hash
-    return ""
 
 
 def _coach_command_receipt(value: Any) -> dict[str, Any]:
@@ -4548,7 +4542,9 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
     receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
     operation_id = str(receipt.get("operation_id") or "")
     client_turn_id = str(job.get("client_turn_id") or "")
-    session_csrf_hash = _restore_coach_session_csrf_hash(receipt.get("session_key"))
+    session_csrf_hash = session_auth_service().restore_coach_session_csrf_hash(
+        receipt.get("session_key")
+    )
     cancel_event = _background_coach_cancel_event(operation_id, client_turn_id)
     stream_attached = coach_streams.CHAT_STREAM_REGISTRY.events(session_csrf_hash, operation_id) is not None
     try:
@@ -5171,57 +5167,6 @@ def _restore_database_backup(payload: bytes) -> dict[str, Any]:
                 pass
 
 
-SESSION_COOKIE = "ic_session"
-CSRF_COOKIE = "ic_csrf"
-SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
-SESSION_TOUCH_INTERVAL_SECONDS = 5 * 60
-SESSION_CLEANUP_INTERVAL_SECONDS = 15 * 60
-SESSION_CLEANUP_BATCH_SIZE = 100
-SESSION_LAST_CLEANUP_MONOTONIC = 0.0
-
-
-def client_ip(handler: BaseHTTPRequestHandler) -> str:
-    return str(handler.client_address[0]) if handler.client_address else "unknown"
-
-
-def cookie_value(handler: BaseHTTPRequestHandler, name: str) -> str:
-    cookie = SimpleCookie()
-    try:
-        cookie.load(handler.headers.get("Cookie", ""))
-    except Exception:
-        return ""
-    return cookie[name].value if name in cookie else ""
-
-
-def session_token_hash(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def session_timestamp(value: Any) -> float | None:
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", UTC_OFFSET_SUFFIX))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.timestamp()
-    except (TypeError, ValueError, OverflowError):
-        return None
-
-
-def cleanup_expired_sessions(db: Any, now: float, *, force: bool = False) -> int:
-    global SESSION_LAST_CLEANUP_MONOTONIC
-    current_monotonic = time.monotonic()
-    if not force and current_monotonic - SESSION_LAST_CLEANUP_MONOTONIC < SESSION_CLEANUP_INTERVAL_SECONDS:
-        return 0
-    cursor = db.execute(
-        "DELETE FROM sessions WHERE token_hash IN ("
-        "SELECT token_hash FROM sessions WHERE expires_at <= ? LIMIT ?"
-        ")",
-        (now, SESSION_CLEANUP_BATCH_SIZE),
-    )
-    SESSION_LAST_CLEANUP_MONOTONIC = current_monotonic
-    return cursor.rowcount
-
-
 def readiness_service() -> ReadinessService:
     """Compose the public readiness probe from its concrete dependencies."""
     return ReadinessService(
@@ -5229,94 +5174,11 @@ def readiness_service() -> ReadinessService:
     )
 
 
-def authenticated_session(handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
-    token = cookie_value(handler, SESSION_COOKIE)
-    if not token:
-        return None
-    now = time.time()
-    token_hash = session_token_hash(token)
-    with SESSION_LOCK, DB_LOCK, database() as db:
-        cleanup_expired_sessions(db, now)
-        row = db.execute(
-            "SELECT csrf_hash, expires_at, last_seen FROM sessions WHERE token_hash = ?",
-            (token_hash,),
-        ).fetchone()
-        if not row:
-            return None
-        if float(row["expires_at"]) <= now:
-            db.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
-            return None
-        last_seen = session_timestamp(row["last_seen"])
-        if last_seen is None or now - last_seen >= SESSION_TOUCH_INTERVAL_SECONDS:
-            db.execute(
-                "UPDATE sessions SET last_seen = ? WHERE token_hash = ?",
-                (utc_now(), token_hash),
-            )
-        return {"csrf_hash": row["csrf_hash"], "expires_at": float(row["expires_at"])}
-
-
-def login_user(handler: BaseHTTPRequestHandler, password: str) -> dict[str, Any]:
-    if app_config.security_configuration_error(CONFIG, sqlcipher_available=SQLCIPHER_AVAILABLE):
-        raise AppError(503, "Die sichere App-Konfiguration ist unvollständig.")
-    allowed, retry_after = RATE_LIMITER.allow(f"login:{client_ip(handler)}", 5, 900)
-    if not allowed:
-        raise AppError(429, f"Zu viele Anmeldeversuche. Erneut versuchen in etwa {retry_after} Sekunden.")
-    if not hmac.compare_digest(str(password).encode("utf-8"), CONFIG.app_password.encode("utf-8")):
-        raise AppError(401, "Ungültiges Passwort.")
-    token = secrets.token_urlsafe(32)
-    csrf = secrets.token_urlsafe(32)
-    now = time.time()
-    with SESSION_LOCK, DB_LOCK, database() as db:
-        db.execute(
-            "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-            (session_token_hash(token), session_token_hash(csrf), now + SESSION_TTL_SECONDS, utc_now(), utc_now()),
-        )
-    return {"status": "ok", "authenticated": True, "csrf": csrf, "session_token": token}
-
-
-def logout_user(handler: BaseHTTPRequestHandler) -> None:
-    token = cookie_value(handler, SESSION_COOKIE)
-    if not token:
-        return
-    with SESSION_LOCK, DB_LOCK, database() as db:
-        db.execute("DELETE FROM sessions WHERE token_hash = ?", (session_token_hash(token),))
-
-
-def require_auth(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    if app_config.security_configuration_error(CONFIG, sqlcipher_available=SQLCIPHER_AVAILABLE):
-        raise AppError(503, "Die sichere App-Konfiguration ist unvollständig.")
-    session = authenticated_session(handler)
-    if not session:
-        raise AppError(401, "Anmeldung erforderlich.")
-    allowed, retry_after = RATE_LIMITER.allow(f"api:{client_ip(handler)}", 180, 60)
-    if not allowed:
-        raise AppError(429, f"Zu viele Anfragen. Erneut versuchen in etwa {retry_after} Sekunden.")
-    return session
-
-
-def require_csrf(handler: BaseHTTPRequestHandler, session: dict[str, Any]) -> None:
-    token = handler.headers.get("X-CSRF-Token", "")
-    if not token or not hmac.compare_digest(session_token_hash(token), str(session.get("csrf_hash", ""))):
-        raise AppError(403, "Ungültiges CSRF-Token.")
-
-
-def session_cookie_headers(token: str = "", csrf: str = "", *, clear: bool = False) -> list[str]:
-    """Create hardened session cookies without duplicating flag logic."""
-    return session_cookies(
-        SESSION_COOKIE,
-        CSRF_COOKIE,
-        token,
-        csrf,
-        ttl_seconds=SESSION_TTL_SECONDS,
-        secure=bool(getattr(CONFIG, "secure_cookies", False)),
-        clear=clear,
-    )
-
-
 class RequestHandler(BaseHTTPRequestHandler):
     server_version = f"IntervalsCoach/{APP_VERSION}"
     client_disconnect_errors = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
     static_asset_service: StaticAssetService
+    auth_service: SessionAuthService
 
     def log_message(self, fmt: str, *args: Any) -> None:
         LOGGER.info(
@@ -5359,11 +5221,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             readiness = readiness_service().state()
             self.send_json(200 if readiness["ready"] else 503, readiness)
         elif path == "/api/auth/status":
-            session = authenticated_session(self)
+            session = self.auth_service.authenticated_session(self)
             result = {"authenticated": bool(session), "maintenance": runtime_maintenance.MAINTENANCE_GATE.state()}
             self.send_json(200, result)
         elif path == "/api/bootstrap":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             self.send_json(200, public_bootstrap())
         else:
             return False
@@ -5371,16 +5233,16 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_sync_get(self, path: str) -> bool:
         if path == "/api/state/events":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             self.handle_state_events()
         elif match := SYNC_JOB_RE.match(path):
-            require_auth(self)
+            self.auth_service.require_auth(self)
             self.send_json(200, sync_job_queue_service().state(match.group(1)))
         elif path == "/api/sync/status":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             self.send_json(200, sync_public_state_service().state())
         elif path == "/api/activities":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             query = parse_qs(urlparse(self.path).query)
             self.send_json(200, activity_read_service().page(
                 query.get("cursor", [None])[0], query.get("limit", [None])[0],
@@ -5393,20 +5255,20 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_coach_get(self, path: str) -> bool:
         if path == "/api/chat/history":
-            session = require_auth(self)
+            session = self.auth_service.require_auth(self)
             query = parse_qs(urlparse(self.path).query)
             self.send_json(200, chat_history_page_service().page(
                 query.get("cursor", [None])[0], query.get("limit", [None])[0],
                 query.get("q", [None])[0], session_csrf_hash=session["csrf_hash"],
             ))
         elif path == "/api/chat/receipt":
-            session = require_auth(self)
+            session = self.auth_service.require_auth(self)
             query = parse_qs(urlparse(self.path).query)
             self.send_json(200, coach_command_receipt(
                 query.get("client_turn_id", [None])[0], session["csrf_hash"],
             ))
         elif path == "/api/chat/status":
-            session = require_auth(self)
+            session = self.auth_service.require_auth(self)
             self.send_json(200, chat_stream_status(session["csrf_hash"]))
         else:
             return False
@@ -5414,28 +5276,28 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_training_get(self, path: str) -> bool:
         if path == "/api/plan":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             query = parse_qs(urlparse(self.path).query)
             self.send_json(200, public_plan_state(local_only=query.get("local", ["0"])[0] == "1"))
         elif path == "/api/weather":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             query = parse_qs(urlparse(self.path).query)
             self.send_json(200, public_weather_state(local_only=query.get("local", ["0"])[0] == "1"))
         elif path == "/api/library":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             query = parse_qs(urlparse(self.path).query)
             self.send_json(200, library_page_service().page(query.get("cursor", [None])[0], query.get("limit", [None])[0]))
         elif path == "/api/performance":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             self.send_json(200, public_performance_state())
         elif path == "/api/profile":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             self.send_json(200, {"profile": profile_service().get(), "competitions": competition_service().list(limit=100)})
         elif path == "/api/feedback":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             self.send_json(200, public_feedback_state())
         elif path == "/api/context-preview":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             self.send_json(200, coach_context_preview_service().preview(SETTINGS.selected_ai_provider()))
         else:
             return False
@@ -5443,7 +5305,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_diagnostics_get(self, path: str) -> bool:
         if path == "/api/logs":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             raw_limit = parse_qs(urlparse(self.path).query).get("limit", ["200"])[0]
             try:
                 limit = max(1, min(int(raw_limit), 500))
@@ -5451,19 +5313,19 @@ class RequestHandler(BaseHTTPRequestHandler):
                 limit = 200
             self.send_json(200, {"entries": recent_log_entries_service().list(limit)})
         elif path == "/api/diagnostics":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             self.send_json(200, diagnostic_report_service().report())
         elif path == "/api/diagnostics/capture":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             self.send_json(200, DIAGNOSTIC_CAPTURE.status())
         elif path == "/api/privacy/export":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             stream_privacy_export(self)
         elif path == "/api/privacy/delete/preview":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             self.send_json(200, privacy_delete_service().preview())
         elif path == "/api/change-history":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             raw_limit = parse_qs(urlparse(self.path).query).get("limit", ["100"])[0]
             try:
                 limit = max(1, min(int(raw_limit), change_history.MAX_ROWS))
@@ -5471,7 +5333,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 limit = 100
             self.send_json(200, {"changes": change_history_service().list(limit)})
         elif path == "/api/privacy/backup":
-            require_auth(self)
+            self.auth_service.require_auth(self)
             stream_database_backup(self)
         else:
             return False
@@ -5513,30 +5375,30 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             path = urlparse(self.path).path
             if path == "/api/login":
-                result = login_user(self, str(self.read_json().get("password") or ""))
+                result = self.auth_service.login_user(self, str(self.read_json().get("password") or ""))
                 token = result.pop("session_token")
                 csrf = result["csrf"]
                 self.send_json(200, result, {
-                    "Set-Cookie": session_cookie_headers(token, csrf),
+                    "Set-Cookie": self.auth_service.session_cookie_headers(token, csrf),
                 })
             elif path == "/api/privacy/restore":
-                session = require_auth(self)
-                require_csrf(self, session)
+                session = self.auth_service.require_auth(self)
+                self.auth_service.require_csrf(self, session)
                 result = restore_database_backup(self.read_body(MAX_BACKUP_BYTES))
                 self.send_json(200, result, {"Set-Cookie": [
-                    session_cookie_headers(clear=True)[0], session_cookie_headers(clear=True)[1],
+                    self.auth_service.session_cookie_headers(clear=True)[0], self.auth_service.session_cookie_headers(clear=True)[1],
                 ]})
             elif path == "/api/logout":
-                session = require_auth(self)
-                require_csrf(self, session)
+                session = self.auth_service.require_auth(self)
+                self.auth_service.require_csrf(self, session)
                 with runtime_maintenance.MAINTENANCE_GATE.operation():
-                    logout_user(self)
+                    self.auth_service.logout_user(self)
                 self.send_json(200, {"status": "ok"}, {"Set-Cookie": [
-                    session_cookie_headers(clear=True)[0], session_cookie_headers(clear=True)[1],
+                    self.auth_service.session_cookie_headers(clear=True)[0], self.auth_service.session_cookie_headers(clear=True)[1],
                 ]})
             else:
-                session = require_auth(self)
-                require_csrf(self, session)
+                session = self.auth_service.require_auth(self)
+                self.auth_service.require_csrf(self, session)
                 if path == "/api/chat/cancel":
                     # Cancellation must remain reachable while the streaming
                     # request holds the maintenance gate for its lifetime.
@@ -5782,8 +5644,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.request_id = uuid.uuid4().hex[:12]
         try:
             path = urlparse(self.path).path
-            session = require_auth(self)
-            require_csrf(self, session)
+            session = self.auth_service.require_auth(self)
+            self.auth_service.require_csrf(self, session)
             if path == "/api/settings/model":
                 self.send_json(200, SETTINGS.save_model(self.read_json().get("model")))
                 return
@@ -5937,9 +5799,11 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 def request_handler_class() -> type[RequestHandler]:
     static_assets = StaticAssetService(PUBLIC_DIR)
+    auth = session_auth_service()
 
     class ComposedRequestHandler(RequestHandler):
         static_asset_service = static_assets
+        auth_service = auth
 
     return ComposedRequestHandler
 

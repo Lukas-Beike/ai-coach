@@ -25,6 +25,7 @@ from backend.coach.proposals import validated_coach_action_preview_input
 from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.readiness import ReadinessService
 from backend.http_api import readiness as readiness_module
+from backend.http_api import auth as http_auth
 from backend.http_api import server as http_server_module
 from backend.http_api.rate_limit import RateLimiter
 from backend import privacy as privacy_module
@@ -131,6 +132,22 @@ server.CONFIG = replace(
     calendar_ical_url="",
     secure_cookies=False,
 )
+
+
+def create_test_session(server_module):
+    token = f"session-{uuid.uuid4().hex}"
+    now = server_module.time.time()
+    auth = server_module.session_auth_service()
+    with server_module.DB_LOCK, server_module.database() as db:
+        db.execute(
+            "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
+            (
+                auth.session_token_hash(token), auth.session_token_hash("csrf"),
+                now + http_auth.SESSION_TTL_SECONDS, server_module.utc_now(),
+                server_module.utc_now(),
+            ),
+        )
+    return token
 
 
 def _garmin_metrics(snapshot):
@@ -1466,13 +1483,13 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.get_kv(weather_cache.FAILURE_KEY), "")
 
     def test_session_cookies_secure_flag_is_configurable_without_changing_csrf_visibility(self):
-        insecure = server.session_cookie_headers("session-token", "csrf-token")
+        insecure = server.session_auth_service().session_cookie_headers("session-token", "csrf-token")
         self.assertNotIn("; Secure", insecure[0])
         self.assertNotIn("; Secure", insecure[1])
         self.assertIn("HttpOnly", insecure[0])
         self.assertNotIn("HttpOnly", insecure[1])
         with patch.object(server, "CONFIG", replace(server.CONFIG, secure_cookies=True)):
-            secure = server.session_cookie_headers("session-token", "csrf-token")
+            secure = server.session_auth_service().session_cookie_headers("session-token", "csrf-token")
         self.assertIn("; Secure", secure[0])
         self.assertIn("; Secure", secure[1])
         self.assertIn("Max-Age=2592000", secure[0])
@@ -1485,16 +1502,17 @@ class CoachTests(unittest.TestCase):
                 self.headers = {"Cookie": cookies}
 
         token = create_test_session(server)
-        token_hash = server.session_token_hash(token)
+        auth = server.session_auth_service()
+        token_hash = auth.session_token_hash(token)
         old_seen = "2020-01-01T00:00:00+00:00"
         with server.DB_LOCK, server.database() as db:
             original = db.execute("SELECT expires_at FROM sessions WHERE token_hash=?", (token_hash,)).fetchone()["expires_at"]
             db.execute("UPDATE sessions SET last_seen=? WHERE token_hash=?", (old_seen, token_hash))
 
-        first = server.authenticated_session(Handler(f"ic_session={token}"))
+        first = auth.authenticated_session(Handler(f"ic_session={token}"))
         with server.DB_LOCK, server.database() as db:
             touched = db.execute("SELECT expires_at, last_seen FROM sessions WHERE token_hash=?", (token_hash,)).fetchone()
-        second = server.authenticated_session(Handler(f"ic_session={token}"))
+        second = auth.authenticated_session(Handler(f"ic_session={token}"))
         with server.DB_LOCK, server.database() as db:
             unchanged = db.execute("SELECT expires_at, last_seen FROM sessions WHERE token_hash=?", (token_hash,)).fetchone()
 
@@ -1513,23 +1531,24 @@ class CoachTests(unittest.TestCase):
                 self.headers = {"Cookie": cookies}
 
         token = create_test_session(server)
+        auth = server.session_auth_service()
         with server.DB_LOCK, server.database() as db:
-            db.execute("UPDATE sessions SET expires_at=? WHERE token_hash=?", (server.time.time() - 1, server.session_token_hash(token)))
-        self.assertIsNone(server.authenticated_session(Handler(f"ic_session={token}")))
+            db.execute("UPDATE sessions SET expires_at=? WHERE token_hash=?", (server.time.time() - 1, auth.session_token_hash(token)))
+        self.assertIsNone(auth.authenticated_session(Handler(f"ic_session={token}")))
         with server.DB_LOCK, server.database() as db:
-            self.assertIsNone(db.execute("SELECT token_hash FROM sessions WHERE token_hash=?", (server.session_token_hash(token),)).fetchone())
+            self.assertIsNone(db.execute("SELECT token_hash FROM sessions WHERE token_hash=?", (auth.session_token_hash(token),)).fetchone())
 
     def test_expired_session_cleanup_is_bounded_and_periodic(self):
         with server.DB_LOCK, server.database() as db:
-            for index in range(server.SESSION_CLEANUP_BATCH_SIZE + 1):
+            for index in range(http_auth.SESSION_CLEANUP_BATCH_SIZE + 1):
                 db.execute(
                     "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                     (f"expired-{index}", f"csrf-{index}", 0, "now", "now"),
                 )
-            server.SESSION_LAST_CLEANUP_MONOTONIC = 0
-            deleted = server.cleanup_expired_sessions(db, server.time.time(), force=True)
+            auth = server.session_auth_service()
+            deleted = auth.cleanup_expired_sessions(db, server.time.time(), force=True)
             remaining = db.execute("SELECT COUNT(*) AS count FROM sessions").fetchone()["count"]
-        self.assertEqual(deleted, server.SESSION_CLEANUP_BATCH_SIZE)
+        self.assertEqual(deleted, http_auth.SESSION_CLEANUP_BATCH_SIZE)
         self.assertEqual(remaining, 1)
 
     def test_parallel_authenticated_requests_share_a_valid_session(self):
@@ -1548,7 +1567,7 @@ class CoachTests(unittest.TestCase):
         def authenticate():
             try:
                 barrier.wait(timeout=5)
-                results.append(server.authenticated_session(Handler(cookies)))
+                results.append(server.session_auth_service().authenticated_session(Handler(cookies)))
             except Exception as exc:
                 errors.append(exc)
 
@@ -1566,14 +1585,14 @@ class CoachTests(unittest.TestCase):
             headers = {}
 
         with self.assertRaises(server.AppError) as missing:
-            server.require_csrf(MissingTokenHandler(), {"csrf_hash": server.session_token_hash("expected")})
+            server.session_auth_service().require_csrf(MissingTokenHandler(), {"csrf_hash": server.session_auth_service().session_token_hash("expected")})
         self.assertEqual(missing.exception.status, 403)
 
         class Handler:
             headers = {"X-CSRF-Token": "foreign"}
 
         with self.assertRaises(server.AppError) as foreign:
-            server.require_csrf(Handler(), {"csrf_hash": server.session_token_hash("expected")})
+            server.session_auth_service().require_csrf(Handler(), {"csrf_hash": server.session_auth_service().session_token_hash("expected")})
         self.assertEqual(foreign.exception.status, 403)
 
     def test_logout_removes_session_immediately(self):
@@ -1584,8 +1603,9 @@ class CoachTests(unittest.TestCase):
                 self.headers = {"Cookie": cookies}
 
         token = create_test_session(server)
-        server.logout_user(Handler(f"ic_session={token}"))
-        self.assertIsNone(server.authenticated_session(Handler(f"ic_session={token}")))
+        auth = server.session_auth_service()
+        auth.logout_user(Handler(f"ic_session={token}"))
+        self.assertIsNone(auth.authenticated_session(Handler(f"ic_session={token}")))
 
     def test_privacy_export_contains_archived_and_provider_state_without_sessions_or_credentials(self):
         archived = server.workout_library_remote_reconciler().reconcile([{
@@ -3733,12 +3753,13 @@ class CoachTests(unittest.TestCase):
             config = replace(server.CONFIG, app_password="test-password-123")
             with patch.object(server, "DATA_DIR", data_dir), patch.object(server, "DB_PATH", data_dir / "intervals-coach.db"), patch.object(server, "CONFIG", config):
                 server.initialise_database()
-                login = server.login_user(Handler(), "test-password-123")
+                auth = server.session_auth_service()
+                login = auth.login_user(Handler(), "test-password-123")
                 token = login["session_token"]
                 csrf = login["csrf"]
-                restored = server.authenticated_session(Handler(f"ic_session={token}", csrf))
+                restored = auth.authenticated_session(Handler(f"ic_session={token}", csrf))
                 self.assertIsNotNone(restored)
-                server.require_csrf(Handler(f"ic_session={token}", csrf), restored)
+                auth.require_csrf(Handler(f"ic_session={token}", csrf), restored)
                 with server.database() as db:
                     row = db.execute("SELECT token_hash, csrf_hash FROM sessions").fetchone()
                     self.assertNotEqual(row["token_hash"], token)
@@ -6384,11 +6405,12 @@ class CoachTests(unittest.TestCase):
         self.assertIn("2 Wochen", user_message["content"])
 
     def test_background_worker_restores_session_binding_from_persisted_key(self):
-        csrf_hash = server.session_token_hash("csrf-background-bound")
-        with server.SESSION_LOCK, server.DB_LOCK, server.database() as db:
+        auth = server.session_auth_service()
+        csrf_hash = auth.session_token_hash("csrf-background-bound")
+        with auth.session_lock, server.DB_LOCK, server.database() as db:
             db.execute(
                 "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-                (server.session_token_hash("session-background-bound"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
+                (auth.session_token_hash("session-background-bound"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
             )
         server.enqueue_background_coach_job(
             "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",
@@ -6403,11 +6425,12 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(seen["session_csrf_hash"], csrf_hash)
 
     def test_background_worker_forwards_live_deltas_and_completion_to_attached_stream(self):
-        csrf_hash = server.session_token_hash("csrf-background-streamed")
-        with server.SESSION_LOCK, server.DB_LOCK, server.database() as db:
+        auth = server.session_auth_service()
+        csrf_hash = auth.session_token_hash("csrf-background-streamed")
+        with auth.session_lock, server.DB_LOCK, server.database() as db:
             db.execute(
                 "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-                (server.session_token_hash("session-background-streamed"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
+                (auth.session_token_hash("session-background-streamed"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
             )
         operation_id, _cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(csrf_hash)
         try:
@@ -6472,11 +6495,12 @@ class CoachTests(unittest.TestCase):
             operation_id="operation-background-requeue",
         )
         job = server.coach_job_store().claim()
+        auth = server.session_auth_service()
         with patch.object(
             server,
             "chat_with_coach",
             side_effect=server.AppError(429, "busy", reason="chat_queue_full"),
-        ), patch.object(server, "_restore_coach_session_csrf_hash", return_value="csrf-background-requeue"):
+        ), patch.object(auth, "restore_coach_session_csrf_hash", return_value="csrf-background-requeue"):
             server._run_background_coach_job(job)
         with server.DB_LOCK, server.database() as db:
             command = db.execute(
@@ -8811,11 +8835,12 @@ class CoachTests(unittest.TestCase):
 
     def test_api_auth_uses_rate_limiter_and_preserves_retry_response(self):
         handler = Mock(client_address=("203.0.113.7", 0))
+        auth = server.session_auth_service()
         with patch.object(server.app_config, "security_configuration_error", return_value=None), \
-                patch.object(server, "authenticated_session", return_value={"csrf_hash": "unused"}), \
+                patch.object(auth, "authenticated_session", return_value={"csrf_hash": "unused"}), \
                 patch.object(RateLimiter, "allow", autospec=True, return_value=(False, 17)) as rate_limit, \
                 self.assertRaises(server.AppError) as raised:
-            server.require_auth(handler)
+            auth.require_auth(handler)
         self.assertEqual(raised.exception.status, 429)
         self.assertIn("17 Sekunden", raised.exception.message)
         rate_limit.assert_called_once_with(server.RATE_LIMITER, "api:203.0.113.7", 180, 60)
