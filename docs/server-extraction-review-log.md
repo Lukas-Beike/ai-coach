@@ -4224,3 +4224,24 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Konfliktfreiheit erneut geprüft: **PASS**. Sonar-Analyse auf dem
   veröffentlichten Head steht noch aus; dieser Review-PASS allein
   autorisiert bei rotem Pflichtcheck keinen Merge.
+
+## PR #706 — dritte Sonar-Runde (lokal, noch unveröffentlicht)
+
+- Auf Head `e5fa608` sind alle Unit-/Container-/CodeQL-/Codex-Gates
+  grün; der neue Sonar-Pflichtcheck bleibt mit 15 New-Code-Befunden
+  rot (`new_violations=15`, Grenze null). Browserprüfung lief zuletzt
+  noch. Auto-Merge ist deaktiviert; `mergedAt=null`.
+- GPT-6-Luna-Diff `d4fd6fe` zu zwei verbliebenen Job-Normalisierungs-
+  Komplexitätsbefunden am vollständigen Diff und Code geprüft: **PASS**.
+  Die Helfer erhalten Validierungsreihenfolge, Fehlermeldungen,
+  Trunkierung, Eindeutigkeit und kanonischen Hash; Transaktion und
+  Persistenz bleiben beim `SyncJobStore`. Sequenziell als `0985f4b`
+  integriert. 45 Job-/Outcome-/Queue-Tests, Ruff und Diff-Check **PASS**.
+  Ein erster Testaufruf verwendete einen nicht existierenden Modulnamen;
+  der korrigierte Aufruf ist grün. Gesamtsuite für `0985f4b`
+  **PASS**: 2.245 Tests, 12 Skips in 198,199 s. Root-Review des
+  aktualisierten Code-Diffs nach Integration erneut **PASS**.
+- Offen bleiben neun S107-Konstruktoren sowie vier S3776-Methoden in
+  `server.py`. Diese werden nicht per Sonar-Unterdrückung oder
+  kosmetischen Callback-Bags behandelt, sondern mit den zuständigen
+  P6/P7/P10-Use-Cases zusammengeführt.
