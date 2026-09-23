@@ -20,7 +20,11 @@ from backend.sync.daily import DailySyncMarkerService
 from backend.sync.intervals import (
     IntervalsSnapshotReader,
     IntervalsSnapshotService,
+    IntervalsSyncJournal,
+    IntervalsSyncRuntime,
     IntervalsSyncService,
+    IntervalsSyncStatus,
+    IntervalsSyncWorkflow,
 )
 from backend.sync.performance import PerformanceRefreshFollowupService
 from backend.sync.state import SyncStateRepository
@@ -108,26 +112,33 @@ class IntervalsSyncServiceTests(unittest.TestCase):
 
     def make_service(self, *, config=None, monotonic=None, wait_seconds=120.0):
         clock = monotonic or (lambda: 0.0)
+        status = IntervalsSyncStatus(self.database_manager, self.key_values)
         return IntervalsSyncService(
             config or self.config,
-            self.reader,
-            self.snapshot_service,
-            self.sync_state,
-            self.daily_markers,
+            IntervalsSyncWorkflow(
+                self.reader,
+                self.snapshot_service,
+                self.sync_state,
+                self.daily_markers,
+                {"intervals": 42},
+                -1,
+            ),
             self.followup,
-            self.status_writer,
-            self.observer,
-            self.gate,
-            self.database_manager,
-            self.key_values,
-            lambda value: value.replace("secret", "[REDACTED]"),
-            self.logger,
-            self.lock,
-            lambda: NOW,
-            {"intervals": 42},
-            -1,
-            monotonic=clock,
-            wait_seconds=wait_seconds,
+            status,
+            IntervalsSyncJournal(
+                status,
+                self.status_writer,
+                lambda value: value.replace("secret", "[REDACTED]"),
+                self.logger,
+                lambda: NOW,
+            ),
+            IntervalsSyncRuntime(
+                self.lock,
+                self.observer,
+                self.gate,
+                monotonic=clock,
+                wait_seconds=wait_seconds,
+            ),
         )
 
     def get_value(self, key):
@@ -255,6 +266,19 @@ class IntervalsSyncServiceTests(unittest.TestCase):
         self.logger.error.assert_called_once()
         self.assertEqual(self.get_value("sync_running"), "0")
         self.assertFalse(self.lock.locked())
+
+    def test_restart_resumes_persisted_operation_identity_and_start_time(self):
+        self.set_value("sync_running", "1")
+        self.set_value("sync_operation_id", "resumed-operation")
+        self.set_value("sync_operation_started_at", "before-restart")
+
+        self.service.sync("startup", activity_days=7)
+
+        self.assertEqual(
+            self.status_writer.write.call_args_list[0].args[0], "resumed-operation"
+        )
+        self.assertEqual(self.get_value("sync_operation_started_at"), "before-restart")
+        self.assertEqual(self.get_value("sync_running"), "0")
 
     def test_missing_api_key_fails_before_lock_and_provider_io(self):
         root = Path(self.temporary_directory.name)

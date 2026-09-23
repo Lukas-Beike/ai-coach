@@ -6,7 +6,8 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
@@ -368,54 +369,308 @@ class IntervalsSnapshotService:
         return sync_window, pagination
 
 
+class IntervalsSyncWorkflow:
+    """Own the reader, snapshot, pagination, and cursor steps of a sync."""
+
+    def __init__(
+        self,
+        reader: IntervalsSnapshotReader,
+        snapshots: IntervalsSnapshotService,
+        state: SyncStateRepository,
+        daily_sync_marker_service: DailySyncMarkerService,
+        sync_period_defaults: Mapping[str, int],
+        all_sync_days: int,
+    ) -> None:
+        self._reader = reader
+        self._snapshots = snapshots
+        self._state = state
+        self._daily_sync_marker_service = daily_sync_marker_service
+        self._sync_period_defaults = sync_period_defaults
+        self._all_sync_days = all_sync_days
+
+    @property
+    def all_sync_days(self) -> int:
+        return self._all_sync_days
+
+    def sync_period(self) -> int:
+        return self._state.sync_period(
+            "intervals", self._sync_period_defaults, self._all_sync_days
+        )
+
+    def synchronize(
+        self,
+        reason: str,
+        activity_days: int,
+        end_date: date | None,
+        cancel_event: threading.Event | None,
+        operation_id: str,
+        journal: IntervalsSyncJournal,
+    ) -> dict[str, Any]:
+        snapshot = self._reader.fetch_snapshot(
+            activity_days=activity_days,
+            **({"end_date": end_date} if end_date is not None else {}),
+            **({"cancel_event": cancel_event} if cancel_event is not None else {}),
+        )
+        journal.storing(operation_id)
+        snapshot, planned_import = self._snapshots.store_snapshot(
+            snapshot, activity_days, end_date
+        )
+        if end_date is None:
+            self._daily_sync_marker_service.mark("intervals")
+        library_imported, library_error, library_count = (
+            self._snapshots.seed_workout_library(reason, cancel_event)
+        )
+        sync_window, pagination = self._snapshots.record_window(
+            activity_days, end_date, snapshot
+        )
+        return {
+            "status": "partial" if library_error else "ok",
+            "synced_at": snapshot["synced_at"],
+            "activities": len(snapshot["recent_activities"]),
+            "wellness": len(snapshot["recent_wellness"]),
+            "events": len(snapshot["upcoming_calendar"]),
+            "planned_import": planned_import,
+            "activity_days": activity_days,
+            "window_start": sync_window[0][0].isoformat(),
+            "window_end": sync_window[-1][1].isoformat(),
+            "library": library_count,
+            "library_imported": library_imported,
+            "library_error": library_error,
+            "pagination": pagination,
+        }
+
+
+class IntervalsSyncStatus:
+    """Own transactional reads and writes of Intervals sync KV state."""
+
+    def __init__(
+        self, database_manager: DatabaseManager, key_values: KeyValueRepository
+    ) -> None:
+        self._database_manager = database_manager
+        self._key_values = key_values
+
+    def get(self, key: str) -> str | None:
+        with self._database_manager.unit_of_work() as db:
+            return self._key_values.get(db, key)
+
+    def set(self, key: str, value: str) -> None:
+        with self._database_manager.unit_of_work() as db:
+            self._key_values.set(db, key, value)
+
+
+class IntervalsSyncJournal:
+    """Own operation progress, failure redaction, and failure logging."""
+
+    def __init__(
+        self,
+        status: IntervalsSyncStatus,
+        writer: SyncOperationStateWriter,
+        redactor: Callable[[str], str],
+        logger: logging.Logger,
+        utc_now: Callable[[], str],
+    ) -> None:
+        self._status = status
+        self._writer = writer
+        self._redactor = redactor
+        self._logger = logger
+        self._utc_now = utc_now
+
+    def start(self, operation_id: str) -> None:
+        started_at = (
+            self._status.get("sync_operation_started_at")
+            if self._status.get("sync_running") == "1"
+            else self._utc_now()
+        )
+        self._status.set("sync_operation_started_at", started_at or self._utc_now())
+        self._writer.write(
+            operation_id,
+            "running",
+            "fetching",
+            10,
+            "Intervals.icu-Daten werden gelesen…",
+        )
+
+    def storing(self, operation_id: str) -> None:
+        self._writer.write(
+            operation_id,
+            "running",
+            "storing",
+            75,
+            "Lokale Trainingsdaten werden aktualisiert…",
+        )
+
+    def complete(self, operation_id: str) -> None:
+        self._writer.write(
+            operation_id,
+            "completed",
+            "complete",
+            100,
+            "Intervals.icu-Synchronisierung abgeschlossen.",
+        )
+        self._status.set("sync_operation_finished_at", self._utc_now())
+
+    def failure(self, operation_id: str, reason: str, exc: Exception) -> None:
+        if isinstance(exc, AppError) and exc.reason == "chat_cancelled":
+            self._writer.write(
+                operation_id,
+                "cancelled",
+                "cancelled",
+                100,
+                "Intervals.icu-Synchronisierung abgebrochen.",
+            )
+            self._status.set("sync_operation_finished_at", self._utc_now())
+            return
+        self._status.set("last_sync_error", self._redactor(str(exc))[:1000])
+        self._writer.write(
+            operation_id,
+            "error",
+            "error",
+            100,
+            "Intervals.icu-Synchronisierung fehlgeschlagen.",
+            str(exc),
+        )
+        self._status.set("sync_operation_finished_at", self._utc_now())
+        self._logger.error(
+            "Intervals.icu synchronization failed",
+            extra={
+                "event": "sync_failed",
+                "context": {
+                    "reason": reason,
+                    "last_success": self._status.get("last_sync_at"),
+                },
+            },
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+
+
+class IntervalsSyncRuntime:
+    """Own lock/gate/observation coordination and wait-for-existing behavior."""
+
+    def __init__(
+        self,
+        lock: Any,
+        observer: SyncOperationObserver,
+        provider_resync_gate: ProviderResyncGate,
+        monotonic: Callable[[], float] = time.monotonic,
+        wait_seconds: float = 120.0,
+    ) -> None:
+        self._lock = lock
+        self._observer = observer
+        self._provider_resync_gate = provider_resync_gate
+        self._monotonic = monotonic
+        self._wait_seconds = wait_seconds
+
+    @contextmanager
+    def operation(self, reason: str, operation_id: str | None) -> Iterator[Any]:
+        with (
+            self._observer.observe("intervals", "activities", reason, operation_id) as scope,
+            self._provider_resync_gate.operation(),
+        ):
+            yield scope
+
+    def running(self, status: IntervalsSyncStatus) -> bool:
+        return self._lock.locked() or status.get("sync_running") == "1"
+
+    def acquire(self) -> bool:
+        return self._lock.acquire(blocking=False)
+
+    def release(self) -> None:
+        self._lock.release()
+
+    def wait_for_existing(
+        self,
+        status: IntervalsSyncStatus,
+        followup: PerformanceRefreshFollowupService,
+        all_sync_days: int,
+        wait_for_performance: bool,
+        cancel_event: threading.Event | None,
+        previous_sync_at: str | None,
+    ) -> dict[str, Any]:
+        deadline = self._monotonic() + self._wait_seconds
+        while self._monotonic() < deadline:
+            self._raise_if_cancelled(cancel_event)
+            remaining = max(0.05, min(1.0, deadline - self._monotonic()))
+            if not self._lock.acquire(timeout=remaining):
+                continue
+            try:
+                current_sync_at = status.get("last_sync_at")
+                if current_sync_at and current_sync_at != previous_sync_at:
+                    return self._completed_wait_result(
+                        status,
+                        followup,
+                        all_sync_days,
+                        current_sync_at,
+                        wait_for_performance,
+                        cancel_event,
+                    )
+                last_error = status.get("last_sync_error") or ""
+                detail = f" {last_error[:300]}" if last_error else ""
+                raise AppError(
+                    503,
+                    "Die laufende Intervals.icu-Synchronisierung konnte nicht "
+                    f"abgeschlossen werden.{detail}",
+                    reason="provider_refresh_failed",
+                )
+            finally:
+                self._lock.release()
+        raise AppError(
+            503,
+            "Die laufende Intervals.icu-Synchronisierung ist noch nicht "
+            "abgeschlossen. Bitte später erneut versuchen.",
+            reason="provider_busy",
+        )
+
+    @staticmethod
+    def _raise_if_cancelled(cancel_event: threading.Event | None) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
+
+    @staticmethod
+    def _completed_wait_result(
+        status: IntervalsSyncStatus,
+        followup: PerformanceRefreshFollowupService,
+        all_sync_days: int,
+        current_sync_at: str,
+        wait_for_performance: bool,
+        cancel_event: threading.Event | None,
+    ) -> dict[str, Any]:
+        try:
+            completed_activity_days = int(status.get("last_sync_activity_days") or 0)
+        except (TypeError, ValueError):
+            completed_activity_days = 0
+        if wait_for_performance:
+            followup.wait(cancel_event=cancel_event)
+        result: dict[str, Any] = {
+            "status": "ok",
+            "waited_for_existing": True,
+            "synced_at": current_sync_at,
+        }
+        if completed_activity_days > 0 or completed_activity_days == all_sync_days:
+            result["activity_days"] = completed_activity_days
+        return result
+
+
 class IntervalsSyncService:
     """Own the complete read-only Intervals synchronization lifecycle."""
 
     def __init__(
         self,
         config: Config,
-        snapshot_reader: IntervalsSnapshotReader,
-        snapshot_service: IntervalsSnapshotService,
-        sync_state_repository: SyncStateRepository,
-        daily_sync_marker_service: DailySyncMarkerService,
+        workflow: IntervalsSyncWorkflow,
         performance_followup_service: PerformanceRefreshFollowupService,
-        operation_state_writer: SyncOperationStateWriter,
-        observer: SyncOperationObserver,
-        provider_resync_gate: ProviderResyncGate,
-        database_manager: DatabaseManager,
-        key_value_repository: KeyValueRepository,
-        redactor: Callable[[str], str],
-        logger: logging.Logger,
-        lock: Any,
-        utc_now: Callable[[], str],
-        sync_period_defaults: Mapping[str, int],
-        all_sync_days: int,
-        *,
-        monotonic: Callable[[], float] = time.monotonic,
-        wait_seconds: float = 120.0,
+        status: IntervalsSyncStatus,
+        journal: IntervalsSyncJournal,
+        runtime: IntervalsSyncRuntime,
     ) -> None:
         self._config = config
-        self._snapshot_reader = snapshot_reader
-        self._snapshot_service = snapshot_service
-        self._sync_state_repository = sync_state_repository
-        self._daily_sync_marker_service = daily_sync_marker_service
+        self._workflow = workflow
         self._performance_followup_service = performance_followup_service
-        self._operation_state_writer = operation_state_writer
-        self._observer = observer
-        self._provider_resync_gate = provider_resync_gate
-        self._database_manager = database_manager
-        self._key_value_repository = key_value_repository
-        self._redactor = redactor
-        self._logger = logger
-        self._lock = lock
-        self._utc_now = utc_now
-        self._sync_period_defaults = sync_period_defaults
-        self._all_sync_days = all_sync_days
-        self._monotonic = monotonic
-        self._wait_seconds = wait_seconds
+        self._status = status
+        self._journal = journal
+        self._runtime = runtime
 
     def running(self) -> bool:
-        return self._lock.locked() or self._get_value("sync_running") == "1"
+        return self._runtime.running(self._status)
 
     def sync(
         self,
@@ -427,12 +682,7 @@ class IntervalsSyncService:
         wait_for_performance: bool = False,
         cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
-        with (
-            self._observer.observe(
-                "intervals", "activities", reason, operation_id
-            ) as scope,
-            self._provider_resync_gate.operation(),
-        ):
+        with self._runtime.operation(reason, operation_id) as scope:
             result = self._sync_inner(
                 reason,
                 activity_days,
@@ -458,25 +708,27 @@ class IntervalsSyncService:
         if not self._config.intervals_api_key:
             raise AppError(503, INTERVALS_API_KEY_ERROR)
         if activity_days is None:
-            activity_days = self._sync_state_repository.sync_period(
-                "intervals", self._sync_period_defaults, self._all_sync_days
-            )
+            activity_days = self._workflow.sync_period()
         self._raise_if_cancelled(cancel_event)
-        if not self._lock.acquire(blocking=False):
+        if not self._runtime.acquire():
             if not wait_for_existing:
                 return {"status": "already_running"}
-            return self._wait_for_existing(
+            return self._runtime.wait_for_existing(
+                self._status,
+                self._performance_followup_service,
+                self._workflow.all_sync_days,
                 wait_for_performance,
                 cancel_event,
-                self._get_value("last_sync_at"),
+                self._status.get("last_sync_at"),
             )
 
-        resolved_operation_id = (
-            self._get_value("sync_operation_id")
-            if self._get_value("sync_running") == "1"
-            else None
-        ) or operation_id
+        resolved_operation_id = operation_id
         try:
+            resolved_operation_id = (
+                self._status.get("sync_operation_id")
+                if self._status.get("sync_running") == "1"
+                else None
+            ) or operation_id
             return self._execute(
                 reason,
                 activity_days,
@@ -486,7 +738,7 @@ class IntervalsSyncService:
                 cancel_event,
             )
         except Exception as exc:
-            self._record_failure(resolved_operation_id, reason, exc)
+            self._journal.failure(resolved_operation_id, reason, exc)
             raise
         finally:
             self._finish()
@@ -500,67 +752,18 @@ class IntervalsSyncService:
         wait_for_performance: bool,
         cancel_event: threading.Event | None,
     ) -> dict[str, Any]:
-        started_at = (
-            self._get_value("sync_operation_started_at")
-            if self._get_value("sync_running") == "1"
-            else self._utc_now()
-        )
-        self._set_value("sync_operation_started_at", started_at or self._utc_now())
-        self._operation_state_writer.write(
+        self._journal.start(operation_id)
+        self._status.set("sync_running", "1")
+        self._status.set("sync_status", "Intervals.icu: Synchronisierung läuft…")
+        result = self._workflow.synchronize(
+            reason,
+            activity_days,
+            end_date,
+            cancel_event,
             operation_id,
-            "running",
-            "fetching",
-            10,
-            "Intervals.icu-Daten werden gelesen…",
+            self._journal,
         )
-        self._set_value("sync_running", "1")
-        self._set_value("sync_status", "Intervals.icu: Synchronisierung läuft…")
-        snapshot = self._snapshot_reader.fetch_snapshot(
-            activity_days=activity_days,
-            **({"end_date": end_date} if end_date is not None else {}),
-            **({"cancel_event": cancel_event} if cancel_event is not None else {}),
-        )
-        self._operation_state_writer.write(
-            operation_id,
-            "running",
-            "storing",
-            75,
-            "Lokale Trainingsdaten werden aktualisiert…",
-        )
-        snapshot, planned_import = self._snapshot_service.store_snapshot(
-            snapshot, activity_days, end_date
-        )
-        if end_date is None:
-            self._daily_sync_marker_service.mark("intervals")
-        library_imported, library_error, library_count = (
-            self._snapshot_service.seed_workout_library(reason, cancel_event)
-        )
-        sync_window, pagination = self._snapshot_service.record_window(
-            activity_days, end_date, snapshot
-        )
-        self._operation_state_writer.write(
-            operation_id,
-            "completed",
-            "complete",
-            100,
-            "Intervals.icu-Synchronisierung abgeschlossen.",
-        )
-        self._set_value("sync_operation_finished_at", self._utc_now())
-        result = {
-            "status": "partial" if library_error else "ok",
-            "synced_at": snapshot["synced_at"],
-            "activities": len(snapshot["recent_activities"]),
-            "wellness": len(snapshot["recent_wellness"]),
-            "events": len(snapshot["upcoming_calendar"]),
-            "planned_import": planned_import,
-            "activity_days": activity_days,
-            "window_start": sync_window[0][0].isoformat(),
-            "window_end": sync_window[-1][1].isoformat(),
-            "library": library_count,
-            "library_imported": library_imported,
-            "library_error": library_error,
-            "pagination": pagination,
-        }
+        self._journal.complete(operation_id)
         performance_job = (
             self._performance_followup_service.enqueue_after_sync(reason)
             if end_date is None
@@ -575,114 +778,12 @@ class IntervalsSyncService:
             )
         return result
 
-    def _wait_for_existing(
-        self,
-        wait_for_performance: bool,
-        cancel_event: threading.Event | None,
-        previous_sync_at: str | None,
-    ) -> dict[str, Any]:
-        deadline = self._monotonic() + self._wait_seconds
-        while self._monotonic() < deadline:
-            self._raise_if_cancelled(cancel_event)
-            remaining = max(0.05, min(1.0, deadline - self._monotonic()))
-            if not self._lock.acquire(timeout=remaining):
-                continue
-            try:
-                current_sync_at = self._get_value("last_sync_at")
-                if current_sync_at and current_sync_at != previous_sync_at:
-                    return self._completed_wait_result(
-                        current_sync_at, wait_for_performance, cancel_event
-                    )
-                last_error = self._redactor(self._get_value("last_sync_error") or "")
-                detail = f" {last_error[:300]}" if last_error else ""
-                raise AppError(
-                    503,
-                    "Die laufende Intervals.icu-Synchronisierung konnte nicht "
-                    f"abgeschlossen werden.{detail}",
-                    reason="provider_refresh_failed",
-                )
-            finally:
-                self._lock.release()
-        raise AppError(
-            503,
-            "Die laufende Intervals.icu-Synchronisierung ist noch nicht "
-            "abgeschlossen. Bitte später erneut versuchen.",
-            reason="provider_busy",
-        )
-
-    def _completed_wait_result(
-        self,
-        current_sync_at: str,
-        wait_for_performance: bool,
-        cancel_event: threading.Event | None,
-    ) -> dict[str, Any]:
-        try:
-            completed_activity_days = int(
-                self._get_value("last_sync_activity_days") or 0
-            )
-        except (TypeError, ValueError):
-            completed_activity_days = 0
-        if wait_for_performance:
-            self._performance_followup_service.wait(cancel_event=cancel_event)
-        result: dict[str, Any] = {
-            "status": "ok",
-            "waited_for_existing": True,
-            "synced_at": current_sync_at,
-        }
-        if (
-            completed_activity_days > 0
-            or completed_activity_days == self._all_sync_days
-        ):
-            result["activity_days"] = completed_activity_days
-        return result
-
-    def _record_failure(self, operation_id: str, reason: str, exc: Exception) -> None:
-        if isinstance(exc, AppError) and exc.reason == "chat_cancelled":
-            self._operation_state_writer.write(
-                operation_id,
-                "cancelled",
-                "cancelled",
-                100,
-                "Intervals.icu-Synchronisierung abgebrochen.",
-            )
-            self._set_value("sync_operation_finished_at", self._utc_now())
-            return
-        self._set_value("last_sync_error", self._redactor(str(exc))[:1000])
-        self._operation_state_writer.write(
-            operation_id,
-            "error",
-            "error",
-            100,
-            "Intervals.icu-Synchronisierung fehlgeschlagen.",
-            str(exc),
-        )
-        self._set_value("sync_operation_finished_at", self._utc_now())
-        self._logger.error(
-            "Intervals.icu synchronization failed",
-            extra={
-                "event": "sync_failed",
-                "context": {
-                    "reason": reason,
-                    "last_success": self._get_value("last_sync_at"),
-                },
-            },
-            exc_info=(type(exc), exc, exc.__traceback__),
-        )
-
     def _finish(self) -> None:
         try:
-            self._set_value("sync_running", "0")
-            self._set_value("sync_status", "")
+            self._status.set("sync_running", "0")
+            self._status.set("sync_status", "")
         finally:
-            self._lock.release()
-
-    def _get_value(self, key: str) -> str | None:
-        with self._database_manager.unit_of_work() as db:
-            return self._key_value_repository.get(db, key)
-
-    def _set_value(self, key: str, value: str) -> None:
-        with self._database_manager.unit_of_work() as db:
-            self._key_value_repository.set(db, key, value)
+            self._runtime.release()
 
     @staticmethod
     def _raise_if_cancelled(cancel_event: threading.Event | None) -> None:

@@ -8139,7 +8139,8 @@ class CoachTests(unittest.TestCase):
         INTERVALS_SYNC_LOCK.acquire()
         previous_snapshot_read = threading.Event()
         service = server.intervals_sync_service()
-        original_get_value = service._get_value
+        status = service._status
+        original_get_value = status.get
 
         def get_value_after_read(key):
             value = original_get_value(key)
@@ -8157,7 +8158,7 @@ class CoachTests(unittest.TestCase):
         worker = threading.Thread(target=finish_active_sync)
         worker.start()
         try:
-            with patch.object(service, "_get_value", side_effect=get_value_after_read):
+            with patch.object(status, "get", side_effect=get_value_after_read):
                 result = service.sync(
                     "latest activity test",
                     activity_days=7,

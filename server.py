@@ -96,7 +96,11 @@ from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
 from backend.sync.intervals import (
     IntervalsSnapshotReader,
     IntervalsSnapshotService,
+    IntervalsSyncJournal,
+    IntervalsSyncRuntime,
     IntervalsSyncService,
+    IntervalsSyncStatus,
+    IntervalsSyncWorkflow,
 )
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 from backend.weather import history as weather_history
@@ -924,30 +928,37 @@ def intervals_snapshot_service() -> IntervalsSnapshotService:
 
 def intervals_sync_service() -> IntervalsSyncService:
     """Compose the complete read-only Intervals synchronization use case."""
+    status = IntervalsSyncStatus(database_manager(), KEY_VALUE_REPOSITORY)
     return IntervalsSyncService(
         CONFIG,
-        intervals_snapshot_reader(),
-        intervals_snapshot_service(),
-        sync_state_repository(),
-        daily_sync_marker_service(),
-        performance_refresh_followup_service(),
-        SyncOperationStateWriter(
-            database_manager(),
-            KEY_VALUE_REPOSITORY,
-            runtime_events.STATE_EVENT_BUFFER,
-            REDACTOR.redact_text,
+        IntervalsSyncWorkflow(
+            intervals_snapshot_reader(),
+            intervals_snapshot_service(),
+            sync_state_repository(),
+            daily_sync_marker_service(),
+            SYNC_PERIOD_DEFAULTS,
+            ALL_SYNC_DAYS,
         ),
-        sync_operation_observer(),
-        INTERVALS_RESYNC_GATE,
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        REDACTOR.redact_text,
-        LOGGER,
-        INTERVALS_SYNC_LOCK,
-        utc_now,
-        SYNC_PERIOD_DEFAULTS,
-        ALL_SYNC_DAYS,
-        wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
+        performance_refresh_followup_service(),
+        status,
+        IntervalsSyncJournal(
+            status,
+            SyncOperationStateWriter(
+                database_manager(),
+                KEY_VALUE_REPOSITORY,
+                runtime_events.STATE_EVENT_BUFFER,
+                REDACTOR.redact_text,
+            ),
+            REDACTOR.redact_text,
+            LOGGER,
+            utc_now,
+        ),
+        IntervalsSyncRuntime(
+            INTERVALS_SYNC_LOCK,
+            sync_operation_observer(),
+            INTERVALS_RESYNC_GATE,
+            wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
+        ),
     )
 
 
