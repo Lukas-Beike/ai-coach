@@ -556,8 +556,13 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
 - [ ] Auth, Session-Cookies, CSRF, Rate-Limits und Readiness in `http_api/` ziehen.
 - [ ] Öffentliche Bootstrap-/State-Projektionen und Pagination zuordnen;
   Projektionen erhalten Daten über Domänenlesefunktionen.
+  - [x] Lokalen Bootstrap-Lesevorlauf und Wetter-Follow-up mit
+    bestehender UOW-/Lock-Grenze in konkrete `http_api/`-Eigentümer
+    verschieben; übrige `public_state`-Projektionen bleiben offen.
 - [ ] `RequestHandler`, Route-Dispatch, Body-Limits, statische Dateien und SSE
   transportseitig auslagern; vorhandene `requests.py`/`responses.py` nutzen.
+  - [x] Sync-POST-Fachentscheidungen in `SyncCommandEndpoint` verlagern;
+    Handler behält ausschließlich Transport, Body-Lesen und Antwort.
 - [ ] Handler mit den konkret benötigten Services verbinden; keine Weitergabe
   des `server`-Moduls als Pseudo-Servicecontainer.
 - [ ] `CoachHTTPServer` dem HTTP-Bereich zuordnen.

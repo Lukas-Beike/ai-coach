@@ -4467,3 +4467,58 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Review erneut **PASS**. Inventar: `server.py` 6.932 Zeilen, P7
   101 Definitionen/31 globale Bindungen; P7 ist weiterhin offen.
   Sonar/CI des veröffentlichten Stands noch ausstehend.
+
+## PR #706 — Intervals-Lifecycle, Coach-Aktivitätslesen und HTTP-Sync
+
+- GPT-6-Luna-Intervals-Diff `bbb72f61` zunächst **FAIL**: Der Waiter
+  hätte den rohen persistierten `last_sync_error` in eine API-Meldung
+  übernommen. Korrektur `0fefd5c7` mit Redaction-Regression erneut
+  im tatsächlichen Code geprüft: **PASS**. Sequenziell als `65cdb3c0`
+  und `b1a4a403` integriert. Status-/Journal-/Runtime-Eigentümer
+  besitzen den äußeren Observer, Lock, Gate, persistierte Fehler und
+  Wait-Semantik ohne Server-Rückimport. 13 Flow-/Architektur- und fünf
+  Server-Regressionen **PASS**.
+- GPT-6-Luna-P7-Aktivitätslese-Diff `fdb5827a` im tatsächlichen Code
+  **PASS**, als `27c3ad09` integriert. Vier direkte, drei Architektur-,
+  ein Server-Detail- und 27 Coach-Tool-Regressionen **PASS**. Die
+  Aktivitätslesefunktionen und zugehörige Auswahl liegen im konkreten
+  Coach-Use-Case; übrige P7-Definitionen bleiben offen.
+- Root-P10-HTTP-Sync-Diff `9f48ba7` im tatsächlichen Code **PASS**,
+  als `2f9be5ef` integriert. `SyncCommandEndpoint` besitzt Perioden-
+  validierung, Queue-/Bestätigungsentscheidungen und Full-Resync;
+  `_handle_sync_post` beschränkt sich auf Transport/Body/Antwort.
+  Fünf direkte und drei Architekturtests **PASS**. Ein anfängliches
+  Top-Level-`import server` im neuen Testmodul verletzte die isolierte
+  Testinitialisierung: Korrektur `034fb702` als `635cd960` integriert,
+  Handler-Regressionsfall nach `test_server.py` verschoben.
+- Der erste breite Lauf dieses Stands war **FAIL**: Ein älterer Test
+  patchte nach dem Intervals-Umzug weiterhin `service._get_value`,
+  brach nach Lock-Erwerb ab und verursachte Folgefehler/Hänger.
+  Root-Korrektur `c184b06d` patcht `service._status.get` und erwirbt
+  den Lock erst nach Aufbau des Beobachtungspunkts. Einzeltest **PASS**;
+  vollständige integrierte Suite auf `c184b06d` **PASS**: 2.274 Tests,
+  12 Skips in 221,892 s. Damit sind die korrigierten Pfade am
+  integrierten Code erneut geprüft; P7 und P10 bleiben offen.
+
+## PR #706 — P10 lokaler Bootstrap- und Wetter-Vorlauf
+
+- Root-Diff `f3820d2d` nach tatsächlichem Code-/Diff-Review **PASS**,
+  als `f7f8d521` integriert. `PublicStateLocalPrelude` hält die
+  vorhandene gemeinsame DB-UOW unter `DB_LOCK` für Snapshot,
+  Aktivitätsfeedback, geplante Einheiten und Offline-Wetter ein;
+  `PublicStateWeatherPrelude` aktualisiert Provider-Wetter und löst
+  Adaptive-Follow-up erst außerhalb dieses Locks aus. Kein
+  Server-Rückimport, kein fachtragender Server-Callback; `public_state`
+  enthält allerdings noch weitere Projektionen und ist nicht fertig
+  ausgelagert. Neun gezielte und vier Architekturtests, Compile,
+  Ruff für die neuen Module und Diff-Check **PASS**. Vollständige
+  integrierte Suite auf `f7f8d521` **PASS**: 2.276 Tests, 12 Skips
+  in 225,183 s. Sonar/CI des erweiterten Stands stehen noch aus.
+- Inventar nach `f7f8d521`: `server.py` 6.862 Zeilen,
+  318 Definitionen; P7 101 Definitionen/31 globale Bindungen,
+  P10 25 Definitionen/37 globale Bindungen. Diese Zahlen sind keine
+  fachliche Fertigmeldung. Die ältere `test_coach_review.py` hat
+  bestehende Ruff-Stilbefunde; die oben betroffenen neuen Module
+  bestehen Ruff. Nächster Schritt: aktuellen PR-Head gegen `develop`
+  prüfen, veröffentlichen, Sonar/CI auswerten und die verbleibende
+  P10-Projektion weiter auslagern.
