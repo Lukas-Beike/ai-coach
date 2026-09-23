@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from backend import privacy as privacy_module
 from backend.privacy import PrivacyDataExportDependencies, PrivacyDataExportService
 from backend.weather import cache as weather_cache
 
@@ -143,7 +144,7 @@ class PrivacyDataExportServiceTests(unittest.TestCase):
     def test_backend_module_has_no_server_dependency_and_old_wrapper_is_absent(self):
         import server
 
-        source = Path(__file__).parents[1] / "backend" / "privacy.py"
+        source = Path(privacy_module.__file__)
         self.assertNotIn("import server", source.read_text(encoding="utf-8"))
         self.assertFalse(hasattr(server, "privacy_export"))
         self.assertTrue(callable(server.privacy_data_export_service))
