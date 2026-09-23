@@ -1629,7 +1629,7 @@ class CoachTests(unittest.TestCase):
 
     def test_privacy_export_zip_streams_collections_and_contains_complete_manifest(self):
         server.sync_state_repository().save_snapshot({"export-test": True, "synced_at": "2026-09-01", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})
-        temporary = server._privacy_export_file()
+        temporary = server.privacy_archive_export_service().create_file()
         try:
             with zipfile.ZipFile(temporary) as archive:
                 names = set(archive.namelist())
@@ -1640,6 +1640,18 @@ class CoachTests(unittest.TestCase):
                 self.assertIn("snapshots.jsonl", names)
                 self.assertIn("profile.json", names)
                 self.assertNotIn("sessions.jsonl", names)
+                self.assertEqual(
+                    manifest["categories"],
+                    sorted(name.rsplit(".", 1)[0] for name in names if name != "manifest.json"),
+                )
+                self.assertEqual(
+                    manifest["jsonl_files"],
+                    sorted(name for name in names if name.endswith(".jsonl")),
+                )
+                state = json.loads(archive.read("application_state.json"))
+                self.assertTrue(
+                    {"profile", "garmin_snapshot", weather_cache.CACHE_KEY}.isdisjoint(state)
+                )
                 snapshots = [json.loads(line) for line in archive.read("snapshots.jsonl").splitlines()]
                 self.assertTrue(any(item.get("export-test") for item in snapshots))
         finally:
@@ -1660,6 +1672,47 @@ class CoachTests(unittest.TestCase):
         server.stream_privacy_export(handler)
         self.assertTrue(handler.payload.startswith(b"PK"))
         self.assertFalse(handler.path.exists())
+
+    def test_privacy_archive_export_enforces_free_space_size_timeout_and_cleanup(self):
+        service = server.privacy_archive_export_service()
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            no_space_config = replace(
+                service._config,
+                data_dir=data_dir,
+                minimum_free_bytes=10**12,
+                disk_usage=lambda _path: Mock(free=0),
+            )
+            with patch.object(service, "_config", no_space_config), self.assertRaises(server.AppError) as no_space:
+                service.create_file()
+            self.assertEqual(no_space.exception.status, 507)
+            self.assertEqual(list(data_dir.iterdir()), [])
+
+            too_large_config = replace(
+                service._config,
+                data_dir=data_dir,
+                maximum_bytes=1,
+                minimum_free_bytes=1,
+                disk_usage=lambda _path: Mock(free=10**12),
+            )
+            with patch.object(service, "_config", too_large_config), self.assertRaises(server.AppError) as too_large:
+                service.create_file()
+            self.assertEqual(too_large.exception.status, 413)
+            self.assertEqual(list(data_dir.iterdir()), [])
+
+            clock = Mock(side_effect=[0, 1])
+            timeout_config = replace(
+                service._config,
+                data_dir=data_dir,
+                minimum_free_bytes=1,
+                time_limit_seconds=0,
+                monotonic=clock,
+                disk_usage=lambda _path: Mock(free=10**12),
+            )
+            with patch.object(service, "_config", timeout_config), self.assertRaises(server.AppError) as timeout:
+                service.create_file()
+            self.assertEqual(timeout.exception.status, 408)
+            self.assertEqual(list(data_dir.iterdir()), [])
 
     def test_file_stream_uses_bounded_chunks_and_cleans_up_after_disconnect(self):
         class RecordingWriter:
@@ -2302,6 +2355,11 @@ class CoachTests(unittest.TestCase):
 
         source = Path(backup_export.__file__).read_text(encoding="utf-8")
         self.assertNotIn("import server", source)
+        self.assertIn("class PrivacyArchiveExportService", source)
+        self.assertIn("def create_file(self)", source)
+        server_source = Path(server.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("def _privacy_export_file", server_source)
+        self.assertIn("def privacy_archive_export_service", server_source)
 
         class Rows:
             def execute(self, query):
