@@ -5345,3 +5345,23 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   auf `origin/develop` erreichbar; alle CI-/Browser-/Codex-Checks
   **PASS**, 0 Review-Threads offen. Offen bleiben Restore-Austausch
   und atomare Ressourcen-/Worker-Wiederaufnahme.
+
+## P10 Performance-/Feedback-Projektionen — Integrationsreview
+
+- GPT-6-Luna/high-Patch `aa00a316`, auf bestätigtem #733-Merge
+  `eb69cffd` als `2aefe68b` mit Inventar-/Architekturstand
+  `b0e71b3a` integriert. Root prüfte den tatsächlichen Diff und
+  Code: **PASS**. Die zwei konkreten Services in
+  `backend/http_api/public_performance.py` besitzen die vollständige
+  Performance-/Garmin- bzw. Feedback-Projektion; `server.py` enthält
+  nur ihre Komposition und direkte Handler-Delegation. Auth-Grenze,
+  lokale Datumsauflösung, Lese-Reihenfolge und Check-in-Limit 30
+  bleiben erhalten. Keine Server-Rückimporte oder Alt-Wrapper.
+- Rebase-Konflikte betrafen #733-Authentifizierung sowie das generierte
+  Inventar; die dynamische Handler-Auth wurde beibehalten und das
+  Inventar aus dem kombinierten Quellstand neu erzeugt. Fokussierte
+  Tests und Architekturtest **PASS** (6/6), Inventar-/Diff-Check
+  **PASS**. Neu gebautes Read-only-Docker-Image: vollständige Suite
+  **PASS**, 2.343 Tests, 11 Skips. `server.py` umfasst 5.888
+  physische Zeilen; übrige P10-Projektionen und vollständiger
+  HTTP-Transport bleiben offen. PR-CI und externer Review folgen.
