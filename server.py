@@ -158,7 +158,13 @@ from backend.sync.garmin_service import (
     shared_garmin_sync_lock,
 )
 from backend.sync.garmin_projection_service import GarminProjectionService
-from backend.sync.full_resync import FullProviderResyncService, PROVIDER_RESYNC_KEYS
+from backend.sync.full_resync import (
+    FullProviderResyncService,
+    FullResyncOperationJournal,
+    FullResyncProviderExecution,
+    FullResyncStateStore,
+    PROVIDER_RESYNC_KEYS,
+)
 from backend.sync.external_calendar import (
     ExternalCalendarSyncService,
     shared_external_calendar_sync_lock,
@@ -1045,22 +1051,26 @@ def garmin_projection_service() -> GarminProjectionService:
 
 def full_provider_resync_service() -> FullProviderResyncService:
     """Compose complete provider reset orchestration."""
+    observer = sync_operation_observer()
     return FullProviderResyncService(
-        CONFIG,
-        intervals_sync_service(),
-        garmin_sync_service(),
-        competition_sync_service(),
-        sync_operation_observer(),
-        INTERVALS_RESYNC_GATE,
-        GARMIN_RESYNC_GATE,
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        REDACTOR.redact_text,
-        LOGGER,
-        utc_now,
-        time.perf_counter,
-        lambda: uuid.uuid4().hex,
-        ALL_SYNC_DAYS,
+        FullResyncProviderExecution(
+            CONFIG,
+            intervals_sync_service(),
+            garmin_sync_service(),
+            competition_sync_service(),
+            INTERVALS_RESYNC_GATE,
+            GARMIN_RESYNC_GATE,
+            ALL_SYNC_DAYS,
+        ),
+        FullResyncStateStore(database_manager(), KEY_VALUE_REPOSITORY),
+        FullResyncOperationJournal(
+            observer,
+            LOGGER,
+            REDACTOR.redact_text,
+            utc_now,
+            time.perf_counter,
+            lambda: uuid.uuid4().hex,
+        ),
     )
 
 

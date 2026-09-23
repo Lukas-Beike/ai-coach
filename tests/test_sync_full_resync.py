@@ -14,6 +14,9 @@ from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.sync.full_resync import (
     PROVIDER_RESYNC_KEYS,
     FullProviderResyncService,
+    FullResyncOperationJournal,
+    FullResyncProviderExecution,
+    FullResyncStateStore,
 )
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import OPERATION_CONTEXT
@@ -117,22 +120,28 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         return self.competition_result
 
     def _service(self, *, config=None, key_values=None):
-        return FullProviderResyncService(
-            config or SimpleNamespace(intervals_api_key="fake-key"),
-            self.intervals_service,
-            self.garmin_service,
-            self.competition_service,
+        operation_journal = FullResyncOperationJournal(
             self.observer,
-            self.intervals_gate,
-            self.garmin_gate,
-            self.database,
-            key_values or self.key_values,
-            lambda value: value.replace("api-secret", "[redacted]"),
             self.logger,
+            lambda value: value.replace("api-secret", "[redacted]"),
             lambda: NOW,
             lambda: 10.0,
             lambda: "generated-operation",
-            -1,
+        )
+        return FullProviderResyncService(
+            FullResyncProviderExecution(
+                config or SimpleNamespace(intervals_api_key="fake-key"),
+                self.intervals_service,
+                self.garmin_service,
+                self.competition_service,
+                self.intervals_gate,
+                self.garmin_gate,
+                -1,
+            ),
+            FullResyncStateStore(
+                self.database, key_values or self.key_values
+            ),
+            operation_journal,
         )
 
     def _get_value(self, provider, field):
