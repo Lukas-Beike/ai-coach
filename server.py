@@ -1996,7 +1996,7 @@ def coach_job_store() -> CoachJobStore:
 def coach_job_submission_service() -> CoachJobSubmissionService:
     """Compose validation and committed side effects for background submissions."""
     return CoachJobSubmissionService(
-        database_manager(), CHAT_REPOSITORY, DB_LOCK, SETTINGS,
+        database_manager, CHAT_REPOSITORY, DB_LOCK, SETTINGS,
         runtime_events.STATE_EVENT_BUFFER, coach_streams.CHAT_STREAM_REGISTRY,
         COACH_JOB_WAKE, utc_now, background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS,
         max_attachment_storage_bytes=MAX_ATTACHMENT_STORAGE_BYTES,

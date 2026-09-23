@@ -6475,6 +6475,30 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(user_message["role"], "user")
         self.assertIn("2 Wochen", user_message["content"])
 
+    def test_background_submission_resolves_current_database_manager_per_call(self):
+        service = server.coach_job_submission_service()
+        first_manager = server.database_manager()
+        first = service.enqueue(
+            "Eine lange Planung bitte", "turn-background-manager-refresh", "csrf-background-manager-refresh",
+            operation_id="operation-background-manager-refresh",
+        )
+
+        first_manager.close()
+        server.DATABASE_MANAGER = None
+        server.DATABASE_MANAGER_SIGNATURE = None
+        second_manager = server.database_manager()
+
+        self.assertIsNot(first_manager, second_manager)
+        self.assertEqual(
+            service.active("csrf-background-manager-refresh")["client_turn_id"],
+            "turn-background-manager-refresh",
+        )
+        replay = service.enqueue(
+            "Replay", "turn-background-manager-refresh", "csrf-background-manager-refresh",
+            operation_id="operation-background-manager-replay",
+        )
+        self.assertEqual(replay, first)
+
     def test_background_job_replay_reuses_receipt_without_republishing(self):
         registry = server.coach_streams.CHAT_STREAM_REGISTRY
 

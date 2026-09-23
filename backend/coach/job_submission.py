@@ -30,7 +30,7 @@ class CoachJobSubmissionService:
 
     def __init__(
         self,
-        database_manager: DatabaseManager,
+        database_manager: Callable[[], DatabaseManager],
         chat_repository: ChatRepository,
         database_lock: Any,
         settings_service: SettingsService,
@@ -59,8 +59,10 @@ class CoachJobSubmissionService:
         self, session_csrf_hash: str, operation_id: str | None = None
     ) -> dict[str, Any] | None:
         session_key = _coach_session_key(session_csrf_hash)
-        with self._database_lock, self._database_manager.unit_of_work() as db:
-            rows = self._active_rows(db)
+        with self._database_lock:
+            database_manager = self._database_manager()
+            with database_manager.unit_of_work() as db:
+                rows = self._active_rows(db)
         return self._find_active(rows, session_key, operation_id)
 
     @staticmethod
@@ -170,80 +172,82 @@ class CoachJobSubmissionService:
         thinking_level: str,
     ) -> tuple[dict[str, Any] | None, int | None]:
         now = self._utc_now()
-        with self._database_lock, self._database_manager.unit_of_work() as db:
-            existing = db.execute(
-                "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)
-            ).fetchone()
-            if existing:
-                receipt = command_receipt(existing.get("receipt"))
-                if receipt.get("session_key") != _coach_session_key(session_csrf_hash):
+        with self._database_lock:
+            database_manager = self._database_manager()
+            with database_manager.unit_of_work() as db:
+                existing = db.execute(
+                    "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)
+                ).fetchone()
+                if existing:
+                    receipt = command_receipt(existing.get("receipt"))
+                    if receipt.get("session_key") != _coach_session_key(session_csrf_hash):
+                        raise AppError(
+                            403,
+                            "Dieser Coach-Auftrag gehoert zu einer anderen Sitzung.",
+                            reason="command_scope_denied",
+                        )
+                    if receipt.get("mode") != "background":
+                        raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
+                    return {
+                        "status": "completed" if existing.get("status") == "completed" else "queued",
+                        "mode": "background",
+                        "operation_id": receipt.get("operation_id"),
+                        "plan_scope": receipt.get("plan_scope") or scope,
+                    }, None
+
+                if self._find_active(self._active_rows(db), session_key):
                     raise AppError(
-                        403,
-                        "Dieser Coach-Auftrag gehoert zu einer anderen Sitzung.",
-                        reason="command_scope_denied",
+                        409,
+                        "Für diese Sitzung läuft bereits eine Coach-Anfrage.",
+                        reason="chat_already_running",
                     )
-                if receipt.get("mode") != "background":
-                    raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
-                return {
-                    "status": "completed" if existing.get("status") == "completed" else "queued",
+
+                user_message = self._chat_repository.add(db, "user", message, client_turn_id=client_turn_id)
+                attachment_json = json.dumps(attachments, ensure_ascii=False, separators=(",", ":"))
+                stored_attachment_bytes = db.execute(
+                    "SELECT COALESCE(SUM(length(attachments)), 0) AS total FROM messages"
+                ).fetchone()["total"]
+                stored_gemini_history_row = db.execute(
+                    "SELECT COALESCE(length(value), 0) AS total FROM kv WHERE key='gemini_conversation_history'"
+                ).fetchone()
+                stored_gemini_history_bytes = stored_gemini_history_row["total"] if stored_gemini_history_row else 0
+                if (
+                    int(stored_attachment_bytes or 0)
+                    + int(stored_gemini_history_bytes or 0)
+                    + len(attachment_json.encode("utf-8"))
+                    > self._max_attachment_storage_bytes
+                ):
+                    raise AppError(
+                        413,
+                        "Der lokale Speicher für Chat-Anhänge ist ausgeschöpft. Entferne alte Chat-Daten, bevor du weitere Bilder sendest.",
+                        reason="attachment_storage_quota",
+                    )
+                db.execute("UPDATE messages SET attachments=? WHERE id=?", (attachment_json, user_message["id"]))
+                receipt = {
+                    "status": "queued",
                     "mode": "background",
-                    "operation_id": receipt.get("operation_id"),
-                    "plan_scope": receipt.get("plan_scope") or scope,
-                }, None
-
-            if self._find_active(self._active_rows(db), session_key):
-                raise AppError(
-                    409,
-                    "Für diese Sitzung läuft bereits eine Coach-Anfrage.",
-                    reason="chat_already_running",
+                    "phase": "queued",
+                    "operation_id": operation_id,
+                    "session_key": session_key,
+                    "user_message_id": user_message["id"],
+                    "client_turn_id": client_turn_id,
+                    "plan_scope": scope,
+                    "ai_provider": ai_provider,
+                    "model": model,
+                    "thinking_level": thinking_level,
+                    "request_kind": request_kind,
+                }
+                db.execute(
+                    "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) "
+                    "VALUES (?, ?, NULL, '{}', 'local', 'queued', ?, ?, ?)",
+                    (
+                        uuid.uuid4().hex,
+                        client_turn_id,
+                        json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
+                        now,
+                        now,
+                    ),
                 )
-
-            user_message = self._chat_repository.add(db, "user", message, client_turn_id=client_turn_id)
-            attachment_json = json.dumps(attachments, ensure_ascii=False, separators=(",", ":"))
-            stored_attachment_bytes = db.execute(
-                "SELECT COALESCE(SUM(length(attachments)), 0) AS total FROM messages"
-            ).fetchone()["total"]
-            stored_gemini_history_row = db.execute(
-                "SELECT COALESCE(length(value), 0) AS total FROM kv WHERE key='gemini_conversation_history'"
-            ).fetchone()
-            stored_gemini_history_bytes = stored_gemini_history_row["total"] if stored_gemini_history_row else 0
-            if (
-                int(stored_attachment_bytes or 0)
-                + int(stored_gemini_history_bytes or 0)
-                + len(attachment_json.encode("utf-8"))
-                > self._max_attachment_storage_bytes
-            ):
-                raise AppError(
-                    413,
-                    "Der lokale Speicher für Chat-Anhänge ist ausgeschöpft. Entferne alte Chat-Daten, bevor du weitere Bilder sendest.",
-                    reason="attachment_storage_quota",
-                )
-            db.execute("UPDATE messages SET attachments=? WHERE id=?", (attachment_json, user_message["id"]))
-            receipt = {
-                "status": "queued",
-                "mode": "background",
-                "phase": "queued",
-                "operation_id": operation_id,
-                "session_key": session_key,
-                "user_message_id": user_message["id"],
-                "client_turn_id": client_turn_id,
-                "plan_scope": scope,
-                "ai_provider": ai_provider,
-                "model": model,
-                "thinking_level": thinking_level,
-                "request_kind": request_kind,
-            }
-            db.execute(
-                "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) "
-                "VALUES (?, ?, NULL, '{}', 'local', 'queued', ?, ?, ?)",
-                (
-                    uuid.uuid4().hex,
-                    client_turn_id,
-                    json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
-                    now,
-                    now,
-                ),
-            )
         return None, user_message["id"]
 
 
