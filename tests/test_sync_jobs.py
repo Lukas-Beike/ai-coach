@@ -210,6 +210,18 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assert_invalid("intervals", "refresh", {"days": value}, message)
 
+    def test_refresh_validation_order_and_omitted_reason(self):
+        self.assert_invalid(
+            "intervals",
+            "refresh",
+            {"days": "invalid", "unsupported": True},
+            "Der Job enthält nicht unterstützte Felder",
+        )
+        self.assertEqual(
+            self.normalize("calendar", "refresh", {"reason": None})["payload"],
+            {},
+        )
+
     def test_boolean_fields_require_actual_booleans(self):
         for value in (True, False):
             with self.subTest(value=value):
@@ -512,6 +524,31 @@ class SyncJobStoreTests(unittest.TestCase):
             self.enqueue(operations=[{"item_key": "   ", "operation": "sync"}])
         job, _ = self.enqueue(available_at="2026-09-20T15:00:00+03:00")
         self.assertEqual(job["available_at"], self.now)
+
+    def test_operation_normalization_keeps_truncation_order_and_exact_errors(self):
+        repeated = "k" * 161
+        with self.assertRaisesRegex(
+            SyncJobInvalidOperationError, r"Job operation keys must be unique\."
+        ):
+            self.enqueue(
+                operations=[
+                    {"item_key": repeated, "operation": "sync"},
+                    {"item_key": repeated + "x", "operation": "sync"},
+                ]
+            )
+        with self.assertRaisesRegex(
+            SyncJobInvalidOperationError, r"Job operations must be objects\."
+        ):
+            self.enqueue(operations=[{"item_key": "first"}, None])
+
+    def test_operation_hash_rejects_non_json_payload(self):
+        with self.assertRaisesRegex(
+            SyncJobInvalidOperationError, r"Job payload is not JSON serializable\."
+        ):
+            self.store._normalize_operations(
+                {"type": "refresh", "payload": {"value": object()}},
+                [{"item_key": "one", "operation": "read"}],
+            )
 
     def test_performance_refresh_enqueue_is_single_flight(self):
         from threading import Barrier

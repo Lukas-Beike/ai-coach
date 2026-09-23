@@ -233,40 +233,61 @@ def _normalize_plan_push_job(provider: str, values: dict[str, Any]) -> dict[str,
 def _normalize_refresh_job(
     provider_value: str, values: dict[str, Any], all_sync_days: int
 ) -> dict[str, Any]:
-    allowed_fields = {
-        "intervals": {"days", "reason", "end_date"},
-        "garmin": {"days", "reason", "end_date"},
-        "calendar": {"reason"},
-        "weather": {"force", "reason"},
-    }[provider_value]
-    if set(values) - allowed_fields:
+    if set(values) - _refresh_job_fields(provider_value):
         raise JobValidationError("Der Job enthält nicht unterstützte Felder.")
 
     normalized_payload: dict[str, Any] = {}
     if "days" in values:
-        try:
-            days = int(values["days"])
-        except (TypeError, ValueError) as exc:
-            raise JobValidationError(
-                "Der Synchronisationszeitraum ist ungültig."
-            ) from exc
-        if days != all_sync_days and (days < 1 or days > 3660):
-            raise JobValidationError("Der Synchronisationszeitraum ist zu groß.")
-        normalized_payload["days"] = days
+        normalized_payload["days"] = _normalize_refresh_days(
+            values["days"], all_sync_days
+        )
     if "force" in values:
-        if type(values["force"]) is not bool:
-            raise JobValidationError("force muss ein Boolean sein.")
-        normalized_payload["force"] = values["force"]
+        normalized_payload["force"] = _normalize_refresh_force(values["force"])
     if "end_date" in values:
-        try:
-            normalized_payload["end_date"] = date.fromisoformat(
-                str(values["end_date"])[:10]
-            ).isoformat()
-        except (TypeError, ValueError) as exc:
-            raise JobValidationError("Das Backfill-Enddatum ist ungültig.") from exc
+        normalized_payload["end_date"] = _normalize_refresh_end_date(values["end_date"])
     if values.get("reason") is not None:
-        normalized_payload["reason"] = str(values["reason"]).strip()[:80] or "job"
+        normalized_payload["reason"] = _normalize_refresh_reason(values["reason"])
     return normalized_payload
+
+
+def _refresh_job_fields(provider: str) -> set[str]:
+    return {
+        "intervals": {"days", "reason", "end_date"},
+        "garmin": {"days", "reason", "end_date"},
+        "calendar": {"reason"},
+        "weather": {"force", "reason"},
+    }[provider]
+
+
+def _normalize_refresh_days(value: Any, all_sync_days: int) -> int:
+    try:
+        days = int(value)
+    except (TypeError, ValueError) as exc:
+        raise JobValidationError(
+            "Der Synchronisationszeitraum ist ungültig."
+        ) from exc
+    if days != all_sync_days and (days < 1 or days > 3660):
+        raise JobValidationError("Der Synchronisationszeitraum ist zu groß.")
+    return days
+
+
+def _normalize_refresh_force(value: Any) -> bool:
+    if type(value) is not bool:
+        raise JobValidationError("force muss ein Boolean sein.")
+    return value
+
+
+def _normalize_refresh_end_date(value: Any) -> str:
+    try:
+        return date.fromisoformat(str(value)[:10]).isoformat()
+    except (TypeError, ValueError) as exc:
+        raise JobValidationError(
+            "Das Backfill-Enddatum ist ungültig."
+        ) from exc
+
+
+def _normalize_refresh_reason(value: Any) -> str:
+    return str(value).strip()[:80] or "job"
 
 
 def retry_delay(attempt: int, *, base_seconds: int, max_seconds: int) -> int:
@@ -677,32 +698,41 @@ class SyncJobStore:
         normalized: list[dict[str, str]] = []
         keys: set[str] = set()
         for index, operation in enumerate(values):
-            if not isinstance(operation, dict):
-                raise SyncJobInvalidOperationError("Job operations must be objects.")
-            item_key = str(operation.get("item_key") or f"item-{index}").strip()[:160]
-            item_operation = str(
-                operation.get("operation") or envelope["type"]
-            ).strip()[:80]
-            if not item_key or not item_operation:
-                raise SyncJobInvalidOperationError(
-                    "Job operations require a key and type."
-                )
-            if item_key in keys:
-                raise SyncJobInvalidOperationError("Job operation keys must be unique.")
-            keys.add(item_key)
-            payload_hash = str(operation.get("payload_hash") or "")[:128]
-            if not payload_hash:
-                payload_hash = SyncJobStore._operation_payload_hash(
-                    item_operation, envelope["payload"]
-                )
             normalized.append(
-                {
-                    "item_key": item_key,
-                    "operation": item_operation,
-                    "payload_hash": payload_hash,
-                }
+                SyncJobStore._normalize_operation(operation, index, envelope, keys)
             )
         return normalized
+
+    @staticmethod
+    def _normalize_operation(
+        operation: Any,
+        index: int,
+        envelope: Mapping[str, Any],
+        keys: set[str],
+    ) -> dict[str, str]:
+        if not isinstance(operation, dict):
+            raise SyncJobInvalidOperationError("Job operations must be objects.")
+        item_key = str(operation.get("item_key") or f"item-{index}").strip()[:160]
+        item_operation = str(operation.get("operation") or envelope["type"]).strip()[
+            :80
+        ]
+        if not item_key or not item_operation:
+            raise SyncJobInvalidOperationError(
+                "Job operations require a key and type."
+            )
+        if item_key in keys:
+            raise SyncJobInvalidOperationError("Job operation keys must be unique.")
+        keys.add(item_key)
+        payload_hash = str(operation.get("payload_hash") or "")[:128]
+        if not payload_hash:
+            payload_hash = SyncJobStore._operation_payload_hash(
+                item_operation, envelope["payload"]
+            )
+        return {
+            "item_key": item_key,
+            "operation": item_operation,
+            "payload_hash": payload_hash,
+        }
 
     @staticmethod
     def _operation_payload_hash(operation: str, payload: Any) -> str:
