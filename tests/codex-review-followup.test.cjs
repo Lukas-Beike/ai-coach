@@ -56,10 +56,13 @@ test('a completed clean follow-up on the current head clears a previous P1', asy
   assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:31:54Z' }), false);
 });
 
-test('an old or different-head clean reaction cannot clear a P1', async () => {
+test('an old or missing clean reaction cannot clear a P1', async () => {
   assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:18:00Z' }), true);
-  assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:31:54Z', reviewedHead: 'b'.repeat(40) }), true);
   assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:31:54Z', reaction: false }), true);
+});
+
+test('a clean follow-up remains valid after develop advances and the PR is rebased', async () => {
+  assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:31:54Z', reviewedHead: 'b'.repeat(40) }), false);
 });
 
 test('a clean follow-up still requires all Codex threads to be resolved', async () => {

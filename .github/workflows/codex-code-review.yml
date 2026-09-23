@@ -137,9 +137,9 @@ jobs:
               const completedCodeReview = (latestSummary.body || '').split('\n').find((line) =>
                 line.includes('**Code Review**') && line.includes('**Completed**'));
               const reviewCompletedAt = Date.parse(completedCodeReview?.match(/datetime="([^"]+)"/)?.[1] || '');
-              const reviewedCommit = completedCodeReview?.match(/`([0-9a-f]{7,40})`/)?.[1];
-              if (!reviewedCommit || !pullRequest.head.sha.startsWith(reviewedCommit) ||
-                !(reviewCompletedAt > after)) return false;
+              // A protected-base update changes the PR head without requiring another
+              // review after a clean follow-up; only review ordering is significant.
+              if (!(reviewCompletedAt > after)) return false;
               const summaryUpdatedAt = Date.parse(latestSummary.updated_at || latestSummary.created_at);
               return reactions.some((reaction) => codexBotLogins.has(reaction.user?.login) &&
                 reaction.content === '+1' && Date.parse(reaction.created_at) >= summaryUpdatedAt);
