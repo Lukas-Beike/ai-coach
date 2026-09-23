@@ -4782,6 +4782,11 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Log hatten erwartete Textkonflikte. Der finale Tree-Diff gegenüber dem
   bereits getesteten P7-Stand ist leer. Erneute sieben Service- und vier
   Architekturtests sowie Inventar-/Diff-Check **PASS**.
+- PR #712 auf Head `d591dbb7`: SonarCloud ohne neue Issues,
+  Python-/Container-/Browser-CI und Codex-Review **PASS**, keine offenen
+  Threads; Squash-Merge am `2026-09-23T13:41:20Z`, Commit
+  `703629685b962279312f3ff891ae1e3698cb0c25` auf
+  `origin/develop` erreichbar.
 
 ## P8 Startup-Scheduler — integrierter Prüfstand
 
@@ -4805,4 +4810,7 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   hat 6.677 physische Zeilen; die Tages-Loop-Lifecycle-Steuerung und
   weitere P8-Use-Cases bleiben offen. Neu gebautes kombiniertes
   Read-only-Container-Image **PASS**: 2.297 Tests, 10 Skips in
-  20,563 s. CI/Sonar des künftigen PR-Stands stehen noch aus.
+  20,563 s. Nach PR #712 `origin/develop` mit `141eb40e` integriert;
+  nur Inventar-/Review-Textkonflikte, finaler Tree-Diff gegenüber dem
+  bereits vollständig getesteten kombinierten Stand leer. CI/Sonar des
+  künftigen P8-PR-Stands stehen noch aus.
