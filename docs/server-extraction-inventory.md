@@ -5,11 +5,11 @@
 ## Ausgangsstand
 
 - Geprüfter P0-Basiscommit: `362d6caa4c27951af86b82b11b3a43d48dadceee`
-- Inventarisierter `server.py`-Quelltext (SHA-256): `f5d306cd364cc2b33dc8f0f91899ba0d7c9c97f3d6a5e36deeb9c0eb2781a017`; dieser Fingerprint ist unabhängig von HEAD und Arbeitsbaum stabil.
-- `server.py`: 6.777 physische Zeilen
-- Inventareinträge: 752
+- Inventarisierter `server.py`-Quelltext (SHA-256): `07ed9cc9b714c904f82aff9be83112a32ea83d9f0e89f1068c23f0aa7ab77e92`; dieser Fingerprint ist unabhängig von HEAD und Arbeitsbaum stabil.
+- `server.py`: 6.779 physische Zeilen
+- Inventareinträge: 753
 - Definitionen (Funktionen/Klassen): 314
-- Globale Bindungen einschließlich Imports: 149 Zuweisungen. 289 Imports
+- Globale Bindungen einschließlich Imports: 149 Zuweisungen. 290 Imports
 - Planbereich: bis Zeile 21.702; Einträge dahinter: 0 (zielbestimmt über Symbol-/Verantwortungsanalyse)
 - Status dieses Stands: P0 ist integriert; bereits ausgelagerte Namen erscheinen als Importbindungen. `offen` bedeutet, dass die fachliche Eigentümerschaft noch migriert werden muss.
 
@@ -31,7 +31,7 @@ Der Generator führt selbst keine Tests und keine Laufzeitinitialisierung aus. S
 | Phase | Funktionen/Klassen | Globale Bindungen | Importbindungen |
 | --- | ---: | ---: | ---: |
 | P0 (Zuordnung offen) | 5 | 0 | 0 |
-| P1 | 15 | 30 | 251 |
+| P1 | 15 | 30 | 252 |
 | P2 | 9 | 7 | 0 |
 | P3 | 1 | 0 | 0 |
 | P4 | 0 | 0 | 0 |
@@ -750,6 +750,7 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | Importbindung | `SyncJobOutcomeService` | 223 | `backend/sync/job_outcomes` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `SyncJobQueueService` | 224 | `backend/sync/queue` | P1 | bereits ausgelagert (Importbindung) | tests/test_coach_dialogue.py:415 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:674 (direkt/dynamisch unklar); tests/test_coach_dialogue.py:702 (direkt/dynamisch unklar); tests/test_coach_language_recovery.py:45 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:41 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:81 (direkt/dynamisch unklar); tests/test_server.py:1061 (direkt/dynamisch unklar); tests/test_server.py:1087 (direkt/dynamisch unklar); tests/test_server.py:1132 (direkt/dynamisch unklar); tests/test_server.py:1170 (direkt/dynamisch unklar); tests/test_server.py:1172 (direkt/dynamisch unklar); tests/test_server.py:1181 (direkt/dynamisch unklar); tests/test_server.py:1186 (direkt/dynamisch unklar); tests/test_server.py:323 (direkt/dynamisch unklar); tests/test_server.py:336 (direkt/dynamisch unklar); tests/test_server.py:353 (direkt/dynamisch unklar); tests/test_server.py:504 (direkt/dynamisch unklar); tests/test_server.py:591 (direkt/dynamisch unklar); tests/test_server.py:693 (direkt/dynamisch unklar); tests/test_server.py:758 (direkt/dynamisch unklar); tests/test_server.py:788 (direkt/dynamisch unklar) |
 | Importbindung | `DailySyncScheduler` | 225 | `backend/sync/scheduler` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `DailySyncSchedulerConfig` | 225 | `backend/sync/scheduler` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `CoachActivityReadToolService` | 226 | `backend/coach/activity_read_tools` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `CoachContextPreviewLimits` | 227 | `backend/coach/context` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `CoachContextPreviewService` | 227 | `backend/coach/context` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
@@ -1271,13 +1272,13 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | Funktion | `daily_sync_loop` | 6625 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
 | Funktion | `_scheduler_garmin_configured` | 6637 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
 | Funktion | `daily_sync_scheduler` | 6641 | `sync/scheduler.py` | P8 | offen | tests/test_audit_remediation.py:165 (direkt/dynamisch unklar) |
-| Funktion | `_startup_historical_backfill_payload` | 6662 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_enqueue_startup_calendar_job` | 6676 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_enqueue_startup_intervals_jobs` | 6685 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_enqueue_startup_garmin_jobs` | 6709 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `_enqueue_startup_weather_job` | 6731 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
-| Funktion | `enqueue_startup_sync_jobs` | 6743 | `sync/scheduler.py` | P8 | offen | tests/test_server.py:1174 (direkt/dynamisch unklar); tests/test_server.py:1187 (direkt/dynamisch unklar); tests/test_server.py:345 (Monkeypatch/getattr/sys.modules) |
-| Funktion | `main` | 6751 | `server.py / Composition Root` | P11 | offen | e2e/fixture_runtime.py:103 (direkt/dynamisch unklar); tests/test_server.py:346 (direkt/dynamisch unklar) |
+| Funktion | `_startup_historical_backfill_payload` | 6664 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_enqueue_startup_calendar_job` | 6678 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_enqueue_startup_intervals_jobs` | 6687 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_enqueue_startup_garmin_jobs` | 6711 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `_enqueue_startup_weather_job` | 6733 | `sync/scheduler.py` | P8 | offen | keine statisch gefunden |
+| Funktion | `enqueue_startup_sync_jobs` | 6745 | `sync/scheduler.py` | P8 | offen | tests/test_server.py:1174 (direkt/dynamisch unklar); tests/test_server.py:1187 (direkt/dynamisch unklar); tests/test_server.py:345 (Monkeypatch/getattr/sys.modules) |
+| Funktion | `main` | 6753 | `server.py / Composition Root` | P11 | offen | e2e/fixture_runtime.py:103 (direkt/dynamisch unklar); tests/test_server.py:346 (direkt/dynamisch unklar) |
 
 ## Zielverteilung
 
@@ -1373,7 +1374,7 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | `backend/sync/queue` | 1 |
 | `backend/sync/reconcile` | 1 |
 | `backend/sync/refresh` | 1 |
-| `backend/sync/scheduler` | 1 |
+| `backend/sync/scheduler` | 2 |
 | `backend/sync/selected` | 1 |
 | `backend/sync/state` | 1 |
 | `backend/sync/status` | 2 |

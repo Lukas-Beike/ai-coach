@@ -4705,3 +4705,19 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   physische Zeilen; P8-Hauptphase bleibt für Startup, Coach-Turn,
   Streaming/Background-Lifecycle offen. CI/Sonar des veröffentlichten
   P8-PR-Stands bleiben abzuwarten.
+
+- Nach Veröffentlichung von PR #710 meldete SonarCloud für Head
+  `2368be93` **FAIL**: neues `python:S107` in
+  `DailySyncScheduler.__init__` (16 Parameter bei Limit 13).
+  Korrekturauftrag an denselben GPT-6-Luna-Worker; Commit `4c8e46a0`
+  bündelt ausschließlich die sechs skalaren Konfigurationswerte in
+  `DailySyncSchedulerConfig(frozen=True)` und lässt die konkreten
+  Zustandseigentümer einzeln injiziert. AST zählt nun 12 Parameter
+  einschließlich `self`. Im Root-Diff als `18331ade` **PASS** geprüft:
+  Reihenfolge, Marker, Queue-/Reset-/Maintenance-/DB-Gates und Payloads
+  unverändert. Worker-Gesamtsuite 2.284 Tests, 12 Skips; fünf
+  Scheduler- und vier Architekturtests, scoped Ruff/Compile/Diff
+  **PASS**. Neu gebautes Read-only-Container-Image auf dem korrigierten
+  Integrationsstand: vollständige Suite **PASS** mit 2.286 Tests und
+  10 Skips in 22,182 s. Inventar-Check **PASS**; erneute Sonar/CI-
+  Prüfung des veröffentlichten PR-Heads steht noch aus.
