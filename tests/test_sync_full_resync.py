@@ -119,14 +119,14 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.competition_calls.append(kwargs)
         return self.competition_result
 
-    def _service(self, *, config=None, key_values=None):
+    def _service(self, *, config=None, key_values=None, operation_id_factory=None):
         operation_journal = FullResyncOperationJournal(
             self.observer,
             self.logger,
             lambda value: value.replace("api-secret", "[redacted]"),
             lambda: NOW,
             lambda: 10.0,
-            lambda: "generated-operation",
+            operation_id_factory or (lambda: "generated-operation"),
         )
         return FullProviderResyncService(
             FullResyncProviderExecution(
@@ -293,6 +293,24 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.assertEqual(self._get_value("garmin", "status"), "")
         self.assertEqual(self._get_value("garmin", "last_at"), NOW)
         self.assertFalse(self.garmin_gate.is_resetting())
+
+    def test_empty_generated_operation_id_still_cleans_up_and_logs_completion(self):
+        service = self._service(operation_id_factory=lambda: "")
+
+        result = service.resync("intervals")
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(
+            self.intervals_calls[0][1]["operation_id"],
+            "",
+        )
+        self.assertEqual(self._get_value("intervals", "running"), "0")
+        self.assertEqual(self._get_value("intervals", "status"), "")
+        self.assertEqual(self.logger.events[-1][2]["event"], "operation_completed")
+        self.assertEqual(
+            self.logger.events[-1][2]["context"]["operation_id"],
+            "",
+        )
 
     def test_failure_is_redacted_bounded_and_restores_context_and_gate(self):
         self.intervals_error = RuntimeError("api-secret" + "x" * 1100)

@@ -302,7 +302,8 @@ class FullProviderResyncService:
             raise
         finally:
             try:
-                if operation_started is not None and resolved_operation_id:
+                if operation_started is not None:
+                    assert resolved_operation_id is not None
                     try:
                         self._state_store.finish(provider)
                     finally:
