@@ -86,6 +86,17 @@ def _number(value: Any) -> float | int | None:
     return int(number) if number.is_integer() else round(number, 2)
 
 
+def _validated_body_battery_sample(sample: Any) -> dict[str, Any] | None:
+    if not isinstance(sample, (list, tuple)) or len(sample) < 2:
+        return None
+    observed_at = timestamp(sample[0])
+    level = _number(sample[1])
+    if observed_at is None or level is None or not 0 <= float(level) <= 100:
+        return None
+    key = observed_at.isoformat()
+    return {"observed_at": key, "value": round(float(level))}
+
+
 def body_battery_samples(records: Any) -> list[dict[str, Any]]:
     """Return validated, UTC-normalized Body Battery samples in time order."""
     values = records if isinstance(records, list) else [records]
@@ -99,14 +110,9 @@ def body_battery_samples(records: Any) -> list[dict[str, Any]]:
         if not isinstance(raw_samples, list):
             continue
         for sample in raw_samples:
-            if not isinstance(sample, (list, tuple)) or len(sample) < 2:
-                continue
-            observed_at = timestamp(sample[0])
-            level = _number(sample[1])
-            if observed_at is None or level is None or not 0 <= float(level) <= 100:
-                continue
-            key = observed_at.isoformat()
-            samples[key] = {"observed_at": key, "value": round(float(level))}
+            normalized = _validated_body_battery_sample(sample)
+            if normalized is not None:
+                samples[normalized["observed_at"]] = normalized
     return sorted(samples.values(), key=lambda sample: sample["observed_at"])
 
 

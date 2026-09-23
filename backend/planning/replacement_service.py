@@ -41,19 +41,12 @@ class StructuredTrainingPlanReplacementService:
         self._id_factory = id_factory
 
     @staticmethod
-    def _existing_state(
+    def _selected_rows(
         db: Any,
-        arguments: dict[str, Any],
         selected_plan_id: str | None,
         period: dict[str, str],
-        today: str,
-    ) -> tuple[
-        list[dict[str, Any]],
-        set[str],
-        set[str],
-        list[tuple[dict[str, Any], dict[str, Any]]],
-    ]:
-        rows = db.execute(
+    ) -> list[dict[str, Any]]:
+        return db.execute(
             "SELECT local_id, payload FROM planned_units "
             "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
             "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
@@ -68,32 +61,40 @@ class StructuredTrainingPlanReplacementService:
                 period["end"],
             ),
         ).fetchall()
-        replace_ids = {
-            str(row.get("local_id") or "") for row in rows if row.get("local_id")
-        }
-        archived_rows = db.execute(
+
+    @staticmethod
+    def _archived_or_deleted_unit_ids(db: Any) -> set[str]:
+        rows = db.execute(
             "SELECT local_id FROM planned_units "
             "WHERE COALESCE(json_extract(payload, '$.local_deleted'), 0) = 1 "
             "OR (COALESCE(json_extract(payload, '$.archived'), 0) = 1 "
             "AND (external_id IS NULL OR external_id = ''))"
         ).fetchall()
-        ignored_calendar_ids = replace_ids | {
-            str(row.get("local_id") or "")
-            for row in archived_rows
-            if row.get("local_id")
-        }
-        superseded_plan_ids: set[str] = (
-            {selected_plan_id} if selected_plan_id else set()
-        )
-        if not selected_plan_id and not arguments.get("period"):
-            metadata_rows = db.execute(
-                "SELECT id FROM training_plans WHERE status <> 'archived' AND end_date >= ?",
-                (today,),
-            ).fetchall()
-            superseded_plan_ids.update(
-                str(row.get("id") or "") for row in metadata_rows if row.get("id")
-            )
-        existing_entries: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        return {str(row.get("local_id") or "") for row in rows if row.get("local_id")}
+
+    @staticmethod
+    def _superseded_plan_ids(
+        db: Any,
+        arguments: dict[str, Any],
+        selected_plan_id: str | None,
+        today: str,
+    ) -> set[str]:
+        plan_ids = {selected_plan_id} if selected_plan_id else set()
+        if selected_plan_id or arguments.get("period"):
+            return plan_ids
+        rows = db.execute(
+            "SELECT id FROM training_plans WHERE status <> 'archived' AND end_date >= ?",
+            (today,),
+        ).fetchall()
+        plan_ids.update(str(row.get("id") or "") for row in rows if row.get("id"))
+        return plan_ids
+
+    @staticmethod
+    def _parse_existing_entries(
+        rows: list[dict[str, Any]],
+    ) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], set[str]]:
+        entries: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        plan_ids: set[str] = set()
         for row in rows:
             try:
                 current = json.loads(row.get("payload") or "{}")
@@ -109,10 +110,43 @@ class StructuredTrainingPlanReplacementService:
                     "Eine bestehende lokale Planung ist beschädigt.",
                     reason="invalid_plan",
                 )
-            existing_entries.append((dict(row), current))
+            entries.append((dict(row), current))
             plan_id = str(current.get("plan_id") or "").strip()
             if plan_id:
-                superseded_plan_ids.add(plan_id)
+                plan_ids.add(plan_id)
+        return entries, plan_ids
+
+    @staticmethod
+    def _existing_state(
+        db: Any,
+        arguments: dict[str, Any],
+        selected_plan_id: str | None,
+        period: dict[str, str],
+        today: str,
+    ) -> tuple[
+        list[dict[str, Any]],
+        set[str],
+        set[str],
+        list[tuple[dict[str, Any], dict[str, Any]]],
+    ]:
+        rows = StructuredTrainingPlanReplacementService._selected_rows(
+            db, selected_plan_id, period
+        )
+        replace_ids = {
+            str(row.get("local_id") or "") for row in rows if row.get("local_id")
+        }
+        ignored_calendar_ids = replace_ids | (
+            StructuredTrainingPlanReplacementService._archived_or_deleted_unit_ids(db)
+        )
+        superseded_plan_ids = (
+            StructuredTrainingPlanReplacementService._superseded_plan_ids(
+                db, arguments, selected_plan_id, today
+            )
+        )
+        existing_entries, existing_plan_ids = (
+            StructuredTrainingPlanReplacementService._parse_existing_entries(rows)
+        )
+        superseded_plan_ids.update(existing_plan_ids)
         return rows, ignored_calendar_ids, superseded_plan_ids, existing_entries
 
     def _validate_calendar(
