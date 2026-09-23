@@ -6627,7 +6627,7 @@ def daily_sync_loop() -> None:
     while True:
         time.sleep(300)
         try:
-            schedule_daily_sync_jobs()
+            daily_sync_scheduler().schedule()
             morning_body_battery_service().refresh()
         except AppError as exc:
             if exc.reason != "maintenance":
@@ -6638,8 +6638,8 @@ def _scheduler_garmin_configured() -> bool:
     return garmin_sync_service().configured()
 
 
-def schedule_daily_sync_jobs() -> None:
-    DailySyncScheduler(
+def daily_sync_scheduler() -> DailySyncScheduler:
+    return DailySyncScheduler(
         profile_service(),
         sync_job_queue_service(),
         daily_sync_marker_service(),
@@ -6656,7 +6656,7 @@ def schedule_daily_sync_jobs() -> None:
         auto_update_label=AUTO_UPDATE_LABEL,
         sync_period_defaults=SYNC_PERIOD_DEFAULTS,
         all_sync_days=ALL_SYNC_DAYS,
-    ).schedule()
+    )
 
 
 def _startup_historical_backfill_payload(provider: str) -> dict[str, Any] | None:
