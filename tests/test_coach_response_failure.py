@@ -18,7 +18,7 @@ class CoachResponseFailureTests(unittest.TestCase):
         server.local_plan_creation_service().save([self.workout("2026-09-08")])
         turn_id = "synthetic-sync-rate-retry"
         message = "Bitte den Plan erneut synchronisieren"
-        server.enqueue_background_coach_job(message, turn_id, "synthetic-session")
+        server.coach_job_submission_service().enqueue(message, turn_id, "synthetic-session")
         payloads = []
 
         def create(payload, **kwargs):
@@ -56,7 +56,7 @@ class CoachResponseFailureTests(unittest.TestCase):
         server.local_plan_creation_service().save([self.workout("2026-09-08")])
         turn_id = "sync-provider-response-failure"
         message = "Sync zu intervals.icu durchführen"
-        server.enqueue_background_coach_job(message, turn_id, "synthetic-session")
+        server.coach_job_submission_service().enqueue(message, turn_id, "synthetic-session")
         responses = 0
 
         def create(payload, **kwargs):

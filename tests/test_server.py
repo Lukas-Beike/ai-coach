@@ -5122,7 +5122,7 @@ class CoachTests(unittest.TestCase):
             {"role": "model", "parts": [{"functionCall": {"name": "stage_training_plan", "args": {}}}]},
         ]))
         with patch.object(server, "CONFIG", config):
-            server.enqueue_background_coach_job(
+            server.coach_job_submission_service().enqueue(
                 "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
                 "turn-gemini-background-restart",
                 "csrf-gemini-background-restart",
@@ -6454,7 +6454,7 @@ class CoachTests(unittest.TestCase):
         self.assertIs(client.wait, server.time.sleep)
 
     def test_background_coach_job_is_persisted_and_session_scoped(self):
-        job = server.enqueue_background_coach_job(
+        job = server.coach_job_submission_service().enqueue(
             "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
             "turn-background-persisted",
             "csrf-background-owner",
@@ -6475,6 +6475,42 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(user_message["role"], "user")
         self.assertIn("2 Wochen", user_message["content"])
 
+    def test_background_job_replay_reuses_receipt_without_republishing(self):
+        registry = server.coach_streams.CHAT_STREAM_REGISTRY
+
+        def publish_after_commit(topic, event):
+            self.assertEqual(topic, "coach")
+            with server.database() as db:
+                command = db.execute(
+                    "SELECT status FROM coach_commands WHERE client_turn_id=?",
+                    (event["client_turn_id"],),
+                ).fetchone()
+            self.assertEqual(command["status"], "queued")
+
+        with (
+            patch.object(server.runtime_events.STATE_EVENT_BUFFER, "publish", side_effect=publish_after_commit) as publish,
+            patch.object(registry, "set_background_event") as register_event,
+            patch.object(server.COACH_JOB_WAKE, "set") as wake_worker,
+        ):
+            first = server.coach_job_submission_service().enqueue(
+                "Eine lange Planung bitte", "turn-background-idempotent", "csrf-background-idempotent",
+                operation_id="operation-background-idempotent",
+            )
+            replay = server.coach_job_submission_service().enqueue(
+                "Andere Nachricht ignorieren", "turn-background-idempotent", "csrf-background-idempotent",
+                operation_id="operation-background-replay",
+            )
+            with self.assertRaises(server.AppError) as foreign_replay:
+                server.coach_job_submission_service().enqueue(
+                    "Fremde Sitzung", "turn-background-idempotent", "csrf-background-foreign",
+                )
+
+        self.assertEqual(replay, first)
+        self.assertEqual(foreign_replay.exception.reason, "command_scope_denied")
+        publish.assert_called_once()
+        register_event.assert_called_once()
+        wake_worker.assert_called_once()
+
     def test_background_worker_restores_session_binding_from_persisted_key(self):
         auth = server.session_auth_service()
         csrf_hash = auth.session_token_hash("csrf-background-bound")
@@ -6483,7 +6519,7 @@ class CoachTests(unittest.TestCase):
                 "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                 (auth.session_token_hash("session-background-bound"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
             )
-        server.enqueue_background_coach_job(
+        server.coach_job_submission_service().enqueue(
             "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",
             "turn-background-bound",
             csrf_hash,
@@ -6505,7 +6541,7 @@ class CoachTests(unittest.TestCase):
             )
         operation_id, _cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(csrf_hash)
         try:
-            server.enqueue_background_coach_job(
+            server.coach_job_submission_service().enqueue(
                 "Wie soll ich heute trainieren?", "turn-background-streamed", csrf_hash,
                 operation_id=operation_id,
             )
@@ -6532,7 +6568,7 @@ class CoachTests(unittest.TestCase):
     def test_attached_durable_job_uses_provider_stream_instead_of_background_polling(self):
         csrf_hash = "csrf-attached-provider-stream"
         server.set_kv("openai_conversation_id", "conv-attached-provider-stream")
-        server.enqueue_background_coach_job(
+        server.coach_job_submission_service().enqueue(
             "Wie soll ich heute trainieren?", "turn-attached-provider-stream", csrf_hash,
             operation_id="operation-attached-provider-stream",
         )
@@ -6559,7 +6595,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["message"]["content"], "Heute locker.")
 
     def test_background_worker_requeues_transient_coach_contention(self):
-        server.enqueue_background_coach_job(
+        server.coach_job_submission_service().enqueue(
             "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",
             "turn-background-requeue",
             "csrf-background-requeue",
@@ -6584,7 +6620,7 @@ class CoachTests(unittest.TestCase):
 
 
     def test_background_worker_preserves_checkpointed_recovery_phase(self):
-        server.enqueue_background_coach_job(
+        server.coach_job_submission_service().enqueue(
             "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",
             "turn-background-recovery-phase",
             "csrf-background-recovery-phase",
@@ -9352,7 +9388,7 @@ class CoachTests(unittest.TestCase):
     def test_background_chat_cancel_closes_the_active_provider_response(self):
         operation_id = "background-stream-cancel-close"
         session_key = "session-background-cancel-close"
-        server.enqueue_background_coach_job(
+        server.coach_job_submission_service().enqueue(
             "Eine Trainingsanfrage", "turn-background-cancel-close", session_key,
             operation_id=operation_id,
         )

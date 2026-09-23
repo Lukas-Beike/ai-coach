@@ -133,7 +133,7 @@ class CoachReviewTests(unittest.TestCase):
         client_turn_id = "summary-recovery"
         intent = self.intent("manage_training_templates", ["local_template"])
         message = "Speichere die Vorlage und erstelle einen Trainingsplan fuer die naechsten acht Wochen."
-        server.enqueue_background_coach_job(message, client_turn_id, csrf_hash, operation_id="summary-recovery-op")
+        server.coach_job_submission_service().enqueue(message, client_turn_id, csrf_hash, operation_id="summary-recovery-op")
         persisted_receipt = {
             "mode": "background", "phase": "preparing", "session_key": server._coach_session_key(csrf_hash),
             "command_receipts": [{

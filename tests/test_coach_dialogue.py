@@ -725,7 +725,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(len(result["sync_job_ids"]), 1)
 
     def test_successful_morning_quick_action_is_marked_complete_without_word_matching(self):
-        server.enqueue_background_coach_job(
+        server.coach_job_submission_service().enqueue(
             "Natural wording without a fixed trigger", "morning-quick", "synthetic-session",
             request_kind="morning_checkin",
         )
@@ -746,7 +746,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertFalse(json.loads(row["receipt"])["coach_quick_actions"]["morning_checkin"])
 
     def test_morning_quick_action_stays_pending_while_coach_awaits_clarification(self):
-        server.enqueue_background_coach_job(
+        server.coach_job_submission_service().enqueue(
             "Natural wording without a fixed trigger", "morning-question", "synthetic-session",
             request_kind="morning_checkin",
         )
@@ -765,7 +765,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertTrue(server.coach_quick_actions_service().state()["morning_checkin"])
 
     def test_chat_reset_cancels_queued_background_turn_without_reappearing_message(self):
-        job = server.enqueue_background_coach_job(
+        job = server.coach_job_submission_service().enqueue(
             "Plan something", "queued-before-reset", "synthetic-session",
             operation_id="operation-before-reset",
         )
@@ -807,7 +807,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_background_resumes_response_and_committed_effect_without_replaying(self):
         turn_id = "background-resume"
-        server.enqueue_background_coach_job("Müde heute", turn_id, "synthetic-session")
+        server.coach_job_submission_service().enqueue("Müde heute", turn_id, "synthetic-session")
         call = self.call("save_checkin", {"payload": {"notes": "Synthetic tired"}}, ["local_checkin"], call_id="saved-call")["output"][0]
         args = json.loads(call["arguments"])
         prior = {"call_id": call["call_id"], "tool": call["name"], "effect_key": coach_service.dialogue_effect_key(call["name"], args),
@@ -820,7 +820,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_background_replays_checkpointed_outputs_before_new_response(self):
         turn_id = "background-outputs"
-        server.enqueue_background_coach_job("Wie geht es weiter?", turn_id, "synthetic-session")
+        server.coach_job_submission_service().enqueue("Wie geht es weiter?", turn_id, "synthetic-session")
         outputs = [{"type": "function_call_output", "call_id": "read", "output": '{"ok":true}'}]
         server._merge_coach_command_receipt(turn_id, {"openai_response_id": "old-response", "pending_tool_outputs": outputs})
         result, model = self.turn("Wie geht es weiter?", [{"output_text": "Fortgesetzt."}], turn=turn_id, background_job=True)
