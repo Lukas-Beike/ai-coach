@@ -6541,7 +6541,7 @@ class CoachTests(unittest.TestCase):
             return {}
 
         with patch.object(server, "chat_with_coach", side_effect=capture_phase), patch.object(
-            server, "_restore_coach_session_csrf_hash", return_value="csrf-background-recovery-phase"
+            server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="csrf-background-recovery-phase"
         ):
             server._run_background_coach_job(job)
         self.assertEqual(seen["phase"], "waiting_final_response")
