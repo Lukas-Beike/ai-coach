@@ -215,6 +215,7 @@ from backend.planning.state_service import StructuredTrainingStateService
 from backend.planning.training_plan_artifact_service import TrainingPlanArtifactService
 from backend.planning import training_plans as planning_training_plans
 from backend.planning import workouts as planning_workouts
+from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.sync.jobs import (
     SyncJobStore,
 )
@@ -5060,6 +5061,21 @@ def public_state_weather_prelude_service() -> PublicStateWeatherPrelude:
     return PublicStateWeatherPrelude(weather_service(), adaptive_preview_followup_service())
 
 
+def public_state_calendar_projection_service() -> PublicStateCalendarProjection:
+    """Compose the calendar portion of the public bootstrap projection."""
+    return PublicStateCalendarProjection(
+        checkin_service(),
+        competition_service(),
+        external_calendar_reader(),
+        external_calendar_sync_service(),
+        daily_planning_context_service(),
+        external_calendar_configured=bool(CONFIG.calendar_ical_url),
+        external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
+        default_workout_name=PLANNED_WORKOUT_LABEL,
+        today=lambda: local_now().date(),
+    )
+
+
 def public_state(local_only: bool = False) -> dict[str, Any]:
     prelude = public_state_local_prelude_service().read(local_only)
     snapshot = prelude.snapshot
@@ -5072,36 +5088,18 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
     )
 
     with DB_LOCK, database() as db:
-        checkins = checkin_service().list(30)
-        competitions = competition_service().list()
-        external_calendar = external_calendar_reader().state(
-            configured=bool(CONFIG.calendar_ical_url),
-            running=external_calendar_sync_service().running(),
-            window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
-        )
-        daily_context = daily_planning_context_service().build(
+        calendar_data = public_state_calendar_projection_service().read(
             snapshot,
-            canonical_planned,
-            weather,
-            checkins,
-            external_calendar_reader().list_events(
-                50, training_relevant_only=True
-            ),
-        )
-        calendar_projection = planning_calendar_read_model.project_planning_calendar(
             local_planned,
             activities,
             weather,
-            competitions,
-            (
-                external_calendar.get("events")
-                if isinstance(external_calendar, dict)
-                else []
-            ),
-            today=local_now().date(),
-            provider_window=calendar_window,
-            default_name=PLANNED_WORKOUT_LABEL,
+            calendar_window,
         )
+        checkins = calendar_data.checkins
+        competitions = calendar_data.competitions
+        external_calendar = calendar_data.external_calendar
+        daily_context = calendar_data.daily_context
+        calendar_projection = calendar_data.calendar_projection
         freshness = provider_freshness_service().current(
             profile=profile_service().get(),
             garmin_has_core_error=bool(
