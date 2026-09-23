@@ -399,8 +399,8 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(tables, {"unexpected_records"})
 
     def test_database_initialization_does_not_recover_jobs(self):
-        with patch.object(server.SyncJobQueueService, "resume_interrupted") as sync_recovery, patch.object(
-            server, "resume_interrupted_coach_jobs"
+        with patch.object(server.SyncJobQueueService, "resume_interrupted") as sync_recovery, patch(
+            "backend.coach.job_store.CoachJobStore.resume_interrupted"
         ) as coach_recovery:
             server.initialise_database()
         sync_recovery.assert_not_called()
@@ -416,8 +416,8 @@ class CoachTests(unittest.TestCase):
             server.SyncJobQueueService,
             "resume_interrupted",
             side_effect=lambda: order.append("sync-recovery"),
-        ), patch.object(
-            server, "resume_interrupted_coach_jobs", side_effect=lambda: order.append("coach-recovery")
+        ), patch(
+            "backend.coach.job_store.CoachJobStore.resume_interrupted", side_effect=lambda *_: order.append("coach-recovery")
         ), patch.object(http_server_module, "CoachHTTPServer", http_server_factory), patch.object(
             server.SyncJobWorker, "start", side_effect=lambda _worker: order.append("sync-worker"), autospec=True
         ), patch.object(
@@ -449,8 +449,8 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(http_server_module.CoachHTTPServer.request_queue_size, 32)
 
     def test_worker_start_functions_do_not_repeat_recovery(self):
-        with patch.object(server.SyncJobQueueService, "resume_interrupted") as sync_recovery, patch.object(
-            server, "resume_interrupted_coach_jobs"
+        with patch.object(server.SyncJobQueueService, "resume_interrupted") as sync_recovery, patch(
+            "backend.coach.job_store.CoachJobStore.resume_interrupted"
         ) as coach_recovery, patch.object(server.SyncJobWorker, "start") as sync_start, patch.object(server.threading, "Thread") as thread, patch.object(
             server, "SYNC_JOB_WORKER", None
         ), patch.object(server, "COACH_JOB_WORKER", None):
@@ -5359,7 +5359,7 @@ class CoachTests(unittest.TestCase):
                 "csrf-gemini-background-restart",
             )
             self.assertIsNotNone(server.coach_job_store().claim())
-            self.assertEqual(server.resume_interrupted_coach_jobs(), 0)
+            self.assertEqual(server.coach_job_store().resume_interrupted(server.coach_turn_failure_service()), 0)
         with server.DB_LOCK, server.database() as db:
             command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-gemini-background-restart",)).fetchone()
         self.assertEqual(command["status"], "completed")

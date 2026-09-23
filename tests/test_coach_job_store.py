@@ -5,6 +5,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 from backend.coach.job_store import CoachJobStore
 from backend.db import row_factory
@@ -24,7 +25,7 @@ class CoachJobStoreTests(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             db.execute(
                 "CREATE TABLE coach_commands (client_turn_id TEXT PRIMARY KEY, "
-                "status TEXT NOT NULL, receipt TEXT NOT NULL, created_at TEXT NOT NULL, "
+                "status TEXT NOT NULL, receipt TEXT NOT NULL, intent TEXT, created_at TEXT NOT NULL, "
                 "updated_at TEXT NOT NULL)"
             )
             db.execute(
@@ -46,11 +47,11 @@ class CoachJobStoreTests(unittest.TestCase):
             lambda: "2026-09-23T12:00:00+00:00",
         )
 
-    def _insert(self, turn_id, receipt, *, status="queued", created_at="2026-09-23"):
+    def _insert(self, turn_id, receipt, *, status="queued", created_at="2026-09-23", intent=None):
         with self.manager.unit_of_work() as db:
             db.execute(
-                "INSERT INTO coach_commands VALUES (?, ?, ?, ?, ?)",
-                (turn_id, status, json.dumps(receipt), created_at, created_at),
+                "INSERT INTO coach_commands VALUES (?, ?, ?, ?, ?, ?)",
+                (turn_id, status, json.dumps(receipt), json.dumps(intent or {}), created_at, created_at),
             )
 
     def test_claim_skips_non_background_and_future_retry_then_claims_once(self):
@@ -156,6 +157,42 @@ class CoachJobStoreTests(unittest.TestCase):
             ).fetchone()
         self.assertTrue(json.loads(active["receipt"])["cancel_requested"])
         self.assertNotIn("cancel_requested", json.loads(done["receipt"]))
+
+    def test_restart_requeues_openai_and_queued_jobs_but_fails_interrupted_gemini(self):
+        self._insert("attached", {"mode": "interactive"}, status="running", intent={"operation": "save_checkin"})
+        self._insert("openai", {"mode": "background", "ai_provider": "openai", "openai_response_id": "resp-1"}, status="running")
+        self._insert("queued", {"mode": "background", "phase": "preparing"})
+        self._insert("gemini", {"mode": "background", "ai_provider": "gemini"}, status="running", intent={"operation": "stage_training_plan"})
+        failures = Mock()
+
+        self.assertEqual(self.store.resume_interrupted(failures), 2)
+
+        with self.manager.unit_of_work() as db:
+            rows = {
+                row["client_turn_id"]: row
+                for row in db.execute("SELECT client_turn_id, status, receipt FROM coach_commands").fetchall()
+            }
+        self.assertEqual(rows["openai"]["status"], "queued")
+        self.assertEqual(json.loads(rows["openai"]["receipt"])["phase"], "resuming")
+        self.assertEqual(rows["queued"]["status"], "queued")
+        self.assertEqual(json.loads(rows["queued"]["receipt"])["phase"], "queued")
+        self.assertEqual(rows["gemini"]["status"], "running")
+        self.assertTrue(self.wake.is_set())
+        self.assertEqual(failures.persist.call_count, 2)
+        self.assertEqual(failures.persist.call_args_list[0].args[:2], ("attached", {"operation": "save_checkin"}))
+        self.assertEqual(failures.persist.call_args_list[1].args[:2], ("gemini", {"operation": "stage_training_plan"}))
+        self.assertTrue(all(call.args[2].reason == "process_interrupted" for call in failures.persist.call_args_list))
+
+    def test_restart_recovery_uses_replaced_manager_and_does_not_wake_without_jobs(self):
+        self._insert("done", {"mode": "background"}, status="completed")
+        self.manager.close()
+        self.manager = self._manager()
+        failures = Mock()
+
+        self.assertEqual(self.store.resume_interrupted(failures), 0)
+
+        failures.persist.assert_not_called()
+        self.assertFalse(self.wake.is_set())
 
 
 if __name__ == "__main__":

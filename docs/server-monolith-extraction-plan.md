@@ -544,16 +544,21 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
     Job-Entscheidungen bleiben bis zur Coach-Job-Auslagerung offen.
   - [x] Durable Background-Claims, Contention-Requeue und gespeicherte
     Nutzernachrichten einem konkreten `CoachJobStore` zuordnen; Enqueue,
-    Resume, Cancel und Worker-Turn-Orchestrierung bleiben offen.
+    Resume und Cancel sind in den folgenden Teilaufgaben abgeschlossen,
+    Worker-Turn-Orchestrierung bleibt offen.
+  - [x] Restart-Recovery für unterbrochene synchrone, OpenAI- und Gemini-
+    Background-Turns einschließlich persistierter Intents, Queue-Phase und
+    Worker-Wake dem `CoachJobStore` zuordnen; Worker-Turn-Orchestrierung
+    bleibt offen.
   - [x] Background-Enqueue samt Validierung, Session-Bindung, Replay,
     Anhangsquote und atomarer Command-/Message-Persistenz einem
-    `CoachJobSubmissionService` zuordnen; Worker-/Turn-Ausführung,
-    Resume und Cancel bleiben offen.
+    `CoachJobSubmissionService` zuordnen; Worker-/Turn-Ausführung bleibt
+    offen. Resume und Cancel sind in den folgenden Teilaufgaben abgeschlossen.
   - [x] Sessiongebundene Attached-/Background-Cancellation samt
     persistierter Cancel-Markierung, Provider-Response-Close und
     Restart-Verhalten einem `CoachCancellationService` zuordnen;
     Receipt-Merge gehört dem `CoachJobStore`. Turn-Ausführung und
-    Resume bleiben offen.
+    Worker-Ausführung bleiben offen.
 - [ ] Manuellen Morning Check-in mit Frische-Gate auslagern; die auf `develop`
   entfernte automatische Reservierungs-/Retry-Steuerung nicht wieder einführen.
   - [x] Manuellen Garmin-Schlaf-/Body-Battery-Vorbereitungspfad und
