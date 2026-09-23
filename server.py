@@ -10,7 +10,6 @@ import hashlib
 import hmac
 import json
 import logging
-import mimetypes
 import os
 import queue
 import re
@@ -288,6 +287,7 @@ from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
 from backend.http_api.library_page import LibraryPageService
 from backend.http_api.chat_page import ChatHistoryPageService
+from backend.http_api.static_assets import StaticAssetService
 from backend.http_api.requests import (
     read_audio_body as read_request_audio_body,
     read_body as read_request_body,
@@ -312,36 +312,6 @@ PUBLIC_DIR = ROOT / "public"
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
-ASSET_INDEX_HTML = "index.html"
-ASSET_API_JS = "api.js"
-ASSET_APP_JS = "app.js"
-ASSET_NAVIGATION_JS = "navigation.js"
-ASSET_STATE_JS = "state.js"
-ASSET_VIEWS_JS = "views.js"
-ASSET_FORMS_JS = "forms.js"
-ASSET_COMPONENTS_JS = "components.js"
-ASSET_STYLES_CSS = "styles.css"
-ASSET_SERVICE_WORKER_JS = "service-worker.js"
-ASSET_MANIFEST = "manifest.webmanifest"
-ASSET_LOGO = "logo.png"
-ASSET_ICON = "icon.svg"
-STATIC_TARGETS = {
-    ASSET_INDEX_HTML: PUBLIC_DIR / ASSET_INDEX_HTML,
-    ASSET_API_JS: PUBLIC_DIR / ASSET_API_JS,
-    ASSET_APP_JS: PUBLIC_DIR / ASSET_APP_JS,
-    ASSET_NAVIGATION_JS: PUBLIC_DIR / ASSET_NAVIGATION_JS,
-    ASSET_STATE_JS: PUBLIC_DIR / ASSET_STATE_JS,
-    ASSET_VIEWS_JS: PUBLIC_DIR / ASSET_VIEWS_JS,
-    ASSET_FORMS_JS: PUBLIC_DIR / ASSET_FORMS_JS,
-    ASSET_COMPONENTS_JS: PUBLIC_DIR / ASSET_COMPONENTS_JS,
-    ASSET_STYLES_CSS: PUBLIC_DIR / ASSET_STYLES_CSS,
-    ASSET_SERVICE_WORKER_JS: PUBLIC_DIR / ASSET_SERVICE_WORKER_JS,
-    ASSET_MANIFEST: PUBLIC_DIR / ASSET_MANIFEST,
-    ASSET_LOGO: PUBLIC_DIR / ASSET_LOGO,
-    ASSET_ICON: PUBLIC_DIR / ASSET_ICON,
-}
-VERSIONED_STATIC_ASSETS = {ASSET_API_JS, ASSET_NAVIGATION_JS, ASSET_STATE_JS, ASSET_VIEWS_JS, ASSET_FORMS_JS, ASSET_COMPONENTS_JS, ASSET_APP_JS, ASSET_STYLES_CSS, ASSET_LOGO, ASSET_ICON}
-STATIC_REVALIDATE_ASSETS = {ASSET_INDEX_HTML, ASSET_SERVICE_WORKER_JS, ASSET_MANIFEST}
 PROVIDER_INTERVALS_NAME = "Intervals.icu"
 PROVIDER_GARMIN_NAME = "Garmin Connect"
 PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
@@ -358,7 +328,6 @@ UPDATE_COMMAND_RECEIPT_SQL = "UPDATE coach_commands SET status='completed', rece
 SELECT_COMMAND_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
 SELECT_PLANNING_REVISION_SQL = "SELECT revision FROM planning_state WHERE id=1"
 SELECT_USER_MESSAGE_SQL = "SELECT id FROM messages WHERE client_turn_id=? AND role='user'"
-STATIC_IMMUTABLE_MAX_AGE = 31536000
 APP_VERSION = "1.11.11"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
@@ -5607,6 +5576,7 @@ def session_cookie_headers(token: str = "", csrf: str = "", *, clear: bool = Fal
 class RequestHandler(BaseHTTPRequestHandler):
     server_version = f"IntervalsCoach/{APP_VERSION}"
     client_disconnect_errors = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
+    static_asset_service: StaticAssetService
 
     def log_message(self, fmt: str, *args: Any) -> None:
         LOGGER.info(
@@ -6209,43 +6179,29 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.log_client_disconnect()
 
     def send_static(self, path: str) -> None:
-        asset_name = ASSET_INDEX_HTML if path in {"", "/"} else path.lstrip("/")
-        if any(marker in asset_name for marker in ("/", "\\", ":")) or asset_name.startswith(".."):
-            raise AppError(403, "Forbidden.")
-        target = STATIC_TARGETS.get(asset_name, STATIC_TARGETS[ASSET_INDEX_HTML])
-        if not target.is_file():
-            target = STATIC_TARGETS[ASSET_INDEX_HTML]
-        data = target.read_bytes()
-        mime = mimetypes.guess_type(target.name)[0] or OCTET_STREAM_MIME
-        etag = f'"{hashlib.sha256(data).hexdigest()[:24]}"'
-        query = parse_qs(urlparse(getattr(self, "path", "")).query)
-        versioned = target.name in VERSIONED_STATIC_ASSETS and bool(str(query.get("v", [""])[0]).strip())
-        if versioned:
-            cache_control = f"public, max-age={STATIC_IMMUTABLE_MAX_AGE}, immutable"
-        elif target.name in STATIC_REVALIDATE_ASSETS:
-            cache_control = "no-cache"
-        else:
-            cache_control = "public, max-age=3600"
-        if getattr(self, "headers", {}).get("If-None-Match") == etag:
-            self.send_response(304)
-            self.send_header("ETag", etag)
-            self.send_header("Cache-Control", cache_control)
-            self.end_headers()
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", mime + ("; charset=utf-8" if mime.startswith("text/") else ""))
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("ETag", etag)
-        self.send_header("Cache-Control", cache_control)
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
+        response = self.static_asset_service.render(
+            path,
+            getattr(self, "path", ""),
+            getattr(self, "headers", {}).get("If-None-Match"),
+        )
+        self.send_response(response.status)
+        for name, value in response.headers:
+            self.send_header(name, value)
         try:
             self.end_headers()
-            self.wfile.write(data)
+            if response.body:
+                self.wfile.write(response.body)
         except self.client_disconnect_errors:
             self.log_client_disconnect()
+
+
+def request_handler_class() -> type[RequestHandler]:
+    static_assets = StaticAssetService(PUBLIC_DIR)
+
+    class ComposedRequestHandler(RequestHandler):
+        static_asset_service = static_assets
+
+    return ComposedRequestHandler
 
 
 def daily_sync_loop_service() -> DailySyncLoop:
@@ -6308,7 +6264,7 @@ def main() -> None:
     initialise_database()
     sync_job_queue_service().resume_interrupted()
     resume_interrupted_coach_jobs()
-    server = http_server.CoachHTTPServer(("0.0.0.0", CONFIG.port), RequestHandler)
+    server = http_server.CoachHTTPServer(("0.0.0.0", CONFIG.port), request_handler_class())
     server.allow_reuse_address = True
     sync_job_worker().start()
     start_coach_job_worker()

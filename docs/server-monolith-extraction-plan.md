@@ -603,6 +603,9 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
   transportseitig auslagern; vorhandene `requests.py`/`responses.py` nutzen.
   - [x] Sync-POST-Fachentscheidungen in `SyncCommandEndpoint` verlagern;
     Handler behält ausschließlich Transport, Body-Lesen und Antwort.
+  - [x] Statische Asset-Allowlist, Pfadsperre, Cache-/ETag-Projektion und
+    Sicherheitsheader `StaticAssetService` zuordnen; Handler sendet nur
+    Status, Header und Bytes.
 - [ ] Handler mit den konkret benötigten Services verbinden; keine Weitergabe
   des `server`-Moduls als Pseudo-Servicecontainer.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
