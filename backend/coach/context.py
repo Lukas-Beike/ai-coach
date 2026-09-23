@@ -8,22 +8,22 @@ from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from typing import Any
 
+from backend.calendar import local as calendar_local
+from backend.coach.conversation import CoachMessageService
+from backend.coach.prompt import COACH_PROMPT
 from backend.db import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.performance import activity_validation, load as performance_load
+from backend.performance import activity_validation
 from backend.performance import context as performance_context
+from backend.performance import load as performance_load
 from backend.planning import adaptive as planning_adaptive
-from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
-from backend.planning.library_service import WorkoutLibraryService
 from backend.planning import context as planning_context
 from backend.planning import library as planning_library
 from backend.planning import season as planning_season
-from backend.calendar import local as calendar_local
-from backend.coach.prompt import COACH_PROMPT
-from backend.coach.conversation import CoachMessageService
+from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
+from backend.planning.library_service import WorkoutLibraryService
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.sync.state import SyncStateRepository
-
 
 COACH_RECENT_ACTIVITIES_PER_SPORT = 5
 COACH_PLANNED_EVENT_LIMIT = 50
@@ -362,17 +362,21 @@ def coach_workout_library(
             rows = by_type[workout_type]
             if index >= len(rows):
                 continue
-            compacted = planning_context.selected(rows[index], COACH_LIBRARY_FIELDS)
-            if "name" in compacted:
-                compacted["name"] = str(compacted["name"])[:200]
-            if "description" in compacted:
-                compacted["description"] = str(compacted["description"])[:description_limit]
-            if isinstance(compacted.get("tags"), list):
-                compacted["tags"] = [str(tag)[:80] for tag in compacted["tags"][:10]]
-            chosen.append(compacted)
+            chosen.append(_compact_coach_library_workout(rows[index], description_limit))
             if len(chosen) >= limit:
                 return chosen
     return chosen
+
+
+def _compact_coach_library_workout(workout: dict[str, Any], description_limit: int) -> dict[str, Any]:
+    compacted = planning_context.selected(workout, COACH_LIBRARY_FIELDS)
+    if "name" in compacted:
+        compacted["name"] = str(compacted["name"])[:200]
+    if "description" in compacted:
+        compacted["description"] = str(compacted["description"])[:description_limit]
+    if isinstance(compacted.get("tags"), list):
+        compacted["tags"] = [str(tag)[:80] for tag in compacted["tags"][:10]]
+    return compacted
 
 
 def coach_context_json_size(value: Any) -> int:
