@@ -6000,3 +6000,15 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `server.py`: 4.964 physische Zeilen, 237 Definitionen; P0-Inventar 0.
   Nächster Schritt: PR gegen `develop` veröffentlichen und
   CI/Review/Merge verifizieren.
+
+## P7 strukturierte Planmutationen — bestätigter #752-Merge
+
+- #752 auf Head `f396cf3c` bestand Root-Gate, native und Read-only-Docker-
+  Vollsuite, CodeQL/Sonar, Qualitäts- und Containerchecks. Der einmalig
+  angeforderte Codex-Code- und Security-Review war auf diesem Head ohne
+  Befund; keine offenen Review-Threads. Ein früher Koordinationsjob wurde
+  beim manuellen Review-Wechsel abgebrochen und war nicht mergeblockierend.
+- Squash-Merge `ba61818a4365be2abf2544c8cc711ce94f972302` am
+  `2026-09-23T22:04:32Z` bestätigt und als Vorfahr von `origin/develop`
+  geprüft. Der zum Mergezeitpunkt noch laufende optionale Browser-Smoke-
+  und Accessibility-Check wurde nachträglich **PASS** (5m42s).
