@@ -6085,3 +6085,53 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `2026-09-23T22:33:50Z` bestätigt und als Vorfahr von `origin/develop`
   geprüft. Der zum Mergezeitpunkt noch laufende optionale Browser-Smoke-/
   Accessibility-Check wurde nachträglich **PASS** (6m8s).
+
+## P7 Dialog-Plan-/Artefakt-Scopes — integrierter Patch
+
+- GPT-6-Luna-Ausgangscommit `ce1b6d77` wurde auf den bestätigten #753-
+  Merge als `e60cd348` ohne Konflikt integriert. Root prüfte den
+  tatsächlichen Code/Diff: **PASS**. Vier Datums-/Planned-Unit-/Draft-
+  Prüffunktionen samt ihrer Prüf-Orchestrierung gehören nun einem
+  konkreten `CoachDialoguePlanScopeService`; der Server ruft ihn direkt
+  auf und behält keinen Wrapper. Kein Backend-Rückimport oder
+  Server-Fachcallback. Die bestehende DatabaseManager-UOW wird unter
+  demselben `DB_LOCK` geöffnet; Artifact-Herkunft muss vor dem expliziten
+  Flag erfolgreich geprüft werden.
+- Neun direkte Tests mit temporärer SQLite-DB prüfen gültige und
+  unzulässige Daten, Unit-Scope, fehlende Einheit, fremdes Draft,
+  Artefakt-Flag und ausschließlich lesende SQL-Prüfung. Für diese
+  lokale Prüfgrenze angemessen, zusammen mit bestehenden Dialog-
+  Integrationen. Worker-Vollsuite **PASS** (2.456 Tests/12 Skips),
+  betroffene Integrationen **PASS** (492/3 Skips). Nach Integration:
+  direkte/Architekturtests **PASS** (15/15), Dialog-Harness **PASS**
+  (68/68), Ruff, Compile, Inventar-`--check` und Diff-Check **PASS**.
+  Vollständige Root-Regression des kombinierten Folgestands und PR-CI
+  stehen noch aus.
+
+## P7 Dialog-Autorisierung — Root-Integrationsreview
+
+- Integrierter Ausgangsstand `e60cd348` auf #753-Squash `e79b8937`;
+  Root-Diff dieses Worktrees (noch nicht committet) manuell geprüft:
+  **PASS** für Request-Provenienz, Remote-Schreib-/Refresh-Ziel,
+  Retry-Provider, lebende Objekt- und Plan-Scopes, Reparaturzeitraum
+  und die unveränderte Lock/UOW-Eigentümerschaft. Sechs vormals
+  servereigene Funktionen sind vollständig in
+  `CoachDialogueActionService.classify` verlagert; der Server komponiert
+  nur konkrete Backend-Dienste und ruft die Methode direkt auf.
+  Kein Rückimport, Fachcallback oder Kompatibilitätswrapper.
+- Sieben neue direkte Sicherheitsfälle (Advice-only, fremde Nachricht,
+  Remote-Freigabe, Providerziel, fehlendes Objekt, Reparaturumfang,
+  erlaubter lokaler Scope) ergänzen die bestehenden Dialog-Integrationen
+  für Retry, archivierte Pläne und mehrstufige Korrekturen. Diese
+  Abdeckung ist für die ausgelagerte Autorisierungsgrenze angemessen;
+  P7-Turn-Orchestrierung wird separat weiter geprüft.
+- Betroffene Dialog-/Architekturtests 74/74 **PASS** vor dem neuen
+  Sicherheitsfall; neuer Fall separat **PASS**. Frisch gebautes
+  Read-only-Docker-Image: 2.457 Tests/11 Skips **PASS**. Native
+  Vollsuite: 2.457 Tests/12 Skips **PASS** (214,605 s). PR-CI noch
+  ausstehend. Inventar `--check`, Compile,
+  Ruff für das neue Backend-Modul und Diff-Check **PASS**.
+  `server.py`: 4.746 physische Zeilen, 225 Definitionen;
+  P7 verbleiben 52 Definitionen/28 globale Bindungen. Nächster
+  Schritt: Root-Gate auf finalem Diff, dann PR gegen aktuellen
+  `develop` veröffentlichen.
