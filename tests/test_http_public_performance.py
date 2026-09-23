@@ -72,6 +72,34 @@ class PublicPerformanceStateTests(unittest.TestCase):
         checkin_service.context.assert_called_once_with()
         activity_feedback_service.context.assert_called_once_with()
 
+    def test_feedback_state_reuses_checkins_from_composite_state(self):
+        checkin_service = Mock()
+        checkin_service.context.return_value = {"recent": []}
+        activity_feedback_service = Mock()
+        activity_feedback_service.context.return_value = {"recent": []}
+        checkins = [{"checkin_date": "2026-09-23"}]
+
+        result = PublicFeedbackStateService(
+            checkin_service, activity_feedback_service
+        ).feedback_state(checkins)
+
+        self.assertIs(result["checkins"], checkins)
+        checkin_service.list.assert_not_called()
+
+    def test_performance_state_reuses_snapshot_from_composite_state(self):
+        sync_state_repository = Mock()
+        service = PublicPerformanceStateService(
+            sync_state_repository, Mock(), Mock(), Mock(), lambda: date(2026, 9, 23)
+        )
+
+        with patch(
+            "backend.http_api.public_performance.performance_context.current_performance_context",
+            return_value={},
+        ):
+            service.from_snapshot({"synced_at": "synthetic"})
+
+        sync_state_repository.latest_snapshot.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,7 +27,10 @@ class PublicPerformanceStateService:
         self._today = today
 
     def performance_state(self) -> dict[str, Any]:
-        snapshot = self._sync_state_repository.latest_snapshot()
+        return self.from_snapshot(self._sync_state_repository.latest_snapshot())
+
+    def from_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        """Project a snapshot already read by a larger state request."""
         return {
             "performance": performance_context.current_performance_context(
                 snapshot,
@@ -46,9 +49,9 @@ class PublicFeedbackStateService:
         self._checkin_service = checkin_service
         self._activity_feedback_service = activity_feedback_service
 
-    def feedback_state(self) -> dict[str, Any]:
+    def feedback_state(self, checkins: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         return {
-            "checkins": self._checkin_service.list(30),
+            "checkins": checkins if checkins is not None else self._checkin_service.list(30),
             "local_feedback": self._checkin_service.context(),
             "activity_feedback": self._activity_feedback_service.context(),
         }
