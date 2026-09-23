@@ -4303,3 +4303,27 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Review des integrierten P7-Diffs **PASS**. Inventar: `server.py`
   6.929 Zeilen; P7 103 Definitionen/31
   globale Bindungen, also weiterhin offen.
+
+## PR #706 — OpenAI-Stream-Telemetry-Gate
+
+- Erstes GPT-6-Luna-Diff `6cab84a` nach tatsächlichem Root-Diff-/Code-
+  Review **FAIL**: ein neuer generischer Failure-Dispatcher hatte zu
+  viele Parameter und vermischte mehrere Status-/Usage-Pfade. Der
+  konkrete Korrekturauftrag ging an denselben Worker; keine Integration
+  des unzureichenden Einzelstands.
+- Korrektur-Diff `a6a2d67` mit fachlich getrennten HTTP-, Timeout-,
+  Netzwerk-, Cancel-, Disconnect- und AppError-Telemetry-Pfaden erneut
+  am tatsächlichen Code geprüft: **PASS**. HTTP-Rate-Limits werden vor
+  dem Error-Body-Read persistiert; Status, Log und redigierte Diagnose
+  bleiben in ihrer Reihenfolge. `OpenAIStreamClient` besitzt weiterhin
+  SSE-Transport, Retry, Abbruch, Byte-/Handle-Grenzen und finale
+  Response-Validierung; keine Server-Rückimporte oder Callback-Fachlogik.
+- Beide Worker-Commits sequenziell als `35a211d` und `25cb5ac`
+  integriert. Root hat den einzigen alten Server-Test auf die konkrete
+  Telemetry-Eigentümerschaft umgestellt. 76 Provider-, Architektur-
+  und Server-Tests, Ruff, Compile, Diff- und Inventar-Check **PASS**.
+  Die Gesamtsuite des erweiterten lokalen Stands **PASS**: 2.251 Tests,
+  12 Skips in 211,476 s. Erneuter Root-Code-Review des integrierten
+  Patches einschließlich Testanpassung **PASS**. Die Sonar-Prüfung des
+  veröffentlichten Stands steht noch aus. Inventar aktuell: `server.py` 6.933 Zeilen; P2 elf
+  Definitionen/sieben globale Bindungen (P2 weiterhin offen).

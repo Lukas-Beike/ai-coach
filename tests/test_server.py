@@ -8740,9 +8740,10 @@ class CoachTests(unittest.TestCase):
     def test_openai_stream_client_uses_runtime_state_and_diagnostics(self):
         client = server.openai_stream_client()
 
-        self.assertIs(client.provider_state, server.provider_state_service())
-        self.assertIs(client.diagnostic_capture, server.DIAGNOSTIC_CAPTURE)
-        self.assertIs(client.logger, server.LOGGER)
+        self.assertIs(client.telemetry.provider_state, server.provider_state_service())
+        self.assertIs(client.telemetry.diagnostic_capture, server.DIAGNOSTIC_CAPTURE)
+        self.assertIs(client.telemetry.logger, server.LOGGER)
+        self.assertEqual(client.config.max_bytes, server.MAX_EXTERNAL_RESPONSE_BYTES)
         self.assertIs(client.opener, server.urlopen)
 
     def test_responses_stream_request_client_disconnect_records_cancelled_usage(self):
