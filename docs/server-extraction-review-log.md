@@ -6135,3 +6135,17 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   P7 verbleiben 52 Definitionen/28 globale Bindungen. Nächster
   Schritt: Root-Gate auf finalem Diff, dann PR gegen aktuellen
   `develop` veröffentlichen.
+
+## P7 Dialog-Scopes und Autorisierung — bestätigter #754-Merge
+
+- Root-Gate **PASS** auf Commit `a63a28c7`; native und frisch
+  gebaute Read-only-Docker-Vollsuiten **PASS** (je 2.457 Tests,
+  12/11 Skips). CI-Testshards, Container, Quality, Sonar, CodeQL und
+  der einmalig angeforderte Codex-Code-/Security-Review **PASS**;
+  null offene Review-Threads. Der optionale Browser-Smoke lief zum
+  Mergezeitpunkt noch; sein Ergebnis wird getrennt nachgeprüft.
+- Squash-Merge `df885603c3162f57e88979ce5768d835dba25fd0` am
+  `2026-09-23T22:57:03Z` mit `state=MERGED`, `mergedAt` und
+  Erreichbarkeit auf `origin/develop` bestätigt.
+- P7 bleibt offen: Rückfrage-Persistenz, atomare Trainings-Patches,
+  strukturierte Coach-Turn-Orchestrierung und weitere Eigentümer.
