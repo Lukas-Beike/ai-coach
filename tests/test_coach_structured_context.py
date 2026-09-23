@@ -4,7 +4,11 @@ import unittest
 from datetime import date
 from unittest.mock import Mock
 
-from backend.coach.context import CoachStructuredContextService
+from backend.coach.context import (
+    CoachPerformanceContextReader,
+    CoachPlanningContextReader,
+    CoachStructuredContextService,
+)
 
 
 class CoachStructuredContextServiceTests(unittest.TestCase):
@@ -68,18 +72,23 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
         self.service = CoachStructuredContextService(
             self.sync_state_repository,
             self.checkin_service,
-            self.planned_unit_service,
             self.weather_service,
-            self.daily_planning_context_service,
-            self.external_calendar_reader,
-            self.profile_service,
-            self.competition_service,
-            self.training_plan_service,
             self.activity_feedback_service,
-            self.adaptive_replan_preview_service,
-            self.garmin_payload_service,
-            self.garmin_projection_service,
-            lambda: date(2026, 9, 23),
+            CoachPlanningContextReader(
+                self.planned_unit_service,
+                self.daily_planning_context_service,
+                self.external_calendar_reader,
+                self.competition_service,
+                self.training_plan_service,
+                self.adaptive_replan_preview_service,
+                lambda: date(2026, 9, 23),
+            ),
+            CoachPerformanceContextReader(
+                self.profile_service,
+                self.garmin_payload_service,
+                self.garmin_projection_service,
+                lambda: date(2026, 9, 23),
+            ),
         )
 
     def test_build_uses_snapshot_fallback_and_projects_safe_provider_context(self) -> None:

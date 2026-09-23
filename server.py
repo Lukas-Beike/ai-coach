@@ -187,6 +187,8 @@ from backend.sync.queue import SyncJobQueueService
 from backend.coach.context import (
     CoachContextPreviewLimits,
     CoachContextPreviewService,
+    CoachPerformanceContextReader,
+    CoachPlanningContextReader,
     CoachStructuredContextService,
     CoachTrainingContextService,
     CoachQuickActionsService,
@@ -1934,18 +1936,23 @@ def coach_structured_context_service() -> CoachStructuredContextService:
     return CoachStructuredContextService(
         sync_state_repository(),
         checkin_service(),
-        planned_unit_service(),
         weather_service(),
-        daily_planning_context_service(),
-        external_calendar_reader(),
-        profile_service(),
-        competition_service(),
-        training_plan_service(),
         activity_feedback_service(),
-        adaptive_replan_preview_service(),
-        garmin_payload_service(),
-        garmin_projection_service(),
-        lambda: local_now().date(),
+        CoachPlanningContextReader(
+            planned_unit_service(),
+            daily_planning_context_service(),
+            external_calendar_reader(),
+            competition_service(),
+            training_plan_service(),
+            adaptive_replan_preview_service(),
+            lambda: local_now().date(),
+        ),
+        CoachPerformanceContextReader(
+            profile_service(),
+            garmin_payload_service(),
+            garmin_projection_service(),
+            lambda: local_now().date(),
+        ),
     )
 
 

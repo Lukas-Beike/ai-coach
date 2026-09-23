@@ -187,40 +187,142 @@ class CoachIntervalsContextService:
         }
 
 
+class CoachPlanningContextReader:
+    """Read local planning and calendar inputs for structured Coach context."""
+
+    def __init__(
+        self,
+        planned_unit_service: Any,
+        daily_planning_context_service: Any,
+        external_calendar_reader: Any,
+        competition_service: Any,
+        training_plan_service: Any,
+        adaptive_replan_preview_service: Any,
+        today: Callable[[], date],
+    ) -> None:
+        self._planned_unit_service = planned_unit_service
+        self._daily_planning_context_service = daily_planning_context_service
+        self._external_calendar_reader = external_calendar_reader
+        self._competition_service = competition_service
+        self._training_plan_service = training_plan_service
+        self._adaptive_replan_preview_service = adaptive_replan_preview_service
+        self._today = today
+
+    def planned(self) -> list[dict[str, Any]]:
+        return self._planned_unit_service.list(250, future_only=True)
+
+    def daily(self, snapshot: Any, planned: Any, weather: Any, checkins: Any) -> Any:
+        return self._daily_planning_context_service.build(
+            snapshot, planned, weather, checkins.get("recent", []),
+            self._external_calendar_reader.list_events(
+                limit=50, training_relevant_only=True
+            ),
+        )
+
+    def competitions(self) -> Any:
+        return self._competition_service.list()
+
+    def training_plans(self) -> Any:
+        return self._training_plan_service.list(limit=100)
+
+    def planning(self) -> Any:
+        return planning_season.planning_state(
+            self._competition_service.list(),
+            self._today(),
+            self._adaptive_replan_preview_service.latest_preview(),
+            self._adaptive_replan_preview_service.status(),
+        )
+
+    def calendar(self, planned: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        def calendar_source(item: dict[str, Any]) -> str:
+            if item.get("is_external_calendar"):
+                return "external-calendar"
+            if item.get("is_competition"):
+                return "competition"
+            return "local-plan"
+
+        return [
+            {
+                "date": item.get("date") or item.get("event_date"),
+                "name": str(item.get("name") or "")[:200],
+                "type": item.get("category") or item.get("type"),
+                "source": calendar_source(item),
+                "training_relevant": item.get("training_relevant", True),
+                "no_intensity": item.get("no_intensity", False),
+                "short_only": item.get("short_only", False),
+            }
+            for item in calendar_local.local_calendar_events(
+                planned,
+                self._competition_service.list(),
+                self._external_calendar_reader.list_events(
+                    50, training_relevant_only=True
+                ),
+            )
+        ]
+
+    def external_calendar(self) -> dict[str, Any]:
+        return {
+            "provider": "iCalendar",
+            "read_only": True,
+            "events": self._external_calendar_reader.list_events(
+                limit=50, training_relevant_only=True
+            ),
+        }
+
+
+class CoachPerformanceContextReader:
+    """Read profile and provider performance projections without raw-data leaks."""
+
+    def __init__(
+        self,
+        profile_service: Any,
+        garmin_payload_service: Any,
+        garmin_projection_service: Any,
+        today: Callable[[], date],
+    ) -> None:
+        self._profile_service = profile_service
+        self._garmin_payload_service = garmin_payload_service
+        self._garmin_projection_service = garmin_projection_service
+        self._today = today
+
+    def profile(self) -> Any:
+        return self._profile_service.get()
+
+    def intervals(self, snapshot: Any, planned: Any) -> dict[str, Any]:
+        return CoachIntervalsContextService().project(snapshot, planned, self._today())
+
+    def current_performance(self, snapshot: Any) -> Any:
+        return performance_context.current_performance_context(
+            snapshot,
+            self._garmin_payload_service.snapshot(),
+            self._profile_service.get(),
+            self._today(),
+        )
+
+    def garmin(self, snapshot: Any) -> Any:
+        return self._garmin_projection_service.coach_context(
+            include_performance=not snapshot
+        )
+
+
 class CoachStructuredContextService:
-    """Read the authoritative local/provider inputs and build Coach context."""
+    """Assemble bounded Coach context from domain-specific read owners."""
 
     def __init__(
         self,
         sync_state_repository: Any,
         checkin_service: Any,
-        planned_unit_service: Any,
         weather_service: Any,
-        daily_planning_context_service: Any,
-        external_calendar_reader: Any,
-        profile_service: Any,
-        competition_service: Any,
-        training_plan_service: Any,
         activity_feedback_service: Any,
-        adaptive_replan_preview_service: Any,
-        garmin_payload_service: Any,
-        garmin_projection_service: Any,
-        today: Callable[[], date],
+        planning_reader: CoachPlanningContextReader,
+        performance_reader: CoachPerformanceContextReader,
     ) -> None:
         self._sync_state_repository = sync_state_repository
         self._checkin_service = checkin_service
-        self._planned_unit_service = planned_unit_service
         self._weather_service = weather_service
-        self._daily_planning_context_service = daily_planning_context_service
-        self._external_calendar_reader = external_calendar_reader
-        self._profile_service = profile_service
-        self._competition_service = competition_service
-        self._training_plan_service = training_plan_service
         self._activity_feedback_service = activity_feedback_service
-        self._adaptive_replan_preview_service = adaptive_replan_preview_service
-        self._garmin_payload_service = garmin_payload_service
-        self._garmin_projection_service = garmin_projection_service
-        self._today = today
+        self._planning_reader = planning_reader
+        self._performance_reader = performance_reader
 
     def build(self, snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
         """Assemble the bounded structured context using explicit read services."""
@@ -230,78 +332,24 @@ class CoachStructuredContextService:
             else self._sync_state_repository.latest_snapshot()
         )
         checkins = self._checkin_service.context()
-        local_planned_workouts = self._planned_unit_service.list(
-            250, future_only=True
+        local_planned_workouts = self._planning_reader.planned()
+        weather = self._weather_service.state(local_planned_workouts, refresh=False)
+        daily_context = self._planning_reader.daily(
+            snapshot, local_planned_workouts, weather, checkins
         )
-        planned = local_planned_workouts
-        weather = self._weather_service.state(planned, refresh=False)
-        daily_context = self._daily_planning_context_service.build(
-            snapshot,
-            planned,
-            weather,
-            checkins.get("recent", []),
-            self._external_calendar_reader.list_events(
-                limit=50, training_relevant_only=True
-            ),
-        )
-
-        def calendar_source(item: dict[str, Any]) -> str:
-            if item.get("is_external_calendar"):
-                return "external-calendar"
-            if item.get("is_competition"):
-                return "competition"
-            return "local-plan"
-
         return {
-            "durable_profile": self._profile_service.get(),
-            "target_competitions": self._competition_service.list(),
-            "training_plans": self._training_plan_service.list(limit=100),
+            "durable_profile": self._performance_reader.profile(),
+            "target_competitions": self._planning_reader.competitions(),
+            "training_plans": self._planning_reader.training_plans(),
             "local_feedback": checkins,
             "activity_feedback": self._activity_feedback_service.context(),
-            "planning": planning_season.planning_state(
-                self._competition_service.list(),
-                self._today(),
-                self._adaptive_replan_preview_service.latest_preview(),
-                self._adaptive_replan_preview_service.status(),
-            ),
+            "planning": self._planning_reader.planning(),
             "local_planned_workouts": local_planned_workouts,
-            "calendar": [
-                {
-                    "date": item.get("date") or item.get("event_date"),
-                    "name": str(item.get("name") or "")[:200],
-                    "type": item.get("category") or item.get("type"),
-                    "source": calendar_source(item),
-                    "training_relevant": item.get("training_relevant", True),
-                    "no_intensity": item.get("no_intensity", False),
-                    "short_only": item.get("short_only", False),
-                }
-                for item in calendar_local.local_calendar_events(
-                    local_planned_workouts,
-                    self._competition_service.list(),
-                    self._external_calendar_reader.list_events(
-                        50, training_relevant_only=True
-                    ),
-                )
-            ],
-            "external_calendar": {
-                "provider": "iCalendar",
-                "read_only": True,
-                "events": self._external_calendar_reader.list_events(
-                    limit=50, training_relevant_only=True
-                ),
-            },
-            "intervals": CoachIntervalsContextService().project(
-                snapshot, local_planned_workouts, self._today()
-            ),
-            "current_performance": performance_context.current_performance_context(
-                snapshot,
-                self._garmin_payload_service.snapshot(),
-                self._profile_service.get(),
-                self._today(),
-            ),
-            "garmin": self._garmin_projection_service.coach_context(
-                include_performance=not snapshot
-            ),
+            "calendar": self._planning_reader.calendar(local_planned_workouts),
+            "external_calendar": self._planning_reader.external_calendar(),
+            "intervals": self._performance_reader.intervals(snapshot, local_planned_workouts),
+            "current_performance": self._performance_reader.current_performance(snapshot),
+            "garmin": self._performance_reader.garmin(snapshot),
             "weather": weather,
             "daily_planning_context": daily_context,
             "source_policy": {
