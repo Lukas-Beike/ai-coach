@@ -124,3 +124,11 @@ def require_scope(intent: dict[str, Any], *tokens: str) -> bool:
 
 def require_operation(intent: dict[str, Any], operation: str) -> bool:
     return operation in authorized_operations(intent)
+
+
+def structured_action_payload(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Return a structured local-action payload or the shared client error."""
+    payload = arguments.get("payload")
+    if isinstance(payload, dict):
+        return payload
+    raise AppError(400, "Diese Aktion benoetigt payload.", reason="invalid_action")

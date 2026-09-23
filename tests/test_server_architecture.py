@@ -26,6 +26,7 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.job_submission", ("CoachJobSubmissionService",)),
+    ("backend.coach.athlete_record_tools", ("CoachAthleteRecordToolService",)),
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
@@ -126,7 +127,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "backend.coach.authorization",
-        ("coach_execution_scope", "coach_session_key", "require_coach_scope", "_require_coach_scope", "_coach_scope_values"),
+        ("coach_execution_scope", "coach_session_key", "require_coach_scope", "structured_action_payload", "_require_coach_scope", "_coach_scope_values"),
     ),
     (
         "backend.coach.attachments",
@@ -1683,6 +1684,13 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_run_structured_intervals_refresh",
     "_retry_structured_intervals_refresh",
     "_queue_structured_performance_refresh",
+    "_structured_coach_checkin_result",
+    "_structured_coach_activity_feedback_result",
+    "_structured_coach_delete_activity_feedback_result",
+    "_structured_coach_save_competition_result",
+    "_structured_coach_delete_competition_result",
+    "ATHLETE_RECORD_HANDLERS",
+    "_structured_coach_athlete_record_result",
     "sync_illness_pause_to_intervals",
     "_adaptive_replan_result",
     "apply_adaptive_replan",
