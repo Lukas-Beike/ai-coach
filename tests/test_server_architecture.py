@@ -25,6 +25,7 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 # backend-owned implementations, not server callbacks or compatibility
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.prompt", ("COACH_PROMPT",)),
     ("backend.http_api.library_page", ("LibraryPageService", "paged_library")),
     (
@@ -1617,6 +1618,13 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "RATE_LIMIT_BUCKET_MAX_AGE_SECONDS",
     "RATE_LIMIT_LAST_CLEANUP_MONOTONIC",
     "allow_rate",
+    "CHAT_STREAM_LOCK",
+    "CHAT_STREAMS",
+    "COACH_JOB_CANCEL_EVENTS",
+    "register_chat_stream",
+    "publish_chat_stream_event",
+    "chat_stream_events",
+    "unregister_chat_stream",
     "_enqueue_coach_plan_push",
     "_resolve_structured_sync_conflict",
     "check_adaptive_replan",

@@ -295,7 +295,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
     def test_restart_job_observes_cancel_during_session_restore(self):
         server.enqueue_background_coach_job("Synthetic request", "cancel-race", "synthetic-session", operation_id="cancel-operation")
         job = server._claim_background_coach_job()
-        server.COACH_JOB_CANCEL_EVENTS.clear()  # Process restart loses in-memory events.
+        server.coach_streams.CHAT_STREAM_REGISTRY.clear_state()  # Process restart loses in-memory events.
         def restore(_):
             self.assertEqual(server.cancel_chat_stream("synthetic-session", "cancel-operation")["status"], "cancelling")
             return "synthetic-session"

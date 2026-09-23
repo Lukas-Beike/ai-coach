@@ -5,6 +5,7 @@ from backend.coach.attachments import (MAX_ATTACHMENT_STORAGE_BYTES, MAX_GEMINI_
                                       validate_attachments)
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.profile_update import CoachProfileUpdateService
+from backend.coach import streams as coach_streams
 
 import hashlib
 import hmac
@@ -354,8 +355,6 @@ COACH_TRAINING_CHANGE_LIMIT = 366
 INTERVALS_SYNC_WAIT_SECONDS = 120
 DB_LOCK = threading.RLock()
 OPENAI_CONVERSATION_LOCK = threading.RLock()
-CHAT_STREAM_LOCK = threading.Lock()
-CHAT_STREAMS: dict[str, dict[str, Any]] = {}
 CHAT_QUEUE_LIMIT = 3
 CHAT_QUEUE = threading.BoundedSemaphore(CHAT_QUEUE_LIMIT)
 CHAT_LOCK_TIMEOUT_SECONDS = 30
@@ -363,7 +362,6 @@ COACH_JOB_WORKER_LOCK = threading.Lock()
 COACH_JOB_WAKE = threading.Event()
 COACH_JOB_STOP = threading.Event()
 COACH_JOB_WORKER: threading.Thread | None = None
-COACH_JOB_CANCEL_EVENTS: dict[str, threading.Event] = {}
 SYNC_JOB_WORKER: SyncJobWorker | None = None
 SESSION_LOCK = threading.RLock()
 SESSIONS: dict[str, dict[str, Any]] = {}
@@ -2239,9 +2237,8 @@ def _reset_local_coach_chat_state() -> list[str]:
 
 
 def _request_coach_operation_cancellation(operation_ids: list[str]) -> None:
-    with CHAT_STREAM_LOCK:
-        for operation_id in operation_ids:
-            COACH_JOB_CANCEL_EVENTS.setdefault(operation_id, threading.Event()).set()
+    for operation_id in operation_ids:
+        coach_streams.CHAT_STREAM_REGISTRY.cancel_background_event(operation_id)
 
 
 def _clear_coach_conversation_state() -> None:
@@ -2451,48 +2448,11 @@ def enqueue_background_coach_job(
     if existing_response:
         return existing_response
     runtime_events.STATE_EVENT_BUFFER.publish("coach", {"message_id": user_message_id, "role": "user", "client_turn_id": client_turn_id})
-    with CHAT_STREAM_LOCK:
-        COACH_JOB_CANCEL_EVENTS[operation_id] = cancel_event or threading.Event()
+    coach_streams.CHAT_STREAM_REGISTRY.set_background_event(
+        operation_id, cancel_event or threading.Event()
+    )
     COACH_JOB_WAKE.set()
     return {"status": "queued", "mode": "background", "operation_id": operation_id, "plan_scope": scope}
-
-
-def register_chat_stream(session_csrf_hash: str) -> tuple[str, threading.Event]:
-    operation_id = uuid.uuid4().hex
-    cancel_event = threading.Event()
-    with CHAT_STREAM_LOCK:
-        if session_csrf_hash in CHAT_STREAMS:
-            raise AppError(409, "Für diese Sitzung läuft bereits eine Coach-Anfrage.", reason="chat_already_running")
-        CHAT_STREAMS[session_csrf_hash] = {
-            "operation_id": operation_id,
-            "cancel_event": cancel_event,
-            "events": queue.Queue(),
-        }
-    return operation_id, cancel_event
-
-
-def publish_chat_stream_event(operation_id: str, event: str, data: Any) -> bool:
-    """Forward a worker event to the currently attached finite SSE response."""
-    with CHAT_STREAM_LOCK:
-        stream = next(
-            (candidate for candidate in CHAT_STREAMS.values()
-             if candidate.get("operation_id") == operation_id),
-            None,
-        )
-        events = stream.get("events") if stream else None
-    if not isinstance(events, queue.Queue):
-        return False
-    events.put((event, data))
-    return True
-
-
-def chat_stream_events(session_csrf_hash: str, operation_id: str) -> queue.Queue[Any] | None:
-    with CHAT_STREAM_LOCK:
-        stream = CHAT_STREAMS.get(session_csrf_hash)
-        if not stream or stream.get("operation_id") != operation_id:
-            return None
-        events = stream.get("events")
-    return events if isinstance(events, queue.Queue) else None
 
 
 def _close_chat_provider_response(response: Any) -> None:
@@ -2504,48 +2464,27 @@ def _close_chat_provider_response(response: Any) -> None:
         pass
 
 
-def _cancel_attached_chat_stream(session_csrf_hash: str, operation_id: Any) -> tuple[dict[str, Any] | None, Any]:
-    with CHAT_STREAM_LOCK:
-        stream = CHAT_STREAMS.get(session_csrf_hash)
-        if not stream:
-            return None, None
-        if operation_id and str(operation_id) != stream["operation_id"]:
-            raise AppError(409, "Die angegebene Coach-Anfrage ist nicht mehr aktiv.")
-        stream["cancel_event"].set()
-        response = getattr(stream["cancel_event"], "_provider_response", None) or getattr(stream["cancel_event"], "_openai_response", None)
-        return {"status": "cancelling", "operation_id": stream["operation_id"]}, response
-
-
 def _cancel_background_chat_job(session_csrf_hash: str, operation_id: Any) -> dict[str, Any]:
     job = _active_background_coach_job(session_csrf_hash, str(operation_id or "") or None)
     if not job:
         return {"status": "not_running"}
     receipt = job["receipt"]
     _merge_coach_command_receipt(job["client_turn_id"], {"cancel_requested": True, "phase": "cancelling"})
-    with CHAT_STREAM_LOCK:
-        background_event = COACH_JOB_CANCEL_EVENTS.get(str(receipt.get("operation_id") or ""))
-        if background_event is not None:
-            background_event.set()
-            response = getattr(background_event, "_provider_response", None) or getattr(background_event, "_openai_response", None)
-        else:
-            response = None
+    _, response = coach_streams.CHAT_STREAM_REGISTRY.cancel_background_event(
+        str(receipt.get("operation_id") or "")
+    )
     _close_chat_provider_response(response)
     return {"status": "cancelling", "operation_id": receipt.get("operation_id")}
 
 
 def cancel_chat_stream(session_csrf_hash: str, operation_id: Any = None) -> dict[str, Any]:
-    result, response = _cancel_attached_chat_stream(session_csrf_hash, operation_id)
+    result, response = coach_streams.CHAT_STREAM_REGISTRY.cancel_attached(
+        session_csrf_hash, operation_id
+    )
     if result is None:
         return _cancel_background_chat_job(session_csrf_hash, operation_id)
     _close_chat_provider_response(response)
     return result
-
-
-def unregister_chat_stream(session_csrf_hash: str, operation_id: str) -> None:
-    with CHAT_STREAM_LOCK:
-        stream = CHAT_STREAMS.get(session_csrf_hash)
-        if stream and stream["operation_id"] == operation_id:
-            CHAT_STREAMS.pop(session_csrf_hash, None)
 
 
 COACH_TOOL_MAX_ROUNDS = 12
@@ -4378,10 +4317,9 @@ def _chat_with_structured_coach(*args: Any, **kwargs: Any) -> dict[str, Any]:
 
 def chat_stream_status(session_csrf_hash: str) -> dict[str, Any]:
     """Return the status of the chat operation belonging to this session."""
-    with CHAT_STREAM_LOCK:
-        stream = CHAT_STREAMS.get(session_csrf_hash)
-        if stream:
-            return {"status": "running", "operation_id": stream["operation_id"]}
+    attached = coach_streams.CHAT_STREAM_REGISTRY.attached_status(session_csrf_hash)
+    if attached:
+        return attached
     job = _active_background_coach_job(session_csrf_hash)
     if not job:
         return {"status": "idle", "operation_id": None}
@@ -4601,7 +4539,7 @@ def _background_coach_message(job: dict[str, Any]) -> str:
 
 
 def _background_coach_stream_delta(operation_id: str, text: str) -> None:
-    publish_chat_stream_event(operation_id, "delta", {"text": text})
+    coach_streams.CHAT_STREAM_REGISTRY.publish(operation_id, "delta", {"text": text})
 
 
 def _background_coach_delta_callback(
@@ -4613,18 +4551,17 @@ def _background_coach_delta_callback(
 
 
 def _background_coach_stream_receipt(operation_id: str, value: dict[str, Any]) -> None:
-    publish_chat_stream_event(
+    coach_streams.CHAT_STREAM_REGISTRY.publish(
         operation_id, "completed", {key: item for key, item in value.items() if key != "session_key"},
     )
 
 
 def _background_coach_cancel_event(operation_id: str, client_turn_id: str) -> threading.Event:
-    with CHAT_STREAM_LOCK:
-        cancel_event = COACH_JOB_CANCEL_EVENTS.setdefault(operation_id, threading.Event())
+    cancel_event = coach_streams.CHAT_STREAM_REGISTRY.get_or_create_background_event(operation_id)
     with DB_LOCK, database() as db:
         current = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
     if current and _coach_command_receipt(current["receipt"]).get("cancel_requested"):
-        cancel_event.set()
+        coach_streams.CHAT_STREAM_REGISTRY.cancel_background_event(operation_id)
     return cancel_event
 
 
@@ -4684,7 +4621,7 @@ def _handle_background_coach_error(
             "Persistent Coach background job requeued after contention",
             extra={"event": "coach_background_job_requeued", "context": {"operation_id": operation_id, "reason": exc.reason}},
         )
-        publish_chat_stream_event(operation_id, "background", {
+        coach_streams.CHAT_STREAM_REGISTRY.publish(operation_id, "background", {
             "status": "queued", "mode": "background", "operation_id": operation_id,
         })
         return
@@ -4692,7 +4629,7 @@ def _handle_background_coach_error(
     if failed:
         _background_coach_stream_receipt(operation_id, failed)
         return
-    publish_chat_stream_event(operation_id, "error", {
+    coach_streams.CHAT_STREAM_REGISTRY.publish(operation_id, "error", {
         "reason": exc.reason or "request_failed", "message": REDACTOR.redact_text(exc.message)[:1000],
     })
 
@@ -4702,7 +4639,7 @@ def _handle_background_coach_exception(client_turn_id: str, operation_id: str, e
     if failed:
         _background_coach_stream_receipt(operation_id, failed)
     else:
-        publish_chat_stream_event(operation_id, "error", {
+        coach_streams.CHAT_STREAM_REGISTRY.publish(operation_id, "error", {
             "reason": "internal_error", "message": INTERNAL_SERVER_ERROR,
         })
     LOGGER.exception(
@@ -4718,7 +4655,7 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
     client_turn_id = str(job.get("client_turn_id") or "")
     session_csrf_hash = _restore_coach_session_csrf_hash(receipt.get("session_key"))
     cancel_event = _background_coach_cancel_event(operation_id, client_turn_id)
-    stream_attached = chat_stream_events(session_csrf_hash, operation_id) is not None
+    stream_attached = coach_streams.CHAT_STREAM_REGISTRY.events(session_csrf_hash, operation_id) is not None
     try:
         result = _execute_background_coach_job(
             job, receipt, operation_id, client_turn_id, session_csrf_hash, cancel_event, stream_attached,
@@ -4729,8 +4666,7 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
     except Exception as exc:
         _handle_background_coach_exception(client_turn_id, operation_id, exc)
     finally:
-        with CHAT_STREAM_LOCK:
-            COACH_JOB_CANCEL_EVENTS.pop(operation_id, None)
+        coach_streams.CHAT_STREAM_REGISTRY.remove_background_event(operation_id)
 
 
 def _coach_job_worker_loop() -> None:
@@ -5860,7 +5796,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         request_kind = payload.get("request_kind")
         if not client_turn_id:
             raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
-        operation_id, cancel_event = register_chat_stream(session["csrf_hash"])
+        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(session["csrf_hash"])
         client_connected = True
 
         def send_event(event: str, data: Any) -> None:
@@ -5893,7 +5829,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 # return its receipt and let the client resume via polling.
                 send_event("background", job)
                 return
-            events = chat_stream_events(session["csrf_hash"], operation_id)
+            events = coach_streams.CHAT_STREAM_REGISTRY.events(session["csrf_hash"], operation_id)
             if events is None:
                 send_event("background", job)
             else:
@@ -5923,7 +5859,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             )
             send_event("error", {"reason": "internal_error", "message": INTERNAL_SERVER_ERROR})
         finally:
-            unregister_chat_stream(session["csrf_hash"], operation_id)
+            coach_streams.CHAT_STREAM_REGISTRY.unregister(session["csrf_hash"], operation_id)
             self.close_connection = True
 
     def _handle_coach_post(self, path: str, session: dict[str, Any]) -> bool:

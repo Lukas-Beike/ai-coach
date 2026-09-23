@@ -161,7 +161,5 @@ def reset_application_state(server) -> None:
         for table in tables:
             db.execute(f"DELETE FROM {table}")
     server.profile_service().save({})
-    with server.CHAT_STREAM_LOCK:
-        server.CHAT_STREAMS.clear()
-        server.COACH_JOB_CANCEL_EVENTS.clear()
+    server.coach_streams.CHAT_STREAM_REGISTRY.clear_state()
 
