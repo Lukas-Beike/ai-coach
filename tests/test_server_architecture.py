@@ -1400,6 +1400,10 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     ("backend.http_api.responses", ("json_bytes",)),
     (
+        "backend.http_api.public_state",
+        ("PublicStateDependencies", "PublicStateService"),
+    ),
+    (
         "backend.http_api.static_assets",
         (
             "StaticAssetResponse",
@@ -1620,6 +1624,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
+    "public_state",
     "SESSION_LOCK",
     "SESSION_LAST_CLEANUP_MONOTONIC",
     "authenticated_session",
