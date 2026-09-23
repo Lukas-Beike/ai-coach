@@ -516,6 +516,9 @@ Abhängigkeit: P2–P6.
   - [x] Lokale Trainingsvorlagen-Batches mit 1–28-Eintragsgrenze,
     Objekt-Scope und gemeinsamem Rollback einem konkreten
     `TrainingTemplateToolService` zuordnen.
+  - [x] Lokales Bibliotheksplan-Werkzeug mit Operation-/Objekt-Scope und
+    Eingabeprüfung `CoachLibraryPlanToolService` zuordnen; atomare
+    Planung und Remote-Schreibgrenze verbleiben bei `WorkoutLibraryPlanService`.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.
