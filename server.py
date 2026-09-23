@@ -270,8 +270,8 @@ from backend.http_api.responses import (
 )
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
-from backend.http_api import pagination as api_pagination
 from backend.http_api.library_page import LibraryPageService
+from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.requests import (
     read_audio_body as read_request_audio_body,
     read_body as read_request_body,
@@ -1998,6 +1998,17 @@ def library_page_service() -> LibraryPageService:
     return LibraryPageService(database_manager())
 
 
+def chat_history_page_service() -> ChatHistoryPageService:
+    """Compose bounded local chat history and session-bound proposal reads."""
+    return ChatHistoryPageService(
+        database_manager(),
+        KEY_VALUE_REPOSITORY,
+        coach_proposal_read_service(),
+        DB_LOCK,
+        maximum=CHAT_PAGE_MAX,
+    )
+
+
 def coach_proposal_read_service() -> CoachProposalReadService:
     """Compose session-bound Coach proposal reads and expiration cleanup."""
     return CoachProposalReadService(database_manager(), now=time.time)
@@ -2023,40 +2034,6 @@ def coach_proposal_execution_service() -> CoachProposalExecutionService:
         IntervalsClient, runtime_maintenance.MAINTENANCE_GATE,
         now=time.time, utc_now=utc_now,
     )
-
-
-def paged_chat_history(cursor: Any = None, limit: Any = None, search: Any = None, *, session_csrf_hash: str = "") -> dict[str, Any]:
-    page_size = api_pagination.api_page_limit(
-        limit, api_pagination.API_PAGE_DEFAULT, CHAT_PAGE_MAX
-    )
-    term = str(search or "").strip()[:200]
-    params: list[Any] = []
-    clauses: list[str] = []
-    if term:
-        clauses.append("content LIKE ? ESCAPE '\\'")
-        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        params.append(f"%{escaped}%")
-    decoded = api_pagination.decode_page_cursor(cursor)
-    if isinstance(decoded, int) or (isinstance(decoded, str) and decoded.isdigit()):
-        clauses.append("id < ?")
-        params.append(int(decoded))
-    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-    with DB_LOCK, database() as db:
-        rows = db.execute(
-            f"SELECT id, role, content, client_turn_id, created_at, (SELECT json_group_array(json_extract(value, '$.name')) FROM json_each(messages.attachments)) AS attachment_names FROM messages{where} ORDER BY id DESC LIMIT ?",
-            (*params, page_size + 1),
-        ).fetchall()
-        generation = get_kv("chat_generation", db) or "initial"
-    has_more = len(rows) > page_size
-    rows = rows[:page_size]
-    return {
-        "generation": generation,
-        "messages": [{key: value for key, value in row.items() if (key != "client_turn_id" or value is not None) and (key != "attachment_names" or value != "[]")} for row in reversed(rows)],
-        "proposed_actions": coach_proposal_read_service().current(session_csrf_hash),
-        "next_cursor": api_pagination.encode_page_cursor(int(rows[-1]["id"])) if has_more and rows else None,
-        "limit": page_size,
-        "search": term,
-    }
 
 
 LIBRARY_SYNC_PREVIEW_TTL_SECONDS = 10 * 60
@@ -6054,7 +6031,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if path == "/api/chat/history":
             session = require_auth(self)
             query = parse_qs(urlparse(self.path).query)
-            self.send_json(200, paged_chat_history(
+            self.send_json(200, chat_history_page_service().page(
                 query.get("cursor", [None])[0], query.get("limit", [None])[0],
                 query.get("q", [None])[0], session_csrf_hash=session["csrf_hash"],
             ))

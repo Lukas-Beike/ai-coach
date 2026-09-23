@@ -4721,3 +4721,36 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Integrationsstand: vollständige Suite **PASS** mit 2.286 Tests und
   10 Skips in 22,182 s. Inventar-Check **PASS**; erneute Sonar/CI-
   Prüfung des veröffentlichten PR-Heads steht noch aus.
+
+## PR #710 — bestätigter Merge; P10 Chat-Pagination
+
+- PR #710 nach der `python:S107`-Korrektur auf Head `8e35ba54`
+  erneut im Root-Diff **PASS**; SonarCloud `new_violations=0`,
+  Codex-Review-Gate, Python-/Container-CI und Quality Baseline
+  **PASS**. Squash-Merge am `2026-09-23T13:14:58Z`, Commit
+  `50db694826b3eb410018bbc4129130c5af0de302`, auf
+  `origin/develop` erreichbar. Der beim Merge noch laufende
+  Browserjob endete anschließend ebenfalls mit **SUCCESS**.
+- GPT-6-Luna/high-Worker-Commit `c0538118` verschiebt den vollständigen
+  begrenzten Chat-History-Read in `ChatHistoryPageService`; der alte
+  Server-Wrapper ist entfernt, der Handler ruft den konkreten Service.
+  Ein früher Zwischen-Diff wurde wegen eigener manueller Reader-
+  Transaktion **FAIL** bewertet; der Worker stellte vor Commit
+  `DB_LOCK` plus `DatabaseManager.unit_of_work()` für Rows und
+  Generation wieder her. Root-Review des committed Diffs **PASS**:
+  Cursor, LIKE-Escaping, Begrenzung, Attachment-Namen und
+  sitzungsgebundene Vorschläge behalten den bisherigen Vertrag.
+  Zusätzliche Tests decken `%`, `_`, Backslash, UOW-/Generation-
+  Bindung, Cursor und fremde Proposal-Session ab. Worker-Gesamtsuite
+  **PASS**: 2.282 Tests, 12 Skips; drei Chat-, ein Reset-, ein
+  Session- und vier Architekturtests sowie Compile/Diff/scoped Ruff
+  **PASS**.
+- Nach PR #710 als `c08bdc7e` auf den P10-Integrationsbranch
+  übernommen und `origin/develop` mit `daf17e2e` integriert.
+  Root-Diff/Server-Aufrufer **PASS**; drei Chat-, fünf tägliche
+  Scheduler- und vier Architekturtests **PASS**. Inventar-Generator
+  um die echten Composition-Factorys ergänzt, damit P0/P5 keine
+  falschen offenen Fachdefinitionen ausweisen. `server.py` hat
+  6.756 physische Zeilen. Neu gebautes Read-only-Container-Image:
+  vollständige integrierte Suite **PASS**, 2.288 Tests, 10 Skips
+  in 19,666 s. CI/Sonar des künftigen P10-PR-Stands stehen noch aus.
