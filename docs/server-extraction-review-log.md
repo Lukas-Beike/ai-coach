@@ -5638,3 +5638,32 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   **PASS**. Root-Gate des integrierten lokalen Stands `0719c080`
   plus Dokumentations-/Inventardiff **PASS**; PR-CI und externer
   Review stehen aus. `server.py`: 5.404 Zeilen, 257 Definitionen.
+
+## P10 Export-HTTP-Streaming — Integrationsreview
+
+- GPT-6-Luna/high-Patch `0185e0b8`: Root-Diffreview zunächst **FAIL**,
+  weil beide Exportdienste für jede Route eager konstruiert wurden.
+  Derselbe Worker korrigierte dies in `efb232c0`; die Route löst nun
+  ausschließlich ihren eigenen Dienst auf. Worker-Fokustests und
+  Architektur 7/7, Vollsuite 2.360 Tests/12 Skips, Ruff, Compile und
+  Diff-Check **PASS**.
+- Sequenziell auf den bestätigten #744-Merge rebased als `c82f5100`
+  und `48b86928`, ohne Konflikt. Root prüfte den gesamten Code und Diff
+  erneut: **PASS**. Der HTTP-Transport besitzt Backup-/Privacy-
+  Download-Orchestrierung; Lock bis zum Ende des Sendens, Deadlines,
+  Cleanup und Auth-Reihenfolge bleiben erhalten. Der Server enthält
+  nur Service-Composition und Route-Delegation, keine Fach-Callbacks.
+  Root ergänzte je Route einen positiven und verweigerten Auth-Pfad
+  und entfernte die verwaiste MIME-Konstante.
+- Die Testzahl ist für diese Grenze angemessen: drei neue Transporttests
+  decken Lock/Fehler, Cleanup/Deadline und Lazy-Construction ab; der
+  neue parametrische Routentest prüft beide Auth-Grenzen vor dem
+  Factory-Aufruf. Bestehende Backup-/Privacy-Tests prüfen Archivinhalt,
+  Limits und temporäre Dateien. Integrierte Fokustests und Architektur
+  8/8; native Gesamtsuite **PASS**, 2.375 Tests/12 Skips;
+  Python-3.14-Docker-Build und vollständige Read-only-Docker-Suite
+  **PASS**, 2.375 Tests/11 Skips. Ruff für neue Module, Compile,
+  Inventar- und Diff-Check **PASS**. Root-Gate für `48b86928` plus
+  Integrationsdiff **PASS**; PR-CI und externer Review stehen aus.
+  `server.py`: 5.393 physische Zeilen, 256 Definitionen;
+  `backend/`: 39.191 Zeilen, zusammen 44.584 Zeilen.

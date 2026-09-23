@@ -31,6 +31,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
+    ("backend.http_api.export_streams", ("ExportStreamTransport",)),
     ("backend.coach.conversation", ("CoachConversationResetService",)),
     ("backend.coach.prompt", ("COACH_PROMPT",)),
     ("backend.http_api.readiness", ("ReadinessService",)),
@@ -1635,6 +1636,8 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
 FORBIDDEN_SERVER_SYMBOLS = (
     "_structured_coach_training_template_result",
     "public_state",
+    "stream_database_backup",
+    "stream_privacy_export",
     "SESSION_LOCK",
     "SESSION_LAST_CLEANUP_MONOTONIC",
     "authenticated_session",

@@ -312,6 +312,7 @@ from backend.history.undo_service import HistoryUndoService
 from backend.http_api.library_page import LibraryPageService
 from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.static_assets import StaticAssetService
+from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.requests import (
     read_audio_body as read_request_audio_body,
     read_body as read_request_body,
@@ -344,7 +345,6 @@ PROVIDER_INTERVALS_NAME = "Intervals.icu"
 PROVIDER_GARMIN_NAME = "Garmin Connect"
 PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
 JSON_MEDIA_TYPE = "application/json"
-OCTET_STREAM_MIME = "application/octet-stream"
 OPENAI_RESPONSES_PATH = "/responses"
 TRAINING_PLAN_SCOPE_PREFIX = "training_plan:"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
@@ -4593,24 +4593,13 @@ def database_backup_service() -> DatabaseBackupService:
     )
 
 
-def stream_database_backup(handler: Any) -> None:
-    with database_backup_service().stream_file() as (path, deadline):
-        handler.send_file_stream(
-            path,
-            OCTET_STREAM_MIME,
-            "intervals-coach-database.backup",
-            deadline=deadline,
-        )
-
-
-def stream_privacy_export(handler: Any) -> None:
-    temporary = privacy_archive_export_service().create_file()
-    handler.send_file_stream(
-        temporary,
-        "application/zip",
-        "intervals-coach-export.zip",
-        deadline=time.monotonic() + EXPORT_TIME_LIMIT_SECONDS,
-        cleanup=True,
+def export_stream_transport() -> ExportStreamTransport:
+    """Wire backup/export use cases into their HTTP download transport."""
+    return ExportStreamTransport(
+        database_backup_service,
+        privacy_archive_export_service,
+        monotonic=time.monotonic,
+        time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
     )
 
 
@@ -4839,7 +4828,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, DIAGNOSTIC_CAPTURE.status())
         elif path == "/api/privacy/export":
             self.auth_service.require_auth(self)
-            stream_privacy_export(self)
+            export_stream_transport().stream_privacy_export(self)
         elif path == "/api/privacy/delete/preview":
             self.auth_service.require_auth(self)
             self.send_json(200, privacy_delete_service().preview())
@@ -4853,7 +4842,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, {"changes": change_history_service().list(limit)})
         elif path == "/api/privacy/backup":
             self.auth_service.require_auth(self)
-            stream_database_backup(self)
+            export_stream_transport().stream_database_backup(self)
         else:
             return False
         return True

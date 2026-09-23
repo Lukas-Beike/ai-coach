@@ -607,7 +607,10 @@ Abhängigkeit: P1 sowie Ressourcen-/Worker-Verträge aus P6 und P8.
       Capture-Status/Entries, DB-Zähler und Provider-Frische einem
       konkreten `DiagnosticReportService` zuordnen; der eigenständige
       Capture-Endpunkt delegiert unverändert an `DiagnosticCapture`.
-- [ ] HTTP-Streaming von Exportdateien bleibt im HTTP-Adapter.
+- [x] HTTP-Streaming von Exportdateien bleibt im HTTP-Adapter.
+  `ExportStreamTransport` besitzt die Download-Orchestrierung; jede Route
+  konstruiert nur ihren eigenen Backup-/Privacy-Service und behält
+  Authentisierung, Deadline, Lock-Lebensdauer und Cleanup bei.
 
 Abnahme: Ungültige Backups verändern keine Daten; Restore blockiert
 konkurrierende Operationen korrekt und verwendet anschließend konsistente
