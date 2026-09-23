@@ -27,6 +27,8 @@ from backend.providers import http as provider_http
 if TYPE_CHECKING:
     from backend.providers.state import ProviderStateService
 
+OPENAI_UNEXPECTED_RESPONSE_MESSAGE = "OpenAI hat eine unerwartete Antwort zurückgegeben."
+
 OPENAI_RATE_LIMIT_HEADERS = {
     "retry-after": "retry_after",
     "x-ratelimit-limit-requests": "limit_requests",
@@ -206,13 +208,12 @@ class OpenAIResponsesClient:
         prepared: bool = False,
     ) -> dict[str, Any]:
         self._require_api_key()
-        request_payload = (
-            dict(payload)
-            if prepared
-            else responses_payload(payload, thinking_level=self.thinking_level())
-            if path == self.responses_path
-            else dict(payload)
-        )
+        if prepared:
+            request_payload = dict(payload)
+        elif path == self.responses_path:
+            request_payload = responses_payload(payload, thinking_level=self.thinking_level())
+        else:
+            request_payload = dict(payload)
         request_kwargs = {
             "headers": self._headers(),
             "timeout": self.response_timeout_seconds,
@@ -228,7 +229,7 @@ class OpenAIResponsesClient:
         )
         result = self.provider_state.validate_openai_response(path, result)
         if not isinstance(result, dict):
-            raise AppError(502, "OpenAI hat eine unerwartete Antwort zurückgegeben.")
+            raise AppError(502, OPENAI_UNEXPECTED_RESPONSE_MESSAGE)
         if not (path == self.responses_path and request_payload.get("background") is True):
             self.provider_state.record_usage("openai", result, path.strip("/") or "request")
         return result
@@ -259,7 +260,7 @@ class OpenAIResponsesClient:
         )
         result = self.provider_state.validate_openai_response(self.responses_path, result)
         if not isinstance(result, dict):
-            raise AppError(502, "OpenAI hat eine unerwartete Antwort zurückgegeben.")
+            raise AppError(502, OPENAI_UNEXPECTED_RESPONSE_MESSAGE)
         return result
 
     def cancel(self, response_id: str) -> None:
@@ -322,7 +323,7 @@ class OpenAIResponsesClient:
         )
         current = self.provider_state.validate_openai_response(self.responses_path, current)
         if not isinstance(current, dict):
-            raise AppError(502, "OpenAI hat eine unerwartete Antwort zurückgegeben.")
+            raise AppError(502, OPENAI_UNEXPECTED_RESPONSE_MESSAGE)
         self.provider_state.record_usage("openai", current, "responses_background")
         return current
 

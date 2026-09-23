@@ -442,7 +442,7 @@ class JsonHttpClient:
                 "Upstream service is unavailable",
                 extra={
                     "event": "upstream_network_error",
-                    "context": self._failure_context(request_context, parsed_url, started, exc),
+                    "context": self._failure_context(request_context, started, exc),
                 },
             )
             self._capture_failure(request_context, parsed_url, started, exc)
@@ -462,7 +462,7 @@ class JsonHttpClient:
                 "External HTTP request failed while processing response",
                 extra={
                     "event": "external_request_failed",
-                    "context": self._failure_context(request_context, parsed_url, started, exc),
+                    "context": self._failure_context(request_context, started, exc),
                 },
             )
             self._capture_failure(request_context, parsed_url, started, exc)
@@ -481,7 +481,7 @@ class JsonHttpClient:
         return _external_call_error_code(error)
 
     def _failure_context(
-        self, request_context: dict[str, Any], parsed_url: Any, started: float, error: BaseException,
+        self, request_context: dict[str, Any], started: float, error: BaseException,
     ) -> dict[str, Any]:
         return {
             **request_context,
