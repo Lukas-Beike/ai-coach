@@ -17,7 +17,6 @@ import secrets
 import shutil
 import sqlite3
 import threading
-import tempfile
 import time
 import uuid
 from contextlib import nullcontext, contextmanager
@@ -135,6 +134,7 @@ from backend.providers import weather as weather_provider
 from backend.providers.garmin import GarminClientFactory
 from backend.providers.garmin_morning import fetch_morning_body_battery
 from backend.http_api import server as http_server
+from backend.http_api.readiness import ReadinessService
 from backend.http_api.state_versions import StateVersionService
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.state_prelude import (
@@ -5447,46 +5447,11 @@ def cleanup_expired_sessions(db: Any, now: float, *, force: bool = False) -> int
     return cursor.rowcount
 
 
-def readiness_state() -> dict[str, Any]:
-    """Return only safe infrastructure checks for the unauthenticated probe."""
-    checks = {
-        "database": False,
-        "schema": False,
-        "data_directory": False,
-        "maintenance": False,
-    }
-    try:
-        with DB_LOCK, database() as db:
-            checks["database"] = bool(db.execute("SELECT 1").fetchone())
-            checks["schema"] = database_schema_is_current(db)
-    except Exception:
-        pass
-    probe: Path | None = None
-    try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="wb", prefix=".readiness-", suffix=".probe", dir=DATA_DIR, delete=False
-        ) as handle:
-            probe = Path(handle.name)
-            handle.write(b"ok")
-        checks["data_directory"] = True
-    except (OSError, IOError):
-        pass
-    finally:
-        if probe is not None:
-            try:
-                probe.unlink(missing_ok=True)
-            except OSError:
-                pass
-    maintenance = runtime_maintenance.MAINTENANCE_GATE.state()
-    checks["maintenance"] = not bool(maintenance.get("active"))
-    ready = all(checks.values())
-    return {
-        "status": "ready" if ready else "not_ready",
-        "ready": ready,
-        "checks": checks,
-        "maintenance": {"active": bool(maintenance.get("active"))},
-    }
+def readiness_service() -> ReadinessService:
+    """Compose the public readiness probe from its concrete dependencies."""
+    return ReadinessService(
+        database_manager(), DB_LOCK, DATA_DIR, runtime_maintenance.MAINTENANCE_GATE
+    )
 
 
 def authenticated_session(handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
@@ -5616,7 +5581,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if path == "/api/health":
             self.send_json(200, {"status": "ok", "maintenance": runtime_maintenance.MAINTENANCE_GATE.state()})
         elif path == "/api/readiness":
-            readiness = readiness_state()
+            readiness = self.readiness_service.state()
             self.send_json(200 if readiness["ready"] else 503, readiness)
         elif path == "/api/auth/status":
             session = authenticated_session(self)
@@ -6197,9 +6162,11 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 def request_handler_class() -> type[RequestHandler]:
     static_assets = StaticAssetService(PUBLIC_DIR)
+    readiness = readiness_service()
 
     class ComposedRequestHandler(RequestHandler):
         static_asset_service = static_assets
+        readiness_service = readiness
 
     return ComposedRequestHandler
 

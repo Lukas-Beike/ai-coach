@@ -26,6 +26,7 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.prompt", ("COACH_PROMPT",)),
+    ("backend.http_api.readiness", ("ReadinessService",)),
     ("backend.http_api.library_page", ("LibraryPageService", "paged_library")),
     (
         "backend.coach.proposals",
@@ -1601,6 +1602,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
+    "readiness_state",
     "_enqueue_coach_plan_push",
     "_resolve_structured_sync_conflict",
     "check_adaptive_replan",
