@@ -61,7 +61,6 @@ from backend import observability
 from backend.activities import duplicates as activity_duplicates
 from backend.activities.duplicates import latest_wahoo_garmin_duplicate
 from backend.activities.duplicate_service import DuplicateActivityService
-from backend.calendar import canonical as calendar_canonical
 from backend.calendar import external as calendar_external
 from backend.calendar import local as calendar_local
 from backend.calendar import public_events as public_event_calendar
@@ -112,8 +111,6 @@ from backend.sync.intervals import (
     IntervalsSyncWorkflow,
 )
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
-from backend.weather import history as weather_history
-from backend.weather import cache as weather_cache
 from backend.weather.service import (
     WeatherCacheStore,
     WeatherRefreshJournal,
@@ -152,6 +149,7 @@ from backend.http_api.state_prelude import (
     PublicStateLocalPrelude,
     PublicStateWeatherPrelude,
 )
+from backend.http_api.public_plan import PublicPlanStateService
 from backend.http_api.state_versions import StateVersionService
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
@@ -216,7 +214,6 @@ from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import SyncJobWorker, shared_sync_job_wake_event
 from backend.planning import adaptive as planning_adaptive
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
-from backend.planning import calendar_read_model as planning_calendar_read_model
 from backend.planning.calendar_service import CalendarConflictService
 from backend.planning import changes as planning_changes
 from backend.planning import context as planning_context
@@ -4523,65 +4520,29 @@ def public_bootstrap_service() -> PublicBootstrapService:
     )
 
 
-def public_plan_state(local_only: bool = False) -> dict[str, Any]:
-    snapshot = sync_state_repository().latest_snapshot() or {}
-    local_planned = planned_unit_service().list(500)
-    canonical_planned = calendar_canonical.canonical_planned_workouts(
-        [], local_planned
+def public_plan_state_service() -> PublicPlanStateService:
+    """Compose the public planning projection from its concrete read owners."""
+    return PublicPlanStateService(
+        sync_state=sync_state_repository(),
+        planned_units=planned_unit_service(),
+        activity_feedback=activity_feedback_service(),
+        weather=weather_service(),
+        adaptive_followup=adaptive_preview_followup_service(),
+        database_manager=database_manager(),
+        key_values=KEY_VALUE_REPOSITORY,
+        training_plans=training_plan_service(),
+        external_calendar=external_calendar_reader(),
+        external_calendar_sync=external_calendar_sync_service(),
+        daily_context=daily_planning_context_service(),
+        checkins=checkin_service(),
+        competitions=competition_service(),
+        adaptive_preview=adaptive_replan_preview_service(),
+        coach_quick_actions=coach_quick_actions_service(),
+        today=lambda: local_now().date(),
+        external_calendar_configured=bool(CONFIG.calendar_ical_url),
+        external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
+        default_workout_name=PLANNED_WORKOUT_LABEL,
     )
-    activities = snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
-    activities = activities[:1000] if isinstance(activities, list) else []
-    activities = activity_feedback_service().attach_to_activities(activities)
-    weather = weather_service().state(canonical_planned, refresh=not local_only)
-    if weather.pop("_refreshed", False):
-        adaptive_preview_followup_service().check("weather")
-    weather = weather_history.calendar_state(
-        get_kv(weather_cache.HISTORY_KEY),
-        weather,
-        today=local_now().date(),
-    )
-    provider_sync = snapshot.get("provider_sync", {}) if isinstance(snapshot, dict) else {}
-    calendar_window = provider_sync.get("calendar_window", {}) if isinstance(provider_sync, dict) else {}
-    competitions = competition_service().list()
-    external_events = external_calendar_reader().list_events(
-        1000, training_relevant_only=True
-    )
-    calendar_projection = planning_calendar_read_model.project_planning_calendar(
-        local_planned,
-        activities,
-        weather,
-        competitions,
-        external_events,
-        today=local_now().date(),
-        provider_window=calendar_window,
-        default_name=PLANNED_WORKOUT_LABEL,
-    )
-    return {
-        "plans": training_plan_service().list(limit=30),
-        **calendar_projection,
-        "weather": weather,
-        "external_calendar": external_calendar_reader().state(
-            configured=bool(CONFIG.calendar_ical_url),
-            running=external_calendar_sync_service().running(),
-            window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
-        ),
-        "daily_planning_context": daily_planning_context_service().build(
-            snapshot,
-            canonical_planned,
-            weather,
-            checkin_service().list(365),
-            external_calendar_reader().list_events(
-                50, training_relevant_only=True
-            ),
-        ),
-        "planning": planning_season.planning_state(
-            competitions,
-            local_now().date(),
-            adaptive_replan_preview_service().latest_preview(),
-            adaptive_replan_preview_service().status(),
-        ),
-        "coach_quick_actions": coach_quick_actions_service().state(),
-    }
 
 
 def public_weather_state(local_only: bool = False) -> dict[str, Any]:
@@ -4947,7 +4908,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         if path == "/api/plan":
             self.auth_service.require_auth(self)
             query = parse_qs(urlparse(self.path).query)
-            self.send_json(200, public_plan_state(local_only=query.get("local", ["0"])[0] == "1"))
+            self.send_json(200, public_plan_state_service().read(
+                local_only=query.get("local", ["0"])[0] == "1"
+            ))
         elif path == "/api/weather":
             self.auth_service.require_auth(self)
             query = parse_qs(urlparse(self.path).query)

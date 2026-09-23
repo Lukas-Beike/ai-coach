@@ -36,6 +36,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "backend.http_api.public_performance",
         ("PublicPerformanceStateService", "PublicFeedbackStateService"),
     ),
+    ("backend.http_api.public_plan", ("PublicPlanStateService",)),
     ("backend.http_api.library_page", ("LibraryPageService", "paged_library")),
     (
         "backend.coach.proposals",

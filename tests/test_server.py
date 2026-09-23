@@ -211,6 +211,22 @@ class CoachTests(unittest.TestCase):
         endpoint.execute.assert_called_once_with("/api/weather/sync", None)
         handler.send_json.assert_called_once_with(202, {"id": "job-3"})
 
+    def test_plan_handler_delegates_local_and_refresh_reads_to_service(self):
+        for local_only in (True, False):
+            with self.subTest(local_only=local_only):
+                handler = object.__new__(server.RequestHandler)
+                handler.path = "/api/plan?local=1" if local_only else "/api/plan"
+                handler.send_json = Mock()
+                service = Mock()
+                service.read.return_value = {"plans": []}
+                with (
+                    patch.object(server, "require_auth"),
+                    patch.object(server, "public_plan_state_service", return_value=service),
+                ):
+                    self.assertTrue(handler._handle_training_get("/api/plan"))
+                service.read.assert_called_once_with(local_only=local_only)
+                handler.send_json.assert_called_once_with(200, {"plans": []})
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -1393,7 +1409,7 @@ class CoachTests(unittest.TestCase):
             server.weather_service().state([], force=True)
             server.profile_service().save({"weather_location": "Emsdetten"})
             server.initialise_database()
-            calendar = server.public_plan_state(local_only=True)
+            calendar = server.public_plan_state_service().read(local_only=True)
         self.assertEqual(fetch.call_count, 2)
         history = calendar["weather"]["days"]
         self.assertEqual(len(history), 1)
@@ -3532,7 +3548,7 @@ class CoachTests(unittest.TestCase):
             patch.object(server.weather_service(), "state", return_value={"days": []}),
             patch.object(server, "local_now", return_value=datetime(2026, 8, 26, 12, 0)),
         ):
-            result = server.public_plan_state(local_only=True)
+            result = server.public_plan_state_service().read(local_only=True)
 
         self.assertEqual(result["planned"][0]["compliance"]["status"], "completed")
         self.assertEqual(result["training_calendar"][0]["compliance"]["actual_activity"]["icu_rpe"], 8)

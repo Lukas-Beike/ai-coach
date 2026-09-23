@@ -1,0 +1,124 @@
+"""Public training-plan state projection for the HTTP API."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from datetime import date
+from typing import Any
+
+from backend.calendar import canonical as calendar_canonical
+from backend.planning import calendar_read_model
+from backend.planning import season as planning_season
+from backend.weather import cache as weather_cache
+from backend.weather import history as weather_history
+
+
+class PublicPlanStateService:
+    """Compose bounded local planning reads into the public plan response."""
+
+    def __init__(
+        self,
+        sync_state: Any,
+        planned_units: Any,
+        activity_feedback: Any,
+        weather: Any,
+        adaptive_followup: Any,
+        database_manager: Any,
+        key_values: Any,
+        training_plans: Any,
+        external_calendar: Any,
+        external_calendar_sync: Any,
+        daily_context: Any,
+        checkins: Any,
+        competitions: Any,
+        adaptive_preview: Any,
+        coach_quick_actions: Any,
+        today: Callable[[], date],
+        *,
+        external_calendar_configured: bool,
+        external_calendar_window_days: int,
+        default_workout_name: str,
+    ) -> None:
+        self._sync_state = sync_state
+        self._planned_units = planned_units
+        self._activity_feedback = activity_feedback
+        self._weather = weather
+        self._adaptive_followup = adaptive_followup
+        self._database_manager = database_manager
+        self._key_values = key_values
+        self._training_plans = training_plans
+        self._external_calendar = external_calendar
+        self._external_calendar_sync = external_calendar_sync
+        self._daily_context = daily_context
+        self._checkins = checkins
+        self._competitions = competitions
+        self._adaptive_preview = adaptive_preview
+        self._coach_quick_actions = coach_quick_actions
+        self._today = today
+        self._external_calendar_configured = external_calendar_configured
+        self._external_calendar_window_days = external_calendar_window_days
+        self._default_workout_name = default_workout_name
+
+    def read(self, local_only: bool = False) -> dict[str, Any]:
+        snapshot = self._sync_state.latest_snapshot() or {}
+        local_planned = self._planned_units.list(500)
+        canonical_planned = calendar_canonical.canonical_planned_workouts(
+            [], local_planned
+        )
+        activities = (
+            snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
+        )
+        activities = activities[:1000] if isinstance(activities, list) else []
+        activities = self._activity_feedback.attach_to_activities(activities)
+        weather = self._weather.state(canonical_planned, refresh=not local_only)
+        if weather.pop("_refreshed", False):
+            self._adaptive_followup.check("weather")
+        with self._database_manager.unit_of_work() as db:
+            history = self._key_values.get(db, weather_cache.HISTORY_KEY)
+        weather = weather_history.calendar_state(history, weather, today=self._today())
+        provider_sync = (
+            snapshot.get("provider_sync", {}) if isinstance(snapshot, dict) else {}
+        )
+        calendar_window = (
+            provider_sync.get("calendar_window", {})
+            if isinstance(provider_sync, dict)
+            else {}
+        )
+        competitions = self._competitions.list()
+        external_events = self._external_calendar.list_events(
+            1000, training_relevant_only=True
+        )
+        calendar_projection = calendar_read_model.project_planning_calendar(
+            local_planned,
+            activities,
+            weather,
+            competitions,
+            external_events,
+            today=self._today(),
+            provider_window=calendar_window,
+            default_name=self._default_workout_name,
+        )
+        return {
+            "plans": self._training_plans.list(limit=30),
+            **calendar_projection,
+            "weather": weather,
+            "external_calendar": self._external_calendar.state(
+                configured=self._external_calendar_configured,
+                running=self._external_calendar_sync.running(),
+                window_days=self._external_calendar_window_days,
+            ),
+            "daily_planning_context": self._daily_context.build(
+                snapshot,
+                canonical_planned,
+                weather,
+                self._checkins.list(365),
+                self._external_calendar.list_events(50, training_relevant_only=True),
+            ),
+            "planning": planning_season.planning_state(
+                competitions,
+                self._today(),
+                self._adaptive_preview.latest_preview(),
+                self._adaptive_preview.status(),
+            ),
+            "coach_quick_actions": self._coach_quick_actions.state(),
+        }
