@@ -9,6 +9,7 @@ import sqlite3
 import shutil
 import time
 import zipfile
+import http.client
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
@@ -1493,6 +1494,74 @@ class CoachTests(unittest.TestCase):
         self.assertIn("; Secure", secure[0])
         self.assertIn("; Secure", secure[1])
         self.assertIn("Max-Age=2592000", secure[0])
+
+    def test_composed_handler_resolves_current_auth_service_after_database_manager_change(self):
+        handler_class = server.request_handler_class()
+        httpd = http_server_module.CoachHTTPServer(("127.0.0.1", 0), handler_class)
+        worker = threading.Thread(target=httpd.serve_forever, daemon=True)
+        worker.start()
+
+        def library_status(token):
+            connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)
+            try:
+                connection.request(
+                    "GET", "/api/library?limit=1",
+                    headers={"Cookie": f"ic_session={token}"},
+                )
+                response = connection.getresponse()
+                return response.status, json.loads(response.read())
+            finally:
+                connection.close()
+
+        try:
+            with patch.object(server.app_config, "security_configuration_error", return_value=None):
+                original_manager = server.database_manager()
+                original_token = create_test_session(server)
+                status, _payload = library_status(original_token)
+                self.assertEqual(status, 200)
+                original_auth = server.session_auth_service()
+
+                with tempfile.TemporaryDirectory(prefix="session-auth-manager-switch-") as directory:
+                    switched_db = Path(directory) / "switched.db"
+                    with patch.object(server, "DB_PATH", switched_db):
+                        switched_manager = server.database_manager()
+                        try:
+                            self.assertIsNot(switched_manager, original_manager)
+                            server.initialise_database()
+                            barrier = threading.Barrier(8)
+                            auth_services = []
+                            errors = []
+
+                            def resolve_auth_service():
+                                try:
+                                    barrier.wait(timeout=5)
+                                    auth_services.append(server.session_auth_service())
+                                except Exception as error:
+                                    errors.append(error)
+
+                            resolvers = [threading.Thread(target=resolve_auth_service) for _ in range(8)]
+                            for resolver in resolvers:
+                                resolver.start()
+                            for resolver in resolvers:
+                                resolver.join(5)
+                            self.assertEqual(errors, [])
+                            self.assertEqual(len(auth_services), 8)
+                            switched_auth = auth_services[0]
+                            self.assertTrue(all(auth is switched_auth for auth in auth_services))
+                            self.assertIsNot(switched_auth, original_auth)
+                            switched_token = create_test_session(server)
+
+                            status, payload = library_status(switched_token)
+                            self.assertEqual(status, 200)
+                            self.assertIn("workouts", payload)
+                        finally:
+                            switched_manager.close()
+                            server.DATABASE_MANAGER = None
+                            server.DATABASE_MANAGER_SIGNATURE = None
+        finally:
+            httpd.shutdown()
+            worker.join(5)
+            httpd.server_close()
 
     def test_authenticated_session_throttles_last_seen_without_extending_fixed_expiry(self):
         class Handler:
