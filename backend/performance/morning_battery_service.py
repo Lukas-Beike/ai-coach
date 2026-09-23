@@ -212,14 +212,14 @@ class MorningBatteryEvents:
             },
         )
 
-    def refresh_failed(self, error: Exception, safe_error: Any) -> None:
+    def refresh_failed(self, safe_error: Any) -> None:
         self._logger.warning(
             "Morning Body Battery refresh failed",
             extra={
                 "event": "morning_body_battery_sync_failed",
                 "context": safe_error,
             },
-            exc_info=(type(error), error, error.__traceback__),
+            exc_info=True,  # noqa: LOG014 - called from the refresh exception handler
         )
 
 
@@ -264,7 +264,7 @@ class MorningBodyBatteryService:
         try:
             self.sync(checkin_date or now.date())
         except Exception as exc:  # noqa: BLE001 - optional refresh failures are logged and swallowed
-            self._events.refresh_failed(exc, self.source.safe_provider_error(exc))
+            self._events.refresh_failed(self.source.safe_provider_error(exc))
 
     def _sync_locked(self, checkin_date: date) -> dict[str, Any]:
         existing = self.current()

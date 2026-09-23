@@ -43,10 +43,10 @@ class FakeLock:
 
 class FakeLogger:
     def __init__(self) -> None:
-        self.warnings: list[tuple[str, dict[str, object], object]] = []
+        self.warnings: list[tuple[str, dict[str, object], bool]] = []
 
     def warning(
-        self, message: str, *, extra: dict[str, object], exc_info: object
+        self, message: str, *, extra: dict[str, object], exc_info: bool
     ) -> None:
         self.warnings.append((message, extra, exc_info))
 
@@ -443,7 +443,7 @@ class MorningBodyBatteryServiceTests(unittest.TestCase):
                 "context": "sanitized fake error",
             },
         )
-        self.assertEqual(later.logger.warnings[0][2][0], RuntimeError)  # type: ignore[index]
+        self.assertIs(later.logger.warnings[0][2], True)
         self.assertEqual(later.safe_errors[0].args, ("fake fixture failure",))
 
 
