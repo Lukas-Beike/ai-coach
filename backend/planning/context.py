@@ -358,30 +358,33 @@ def _day(days: dict[str, dict[str, Any]], value: str) -> dict[str, Any]:
     return days.setdefault(value, {"date": value, "planned": [], "appointments": []})
 
 
-def build_daily_planning_context(
-    *,
-    planned: list[dict[str, Any]],
-    checkins: list[dict[str, Any]],
-    calendar_events: list[dict[str, Any]],
-    weather_days: list[dict[str, Any]],
-    recovery_by_date: dict[str, dict[str, Any]],
-    health_by_date: dict[str, dict[str, Any]],
-    activity_feedback: list[dict[str, Any]],
-    today: date,
-    calendar_window_days: int,
-) -> list[dict[str, Any]]:
-    """Combine already loaded date-specific signals without performing I/O."""
-    days: dict[str, dict[str, Any]] = {}
+def _project_planned_days(
+    days: dict[str, dict[str, Any]], planned: list[dict[str, Any]]
+) -> None:
     for event in planned:
         value = planning_date(event.get("start_date_local") or event.get("date"))
         if value:
             _day(days, value)["planned"].append(selected(event, PLANNED_FIELDS))
+
+
+def _project_checkin_days(
+    days: dict[str, dict[str, Any]], checkins: list[dict[str, Any]]
+) -> None:
     for checkin in checkins:
         if not isinstance(checkin, dict):
             continue
         value = planning_date(checkin.get("checkin_date"))
         if value:
             _day(days, value)["checkin"] = selected(checkin, CHECKIN_FIELDS)
+
+
+def _project_calendar_days(
+    days: dict[str, dict[str, Any]],
+    calendar_events: list[dict[str, Any]],
+    *,
+    today: date,
+    calendar_window_days: int,
+) -> None:
     for event in calendar_events:
         if not isinstance(event, dict):
             continue
@@ -391,6 +394,11 @@ def build_daily_planning_context(
             _day(days, value)["appointments"].append(
                 selected(event, APPOINTMENT_FIELDS)
             )
+
+
+def _project_activity_feedback_days(
+    days: dict[str, dict[str, Any]], activity_feedback: list[dict[str, Any]]
+) -> None:
     for feedback in activity_feedback:
         if not isinstance(feedback, dict):
             continue
@@ -399,17 +407,33 @@ def build_daily_planning_context(
             _day(days, value).setdefault("activity_feedback", []).append(
                 selected(feedback, FEEDBACK_FIELDS)
             )
+
+
+def _project_weather_days(
+    days: dict[str, dict[str, Any]], weather_days: list[dict[str, Any]]
+) -> None:
     for weather_day in weather_days:
         if not isinstance(weather_day, dict):
             continue
         value = planning_date(weather_day.get("date"))
         if value:
             _day(days, value)["weather"] = selected(weather_day, WEATHER_FIELDS)
+
+
+def _project_recovery_and_health_days(
+    days: dict[str, dict[str, Any]],
+    recovery_by_date: dict[str, dict[str, Any]],
+    health_by_date: dict[str, dict[str, Any]],
+) -> None:
     for value, recovery in recovery_by_date.items():
         _day(days, value)["recovery"] = recovery
     for value, health in health_by_date.items():
         _day(days, value)["health"] = health
 
+
+def _sort_and_clean_daily_planning_days(
+    days: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
     for value in days.values():
         value["planned"].sort(
             key=lambda event: str(
@@ -431,3 +455,31 @@ def build_daily_planning_context(
             if not value.get(key):
                 value.pop(key, None)
     return [days[key] for key in sorted(days)]
+
+
+def build_daily_planning_context(
+    *,
+    planned: list[dict[str, Any]],
+    checkins: list[dict[str, Any]],
+    calendar_events: list[dict[str, Any]],
+    weather_days: list[dict[str, Any]],
+    recovery_by_date: dict[str, dict[str, Any]],
+    health_by_date: dict[str, dict[str, Any]],
+    activity_feedback: list[dict[str, Any]],
+    today: date,
+    calendar_window_days: int,
+) -> list[dict[str, Any]]:
+    """Combine already loaded date-specific signals without performing I/O."""
+    days: dict[str, dict[str, Any]] = {}
+    _project_planned_days(days, planned)
+    _project_checkin_days(days, checkins)
+    _project_calendar_days(
+        days,
+        calendar_events,
+        today=today,
+        calendar_window_days=calendar_window_days,
+    )
+    _project_activity_feedback_days(days, activity_feedback)
+    _project_weather_days(days, weather_days)
+    _project_recovery_and_health_days(days, recovery_by_date, health_by_date)
+    return _sort_and_clean_daily_planning_days(days)
