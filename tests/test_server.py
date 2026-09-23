@@ -168,6 +168,20 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
 
 class CoachTests(unittest.TestCase):
+    def test_sync_post_handler_keeps_bodyless_routes_and_unknown_posts_transport_only(self):
+        handler = object.__new__(server.RequestHandler)
+        handler.read_json = Mock(return_value={"ignored": True})
+        handler.send_json = Mock()
+        endpoint = Mock()
+        endpoint.execute.return_value = (202, {"id": "job-3"})
+        with patch.object(server, "sync_command_endpoint", return_value=endpoint) as factory:
+            self.assertFalse(handler._handle_sync_post("/api/unknown"))
+            factory.assert_not_called()
+            self.assertTrue(handler._handle_sync_post("/api/weather/sync"))
+        handler.read_json.assert_not_called()
+        endpoint.execute.assert_called_once_with("/api/weather/sync", None)
+        handler.send_json.assert_called_once_with(202, {"id": "job-3"})
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()

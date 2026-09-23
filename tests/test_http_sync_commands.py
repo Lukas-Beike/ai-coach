@@ -1,9 +1,8 @@
 """HTTP sync command parsing, authorization preconditions, and queue contracts."""
 
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
-import server
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
 
@@ -73,19 +72,6 @@ class SyncCommandEndpointTests(unittest.TestCase):
             (200, {"status": "resolved"}),
         )
         self.queue.resolve.assert_called_once_with("abc-123", {"strategy": "keep_local"})
-
-    def test_handler_keeps_bodyless_routes_and_unknown_posts_transport_only(self):
-        handler = object.__new__(server.RequestHandler)
-        handler.read_json = Mock(return_value={"ignored": True})
-        handler.send_json = Mock()
-        self.queue.enqueue.return_value = {"id": "job-3"}
-        with patch.object(server, "sync_command_endpoint", return_value=self.endpoint) as factory:
-            self.assertFalse(handler._handle_sync_post("/api/unknown"))
-            factory.assert_not_called()
-            self.assertTrue(handler._handle_sync_post("/api/weather/sync"))
-        handler.read_json.assert_not_called()
-        handler.send_json.assert_called_once_with(202, {"id": "job-3"})
-
 
 if __name__ == "__main__":
     unittest.main()
