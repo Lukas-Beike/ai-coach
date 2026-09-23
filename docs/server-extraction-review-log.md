@@ -5472,3 +5472,22 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Compile und Diff-Check **PASS**. Wegen der Einmal-Review-Regel
   wird #738 ohne Merge durch einen neuen PR mit dem korrigierten
   Head ersetzt; kein alter PASS wird auf eine neue Head-SHA übertragen.
+
+## P10 öffentliche Planprojektion — integrierter lokaler Prüfstand
+
+- GPT-6-Luna/high-Patch `f8f77ddd` mit Korrektur `b83ac404`, nach
+  Rebase auf bestätigtem #730-Merge `67b4b377` als `09579637` und
+  `7c602be1`: `PublicPlanStateService` besitzt den vollständigen
+  `/api/plan`-Leseablauf einschließlich Bounded Reads, Wetter-Follow-up,
+  geschütztem History-Read, Kalender- und Tageskontextprojektion.
+  `server.py` komponiert nur und der Handler delegiert direkt.
+- Root-Diffreview des Erststands **FAIL**, da History ohne `DB_LOCK`
+  gelesen und der Manager zu früh gebunden wurde. Derselbe Worker
+  korrigierte beides. Root prüfte den tatsächlichen korrigierten und
+  rebasierten Gesamtdiff: **PASS**. Managerauflösung erfolgt innerhalb
+  des Locks; keine Backend-Rückimporte oder fachlichen Server-
+  Callbacks. Neu gebautes Read-only-Docker-Image: vollständige Suite
+  **PASS**, 2.338 Tests, 11 Skips; fokussierte Plan-/Architekturtests
+  **PASS**, 7/7; Inventar- und Diff-Check **PASS**. `server.py` hat
+  6.010 physische Zeilen und 286 Definitionen. Andere P10-Projektionen,
+  PR-CI und externer Review bleiben offen.
