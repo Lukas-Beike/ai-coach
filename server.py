@@ -128,6 +128,11 @@ from backend.providers.garmin import GarminClientFactory
 from backend.providers.garmin_morning import fetch_morning_body_battery
 from backend.http_api.state_versions import StateVersionService
 from backend.http_api.sync_commands import SyncCommandEndpoint
+from backend.http_api.state_prelude import (
+    CalendarWindowRange,
+    PublicStateLocalPrelude,
+    PublicStateWeatherPrelude,
+)
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
@@ -5040,36 +5045,31 @@ def public_weather_state(local_only: bool = False) -> dict[str, Any]:
     return result
 
 
-def public_state(local_only: bool = False) -> dict[str, Any]:
-    # Build the local part under one connection. SQLCipher setup is relatively
-    # expensive, and the composite state otherwise opened the encrypted DB for
-    # every card and status field on each page load.
-    with DB_LOCK, database():
-        snapshot = sync_state_repository().latest_snapshot()
-        activities = activity_feedback_service().attach_to_activities(
-            snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
-        )
-        local_planned = planned_unit_service().list()
-        canonical_planned = calendar_canonical.canonical_planned_workouts(
-            [], local_planned
-        )
-        provider_sync = snapshot.get("provider_sync", {}) if isinstance(snapshot, dict) else {}
-        calendar_window = provider_sync.get("calendar_window") if isinstance(provider_sync, dict) else None
-        if not isinstance(calendar_window, dict):
-            today = local_now().date()
-            calendar_window = {
-                "start": (today - timedelta(days=PLANNED_CALENDAR_HISTORY_DAYS)).isoformat(),
-                "end": (today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)).isoformat(),
-            }
-        if local_only:
-            weather = weather_service().state(canonical_planned, refresh=False)
+def public_state_local_prelude_service() -> PublicStateLocalPrelude:
+    """Compose the local bootstrap read with its existing transaction owner."""
+    return PublicStateLocalPrelude(
+        sync_state_repository(), activity_feedback_service(),
+        planned_unit_service(), weather_service(), database_manager(),
+        DB_LOCK, lambda: local_now().date(),
+        CalendarWindowRange(PLANNED_CALENDAR_HISTORY_DAYS, PLANNED_CALENDAR_FUTURE_DAYS),
+    )
 
-    # Provider refreshes must not happen while the composite local read holds
-    # DB_LOCK. The local bootstrap path above remains completely offline.
-    if not local_only:
-        weather = weather_service().state(canonical_planned, refresh=True)
-    if weather.pop("_refreshed", False):
-        adaptive_preview_followup_service().check("weather")
+
+def public_state_weather_prelude_service() -> PublicStateWeatherPrelude:
+    """Compose weather refresh after the local bootstrap lock is released."""
+    return PublicStateWeatherPrelude(weather_service(), adaptive_preview_followup_service())
+
+
+def public_state(local_only: bool = False) -> dict[str, Any]:
+    prelude = public_state_local_prelude_service().read(local_only)
+    snapshot = prelude.snapshot
+    activities = prelude.activities
+    local_planned = prelude.local_planned
+    canonical_planned = prelude.canonical_planned
+    calendar_window = prelude.calendar_window
+    weather = public_state_weather_prelude_service().project(
+        canonical_planned, prelude.weather
+    )
 
     with DB_LOCK, database() as db:
         checkins = checkin_service().list(30)
