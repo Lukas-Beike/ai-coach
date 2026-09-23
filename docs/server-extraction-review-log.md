@@ -5783,3 +5783,36 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Das Root-Gate für `c2b6a37a` samt Integrations- und Dokumentationsdiff
   ist **PASS**; PR-CI und externer Review stehen noch aus.
   `server.py`: 5.200 Zeilen, 245 Definitionen.
+
+## P8 Restart-Recovery — bestätigter #747-Merge
+
+- #747 auf Head `b828ca9a`: Container-, Browser-, CodeQL-, SonarCloud-
+  und übrige CI-Prüfungen **PASS**, 0 offene Review-Threads. Der erste
+  Codex-Gate-Lauf schlug trotz befundfreiem Review mit einem unerwarteten
+  Koordinatorfehler fail-closed fehl; ein regulärer Wiederholungslauf
+  desselben geschützten Workflows erzeugte für denselben Head den grünen
+  Gate-Check, ohne einen zweiten Review anzufordern. Squash-Merge
+  `41675599ed8d9e863036c3620beec5b2f3cafbdd` am
+  `2026-09-23T20:46:46Z` bestätigt und auf `origin/develop` erreichbar.
+
+## P8 strukturierter Provider-Request — integrierter lokaler Prüfstand
+
+- Luna-Commit `2d6b670f` wurde als einzelner Patch auf den bestätigten
+  #747-Merge rebasiert (`f235ab84`). Root prüfte den tatsächlichen Code
+  und Diff erneut: **PASS**. `CoachRequestPayloadService` besitzt die
+  komplette Request-Projektion inklusive Dialog-/Attachment-Kontext,
+  Modell-/Thinking-Auswahl, OpenAI-Kontinuität und Gemini-Medien. Der
+  Server konstruiert den konkreten Service und delegiert; es gibt keine
+  Server-Rückimporte oder fachlichen Server-Callbacks.
+- Vier neue Unit-Tests decken OpenAI-Kontinuität und lokale Zusammenfassung,
+  Advisory-Grenze, Gemini-Bild und untrusted-evidence-Anweisung sowie
+  Modell-/Thinking-/Token-Fallback ab. Vorhandene Attachment-Tests bleiben
+  wirksam. Testumfang für diesen Payload-Baustein angemessen; die
+  Response-/Tool-Rundenschleife benötigt später eigene Regressionen.
+- Fokussierte Tests einschließlich Attachment-/Architektur-Checks
+  **PASS**, 27/27; Ruff, Compile, Inventar- und Diff-Check **PASS**.
+  Native Vollsuite **PASS**, 2.388 Tests/12 Skips; frisch gebautes
+  Python-3.14-Image und vollständige Read-only-Docker-Suite **PASS**,
+  2.388 Tests/11 Skips. Root-Gate für `f235ab84` samt
+  Integrations-/Dokumentationsdiff **PASS**; PR-CI und externer Review
+  stehen aus. `server.py`: 5.150 Zeilen, 245 Definitionen.

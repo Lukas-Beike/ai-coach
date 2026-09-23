@@ -534,6 +534,10 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
 
 - [ ] Die gesamte strukturierte Response-/Tool-Rundenschleife einschließlich
   Retry, Fehler-Recovery, Receipts und finaler Persistenz nach `coach/` ziehen.
+  - [x] Provider-Request-Aufbau einschließlich Dialogkontext,
+    Attachment-Sicherheitsanweisung, OpenAI-Kontinuität, Gemini-Medien
+    und Modell-/Thinking-Auswahl `CoachRequestPayloadService` zuordnen;
+    die Response-/Tool-Rundenschleife bleibt offen.
   - [x] Terminale Turn-Fehlerprojektion einschließlich bestätigter Effekte,
     Pending-Request, atomarem Receipt, Checkpoint-Bereinigung und Event nach
     Commit einem `CoachTurnFailureService` zuordnen; der übrige Turn bleibt offen.
