@@ -232,7 +232,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
         startup = patch.object(server.app_config, "security_configuration_error", return_value=None)
         startup.start()
         self.addCleanup(startup.stop)
-        httpd = http_server_module.CoachHTTPServer(("127.0.0.1", 0), server.RequestHandler)
+        httpd = http_server_module.CoachHTTPServer(("127.0.0.1", 0), server.request_handler_class())
         worker = threading.Thread(target=httpd.serve_forever, daemon=True)
         worker.start()
         connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)
@@ -309,7 +309,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
         def coach(*args, **kwargs):
             self.assertTrue(kwargs["cancel_event"].is_set())
             return {"status": "cancelled"}
-        with patch.object(server, "_restore_coach_session_csrf_hash", side_effect=restore), patch.object(server, "chat_with_coach", side_effect=coach) as execute:
+        with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", side_effect=restore), patch.object(server, "chat_with_coach", side_effect=coach) as execute:
             server._run_background_coach_job(job)
         execute.assert_called_once()
 

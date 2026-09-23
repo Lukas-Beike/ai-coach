@@ -129,7 +129,7 @@ class CoachReviewTests(unittest.TestCase):
 
 
     def test_resumed_effect_is_preserved_but_incomplete_summary_is_partial(self):
-        csrf_hash = server.session_token_hash("csrf-summary-recovery")
+        csrf_hash = server.session_auth_service().session_token_hash("csrf-summary-recovery")
         client_turn_id = "summary-recovery"
         intent = self.intent("manage_training_templates", ["local_template"])
         message = "Speichere die Vorlage und erstelle einen Trainingsplan fuer die naechsten acht Wochen."
