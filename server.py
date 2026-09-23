@@ -193,6 +193,7 @@ from backend.coach.context import (
     CoachTrainingContextService,
     CoachQuickActionsService,
 )
+from backend.coach.sync_tools import COACH_SYNC_TOOL_NAMES, CoachSyncToolService
 from backend.coach.conversation import (
     CoachAttachmentContextService,
     CoachMessageService,
@@ -762,6 +763,15 @@ def structured_plan_sync_service() -> StructuredPlanSyncService:
 def plan_repair_manifest_service() -> PlanRepairManifestService:
     """Compose complete-period local repair manifest validation."""
     return PlanRepairManifestService(database_manager(), planning_authority_service())
+
+
+def coach_sync_tool_service() -> CoachSyncToolService:
+    """Compose concrete sync commands for structured Coach tool execution."""
+    return CoachSyncToolService(
+        sync_job_queue_service(), planning_authority_service(),
+        sync_conflict_command_service(), structured_plan_sync_service(),
+        plan_repair_manifest_service(), plan_push_command_service(),
+    )
 
 
 def state_version_service() -> StateVersionService:
@@ -2795,76 +2805,6 @@ def _structured_coach_plan_tool_result(
     return handler() if handler else None
 
 
-def _sync_structured_training_plan(
-    arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str],
-) -> dict[str, Any]:
-    if "start_intervals_plan_sync" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
-        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-    entries = arguments.get("entries")
-    if "repair" in arguments and type(arguments["repair"]) is not bool:
-        raise AppError(400, "repair muss ein Boolean sein.", reason="invalid_job_request")
-    if arguments.get("repair"):
-        service = plan_repair_manifest_service()
-        prepared = service.prepare(arguments, intent)
-        for scope_group in prepared.required_scope_groups:
-            require_coach_scope(intent, *scope_group)
-        manifest = service.execute(prepared)
-        return plan_push_command_service().enqueue(manifest, sync_job_ids, reason=str(arguments.get("reason") or "Coach-Reparatur"), repair=True)
-    service = structured_plan_sync_service()
-    prepared = service.prepare(entries, intent)
-    for scope_group in prepared.required_scope_groups:
-        require_coach_scope(intent, *scope_group)
-    return service.execute(prepared, sync_job_ids, reason=str(arguments.get("reason") or "Coach-Anfrage"))
-
-
-def _structured_coach_sync_tool_result(
-    name: str, arguments: dict[str, Any], *, intent: dict[str, Any],
-    sync_job_ids: list[str],
-) -> dict[str, Any] | None:
-    if name == "start_intervals_plan_sync":
-        return _sync_structured_training_plan(arguments, intent, sync_job_ids)
-    if name == "get_sync_job":
-        job_id = str(arguments.get("job_id") or "").strip()
-        if job_id not in sync_job_ids:
-            require_coach_scope(intent, f"sync_job:{job_id}")
-        return {"ok": True, "job": sync_job_queue_service().state(job_id)}
-    if name == "sync_competitions":
-        if "sync_competitions" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Sync nicht.", reason="intent_scope_denied")
-        require_coach_scope(intent, "local_competitions")
-        planning_authority_service().mark_competitions_authoritative()
-        job = sync_job_queue_service().enqueue(
-            "intervals",
-            "competition_push",
-            {"reason": str(arguments.get("reason") or "Bestätigter Coach-Auftrag")},
-            requested_by="coach",
-        )
-        sync_job_ids.append(job["id"])
-        return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
-    if name == "resolve_training_sync_conflict":
-        if "resolve_training_sync_conflict" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        local_id = str(arguments.get("local_id") or "").strip()
-        if local_id:
-            require_coach_scope(intent, f"planned_unit:{local_id}", f"competition:{local_id}")
-            return sync_conflict_command_service().resolve_local(
-                local_id, str(arguments.get("strategy") or "keep_local").strip().casefold()
-            )
-        job_id = str(arguments.get("job_id") or "").strip()
-        require_coach_scope(intent, f"sync_job:{job_id}")
-        command_service = sync_conflict_command_service()
-        previous_job = command_service.job_state(job_id)
-        provider = previous_job["provider"]
-        push = command_service.is_push_job(previous_job)
-        require_coach_scope(intent, "intervals_sync" if push else f"{provider}_refresh")
-        if intent.get("target_system") != provider or bool((intent.get("request") or {}).get("remote_write")) != push:
-            raise AppError(403, "Die Wiederholung benötigt den passenden Anbieterauftrag.", reason="request_target")
-        result = command_service.retry_job(job_id)
-        sync_job_ids.append(job_id)
-        return result
-    return None
-
-
 def _structured_coach_misc_tool_result(
     name: str, arguments: dict[str, Any], *, intent: dict[str, Any],
     client_turn_id: str, session_csrf_hash: str,
@@ -2963,8 +2903,11 @@ def _structured_coach_tool_result(
         result = provider_refresh_command_service().queue_performance_refresh(arguments)
         sync_job_ids.append(result["sync_job_id"])
         return result
-    sync_result = _structured_coach_sync_tool_result(
-        name, arguments, intent=intent, sync_job_ids=sync_job_ids,
+    sync_result = (
+        coach_sync_tool_service().execute(
+            name, arguments, intent=intent, sync_job_ids=sync_job_ids,
+        )
+        if name in COACH_SYNC_TOOL_NAMES else None
     )
     if sync_result is not None:
         return sync_result
