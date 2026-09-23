@@ -5816,3 +5816,38 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   2.388 Tests/11 Skips. Root-Gate für `f235ab84` samt
   Integrations-/Dokumentationsdiff **PASS**; PR-CI und externer Review
   stehen aus. `server.py`: 5.150 Zeilen, 245 Definitionen.
+
+## P8 strukturierter Provider-Request — bestätigter #748-Merge
+
+- #748 auf Head `658aa643`: alle Container-, Browser-, CodeQL-,
+  SonarCloud-, Codex-Code-/Security- und weiteren CI-Prüfungen **PASS**,
+  0 offene Review-Threads. Squash-Merge
+  `ac91b7e9a8be637d2c5256a5a5a419a19fe9c09d` am
+  `2026-09-23T21:00:35Z` bestätigt und auf `origin/develop` erreichbar.
+
+## P10 öffentliches State-SSE — integrierter lokaler Prüfstand
+
+- Luna-Ausgangscommit `797a13e8`: Root-Diffreview zunächst **FAIL**,
+  weil ein migrierter Test den neuen Eigentümer über `server.py` ansprach
+  und ein enger Architektur-Guard für die alten Handler-Methoden fehlte.
+  Der gleiche Worker korrigierte beide Befunde, ergänzte einen expliziten
+  401-Routentest und regenerierte nach Testzeilenänderungen das Inventar.
+  Endcommit `0caa3182` wurde als einzelner Patch auf #748 rebasiert
+  (`122dc349`); Root prüfte den vollständigen Code/Diff erneut:
+  **PASS**.
+- `StateEventTransport` besitzt Cursor-Validierung, Initial-/Ready-Events,
+  Gap-Reset, 15-Sekunden-Heartbeat und Disconnect-Schleife. Der Puffer
+  bleibt bei `runtime_events`, Socket- und Schreibzustand beim Handler;
+  dieser authentifiziert vor Konstruktion und delegiert nur. Keine
+  Server-Rückimporte, Fach-Callbacks oder zurückgebliebene SSE-Orchestrierung.
+- Vier neue Transportfälle und der Route-/Auth-Test prüfen Cursor, Event-
+  Reihenfolge, Gap/Heartbeat, Disconnect und 401 vor Streamstart. Der
+  ergänzte AST-Guard verbietet beide entfernten Handler-Methoden. Testzahl
+  für diese SSE-Teilgrenze angemessen; Coach-Chat-Stream bleibt separat
+  offen. Fokussierte Transport-/Architekturtests **PASS**, 9/9;
+  Inventar- und Diff-Check **PASS**. Frisch gebautes Python-3.14-Image
+  und vollständige Read-only-Docker-Suite **PASS**, 2.394 Tests/11 Skips.
+  Native Vollsuite **PASS**, 2.394 Tests/12 Skips; Ruff und Compile
+  **PASS**. Root-Gate für `122dc349` samt vollständigem Integrations-
+  und Dokumentationsdiff **PASS**; PR-CI und externer Review stehen
+  noch aus. `server.py`: 5.122 Zeilen, 245 Definitionen.
