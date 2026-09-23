@@ -5240,5 +5240,10 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Inventar- und Diff-Check **PASS**. Scoped Ruff meldet nur den
   bereits vorhandenen `UP031`-Befund im Conversation-Modul.
 - Dieser Stand ist lokal und noch kein gemergter PR. Inventar:
-  `server.py` 6.134 physische Zeilen, 288 Definitionen; P7-Rest
-  bleibt umfangreich.
+  Nach Rebase auf bestätigtem #728-Merge `16fb0c61` ist die
+  Fachlogik des P7-Diffs unverändert. Root prüfte den tatsächlichen
+  kombinierten Code und Diff erneut: **PASS**. Neu gebautes Read-only-
+  Docker-Image: vollständige Suite **PASS**, 2.328 Tests, 11 Skips;
+  Inventar-, Architektur- und Diff-Check **PASS**. `server.py` hat
+  6.099 physische Zeilen und 288 Definitionen. P7-Rest bleibt
+  umfangreich; PR-CI und externer Review folgen.
