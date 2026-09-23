@@ -49,7 +49,6 @@ from backend.errors import (
     NOT_FOUND_ERROR,
     PLANNED_CALENDAR_RECHECK_ERROR,
     STALE_PLANNING_REVISION_ERROR,
-    STRUCTURED_AUTHORIZATION_ERROR,
     AppError,
     ClientDisconnected,
     provider_error,
@@ -251,6 +250,7 @@ from backend.sync.scheduler import (
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.athlete_record_tools import CoachAthleteRecordToolService
 from backend.coach.library_plan_tools import CoachLibraryPlanToolService
+from backend.coach.planning_action_tools import CoachPlanningActionToolService
 from backend.coach.plan_artifact_tools import CoachPlanArtifactToolService
 from backend.coach.planning_change_tools import CoachPlanningChangeToolService
 from backend.coach.context import (
@@ -306,7 +306,6 @@ from backend.coach.authorization import (
     coach_execution_scope,
     coach_session_key,
     require_coach_scope,
-    structured_action_payload,
 )
 from backend.coach.outcomes import coach_effect_label, coach_failure_lines, unresolved_coach_steps
 from backend.http_api.responses import (
@@ -2382,41 +2381,6 @@ def _structured_coach_plan_tool_result(
     return None
 
 
-def _structured_coach_misc_tool_result(
-    name: str, arguments: dict[str, Any], *, intent: dict[str, Any],
-    client_turn_id: str, session_csrf_hash: str,
-) -> dict[str, Any] | None:
-    if name == "preview_adaptive_replan":
-        if "preview_adaptive_replan" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        require_coach_scope(intent, "adaptive_replan")
-        return {"ok": True, **adaptive_replan_preview_service().preview()}
-    if name == "apply_adaptive_replan":
-        return coach_adaptive_apply_service().apply(arguments, intent, client_turn_id)
-    if name == "update_training_plan":
-        if "update_training_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        payload = structured_action_payload(arguments)
-        plan_id = str(payload.get("plan_id") or "").strip()
-        require_coach_scope(intent, f"{TRAINING_PLAN_SCOPE_PREFIX}{plan_id}", "local_plan")
-        return {"ok": True, **training_plan_service().update(plan_id, payload)}
-    if name == "undo_training_change":
-        if "undo_training_change" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        change_id = str(arguments.get("change_id") or "").strip()
-        require_coach_scope(intent, f"change:{change_id}")
-        preview = history_undo_service().preview(change_id)
-        proposal = coach_proposal_creation_service().create(
-            preview.pop("proposal"), session_csrf_hash
-        )
-        return {
-            "ok": True,
-            **preview,
-            "proposed_action": proposal["proposed_action"],
-        }
-    return None
-
-
 def _structured_coach_tool_result(
     name: str,
     arguments: dict[str, Any],
@@ -2450,10 +2414,14 @@ def _structured_coach_tool_result(
     )
     if sync_result is not None:
         return sync_result
-    misc_result = _structured_coach_misc_tool_result(
-        name, arguments, intent=intent,
-        client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash,
-    )
+    misc_result = CoachPlanningActionToolService(
+        adaptive_replan_preview_service,
+        coach_adaptive_apply_service,
+        training_plan_service,
+        history_undo_service,
+        coach_proposal_creation_service,
+        TRAINING_PLAN_SCOPE_PREFIX,
+    ).execute(name, arguments, intent, client_turn_id, session_csrf_hash)
     if misc_result is not None:
         return misc_result
     raise AppError(400, "Unbekanntes Coach-Werkzeug.", reason="unknown_coach_tool")

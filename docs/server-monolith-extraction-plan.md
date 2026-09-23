@@ -534,6 +534,10 @@ Abhängigkeit: P2–P6.
     `replace_training_plan` und `apply_training_changes` dem konkreten
     `CoachPlanningChangeToolService` zuordnen; die atomaren Replacement- und
     Change-Planungsservices bleiben Zustandseigentümer.
+  - [x] Autorisierung, Scope und Argumentprojektion der vier übrigen
+    strukturierten Adaptive-, Planupdate- und Undo-Werkzeuge einem konkreten
+    `CoachPlanningActionToolService` zuordnen; die zuständigen Preview-, Apply-, Plan-,
+    History- und Proposal-Services bleiben Zustandseigentümer.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.
