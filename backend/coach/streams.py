@@ -105,6 +105,18 @@ class ChatStreamRegistry:
             )
             return event, response
 
+    def cancel_existing_background_event(self, operation_id: str) -> tuple[threading.Event | None, Any]:
+        """Cancel a registered event without recreating state lost on restart."""
+        with self._lock:
+            event = self._background_events.get(operation_id)
+            if event is None:
+                return None, None
+            event.set()
+            response = getattr(event, "_provider_response", None) or getattr(
+                event, "_openai_response", None
+            )
+            return event, response
+
     def clear_state(self) -> None:
         """Clear ephemeral process state for isolated tests and process restart simulation."""
         with self._lock:

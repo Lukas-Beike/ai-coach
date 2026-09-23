@@ -2470,7 +2470,7 @@ def _cancel_background_chat_job(session_csrf_hash: str, operation_id: Any) -> di
         return {"status": "not_running"}
     receipt = job["receipt"]
     _merge_coach_command_receipt(job["client_turn_id"], {"cancel_requested": True, "phase": "cancelling"})
-    _, response = coach_streams.CHAT_STREAM_REGISTRY.cancel_background_event(
+    _, response = coach_streams.CHAT_STREAM_REGISTRY.cancel_existing_background_event(
         str(receipt.get("operation_id") or "")
     )
     _close_chat_provider_response(response)

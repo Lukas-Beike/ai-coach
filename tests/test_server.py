@@ -18,6 +18,7 @@ from urllib.error import URLError
 from urllib.parse import quote
 from unittest.mock import Mock, patch
 from support import IntervalsRequestRecorder, RecordedIntervalsClient, build_gemini_request_payload, create_test_session, parsed_workout_fixture
+from backend.coach import streams as coach_streams
 from backend.coach.context import CoachIntervalsContextService, future_coach_planned_workouts
 from backend.coach.attachments import gemini_history_parts
 from backend.coach.proposals import validated_coach_action_preview_input
@@ -247,7 +248,7 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM sessions")
             db.execute("DELETE FROM kv")
         server.profile_service().save({})
-        server.coach_streams.CHAT_STREAM_REGISTRY.clear_state()
+        coach_streams.CHAT_STREAM_REGISTRY.clear_state()
 
     @staticmethod
     def history_preview(change_id, session_csrf_hash="session-csrf-hash"):
@@ -6374,7 +6375,7 @@ class CoachTests(unittest.TestCase):
                 "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                 (server.session_token_hash("session-background-streamed"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
             )
-        operation_id, _cancel_event = server.coach_streams.CHAT_STREAM_REGISTRY.register(csrf_hash)
+        operation_id, _cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(csrf_hash)
         try:
             server.enqueue_background_coach_job(
                 "Wie soll ich heute trainieren?", "turn-background-streamed", csrf_hash,
@@ -6390,7 +6391,7 @@ class CoachTests(unittest.TestCase):
             with patch.object(server, "chat_with_coach", side_effect=complete_chat):
                 server._run_background_coach_job(job)
 
-            events = server.coach_streams.CHAT_STREAM_REGISTRY.events(csrf_hash, operation_id)
+            events = coach_streams.CHAT_STREAM_REGISTRY.events(csrf_hash, operation_id)
             self.assertEqual(events.get_nowait(), ("delta", {"text": "Erster "}))
             self.assertEqual(events.get_nowait(), ("delta", {"text": "Teil"}))
             event, receipt = events.get_nowait()
@@ -6398,7 +6399,7 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(receipt["message"]["content"], "Erster Teil")
             self.assertNotIn("session_key", receipt)
         finally:
-            server.coach_streams.CHAT_STREAM_REGISTRY.unregister(csrf_hash, operation_id)
+            coach_streams.CHAT_STREAM_REGISTRY.unregister(csrf_hash, operation_id)
 
     def test_attached_durable_job_uses_provider_stream_instead_of_background_polling(self):
         csrf_hash = "csrf-attached-provider-stream"
@@ -9047,10 +9048,10 @@ class CoachTests(unittest.TestCase):
 
     def test_chat_stream_registration_rejects_duplicate_stream_and_wrong_operation_id(self):
         session_key = "session-stream-test"
-        operation_id, cancel_event = server.coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
+        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
         try:
             with self.assertRaises(server.AppError) as duplicate:
-                server.coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
+                coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
             self.assertEqual(duplicate.exception.reason, "chat_already_running")
             with self.assertRaises(server.AppError) as raised:
                 server.cancel_chat_stream(session_key, "other-operation")
@@ -9059,21 +9060,21 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(result["status"], "cancelling")
             self.assertTrue(cancel_event.is_set())
         finally:
-            server.coach_streams.CHAT_STREAM_REGISTRY.unregister(session_key, operation_id)
+            coach_streams.CHAT_STREAM_REGISTRY.unregister(session_key, operation_id)
 
     def test_chat_stream_status_is_scoped_to_the_session(self):
         session_key = "session-stream-status-test"
         self.assertEqual(server.chat_stream_status(session_key), {"status": "idle", "operation_id": None})
-        operation_id, cancel_event = server.coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
+        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
         try:
             self.assertEqual(server.chat_stream_status(session_key), {"status": "running", "operation_id": operation_id})
             self.assertEqual(server.chat_stream_status("other-session"), {"status": "idle", "operation_id": None})
             self.assertFalse(cancel_event.is_set())
         finally:
-            server.coach_streams.CHAT_STREAM_REGISTRY.unregister(session_key, operation_id)
+            coach_streams.CHAT_STREAM_REGISTRY.unregister(session_key, operation_id)
 
     def test_chat_stream_registry_isolates_sessions_and_preserves_event_order(self):
-        registry = server.coach_streams.ChatStreamRegistry()
+        registry = coach_streams.ChatStreamRegistry()
         first_operation, _ = registry.register("session-one")
         second_operation, _ = registry.register("session-two")
         try:
@@ -9091,7 +9092,7 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(registry.publish(first_operation, "delta", {"text": "after detach"}))
 
     def test_background_cancel_event_can_be_recreated_after_process_restart(self):
-        registry = server.coach_streams.ChatStreamRegistry()
+        registry = coach_streams.ChatStreamRegistry()
         event = threading.Event()
         response = Mock()
         event._provider_response = response
@@ -9111,7 +9112,7 @@ class CoachTests(unittest.TestCase):
             operation_id=operation_id,
         )
         self.assertIsNotNone(server._claim_background_coach_job())
-        registry = server.coach_streams.CHAT_STREAM_REGISTRY
+        registry = coach_streams.CHAT_STREAM_REGISTRY
         cancel_event = registry.get_background_event(operation_id)
         response = Mock()
         cancel_event._provider_response = response
@@ -9142,7 +9143,7 @@ class CoachTests(unittest.TestCase):
         events.put(("delta", {"text": "Antwort bleibt gespeichert"}))
         events.put(("completed", {"message": {"id": 2}}))
 
-        registry = server.coach_streams.CHAT_STREAM_REGISTRY
+        registry = coach_streams.CHAT_STREAM_REGISTRY
         with patch.object(registry, "register", return_value=(operation_id, cancel_event)), \
                 patch.object(registry, "unregister") as unregister, \
                 patch.object(registry, "events", return_value=events):
@@ -9170,7 +9171,7 @@ class CoachTests(unittest.TestCase):
         events.put(("delta", {"text": "ist fertig."}))
         events.put(("completed", {"status": "completed", "message": {"id": 2, "content": "Dein Plan ist fertig."}}))
 
-        registry = server.coach_streams.CHAT_STREAM_REGISTRY
+        registry = coach_streams.CHAT_STREAM_REGISTRY
         with patch.object(registry, "register", return_value=(operation_id, cancel_event)), patch.object(
             registry, "unregister"
         ) as unregister, patch.object(registry, "events", return_value=events):
@@ -9184,7 +9185,7 @@ class CoachTests(unittest.TestCase):
 
     def test_chat_stream_cancel_closes_the_active_provider_response(self):
         session_key = "session-stream-close-test"
-        operation_id, cancel_event = server.coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
+        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
         response = Mock()
         cancel_event._openai_response = response
         try:
@@ -9193,7 +9194,7 @@ class CoachTests(unittest.TestCase):
             response.close.assert_called_once_with()
             self.assertTrue(cancel_event.is_set())
         finally:
-            server.coach_streams.CHAT_STREAM_REGISTRY.unregister(session_key, operation_id)
+            coach_streams.CHAT_STREAM_REGISTRY.unregister(session_key, operation_id)
 
     def test_chat_queue_is_bounded_instead_of_waiting_indefinitely(self):
         acquired = [server.CHAT_QUEUE.acquire(blocking=False) for _ in range(server.CHAT_QUEUE_LIMIT)]

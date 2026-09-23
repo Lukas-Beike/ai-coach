@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from backend.coach import streams as coach_streams
 import test_server as fixtures
 from support import isolated_server, reset_application_state
 from backend.coach.dialogue import validate_request
@@ -779,7 +780,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(command["status"], "completed")
         self.assertEqual(json.loads(command["receipt"])["status"], "cancelled")
         self.assertTrue(
-            server.coach_streams.CHAT_STREAM_REGISTRY.get_background_event(
+            coach_streams.CHAT_STREAM_REGISTRY.get_background_event(
                 "operation-before-reset"
             ).is_set()
         )
