@@ -5216,3 +5216,29 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Root-Review des konkreten Diffs **PASS**; Inventar-Check, vier
   Architekturtests, Compile und Diff-Check **PASS**. Laufzeitcode
   und das bereits mit 2.326 Tests geprüfte Verhalten sind unverändert.
+  #728 wurde am `2026-09-23T16:59:33Z` als
+  `16fb0c6123b0619b747bdec5da05f548e562b0fc` gemergt;
+  der Commit ist auf `origin/develop` erreichbar, 0 Review-Threads
+  offen. Der nicht erforderliche Browser-Smoke-Test lief bei diesem
+  Eintrag noch.
+
+## P7 Coach-Chat-Reset — lokaler Prüfstand
+
+- Root-Commit `c37eeb87` (Rebase des inhaltlich identischen
+  `7237a69a`) verlagert die gesamte Reset-Orchestrierung in
+  `CoachConversationResetService`: best-effort OpenAI-DELETE vor der
+  lokalen UOW, atomare Nachrichten-/Command-/Entwurfs-/Generation-
+  Änderung, Cancellation über den konkreten Stream-Owner und das
+  bisherige anschließende Provider-KV-Clearing. Der Handler delegiert
+  direkt; die sechs alten Server-Fachfunktionen sind entfernt.
+- Root-Diffreview **PASS**: keine Backend-Importe aus `server.py`, keine
+  rückrufende Server-Fachlogik, bestehende Remote-Autorisierung durch
+  Handler-Auth/CSRF und unveränderte Reset-Reihenfolge. Zwei neue
+  Regressionen prüfen Transaktions-Rollback und best-effort Remote-
+  Fehler. Read-only-Docker-Vollsuite **PASS**, 2.325 Tests, 11 Skips
+  in 21,365 s; 68 Coach-Dialogtests, 4 Architekturtests, Compile,
+  Inventar- und Diff-Check **PASS**. Scoped Ruff meldet nur den
+  bereits vorhandenen `UP031`-Befund im Conversation-Modul.
+- Dieser Stand ist lokal und noch kein gemergter PR. Inventar:
+  `server.py` 6.134 physische Zeilen, 288 Definitionen; P7-Rest
+  bleibt umfangreich.
