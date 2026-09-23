@@ -771,6 +771,7 @@ def coach_sync_tool_service() -> CoachSyncToolService:
         sync_job_queue_service(), planning_authority_service(),
         sync_conflict_command_service(), structured_plan_sync_service(),
         plan_repair_manifest_service(), plan_push_command_service(),
+        provider_refresh_command_service(),
     )
 
 
@@ -2889,27 +2890,10 @@ def _structured_coach_tool_result(
     )
     if plan_result is not None:
         return plan_result
-    if name == "start_provider_refresh":
-        if "start_provider_refresh" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        provider = str(intent.get("target_system") or "")
-        require_coach_scope(intent, f"{provider}_refresh")
-        result = provider_refresh_command_service().start(
-            provider, arguments, cancel_event=cancel_event
-        )
-        if result.get("status") == "queued":
-            sync_job_ids.append(result["sync_job_id"])
-        return result
-    if name == "refresh_current_performance":
-        if "refresh_current_performance" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Refresh nicht.", reason="intent_scope_denied")
-        require_coach_scope(intent, "intervals_refresh")
-        result = provider_refresh_command_service().queue_performance_refresh(arguments)
-        sync_job_ids.append(result["sync_job_id"])
-        return result
     sync_result = (
         coach_sync_tool_service().execute(
             name, arguments, intent=intent, sync_job_ids=sync_job_ids,
+            cancel_event=cancel_event,
         )
         if name in COACH_SYNC_TOOL_NAMES else None
     )

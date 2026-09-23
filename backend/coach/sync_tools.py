@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from backend.coach.authorization import authorized_operations, require_coach_scope
 from backend.errors import STRUCTURED_AUTHORIZATION_ERROR, AppError
 from backend.sync.authority import PlanningAuthorityService
+from backend.sync.commands import ProviderRefreshCommandService
 from backend.sync.conflict_commands import SyncConflictCommandService
 from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_repair import PlanRepairManifestService
@@ -15,12 +17,12 @@ from backend.sync.queue import SyncJobQueueService
 
 COACH_SYNC_TOOL_NAMES = frozenset({
     "start_intervals_plan_sync", "get_sync_job", "sync_competitions",
-    "resolve_training_sync_conflict",
+    "resolve_training_sync_conflict", "start_provider_refresh", "refresh_current_performance",
 })
 
 
 class CoachSyncToolService:
-    """Own authorization and effects for the four Coach sync commands."""
+    """Own authorization and effects for the Coach sync commands."""
 
     def __init__(
         self,
@@ -30,6 +32,7 @@ class CoachSyncToolService:
         plan_sync: StructuredPlanSyncService,
         plan_repair: PlanRepairManifestService,
         plan_push: PlanPushCommandService,
+        provider_refresh: ProviderRefreshCommandService,
     ) -> None:
         self._queue = queue
         self._authority = authority
@@ -37,6 +40,7 @@ class CoachSyncToolService:
         self._plan_sync = plan_sync
         self._plan_repair = plan_repair
         self._plan_push = plan_push
+        self._provider_refresh = provider_refresh
 
     def execute(
         self,
@@ -45,6 +49,7 @@ class CoachSyncToolService:
         *,
         intent: dict[str, Any],
         sync_job_ids: list[str],
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any] | None:
         if name == "start_intervals_plan_sync":
             return self._start_plan_sync(arguments, intent, sync_job_ids)
@@ -57,7 +62,34 @@ class CoachSyncToolService:
             return self._sync_competitions(arguments, intent, sync_job_ids)
         if name == "resolve_training_sync_conflict":
             return self._resolve_conflict(arguments, intent, sync_job_ids)
+        if name == "start_provider_refresh":
+            return self._start_provider_refresh(arguments, intent, sync_job_ids, cancel_event)
+        if name == "refresh_current_performance":
+            return self._refresh_current_performance(arguments, intent, sync_job_ids)
         return None
+
+    def _start_provider_refresh(
+        self, arguments: dict[str, Any], intent: dict[str, Any],
+        sync_job_ids: list[str], cancel_event: threading.Event | None,
+    ) -> dict[str, Any]:
+        if "start_provider_refresh" not in authorized_operations(intent):
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+        provider = str(intent.get("target_system") or "")
+        require_coach_scope(intent, f"{provider}_refresh")
+        result = self._provider_refresh.start(provider, arguments, cancel_event=cancel_event)
+        if result.get("status") == "queued":
+            sync_job_ids.append(result["sync_job_id"])
+        return result
+
+    def _refresh_current_performance(
+        self, arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str],
+    ) -> dict[str, Any]:
+        if "refresh_current_performance" not in authorized_operations(intent) or intent.get("target_system") != "intervals":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Refresh nicht.", reason="intent_scope_denied")
+        require_coach_scope(intent, "intervals_refresh")
+        result = self._provider_refresh.queue_performance_refresh(arguments)
+        sync_job_ids.append(result["sync_job_id"])
+        return result
 
     def _start_plan_sync(
         self, arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str]

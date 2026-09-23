@@ -1,5 +1,6 @@
 """Authorization and effect boundaries for structured Coach sync tools."""
 
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -16,10 +17,39 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         self.plan_sync = Mock()
         self.plan_repair = Mock()
         self.plan_push = Mock()
+        self.provider_refresh = Mock()
         self.service = CoachSyncToolService(
             self.queue, self.authority, self.conflicts,
-            self.plan_sync, self.plan_repair, self.plan_push,
+            self.plan_sync, self.plan_repair, self.plan_push, self.provider_refresh,
         )
+
+    def test_provider_refresh_checks_scope_and_preserves_cancel_and_job_tracking(self):
+        intent = {"operation": "start_provider_refresh", "target_system": "garmin", "authorization_scope": []}
+        jobs = []
+        with self.assertRaises(AppError):
+            self.service.execute("start_provider_refresh", {}, intent=intent, sync_job_ids=jobs)
+        self.provider_refresh.start.assert_not_called()
+        intent["authorization_scope"] = ["garmin_refresh"]
+        self.provider_refresh.start.return_value = {"status": "queued", "sync_job_id": "job-2"}
+        cancel = threading.Event()
+        self.service.execute("start_provider_refresh", {"days": 3}, intent=intent, sync_job_ids=jobs, cancel_event=cancel)
+        self.provider_refresh.start.assert_called_once_with("garmin", {"days": 3}, cancel_event=cancel)
+        self.assertEqual(jobs, ["job-2"])
+        self.provider_refresh.start.return_value = {"status": "complete"}
+        self.service.execute("start_provider_refresh", {}, intent=intent, sync_job_ids=jobs)
+        self.assertEqual(jobs, ["job-2"])
+
+    def test_performance_refresh_requires_intervals_scope_before_enqueue(self):
+        intent = {"operation": "refresh_current_performance", "target_system": "garmin", "authorization_scope": ["intervals_refresh"]}
+        jobs = []
+        with self.assertRaises(AppError):
+            self.service.execute("refresh_current_performance", {}, intent=intent, sync_job_ids=jobs)
+        self.provider_refresh.queue_performance_refresh.assert_not_called()
+        intent["target_system"] = "intervals"
+        self.provider_refresh.queue_performance_refresh.return_value = {"sync_job_id": "job-3"}
+        self.service.execute("refresh_current_performance", {"reason": "now"}, intent=intent, sync_job_ids=jobs)
+        self.provider_refresh.queue_performance_refresh.assert_called_once_with({"reason": "now"})
+        self.assertEqual(jobs, ["job-3"])
 
     def test_plan_repair_checks_object_scopes_before_mutation(self):
         intent = {
