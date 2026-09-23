@@ -168,7 +168,7 @@ jobs:
                   'GET /repos/{owner}/{repo}/compare/{basehead}', {
                     owner: context.repo.owner, repo: context.repo.repo,
                     basehead: `${mergeBase}...${head}`,
-                    headers: { accept: 'application/vnd.github.v3.diff' },
+                    headers: { accept: 'application/vnd.github.diff' },
                   }
                 )).data;
                 const [oldDiff, newDiff] = await Promise.all([
