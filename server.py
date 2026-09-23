@@ -140,6 +140,10 @@ from backend.http_api import server as http_server
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.auth import SessionAuthService
+from backend.http_api.public_performance import (
+    PublicFeedbackStateService,
+    PublicPerformanceStateService,
+)
 from backend.http_api.state_prelude import (
     CalendarWindowRange,
     PublicStateLocalPrelude,
@@ -845,6 +849,22 @@ def state_version_service() -> StateVersionService:
         SNAPSHOT_REPOSITORY,
         profile_service(),
     )
+
+
+def public_performance_state_service() -> PublicPerformanceStateService:
+    """Compose the read-only performance projection."""
+    return PublicPerformanceStateService(
+        sync_state_repository(),
+        garmin_payload_service(),
+        profile_service(),
+        garmin_projection_service(),
+        lambda: local_now().date(),
+    )
+
+
+def public_feedback_state_service() -> PublicFeedbackStateService:
+    """Compose the read-only feedback projection."""
+    return PublicFeedbackStateService(checkin_service(), activity_feedback_service())
 
 
 def sync_public_state_service() -> SyncPublicStateService:
@@ -4666,27 +4686,6 @@ def public_plan_state(local_only: bool = False) -> dict[str, Any]:
     }
 
 
-def public_performance_state() -> dict[str, Any]:
-    snapshot = sync_state_repository().latest_snapshot()
-    return {
-        "performance": performance_context.current_performance_context(
-            snapshot,
-            garmin_payload_service().snapshot(),
-            profile_service().get(),
-            local_now().date(),
-        ),
-        "garmin": garmin_projection_service().public_state(),
-    }
-
-
-def public_feedback_state() -> dict[str, Any]:
-    return {
-        "checkins": checkin_service().list(30),
-        "local_feedback": checkin_service().context(),
-        "activity_feedback": activity_feedback_service().context(),
-    }
-
-
 def public_weather_state(local_only: bool = False) -> dict[str, Any]:
     """Return the configured forecast without loading the complete plan state."""
     result = weather_service().state(refresh=not local_only)
@@ -5148,13 +5147,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, library_page_service().page(query.get("cursor", [None])[0], query.get("limit", [None])[0]))
         elif path == "/api/performance":
             self.auth_service.require_auth(self)
-            self.send_json(200, public_performance_state())
+            self.send_json(200, public_performance_state_service().performance_state())
         elif path == "/api/profile":
             self.auth_service.require_auth(self)
             self.send_json(200, {"profile": profile_service().get(), "competitions": competition_service().list(limit=100)})
         elif path == "/api/feedback":
             self.auth_service.require_auth(self)
-            self.send_json(200, public_feedback_state())
+            self.send_json(200, public_feedback_state_service().feedback_state())
         elif path == "/api/context-preview":
             self.auth_service.require_auth(self)
             self.send_json(200, coach_context_preview_service().preview(SETTINGS.selected_ai_provider()))
