@@ -174,7 +174,6 @@ def normalize_sync_job_request(
     provider_value = envelope["provider"]
     type_value = envelope["type"]
     values = envelope["payload"]
-
     if type_value == "historical_backfill" and provider_value not in {
         "intervals",
         "garmin",
@@ -182,71 +181,58 @@ def normalize_sync_job_request(
         raise JobValidationError(
             "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig."
         )
-
     if type_value in {"performance_refresh", "competition_push"}:
-        if provider_value != "intervals":
-            raise JobValidationError("Dieser Job ist nur für Intervals.icu zulässig.")
-        if set(values) - {"reason"}:
-            raise JobValidationError("Der Job enthält nicht unterstützte Felder.")
-        reason = str(values.get("reason") or "job").strip()[:80] or "job"
-        return {
-            "provider": provider_value,
-            "type": type_value,
-            "payload": {"reason": reason},
-        }
+        normalized_payload = _normalize_reason_only_job(provider_value, values)
+    elif type_value == "plan_push":
+        normalized_payload = _normalize_plan_push_job(provider_value, values)
+    else:
+        normalized_payload = _normalize_refresh_job(provider_value, values, all_sync_days)
+    return {"provider": provider_value, "type": type_value, "payload": normalized_payload}
 
-    if type_value == "plan_push":
-        if provider_value != "intervals":
-            raise JobValidationError(
-                "Plan-Push-Jobs sind nur für Intervals.icu zulässig."
-            )
-        if set(values) - {"entries", "reason", "repair"}:
-            raise JobValidationError(
-                "Ein Plan-Push-Job enthält nicht unterstützte Felder."
-            )
-        entries = values.get("entries")
-        if not isinstance(entries, list) or not 1 <= len(entries) <= 28:
-            raise JobValidationError(
-                "Ein Plan-Push-Job benötigt 1 bis 28 ausgewählte Einheiten."
-            )
-        normalized_entries: list[dict[str, str]] = []
-        for entry in entries:
-            workout_id = (
-                str(entry.get("library_workout_id") or "")
-                if isinstance(entry, dict)
-                else ""
-            )
-            if not isinstance(entry, dict) or not re.fullmatch(
-                r"[0-9a-f-]{36}", workout_id
-            ):
-                raise JobValidationError(
-                    "Jede Plan-Push-Einheit benötigt eine lokale UUID."
-                )
-            payload_hash = str(entry.get("expected_payload_hash") or "").strip().lower()
-            if not re.fullmatch(r"[0-9a-f]{64}", payload_hash):
-                raise JobValidationError(
-                    "Jede Plan-Push-Einheit benötigt einen aktuellen Payload-Hash."
-                )
-            normalized_entries.append(
-                {
-                    "library_workout_id": workout_id,
-                    "expected_payload_hash": payload_hash,
-                }
-            )
-        if "repair" in values and type(values["repair"]) is not bool:
-            raise JobValidationError("repair muss ein Boolean sein.")
-        normalized_payload: dict[str, Any] = {
-            "entries": normalized_entries,
-            "reason": str(values.get("reason") or "job").strip()[:80] or "job",
-        }
-        if values.get("repair"):
-            normalized_payload["repair"] = True
-        return {
-            "provider": provider_value,
-            "type": type_value,
-            "payload": normalized_payload,
-        }
 
+def _normalize_reason_only_job(provider: str, values: dict[str, Any]) -> dict[str, str]:
+    if provider != "intervals":
+        raise JobValidationError("Dieser Job ist nur für Intervals.icu zulässig.")
+    if set(values) - {"reason"}:
+        raise JobValidationError("Der Job enthält nicht unterstützte Felder.")
+    return {"reason": str(values.get("reason") or "job").strip()[:80] or "job"}
+
+
+def _normalize_plan_push_entry(entry: Any) -> dict[str, str]:
+    workout_id = (
+        str(entry.get("library_workout_id") or "") if isinstance(entry, dict) else ""
+    )
+    if not isinstance(entry, dict) or not re.fullmatch(r"[0-9a-f-]{36}", workout_id):
+        raise JobValidationError("Jede Plan-Push-Einheit benötigt eine lokale UUID.")
+    payload_hash = str(entry.get("expected_payload_hash") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", payload_hash):
+        raise JobValidationError("Jede Plan-Push-Einheit benötigt einen aktuellen Payload-Hash.")
+    return {"library_workout_id": workout_id, "expected_payload_hash": payload_hash}
+
+
+def _normalize_plan_push_job(provider: str, values: dict[str, Any]) -> dict[str, Any]:
+    if provider != "intervals":
+        raise JobValidationError("Plan-Push-Jobs sind nur für Intervals.icu zulässig.")
+    if set(values) - {"entries", "reason", "repair"}:
+        raise JobValidationError("Ein Plan-Push-Job enthält nicht unterstützte Felder.")
+    entries = values.get("entries")
+    if not isinstance(entries, list) or not 1 <= len(entries) <= 28:
+        raise JobValidationError("Ein Plan-Push-Job benötigt 1 bis 28 ausgewählte Einheiten.")
+    normalized_entries = [_normalize_plan_push_entry(entry) for entry in entries]
+    if "repair" in values and type(values["repair"]) is not bool:
+        raise JobValidationError("repair muss ein Boolean sein.")
+    normalized: dict[str, Any] = {
+        "entries": normalized_entries,
+        "reason": str(values.get("reason") or "job").strip()[:80] or "job",
+    }
+    if values.get("repair"):
+        normalized["repair"] = True
+    return normalized
+
+
+def _normalize_refresh_job(
+    provider_value: str, values: dict[str, Any], all_sync_days: int
+) -> dict[str, Any]:
     allowed_fields = {
         "intervals": {"days", "reason", "end_date"},
         "garmin": {"days", "reason", "end_date"},
@@ -280,11 +266,7 @@ def normalize_sync_job_request(
             raise JobValidationError("Das Backfill-Enddatum ist ungültig.") from exc
     if values.get("reason") is not None:
         normalized_payload["reason"] = str(values["reason"]).strip()[:80] or "job"
-    return {
-        "provider": provider_value,
-        "type": type_value,
-        "payload": normalized_payload,
-    }
+    return normalized_payload
 
 
 def retry_delay(attempt: int, *, base_seconds: int, max_seconds: int) -> int:
@@ -553,34 +535,8 @@ class SyncJobStore:
                 str(item.get("item_key") or ""): item for item in stored_items
             }
             for index, item in enumerate(item_results):
-                item_key = str(
-                    item.get("library_workout_id") or item.get("item_key") or ""
-                ).strip()
-                target = stored_by_key.get(item_key)
-                if target is None and len(stored_items) == 1:
-                    target = stored_items[0]
-                if target is None and index < len(stored_items):
-                    target = stored_items[index]
-                if target is None:
-                    continue
-                outcome = str(item.get("status") or "error").strip().casefold()
-                item_state = (
-                    "completed"
-                    if outcome in {"synced", "already_synced", "skipped"}
-                    else "failed"
-                )
-                detail = str(redact(str(item.get("error") or "")) or "")[:500] or None
-                db.execute(
-                    "UPDATE sync_job_items SET status=?, remote_id=COALESCE(?, remote_id), "
-                    "error_class=?, error_detail=?, updated_at=? WHERE id=?",
-                    (
-                        item_state,
-                        str(item.get("remote_id") or "").strip() or None,
-                        None if item_state == "completed" else "plan_push_error",
-                        detail,
-                        now,
-                        target["id"],
-                    ),
+                self._update_result_item(
+                    db, item, index, stored_items, stored_by_key, redact, now
                 )
             items = [
                 dict(item)
@@ -600,6 +556,40 @@ class SyncJobStore:
             )
             updated, updated_items = read_job(db, job_id)
             return self._event_snapshot(updated, updated_items)
+
+    @staticmethod
+    def _update_result_item(
+        db: Any,
+        item: dict[str, Any],
+        index: int,
+        stored_items: list[dict[str, Any]],
+        stored_by_key: dict[str, dict[str, Any]],
+        redact: Callable[[str], str],
+        now: str,
+    ) -> None:
+        item_key = str(item.get("library_workout_id") or item.get("item_key") or "").strip()
+        target = stored_by_key.get(item_key)
+        if target is None and len(stored_items) == 1:
+            target = stored_items[0]
+        if target is None and index < len(stored_items):
+            target = stored_items[index]
+        if target is None:
+            return
+        outcome = str(item.get("status") or "error").strip().casefold()
+        item_state = "completed" if outcome in {"synced", "already_synced", "skipped"} else "failed"
+        detail = str(redact(str(item.get("error") or "")) or "")[:500] or None
+        db.execute(
+            "UPDATE sync_job_items SET status=?, remote_id=COALESCE(?, remote_id), "
+            "error_class=?, error_detail=?, updated_at=? WHERE id=?",
+            (
+                item_state,
+                str(item.get("remote_id") or "").strip() or None,
+                None if item_state == "completed" else "plan_push_error",
+                detail,
+                now,
+                target["id"],
+            ),
+        )
 
     def requeue(
         self, job: Mapping[str, Any], error_class: str, detail: str, available_at: str
@@ -702,18 +692,9 @@ class SyncJobStore:
             keys.add(item_key)
             payload_hash = str(operation.get("payload_hash") or "")[:128]
             if not payload_hash:
-                try:
-                    serialized = json.dumps(
-                        {"operation": item_operation, "payload": envelope["payload"]},
-                        sort_keys=True,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    )
-                except (TypeError, ValueError) as exc:
-                    raise SyncJobInvalidOperationError(
-                        "Job payload is not JSON serializable."
-                    ) from exc
-                payload_hash = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+                payload_hash = SyncJobStore._operation_payload_hash(
+                    item_operation, envelope["payload"]
+                )
             normalized.append(
                 {
                     "item_key": item_key,
@@ -722,6 +703,21 @@ class SyncJobStore:
                 }
             )
         return normalized
+
+    @staticmethod
+    def _operation_payload_hash(operation: str, payload: Any) -> str:
+        try:
+            serialized = json.dumps(
+                {"operation": operation, "payload": payload},
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError) as exc:
+            raise SyncJobInvalidOperationError(
+                "Job payload is not JSON serializable."
+            ) from exc
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _event_snapshot(
