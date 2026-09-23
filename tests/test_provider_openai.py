@@ -1051,6 +1051,22 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         self.assertEqual((raised.exception.status, raised.exception.message), (503, "OPENAI_API_KEY ist nicht konfiguriert."))
 
+    def test_conversation_delete_keeps_remote_write_boundary_and_timeout(self):
+        http = _ClientHTTP({"deleted": True})
+        client = self._client(http)
+        self.assertFalse(client.delete_conversation(""))
+        self.assertTrue(client.delete_conversation("conv/ü?"))
+        self.assertEqual(len(http.calls), 1)
+        args, kwargs = http.calls[0]
+        self.assertEqual(args, ("DELETE", "https://api.example.test/v1/conversations/conv%2F%C3%BC%3F"))
+        self.assertEqual(kwargs, {
+            "headers": {"Authorization": "Bearer sk-test"},
+            "timeout": 30,
+            "service": "openai",
+        })
+        without_key = self._client(_ClientHTTP(), api_key=None)
+        self.assertFalse(without_key.delete_conversation("conv"))
+
     def test_responses_client_retries_locked_conversation_with_injected_wait(self):
         state = _ClientState()
         logger = _ClientLogger()
