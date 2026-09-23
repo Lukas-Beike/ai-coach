@@ -286,6 +286,7 @@ from backend.coach.proposals import (
 )
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools, validate_request
+from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
 from backend.coach.turn_failures import (
@@ -363,7 +364,6 @@ SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?
 UPDATE_COMMAND_RECEIPT_SQL = "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?"
 SELECT_COMMAND_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
 SELECT_PLANNING_REVISION_SQL = "SELECT revision FROM planning_state WHERE id=1"
-SELECT_USER_MESSAGE_SQL = "SELECT id FROM messages WHERE client_turn_id=? AND role='user'"
 APP_VERSION = "1.11.11"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
@@ -2459,7 +2459,7 @@ def _apply_dialogue_operation_scope(name: str, arguments: dict[str, Any], action
         if not period or period["end"] < local_now().date().isoformat():
             raise AppError(400, "Für die Planung fehlt ein gültiger zukünftiger Zeitraum.", reason="request_period")
         action["period"] = {**period, "start": max(period["start"], local_now().date().isoformat())}
-        _validate_dialogue_plan_scope(name, arguments, action)
+        CoachDialoguePlanScopeService(database_manager(), DB_LOCK).validate(name, arguments, action)
     if name == "start_intervals_plan_sync":
         if action["request"]["sync_scope"] not in {"created", "selected", "all_pending"}:
             raise AppError(400, "Der Umfang der Synchronisierung fehlt.", reason="request_sync")
@@ -2499,49 +2499,6 @@ def _dialogue_action(name: str, arguments: dict[str, Any], context: dict[str, An
               "artifact_id": arguments.get("artifact_id"), "request": request, "bulk_change": True}
     _apply_dialogue_operation_scope(name, arguments, action)
     return action
-
-
-def _check_dialogue_plan_date(value: Any, start: str, end: str) -> None:
-    value = str(value or "")[:10]
-    if not start <= value <= end:
-        raise AppError(403, "Die Änderung liegt außerhalb des beauftragten Zeitraums.", reason="request_period")
-
-
-def _validate_dialogue_plan_changes(
-    arguments: dict[str, Any], action: dict[str, Any], start: str, end: str, db: Any,
-) -> None:
-    for change in arguments.get("changes", []):
-        local_id = str(change.get("local_id") or "")
-        require_coach_scope(action, f"planned_unit:{local_id}")
-        row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
-        if not row:
-            raise AppError(404, "Die ausgewählte Einheit fehlt.", reason="request_object_missing")
-        _check_dialogue_plan_date(json.loads(row["payload"]).get("date"), start, end)
-        if change.get("date"):
-            _check_dialogue_plan_date(change["date"], start, end)
-
-
-def _validate_dialogue_plan_artifact(action: dict[str, Any], start: str, end: str, db: Any) -> None:
-    artifact = db.execute("SELECT client_turn_id, payload FROM coach_plan_artifacts WHERE id=?", (action.get("artifact_id"),)).fetchone()
-    origin = db.execute(SELECT_USER_MESSAGE_SQL, (artifact["client_turn_id"],)).fetchone() if artifact else None
-    if not origin or origin["id"] not in action["request"]["source_message_ids"]:
-        raise AppError(409, "Dieser Entwurf gehört nicht zum aktuellen lokalen Gespräch.", reason="artifact_conversation_conflict")
-    for workout in json.loads(artifact["payload"]).get("workouts", []):
-        _check_dialogue_plan_date(workout.get("date"), start, end)
-    action["_artifact_explicit"] = True  # Resolved local dialogue reference, not literal ID matching.
-
-
-def _validate_dialogue_plan_scope(name: str, arguments: dict[str, Any], action: dict[str, Any]) -> None:
-    start, end = action["period"]["start"], action["period"]["end"]
-    workouts = arguments.get("workouts", []) or (arguments.get("payload") or {}).get("workouts", [])
-    for workout in workouts:
-        _check_dialogue_plan_date(workout.get("date"), start, end)
-    with DB_LOCK, database() as db:
-        _validate_dialogue_plan_changes(arguments, action, start, end, db)
-        if name == "commit_training_plan":
-            _validate_dialogue_plan_artifact(action, start, end, db)
-        for entry in arguments.get("entries", []) if name == "apply_workout_library_plan" else []:
-            _check_dialogue_plan_date(entry.get("date"), start, end)
 
 
 def _save_coach_question(arguments: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
