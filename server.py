@@ -288,6 +288,7 @@ from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COA
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.coach.clarification import CoachClarificationService
+from backend.coach.tool_call_metadata import structured_tool_call_metadata
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
@@ -302,9 +303,7 @@ from backend.coach.morning import ManualMorningCheckinService, MorningCheckinSta
 from backend.coach.tools import build_tool_contracts
 from backend.coach.service import (
     command_receipt, effects_from_receipts, mark_resolved_receipts,
-    outcome_status, coach_repair_key, dialogue_effect_key,
-    dialogue_plan_effect_key, dialogue_request_binding_key,
-    dialogue_scope_repair_key,
+    outcome_status,
 )
 from backend.coach.authorization import (
     coach_execution_scope,
@@ -2774,44 +2773,6 @@ def _structured_coach_outcome(
     return status, text, failures
 
 
-def _structured_tool_call_metadata(
-    item: dict[str, Any], tools: list[dict[str, Any]], command_receipts: list[dict[str, Any]],
-) -> dict[str, Any]:
-    name = str(item.get("name") or "")
-    call_id = str(item.get("call_id") or "")
-    if not call_id or len(call_id) > 200:
-        raise AppError(400, "Ein Werkzeugaufruf konnte nicht zugeordnet werden.", reason="invalid_tool_call")
-    if len(command_receipts) >= 40 and not any(entry.get("call_id") == call_id for entry in command_receipts):
-        raise AppError(400, "Der Coach-Auftrag enthält zu viele Schritte.", reason="command_limit")
-    if name not in {tool["name"] for tool in tools}:
-        raise AppError(403, "Dieses Werkzeug steht in diesem Auftrag nicht zur Verfügung.", reason="tool_scope_denied")
-    arguments = json.loads(item.get("arguments") or "{}")
-    if not isinstance(arguments, dict):
-        raise ValueError("arguments_object")
-    repair_key = coach_repair_key(name, arguments)
-    scope_repair_key = dialogue_scope_repair_key(name, arguments)
-    request_binding_key = dialogue_request_binding_key(arguments)
-    plan_effect_key = dialogue_plan_effect_key(name, arguments)
-    step_key = coach_action_hash({
-        "name": name,
-        "scope": sorted((arguments.get("_request") or {}).get("scope") or []),
-        "period": (arguments.get("_request") or {}).get("period"),
-        "repair_key": repair_key,
-    })
-    return {
-        "name": name,
-        "call_id": call_id,
-        "arguments": arguments,
-        "action": {"operation": name, "authorization_scope": []},
-        "effect_key": dialogue_effect_key(name, arguments),
-        "step_key": step_key,
-        "repair_key": repair_key,
-        "scope_repair_key": scope_repair_key,
-        "request_binding_key": request_binding_key,
-        "plan_effect_key": plan_effect_key,
-    }
-
-
 def _cached_structured_tool_call(
     metadata: dict[str, Any], command_receipts: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
@@ -3009,7 +2970,7 @@ def _execute_structured_coach_tool_call(
     repair_key = scope_repair_key = request_binding_key = plan_effect_key = None
     model_instructions = state.model_instructions
     try:
-        metadata = _structured_tool_call_metadata(item, state.tools, state.command_receipts)
+        metadata = structured_tool_call_metadata(item, state.tools, state.command_receipts)
         name, call_id = metadata["name"], metadata["call_id"]
         action = metadata["action"]
         effect_key, step_key = metadata["effect_key"], metadata["step_key"]

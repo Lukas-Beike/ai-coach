@@ -6268,3 +6268,40 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   und Fehlergrenzen: **PASS**; PR-CI und Review stehen noch aus.
   `server.py` 4.579 physische Zeilen nach letzter Leerzeilenkorrektur;
   P7-Rest 40 Definitionen. P7 bleibt offen.
+
+## P7 Planungskommandos — bestätigter #757-Merge
+
+- Geprüfter Root-Dateibaum `9cb02ed8`, nach reinem Conventional-Commit-
+  Betreff-Amend auf Head `7c438953` per leerem `git diff` unverändert.
+  Root-Gate **PASS**: 111 fokussierte, 2.472 native (12 Skips) und
+  2.472 Read-only-Docker-Tests (11 Skips), Ruff/Compile/Inventar.
+- PR #757: CI-Testshards, Container, Qualitätsbaseline, Sonar,
+  CodeQL, Browser (5m36s), einmalig angeforderte Codex-Code-/Security-
+  Review **PASS**, null offene Threads. Der nach dem Commit-Amend
+  zunächst fehlgeschlagene Codex-Check wurde durch erneute Auswertung
+  des unveränderten Diffs im geschützten Workflow grün, ohne zweite
+  Review-Anfrage oder Branch-Schutz-Umgehung.
+- Squash-Merge `dfb2f45772ef9fda873206dea111eefe0ca06002` am
+  `2026-09-23T23:48:49Z` mit `state=MERGED`, `mergedAt` und
+  Erreichbarkeit auf `origin/develop` bestätigt.
+
+## P7 Tool-Call-Metadaten — sequenzielle Worker-Integration
+
+- Ein einzelner explizit als GPT-6-Luna/high gestarteter Worker lieferte
+  Commit `65125aca`. Auf dem bestätigten #757-Merge wurde er ohne
+  Konflikt als `2500ef5d` integriert. Root prüfte tatsächlichen
+  Worker- und Integrationsdiff: exakt die unveränderte reine
+  Projektion mit Call-ID-/40-Schritt-/Allowlist-/JSON-Grenzen und
+  stabilen Effekt-/Reparatur-/Bindungs-Schlüsseln, direkte
+  Server-Delegation ohne Wrapper oder Rückimport. Die sechs neuen
+  direkten Tests decken gültige Projektion, 200/201-Zeichen-Grenze,
+  Replay trotz Schrittlimit, Tool-Scope und Argumentfehler ab.
+- Integriertes Root-Gate **PASS** für den Code: 111 kombinierte
+  Coach-/Architekturtests und frisches Read-only-Docker-Image mit
+  2.478 Tests/11 Skips **PASS**; Ruff/Compile/Inventar-/Diff-Check
+  **PASS**. Native Vollsuite 2.478 Tests/12 Skips ebenfalls
+  **PASS**; PR-CI steht noch aus.
+  `server.py` 4.540 physische Zeilen, P7-Rest 39 Definitionen/
+  28 globale Bindungen, P0=0. P7 bleibt offen;
+  nächster fachlicher Schritt ist die zustandsbehaftete strukturierte
+  Tool-Ausführungs- und Replay-Orchestrierung.
