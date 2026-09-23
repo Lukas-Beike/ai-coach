@@ -1749,22 +1749,26 @@ def openai_responses_client() -> openai_provider.OpenAIResponsesClient:
 def openai_stream_client() -> openai_provider.OpenAIStreamClient:
     """Compose the OpenAI streaming client from the active runtime settings."""
     return openai_provider.OpenAIStreamClient(
-        api_key=CONFIG.openai_api_key,
-        base_url=CONFIG.openai_base_url,
-        default_base_url=DEFAULT_OPENAI_BASE_URL,
-        responses_path=OPENAI_RESPONSES_PATH,
-        response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-        max_response_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
-        app_version=APP_VERSION,
-        json_media_type=JSON_MEDIA_TYPE,
-        thinking_level=SETTINGS.selected_thinking_level,
-        provider_state=provider_state_service(),
-        diagnostic_capture=DIAGNOSTIC_CAPTURE,
-        logger=LOGGER,
+        openai_provider.OpenAIStreamConfig(
+            api_key=CONFIG.openai_api_key,
+            base_url=CONFIG.openai_base_url,
+            default_base_url=DEFAULT_OPENAI_BASE_URL,
+            responses_path=OPENAI_RESPONSES_PATH,
+            timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+            max_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+            app_version=APP_VERSION,
+            media_type=JSON_MEDIA_TYPE,
+        ),
+        openai_provider.OpenAIStreamTelemetry(
+            provider_state_service(),
+            DIAGNOSTIC_CAPTURE,
+            LOGGER,
+            time.perf_counter,
+            utc_now,
+        ),
+        SETTINGS.selected_thinking_level,
         opener=urlopen,
-        clock=time.perf_counter,
         wait=time.sleep,
-        now=utc_now,
     )
 
 

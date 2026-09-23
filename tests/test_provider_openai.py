@@ -12,6 +12,8 @@ from backend.providers.openai import (
     OpenAIResponseFailure,
     OpenAIResponsesClient,
     OpenAIStreamClient,
+    OpenAIStreamConfig,
+    OpenAIStreamTelemetry,
     StreamReadResult,
     StreamReadState,
     consume_sse_event,
@@ -1175,7 +1177,30 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             "now": lambda: "2026-09-20T10:00:00Z",
         }
         settings.update(overrides)
-        return OpenAIStreamClient(**settings)
+        config = OpenAIStreamConfig(
+            api_key=settings["api_key"],
+            base_url=settings["base_url"],
+            default_base_url=settings["default_base_url"],
+            responses_path=settings["responses_path"],
+            timeout=settings["response_timeout_seconds"],
+            max_bytes=settings["max_response_bytes"],
+            app_version=settings["app_version"],
+            media_type=settings["json_media_type"],
+        )
+        telemetry = OpenAIStreamTelemetry(
+            settings["provider_state"],
+            settings["diagnostic_capture"],
+            settings["logger"],
+            settings["clock"],
+            settings["now"],
+        )
+        return OpenAIStreamClient(
+            config,
+            telemetry,
+            settings["thinking_level"],
+            settings["opener"],
+            settings["wait"],
+        )
 
     @staticmethod
     def _stream_lines(response_id="resp_test"):

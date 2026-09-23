@@ -590,65 +590,107 @@ def request_stream_response(
                 delattr(cancel_event, "_provider_response")
 
 
-class OpenAIStreamClient:
-    """Own one complete OpenAI Responses SSE request and its safe observability."""
+@dataclass(frozen=True)
+class OpenAIStreamConfig:
+    """Static request and transport settings for the Responses SSE client."""
+
+    api_key: str | None
+    base_url: str
+    default_base_url: str
+    responses_path: str
+    timeout: int
+    max_bytes: int
+    app_version: str
+    media_type: str
+
+
+class OpenAIStreamTelemetry:
+    """Persist provider state and emit safe diagnostics for one streaming client."""
 
     def __init__(
         self,
-        *,
-        api_key: str | None,
-        base_url: str,
-        default_base_url: str,
-        responses_path: str,
-        response_timeout_seconds: int,
-        max_response_bytes: int,
-        app_version: str,
-        json_media_type: str,
-        thinking_level: Callable[[], str],
         provider_state: ProviderStateService,
         diagnostic_capture: Any,
         logger: Any,
-        opener: Any = urlopen,
-        clock: Callable[[], float] = time.perf_counter,
-        wait: Callable[[float], Any] = time.sleep,
+        clock: Callable[[], float],
         now: Callable[[], str],
     ) -> None:
-        self.api_key = api_key
-        self.base_url = base_url
-        self.default_base_url = default_base_url
-        self.responses_path = responses_path
-        self.response_timeout_seconds = response_timeout_seconds
-        self.max_response_bytes = max_response_bytes
-        self.app_version = app_version
-        self.json_media_type = json_media_type
-        self.thinking_level = thinking_level
         self.provider_state = provider_state
         self.diagnostic_capture = diagnostic_capture
         self.logger = logger
-        self.opener = opener
         self.clock = clock
-        self.wait = wait
         self.now = now
 
-    def _require_api_key(self) -> None:
-        if not self.api_key:
-            raise AppError(503, OPENAI_API_KEY_ERROR)
+    def record_usage(self, response: Any, operation: str) -> None:
+        self.provider_state.record_usage("openai", response, operation)
 
-    def _raise_if_cancelled(self, cancel_event: Any) -> None:
-        if cancel_event is not None and cancel_event.is_set():
-            raise provider_http.ProviderRequestCancelled
-
-    def _record_transport(self, state: StreamReadState) -> None:
+    def record_transport(self, state: StreamReadState) -> None:
         if state.headers is not None:
             self.provider_state.record_rate_limits(state.headers)
         if state.status is not None:
             self.provider_state.record_success("openai", state.status)
 
-    def _log_failure(
+    def record_started(self, context: dict[str, Any]) -> None:
+        self.logger.info(
+            "External HTTP request started",
+            extra={"event": "external_request_started", "context": context},
+        )
+        self.diagnostic_capture.capture(
+            "openai_stream_started",
+            {
+                "service": "openai",
+                "method": "POST",
+                "host": context["host"],
+                "path": context["path"],
+                "request_bytes": context["request_bytes"],
+            },
+        )
+
+    def record_success(
+        self,
+        response: dict[str, Any],
+        state: StreamReadState,
+        started: float,
+        context: dict[str, Any],
+    ) -> None:
+        self.record_usage(response, "responses_stream")
+        duration_ms = round((self.clock() - started) * 1000, 1)
+        self.diagnostic_capture.capture(
+            "openai_stream_completed",
+            {
+                "service": "openai",
+                "status": 200,
+                "duration_ms": duration_ms,
+                "response_bytes": state.response_bytes,
+            },
+        )
+        self.logger.info(
+            "External HTTP request completed",
+            extra={
+                "event": "external_request_completed",
+                "context": {
+                    **context,
+                    "status": 200,
+                    "duration_ms": duration_ms,
+                    "response_bytes": state.response_bytes,
+                },
+            },
+        )
+
+    def record_retry(self, attempt: int, delay: int) -> None:
+        self.logger.warning(
+            "OpenAI streaming conversation is temporarily locked; retrying",
+            extra={
+                "event": "openai_conversation_locked",
+                "context": {"attempt": attempt, "retry_in_seconds": delay},
+            },
+        )
+
+    def log_failure(
         self,
         context: dict[str, Any],
         started: float,
-        stream_bytes: int,
+        response_bytes: int,
         reason: str,
         status: int,
         *,
@@ -664,38 +706,88 @@ class OpenAIStreamClient:
                     "status": status,
                     "reason": reason,
                     "duration_ms": round((self.clock() - started) * 1000, 1),
-                    "response_bytes": stream_bytes,
+                    "response_bytes": response_bytes,
                 },
             },
         )
 
-    def _capture_failure(
+    def record_failure(
         self,
-        status: int,
-        reason: str,
+        context: dict[str, Any],
         started: float,
-        stream_bytes: int,
-        extra: dict[str, Any] | None = None,
+        response_bytes: int,
+        reason: str,
+        status: int,
+        *,
+        level: int = logging.WARNING,
+        rate_limit_headers: Any = None,
+        status_record: Mapping[str, Any] | None = None,
+        diagnostic_reason: str | None = None,
+        diagnostic_extra: dict[str, Any] | None = None,
+        usage_event: str | None = None,
     ) -> None:
+        if rate_limit_headers is not None:
+            self.provider_state.record_rate_limits(rate_limit_headers)
+        if status_record is not None:
+            self.provider_state.record_status(
+                "openai",
+                state=status_record["state"],
+                reason=status_record["reason"],
+                message=status_record["message"],
+                http_status=status_record["http_status"],
+                provider_error_code=status_record.get("provider_error_code"),
+            )
+        if usage_event is not None:
+            self.record_usage({"usage": {}}, usage_event)
+        self.log_failure(context, started, response_bytes, reason, status, level=level)
         details: dict[str, Any] = {
             "service": "openai",
             "status": status,
-            "reason": reason,
+            "reason": diagnostic_reason or reason,
             "duration_ms": round((self.clock() - started) * 1000, 1),
-            "response_bytes": stream_bytes,
+            "response_bytes": response_bytes,
         }
-        if extra:
-            details.update(extra)
+        if diagnostic_extra:
+            details.update(diagnostic_extra)
         self.diagnostic_capture.capture("openai_stream_failed", details)
 
+class OpenAIStreamClient:
+    """Own one complete OpenAI Responses SSE request."""
+
+    def __init__(
+        self,
+        config: OpenAIStreamConfig,
+        telemetry: OpenAIStreamTelemetry,
+        thinking_level: Callable[[], str],
+        opener: Any = urlopen,
+        wait: Callable[[float], Any] = time.sleep,
+    ) -> None:
+        self.config = config
+        self.telemetry = telemetry
+        self.thinking_level = thinking_level
+        self.opener = opener
+        self.wait = wait
+
+    def _require_api_key(self) -> None:
+        if not self.config.api_key:
+            raise AppError(503, OPENAI_API_KEY_ERROR)
+
+    def _raise_if_cancelled(self, cancel_event: Any) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise provider_http.ProviderRequestCancelled
+
+    def _record_transport(self, state: StreamReadState) -> None:
+        self.telemetry.record_transport(state)
+
     def _context(self, body: bytes) -> dict[str, Any]:
-        parsed = urlparse(endpoint(self.base_url, self.responses_path, default_base_url=self.default_base_url))
+        config = self.config
+        parsed = urlparse(endpoint(config.base_url, config.responses_path, default_base_url=config.default_base_url))
         context = {
             "service": "openai",
             "method": "POST",
             "host": observability.safe_url_netloc(parsed),
             "path": observability.safe_provider_path(parsed.path),
-            "timeout_seconds": self.response_timeout_seconds,
+            "timeout_seconds": config.timeout,
             "request_bytes": len(body),
         }
         return context
@@ -709,18 +801,20 @@ class OpenAIStreamClient:
         started: float,
         stream_bytes: int,
     ) -> NoReturn:
-        if cancel_event is not None and cancel_event.is_set() and final_response is None:
-            self.provider_state.record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
         reason = safe_log_reason(exc.reason or "request_failed")
-        self._log_failure(
+        self.telemetry.record_failure(
             context,
             started,
             stream_bytes,
             reason,
             exc.status,
             level=logging.INFO if exc.reason == "chat_cancelled" else logging.WARNING,
+            usage_event=(
+                "responses_stream_cancelled"
+                if cancel_event is not None and cancel_event.is_set() and final_response is None
+                else None
+            ),
         )
-        self._capture_failure(exc.status, reason, started, stream_bytes)
         raise exc
 
     def _disconnect(
@@ -730,10 +824,15 @@ class OpenAIStreamClient:
         started: float,
         stream_bytes: int,
     ) -> NoReturn:
-        if final_response is None:
-            self.provider_state.record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
-        self._log_failure(context, started, stream_bytes, "client_disconnected", 499, level=logging.INFO)
-        self._capture_failure(499, "client_disconnected", started, stream_bytes)
+        self.telemetry.record_failure(
+            context,
+            started,
+            stream_bytes,
+            "client_disconnected",
+            499,
+            level=logging.INFO,
+            usage_event="responses_stream_cancelled" if final_response is None else None,
+        )
         raise ClientDisconnected()
 
     def _http_error(
@@ -743,30 +842,30 @@ class OpenAIStreamClient:
         started: float,
         stream_bytes: int,
     ) -> NoReturn:
-        raw_error = provider_http.read_error_body(exc, self.max_response_bytes)
+        raw_error = provider_http.read_error_body(exc, self.config.max_bytes)
         status = int(getattr(exc, "code", 502) or 502)
         headers = getattr(exc, "headers", None)
-        self.provider_state.record_rate_limits(headers)
-        details = error_details(status, raw_error, headers, updated_at=self.now())
+        details = error_details(status, raw_error, headers, updated_at=self.telemetry.now())
         diagnostic = error_diagnostic_details(
             raw_error,
             headers,
-            max_response_bytes=self.max_response_bytes,
+            max_response_bytes=self.config.max_bytes,
         )
         provider_code = diagnostic.get("error_code")
         if provider_code not in observability.OPENAI_RESPONSE_ERROR_CODES:
             provider_code = None
-        self.provider_state.record_status(
-            "openai",
-            state=details["state"],
-            reason=details["reason"],
-            message=details["message"],
-            http_status=details["http_status"],
-            provider_error_code=provider_code,
-        )
         reason = safe_log_reason(details["reason"])
-        self._log_failure(context, started, stream_bytes, reason, status)
-        self._capture_failure(status, details["reason"], started, stream_bytes, diagnostic)
+        self.telemetry.record_failure(
+            context,
+            started,
+            stream_bytes,
+            reason,
+            status,
+            rate_limit_headers=headers,
+            status_record={**details, "provider_error_code": provider_code},
+            diagnostic_reason=details["reason"],
+            diagnostic_extra=diagnostic,
+        )
         error = AppError(status, details["message"], reason=details["reason"])
         retry_after = details.get("retry_after_seconds")
         if isinstance(retry_after, int):
@@ -782,19 +881,15 @@ class OpenAIStreamClient:
         stream_bytes: int,
     ) -> NoReturn:
         if cancel_event is not None and cancel_event.is_set():
-            self.provider_state.record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
-            self._log_failure(context, started, stream_bytes, "chat_cancelled", 499, level=logging.INFO)
-            self._capture_failure(499, "chat_cancelled", started, stream_bytes)
+            self.telemetry.record_failure(
+                context, started, stream_bytes, "chat_cancelled", 499,
+                level=logging.INFO, usage_event="responses_stream_cancelled",
+            )
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-        self.provider_state.record_status(
-            "openai",
-            state="error",
-            reason="provider_timeout",
-            message="OpenAI hat nicht rechtzeitig geantwortet.",
-            http_status=504,
+        self.telemetry.record_failure(
+            context, started, stream_bytes, "provider_timeout", 504,
+            status_record={"state": "error", "reason": "provider_timeout", "message": "OpenAI hat nicht rechtzeitig geantwortet.", "http_status": 504},
         )
-        self._log_failure(context, started, stream_bytes, "provider_timeout", 504)
-        self._capture_failure(504, "provider_timeout", started, stream_bytes)
         raise AppError(504, "OpenAI hat nicht rechtzeitig geantwortet.", reason="provider_timeout") from exc
 
     def _network(
@@ -806,19 +901,15 @@ class OpenAIStreamClient:
         stream_bytes: int,
     ) -> NoReturn:
         if cancel_event is not None and cancel_event.is_set():
-            self.provider_state.record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
-            self._log_failure(context, started, stream_bytes, "chat_cancelled", 499, level=logging.INFO)
-            self._capture_failure(499, "chat_cancelled", started, stream_bytes)
+            self.telemetry.record_failure(
+                context, started, stream_bytes, "chat_cancelled", 499,
+                level=logging.INFO, usage_event="responses_stream_cancelled",
+            )
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-        self.provider_state.record_status(
-            "openai",
-            state="error",
-            reason="provider_unavailable",
-            message="OpenAI ist vorübergehend nicht verfügbar.",
-            http_status=503,
+        self.telemetry.record_failure(
+            context, started, stream_bytes, "provider_unavailable", 503,
+            status_record={"state": "error", "reason": "provider_unavailable", "message": "OpenAI ist vorübergehend nicht verfügbar.", "http_status": 503},
         )
-        self._log_failure(context, started, stream_bytes, "provider_unavailable", 503)
-        self._capture_failure(503, "provider_unavailable", started, stream_bytes)
         raise AppError(503, "OpenAI ist vorübergehend nicht verfügbar.", reason="provider_unavailable") from exc
 
     def _stream_once(
@@ -831,43 +922,31 @@ class OpenAIStreamClient:
         attempt_state: dict[str, Any],
     ) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
-        url = endpoint(self.base_url, self.responses_path, default_base_url=self.default_base_url)
+        config = self.config
+        url = endpoint(config.base_url, config.responses_path, default_base_url=config.default_base_url)
         request = Request(
             url,
             data=body,
             headers={
                 "Accept": "text/event-stream",
-                "Content-Type": self.json_media_type,
-                "Authorization": f"Bearer {self.api_key}",
-                "User-Agent": f"IntervalsCoach/{self.app_version}",
+                "Content-Type": config.media_type,
+                "Authorization": f"Bearer {config.api_key}",
+                "User-Agent": f"IntervalsCoach/{config.app_version}",
             },
             method="POST",
         )
         context = self._context(body)
-        started = self.clock()
+        started = self.telemetry.clock()
         attempt_state.update(context=context, started=started, stream_bytes=0, final_response=None)
-        self.logger.info(
-            "External HTTP request started",
-            extra={"event": "external_request_started", "context": context},
-        )
-        self.diagnostic_capture.capture(
-            "openai_stream_started",
-            {
-                "service": "openai",
-                "method": "POST",
-                "host": context["host"],
-                "path": context["path"],
-                "request_bytes": len(body),
-            },
-        )
+        self.telemetry.record_started(context)
         stream_state = StreamReadState()
         try:
             self._raise_if_cancelled(cancel_event)
             try:
                 result = request_stream_response(
                     request,
-                    timeout=self.response_timeout_seconds,
-                    max_bytes=self.max_response_bytes,
+                    timeout=config.timeout,
+                    max_bytes=config.max_bytes,
                     cancel_event=cancel_event,
                     on_text_delta=on_text_delta,
                     on_response_id=on_response_id,
@@ -886,30 +965,8 @@ class OpenAIStreamClient:
                     "OpenAI hat keine vollständige Streaming-Antwort zurückgegeben.",
                     reason="invalid_response",
                 )
-            final_response = self.provider_state.validate_openai_response(self.responses_path, final_response)
-            self.provider_state.record_usage("openai", final_response, "responses_stream")
-            duration_ms = round((self.clock() - started) * 1000, 1)
-            self.diagnostic_capture.capture(
-                "openai_stream_completed",
-                {
-                    "service": "openai",
-                    "status": 200,
-                    "duration_ms": duration_ms,
-                    "response_bytes": stream_state.response_bytes,
-                },
-            )
-            self.logger.info(
-                "External HTTP request completed",
-                extra={
-                    "event": "external_request_completed",
-                    "context": {
-                        **context,
-                        "status": 200,
-                        "duration_ms": duration_ms,
-                        "response_bytes": stream_state.response_bytes,
-                    },
-                },
-            )
+            final_response = self.telemetry.provider_state.validate_openai_response(config.responses_path, final_response)
+            self.telemetry.record_success(final_response, stream_state, started, context)
             return final_response
         except AppError as exc:
             self._app_error(
@@ -973,22 +1030,17 @@ class OpenAIStreamClient:
                     attempt_state=attempt_state,
                 ),
                 cancel_event=cancel_event,
-                on_retry=lambda attempt, delay: self.logger.warning(
-                    "OpenAI streaming conversation is temporarily locked; retrying",
-                    extra={
-                        "event": "openai_conversation_locked",
-                        "context": {"attempt": attempt, "retry_in_seconds": delay},
-                    },
-                ),
+                on_retry=lambda attempt, delay: self.telemetry.record_retry(attempt, delay),
                 wait=self.wait,
             )
         except provider_http.ProviderRequestCancelled as exc:
             context = attempt_state.get("context", {"service": "openai", "method": "POST"})
-            started = attempt_state.get("started", self.clock())
+            started = attempt_state.get("started", self.telemetry.clock())
             stream_bytes = attempt_state.get("stream_bytes", 0)
-            self.provider_state.record_usage("openai", {"usage": {}}, "responses_stream_cancelled")
-            self._log_failure(context, started, stream_bytes, "chat_cancelled", 499, level=logging.INFO)
-            self._capture_failure(499, "chat_cancelled", started, stream_bytes)
+            self.telemetry.record_failure(
+                context, started, stream_bytes, "chat_cancelled", 499,
+                level=logging.INFO, usage_event="responses_stream_cancelled",
+            )
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
 
 

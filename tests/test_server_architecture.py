@@ -1289,6 +1289,8 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "OPENAI_RATE_LIMIT_HEADERS",
             "OpenAIResponsesClient",
+            "OpenAIStreamConfig",
+            "OpenAIStreamTelemetry",
             "OpenAIStreamClient",
             "response_id",
             "poll_background_response",
