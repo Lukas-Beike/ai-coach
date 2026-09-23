@@ -531,8 +531,10 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   - [x] Die vier täglichen Providerentscheidungen einschließlich Due-Marker,
     Queue-/Resync-/Maintenance-Gates und Payload-Reihenfolge gehören einem
     konkreten `DailySyncScheduler`; `server.py` komponiert nur noch.
-  - [ ] Startup-Scheduler und verbleibende Tages-Loop-Lifecycle-Steuerung
-    vollständig zuordnen.
+  - [x] Startup-Provider- und Historical-Backfill-Entscheidungen einem
+    konkreten `StartupSyncScheduler` zuordnen; Reihenfolge und aktive Jobs
+    bleiben erhalten.
+  - [ ] Verbleibende Tages-Loop-Lifecycle-Steuerung vollständig zuordnen.
 
 Abnahme: SSE liefert inkrementelle Texte und finale Receipts; Disconnect,
 Cancel, Retry nach bereits ausgeführtem Tool und Neustart verursachen keine

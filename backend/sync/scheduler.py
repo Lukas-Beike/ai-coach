@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.profile import ProfileService
@@ -133,3 +134,122 @@ class DailySyncScheduler:
     def _sync_running(self) -> bool:
         with self._database_lock, self._database.unit_of_work() as db:
             return self._key_values.get(db, "sync_running") == "1"
+
+
+@dataclass(frozen=True)
+class StartupSyncSchedulerConfig:
+    calendar_enabled: bool
+    intervals_enabled: bool
+    garmin_automatic_sync_days: int
+    sync_period_defaults: Mapping[str, int]
+    all_sync_days: int
+    sync_chunk_days: int
+    sync_earliest_date: date
+
+
+class StartupSyncScheduler:
+    """Enqueue configured startup refreshes and historical backfills."""
+
+    def __init__(
+        self,
+        profile: ProfileService,
+        queue: SyncJobQueueService,
+        garmin: GarminSyncService,
+        sync_state: SyncStateRepository,
+        *,
+        config: StartupSyncSchedulerConfig,
+    ) -> None:
+        self._profile = profile
+        self._queue = queue
+        self._garmin = garmin
+        self._sync_state = sync_state
+        self._config = config
+
+    def schedule(self) -> None:
+        """Queue startup work in the established provider order."""
+        self._schedule_calendar()
+        self._schedule_intervals()
+        self._schedule_garmin()
+        self._schedule_weather()
+
+    def _schedule_calendar(self) -> None:
+        if self._config.calendar_enabled and not self._queue.active("calendar", "refresh"):
+            self._queue.enqueue(
+                "calendar", "refresh", {"reason": "startup"}, requested_by="startup"
+            )
+
+    def _schedule_intervals(self) -> None:
+        if not self._config.intervals_enabled:
+            return
+        if not self._queue.active("intervals", "refresh"):
+            self._queue.enqueue(
+                "intervals",
+                "refresh",
+                {
+                    "days": self._sync_state.sync_period(
+                        "intervals",
+                        self._config.sync_period_defaults,
+                        self._config.all_sync_days,
+                    ),
+                    "reason": "startup",
+                },
+                requested_by="startup",
+            )
+        self._enqueue_historical_backfill("intervals")
+
+    def _schedule_garmin(self) -> None:
+        if not self._garmin.configured():
+            return
+        if not self._queue.active("garmin", "refresh"):
+            self._queue.enqueue(
+                "garmin",
+                "refresh",
+                {
+                    "days": self._config.garmin_automatic_sync_days,
+                    "reason": "startup",
+                },
+                requested_by="startup",
+            )
+        self._enqueue_historical_backfill("garmin")
+
+    def _schedule_weather(self) -> None:
+        location = self._profile.get().get("weather_location", "")
+        if location.strip() and not self._queue.active("weather", "refresh"):
+            self._queue.enqueue(
+                "weather",
+                "refresh",
+                {"force": True, "reason": "startup"},
+                requested_by="startup",
+            )
+
+    def _enqueue_historical_backfill(self, provider: str) -> None:
+        if self._queue.active(provider, "historical_backfill"):
+            return
+        payload = self._historical_backfill_payload(provider)
+        if payload is not None:
+            self._queue.enqueue(
+                provider,
+                "historical_backfill",
+                payload,
+                requested_by="startup",
+            )
+
+    def _historical_backfill_payload(self, provider: str) -> dict[str, Any] | None:
+        cursor = self._sync_state.cursor(provider, "historical").get("cursor")
+        if cursor and str(cursor) <= self._config.sync_earliest_date.isoformat():
+            return None
+        try:
+            resume_end = (
+                date.fromisoformat(str(cursor)[:10]) - timedelta(days=1)
+                if cursor
+                else None
+            )
+        except ValueError:
+            resume_end = None
+        payload: dict[str, Any] = {
+            "days": self._config.sync_chunk_days,
+            "reason": "startup historical backfill",
+        }
+        if resume_end is not None:
+            payload["end_date"] = resume_end.isoformat()
+        return payload

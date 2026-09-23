@@ -4782,3 +4782,35 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Log hatten erwartete Textkonflikte. Der finale Tree-Diff gegenüber dem
   bereits getesteten P7-Stand ist leer. Erneute sieben Service- und vier
   Architekturtests sowie Inventar-/Diff-Check **PASS**.
+- PR #712 auf Head `d591dbb7`: SonarCloud ohne neue Issues,
+  Python-/Container-/Browser-CI und Codex-Review **PASS**, keine offenen
+  Threads; Squash-Merge am `2026-09-23T13:41:20Z`, Commit
+  `703629685b962279312f3ff891ae1e3698cb0c25` auf
+  `origin/develop` erreichbar.
+
+## P8 Startup-Scheduler — integrierter Prüfstand
+
+- GPT-6-Luna/high-Worker-Commit `66c47bcf`, nach dem geprüften P7-/P10-
+  Stand als `ea40c78b` integriert. Root-Review des tatsächlichen Diffs
+  **PASS**: Calendar → Intervals → Garmin → Weather, Refresh und
+  Historical Backfill samt aktiver Jobs, Cursor-/Frühgrenze und Payloads
+  liegen vollständig in `StartupSyncScheduler`; die sieben alten
+  `server.py`-Fachfunktionen sind entfernt. `main()` ruft den konkreten
+  Service auf; `server.py` erstellt lediglich dessen Abhängigkeiten.
+  Queue, Sync-State, Garmin-Konfiguration und Profil behalten jeweils
+  ihren bestehenden Zustandseigentümer. Keine Backend-Rückimporte oder
+  permanenten Wrapper.
+- Worker-Host-Suite **PASS**: 2.288 Tests, 12 Skips; neu gebautes
+  Read-only-Container-Image **PASS**: 2.288 Tests, 10 Skips. Der erste
+  isolierte Containerlauf scheiterte nur am fehlenden read-only Docs-Mount;
+  nach korrektem Mount keine Produkt-/Teständerung. Vier neue Startup-,
+  ein `main()`-Reihenfolge-, vier Architekturtests, scoped Ruff,
+  Compile und Diff-Check **PASS**. Integriert erneut vier Startup- und
+  vier Architekturtests, Inventar und scoped Ruff **PASS**. `server.py`
+  hat 6.677 physische Zeilen; die Tages-Loop-Lifecycle-Steuerung und
+  weitere P8-Use-Cases bleiben offen. Neu gebautes kombiniertes
+  Read-only-Container-Image **PASS**: 2.297 Tests, 10 Skips in
+  20,563 s. Nach PR #712 `origin/develop` mit `141eb40e` integriert;
+  nur Inventar-/Review-Textkonflikte, finaler Tree-Diff gegenüber dem
+  bereits vollständig getesteten kombinierten Stand leer. CI/Sonar des
+  künftigen P8-PR-Stands stehen noch aus.

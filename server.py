@@ -222,7 +222,12 @@ from backend.sync.jobs import (
 )
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.queue import SyncJobQueueService
-from backend.sync.scheduler import DailySyncScheduler, DailySyncSchedulerConfig
+from backend.sync.scheduler import (
+    DailySyncScheduler,
+    DailySyncSchedulerConfig,
+    StartupSyncScheduler,
+    StartupSyncSchedulerConfig,
+)
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.context import (
     CoachContextPreviewLimits,
@@ -6602,10 +6607,6 @@ def daily_sync_loop() -> None:
                 LOGGER.error("Automatic synchronization scheduling failed", extra={"event": "daily_sync_failed"})
 
 
-def _scheduler_garmin_configured() -> bool:
-    return garmin_sync_service().configured()
-
-
 def daily_sync_scheduler() -> DailySyncScheduler:
     return DailySyncScheduler(
         profile_service(),
@@ -6629,93 +6630,22 @@ def daily_sync_scheduler() -> DailySyncScheduler:
     )
 
 
-def _startup_historical_backfill_payload(provider: str) -> dict[str, Any] | None:
-    cursor = sync_state_repository().cursor(provider, "historical").get("cursor")
-    if cursor and str(cursor) <= SYNC_EARLIEST_DATE.isoformat():
-        return None
-    try:
-        resume_end = date.fromisoformat(str(cursor)[:10]) - timedelta(days=1) if cursor else None
-    except ValueError:
-        resume_end = None
-    payload: dict[str, Any] = {"days": SYNC_CHUNK_DAYS, "reason": "startup historical backfill"}
-    if resume_end is not None:
-        payload["end_date"] = resume_end.isoformat()
-    return payload
-
-
-def _enqueue_startup_calendar_job() -> None:
-    if CONFIG.calendar_ical_url and not sync_job_queue_service().active(
-        "calendar", "refresh"
-    ):
-        sync_job_queue_service().enqueue(
-            "calendar", "refresh", {"reason": "startup"}, requested_by="startup"
-        )
-
-
-def _enqueue_startup_intervals_jobs() -> None:
-    if not CONFIG.intervals_api_key:
-        return
-    if not sync_job_queue_service().active("intervals", "refresh"):
-        sync_job_queue_service().enqueue(
-            "intervals",
-            "refresh",
-            {
-                "days": sync_state_repository().sync_period(
-                    "intervals", SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS
-                ),
-                "reason": "startup",
-            },
-            requested_by="startup",
-        )
-    if sync_job_queue_service().active("intervals", "historical_backfill"):
-        return
-    payload = _startup_historical_backfill_payload("intervals")
-    if payload is not None:
-        sync_job_queue_service().enqueue(
-            "intervals", "historical_backfill", payload, requested_by="startup"
-        )
-
-
-def _enqueue_startup_garmin_jobs() -> None:
-    if not _scheduler_garmin_configured():
-        return
-    if not sync_job_queue_service().active("garmin", "refresh"):
-        sync_job_queue_service().enqueue(
-            "garmin",
-            "refresh",
-            {
-                "days": GARMIN_AUTOMATIC_SYNC_DAYS,
-                "reason": "startup",
-            },
-            requested_by="startup",
-        )
-    if sync_job_queue_service().active("garmin", "historical_backfill"):
-        return
-    payload = _startup_historical_backfill_payload("garmin")
-    if payload is not None:
-        sync_job_queue_service().enqueue(
-            "garmin", "historical_backfill", payload, requested_by="startup"
-        )
-
-
-def _enqueue_startup_weather_job() -> None:
-    if profile_service().get().get(
-        "weather_location", ""
-    ).strip() and not sync_job_queue_service().active("weather", "refresh"):
-        sync_job_queue_service().enqueue(
-            "weather",
-            "refresh",
-            {"force": True, "reason": "startup"},
-            requested_by="startup",
-        )
-
-
-def enqueue_startup_sync_jobs() -> None:
-    """Queue configured startup refreshes without duplicating resumed jobs."""
-    _enqueue_startup_calendar_job()
-    _enqueue_startup_intervals_jobs()
-    _enqueue_startup_garmin_jobs()
-    _enqueue_startup_weather_job()
+def startup_sync_scheduler() -> StartupSyncScheduler:
+    return StartupSyncScheduler(
+        profile_service(),
+        sync_job_queue_service(),
+        garmin_sync_service(),
+        sync_state_repository(),
+        config=StartupSyncSchedulerConfig(
+            calendar_enabled=bool(CONFIG.calendar_ical_url),
+            intervals_enabled=bool(CONFIG.intervals_api_key),
+            garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
+            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+            all_sync_days=ALL_SYNC_DAYS,
+            sync_chunk_days=SYNC_CHUNK_DAYS,
+            sync_earliest_date=SYNC_EARLIEST_DATE,
+        ),
+    )
 
 
 def main() -> None:
@@ -6732,7 +6662,7 @@ def main() -> None:
     server.allow_reuse_address = True
     sync_job_worker().start()
     start_coach_job_worker()
-    enqueue_startup_sync_jobs()
+    startup_sync_scheduler().schedule()
     threading.Thread(target=daily_sync_loop, daemon=True).start()
     LOGGER.info(f"{APP_NAME} listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
     try:

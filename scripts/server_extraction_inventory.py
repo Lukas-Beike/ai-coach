@@ -736,6 +736,7 @@ def _explicit_owner(name: str) -> str | None:
             "library_page_service": COMPOSITION_ROOT,
             "chat_history_page_service": COMPOSITION_ROOT,
             "daily_sync_scheduler": COMPOSITION_ROOT,
+            "startup_sync_scheduler": COMPOSITION_ROOT,
             "coach_activity_read_tool_service": COMPOSITION_ROOT,
             "coach_profile_update_service": COMPOSITION_ROOT,
             "coach_adaptive_apply_service": COMPOSITION_ROOT,
