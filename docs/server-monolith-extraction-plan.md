@@ -677,6 +677,10 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     Refresh-/Local-Only-Regel in `PublicWeatherStateService` verlagern.
 - [ ] `RequestHandler`, Route-Dispatch, Body-Limits, statische Dateien und SSE
   transportseitig auslagern; vorhandene `requests.py`/`responses.py` nutzen.
+  - [x] Cursor-Validierung, Initialereignisse, Gap-Reset, Heartbeat und
+    Verbindungsschleife des authentifizierten `/api/state/events`-Streams
+    `StateEventTransport` zuordnen; Event-Puffer bleibt `runtime_events`,
+    Socket-/Schreibzustand bleibt beim Handler.
   - [x] Sync-POST-Fachentscheidungen in `SyncCommandEndpoint` verlagern;
     Handler behält ausschließlich Transport, Body-Lesen und Antwort.
   - [x] Statische Asset-Allowlist, Pfadsperre, Cache-/ETag-Projektion und
