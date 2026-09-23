@@ -222,6 +222,7 @@ from backend.sync.jobs import (
 )
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.queue import SyncJobQueueService
+from backend.sync.scheduler import DailySyncScheduler
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.context import (
     CoachContextPreviewLimits,
@@ -6637,75 +6638,25 @@ def _scheduler_garmin_configured() -> bool:
     return garmin_sync_service().configured()
 
 
-def _schedule_daily_weather_job() -> None:
-    if not profile_service().get().get(
-        "weather_location", ""
-    ).strip() or sync_job_queue_service().active("weather"):
-        return
-    sync_job_queue_service().enqueue(
-        "weather",
-        "refresh",
-        {"force": False, "reason": AUTO_UPDATE_LABEL},
-        requested_by="scheduler",
-    )
-
-
-def _schedule_daily_calendar_job() -> None:
-    if (
-        not CONFIG.calendar_ical_url
-        or not daily_sync_marker_service().is_due("calendar")
-        or sync_job_queue_service().active("calendar")
-    ):
-        return
-    sync_job_queue_service().enqueue(
-        "calendar",
-        "refresh",
-        {"reason": AUTO_UPDATE_LABEL},
-        requested_by="scheduler",
-    )
-
-
-def _schedule_daily_garmin_job() -> None:
-    if (
-        not _scheduler_garmin_configured()
-        or not daily_sync_marker_service().is_due("garmin")
-        or sync_job_queue_service().active("garmin")
-    ):
-        return
-    sync_job_queue_service().enqueue(
-        "garmin",
-        "refresh",
-        {
-            "days": GARMIN_AUTOMATIC_SYNC_DAYS,
-            "reason": AUTO_UPDATE_LABEL,
-        },
-        requested_by="scheduler",
-    )
-
-
-def _schedule_daily_intervals_job() -> None:
-    if not CONFIG.intervals_api_key or not daily_sync_marker_service().is_due("intervals") or get_kv("sync_running") == "1" or INTERVALS_RESYNC_GATE.is_resetting():
-        return
-    if not sync_job_queue_service().active("intervals"):
-        sync_job_queue_service().enqueue(
-            "intervals",
-            "refresh",
-            {
-                "days": sync_state_repository().sync_period(
-                    "intervals", SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS
-                ),
-                "reason": AUTO_UPDATE_LABEL,
-            },
-            requested_by="scheduler",
-        )
-
-
-@runtime_maintenance.maintenance_operation
 def schedule_daily_sync_jobs() -> None:
-    _schedule_daily_weather_job()
-    _schedule_daily_calendar_job()
-    _schedule_daily_garmin_job()
-    _schedule_daily_intervals_job()
+    DailySyncScheduler(
+        profile_service(),
+        sync_job_queue_service(),
+        daily_sync_marker_service(),
+        garmin_sync_service(),
+        database_manager(),
+        KEY_VALUE_REPOSITORY,
+        DB_LOCK,
+        sync_state_repository(),
+        INTERVALS_RESYNC_GATE,
+        runtime_maintenance.MAINTENANCE_GATE,
+        calendar_url_enabled=bool(CONFIG.calendar_ical_url),
+        intervals_key_enabled=bool(CONFIG.intervals_api_key),
+        garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
+        auto_update_label=AUTO_UPDATE_LABEL,
+        sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+        all_sync_days=ALL_SYNC_DAYS,
+    ).schedule()
 
 
 def _startup_historical_backfill_payload(provider: str) -> dict[str, Any] | None:

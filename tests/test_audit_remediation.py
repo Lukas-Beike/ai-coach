@@ -20,6 +20,7 @@ from backend.planning import competitions as planning_competitions
 from backend.planning import context as planning_context
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync import garmin as garmin_sync
+from backend.sync.scheduler import DailySyncScheduler
 from backend.weather import cache as weather_cache
 
 server = dialogue.server
@@ -162,7 +163,24 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
     def test_garmin_daily_schedule_is_independent_of_intervals(self):
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="", calendar_ical_url="")), patch.object(garmin_sync.GarminFixtureLoader, "path", return_value=Path("synthetic")), patch.object(server, "daily_sync_marker_service") as marker_service:
             marker_service.return_value.is_due.return_value = True
-            server.schedule_daily_sync_jobs()
+            DailySyncScheduler(
+                server.profile_service(),
+                server.sync_job_queue_service(),
+                marker_service.return_value,
+                server.garmin_sync_service(),
+                server.database_manager(),
+                server.KEY_VALUE_REPOSITORY,
+                server.DB_LOCK,
+                server.sync_state_repository(),
+                server.INTERVALS_RESYNC_GATE,
+                server.runtime_maintenance.MAINTENANCE_GATE,
+                calendar_url_enabled=False,
+                intervals_key_enabled=False,
+                garmin_automatic_sync_days=server.GARMIN_AUTOMATIC_SYNC_DAYS,
+                auto_update_label=server.AUTO_UPDATE_LABEL,
+                sync_period_defaults=server.SYNC_PERIOD_DEFAULTS,
+                all_sync_days=server.ALL_SYNC_DAYS,
+            ).schedule()
         with server.DB_LOCK, server.database() as db:
             rows = db.execute("SELECT provider, payload FROM sync_jobs").fetchall()
         self.assertEqual([row["provider"] for row in rows], ["garmin"])
