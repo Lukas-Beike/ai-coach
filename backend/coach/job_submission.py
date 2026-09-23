@@ -96,43 +96,15 @@ class CoachJobSubmissionService:
         attachments: Any = None,
     ) -> dict[str, Any]:
         """Persist a long Coach turn before returning control to the browser."""
-        message = str(message or "").strip()
-        client_turn_id = str(client_turn_id or "").strip()
-        request_kind = str(request_kind or "").strip() or None
-        if request_kind not in {None, "morning_checkin"}:
-            raise AppError(400, "Unbekannte Coach-Schnellaktion.", reason="invalid_request_kind")
-        try:
-            attachments = validate_attachments(attachments)
-        except ValueError:
-            raise AppError(
-                400,
-                "Ungültiger Anhang. Erlaubt: bis zu 4 GPX-, FIT-, PNG-, JPEG- oder WebP-Dateien mit je höchstens 5 MB.",
-                reason="invalid_attachment",
-            ) from None
-        if attachments and not message:
-            message = "Bitte analysiere die angehängten Dateien."
-        scope = coach_execution_scope(None, background_horizon_days=self._background_horizon_days)
-        if not message or len(message) > 12_000:
-            raise AppError(400, "Die Coach-Nachricht ist leer oder zu lang.", reason="invalid_chat_message")
-        if not client_turn_id or len(client_turn_id) > 120:
-            raise AppError(400, "client_turn_id muss eine begrenzte, nicht leere Kennung sein.", reason="invalid_client_turn")
-        if not scope["background"]:
-            raise AppError(400, "Diese Coach-Anfrage benötigt keinen Hintergrundauftrag.", reason="background_not_required")
-
+        message, client_turn_id, request_kind, attachments, scope = self._validate_submission(
+            message, client_turn_id, request_kind, attachments
+        )
         active = self.active(session_csrf_hash)
         if active and active["client_turn_id"] != client_turn_id:
             raise AppError(409, "Für diese Sitzung läuft bereits eine Coach-Anfrage.", reason="chat_already_running")
         operation_id = operation_id or uuid.uuid4().hex
         session_key = coach_session_key(session_csrf_hash)
-        ai_provider = self._settings_service.selected_ai_provider()
-        model = self._settings_service.selected_model(ai_provider)
-        thinking_level = self._settings_service.selected_thinking_level()
-        if ai_provider == "gemini" and gemini_inline_image_bytes(attachments) > self._max_gemini_inline_image_bytes:
-            raise AppError(
-                413,
-                "Die ausgewählten Dateien sind für eine Gemini-Anfrage zusammen zu groß. Sende weniger Dateien oder wähle OpenAI.",
-                reason="gemini_attachment_request_too_large",
-            )
+        ai_provider, model, thinking_level = self._provider_settings(attachments)
 
         existing_response, user_message_id = self._persist(
             message,
@@ -155,6 +127,49 @@ class CoachJobSubmissionService:
         self._stream_registry.set_background_event(operation_id, cancel_event or threading.Event())
         self._wake_event.set()
         return {"status": "queued", "mode": "background", "operation_id": operation_id, "plan_scope": scope}
+
+    def _validate_submission(
+        self,
+        message: str,
+        client_turn_id: str,
+        request_kind: str | None,
+        attachments: Any,
+    ) -> tuple[str, str, str | None, list[dict[str, Any]], dict[str, Any]]:
+        message = str(message or "").strip()
+        client_turn_id = str(client_turn_id or "").strip()
+        request_kind = str(request_kind or "").strip() or None
+        if request_kind not in {None, "morning_checkin"}:
+            raise AppError(400, "Unbekannte Coach-Schnellaktion.", reason="invalid_request_kind")
+        try:
+            attachments = validate_attachments(attachments)
+        except ValueError:
+            raise AppError(
+                400,
+                "Ungültiger Anhang. Erlaubt: bis zu 4 GPX-, FIT-, PNG-, JPEG- oder WebP-Dateien mit je höchstens 5 MB.",
+                reason="invalid_attachment",
+            ) from None
+        if attachments and not message:
+            message = "Bitte analysiere die angehängten Dateien."
+        scope = coach_execution_scope(None, background_horizon_days=self._background_horizon_days)
+        if not message or len(message) > 12_000:
+            raise AppError(400, "Die Coach-Nachricht ist leer oder zu lang.", reason="invalid_chat_message")
+        if not client_turn_id or len(client_turn_id) > 120:
+            raise AppError(400, "client_turn_id muss eine begrenzte, nicht leere Kennung sein.", reason="invalid_client_turn")
+        if not scope["background"]:
+            raise AppError(400, "Diese Coach-Anfrage benötigt keinen Hintergrundauftrag.", reason="background_not_required")
+        return message, client_turn_id, request_kind, attachments, scope
+
+    def _provider_settings(self, attachments: list[dict[str, Any]]) -> tuple[str, str, str]:
+        ai_provider = self._settings_service.selected_ai_provider()
+        model = self._settings_service.selected_model(ai_provider)
+        thinking_level = self._settings_service.selected_thinking_level()
+        if ai_provider == "gemini" and gemini_inline_image_bytes(attachments) > self._max_gemini_inline_image_bytes:
+            raise AppError(
+                413,
+                "Die ausgewählten Dateien sind für eine Gemini-Anfrage zusammen zu groß. Sende weniger Dateien oder wähle OpenAI.",
+                reason="gemini_attachment_request_too_large",
+            )
+        return ai_provider, model, thinking_level
 
     def _persist(
         self,
