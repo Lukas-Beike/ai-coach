@@ -510,6 +510,9 @@ Abhängigkeit: P2–P6.
     Session-Schlüssels einem konkreten `CoachCommandReceiptService` zuordnen.
 - [ ] Tool-Dispatch samt Ergebnis-/Fehlerprojektion verschieben; Planmutationen
   rufen die in P4 abgeschlossenen Planungs-Use-Cases auf.
+  - [x] Read-only Coach-Toolauswahl, begrenzte Limits und Antwortprojektion
+    einem zustandslosen `CoachReadToolService` zuordnen; konkrete Profil-,
+    Planning-, Activity- und History-Dienste bleiben ihre Zustandseigentümer.
   - [x] Strukturierte Coach-Sync-Werkzeuge einschließlich Scope-/Remote-
     Prüfung und Job-ID-Buchführung dem konkreten Sync-Tool-Service zuordnen.
   - [x] Adaptive Apply-Freigabe mit späterem Nutzerturn und atomare

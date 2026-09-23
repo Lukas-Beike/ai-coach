@@ -7,6 +7,7 @@ from backend.coach.attachments import (
 )
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.profile_update import CoachProfileUpdateService
+from backend.coach.read_tools import CoachReadToolService
 from backend.coach.training_template_tools import TrainingTemplateToolService
 from backend.coach import streams as coach_streams
 
@@ -865,6 +866,21 @@ def coach_activity_read_tool_service() -> CoachActivityReadToolService:
         garmin_payload_service(),
         profile_service(),
         lambda: local_now().date(),
+    )
+
+
+def coach_read_tool_service() -> CoachReadToolService:
+    """Compose the read-only Coach tool dispatcher from domain service factories."""
+    return CoachReadToolService(
+        profile_service,
+        structured_training_state_service,
+        coach_activity_read_tool_service,
+        workout_library_service,
+        planned_unit_service,
+        change_history_service,
+        competition_service,
+        training_plan_service,
+        COACH_TRAINING_CHANGE_LIMIT,
     )
 
 
@@ -2338,50 +2354,6 @@ COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, 
     training_plan_statuses=planning_training_plans.TRAINING_PLAN_STATUSES,
     dialogue_tools=dialogue_tools,
 )
-def _structured_bounded_integer(
-    arguments: dict[str, Any], key: str, default: int, maximum: int, error: str,
-) -> int:
-    try:
-        return max(1, min(int(arguments.get(key, default)), maximum))
-    except (TypeError, ValueError) as exc:
-        raise AppError(400, error, reason="invalid_list_request") from exc
-
-
-def _structured_coach_read_result(name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
-    if name == "read_profile":
-        return {"ok": True, "profile": profile_service().get()}
-    if name == "read_training_state":
-        return {
-            "ok": True,
-            **structured_training_state_service().read(
-                include_inactive=bool(arguments.get("include_inactive")),
-                cursor=arguments.get("cursor"),
-                limit=arguments.get("limit"),
-            ),
-        }
-    if name in {"list_recent_activities", "get_activity_details"}:
-        return coach_activity_read_tool_service().execute(name, arguments)
-    if name == "list_workout_library":
-        limit = _structured_bounded_integer(arguments, "limit", 100, 500, "Bibliothekslimit ist ungültig.")
-        return {
-            "ok": True,
-            "templates": workout_library_service().list(
-                limit, include_archived=bool(arguments.get("include_archived"))
-            ),
-        }
-    if name == "list_planned_workouts":
-        limit = _structured_bounded_integer(arguments, "limit", 100, COACH_TRAINING_CHANGE_LIMIT, "Planungslimit ist ungültig.")
-        return {"ok": True, **planned_unit_service().list_for_coach(limit)}
-    if name == "list_change_history":
-        limit = _structured_bounded_integer(arguments, "limit", 100, 500, "Historienlimit ist ungültig.")
-        return {"ok": True, "changes": change_history_service().list(limit)}
-    if name == "list_competitions":
-        return {"ok": True, "competitions": competition_service().list()}
-    if name == "list_training_plans":
-        return {"ok": True, "training_plans": training_plan_service().list(100)}
-    return None
-
-
 def _structured_coach_plan_artifact_result(
     name: str,
     arguments: dict[str, Any],
@@ -2553,7 +2525,7 @@ def _structured_coach_tool_result(
     sync_job_ids: list[str],
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
-    read_result = _structured_coach_read_result(name, arguments)
+    read_result = coach_read_tool_service().execute(name, arguments)
     if read_result is not None:
         return read_result
     if name == "update_profile":

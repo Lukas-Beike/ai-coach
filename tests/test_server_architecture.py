@@ -25,6 +25,7 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 # backend-owned implementations, not server callbacks or compatibility
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("backend.coach.read_tools", ("CoachReadToolService",)),
     ("backend.coach.turn_failures", ("CoachTurnFailureService", "coach_error_metadata")),
     ("backend.coach.job_submission", ("CoachJobSubmissionService",)),
     ("backend.coach.athlete_record_tools", ("CoachAthleteRecordToolService",)),
@@ -1643,6 +1644,8 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_replace_database_with_restore",
     "_resume_after_database_restore",
     "_restore_database_backup",
+    "_structured_bounded_integer",
+    "_structured_coach_read_result",
     "_structured_coach_training_template_result",
     "public_state",
     "stream_database_backup",
