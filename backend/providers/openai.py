@@ -287,6 +287,23 @@ class OpenAIResponsesClient:
                 extra={"event": "openai_background_cancel_failed"},
             )
 
+    def delete_conversation(self, conversation_id: str) -> bool:
+        """Delete an explicitly identified remote conversation, when configured."""
+        if not self.api_key or not conversation_id:
+            return False
+        self.http_client.request(
+            "DELETE",
+            endpoint(
+                self.base_url,
+                "/conversations/" + quote(conversation_id, safe=""),
+                default_base_url=self.default_base_url,
+            ),
+            headers=self._headers(),
+            timeout=30,
+            service="openai",
+        )
+        return True
+
     def background(
         self,
         payload: Mapping[str, Any],

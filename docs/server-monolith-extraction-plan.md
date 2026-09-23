@@ -552,11 +552,14 @@ Abhängigkeit: P1 sowie Ressourcen-/Worker-Verträge aus P6 und P8.
   - [x] Begrenzten lokalen Privacy-ZIP-Aufbau einschließlich SQL-/KV-
     Auswahl, Manifest, Zeit-/Platz-/Größenlimits und Temp-Datei-Cleanup
     einem konkreten `PrivacyArchiveExportService` zuordnen.
-- [ ] Lokalen Privacy-Export/-Delete und autorisierte Remote-Konversations-
+- [x] Lokalen Privacy-Export/-Delete und autorisierte Remote-Konversations-
   löschung nach `privacy.py` bzw. zum zuständigen Provider aufteilen.
   - [x] Lokale JSON-Datenprojektion einschließlich sensibler KV-Ausnahmen,
     fehlerhaftem JSON und getrennter DB-Lesegrenzen einem konkreten
-    `PrivacyDataExportService` zuordnen; Delete bleibt offen.
+    `PrivacyDataExportService` zuordnen.
+  - [x] Preview, Wartungsgate, lokale Löschtransaktion und best-effort-
+    Remote-Ergebnis gehören `PrivacyDeleteService`; der einzige
+    autorisierte OpenAI-DELETE gehört `OpenAIResponsesClient`.
 - [x] Diagnosehistorie/-report und Logprojektion vollständig auslagern.
   - [x] Begrenzte, datensparsame Coach-Command-Historie samt SQL-Read und
     Fehlerprojektion zu `diagnostics/history.py` verschieben.

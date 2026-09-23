@@ -22,6 +22,7 @@ from backend.coach.context import CoachIntervalsContextService, future_coach_pla
 from backend.coach.attachments import gemini_history_parts
 from backend.coach.proposals import validated_coach_action_preview_input
 from backend.http_api.chat_page import ChatHistoryPageService
+from backend import privacy as privacy_module
 
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
 os.environ.update({
@@ -1750,8 +1751,8 @@ class CoachTests(unittest.TestCase):
 
     def test_privacy_delete_reports_remote_attempt_and_failure(self):
         server.set_kv("openai_conversation_id", "conv-test")
-        with patch.object(server, "delete_remote_conversation", side_effect=server.AppError(503, "upstream")):
-            result = server.delete_local_data()
+        with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", side_effect=server.AppError(503, "upstream")):
+            result = server.privacy_delete_service().delete()
         self.assertTrue(result["remote_delete_attempted"])
         self.assertFalse(result["remote_conversation_deleted"])
         self.assertTrue(result["local_data_deleted"])
@@ -1759,20 +1760,41 @@ class CoachTests(unittest.TestCase):
 
     def test_privacy_delete_preview_covers_every_durable_table_and_reports_counts(self):
         expected_tables = set(CURRENT_DATABASE_SCHEMA)
-        scoped_tables = {table for _category, _label, tables in server.PRIVACY_DELETE_SCOPE for table in tables}
+        scoped_tables = {table for _category, _label, tables in privacy_module.PRIVACY_DELETE_SCOPE for table in tables}
         self.assertEqual(scoped_tables, expected_tables)
         server.set_kv("openai_conversation_id", "conv-test")
-        preview = server.privacy_delete_preview()
-        self.assertEqual({item["id"] for item in preview["categories"]}, {item[0] for item in server.PRIVACY_DELETE_SCOPE})
+        preview = server.privacy_delete_service().preview()
+        self.assertEqual({item["id"] for item in preview["categories"]}, {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE})
         self.assertEqual(preview["confirmation_text"], "LOKALE DATEN LÖSCHEN")
         self.assertTrue(preview["remote_untouched"])
-        with patch.object(server, "delete_remote_conversation", return_value=True):
-            result = server.delete_local_data()
+        with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
+            result = server.privacy_delete_service().delete()
         self.assertTrue(result["local_data_deleted"])
-        self.assertEqual(set(result["deleted_categories"]), {item[0] for item in server.PRIVACY_DELETE_SCOPE})
+        self.assertEqual(set(result["deleted_categories"]), {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE})
         with server.DB_LOCK, server.database() as db:
             for table in expected_tables - {"kv"}:
                 self.assertEqual(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"], 0)
+
+    def test_privacy_delete_rolls_back_earlier_table_deletes_on_sql_failure(self):
+        server.coach_message_service().add("user", "Synthetic private message")
+        server.sync_state_repository().save_snapshot({
+            "synced_at": "synthetic", "recent_activities": [], "recent_wellness": [],
+            "upcoming_calendar": [],
+        })
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "CREATE TRIGGER synthetic_privacy_abort BEFORE DELETE ON snapshots "
+                "BEGIN SELECT RAISE(ABORT, 'synthetic rollback'); END"
+            )
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                server.privacy_delete_service().delete()
+        finally:
+            with server.DB_LOCK, server.database() as db:
+                db.execute("DROP TRIGGER synthetic_privacy_abort")
+        with server.DB_LOCK, server.database() as db:
+            self.assertGreater(db.execute("SELECT COUNT(*) AS count FROM messages").fetchone()["count"], 0)
+            self.assertGreater(db.execute("SELECT COUNT(*) AS count FROM snapshots").fetchone()["count"], 0)
 
     def test_weather_refresh_rechecks_adaptive_planning(self):
         server.profile_service().save({"weather_location": "Berlin"})
@@ -5009,7 +5031,7 @@ class CoachTests(unittest.TestCase):
     def test_gemini_reset_deletes_an_existing_openai_conversation(self):
         server.set_kv("openai_conversation_id", "conv-test")
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="gemini")
-        with patch.object(server, "CONFIG", config), patch.object(server, "delete_remote_conversation", return_value=True) as delete:
+        with patch.object(server, "CONFIG", config), patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True) as delete:
             result = server.reset_coach_chat()
         delete.assert_called_once_with("conv-test")
         self.assertTrue(result["remote_conversation_deleted"])
@@ -5890,7 +5912,7 @@ class CoachTests(unittest.TestCase):
             "conversation-before-reset",
             "turn-before-reset",
         )
-        with patch.object(server, "delete_remote_conversation", return_value=True):
+        with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
             result = server.reset_coach_chat()
         self.assertEqual(result["status"], "ok")
         with server.DB_LOCK, server.database() as db:
@@ -9256,8 +9278,8 @@ class CoachTests(unittest.TestCase):
     def test_privacy_delete_removes_change_history(self):
         server.profile_service().save({"name": "Ada"})
         self.assertTrue(server.change_history_service().list())
-        with patch.object(server, "delete_remote_conversation", return_value=True):
-            server.delete_local_data()
+        with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
+            server.privacy_delete_service().delete()
         self.assertEqual(server.change_history_service().list(), [])
 
 

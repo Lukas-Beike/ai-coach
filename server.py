@@ -66,7 +66,12 @@ from backend.calendar import local as calendar_local
 from backend.calendar import public_events as public_event_calendar
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.read_service import ActivityReadService
-from backend.privacy import PrivacyDataExportDependencies, PrivacyDataExportService
+from backend.privacy import (
+    PrivacyDataExportDependencies,
+    PrivacyDataExportService,
+    PrivacyDeleteDependencies,
+    PrivacyDeleteService,
+)
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -1715,6 +1720,21 @@ def privacy_data_export_service() -> PrivacyDataExportService:
     )
 
 
+def privacy_delete_service() -> PrivacyDeleteService:
+    """Compose the maintenance-gated local privacy deletion use case."""
+    return PrivacyDeleteService(
+        PrivacyDeleteDependencies(
+            database_manager=database_manager(),
+            database_lock=DB_LOCK,
+            key_value_repository=KEY_VALUE_REPOSITORY,
+            maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+            planning_revision_service=PLANNING_REVISION_SERVICE,
+            openai_client=openai_responses_client(),
+            logger=LOGGER,
+        )
+    )
+
+
 def athlete_context_service() -> AthleteContextService:
     """Compose atomic athlete profile and competition persistence."""
     return AthleteContextService(
@@ -2207,7 +2227,7 @@ def _delete_reset_coach_conversation(conversation_id: str) -> bool:
     if not conversation_id:
         return False
     try:
-        return delete_remote_conversation(conversation_id)
+        return openai_responses_client().delete_conversation(conversation_id)
     except Exception:
         LOGGER.warning(
             "Remote OpenAI conversation could not be deleted during reset",
@@ -5393,91 +5413,6 @@ def _restore_database_backup(payload: bytes) -> dict[str, Any]:
                 pass
 
 
-def delete_remote_conversation(conversation_id: str) -> bool:
-    if not CONFIG.openai_api_key or not conversation_id:
-        return False
-    provider_http_client().request(
-        "DELETE",
-        openai_provider.endpoint(CONFIG.openai_base_url, "/conversations/" + quote(conversation_id, safe=""), default_base_url=DEFAULT_OPENAI_BASE_URL),
-        headers={"Authorization": f"Bearer {CONFIG.openai_api_key}"},
-        timeout=30,
-        service="openai",
-    )
-    return True
-
-
-PRIVACY_DELETE_SCOPE = (
-    ("chats", "Chats, Coach-Werkzeug- und Aktionsprotokolle", ("messages", "coach_commands", "coach_plan_artifacts", "coach_action_proposals")),
-    ("snapshots", "Trainings-Snapshots", ("snapshots",)),
-    ("library", "Workout-Bibliothek und geplante Einheiten", ("workout_library", "planned_units")),
-    ("competitions", "Wettkämpfe und Sync-Vormerkungen", ("competitions", "competition_sync_tombstones")),
-    ("plans", "Trainingspläne", ("training_plans", "planning_state")),
-    ("checkins", "Tages-Check-ins", ("athlete_checkins",)),
-    ("feedback", "Aktivitätsfeedback", ("activity_feedback",)),
-    ("adaptive", "Adaptive Plananpassungen", ("plan_adjustments",)),
-    ("calendars", "Kalenderquellen, Kandidaten und lokale Kalenderereignisse", ("public_event_sources", "public_event_candidates", "external_calendar_events")),
-    ("sessions", "Anmeldesitzungen", ("sessions",)),
-    ("settings", "Profil, Einstellungen, Syncstatus und lokale Caches", ("kv",)),
-    ("history", "Lokale Änderungshistorie", ("change_history",)),
-    ("provider_status", "Bereinigter Provider-Refresh-Verlauf", ("provider_refresh_history", "sync_job_items", "sync_jobs", "provider_sync_cursors")),
-)
-PRIVACY_REMOTE_SCOPE = (
-    "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",
-    "Garmin-Konto und Garmin-Daten bleiben unverändert.",
-    "Externe Kalenderquelle und deren Anbieter bleiben unverändert.",
-)
-
-
-def _privacy_delete_counts(db: Any) -> dict[str, int]:
-    counts = {}
-    for category, _label, tables in PRIVACY_DELETE_SCOPE:
-        counts[category] = sum(int(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"]) for table in tables)
-    return counts
-
-
-def privacy_delete_preview() -> dict[str, Any]:
-    with DB_LOCK, database() as db:
-        counts = _privacy_delete_counts(db)
-    return {
-        "status": "preview",
-        "confirmation_text": "LOKALE DATEN LÖSCHEN",
-        "categories": [
-            {"id": category, "label": label, "records": counts[category]}
-            for category, label, _tables in PRIVACY_DELETE_SCOPE
-        ],
-        "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
-        "openai_conversation": "Eine vorhandene OpenAI-Konversation wird vor dem Löschen zum Löschen angefragt; ein Fehlschlag wird separat ausgewiesen.",
-    }
-
-
-def delete_local_data() -> dict[str, Any]:
-    with runtime_maintenance.MAINTENANCE_GATE.restore():
-        conversation_id = get_kv("openai_conversation_id") or ""
-        remote_delete_attempted = bool(conversation_id)
-        remote_deleted = False
-        if conversation_id:
-            try:
-                remote_deleted = delete_remote_conversation(conversation_id)
-            except Exception:
-                LOGGER.warning("Remote OpenAI conversation could not be deleted", extra={"event": "privacy_remote_delete_failed"}, exc_info=True)
-        with DB_LOCK, database() as db:
-            deleted_counts = _privacy_delete_counts(db)
-            deleted_tables = list(dict.fromkeys(table for _category, _label, tables in PRIVACY_DELETE_SCOPE for table in tables))
-            for table in deleted_tables:
-                db.execute(f"DELETE FROM {table}")
-            db.execute("DELETE FROM kv")
-            set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
-            PLANNING_REVISION_SERVICE.mark_reset_pending()
-        return {
-            "status": "ok",
-            "local_data_deleted": True,
-            "deleted_categories": deleted_counts,
-            "remote_delete_attempted": remote_delete_attempted,
-            "remote_conversation_deleted": remote_deleted,
-            "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
-        }
-
-
 SESSION_COOKIE = "ic_session"
 CSRF_COOKIE = "ic_csrf"
 SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
@@ -5831,7 +5766,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             stream_privacy_export(self)
         elif path == "/api/privacy/delete/preview":
             require_auth(self)
-            self.send_json(200, privacy_delete_preview())
+            self.send_json(200, privacy_delete_service().preview())
         elif path == "/api/change-history":
             require_auth(self)
             raw_limit = parse_qs(urlparse(self.path).query).get("limit", ["100"])[0]
@@ -6125,7 +6060,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             payload = self.read_json()
             if payload.get("confirm") != "LOKALE DATEN LÖSCHEN":
                 raise AppError(400, "Zum Löschen muss LOKALE DATEN LÖSCHEN bestätigt werden.")
-            self.send_json(200, delete_local_data())
+            self.send_json(200, privacy_delete_service().delete())
         elif path == "/api/change-history/undo":
             self.send_json(200, history_undo_service().apply(self.read_json()))
         else:

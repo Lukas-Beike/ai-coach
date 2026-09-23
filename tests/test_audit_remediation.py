@@ -105,7 +105,7 @@ class AuditRemediationTests(unittest.TestCase):
                 failures.append(type(error).__name__)
         def erase():
             try:
-                server.delete_local_data()
+                server.privacy_delete_service().delete()
                 deleted.set()
             except Exception as error:
                 failures.append(type(error).__name__)

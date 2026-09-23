@@ -4952,3 +4952,25 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   vollständigen gemounteten Repository-Tests **PASS**: 2.308 Tests,
   10 Skips in 20,140 s. Damit ist der integrierte JSON-/ZIP-Code nach
   Korrektur erneut freigegeben; CI und Review des PR-Stands stehen aus.
+
+## P9 Privacy-Löschung — eigenständig geprüfter Arbeitsstand
+
+- Root-Diffstand auf `24454a02` (#716-Head): `PrivacyDeleteService`
+  besitzt Preview-Kategorien, Wartungsgate, OpenAI-DELETE-Versuch,
+  Zählung und lokale Löschtransaktion. `OpenAIResponsesClient` besitzt
+  die einzige konkrete Remote-DELETE-Anforderung mit unveränderter
+  URL-Kodierung, 30-s-Timeout und Auth-Header. `server.py` komponiert
+  nur die Abhängigkeiten und delegiert beide HTTP-Endpunkte; die
+  Reset-Routine nutzt denselben Provider-Adapter statt eines
+  servereigenen Remote-Transport-Wrappers. Test-Patch-Ziele wurden
+  auf Providerklasse und Privacy-Service umgestellt. Keine neuen
+  Rückimporte oder fachlichen Server-Callbacks; Fremdprovider bleiben
+  vom Delete unberührt.
+- Gezielte Tests **PASS**: OpenAI-Provider 73, `test_server.py` 465
+  (3 Skips), Provider-Review 15 (1 Skip), Audit-Remediation 17
+  (1 Skip). Ein zusätzlicher synthetischer SQL-Abbruch nach bereits
+  gelöschten Nachrichten beweist den Rollback der ganzen lokalen
+  Transaktion. Neu gebautes Read-only-Container-Image:
+  vollständige Suite **PASS**, 2.310 Tests, 10 Skips in 20,246 s.
+  `server.py` hat 6.347 physische Zeilen; Restore und HTTP-Migration
+  bleiben P9-offen. PR-CI/Review stehen noch aus.
