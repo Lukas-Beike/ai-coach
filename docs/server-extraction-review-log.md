@@ -6074,3 +6074,14 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   **PASS** (2.447 Tests/11 Skips). `server.py`: 4.890 physische Zeilen,
   235 Definitionen; P0-Inventar 0. PR-CI, externer Review und Merge
   stehen noch aus.
+
+## P7 Tool-Routing und Planungshandlungen — bestätigter #753-Merge
+
+- #753 auf Head `2b2105cf` bestand Root-Gate, native und Read-only-Docker-
+  Vollsuite, CI-Testshards, Container, Qualität, Sonar und CodeQL. Der
+  einmalig angeforderte Codex-Code-/Security-Review fand keine Probleme;
+  keine offenen Review-Threads.
+- Squash-Merge `e79b89375f7cb08e7b1967b426fb97e508d5a3e1` am
+  `2026-09-23T22:33:50Z` bestätigt und als Vorfahr von `origin/develop`
+  geprüft. Der zum Mergezeitpunkt noch laufende optionale Browser-Smoke-/
+  Accessibility-Check wurde nachträglich **PASS** (6m8s).
