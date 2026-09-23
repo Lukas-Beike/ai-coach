@@ -302,6 +302,10 @@ from backend.backup.export import (
     PrivacyArchiveExportService,
 )
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
+from backend.backup.restore_validation import (
+    DatabaseRestoreValidationConfig,
+    DatabaseRestoreValidationService,
+)
 
 try:
     from sqlcipher3 import dbapi2 as sqlite_backend
@@ -5079,11 +5083,6 @@ def database_backup_service() -> DatabaseBackupService:
     )
 
 
-# Transitional names for restore/test consumers; implementation ownership is
-# in backend.db.schema.
-_configure_cipher = configure_cipher
-
-
 def stream_database_backup(handler: Any) -> None:
     with database_backup_service().stream_file() as (path, deadline):
         handler.send_file_stream(
@@ -5110,42 +5109,19 @@ def restore_database_backup(payload: bytes) -> dict[str, Any]:
         return _restore_database_backup(payload)
 
 
-def _temporary_restore_database(payload: bytes) -> Path:
-    if not payload or len(payload) > MAX_BACKUP_BYTES:
-        raise AppError(413, "Das Datenbank-Backup ist leer oder zu groß.")
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    temporary_path = DATA_DIR / f".intervals-coach-restore-{uuid.uuid4().hex}.db"
-    temporary_path.write_bytes(payload)
-    return temporary_path
-
-
-def _validate_restore_connection(connection: Any) -> None:
-    if CONFIG.app_password:
-        _configure_cipher(connection, CONFIG.app_password)
-    connection.execute("PRAGMA foreign_keys = ON")
-    if not database_schema_is_current(connection):
-        raise AppError(400, "Das Backup entspricht nicht exakt dem aktuellen Datenbankschema.")
-    integrity = connection.execute("PRAGMA integrity_check").fetchone()
-    if connection.execute("PRAGMA foreign_key_check").fetchall():
-        raise AppError(400, "Das Backup enthält ungültige Fremdschlüssel.")
-    if not integrity or str(integrity["integrity_check"]).casefold() != "ok":
-        raise AppError(400, "Die Integritätsprüfung des Backups ist fehlgeschlagen.")
-    # Never restore sessions captured in a backup. The current browser is
-    # forced to authenticate again after the replacement.
-    connection.execute("DELETE FROM sessions")
-    connection.commit()
-
-
-def _validate_restore_database(temporary_path: Path) -> None:
-    backend = sqlite_backend if SQLCIPHER_AVAILABLE else sqlite3
-    if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
-        raise AppError(503, "SQLCipher ist für die Wiederherstellung nicht verfügbar.")
-    connection = backend.connect(temporary_path, timeout=20)
-    connection.row_factory = database_row_factory
-    try:
-        _validate_restore_connection(connection)
-    finally:
-        connection.close()
+def database_restore_validation_service() -> DatabaseRestoreValidationService:
+    return DatabaseRestoreValidationService(
+        DatabaseRestoreValidationConfig(
+            data_dir=DATA_DIR,
+            maximum_bytes=MAX_BACKUP_BYTES,
+            app_password=CONFIG.app_password,
+            sqlcipher_available=SQLCIPHER_AVAILABLE,
+            sqlite_backend=sqlite_backend,
+            configure_cipher=configure_cipher,
+            row_factory=database_row_factory,
+            schema_is_current=database_schema_is_current,
+        )
+    )
 
 
 def _replace_database_with_restore(temporary_path: Path) -> str | None:
@@ -5176,8 +5152,9 @@ def _resume_after_database_restore() -> None:
 def _restore_database_backup(payload: bytes) -> dict[str, Any]:
     temporary_path: Path | None = None
     try:
-        temporary_path = _temporary_restore_database(payload)
-        _validate_restore_database(temporary_path)
+        restore_validation = database_restore_validation_service()
+        temporary_path = restore_validation.stage(payload)
+        restore_validation.validate(temporary_path)
         previous_backup_name = _replace_database_with_restore(temporary_path)
         temporary_path = None
         _resume_after_database_restore()

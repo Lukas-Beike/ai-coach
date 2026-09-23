@@ -56,6 +56,7 @@ from backend.sync.adaptive import ILLNESS_CALENDAR_CATEGORY
 from backend.db.schema import (
     CURRENT_DATABASE_INDEXES,
     CURRENT_DATABASE_SCHEMA,
+    configure_cipher,
     database_index_names,
     database_schema_is_current,
     database_table_names,
@@ -7184,7 +7185,7 @@ class CoachTests(unittest.TestCase):
                 incomplete_path.write_bytes(valid_backup)
                 connection = server.sqlite_backend.connect(incomplete_path, timeout=20)
                 try:
-                    server._configure_cipher(connection, config.app_password)
+                    configure_cipher(connection, config.app_password)
                     connection.execute("DROP TABLE snapshots")
                     connection.commit()
                 finally:
@@ -7192,12 +7193,14 @@ class CoachTests(unittest.TestCase):
                 with self.assertRaises(server.AppError) as error:
                     server.restore_database_backup(incomplete_path.read_bytes())
                 self.assertEqual(error.exception.status, 400)
+                self.assertEqual(server.get_kv("restore-marker"), "preserved")
+                self.assertEqual(list(data_dir.glob(".intervals-coach-restore-*.db")), [])
 
                 unexpected_path = data_dir / "unexpected.db"
                 unexpected_path.write_bytes(valid_backup)
                 connection = server.sqlite_backend.connect(unexpected_path, timeout=20)
                 try:
-                    server._configure_cipher(connection, config.app_password)
+                    configure_cipher(connection, config.app_password)
                     connection.execute("CREATE TABLE unexpected_records (id TEXT PRIMARY KEY)")
                     connection.commit()
                 finally:
@@ -7205,6 +7208,8 @@ class CoachTests(unittest.TestCase):
                 with self.assertRaises(server.AppError) as error:
                     server.restore_database_backup(unexpected_path.read_bytes())
                 self.assertEqual(error.exception.status, 400)
+                self.assertEqual(server.get_kv("restore-marker"), "preserved")
+                self.assertEqual(list(data_dir.glob(".intervals-coach-restore-*.db")), [])
 
     def test_full_resync_blocks_intervals_operations(self):
         self.assertTrue(server.INTERVALS_RESYNC_GATE.begin_reset())
