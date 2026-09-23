@@ -526,6 +526,9 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   - [x] Process-lokales Chat-Stream-Register, SSE-Queues und Background-
     Cancel-Events einem einzigen `ChatStreamRegistry` zuordnen; durable
     Job-Entscheidungen bleiben bis zur Coach-Job-Auslagerung offen.
+  - [x] Durable Background-Claims, Contention-Requeue und gespeicherte
+    Nutzernachrichten einem konkreten `CoachJobStore` zuordnen; Enqueue,
+    Resume, Cancel und Worker-Turn-Orchestrierung bleiben offen.
 - [ ] Manuellen Morning Check-in mit Frische-Gate auslagern; die auf `develop`
   entfernte automatische Reservierungs-/Retry-Steuerung nicht wieder einführen.
   - [x] Manuellen Garmin-Schlaf-/Body-Battery-Vorbereitungspfad und
