@@ -27,6 +27,7 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.job_submission", ("CoachJobSubmissionService",)),
     ("backend.coach.athlete_record_tools", ("CoachAthleteRecordToolService",)),
+    ("backend.coach.library_plan_tools", ("CoachLibraryPlanToolService",)),
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
@@ -1649,6 +1650,7 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "bootstrap_provider_states",
     "_delete_reset_coach_conversation",
     "_cancel_reset_coach_commands",
+    "_structured_coach_apply_library_plan_result",
     "_reset_local_coach_chat_state",
     "_request_coach_operation_cancellation",
     "_clear_coach_conversation_state",

@@ -251,6 +251,7 @@ from backend.sync.scheduler import (
 )
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.athlete_record_tools import CoachAthleteRecordToolService
+from backend.coach.library_plan_tools import CoachLibraryPlanToolService
 from backend.coach.context import (
     CoachContextPreviewLimits,
     CoachContextPreviewService,
@@ -1583,6 +1584,11 @@ def workout_library_plan_service() -> WorkoutLibraryPlanService:
     )
 
 
+def coach_library_plan_tool_service() -> CoachLibraryPlanToolService:
+    """Compose Coach authorization with atomic local library planning."""
+    return CoachLibraryPlanToolService(workout_library_plan_service())
+
+
 def local_plan_creation_service() -> LocalTrainingPlanCreationService:
     """Compose atomic local plan creation and template reuse."""
     return LocalTrainingPlanCreationService(
@@ -2392,24 +2398,6 @@ def _structured_coach_read_result(name: str, arguments: dict[str, Any]) -> dict[
     return None
 
 
-def _structured_coach_apply_library_plan_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
-    if "apply_workout_library_plan" not in _structured_authorized_operations(intent):
-        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-    entries = arguments.get("entries")
-    if not isinstance(entries, list):
-        raise AppError(400, "Bibliothekseinheiten müssen als Liste gesendet werden.", reason="invalid_library_plan")
-    for entry in entries:
-        if not isinstance(entry, dict):
-            raise AppError(400, "Jede Bibliothekseinheit muss ein Objekt sein.", reason="invalid_library_plan")
-        local_id = str(entry.get("library_workout_id") or "").strip()
-        require_coach_scope(intent, f"library_workout:{local_id}", "local_plan")
-    return {
-        "ok": True,
-        "stored_locally": True,
-        **workout_library_plan_service().apply(entries),
-    }
-
-
 def _structured_coach_plan_artifact_result(
     name: str,
     arguments: dict[str, Any],
@@ -2525,10 +2513,11 @@ def _structured_coach_plan_tool_result(
         return TrainingTemplateToolService(
             database_manager, DB_LOCK, workout_library_service
         ).execute(arguments, intent)
+    if name == "apply_workout_library_plan":
+        return coach_library_plan_tool_service().execute(arguments, intent)
     handlers: dict[str, Callable[[], dict[str, Any]]] = {
         "replace_training_plan": lambda: _replace_structured_coach_training_plan(arguments, intent),
         "apply_training_changes": lambda: _apply_structured_coach_training_changes(arguments, intent),
-        "apply_workout_library_plan": lambda: _structured_coach_apply_library_plan_result(arguments, intent),
     }
     handler = handlers.get(name)
     return handler() if handler else None
