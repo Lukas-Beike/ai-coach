@@ -9,6 +9,7 @@ import sqlite3
 import shutil
 import time
 import zipfile
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
@@ -20,6 +21,7 @@ from support import IntervalsRequestRecorder, RecordedIntervalsClient, build_gem
 from backend.coach.context import CoachIntervalsContextService, future_coach_planned_workouts
 from backend.coach.attachments import gemini_history_parts
 from backend.coach.proposals import validated_coach_action_preview_input
+from backend.http_api.chat_page import ChatHistoryPageService
 
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
 os.environ.update({
@@ -1926,14 +1928,89 @@ class CoachTests(unittest.TestCase):
     def test_chat_history_pagination_and_bounded_search_use_message_id_cursor(self):
         for index in range(5):
             server.coach_message_service().add("user", f"searchable {index}")
-        first = server.paged_chat_history(limit=2)
-        second = server.paged_chat_history(cursor=first["next_cursor"], limit=2)
+        page_service = server.chat_history_page_service()
+        first = page_service.page(limit=2)
+        second = page_service.page(cursor=first["next_cursor"], limit=2)
         page_ids = [item["id"] for item in first["messages"] + second["messages"]]
         page_contents = [item["content"] for item in first["messages"] + second["messages"]]
         self.assertEqual(set(page_contents), {"searchable 1", "searchable 2", "searchable 3", "searchable 4"})
         self.assertEqual(len(page_ids), len(set(page_ids)))
-        search = server.paged_chat_history(limit=10, search="searchable 3")
+        search = page_service.page(limit=10, search="searchable 3")
         self.assertEqual([item["content"] for item in search["messages"]], ["searchable 3"])
+
+    def test_chat_history_search_escapes_like_metacharacters(self):
+        contents = (
+            "literal percent%marker",
+            "literal percentXmarker",
+            "literal underscore_marker",
+            "literal underscoreXmarker",
+            r"literal backslash\marker",
+            "literal backslashmarker",
+        )
+        for content in contents:
+            server.coach_message_service().add("user", content)
+
+        page_service = server.chat_history_page_service()
+        for search_term, expected in (
+            ("percent%marker", "literal percent%marker"),
+            ("underscore_marker", "literal underscore_marker"),
+            (r"backslash\marker", r"literal backslash\marker"),
+        ):
+            with self.subTest(search_term=search_term):
+                page = page_service.page(search=search_term)
+                self.assertEqual([item["content"] for item in page["messages"]], [expected])
+
+    def test_chat_history_cursor_and_generation_share_database_unit_of_work(self):
+        added = [
+            server.coach_message_service().add("user", f"cursor message {index}")
+            for index in range(5)
+        ]
+        server.set_kv("chat_generation", "synthetic-generation")
+        manager = server.database_manager()
+        page_service = ChatHistoryPageService(
+            manager,
+            server.KEY_VALUE_REPOSITORY,
+            Mock(current=Mock(return_value=[])),
+            server.DB_LOCK,
+            maximum=server.CHAT_PAGE_MAX,
+        )
+        statements = []
+        connections = []
+        original_unit_of_work = manager.unit_of_work
+
+        @contextmanager
+        def traced_unit_of_work():
+            with original_unit_of_work() as db:
+                connections.append(db)
+                db.set_trace_callback(statements.append)
+                try:
+                    yield db
+                finally:
+                    db.set_trace_callback(None)
+
+        with patch.object(
+            manager, "unit_of_work", side_effect=traced_unit_of_work
+        ), patch.object(
+            server.KEY_VALUE_REPOSITORY, "get", wraps=server.KEY_VALUE_REPOSITORY.get
+        ) as read_key_value:
+            first = page_service.page(limit=2)
+        read_key_value.assert_called_once_with(
+            read_key_value.call_args.args[0], "chat_generation"
+        )
+        self.assertEqual(len(connections), 1)
+        self.assertIs(read_key_value.call_args.args[0], connections[0])
+        self.assertIn("FROM messages ORDER BY id DESC LIMIT 3", statements[0])
+        self.assertEqual(
+            statements[1], "SELECT value FROM kv WHERE key = 'chat_generation'"
+        )
+        self.assertEqual(first["generation"], "synthetic-generation")
+
+        second = page_service.page(cursor=first["next_cursor"], limit=2)
+        third = page_service.page(cursor=second["next_cursor"], limit=2)
+        ids = [item["id"] for page in (first, second, third) for item in page["messages"]]
+        self.assertEqual(set(ids), {item["id"] for item in added})
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertIsNone(third["next_cursor"])
 
 
     def test_library_pagination_has_stable_type_name_id_cursor(self):

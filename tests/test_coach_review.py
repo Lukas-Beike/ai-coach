@@ -299,9 +299,15 @@ class CoachReviewTests(unittest.TestCase):
         template = server.workout_library_service().create_template({"name": "Synthetic original", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
         change = next(row for row in server.change_history_service().list() if row["entity_id"] == template["id"])
         proposal = self.history_preview(change["id"])["proposed_action"]
-        history = server.paged_chat_history(session_csrf_hash="review-session")
+        history = server.chat_history_page_service().page(
+            session_csrf_hash="review-session"
+        )
         self.assertEqual(history["proposed_actions"][0]["id"], proposal["id"])
-        self.assertEqual(server.paged_chat_history(session_csrf_hash="other-session")["proposed_actions"], [])
+        self.assertEqual(
+            server.chat_history_page_service()
+            .page(session_csrf_hash="other-session")["proposed_actions"],
+            [],
+        )
         server.workout_library_service().update(template["id"], {"action": "update", "name": "Synthetic changed"})
         confirmed = server.coach_proposal_confirmation_service().confirm(proposal["id"], "review-session")
         with self.assertRaises(server.AppError):
