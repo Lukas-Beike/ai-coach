@@ -5439,3 +5439,30 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `public_state`-Eigentümer auf die konkreten Performance-/Feedback-
   Services verdrahten, integrierten Diff und Vollsuite neu prüfen und
   erst dann einen Ersatz-PR gegen aktuelles `develop` eröffnen.
+
+## P10 Öffentliche Projektionen — kombiniertes Sol-Review
+
+- GPT-6-Luna/high-Patch `e0ac064a` verschob die komplette historische
+  `public_state`-Orchestrierung in `PublicStateService`. Root-Diffreview
+  **FAIL**: ein vor dem Wetter-Follow-up gebundener Datenbankmanager
+  konnte nach Restore veraltet sein. Derselbe Worker korrigierte mit
+  Factory-Auflösung unter `DB_LOCK` in `7419a980` und einem
+  deterministischen Managerwechseltest. Ein zunächst außerhalb des
+  erlaubten Schreibbereichs angelegter Test wurde auf Root-Hinweis
+  nach `tests/test_server.py` verlegt; Endpatch nur in den freigegebenen
+  Dateien. Worker-Vollsuite **PASS**, 2.343 Tests, 12 Skips.
+- Root integrierte die Worker-Patches sequenziell als `197426a1` und
+  `ffa6e079` mit den Performance-/Feedback-Services und beseitigte
+  den P2-Duplikationsbefund in `230ecb96`: `PublicStateService` nutzt
+  dieselben konkreten Services mit bereits gelesenem Snapshot und
+  Check-ins. Die ursprüngliche Response-Reihenfolge, lokale-only-
+  Grenze und Lock-/UOW-Nutzung bleiben erhalten. Keine Backend-
+  Rückimporte, Server-Fachcallbacks oder Kompatibilitätswrapper.
+  Root prüfte den tatsächlichen integrierten Diff und Code: **PASS**.
+  Neu gebautes Read-only-Docker-Image mit vollständiger Suite
+  **PASS**, 2.350 Tests, 11 Skips; fokussierte Projektionstests,
+  Architekturtests, Compile, Inventar- und Diff-Check **PASS**.
+  `server.py` umfasst 5.656 physische Zeilen. Die frühere
+  `public_state()`-Funktion hatte nur Testaufrufer; produktives
+  `/api/bootstrap` bleibt ein separater begrenzter Local-Only-Read.
+  Externe PR-/CI-/Review-Prüfung des kombinierten Stands folgt.
