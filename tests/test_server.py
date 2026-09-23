@@ -6511,6 +6511,62 @@ class CoachTests(unittest.TestCase):
         register_event.assert_called_once()
         wake_worker.assert_called_once()
 
+    def test_background_submission_atomically_allows_only_one_active_turn_per_session(self):
+        service = server.coach_job_submission_service()
+        original_active = service.active
+        barrier = threading.Barrier(2)
+        results = []
+        errors = []
+
+        def synchronized_active(session_csrf_hash, operation_id=None):
+            result = original_active(session_csrf_hash, operation_id)
+            barrier.wait(timeout=5)
+            return result
+
+        def submit(client_turn_id):
+            try:
+                results.append(service.enqueue(
+                    "Erstelle eine längere Planung", client_turn_id,
+                    "csrf-background-concurrent-session", operation_id=f"operation-{client_turn_id}",
+                ))
+            except server.AppError as error:
+                errors.append(error)
+
+        registry = server.coach_streams.CHAT_STREAM_REGISTRY
+        with (
+            patch.object(service, "active", side_effect=synchronized_active),
+            patch.object(server.runtime_events.STATE_EVENT_BUFFER, "publish"),
+            patch.object(registry, "set_background_event"),
+            patch.object(server.COACH_JOB_WAKE, "set"),
+        ):
+            threads = [
+                threading.Thread(target=submit, args=(turn_id,))
+                for turn_id in ("turn-background-race-a", "turn-background-race-b")
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], server.AppError)
+        self.assertEqual(errors[0].reason, "chat_already_running")
+        with server.DB_LOCK, server.database() as db:
+            commands = db.execute(
+                "SELECT client_turn_id, status FROM coach_commands "
+                "WHERE client_turn_id IN (?, ?)",
+                ("turn-background-race-a", "turn-background-race-b"),
+            ).fetchall()
+            messages = db.execute(
+                "SELECT client_turn_id FROM messages WHERE client_turn_id IN (?, ?)",
+                ("turn-background-race-a", "turn-background-race-b"),
+            ).fetchall()
+        self.assertEqual(len(commands), 1)
+        self.assertEqual(commands[0]["status"], "queued")
+        self.assertEqual(len(messages), 1)
+
     def test_background_worker_restores_session_binding_from_persisted_key(self):
         auth = server.session_auth_service()
         csrf_hash = auth.session_token_hash("csrf-background-bound")

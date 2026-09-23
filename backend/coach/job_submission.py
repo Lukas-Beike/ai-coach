@@ -60,10 +60,20 @@ class CoachJobSubmissionService:
     ) -> dict[str, Any] | None:
         session_key = _coach_session_key(session_csrf_hash)
         with self._database_lock, self._database_manager.unit_of_work() as db:
-            rows = db.execute(
-                "SELECT client_turn_id, status, receipt, updated_at FROM coach_commands "
-                "WHERE status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 50"
-            ).fetchall()
+            rows = self._active_rows(db)
+        return self._find_active(rows, session_key, operation_id)
+
+    @staticmethod
+    def _active_rows(db: Any) -> list[dict[str, Any]]:
+        return db.execute(
+            "SELECT client_turn_id, status, receipt, updated_at FROM coach_commands "
+            "WHERE status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 50"
+        ).fetchall()
+
+    @staticmethod
+    def _find_active(
+        rows: list[dict[str, Any]], session_key: str, operation_id: str | None = None
+    ) -> dict[str, Any] | None:
         for row in rows:
             receipt = command_receipt(row.get("receipt"))
             if receipt.get("mode") != "background" or receipt.get("session_key") != session_key:
@@ -180,6 +190,13 @@ class CoachJobSubmissionService:
                     "operation_id": receipt.get("operation_id"),
                     "plan_scope": receipt.get("plan_scope") or scope,
                 }, None
+
+            if self._find_active(self._active_rows(db), session_key):
+                raise AppError(
+                    409,
+                    "Für diese Sitzung läuft bereits eine Coach-Anfrage.",
+                    reason="chat_already_running",
+                )
 
             user_message = self._chat_repository.add(db, "user", message, client_turn_id=client_turn_id)
             attachment_json = json.dumps(attachments, ensure_ascii=False, separators=(",", ":"))
