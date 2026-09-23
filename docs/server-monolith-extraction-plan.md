@@ -570,6 +570,9 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
   - [x] Kalender-, Wettkampf- und Tageskontext-Projektion als konkreten
     Service innerhalb der bestehenden Bootstrap-UOW zuordnen; die
     verbleibenden öffentlichen Felder bleiben offen.
+  - [x] Begrenzte Chat-History-Pagination einschließlich Suche, Cursor,
+    Generation und sitzungsgebundener Vorschläge einem konkreten
+    `http_api/`-Service mit unveränderter DB-UOW zuordnen.
 - [ ] `RequestHandler`, Route-Dispatch, Body-Limits, statische Dateien und SSE
   transportseitig auslagern; vorhandene `requests.py`/`responses.py` nutzen.
   - [x] Sync-POST-Fachentscheidungen in `SyncCommandEndpoint` verlagern;
