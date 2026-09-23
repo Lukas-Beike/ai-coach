@@ -253,6 +253,7 @@ from backend.coach.library_plan_tools import CoachLibraryPlanToolService
 from backend.coach.planning_action_tools import CoachPlanningActionToolService
 from backend.coach.plan_artifact_tools import CoachPlanArtifactToolService
 from backend.coach.planning_change_tools import CoachPlanningChangeToolService
+from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.coach.context import (
     CoachContextPreviewLimits,
     CoachContextPreviewService,
@@ -263,7 +264,7 @@ from backend.coach.context import (
     CoachQuickActionsService,
 )
 from backend.coach.request_payload import CoachRequestPayloadService
-from backend.coach.sync_tools import COACH_SYNC_TOOL_NAMES, CoachSyncToolService
+from backend.coach.sync_tools import CoachSyncToolService
 from backend.coach.conversation import (
     CoachAttachmentContextService,
     CoachConversationProvisionService,
@@ -2356,75 +2357,32 @@ COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, 
 )
 
 
-def _structured_coach_plan_tool_result(
-    name: str, arguments: dict[str, Any], *, intent: dict[str, Any],
-    conversation_id: str, client_turn_id: str,
-) -> dict[str, Any] | None:
-    artifact_result = CoachPlanArtifactToolService(training_plan_artifact_service).execute(
-        name, arguments, intent, conversation_id, client_turn_id
-    )
-    if artifact_result is not None:
-        return artifact_result
-    planning_change_result = CoachPlanningChangeToolService(
-        structured_training_plan_replacement_service,
-        structured_training_change_service,
-        TRAINING_PLAN_SCOPE_PREFIX,
-    ).execute(name, arguments, intent)
-    if planning_change_result is not None:
-        return planning_change_result
-    if name == "manage_training_templates":
-        return TrainingTemplateToolService(
+def coach_tool_dispatch_service() -> CoachToolDispatchService:
+    """Compose the concrete Coach tool owners without retaining tool logic."""
+    return CoachToolDispatchService(
+        coach_read_tool_service,
+        coach_profile_update_service,
+        coach_athlete_record_tool_service,
+        lambda: CoachPlanArtifactToolService(training_plan_artifact_service),
+        lambda: CoachPlanningChangeToolService(
+            structured_training_plan_replacement_service,
+            structured_training_change_service,
+            TRAINING_PLAN_SCOPE_PREFIX,
+        ),
+        lambda: TrainingTemplateToolService(
             database_manager, DB_LOCK, workout_library_service
-        ).execute(arguments, intent)
-    if name == "apply_workout_library_plan":
-        return coach_library_plan_tool_service().execute(arguments, intent)
-    return None
-
-
-def _structured_coach_tool_result(
-    name: str,
-    arguments: dict[str, Any],
-    *,
-    intent: dict[str, Any],
-    conversation_id: str,
-    client_turn_id: str,
-    session_csrf_hash: str,
-    sync_job_ids: list[str],
-    cancel_event: threading.Event | None = None,
-) -> dict[str, Any]:
-    read_result = coach_read_tool_service().execute(name, arguments)
-    if read_result is not None:
-        return read_result
-    if name == "update_profile":
-        return coach_profile_update_service().apply(arguments, intent)
-    athlete_record_result = coach_athlete_record_tool_service().execute(name, arguments, intent)
-    if athlete_record_result is not None:
-        return athlete_record_result
-    plan_result = _structured_coach_plan_tool_result(
-        name, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id,
+        ),
+        coach_library_plan_tool_service,
+        coach_sync_tool_service,
+        lambda: CoachPlanningActionToolService(
+            adaptive_replan_preview_service,
+            coach_adaptive_apply_service,
+            training_plan_service,
+            history_undo_service,
+            coach_proposal_creation_service,
+            TRAINING_PLAN_SCOPE_PREFIX,
+        ),
     )
-    if plan_result is not None:
-        return plan_result
-    sync_result = (
-        coach_sync_tool_service().execute(
-            name, arguments, intent=intent, sync_job_ids=sync_job_ids,
-            cancel_event=cancel_event,
-        )
-        if name in COACH_SYNC_TOOL_NAMES else None
-    )
-    if sync_result is not None:
-        return sync_result
-    misc_result = CoachPlanningActionToolService(
-        adaptive_replan_preview_service,
-        coach_adaptive_apply_service,
-        training_plan_service,
-        history_undo_service,
-        coach_proposal_creation_service,
-        TRAINING_PLAN_SCOPE_PREFIX,
-    ).execute(name, arguments, intent, client_turn_id, session_csrf_hash)
-    if misc_result is not None:
-        return misc_result
-    raise AppError(400, "Unbekanntes Coach-Werkzeug.", reason="unknown_coach_tool")
 
 
 def _structured_authorized_operations(intent: dict[str, Any]) -> set[str]:
@@ -2761,7 +2719,7 @@ def _execute_claimed_planning_command(
     try:
         with DB_LOCK, database() as db:
             sync_job_ids: list[str] = []
-            result = _structured_coach_tool_result(operation, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids)
+            result = coach_tool_dispatch_service().execute(operation, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids)
             receipt = {**command_identity, "message": None, "command_receipts": [{"tool": operation, "result": result}], "sync_job_ids": sync_job_ids, "intent": intent, "tool_rounds": 1, "status": "completed"}
             db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'", (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id))
     except Exception as exc:
@@ -3289,7 +3247,7 @@ def _execute_structured_coach_tool(
                     )
                 )
             return result
-        return _structured_coach_tool_result(
+        return coach_tool_dispatch_service().execute(
             name,
             arguments,
             intent=action,

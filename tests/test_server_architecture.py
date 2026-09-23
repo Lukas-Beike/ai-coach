@@ -26,6 +26,7 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.read_tools", ("CoachReadToolService",)),
+    ("backend.coach.tool_dispatch", ("CoachToolDispatchService",)),
     ("backend.coach.turn_failures", ("CoachTurnFailureService", "coach_error_metadata")),
     ("backend.coach.job_submission", ("CoachJobSubmissionService",)),
     ("backend.coach.athlete_record_tools", ("CoachAthleteRecordToolService",)),
@@ -1675,6 +1676,8 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_validate_structured_training_change_scopes",
     "_apply_structured_coach_training_changes",
     "_structured_coach_misc_tool_result",
+    "_structured_coach_plan_tool_result",
+    "_structured_coach_tool_result",
     "_reset_local_coach_chat_state",
     "_request_coach_operation_cancellation",
     "_clear_coach_conversation_state",
