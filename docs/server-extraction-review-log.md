@@ -4344,3 +4344,24 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `3dea5f9`: **PASS**, 2.253 Tests, 12 Skips in 221,691 s. Inventar:
   `server.py` 6.917 Zeilen, P7 weiterhin 103 Definitionen/31 globale
   Bindungen; P7 ist nicht abgeschlossen. Sonar-Prüfung erst nach Push.
+
+## PR #706 — Morning-Body-Battery-Eigentümer
+
+- Erstes GPT-6-Luna-Diff `bf952c2` am tatsächlichen Code geprüft:
+  **FAIL**, weil `exc_info=True` beim Refresh-Fehler ohne fachlichen
+  Grund in ein Exception-Tuple geändert und der Test entsprechend
+  abgeschwächt war. Konkreter Korrekturauftrag an denselben Worker.
+- Korrektur-Diff `a3d5a35` und gesamter Patch erneut geprüft: **PASS**.
+  `MorningBatteryStore` besitzt atomare Snapshot-/History-/Fehler-
+  Writes; Source besitzt Fixture/Remote und sichere Fehlerprojektion;
+  ExecutionGate besitzt Lock-/Maintenance-/Provider-Reihenfolge;
+  Events besitzen Veröffentlichung und unverändertes Exception-
+  Logging. Der Service besitzt Freshness, Retry und Ablauf. Kein
+  Server-Rückimport und keine ausgelagerte Fachlogik im Factory-Callback.
+- Sequenziell als `e20dff9` und `8f13be5` integriert. Zehn direkte
+  Service-, 14 Diagnose- und einschlägige Server-/Architekturtests,
+  Ruff, Compile und Diff-Check **PASS**. Gesamtsuite für `8f13be5`
+  **PASS**: 2.253 Tests, 12 Skips in 217,816 s. Root-Review des
+  integrierten Stands erneut **PASS**. Inventar: `server.py` 6.926
+  Zeilen; P2 weiterhin elf Definitionen/sieben globale Bindungen.
+  Sonar-Prüfung nach Veröffentlichung ausstehend.
