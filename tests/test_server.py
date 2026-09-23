@@ -354,9 +354,12 @@ class CoachTests(unittest.TestCase):
             daily_loop = Mock()
             daily_loop_factory.return_value = daily_loop
             server.main()
-        http_server_factory.assert_called_once_with(
-            ("0.0.0.0", server.CONFIG.port), server.RequestHandler
-        )
+        http_server_factory.assert_called_once()
+        address, handler_class = http_server_factory.call_args.args
+        self.assertEqual(address, ("0.0.0.0", server.CONFIG.port))
+        self.assertTrue(issubclass(handler_class, server.RequestHandler))
+        self.assertIsInstance(handler_class.static_asset_service, server.StaticAssetService)
+        self.assertEqual(handler_class.static_asset_service._targets["index.html"], server.PUBLIC_DIR / "index.html")
         thread_factory.assert_called_once_with(target=daily_loop.run, daemon=True)
         self.assertEqual(
             order,
@@ -8129,58 +8132,66 @@ class CoachTests(unittest.TestCase):
         self.assertGreaterEqual(context["response_duration_ms"], 0)
 
     def test_static_files_reject_path_traversal(self):
-        handler = object.__new__(server.RequestHandler)
+        static_assets = server.StaticAssetService(server.PUBLIC_DIR)
 
         for path in ("/../server.py", "/public/../../server.py", "/..\\server.py"):
             with self.subTest(path=path):
                 with self.assertRaises(server.AppError) as error:
-                    server.RequestHandler.send_static(handler, path)
+                    static_assets.render(path, path, None)
                 self.assertEqual(error.exception.status, 403)
 
     def test_static_files_reject_absolute_path(self):
-        handler = object.__new__(server.RequestHandler)
+        static_assets = server.StaticAssetService(server.PUBLIC_DIR)
 
         with self.assertRaises(server.AppError) as error:
-            server.RequestHandler.send_static(handler, "/C:/Windows/win.ini")
+            static_assets.render("/C:/Windows/win.ini", "/C:/Windows/win.ini", None)
 
         self.assertEqual(error.exception.status, 403)
 
     def test_versioned_static_assets_are_immutable_and_support_etag_revalidation(self):
-        def make_handler(path, headers=None):
-            handler = object.__new__(server.RequestHandler)
-            handler.path = path
-            handler.headers = headers or {}
-            handler.send_response = Mock()
-            handler.send_header = Mock()
-            handler.end_headers = Mock()
-            handler.wfile = Mock()
-            return handler
+        response = server.StaticAssetService(server.PUBLIC_DIR).render("/views.js", "/views.js?v=133", None)
+        headers = dict(response.headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(headers["Cache-Control"], "public, max-age=31536000, immutable")
+        self.assertTrue(headers["ETag"].startswith('"'))
 
-        first = make_handler("/views.js?v=133")
-        server.RequestHandler.send_static(first, "/views.js")
-        response_headers = {call.args[0]: call.args[1] for call in first.send_header.call_args_list}
-        self.assertEqual(first.send_response.call_args.args, (200,))
-        self.assertEqual(response_headers["Cache-Control"], "public, max-age=31536000, immutable")
-        self.assertTrue(response_headers["ETag"].startswith('"'))
-
-        cached = make_handler("/views.js?v=133", {"If-None-Match": response_headers["ETag"]})
-        server.RequestHandler.send_static(cached, "/views.js")
-        self.assertEqual(cached.send_response.call_args.args, (304,))
-        cached.wfile.write.assert_not_called()
+        cached = server.StaticAssetService(server.PUBLIC_DIR).render("/views.js", "/views.js?v=133", headers["ETag"])
+        self.assertEqual(cached.status, 304)
+        self.assertEqual(cached.body, b"")
+        self.assertEqual(dict(cached.headers)["ETag"], headers["ETag"])
 
     def test_html_and_service_worker_remain_revalidatable(self):
         for path in ("/", "/service-worker.js", "/manifest.webmanifest"):
             with self.subTest(path=path):
-                handler = object.__new__(server.RequestHandler)
-                handler.path = path
-                handler.headers = {}
-                handler.send_response = Mock()
-                handler.send_header = Mock()
-                handler.end_headers = Mock()
-                handler.wfile = Mock()
-                server.RequestHandler.send_static(handler, path)
-                response_headers = {call.args[0]: call.args[1] for call in handler.send_header.call_args_list}
-                self.assertEqual(response_headers["Cache-Control"], "no-cache")
+                response = server.StaticAssetService(server.PUBLIC_DIR).render(path, path, None)
+                self.assertEqual(dict(response.headers)["Cache-Control"], "no-cache")
+
+    def test_unknown_static_asset_falls_back_to_index_with_security_headers(self):
+        response = server.StaticAssetService(server.PUBLIC_DIR).render("/missing.js", "/missing.js", None)
+        headers = dict(response.headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
+        self.assertEqual(headers["Content-Length"], str(len(response.body)))
+        self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(headers["X-Frame-Options"], "DENY")
+        self.assertEqual(headers["Referrer-Policy"], "no-referrer")
+        self.assertIn("frame-ancestors 'none'", headers["Content-Security-Policy"])
+
+    def test_static_response_disconnect_is_logged_by_handler_transport(self):
+        handler = object.__new__(server.RequestHandler)
+        handler.path = "/"
+        handler.headers = {}
+        handler.static_asset_service = server.StaticAssetService(server.PUBLIC_DIR)
+        handler.send_response = Mock()
+        handler.send_header = Mock()
+        handler.end_headers = Mock(side_effect=BrokenPipeError())
+        handler.wfile = Mock()
+        handler.log_client_disconnect = Mock()
+
+        server.RequestHandler.send_static(handler, "/")
+
+        handler.log_client_disconnect.assert_called_once_with()
+        handler.wfile.write.assert_not_called()
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
