@@ -5076,3 +5076,11 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `7673a1f8512c50530d9f83420cee67e4e136931a` gemerged; der
   Commit ist auf `origin/develop` erreichbar und sein Dateibaum
   identisch mit dem integrierten Parent `a70be088`.
+- Nach dem bestätigten #719-Merge wurde #720 sequenziell auf
+  `0694a844` rebased (`843edb24`, `58de2214`, `ebab8200`). Der
+  Produkt- und Testdiff war konfliktfrei; nur Inventar und Review-
+  Text wurden neu erzeugt beziehungsweise zusammengeführt. Root-
+  Review des kombinierten Stands **PASS**. Neu gebautes Read-only-
+  Container-Image: vollständige Suite **PASS**, 2.317 Tests,
+  10 Skips in 20,316 s. Inventar- und Diff-Check **PASS**;
+  `server.py` hat 6.283 physische Zeilen.
