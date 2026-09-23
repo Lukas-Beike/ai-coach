@@ -743,6 +743,8 @@ def _explicit_owner(name: str) -> str | None:
             "coach_adaptive_apply_service": COMPOSITION_ROOT,
             "recent_log_entries_service": COMPOSITION_ROOT,
             "diagnostic_report_service": COMPOSITION_ROOT,
+            "privacy_data_export_service": COMPOSITION_ROOT,
+            "privacy_archive_export_service": COMPOSITION_ROOT,
             "coach_proposal_read_service": COMPOSITION_ROOT,
             "coach_proposal_creation_service": COMPOSITION_ROOT,
             "coach_proposal_execution_service": COMPOSITION_ROOT,

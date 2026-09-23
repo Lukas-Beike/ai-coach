@@ -4886,3 +4886,69 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Finaler Tree-Diff gegenüber dem vollständig getesteten Stand leer;
   erneut zwei Service-, 14 Follow-up-, vier Architekturtests sowie
   Inventar-/Diff-Check **PASS**.
+- PR #715 auf Head `64711d07`: SonarCloud ohne neue Issues,
+  Python-/Container-/Browser-CI und explizites Codex-Review **PASS**,
+  keine offenen Review-Threads. Ein alter Review-Koordinationslauf wurde
+  abgebrochen; der eigentliche Review-Check bestand. Squash-Merge am
+  `2026-09-23T14:13:50Z`, Commit
+  `fe3a014492d9691d752f4ad6b462bc7037d71aa2` ist auf
+  `origin/develop` erreichbar.
+
+## P9 lokaler JSON-Datenexport — integrierter Prüfstand
+
+- GPT-6-Luna/high-Worker-Commit `0cc31cbb`, als `7c7b7e28` auf den
+  bestätigten PR-#715-Mergestand integriert. Frühes Diffreview **FAIL**:
+  eine Testdatei war außerhalb des anfänglichen Schreibbereichs geändert;
+  die notwendige einzelne Aufrufer-Migration in
+  `tests/test_coach_attachments.py` wurde danach ausdrücklich begrenzt
+  freigegeben. Außerdem war die lokale Uhr zunächst neu berechnet statt
+  unverändert injiziert; derselbe Worker korrigierte beides vor Commit.
+  Root-Review des tatsächlichen committed Diffs **PASS**: Der konkrete
+  `PrivacyDataExportService.export()` besitzt SQL-/KV-Auswahl,
+  Laufzeitschlüssel-Filter, JSON-Fallbacks und die vollständige
+  Ergebnisprojektion. Die Root erstellt nur Abhängigkeiten; keine
+  Server-Rückimporte oder Fach-Callbacks. Drei getrennte DB-Lock/UOW-
+  Lesegrenzen und die ursprüngliche Feld-/Zeitreihenfolge bleiben
+  erhalten; weder Remote-Schreiben noch zusätzliche sensible Daten.
+- Worker-Gesamtsuite **PASS**: 2.305 Tests, 12 Skips; `test_server.py`
+  464 Tests, 3 Skips, zwei Fake-UOW-Tests sowie scoped Ruff/Compile/Diff
+  **PASS**. Im Integrations-Worktree erneut `test_server.py` **PASS**:
+  464 Tests, 3 Skips. Ein anfänglicher Einzeltest-Aufruf scheiterte
+  ausschließlich an einem unpassenden `unittest`-Importpfad; die
+  Repository-Discovery lief erfolgreich. Kombinierter ZIP-Patch steht
+  noch aus; P9 bleibt für Archiv, Backup/Restore und Privacy-Delete offen.
+
+## P9 Privacy-ZIP-Archiv — integrierter Prüfstand
+
+- GPT-6-Luna/high-Worker-Commit `3d5100ef`, nach sequenzieller
+  Konfliktauflösung in `server.py` als `7c9257a2` integriert. Frühes
+  Root-Diffreview **FAIL**: Konstruktor zunächst zu breit und Lock als
+  `Any` annotiert; derselbe Worker korrigierte frozen Config,
+  konkrete Dienste/Lock und veraltete Modulbeschreibung vor Commit.
+  Root-Review des committed Diffs **PASS**: `PrivacyArchiveExportService`
+  besitzt ZIP-Erzeugung, sämtliche SQL-/KV-/JSONL-Auswahlen, Manifest,
+  Limits und Temp-Datei-Cleanup. DB-Lock und gemeinsame UOW umfassen
+  alle Reads bis zum Abschluss der ZIP-Datei. `server.py` erstellt nur
+  den Service und streamt die fertige Datei; keine Server-Rückimporte,
+  fachlichen Callbacks, Session-Exportdatei oder Remote-Writes.
+- Worker-Gesamtsuite **PASS**: 2.304 Tests, 12 Skips; gezielte ZIP-,
+  Manifest-, Datenschutz-, >1.000-Zeilen- und 507/413/408-Cleanup-
+  Regressionen sowie scoped Ruff/Compile/Diff **PASS**. Kombinierte
+  Integrationstests stehen noch aus. P9 bleibt für Backup/Restore,
+  Privacy-Delete und HTTP-Migration offen.
+- Kombinierter Read-only-Containerlauf des Stands `7c9257a2` **FAIL**:
+  2.308 Tests, 10 Skips, ein Testfehler. Der neue Architekturtest für
+  `backend/privacy.py` leitete den Quellpfad fälschlich aus dem
+  separaten `/review/tests`-Mount ab statt aus dem importierten Modul
+  unter `/app/backend`. Keine Produktcode-Exception. Korrekturauftrag
+  an denselben JSON-Worker; nach dessen Follow-up sind Code und Tests
+  erneut zu prüfen. Die vier Architekturtests, Inventar-Check, scoped
+  Ruff und Diff-Check des integrierten Stands bestanden separat.
+- JSON-Worker-Follow-up `735bb1a8`, integriert als `7082a183`, ändert
+  ausschließlich die Quellpfadableitung im Test auf das importierte
+  `backend.privacy`-Modul. Root-Diffreview **PASS**, kein schwächeres
+  Architektur-Assertion. Gezielt Host und Read-only-Container je zwei
+  Tests **PASS**; erneut gebautes kombiniertes Image mit den
+  vollständigen gemounteten Repository-Tests **PASS**: 2.308 Tests,
+  10 Skips in 20,140 s. Damit ist der integrierte JSON-/ZIP-Code nach
+  Korrektur erneut freigegeben; CI und Review des PR-Stands stehen aus.
