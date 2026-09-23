@@ -16,7 +16,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import quote
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 from support import IntervalsRequestRecorder, RecordedIntervalsClient, build_gemini_request_payload, create_test_session, parsed_workout_fixture
 from backend.coach import streams as coach_streams
 from backend.coach.context import CoachIntervalsContextService, future_coach_planned_workouts
@@ -8628,9 +8628,45 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("athlete", json.dumps(readiness).casefold())
         self.assertNotIn("password", json.dumps(readiness).casefold())
 
+    def test_readiness_handler_composition_preserves_status_and_json_contract(self):
+        ready = {
+            "status": "ready",
+            "ready": True,
+            "checks": {
+                "database": True,
+                "schema": True,
+                "data_directory": True,
+                "maintenance": True,
+            },
+            "maintenance": {"active": False},
+        }
+        not_ready = {
+            "status": "not_ready",
+            "ready": False,
+            "checks": {
+                "database": True,
+                "schema": True,
+                "data_directory": True,
+                "maintenance": False,
+            },
+            "maintenance": {"active": True},
+        }
+        handler_class = server.request_handler_class()
+        handler = object.__new__(handler_class)
+        handler.send_json = Mock()
+
+        with patch.object(handler_class.readiness_service, "state", side_effect=[ready, not_ready]):
+            self.assertTrue(handler._handle_public_get("/api/readiness"))
+            self.assertTrue(handler._handle_public_get("/api/readiness"))
+
+        self.assertEqual(
+            handler.send_json.call_args_list,
+            [call(200, ready), call(503, not_ready)],
+        )
+
     def test_readiness_fails_when_database_is_unavailable(self):
         manager = server.database_manager()
-        with patch.object(manager, "reader", side_effect=OSError("database unavailable")):
+        with patch.object(manager, "unit_of_work", side_effect=OSError("database unavailable")):
             readiness = ReadinessService(
                 manager, server.DB_LOCK, Path(os.environ["DATA_DIR"]),
                 runtime_maintenance.MAINTENANCE_GATE,

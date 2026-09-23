@@ -34,7 +34,7 @@ class ReadinessService:
             "maintenance": False,
         }
         try:
-            with self._db_lock, self._manager.reader() as db:
+            with self._db_lock, self._manager.unit_of_work() as db:
                 checks["database"] = bool(db.execute("SELECT 1").fetchone())
                 checks["schema"] = database_schema_is_current(db)
         except Exception:  # noqa: BLE001, S110 - an infrastructure probe must fail closed.
