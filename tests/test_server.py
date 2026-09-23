@@ -8665,12 +8665,12 @@ class CoachTests(unittest.TestCase):
         handler = Mock(client_address=("203.0.113.7", 0))
         with patch.object(server.app_config, "security_configuration_error", return_value=None), \
                 patch.object(server, "authenticated_session", return_value={"csrf_hash": "unused"}), \
-                patch.object(server.RATE_LIMITER, "allow", return_value=(False, 17)) as rate_limit, \
+                patch.object(RateLimiter, "allow", autospec=True, return_value=(False, 17)) as rate_limit, \
                 self.assertRaises(server.AppError) as raised:
             server.require_auth(handler)
         self.assertEqual(raised.exception.status, 429)
         self.assertIn("17 Sekunden", raised.exception.message)
-        rate_limit.assert_called_once_with("api:203.0.113.7", 180, 60)
+        rate_limit.assert_called_once_with(server.RATE_LIMITER, "api:203.0.113.7", 180, 60)
 
     def test_parallel_operations_keep_distinct_safe_correlation_ids(self):
         barrier = threading.Barrier(2)
