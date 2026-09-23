@@ -5607,3 +5607,34 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Diff-Check **PASS**. Root-Gate des integrierten lokalen Stands
   `87be8cbc` plus Dokumentations-/Inventardiff **PASS**; PR-CI und
   externer Review stehen noch aus. `server.py`: 5.428 physische Zeilen.
+
+## P7 lokaler Bibliotheksplan — bestätigter #743-Merge
+
+- #743 auf Head `c6dd94db`: CodeQL, SonarCloud, Container-/Browser-
+  und Codex-Code-/Security-Prüfung **PASS**, 0 offene Review-Threads.
+  Ein transienter GitHub-API-500 ließ die erste Review-Gate-Abfrage
+  fail-closed; derselbe Workflow wurde ohne weiteren Review-Auftrag
+  erfolgreich wiederholt. Squash-Merge
+  `211b4bd47f16d4bf69057cd6262bbd494550a961` am
+  `2026-09-23T19:54:27Z` bestätigt und auf `origin/develop` erreichbar.
+
+## P7 sitzungsgebundene Coach-Receipts — Integrationsreview
+
+- GPT-6-Luna/high-Patch `fb97ce47`: Root-Diffreview zunächst **FAIL**
+  wegen redundant injiziertem `proposal_view`-Callback. Derselbe Worker
+  entfernte ihn in `6259b01d`; fokussierte und Architekturtests 8/8,
+  volle Suite 2.361 Tests/12 Skips, Ruff, Compile und Diff-Check **PASS**.
+- Sequenziell auf #743 rebased als `dbce4d16` und `0719c080` ohne
+  Konflikt. Root prüfte den gesamten neuen Diff und Code erneut:
+  **PASS**. Der Service besitzt DB-Read-UOW, Session-Owner-Prüfung,
+  aktuelle Proposal-/TTL-Projektion und entfernt den Session-Schlüssel;
+  Planning-/Chat-/HTTP-/SSE-Aufrufer delegieren ohne Server-Wrapper.
+  Die vier neuen Tests prüfen 400/403/404, Fremdsitzung, abgelaufene
+  und konsumierte Vorschläge sowie Restore-Drain-Kompatibilität;
+  bestehende Dialog-/HTTP-Tests ergänzen die Integration. Post-Rebase-
+  native Vollsuite **PASS**, 2.371 Tests/12 Skips; Python-3.14-
+  Docker-Build und vollständige Read-only-Docker-Suite **PASS**,
+  2.371 Tests/11 Skips. Ruff, Compile, Inventar- und Diff-Check
+  **PASS**. Root-Gate des integrierten lokalen Stands `0719c080`
+  plus Dokumentations-/Inventardiff **PASS**; PR-CI und externer
+  Review stehen aus. `server.py`: 5.404 Zeilen, 257 Definitionen.
