@@ -216,7 +216,7 @@ Abhängigkeit: P1.
   - [x] Audio-Validierung, providerabhängige Transkriptionsorchestrierung,
     transiente Base64-/Multipart-Payloads und Response-Prüfung im konkreten
     Audio-Client besitzen; `server.py` komponiert nur noch.
-- [ ] Gemini Payload-/Tool-Konvertierung und Streaming zum Gemini-Adapter ziehen;
+- [x] Gemini Payload-/Tool-Konvertierung und Streaming zum Gemini-Adapter ziehen;
   persistierte Dialoghistorie gehört zu `coach/conversation.py`.
   - [x] Payload-/Tool-/Medienkonvertierung und Stream-Akkumulation auslagern.
   - [x] Stream-Transport einschließlich Header-Abbruch, Response-Handle,
@@ -397,7 +397,7 @@ Konflikterkennung und Rollback. Keine Rückabhängigkeit auf HTTP oder Coach.
 
 Abhängigkeit: P2–P5.
 
-- [ ] Garmin-, Intervals-, Library-, Planned-Unit- und Wettkampf-Sync mit
+- [x] Garmin-, Intervals-, Library-, Planned-Unit- und Wettkampf-Sync mit
   ihren vollständigen Abläufen nach `sync/` ziehen.
   - [x] Wettkampf-Reconciliation, Provider-Orchestrierung, Cleanup und
     gemeinsamer Single-flight-Lock liegen vollständig in `sync/competitions.py`.
