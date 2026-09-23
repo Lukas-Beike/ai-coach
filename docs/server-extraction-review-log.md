@@ -5860,9 +5860,14 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `6cca5c8a5aa60cc32da09b9e516db963e6e0938e` am
   `2026-09-23T21:14:11Z` bestätigt und auf `origin/develop` erreichbar.
 
-## P9 vollständiger Datenbank-Restore — lokaler Zwischenstand
+## P9 vollständiger Datenbank-Restore — integriertes Root-Review
 
-- Root-Ausgangscommit `dd899678` auf dem bestätigten #747-Merge.
+- Root-Ausgangscommit `dd899678` auf dem bestätigten #747-Merge,
+  auf den #749-Merge rebasiert als `fff95a16`. Root hat den tatsächlichen
+  integrierten Code und Diff einschließlich aller Aufrufer geprüft:
+  **PASS**. Keine Server-Rückimporte oder fachlichen Server-Callbacks;
+  Lock, Maintenance-Gate, Backup, Swap und Worker-Wiederaufnahme haben
+  einen konkreten Eigentümer.
   `DatabaseRestoreService` besitzt das
   Wartungsgate, Staging/Validierung über den bestehenden konkreten
   Validierungsservice, Checkpoint und DB-Drain unter `DB_LOCK`, eindeutige
@@ -5881,8 +5886,14 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Compile, Inventar- und Diff-Check **PASS**. Die Vollsuiten des
   endgültigen Codes bestanden nativ mit 2.389 Tests/12 Skips und im
   frisch gebauten Read-only-Docker mit 2.389 Tests/11 Skips. Integration
-  auf aktuelles `develop`, Root-Gate,
-  PR-CI und Merge stehen noch aus. Der existierende Vertrag rollt
+  auf aktuelles `develop`: fokussierte Restore-/Architekturtests 10/10,
+  Ruff der neuen Dateien, Compile, Inventar- und Diff-Check **PASS**;
+  native Vollsuite **PASS**, 2.399 Tests/12 Skips, und frisch gebautes
+  Read-only-Docker **PASS**, 2.399 Tests/11 Skips. Die Testzahl ist für
+  diese Grenze angemessen: fünf neue Fehler-/Reihenfolge-/Sicherungsfälle
+  plus vorhandene echte SQLCipher-/HTTP-Integrationsfälle. PR-CI und Merge
+  stehen noch aus. `server.py`: 5.089 Zeilen, 242 Definitionen.
+  Der existierende Vertrag rollt
   Validierungs-/Swap-Fehler vor erfolgreichem Austausch zurück;
   ein Fehler während der nachgelagerten Worker-Wiederaufnahme löst
   weiterhin keinen zweiten Datenbanktausch aus.
