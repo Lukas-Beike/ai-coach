@@ -23,7 +23,7 @@ const pr = {
 };
 const p1Review = { id: 10, user: { login: bot }, submitted_at: '2026-09-23T15:19:04Z', body: '[P1] Fix fixture' };
 
-async function reviewRequired({ completedAt, reviewedHead = head, reaction = true, unresolved = false, sameDiff = true } = {}) {
+async function reviewRequired({ completedAt, reviewedHead = head, reaction = true, unresolved = false, sameDiff = true, differentContext = false } = {}) {
   const outputs = {};
   const github = {
     rest: {
@@ -51,9 +51,11 @@ async function reviewRequired({ completedAt, reviewedHead = head, reaction = tru
       },
     },
     paginate: async (method, args) => method(args),
-    request: async (_route, { basehead }) => ({ data:
-      `diff --git a/server.py b/server.py\n@@ -1,2 +1,2 @@\n context\n-old\n+${sameDiff || basehead.endsWith(reviewedHead) ? 'new' : 'unreviewed'}\n`,
-    }),
+    request: async (_route, { basehead }) => {
+      const oldPatch = basehead.endsWith(reviewedHead);
+      const contextLine = !oldPatch && differentContext ? 'different function' : 'context';
+      return { data: `diff --git a/server.py b/server.py\nindex abcdef0..1234567 100644\n--- a/server.py\n+++ b/server.py\n@@ -${oldPatch ? 1 : 101},2 +${oldPatch ? 1 : 101},2 @@\n ${contextLine}\n-old\n+${sameDiff || oldPatch ? 'new' : 'unreviewed'}\n` };
+    },
     graphql: async () => ({ repository: { pullRequest: { reviewThreads: {
       nodes: unresolved ? [{ isResolved: false, comments: { nodes: [{ author: { login: bot }, pullRequestReview: { databaseId: 10 } }] } }] : [],
     } } } }),
@@ -80,6 +82,12 @@ test('a clean follow-up remains valid after develop advances and the PR is rebas
 test('a new unreviewed change after the clean follow-up remains blocked', async () => {
   assert.equal(await reviewRequired({
     completedAt: '2026-09-23T15:31:54Z', reviewedHead: 'b'.repeat(40), sameDiff: false,
+  }), true);
+});
+
+test('the same replacement at a different code location remains blocked', async () => {
+  assert.equal(await reviewRequired({
+    completedAt: '2026-09-23T15:31:54Z', reviewedHead: 'b'.repeat(40), differentContext: true,
   }), true);
 });
 

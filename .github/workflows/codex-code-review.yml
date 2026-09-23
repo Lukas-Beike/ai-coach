@@ -179,12 +179,11 @@ jobs:
                     /(?:Binary files|GIT binary patch)/.test(oldDiff + newDiff)) return false;
                 const fileCount = (value) => (value.match(/^diff --git /gm) || []).length;
                 if (fileCount(oldDiff) !== oldFiles.length || fileCount(newDiff) !== newFiles.length) return false;
-                const changes = (value) => value.split('\n').filter((line) =>
-                  line.startsWith('diff --git ') ||
-                  /^(?:new file mode|deleted file mode|rename from|rename to|old mode|new mode) /.test(line) ||
-                  ((line.startsWith('+') || line.startsWith('-')) &&
-                   !line.startsWith('+++ ') && !line.startsWith('--- '))).join('\n');
-                return changes(oldDiff) === changes(newDiff);
+                const reviewedPatch = (value) => value.split('\n')
+                  .filter((line) => !/^index [0-9a-f]+\.\.[0-9a-f]+/.test(line))
+                  .map((line) => line.replace(/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/, '@@'))
+                  .join('\n');
+                return reviewedPatch(oldDiff) === reviewedPatch(newDiff);
               } catch (_error) {
                 return false;
               }
