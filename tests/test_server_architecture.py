@@ -66,6 +66,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     ("backend.coach.receipt_reads", ("CoachCommandReceiptService",)),
+    ("backend.coach.request_payload", ("CoachRequestPayloadService",)),
     (
         "backend.coach.context",
         (
