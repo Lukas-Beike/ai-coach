@@ -4543,3 +4543,31 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Review **PASS**; fünf direkte/Handler-Regressionen, vier Architektur-
   tests, Ruff und die neu gebaute Container-Suite **PASS**. Sonar/CI
   dieses Korrekturstands müssen nach Veröffentlichung erneut bestehen.
+
+## P10 — Kalender- und Tageskontext-Bootstrap
+
+- Erstes GPT-6-Luna-Diff `cd2b5996` anhand des tatsächlichen Codes
+  **FAIL**: Der neue Service berechnete die schon vom lokalen Prelude
+  bereitgestellte kanonische Planliste erneut und konnte damit einen
+  anderen Snapshot an den Tageskontext übergeben. Konkreter Auftrag an
+  denselben Worker; Korrektur `4ea53759` entfernt die zweite Projektion
+  und übergibt `prelude.canonical_planned` unverändert. Regression prüft
+  die Objektidentität. Beide Diffs erneut geprüft: **PASS**.
+- Sequenziell als `00fb89c0`/`3f8b5a9d` auf dem bestätigten PR-#706-
+  Merge-Commit `45dd27f2` integriert und die tatsächliche Codegrenze
+  erneut geprüft: **PASS**. `PublicStateCalendarProjection` besitzt
+  Check-in-/Wettkampf-/externe Kalender-/Tageskontext-Orchestrierung;
+  der vorhandene `DB_LOCK` und dieselbe UOW umschließen den Aufruf.
+  Keine Server-Rückimporte oder Fachcallbacks, JSON-Felder und Offline-
+  Bootstrap-Grenzen unverändert. `public_state` enthält weitere offene
+  Projektionen, daher bleibt P10 unvollständig.
+- Worker nach Korrektur: direkter Test 1, Server 462/3 Skips,
+  Architektur 4, volle Python-Suite 2.277/12 Skips, Ruff der neuen
+  Dateien, Compile und Diff-Check **PASS**. Im integrierten Worktree:
+  vier fokussierte, vier Architekturtests, Ruff, Compile und Diff-
+  Check **PASS**. Neu gebautes Read-only-Container-Image und volle
+  Container-Suite **PASS**: 2.277 Tests, 10 Skips in 20,464 s.
+  Inventar: `server.py` 6.861 Zeilen; P10 weiterhin 26 Definitionen
+  und 37 globale Bindungen. Die neue Factory erhöht die Definitionszahl,
+  ohne den ausgelagerten fachlichen Ablauf wieder in den Server zu holen.
+  CI/Sonar des veröffentlichten PR-Stands bleiben abzuwarten.
