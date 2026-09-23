@@ -1634,6 +1634,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.db.schema", ("database_table_names",)),
     ("backend.db.bootstrap", ("initialize_application_database",)),
     ("backend.http_api.bootstrap_state", ("PublicBootstrapService", "bootstrap_provider_states")),
+    ("backend.http_api.state_events_transport", ("StateEventTransport",)),
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
@@ -2081,6 +2082,21 @@ class ServerArchitectureTests(unittest.TestCase):
             violations,
             "server.py must remain a composition root for extracted symbols:\n"
             + "\n".join(violations),
+        )
+
+    def test_request_handler_does_not_reintroduce_state_event_orchestration(self) -> None:
+        request_handler = next(
+            node
+            for node in _parse(SERVER_PATH).body
+            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
+        )
+        methods = {
+            node.name
+            for node in request_handler.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        self.assertTrue(
+            {"send_state_event_batch", "handle_state_events"}.isdisjoint(methods)
         )
 
     def test_intervals_client_does_not_retain_snapshot_use_cases(self) -> None:

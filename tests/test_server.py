@@ -27,6 +27,7 @@ from backend.coach.proposals import validated_coach_action_preview_input
 from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.public_state import PublicStateService
+from backend.http_api.state_events_transport import StateEventTransport
 from backend.http_api import readiness as readiness_module
 from backend.http_api import auth as http_auth
 from backend.http_api.public_weather import PublicWeatherStateService
@@ -2485,22 +2486,56 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(runtime_events.STATE_EVENT_BUFFER.since(event["event_id"] - 1)["events"][0]["data"]["progress"]["completed"], 1)
 
     def test_state_event_batch_sends_events_and_resets_for_gaps(self):
-        handler = object.__new__(server.RequestHandler)
+        transport = StateEventTransport(runtime_events.STATE_EVENT_BUFFER)
         sent = []
-        handler.send_sse_event = lambda event, payload, event_id=None: sent.append((event, payload, event_id))
-        since, gap = handler.send_state_event_batch({
+        since, gap = transport.send_batch({
             "gap": False,
             "latest_event_id": 5,
             "events": [
                 {"event_id": 4, "event": "provider", "data": {"status": "running"}},
                 {"event_id": 5, "event": "provider", "data": {"status": "completed"}},
             ],
-        }, 3)
+        }, 3, lambda event, payload, event_id=None: sent.append((event, payload, event_id)))
         self.assertEqual((since, gap), (5, False))
         self.assertEqual(sent[-1], ("provider", {"status": "completed"}, 5))
-        since, gap = handler.send_state_event_batch({"gap": True, "latest_event_id": 9, "events": []}, since)
+        since, gap = transport.send_batch(
+            {"gap": True, "latest_event_id": 9, "events": []},
+            since,
+            lambda event, payload, event_id=None: sent.append((event, payload, event_id)),
+        )
         self.assertEqual((since, gap), (9, True))
         self.assertEqual(sent[-1], ("reset", {"reason": "gap", "latest_event_id": 9}, 9))
+
+    def test_state_events_route_requires_auth_before_starting_transport(self):
+        handler = object.__new__(server.RequestHandler)
+        handler.path = "/api/state/events?since=0"
+        handler.connection = Mock()
+        handler.send_sse_headers = Mock()
+        handler.send_sse_event = Mock()
+        auth = Mock()
+
+        with patch.object(server, "session_auth_service", return_value=auth), patch.object(
+            StateEventTransport, "handle"
+        ) as handle:
+            self.assertTrue(handler._handle_sync_get("/api/state/events"))
+            auth.require_auth.assert_called_once_with(handler)
+            handle.assert_called_once()
+
+        denied = server.AppError(401, "unauthorized")
+        auth.require_auth.side_effect = denied
+        auth.require_auth.reset_mock()
+        handler.connection.settimeout.reset_mock()
+        with patch.object(server, "session_auth_service", return_value=auth), patch.object(
+            StateEventTransport, "handle"
+        ) as handle:
+            with self.assertRaises(server.AppError) as caught:
+                handler._handle_sync_get("/api/state/events")
+            self.assertIs(caught.exception, denied)
+            auth.require_auth.assert_called_once_with(handler)
+            handle.assert_not_called()
+            handler.connection.settimeout.assert_not_called()
+            handler.send_sse_headers.assert_not_called()
+            handler.send_sse_event.assert_not_called()
 
     def test_bootstrap_reuses_one_database_connection_for_local_reads(self):
         with patch.object(server.sqlite3, "connect", wraps=sqlite3.connect) as connect:

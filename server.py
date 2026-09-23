@@ -319,6 +319,7 @@ from backend.http_api.library_page import LibraryPageService
 from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.static_assets import StaticAssetService
 from backend.http_api.export_streams import ExportStreamTransport
+from backend.http_api.state_events_transport import StateEventTransport
 from backend.http_api.requests import (
     read_audio_body as read_request_audio_body,
     read_body as read_request_body,
@@ -4497,7 +4498,12 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_sync_get(self, path: str) -> bool:
         if path == "/api/state/events":
             self.auth_service.require_auth(self)
-            self.handle_state_events()
+            StateEventTransport(runtime_events.STATE_EVENT_BUFFER).handle(
+                self.path,
+                send_headers=self.send_sse_headers,
+                send_event=self.send_sse_event,
+                set_connection_timeout=self.connection.settimeout,
+            )
         elif match := SYNC_JOB_RE.match(path):
             self.auth_service.require_auth(self)
             self.send_json(200, sync_job_queue_service().state(match.group(1)))
@@ -4714,40 +4720,6 @@ class RequestHandler(BaseHTTPRequestHandler):
         except self.client_disconnect_errors as exc:
             self.log_client_disconnect()
             raise ClientDisconnected() from exc
-
-    def send_state_event_batch(self, batch: dict[str, Any], since: int) -> tuple[int, bool]:
-        if batch["gap"]:
-            latest_event_id = int(batch["latest_event_id"])
-            self.send_sse_event("reset", {"reason": "gap", "latest_event_id": latest_event_id}, latest_event_id or None)
-            return latest_event_id, True
-        for item in batch["events"]:
-            since = int(item["event_id"])
-            self.send_sse_event(item["event"], item["data"], since)
-        return since, False
-
-    def handle_state_events(self) -> None:
-        query = parse_qs(urlparse(self.path).query)
-        raw_since = query.get("since", ["0"])[0]
-        if not str(raw_since).isdigit():
-            raise AppError(400, "Die Event-ID ist ungültig.", reason="invalid_event_cursor")
-        since = int(raw_since)
-        self.connection.settimeout(None)
-        try:
-            self.send_sse_headers()
-            initial = runtime_events.STATE_EVENT_BUFFER.since(since)
-            since, _ = self.send_state_event_batch(initial, since)
-            self.send_sse_event("ready", {"latest_event_id": since}, since or None)
-            while True:
-                runtime_events.STATE_EVENT_BUFFER.wait(timeout=15)
-                pending = runtime_events.STATE_EVENT_BUFFER.since(since)
-                since, gap = self.send_state_event_batch(pending, since)
-                if gap:
-                    continue
-                if not pending["events"]:
-                    self.send_sse_event("heartbeat", {"latest_event_id": pending["latest_event_id"]})
-                    continue
-        except ClientDisconnected:
-            return
 
     def handle_chat_stream(self, session: dict[str, Any]) -> None:  # NOSONAR - SSE lifecycle must remain atomic around durable job ownership
         payload = self.read_json(MAX_REQUEST_BYTES)
