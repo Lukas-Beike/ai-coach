@@ -4365,3 +4365,22 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   integrierten Stands erneut **PASS**. Inventar: `server.py` 6.926
   Zeilen; P2 weiterhin elf Definitionen/sieben globale Bindungen.
   Sonar-Prüfung nach Veröffentlichung ausstehend.
+
+## P7.21 — adaptive Coach-Freigabe
+
+- Root-Diff `637a909`, als `13a048c` sequenziell integriert und im
+  integrierten Code selbst geprüft: **PASS**. Der konkrete
+  `CoachAdaptiveApplyService` besitzt Scope-/Target-Autorisierung,
+  Preview-Freshness und die spätere, quellgebundene Nutzerfreigabe
+  vor dem lokalen Apply und jedem optionalen Intervals-Schreiben.
+  `DB_LOCK` und DatabaseManager-Transaktion bleiben dieselben
+  Eigentümer; `server.py` komponiert nur die Abhängigkeiten und trägt
+  weder die Approval-Abfrage noch einen Fachcallback. Eager erzeugte
+  Provider-Objekte führen keine Remote-I/O aus; Schreibgrenzen sind
+  weiterhin erst nach der Freigabe erreichbar.
+- Drei direkte Approval-Regressionen, 27 Coach-Tool-Coverage- und drei
+  Architekturtests, Ruff, Compile und Diff-Check **PASS**. Gesamtsuite
+  des integrierten Stands `13a048c` **PASS**: 2.256 Tests, 12 Skips
+  in 254,981 s. Erneutes Root-Review **PASS**. Inventar: `server.py`
+  6.914 Zeilen, P7 102 Definitionen/31 globale Bindungen; P7 bleibt
+  offen. Sonar-Prüfung nach Push ausstehend.
