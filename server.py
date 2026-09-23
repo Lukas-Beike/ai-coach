@@ -281,6 +281,7 @@ from backend.coach.proposals import (
     coach_action_hash,
     coach_action_view,
 )
+from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools, validate_request
 from backend.coach.job_store import CoachJobStore
 from backend.coach.job_submission import CoachJobSubmissionService
@@ -2142,6 +2143,13 @@ def coach_proposal_read_service() -> CoachProposalReadService:
     return CoachProposalReadService(database_manager(), now=time.time)
 
 
+def coach_command_receipt_service() -> CoachCommandReceiptService:
+    """Compose session-bound Coach command receipt reads."""
+    return CoachCommandReceiptService(
+        database_manager, DB_LOCK, now=time.time, proposal_view=coach_action_view,
+    )
+
+
 def coach_proposal_creation_service() -> CoachProposalCreationService:
     """Compose session-bound Coach proposal creation."""
     return CoachProposalCreationService(
@@ -2911,13 +2919,13 @@ def _claim_planning_command(
         existing = db.execute("SELECT conversation_id, status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
         if existing:
             previous = _coach_command_receipt(existing["receipt"])
-            _require_command_owner(previous, session_csrf_hash)
+            coach_command_receipt_service().require_owner(previous, session_csrf_hash)
             if previous.get("effect_key") != command_identity["effect_key"]:
                 raise AppError(409, "Die Auftragskennung wurde fuer andere Argumente verwendet.", reason="command_conflict")
         if existing and existing.get("status") == "completed" and existing.get("receipt"):
             if str(existing.get("conversation_id") or "") != str(conversation_id):
                 raise AppError(403, "Dieses Planungskommando gehört zu einer anderen Conversation.", reason="command_scope_denied")
-            return coach_command_receipt(client_turn_id, session_csrf_hash)
+            return coach_command_receipt_service().read(client_turn_id, session_csrf_hash)
         if existing:
             raise AppError(409, "Dieses Planungskommando wird bereits verarbeitet.", reason="client_turn_in_progress")
         db.execute(
@@ -2949,7 +2957,7 @@ def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf
     if existing_receipt:
         return existing_receipt
     _execute_claimed_planning_command(client_turn_id, operation, arguments, intent, conversation_id, session_csrf_hash, command_identity)
-    return coach_command_receipt(client_turn_id, session_csrf_hash)
+    return coach_command_receipt_service().read(client_turn_id, session_csrf_hash)
 
 
 def _structured_coach_receipt(
@@ -2966,7 +2974,7 @@ def _structured_coach_receipt(
         existing = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
         receipt = _coach_command_receipt(existing["receipt"]) if existing else {}
         if existing:
-            _require_command_owner(receipt, session_csrf_hash)
+            coach_command_receipt_service().require_owner(receipt, session_csrf_hash)
         else:
             user = CHAT_REPOSITORY.add(db, "user", message, client_turn_id=client_turn_id)
             receipt = {"client_turn_id": client_turn_id, "session_key": coach_session_key(session_csrf_hash),
@@ -3890,38 +3898,6 @@ def _chat_with_structured_coach_impl(
     )
 
 
-def _require_command_owner(receipt: dict[str, Any], session_csrf_hash: str) -> None:
-    if receipt.get("session_key") != coach_session_key(session_csrf_hash):
-        raise AppError(403, "Dieser Coach-Auftrag gehoert zu einer anderen Sitzung.", reason="command_scope_denied")
-
-
-def coach_command_receipt(client_turn_id: Any, session_csrf_hash: str) -> dict[str, Any]:
-    turn_id = str(client_turn_id or "").strip()
-    if not turn_id or len(turn_id) > 120:
-        raise AppError(400, "Ungueltige Coach-Auftragskennung.", reason="invalid_client_turn")
-    with DB_LOCK, database() as db:
-        row = db.execute("SELECT receipt, status FROM coach_commands WHERE client_turn_id=?", (turn_id,)).fetchone()
-    if not row:
-        raise AppError(404, "Coach-Auftrag nicht gefunden.", reason="command_not_found")
-    receipt = _coach_command_receipt(row["receipt"])
-    _require_command_owner(receipt, session_csrf_hash)
-    # Proposal state is current and session-bound, including one-time consumption.
-    proposals = receipt.get("proposed_actions") or [
-        item["result"]["proposed_action"] for item in receipt.get("command_receipts", [])
-        if isinstance(item.get("result"), dict) and item["result"].get("proposed_action")
-    ]
-    with DB_LOCK, database() as db:
-        receipt["proposed_actions"] = []
-        for proposal in proposals:
-            current = db.execute("SELECT * FROM coach_action_proposals WHERE id=? AND session_csrf_hash=?", (proposal.get("id"), session_csrf_hash)).fetchone()
-            if current:
-                value = coach_action_view(current)
-                if float(value["expires_at"]) <= time.time() and value["status"] in {"preview", "ready"}:
-                    value["status"] = "expired"
-                receipt["proposed_actions"].append(value)
-    return {key: value for key, value in {**receipt, "client_turn_id": turn_id}.items() if key != "session_key"}
-
-
 def _structured_command_failure_steps(
     receipt: dict[str, Any], intent: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
@@ -4125,7 +4101,7 @@ def _chat_command_state(
         ).fetchone()
         background_receipt = _coach_command_receipt((existing_command or {}).get("receipt"))
         if existing_command:
-            _require_command_owner(background_receipt, session_csrf_hash)
+            coach_command_receipt_service().require_owner(background_receipt, session_csrf_hash)
         background_owned = bool(background_job and background_receipt.get("mode") == "background")
         existing_command = _recover_stale_chat_command(db, existing_command, background_owned, client_turn_id)
     return existing_command, background_receipt, background_owned
@@ -4164,7 +4140,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     )
     if existing_command and existing_command.get("status") == "completed" and existing_command.get("receipt"):
         try:
-            return coach_command_receipt(client_turn_id, session_csrf_hash)
+            return coach_command_receipt_service().read(client_turn_id, session_csrf_hash)
         except (TypeError, ValueError):
             pass
     if existing_command and not background_owned:
@@ -4805,7 +4781,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/chat/receipt":
             session = self.auth_service.require_auth(self)
             query = parse_qs(urlparse(self.path).query)
-            self.send_json(200, coach_command_receipt(
+            self.send_json(200, coach_command_receipt_service().read(
                 query.get("client_turn_id", [None])[0], session["csrf_hash"],
             ))
         elif path == "/api/chat/status":
@@ -5080,7 +5056,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                             send_event("heartbeat", {"operation_id": operation_id})
                             continue
                         try:
-                            send_event("completed", coach_command_receipt(client_turn_id, session["csrf_hash"]))
+                            send_event("completed", coach_command_receipt_service().read(client_turn_id, session["csrf_hash"]))
                         except AppError as exc:
                             send_event("error", {"reason": exc.reason or "request_failed", "message": REDACTOR.redact_text(exc.message)[:1000]})
                         break

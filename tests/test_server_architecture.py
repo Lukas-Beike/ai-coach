@@ -62,6 +62,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "_execute_coach_action",
         ),
     ),
+    ("backend.coach.receipt_reads", ("CoachCommandReceiptService",)),
     (
         "backend.coach.context",
         (
@@ -1660,6 +1661,8 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_validate_restore_connection",
     "_validate_restore_database",
     "_coach_session_key",
+    "coach_command_receipt",
+    "_require_command_owner",
     "_active_background_coach_job",
     "_background_coach_request",
     "_background_coach_provider_settings",
