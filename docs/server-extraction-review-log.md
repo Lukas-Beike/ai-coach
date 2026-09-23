@@ -4848,3 +4848,28 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   getesteten kombinierten Stand leer; erneut vier Loop-, vier Startup-,
   vier Architekturtests und Inventar-/Diff-Check **PASS**. CI/Sonar des
   künftigen PR-Stands stehen aus.
+
+## P9 Diagnosebericht — integrierter Prüfstand
+
+- GPT-6-Luna/high-Worker-Commit `f18dc66c`, nach dem geprüften
+  P8-/P7-/P10-Stand als `58dae268` integriert. Frühes Root-Diffreview
+  stellte einen unnötig vorgezogenen Kalender-Read fest (**FAIL**);
+  Korrekturauftrag an denselben Worker, committed Stand erhält beide
+  getrennten Event-Reads an ihren ursprünglichen Projektionsstellen.
+  Root-Review des tatsächlichen committed Diffs **PASS**:
+  `DiagnosticReportService.report()` besitzt den gesamten Report,
+  einschließlich fünf DB-Zählern, acht KV-Reads, Provider-Frische,
+  redigierten Logs und Capture-Status/Entries. `server.py` enthält nur
+  eine Composition-Factory; der Handler ruft den Service. Keine Backend-
+  Rückimporte, Server-Callbacks, Remote-Writes oder neuen Rohdatenfelder.
+  DB-Lock/UOW, Datenschutz-/Redaktionsgrenzen und API-Shape bleiben
+  erhalten.
+- Worker-Gesamtsuite **PASS**: 2.297 Tests, 12 Skips; 14 Diagnose-
+  Follow-ups, zwei neue Service-, vier Architekturtests, scoped Ruff,
+  Compile/Diff **PASS**. Integriert erneut 14 Follow-ups, zwei Service-,
+  vier Architekturtests, Inventar/Compile/Ruff/Diff **PASS**.
+  `server.py` hat 6.639 physische Zeilen, P9 bleibt für eigenständigen
+  Capture-Endpunkt, Privacy und Backup/Restore offen. Neu gebautes
+  kombiniertes Read-only-Container-Image: vollständige Suite **PASS**,
+  2.303 Tests, 10 Skips in 19,917 s. CI/Sonar des künftigen PR-Stands
+  stehen noch aus.
