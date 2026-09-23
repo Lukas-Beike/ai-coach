@@ -5423,5 +5423,9 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   physische Zeilen; übrige P10-Projektionen und vollständiger
   HTTP-Transport bleiben offen. #736 wurde nach bestandenem Browser-
   und Codex-Review ohne Merge geschlossen, weil #735 inzwischen die
-  Zielbasis änderte und das generierte Inventar konfliktierte. Rebase,
-  erneute Vollsuite und Ersatz-PR folgen; keine Prüfung wird umgangen.
+  Zielbasis änderte und das generierte Inventar konfliktierte. Auf
+  `f6f310ec` rebased und tatsächlichen Gesamtdiff erneut geprüft:
+  **PASS**; fokussierte Architektur-/Service-Tests 6/6, Inventar- und
+  Diff-Check **PASS**, neues Read-only-Docker-Image mit vollständiger
+  Suite **PASS**, 2.346 Tests, 11 Skips. `server.py` hat 5.743
+  physische Zeilen. Ersatz-PR-CI und externer Review folgen.
