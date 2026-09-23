@@ -5317,8 +5317,11 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   **PASS**. Gezielter Browser-Test **PASS** (1/1), vollständiges
   `mobile-small`-Profil **PASS** (51/51) mit frischer temporärer
   Fixture-Datenbank und gemockten Providern; Compile, scoped Ruff
-  und Diff-Check **PASS**. Nach dem Push sind die neuen CI-Checks
-  erneut erforderlich; kein Merge vor deren Abschluss.
+  und Diff-Check **PASS**. Nach dem Push bestand auch die vollständige
+  GitHub-Browser-Suite; der Codex-Check verlangte bei neuer Head-SHA
+  dennoch eine zweite explizite Erstanforderung. Da ohne P1 kein
+  zweiter `@codex review` zulässig ist, wird #731 durch einen neuen
+  PR auf dem bestätigten #732-Merge ersetzt; keine Prüfung wird umgangen.
 
 ## P9 Restore-Validierung — integrierter lokaler Prüfstand
 
