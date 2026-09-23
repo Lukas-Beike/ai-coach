@@ -4952,6 +4952,11 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   vollständigen gemounteten Repository-Tests **PASS**: 2.308 Tests,
   10 Skips in 20,140 s. Damit ist der integrierte JSON-/ZIP-Code nach
   Korrektur erneut freigegeben; CI und Review des PR-Stands stehen aus.
+- PR #716 auf Head `24454a02`: SonarCloud, Python-/Container-/Browser-
+  CI und explizites Codex-Review **PASS**, keine offenen Threads.
+  Squash-Merge am `2026-09-23T14:36:31Z`, Commit
+  `a761e2d37bddf4cd60b215d00cd825f3cf529fa2` auf
+  `origin/develop` erreichbar.
 
 ## P9 Privacy-Löschung — eigenständig geprüfter Arbeitsstand
 
@@ -4974,3 +4979,8 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   vollständige Suite **PASS**, 2.310 Tests, 10 Skips in 20,246 s.
   `server.py` hat 6.347 physische Zeilen; Restore und HTTP-Migration
   bleiben P9-offen. PR-CI/Review stehen noch aus.
+- Der geprüfte Root-Commit `e5da2548` wurde auf den bestätigten
+  #716-Merge-Commit sequenziell als `09b9aa49` übernommen; der
+  vollständige Tree-Diff gegenüber dem mit 2.310 Container-Tests
+  geprüften Stand ist leer. Inventar-Check und Diff-Check bleiben
+  **PASS**; nur diese Review-Dokumentation wurde danach aktualisiert.
