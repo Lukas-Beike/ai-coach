@@ -729,7 +729,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             "Natural wording without a fixed trigger", "morning-quick", "synthetic-session",
             request_kind="morning_checkin",
         )
-        job = server._claim_background_coach_job()
+        job = server.coach_job_store().claim()
         def complete_command(*args, **kwargs):
             with server.database() as db:
                 db.execute("UPDATE coach_commands SET status='completed' WHERE client_turn_id='morning-quick'")
@@ -750,7 +750,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             "Natural wording without a fixed trigger", "morning-question", "synthetic-session",
             request_kind="morning_checkin",
         )
-        job = server._claim_background_coach_job()
+        job = server.coach_job_store().claim()
 
         def complete_with_question(*args, **kwargs):
             with server.database() as db:
@@ -771,7 +771,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         )
         self.assertEqual(job["status"], "queued")
         server.coach_conversation_reset_service().reset()
-        self.assertIsNone(server._claim_background_coach_job())
+        self.assertIsNone(server.coach_job_store().claim())
         self.assertEqual(server.coach_message_service().list(), [])
         with server.database() as db:
             command = db.execute(

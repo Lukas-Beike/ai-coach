@@ -144,8 +144,8 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
 
     def test_attachment_persists_for_worker_without_leaking_into_history(self):
         server.enqueue_background_coach_job("", "attachments-turn", "synthetic-csrf", attachments=[self.upload(), {"name": "chart.png", "data": PNG}])
-        job = server._claim_background_coach_job()
-        self.assertTrue(server._background_coach_message(job))
+        job = server.coach_job_store().claim()
+        self.assertTrue(server.coach_job_store().message(job))
         with server.database() as db:
             row = db.execute("SELECT attachments FROM messages WHERE role='user'").fetchone()
         saved = json.loads(row["attachments"])

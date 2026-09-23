@@ -270,6 +270,7 @@ from backend.coach.proposals import (
     coach_action_view,
 )
 from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools, validate_request
+from backend.coach.job_store import CoachJobStore
 from backend.coach.morning import ManualMorningCheckinService, MorningCheckinStateService
 from backend.coach.tools import build_tool_contracts
 from backend.coach.service import (
@@ -1962,6 +1963,14 @@ def gemini_conversation_history_service() -> GeminiConversationHistoryService:
 def coach_message_service() -> CoachMessageService:
     """Compose local chat persistence and committed state-event publication."""
     return CoachMessageService(database_manager(), CHAT_REPOSITORY, runtime_events.STATE_EVENT_BUFFER)
+
+
+def coach_job_store() -> CoachJobStore:
+    """Compose durable Coach background-job persistence."""
+    return CoachJobStore(
+        database_manager(), DB_LOCK, COACH_JOB_WAKE,
+        runtime_maintenance.MAINTENANCE_GATE, utc_now,
+    )
 
 
 def coach_dialogue_read_service() -> CoachDialogueReadService:
@@ -4420,68 +4429,6 @@ def resume_interrupted_coach_jobs() -> int:
     return resumed
 
 
-@runtime_maintenance.maintenance_operation
-def _claim_background_coach_job() -> dict[str, Any] | None:
-    with DB_LOCK, database() as db:
-        rows = db.execute(
-            "SELECT * FROM coach_commands WHERE status='queued' ORDER BY created_at LIMIT 20"
-        ).fetchall()
-        for row in rows:
-            receipt = _coach_command_receipt(row.get("receipt"))
-            if receipt.get("mode") != "background":
-                continue
-            try:
-                retry_after = float(receipt.get("retry_after") or 0)
-            except (TypeError, ValueError):
-                retry_after = 0
-            if retry_after > time.time():
-                continue
-            claimed = db.execute(
-                "UPDATE coach_commands SET status='running', updated_at=? WHERE client_turn_id=? AND status='queued'",
-                (utc_now(), row["client_turn_id"]),
-            ).rowcount
-            if claimed == 1:
-                return {**dict(row), "status": "running", "receipt": receipt,
-                        "_maintenance_generation": runtime_maintenance.MAINTENANCE_GATE.current_generation()}
-    return None
-
-
-def _requeue_background_coach_job(client_turn_id: str, reason: str) -> None:
-    """Return a job to the durable queue after transient Coach contention."""
-    with DB_LOCK, database() as db:
-        row = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
-        if not row:
-            return
-        receipt = _coach_command_receipt(row.get("receipt"))
-        try:
-            attempts = max(0, int(receipt.get("contention_attempts") or 0)) + 1
-        except (TypeError, ValueError):
-            attempts = 1
-        delay = min(60, 2 ** min(attempts, 5))
-        receipt.update({
-            "status": "queued",
-            "phase": "waiting_for_coach_slot",
-            "retry_reason": reason,
-            "contention_attempts": attempts,
-            "retry_after": time.time() + delay,
-        })
-        db.execute(
-            "UPDATE coach_commands SET status='queued', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
-            (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
-        )
-    COACH_JOB_WAKE.set()
-
-
-def _background_coach_message(job: dict[str, Any]) -> str:
-    receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
-    message_id = receipt.get("user_message_id")
-    with DB_LOCK, database() as db:
-        row = db.execute("SELECT content FROM messages WHERE id=? AND role='user'", (message_id,)).fetchone()
-    if not row or not str(row.get("content") or "").strip():
-        raise AppError(500, "Die gespeicherte Coach-Nachricht fehlt.", reason="background_message_missing")
-    return str(row["content"])
-
-
 def _background_coach_stream_delta(operation_id: str, text: str) -> None:
     coach_streams.CHAT_STREAM_REGISTRY.publish(operation_id, "delta", {"text": text})
 
@@ -4531,7 +4478,7 @@ def _execute_background_coach_job(
 ) -> dict[str, Any]:
     if not session_csrf_hash:
         raise AppError(401, "Die Sitzung des Coach-Auftrags ist abgelaufen.", reason="session_expired")
-    message = _background_coach_message(job)
+    message = coach_job_store().message(job)
     worker_phase = {"status": "running"}
     if not receipt.get("openai_response_id"):
         worker_phase["phase"] = "preparing"
@@ -4560,7 +4507,7 @@ def _handle_background_coach_error(
     client_turn_id: str, operation_id: str, exc: AppError,
 ) -> None:
     if exc.reason in {"chat_queue_full", "chat_request_timeout"}:
-        _requeue_background_coach_job(client_turn_id, exc.reason)
+        coach_job_store().requeue(client_turn_id, exc.reason)
         LOGGER.warning(
             "Persistent Coach background job requeued after contention",
             extra={"event": "coach_background_job_requeued", "context": {"operation_id": operation_id, "reason": exc.reason}},
@@ -4617,7 +4564,7 @@ def _coach_job_worker_loop() -> None:
     while not COACH_JOB_STOP.is_set():
         try:
             with runtime_maintenance.MAINTENANCE_GATE.operation():
-                job = _claim_background_coach_job()
+                job = coach_job_store().claim()
                 if job:
                     _run_background_coach_job(job)
                     continue

@@ -4512,7 +4512,7 @@ class CoachTests(unittest.TestCase):
     def test_manual_morning_quick_action_stops_before_coach_when_sleep_is_not_ready(self):
         receipt = {"request_kind": "morning_checkin"}
         error = server.AppError(503, "Garmin sleep is not ready", reason="garmin_sleep_not_ready")
-        with patch.object(server, "_background_coach_message", return_value="Morgen-Check-in"), patch.object(
+        with patch("backend.coach.job_store.CoachJobStore.message", return_value="Morgen-Check-in"), patch.object(
             server, "_merge_coach_command_receipt"
         ), patch.object(server.ManualMorningCheckinService, "prepare", side_effect=error), patch.object(
             server, "chat_with_coach"
@@ -5034,7 +5034,7 @@ class CoachTests(unittest.TestCase):
                 "turn-gemini-background-restart",
                 "csrf-gemini-background-restart",
             )
-            self.assertIsNotNone(server._claim_background_coach_job())
+            self.assertIsNotNone(server.coach_job_store().claim())
             self.assertEqual(server.resume_interrupted_coach_jobs(), 0)
         with server.DB_LOCK, server.database() as db:
             command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-gemini-background-restart",)).fetchone()
@@ -6395,7 +6395,7 @@ class CoachTests(unittest.TestCase):
             csrf_hash,
             operation_id="operation-background-bound",
         )
-        job = server._claim_background_coach_job()
+        job = server.coach_job_store().claim()
         seen = {}
         with patch.object(server, "chat_with_coach", side_effect=lambda *args, **kwargs: seen.update(kwargs) or {}):
             server._run_background_coach_job(job)
@@ -6414,7 +6414,7 @@ class CoachTests(unittest.TestCase):
                 "Wie soll ich heute trainieren?", "turn-background-streamed", csrf_hash,
                 operation_id=operation_id,
             )
-            job = server._claim_background_coach_job()
+            job = server.coach_job_store().claim()
 
             def complete_chat(*_args, **kwargs):
                 kwargs["on_text_delta"]("Erster ")
@@ -6441,7 +6441,7 @@ class CoachTests(unittest.TestCase):
             "Wie soll ich heute trainieren?", "turn-attached-provider-stream", csrf_hash,
             operation_id="operation-attached-provider-stream",
         )
-        self.assertIsNotNone(server._claim_background_coach_job())
+        self.assertIsNotNone(server.coach_job_store().claim())
         deltas = []
 
         def streamed_response(_payload, on_delta, _cancel_event, **kwargs):
@@ -6470,7 +6470,7 @@ class CoachTests(unittest.TestCase):
             "csrf-background-requeue",
             operation_id="operation-background-requeue",
         )
-        job = server._claim_background_coach_job()
+        job = server.coach_job_store().claim()
         with patch.object(
             server,
             "chat_with_coach",
@@ -6494,7 +6494,7 @@ class CoachTests(unittest.TestCase):
             "csrf-background-recovery-phase",
             operation_id="operation-background-recovery-phase",
         )
-        job = server._claim_background_coach_job()
+        job = server.coach_job_store().claim()
         server._merge_coach_command_receipt(
             "turn-background-recovery-phase",
             {"openai_response_id": "resp-recovery-phase", "phase": "waiting_final_response", "tool_rounds": 1},
@@ -9255,7 +9255,7 @@ class CoachTests(unittest.TestCase):
             "Eine Trainingsanfrage", "turn-background-cancel-close", session_key,
             operation_id=operation_id,
         )
-        self.assertIsNotNone(server._claim_background_coach_job())
+        self.assertIsNotNone(server.coach_job_store().claim())
         registry = coach_streams.CHAT_STREAM_REGISTRY
         cancel_event = registry.get_background_event(operation_id)
         response = Mock()

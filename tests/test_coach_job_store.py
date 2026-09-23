@@ -1,0 +1,141 @@
+import json
+import sqlite3
+import tempfile
+import threading
+import time
+import unittest
+from pathlib import Path
+
+from backend.coach.job_store import CoachJobStore
+from backend.db import row_factory
+from backend.db.manager import DatabaseManager
+from backend.errors import AppError
+from backend.runtime.maintenance import MaintenanceGate
+
+
+class CoachJobStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp_dir.name) / "coach.db"
+        self.wake = threading.Event()
+        self.gate = MaintenanceGate()
+        self.lock = threading.RLock()
+        self.manager = self._manager()
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "CREATE TABLE coach_commands (client_turn_id TEXT PRIMARY KEY, "
+                "status TEXT NOT NULL, receipt TEXT NOT NULL, created_at TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL)"
+            )
+            db.execute(
+                "CREATE TABLE messages (id INTEGER PRIMARY KEY, role TEXT NOT NULL, "
+                "content TEXT NOT NULL)"
+            )
+        self.store = self._store()
+
+    def tearDown(self):
+        self.manager.close()
+        self.temp_dir.cleanup()
+
+    def _manager(self):
+        return DatabaseManager(self.path, sqlite3, row_factory=row_factory)
+
+    def _store(self):
+        return CoachJobStore(
+            self.manager, self.lock, self.wake, self.gate,
+            lambda: "2026-09-23T12:00:00+00:00",
+        )
+
+    def _insert(self, turn_id, receipt, *, status="queued", created_at="2026-09-23"):
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO coach_commands VALUES (?, ?, ?, ?, ?)",
+                (turn_id, status, json.dumps(receipt), created_at, created_at),
+            )
+
+    def test_claim_skips_non_background_and_future_retry_then_claims_once(self):
+        self._insert("interactive", {"mode": "interactive"}, created_at="1")
+        self._insert(
+            "delayed",
+            {"mode": "background", "retry_after": time.time() + 60},
+            created_at="2",
+        )
+        self._insert("ready", {"mode": "background"}, created_at="3")
+
+        job = self.store.claim()
+
+        self.assertEqual(job["client_turn_id"], "ready")
+        self.assertEqual(job["status"], "running")
+        self.assertEqual(job["_maintenance_generation"], 0)
+        self.assertIsNone(self.store.claim())
+
+    def test_claim_preserves_the_twenty_row_candidate_limit(self):
+        for index in range(20):
+            self._insert(f"interactive-{index}", {"mode": "interactive"}, created_at=f"{index:02}")
+        self._insert("outside-limit", {"mode": "background"}, created_at="99")
+
+        self.assertIsNone(self.store.claim())
+
+    def test_claim_obeys_maintenance_gate_and_records_its_generation(self):
+        self._insert("after-restore", {"mode": "background"})
+        with self.gate.restore(), self.assertRaises(AppError) as raised:
+            self.store.claim()
+        self.assertEqual(raised.exception.reason, "maintenance")
+        self.assertEqual(self.store.claim()["_maintenance_generation"], 1)
+
+    def test_requeue_persists_contention_backoff_and_wakes_worker(self):
+        self._insert(
+            "contended",
+            {"mode": "background", "contention_attempts": 100},
+            status="running",
+        )
+        before = time.time()
+
+        self.store.requeue("contended", "chat_queue_full")
+
+        with self.manager.unit_of_work() as db:
+            row = db.execute(
+                "SELECT status, receipt, updated_at FROM coach_commands WHERE client_turn_id=?",
+                ("contended",),
+            ).fetchone()
+        receipt = json.loads(row["receipt"])
+        self.assertEqual(row["status"], "queued")
+        self.assertEqual(row["updated_at"], "2026-09-23T12:00:00+00:00")
+        self.assertEqual(receipt["contention_attempts"], 101)
+        self.assertEqual(receipt["retry_reason"], "chat_queue_full")
+        self.assertEqual(receipt["phase"], "waiting_for_coach_slot")
+        self.assertGreaterEqual(receipt["retry_after"], before + 32)
+        self.assertTrue(self.wake.is_set())
+
+    def test_message_requires_saved_user_content(self):
+        with self.manager.unit_of_work() as db:
+            db.execute("INSERT INTO messages(role, content) VALUES ('user', 'Synthetic question')")
+        self.assertEqual(
+            self.store.message({"receipt": {"user_message_id": 1}}),
+            "Synthetic question",
+        )
+        with self.assertRaises(AppError) as raised:
+            self.store.message({"receipt": {"user_message_id": 999}})
+        self.assertEqual(raised.exception.reason, "background_message_missing")
+
+    def test_claim_and_saved_message_survive_manager_restart_without_double_claim(self):
+        self._insert("restart", {"mode": "background", "user_message_id": 7})
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO messages(id, role, content) VALUES (7, 'user', 'Persisted question')"
+            )
+        self.manager.close()
+
+        self.manager = self._manager()
+        self.store = self._store()
+        job = self.store.claim()
+        self.assertEqual(self.store.message(job), "Persisted question")
+        self.manager.close()
+
+        self.manager = self._manager()
+        self.store = self._store()
+        self.assertIsNone(self.store.claim())
+
+
+if __name__ == "__main__":
+    unittest.main()
