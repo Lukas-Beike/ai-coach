@@ -32,6 +32,10 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.conversation", ("CoachConversationResetService",)),
     ("backend.coach.prompt", ("COACH_PROMPT",)),
     ("backend.http_api.readiness", ("ReadinessService",)),
+    (
+        "backend.http_api.public_performance",
+        ("PublicPerformanceStateService", "PublicFeedbackStateService"),
+    ),
     ("backend.http_api.library_page", ("LibraryPageService", "paged_library")),
     (
         "backend.coach.proposals",
@@ -1396,6 +1400,10 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     ("backend.http_api.responses", ("json_bytes",)),
     (
+        "backend.http_api.public_state",
+        ("PublicStateDependencies", "PublicStateService"),
+    ),
+    (
         "backend.http_api.static_assets",
         (
             "StaticAssetResponse",
@@ -1616,6 +1624,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
+    "public_state",
     "SESSION_LOCK",
     "SESSION_LAST_CLEANUP_MONOTONIC",
     "authenticated_session",
@@ -1626,6 +1635,8 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "cleanup_expired_sessions",
     "session_cookie_headers",
     "_restore_coach_session_csrf_hash",
+    "public_performance_state",
+    "public_feedback_state",
     "_delete_reset_coach_conversation",
     "_cancel_reset_coach_commands",
     "_reset_local_coach_chat_state",

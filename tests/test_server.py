@@ -15,6 +15,7 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.error import URLError
 from urllib.parse import quote
 from unittest.mock import Mock, call, patch
@@ -25,6 +26,7 @@ from backend.coach.attachments import gemini_history_parts
 from backend.coach.proposals import validated_coach_action_preview_input
 from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.readiness import ReadinessService
+from backend.http_api.public_state import PublicStateService
 from backend.http_api import readiness as readiness_module
 from backend.http_api import auth as http_auth
 from backend.http_api import server as http_server_module
@@ -1413,7 +1415,7 @@ class CoachTests(unittest.TestCase):
     def test_local_public_state_does_not_fetch_weather(self):
         server.profile_service().save({"weather_location": "Berlin"})
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=AssertionError("weather must stay local")):
-            state = server.public_state(local_only=True)
+            state = server.public_state_service().read(local_only=True)
         self.assertTrue(state["configured"]["weather"])
         self.assertTrue(state["weather"]["loading"])
 
@@ -1421,8 +1423,124 @@ class CoachTests(unittest.TestCase):
         backend = server.sqlite_backend if server.CONFIG.app_password else server.sqlite3
         real_connect = backend.connect
         with patch.object(backend, "connect", wraps=real_connect) as connect:
-            server.public_state(local_only=True)
+            server.public_state_service().read(local_only=True)
         self.assertEqual(connect.call_count, 2)
+
+    def test_public_state_resolves_database_manager_under_database_lock(self):
+        database_lock = threading.RLock()
+        manager_factory = server.database_manager
+        calls = []
+
+        def resolve_manager():
+            self.assertTrue(database_lock._is_owned())
+            calls.append(True)
+            return manager_factory()
+
+        with patch.object(server, "DB_LOCK", database_lock), patch.object(
+            server, "database_manager", side_effect=resolve_manager
+        ):
+            server.public_state_service()
+        self.assertTrue(calls)
+
+    def test_public_state_resolves_active_manager_after_weather_restore(self):
+        class Manager:
+            def __init__(self):
+                self.closed = False
+                self.unit_of_work_calls = 0
+
+            @contextmanager
+            def unit_of_work(self):
+                self.unit_of_work_calls += 1
+                if self.closed:
+                    raise RuntimeError("database manager is closed")
+                yield object()
+
+        old_manager = Manager()
+        new_manager = Manager()
+        active_manager = [old_manager]
+        database_lock = threading.RLock()
+
+        def manager_factory():
+            self.assertTrue(database_lock._is_owned())
+            return active_manager[0]
+
+        def owner(**methods):
+            result = Mock()
+            for name, value in methods.items():
+                getattr(result, name).return_value = value
+            return result
+
+        settings = Mock()
+        settings.selected_ai_provider.return_value = ""
+        settings.available_ai_providers.return_value = []
+        settings.selected_model.return_value = ""
+        settings.available_model_options.return_value = []
+        settings.selected_thinking_level.return_value = ""
+        settings.available_thinking_level_options.return_value = []
+        settings.calendar_display_settings.return_value = {}
+        weather_prelude = Mock()
+
+        def restore_during_weather(*_args):
+            old_manager.closed = True
+            active_manager[0] = new_manager
+            return {"configured": False}
+
+        weather_prelude.project.side_effect = restore_during_weather
+        dependencies = SimpleNamespace(
+            local_prelude=owner(read=SimpleNamespace(
+                snapshot={}, activities=[], local_planned=[], canonical_planned=[],
+                calendar_window={}, weather={},
+            )),
+            weather_prelude=weather_prelude,
+            calendar_projection=owner(read=SimpleNamespace(
+                checkins=[], competitions=[], external_calendar={}, daily_context=[],
+                calendar_projection={},
+            )),
+            database_manager=manager_factory,
+            database_lock=database_lock,
+            key_values=owner(get=""),
+            app_name="Intervals Coach",
+            app_version="test",
+            config=SimpleNamespace(
+                garmin_tokenstore=str(Path("missing-garmin-tokenstore")),
+                intervals_api_key="", openai_api_key="", gemini_api_key="",
+                calendar_ical_url="",
+            ),
+            settings=settings,
+            coach_messages=owner(list=[]),
+            training_plans=owner(list=[]),
+            workout_library=owner(list=[]),
+            profile=owner(get={}),
+            public_feedback=owner(feedback_state={
+                "checkins": [], "local_feedback": [], "activity_feedback": [],
+            }),
+            public_performance=owner(from_snapshot={"performance": {}, "garmin": {}}),
+            sync_state=owner(sync_period=30),
+            provider_freshness=owner(current={}),
+            garmin_sync_state=owner(core_error_entries=[]),
+            sync_public_state=owner(browser_state={}),
+            intervals_sync_lock=owner(locked=False),
+            workout_library_sync_running=lambda: False,
+            workout_library_sync_state=owner(summary={}),
+            garmin_sync=owner(running=False),
+            provider_resync=owner(state={}),
+            planning_preview=owner(latest_preview={}, status={}),
+            morning_checkin=owner(state={}),
+            coach_quick_actions=owner(state={}),
+            provider_state=owner(summary={}),
+            sync_period_defaults={"intervals": 90, "garmin": 30},
+            all_sync_days=3650,
+            calendar_history_days=30,
+            calendar_future_days=90,
+            local_now=lambda: datetime(2026, 9, 23),
+        )
+        service = PublicStateService(dependencies)
+
+        result = service.read(local_only=True)
+
+        self.assertIn("configured", result)
+        self.assertEqual(old_manager.unit_of_work_calls, 0)
+        self.assertGreater(new_manager.unit_of_work_calls, 0)
 
     def test_changing_weather_location_clears_negative_cache(self):
         server.profile_service().save({"weather_location": "Berlin"})
@@ -2030,7 +2148,7 @@ class CoachTests(unittest.TestCase):
         server.checkin_service().save(
             {"checkin_date": "2026-08-30", "motivation": 8}
         )
-        state = server.public_state(local_only=True)
+        state = server.public_state_service().read(local_only=True)
         self.assertEqual(state["checkins"][0]["checkin_date"], "2026-08-30")
         self.assertEqual(state["checkins"][0]["motivation"], 8)
 
@@ -2039,7 +2157,7 @@ class CoachTests(unittest.TestCase):
 
         with patch.object(server, "CONFIG", config):
             bootstrap = server.public_bootstrap()
-            state = server.public_state(local_only=True)
+            state = server.public_state_service().read(local_only=True)
 
         for result in (bootstrap, state):
             self.assertEqual(result["ai_provider"]["selected"], "")
@@ -2097,7 +2215,7 @@ class CoachTests(unittest.TestCase):
         today = server.local_now().date().isoformat()
         server.sync_state_repository().save_snapshot({"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [{"name": "Locker", "start_date_local": f"{today}T08:00:00"}]})
         server.checkin_service().save({"checkin_date": today, "motivation": 8})
-        state = server.public_state(local_only=True)
+        state = server.public_state_service().read(local_only=True)
         self.assertEqual(state["daily_planning_context"][0]["date"], today)
         self.assertEqual(state["daily_planning_context"][0]["checkin"]["motivation"], 8)
 
@@ -2866,7 +2984,7 @@ class CoachTests(unittest.TestCase):
             "activity_name": "Morgenlauf", "activity_date": "2026-08-30T07:00:00", "notes": "Linkes Knie ungewohnt empfindlich",
         })
         self.assertEqual(result["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich")
-        activity = server.public_state(local_only=True)["activities"][0]
+        activity = server.public_state_service().read(local_only=True)["activities"][0]
         self.assertEqual(activity["activity_feedback"]["activity_id"], "activity-1")
         self.assertEqual(activity["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich")
         context = server.coach_structured_context_service().build()
@@ -4141,7 +4259,7 @@ class CoachTests(unittest.TestCase):
             "synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [],
             "provider_sync": {"calendar_window": {"start": (today - timedelta(days=10)).isoformat(), "end": (today + timedelta(days=20)).isoformat()}},
         })
-        state = server.public_state(local_only=True)
+        state = server.public_state_service().read(local_only=True)
         self.assertEqual(state["planning_view"]["provider_window"]["end"], (today + timedelta(days=20)).isoformat())
         self.assertNotIn("public_calendar", state)
 
@@ -8160,7 +8278,7 @@ class CoachTests(unittest.TestCase):
         server.planned_unit_service().create({"date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "Intervalle", "description": "- 30m Z2", "duration_minutes": 30})
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [{"name": "Morgenlauf"}], "recent_wellness": [], "upcoming_calendar": []}
         server.sync_state_repository().save_snapshot(snapshot)
-        state = server.public_state()
+        state = server.public_state_service().read()
         self.assertEqual(state["app"]["name"], "Intervals Coach")
         self.assertEqual(state["app"]["version"], server.APP_VERSION)
         self.assertEqual(state["activities"][0]["name"], "Morgenlauf")
@@ -8847,7 +8965,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
             server.set_kv("last_library_sync_at", "2026-08-31T08:00:00+00:00")
-            state = server.public_state(local_only=True)["intervals"]
+            state = server.public_state_service().read(local_only=True)["intervals"]
         self.assertEqual(state["state"], "connected")
         self.assertIsNone(state["last_sync_at"])
         self.assertEqual(state["library_sync"]["last_sync_at"], "2026-08-31T08:00:00+00:00")
@@ -8857,7 +8975,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
             server.set_kv("last_library_sync_error", "Intervals.icu weist die Anfrage zurück (422): Invalid workout type")
-            state = server.public_state(local_only=True)["intervals"]
+            state = server.public_state_service().read(local_only=True)["intervals"]
         self.assertEqual(state["state"], "error")
         self.assertIn("422", state["last_error"])
 
@@ -9634,7 +9752,10 @@ class CoachTests(unittest.TestCase):
             def __exit__(self, *args):
                 self.lock.release()
 
-        for state_reader in (server.public_bootstrap, server.public_state):
+        for state_reader in (
+            server.public_bootstrap,
+            lambda: server.public_state_service().read(),
+        ):
             for update in (False, True):
                 with self.subTest(state=state_reader.__name__, update=update):
                     database_lock = ObservedDatabaseLock()

@@ -5393,3 +5393,82 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `69b221e8` bestand die vollständige kombinierte Suite erneut:
   **PASS**, 2.344 Tests, 11 Skips. Root-Gate des korrigierten Diffs
   **PASS**; die erneute Sonar-/Browser-/Codex-Prüfung steht noch aus.
+
+## P8 Coach-Job-Submission — bestätigter Merge
+
+- #734 nach SonarCloud-FAIL und bestandenen übrigen Prüfungen ohne Merge
+  geschlossen. Der korrigierte Head `e0b59d0d` wurde als #735 gegen
+  `develop` geprüft: SonarCloud, Browser, Container-Tests und Codex-Code-
+  sowie Security-Review **PASS**, 0 offene Review-Threads. Squash-Merge
+  `f6f310ec1a3784dbde4250fbb31753c0cec30125` am
+  `2026-09-23T18:10:14Z` bestätigt und auf `origin/develop` erreichbar.
+
+## P10 Performance-/Feedback-Projektionen — Integrationsreview
+
+- GPT-6-Luna/high-Patch `aa00a316`, auf bestätigtem #733-Merge
+  `eb69cffd` als `2aefe68b` mit Inventar-/Architekturstand
+  `b0e71b3a` integriert. Root prüfte den tatsächlichen Diff und
+  Code: **PASS**. Die zwei konkreten Services in
+  `backend/http_api/public_performance.py` besitzen die vollständige
+  Performance-/Garmin- bzw. Feedback-Projektion; `server.py` enthält
+  nur ihre Komposition und direkte Handler-Delegation. Auth-Grenze,
+  lokale Datumsauflösung, Lese-Reihenfolge und Check-in-Limit 30
+  bleiben erhalten. Keine Server-Rückimporte oder Alt-Wrapper.
+- Rebase-Konflikte betrafen #733-Authentifizierung sowie das generierte
+  Inventar; die dynamische Handler-Auth wurde beibehalten und das
+  Inventar aus dem kombinierten Quellstand neu erzeugt. Fokussierte
+  Tests und Architekturtest **PASS** (6/6), Inventar-/Diff-Check
+  **PASS**. Neu gebautes Read-only-Docker-Image: vollständige Suite
+  **PASS**, 2.343 Tests, 11 Skips. `server.py` umfasst 5.888
+  physische Zeilen; übrige P10-Projektionen und vollständiger
+  HTTP-Transport bleiben offen. #736 wurde nach bestandenem Browser-
+  und Codex-Review ohne Merge geschlossen, weil #735 inzwischen die
+  Zielbasis änderte und das generierte Inventar konfliktierte. Auf
+  `f6f310ec` rebased und tatsächlichen Gesamtdiff erneut geprüft:
+  **PASS**; fokussierte Architektur-/Service-Tests 6/6, Inventar- und
+  Diff-Check **PASS**, neues Read-only-Docker-Image mit vollständiger
+  Suite **PASS**, 2.346 Tests, 11 Skips. `server.py` hat 5.743
+  physische Zeilen. #737-Container-, Sonar- und Browser-Checks
+  **PASS**; Codex-Check scheiterte geschlossen mit externem
+  `Unexpected error`, und das abgeschlossene Review meldete einen
+  P2-Befund: `public_state()` dupliziert die Performance-/Feedback-
+  Projektionen noch in `server.py`. Die behauptete produktive
+  `/api/bootstrap`-Verknüpfung existiert zwar nicht, die doppelte
+  Eigentümerschaft aber schon. Review-Gate deshalb **FAIL**;
+  #737 ohne Merge geschlossen. Nächster Schritt: denselben
+  `public_state`-Eigentümer auf die konkreten Performance-/Feedback-
+  Services verdrahten, integrierten Diff und Vollsuite neu prüfen und
+  erst dann einen Ersatz-PR gegen aktuelles `develop` eröffnen.
+
+## P10 Öffentliche Projektionen — kombiniertes Sol-Review
+
+- GPT-6-Luna/high-Patch `e0ac064a` verschob die komplette historische
+  `public_state`-Orchestrierung in `PublicStateService`. Root-Diffreview
+  **FAIL**: ein vor dem Wetter-Follow-up gebundener Datenbankmanager
+  konnte nach Restore veraltet sein. Derselbe Worker korrigierte mit
+  Factory-Auflösung unter `DB_LOCK` in `7419a980` und einem
+  deterministischen Managerwechseltest. Ein zunächst außerhalb des
+  erlaubten Schreibbereichs angelegter Test wurde auf Root-Hinweis
+  nach `tests/test_server.py` verlegt; Endpatch nur in den freigegebenen
+  Dateien. Worker-Vollsuite **PASS**, 2.343 Tests, 12 Skips.
+- Root integrierte die Worker-Patches sequenziell als `197426a1` und
+  `ffa6e079` mit den Performance-/Feedback-Services und beseitigte
+  den P2-Duplikationsbefund in `230ecb96`: `PublicStateService` nutzt
+  dieselben konkreten Services mit bereits gelesenem Snapshot und
+  Check-ins. Die ursprüngliche Response-Reihenfolge, lokale-only-
+  Grenze und Lock-/UOW-Nutzung bleiben erhalten. Keine Backend-
+  Rückimporte, Server-Fachcallbacks oder Kompatibilitätswrapper.
+  Root prüfte den tatsächlichen integrierten Diff und Code: **PASS**.
+  Neu gebautes Read-only-Docker-Image mit vollständiger Suite
+  **PASS**, 2.350 Tests, 11 Skips; fokussierte Projektionstests,
+  Architekturtests, Compile, Inventar- und Diff-Check **PASS**.
+  `server.py` umfasst 5.656 physische Zeilen. Die frühere
+  `public_state()`-Funktion hatte nur Testaufrufer; produktives
+  `/api/bootstrap` bleibt ein separater begrenzter Local-Only-Read.
+  #738 auf Head `c0e6eaaa`: Sonar-, Container-, Browser- und Codex-
+  Checks **PASS**, 0 offene Review-Threads. Root fand danach im
+  zusätzlichen Ruff-Lauf einen reinen Import-Sortierbefund im neuen
+  Modul; der Ein-Modul-Diff `ac4eab44` ist erneut geprüft, Ruff,
+  Compile und Diff-Check **PASS**. Wegen der Einmal-Review-Regel
+  wird #738 ohne Merge durch einen neuen PR mit dem korrigierten
+  Head ersetzt; kein alter PASS wird auf eine neue Head-SHA übertragen.

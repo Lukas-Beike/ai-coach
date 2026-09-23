@@ -80,7 +80,6 @@ from backend.athlete.checkins import (
 )
 from backend.athlete.context import AthleteContextService
 from backend.athlete.profile import DEFAULT_PROFILE, ProfileService, normalize_profile, timezone_name
-from backend.performance import context as performance_context
 from backend.performance import morning_battery as performance_morning_battery
 from backend.performance.morning_battery_service import (
     MorningBatteryClock,
@@ -140,6 +139,10 @@ from backend.http_api import server as http_server
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.auth import SessionAuthService
+from backend.http_api.public_performance import (
+    PublicFeedbackStateService,
+    PublicPerformanceStateService,
+)
 from backend.http_api.state_prelude import (
     CalendarWindowRange,
     PublicStateLocalPrelude,
@@ -230,6 +233,7 @@ from backend.planning.training_plan_artifact_service import TrainingPlanArtifact
 from backend.planning import training_plans as planning_training_plans
 from backend.planning import workouts as planning_workouts
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
+from backend.http_api.public_state import PublicStateDependencies, PublicStateService
 from backend.sync.jobs import (
     SyncJobStore,
 )
@@ -845,6 +849,22 @@ def state_version_service() -> StateVersionService:
         SNAPSHOT_REPOSITORY,
         profile_service(),
     )
+
+
+def public_performance_state_service() -> PublicPerformanceStateService:
+    """Compose the read-only performance projection."""
+    return PublicPerformanceStateService(
+        sync_state_repository(),
+        garmin_payload_service(),
+        profile_service(),
+        garmin_projection_service(),
+        lambda: local_now().date(),
+    )
+
+
+def public_feedback_state_service() -> PublicFeedbackStateService:
+    """Compose the read-only feedback projection."""
+    return PublicFeedbackStateService(checkin_service(), activity_feedback_service())
 
 
 def sync_public_state_service() -> SyncPublicStateService:
@@ -4666,27 +4686,6 @@ def public_plan_state(local_only: bool = False) -> dict[str, Any]:
     }
 
 
-def public_performance_state() -> dict[str, Any]:
-    snapshot = sync_state_repository().latest_snapshot()
-    return {
-        "performance": performance_context.current_performance_context(
-            snapshot,
-            garmin_payload_service().snapshot(),
-            profile_service().get(),
-            local_now().date(),
-        ),
-        "garmin": garmin_projection_service().public_state(),
-    }
-
-
-def public_feedback_state() -> dict[str, Any]:
-    return {
-        "checkins": checkin_service().list(30),
-        "local_feedback": checkin_service().context(),
-        "activity_feedback": activity_feedback_service().context(),
-    }
-
-
 def public_weather_state(local_only: bool = False) -> dict[str, Any]:
     """Return the configured forecast without loading the complete plan state."""
     result = weather_service().state(refresh=not local_only)
@@ -4724,134 +4723,47 @@ def public_state_calendar_projection_service() -> PublicStateCalendarProjection:
     )
 
 
-def public_state(local_only: bool = False) -> dict[str, Any]:
-    prelude = public_state_local_prelude_service().read(local_only)
-    snapshot = prelude.snapshot
-    activities = prelude.activities
-    local_planned = prelude.local_planned
-    canonical_planned = prelude.canonical_planned
-    calendar_window = prelude.calendar_window
-    weather = public_state_weather_prelude_service().project(
-        canonical_planned, prelude.weather
-    )
-
-    with DB_LOCK, database() as db:
-        calendar_data = public_state_calendar_projection_service().read(
-            snapshot,
-            canonical_planned,
-            local_planned,
-            activities,
-            weather,
-            calendar_window,
+def public_state_service() -> PublicStateService:
+    """Compose the public state projection from concrete backend owners."""
+    with DB_LOCK:
+        return PublicStateService(
+            PublicStateDependencies(
+                local_prelude=public_state_local_prelude_service(),
+                weather_prelude=public_state_weather_prelude_service(),
+                calendar_projection=public_state_calendar_projection_service(),
+                database_manager=database_manager,
+                database_lock=DB_LOCK,
+                key_values=KEY_VALUE_REPOSITORY,
+                app_name=APP_NAME,
+                app_version=APP_VERSION,
+                config=CONFIG,
+                settings=SETTINGS,
+                coach_messages=coach_message_service(),
+                training_plans=training_plan_service(),
+                workout_library=workout_library_service(),
+                profile=profile_service(),
+                public_feedback=public_feedback_state_service(),
+                public_performance=public_performance_state_service(),
+                sync_state=sync_state_repository(),
+                provider_freshness=provider_freshness_service(),
+                garmin_sync_state=garmin_sync_state_service(),
+                sync_public_state=sync_public_state_service(),
+                intervals_sync_lock=INTERVALS_SYNC_LOCK,
+                workout_library_sync_running=workout_library_sync_running,
+                workout_library_sync_state=workout_library_sync_state_service(),
+                garmin_sync=garmin_sync_service(),
+                provider_resync=full_provider_resync_service(),
+                planning_preview=adaptive_replan_preview_service(),
+                morning_checkin=morning_checkin_state_service(),
+                coach_quick_actions=coach_quick_actions_service(),
+                provider_state=provider_state_service(),
+                sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+                all_sync_days=ALL_SYNC_DAYS,
+                calendar_history_days=PLANNED_CALENDAR_HISTORY_DAYS,
+                calendar_future_days=PLANNED_CALENDAR_FUTURE_DAYS,
+                local_now=local_now,
+            )
         )
-        checkins = calendar_data.checkins
-        competitions = calendar_data.competitions
-        external_calendar = calendar_data.external_calendar
-        daily_context = calendar_data.daily_context
-        calendar_projection = calendar_data.calendar_projection
-        freshness = provider_freshness_service().current(
-            profile=profile_service().get(),
-            garmin_has_core_error=bool(
-                garmin_sync_state_service().core_error_entries()
-            ),
-            garmin_tokenstore_exists=Path(CONFIG.garmin_tokenstore).exists(),
-        )
-        sync = sync_public_state_service().browser_state(freshness=freshness)
-        return {
-            "app": {
-                "name": APP_NAME,
-                "version": APP_VERSION,
-            },
-            "messages": coach_message_service().list(),
-            "plans": training_plan_service().list(),
-            "library": workout_library_service().list(include_archived=True),
-            "activities": activities,
-            **calendar_projection,
-            "weather": weather,
-            "profile": profile_service().get(),
-            "competitions": competitions,
-            "checkins": checkins,
-            "local_feedback": checkin_service().context(),
-            "activity_feedback": activity_feedback_service().context(),
-            "planning": planning_season.planning_state(
-                competitions,
-                local_now().date(),
-                adaptive_replan_preview_service().latest_preview(),
-                adaptive_replan_preview_service().status(),
-            ),
-            "external_calendar": external_calendar,
-            "daily_planning_context": daily_context,
-            "performance": performance_context.current_performance_context(
-                snapshot,
-                garmin_payload_service().snapshot(),
-                profile_service().get(),
-                local_now().date(),
-            ),
-            "garmin": garmin_projection_service().public_state(),
-            "intervals": intervals_state.public_state(
-                configured=bool(CONFIG.intervals_api_key),
-                running=INTERVALS_SYNC_LOCK.locked() or workout_library_sync_running(),
-                status=get_kv("sync_status") or None,
-                last_sync_at=get_kv("last_sync_at"),
-                last_sync_error=get_kv("last_sync_error") or None,
-                last_library_sync_at=get_kv("last_library_sync_at"),
-                last_library_sync_error=get_kv("last_library_sync_error") or None,
-                pagination_value=get_kv("last_sync_pagination"),
-                snapshot=snapshot,
-                library_sync_state=workout_library_sync_state_service().summary(),
-                today=local_now().date(),
-                history_days=PLANNED_CALENDAR_HISTORY_DAYS,
-                future_days=PLANNED_CALENDAR_FUTURE_DAYS,
-            ),
-            "provider_freshness": freshness,
-            "garmin_sync": {
-                "running": garmin_sync_service().running(),
-                "status": get_kv("garmin_sync_status") or None,
-            },
-            "provider_resync": {
-                "intervals": full_provider_resync_service().state("intervals", db),
-                "garmin": full_provider_resync_service().state("garmin", db),
-            },
-            "sync": sync,
-            "library_sync": {
-                "last_sync_at": get_kv("last_library_sync_at"),
-                "last_error": get_kv("last_library_sync_error") or None,
-                "state": workout_library_sync_state_service().summary(),
-            },
-            "sync_settings": {
-                "intervals_days": sync_state_repository().sync_period(
-                    "intervals", SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS
-                ),
-                "garmin_days": sync_state_repository().sync_period(
-                    "garmin", SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS
-                ),
-            },
-            "calendar_display": SETTINGS.calendar_display_settings(),
-            "competition_sync": {
-                "last_sync_at": get_kv("last_competition_sync_at"),
-                "last_error": get_kv("last_competition_sync_error") or None,
-                "running": get_kv("competition_sync_running") == "1",
-                "status": get_kv("competition_sync_status") or None,
-            },
-            "performance_refresh": {
-                "last_refresh_at": get_kv("last_performance_refresh_at"),
-                "last_error": get_kv("last_performance_error") or None,
-                "running": get_kv("performance_refresh_running") == "1",
-            },
-            "morning_checkin": morning_checkin_state_service().state(),
-            "coach_quick_actions": coach_quick_actions_service().state(),
-            "ai_provider": {"selected": SETTINGS.selected_ai_provider(), "options": SETTINGS.available_ai_providers()},
-            "model": {"selected": SETTINGS.selected_model(), "options": SETTINGS.available_model_options()},
-            "thinking_level": {"selected": SETTINGS.selected_thinking_level(), "options": SETTINGS.available_thinking_level_options()},
-            "configured": {
-                "openai": bool(CONFIG.openai_api_key),
-                "gemini": bool(CONFIG.gemini_api_key),
-                "intervals": bool(CONFIG.intervals_api_key),
-                "weather": bool(weather.get("configured")),
-                "external_calendar": bool(CONFIG.calendar_ical_url),
-            },
-            "usage": provider_state_service().summary(SETTINGS.selected_ai_provider() or "openai"),
-        }
 
 
 def recent_log_entries_service() -> RecentLogEntriesService:
@@ -5148,13 +5060,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, library_page_service().page(query.get("cursor", [None])[0], query.get("limit", [None])[0]))
         elif path == "/api/performance":
             self.auth_service.require_auth(self)
-            self.send_json(200, public_performance_state())
+            self.send_json(200, public_performance_state_service().performance_state())
         elif path == "/api/profile":
             self.auth_service.require_auth(self)
             self.send_json(200, {"profile": profile_service().get(), "competitions": competition_service().list(limit=100)})
         elif path == "/api/feedback":
             self.auth_service.require_auth(self)
-            self.send_json(200, public_feedback_state())
+            self.send_json(200, public_feedback_state_service().feedback_state())
         elif path == "/api/context-preview":
             self.auth_service.require_auth(self)
             self.send_json(200, coach_context_preview_service().preview(SETTINGS.selected_ai_provider()))
