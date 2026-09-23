@@ -588,6 +588,9 @@ Ressourcen. Tests laufen ausschließlich mit temporären Datenbanken/Archiven.
 Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Cases beginnen.
 
 - [ ] Auth, Session-Cookies, CSRF, Rate-Limits und Readiness in `http_api/` ziehen.
+  - [x] Öffentliche Readiness-Prüfung mit bestehender DB-UOW,
+    kurzlebiger Verzeichnisprobe und Wartungsstatus einem konkreten
+    `ReadinessService` zuordnen; Handler sendet nur Status und JSON.
 - [ ] Öffentliche Bootstrap-/State-Projektionen und Pagination zuordnen;
   Projektionen erhalten Daten über Domänenlesefunktionen.
   - [x] Lokalen Bootstrap-Lesevorlauf und Wetter-Follow-up mit

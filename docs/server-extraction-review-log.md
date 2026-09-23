@@ -5084,3 +5084,23 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Container-Image: vollständige Suite **PASS**, 2.317 Tests,
   10 Skips in 20,316 s. Inventar- und Diff-Check **PASS**;
   `server.py` hat 6.283 physische Zeilen.
+
+## P10 Readiness — integrierter Prüfstand
+
+- GPT-6-Luna/high-Patch `c075f454`: öffentliche DB-/Schema-/
+  Verzeichnis-/Wartungsprojektion als `ReadinessService.state()`.
+  Erstes Root-Diffreview **FAIL**: unaufgeforderter Wechsel von
+  `DatabaseManager.unit_of_work()` auf eine Reader-Lease und fehlender
+  Handler-Level-Vertrag für 200/503. Derselbe Worker korrigierte
+  beides in `339b4c6c`; Root-Follow-up- und Gesamtdiffreview
+  danach **PASS**. Die DB-Prüfung bleibt unter `DB_LOCK` in der
+  ursprünglichen Writer-/UOW-Grenze; der Handler-Test prüft den
+  komponierten Service, vollständige JSON-Payloads und Statuscodes.
+- Worker-Vollsuite nach Korrektur **PASS**: 2.319 Tests, 12 Skips;
+  sechs gezielte Readiness- und vier Architekturtests, Compile,
+  scoped Ruff und Diff-Check **PASS**. Konfliktfreie Integration auf
+  bestätigtem #720-Merge `2a57b317` als `479c3de3` und
+  `2cfd1be1`. Neu gebautes kombiniertes Read-only-Container-Image:
+  vollständige Suite **PASS**, 2.319 Tests, 10 Skips in 20,149 s;
+  Inventar- und Diff-Check **PASS**. `server.py` hat 6.250
+  physische Zeilen. PR-CI folgt.
