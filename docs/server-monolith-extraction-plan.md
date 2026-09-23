@@ -499,6 +499,10 @@ Abhängigkeit: P2–P6.
   Replay-/Repair-Schlüssel ihren Coach-Modulen zuordnen.
 - [ ] Tool-Dispatch samt Ergebnis-/Fehlerprojektion verschieben; Planmutationen
   rufen die in P4 abgeschlossenen Planungs-Use-Cases auf.
+  - [x] Strukturierte Coach-Sync-Werkzeuge einschließlich Scope-/Remote-
+    Prüfung und Job-ID-Buchführung dem konkreten Sync-Tool-Service zuordnen.
+  - [x] Adaptive Apply-Freigabe mit späterem Nutzerturn und atomare
+    Coach-Profiländerungen in eigene konkrete Services verlagern.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.

@@ -4450,3 +4450,20 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Bindungen. Zeilenzunahme durch Composition-Factories zählt nicht
   als Phasenabschluss. Sonar/CI des nächsten veröffentlichten Heads
   noch ausstehend.
+
+## P7.22 — atomare Coach-Profiländerung
+
+- Root-Diff `58051bb`, sequenziell als `46523cb` integriert und am
+  integrierten Code erneut geprüft: **PASS**. Der konkrete
+  `CoachProfileUpdateService` besitzt Scope-Prüfung, Feld- und
+  Duplikatvalidierung, Expected-Value-Konfliktprüfung und atomaren
+  Gesamtbatch vor `ProfileService.save`. Bestehende `DB_LOCK`-/UOW-
+  Eigentümer und unveränderte ProfileService-Audit-/Cache-Invalidierung
+  bleiben erhalten; der Server komponiert nur und trägt weder den
+  Business-Loop noch einen Fachcallback.
+- Drei direkte Profil-, drei Architektur- und 68 Dialogregressionen,
+  Ruff, Compile, Diff- und Inventar-Check **PASS**. Gesamtsuite für
+  `46523cb` **PASS**: 2.262 Tests, 12 Skips in 223,005 s. Root-Code-
+  Review erneut **PASS**. Inventar: `server.py` 6.932 Zeilen, P7
+  101 Definitionen/31 globale Bindungen; P7 ist weiterhin offen.
+  Sonar/CI des veröffentlichten Stands noch ausstehend.
