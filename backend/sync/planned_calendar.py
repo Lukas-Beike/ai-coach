@@ -28,6 +28,9 @@ from backend.sync.reconcile import PlannedUnitSyncStateWriter
 
 _PLANNED_UNIT_SYNCS: set[str] = set()
 _PLANNED_UNIT_SYNC_LOCK = threading.Lock()
+_PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL = (
+    "SELECT payload FROM planned_units WHERE local_id=?"
+)
 
 
 @contextmanager
@@ -94,7 +97,7 @@ class PlannedCalendarSyncService:
     def _recheck(self, normalized_id: str, original_payload: str) -> None:
         with self._database_manager.reader() as db:
             current = db.execute(
-                "SELECT payload FROM planned_units WHERE local_id=?", (normalized_id,)
+                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (normalized_id,)
             ).fetchone()
         self._require_unchanged(current, original_payload)
 
@@ -162,7 +165,7 @@ class PlannedCalendarSyncService:
     def _mark_removed(self, normalized_id: str, original_payload: str) -> None:
         with self._database_manager.unit_of_work() as db:
             current = db.execute(
-                "SELECT payload FROM planned_units WHERE local_id=?", (normalized_id,)
+                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (normalized_id,)
             ).fetchone()
             self._require_unchanged(current, original_payload)
             self._state_writer.persist(
@@ -431,7 +434,7 @@ class PlannedCalendarRepairService:
     ) -> _PlannedCalendarRepairContext:
         with self._database_manager.reader() as db:
             row = db.execute(
-                "SELECT payload FROM planned_units WHERE local_id=?", (local_id,)
+                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)
             ).fetchone()
             others = db.execute(
                 "SELECT local_id, json_extract(payload, '$.remote_event_id') AS remote_id, "
@@ -499,7 +502,7 @@ class PlannedCalendarRepairService:
     def _recheck(self, context: _PlannedCalendarRepairContext, message: str) -> None:
         with self._database_manager.reader() as db:
             current = db.execute(
-                "SELECT payload FROM planned_units WHERE local_id=?",
+                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
                 (context.local_id,),
             ).fetchone()
         if (
@@ -654,7 +657,7 @@ class PlannedCalendarRepairService:
         conflict = None
         with self._database_manager.unit_of_work() as db:
             current = db.execute(
-                "SELECT payload FROM planned_units WHERE local_id=?",
+                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
                 (context.local_id,),
             ).fetchone()
             if (
@@ -685,7 +688,7 @@ class PlannedCalendarRepairService:
                     now=self._now(),
                 )
                 current = db.execute(
-                    "SELECT payload FROM planned_units WHERE local_id=?",
+                    _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
                     (context.local_id,),
                 ).fetchone()
                 context.expected_hash = planning_library.library_payload_hash(
@@ -756,7 +759,7 @@ class PlannedCalendarRepairService:
                 verified = event
             with self._database_manager.unit_of_work() as db:
                 current = db.execute(
-                    "SELECT payload FROM planned_units WHERE local_id=?",
+                    _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
                     (context.local_id,),
                 ).fetchone()
                 if (

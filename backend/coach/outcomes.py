@@ -1,6 +1,6 @@
 """Deterministic labels for durable Coach effects, independent of model prose."""
-from typing import Any
 
+from typing import Any
 
 COACH_OPERATION_LABELS = {
     "update_profile": "Profil aktualisiert",
@@ -95,7 +95,7 @@ def _alternative_planning_steps_repaired(previous: dict[str, Any], current: dict
         (before_tool == "apply_training_patch" and after_tool == "replace_training_plan")
         or (before_tool == "replace_training_plan" and after_tool == "apply_training_patch")
     )
-    before, after = _result(previous), _result(current)
+    before = _result(previous)
     request_key = previous.get("request_binding_key")
     effect_key = previous.get("plan_effect_key")
     return (
