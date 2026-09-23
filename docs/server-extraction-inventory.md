@@ -110,7 +110,7 @@ Diese Stellen benötigen bei jeder Migration eine manuelle Prüfung des Lookup-O
 - `tests/test_diagnostic_followups.py:207: with patch.object(server, "IntervalsClient") as provider:`
 - `tests/test_diagnostic_followups.py:40: with patch.object(server, "CONFIG", config):`
 - `tests/test_diagnostic_followups.py:52: with patch.object(server, "CONFIG", config):`
-- `tests/test_provider_review.py:155: with patch.object(server, "chat_with_coach") as coach, patch.object(server.CoachTurnFailureService, "persist") as failure:`
+- `tests/test_provider_review.py:155: with patch.object(server, "chat_with_coach") as coach, patch("backend.coach.turn_failures.CoachTurnFailureService.persist") as failure:`
 - `tests/test_provider_review.py:199: with self.subTest(kind="utf8"), patch.object(server, "CONFIG", replace(server.CONFIG, app_password=password)), \`
 - `tests/test_provider_review.py:200: patch.object(server.app_config, "security_configuration_error", return_value=None), \`
 - `tests/test_provider_review.py:203: with patch.object(server, "database_manager", return_value=self.manager_for_login()):`
@@ -801,10 +801,10 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | Importbindung | `COACH_DIALOGUE_INSTRUCTIONS` | 285 | `backend/coach/dialogue` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `dialogue_tools` | 285 | `backend/coach/dialogue` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `validate_request` | 285 | `backend/coach/dialogue` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `CoachJobStore` | 286 | `backend/coach/job_store` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:4840 (direkt/dynamisch unklar) |
+| Importbindung | `CoachJobStore` | 286 | `backend/coach/job_store` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `CoachCancellationService` | 287 | `backend/coach/cancellation` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `CoachTurnFailureDependencies` | 288 | `backend/coach/turn_failures` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `CoachTurnFailureService` | 288 | `backend/coach/turn_failures` | P1 | bereits ausgelagert (Importbindung) | tests/test_provider_review.py:155 (direkt/dynamisch unklar) |
+| Importbindung | `CoachTurnFailureService` | 288 | `backend/coach/turn_failures` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `coach_error_metadata` | 288 | `backend/coach/turn_failures` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `CoachJobSubmissionService` | 293 | `backend/coach/job_submission` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `ManualMorningCheckinService` | 294 | `backend/coach/morning` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:4841 (direkt/dynamisch unklar) |

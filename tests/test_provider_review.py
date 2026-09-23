@@ -152,7 +152,7 @@ class ProviderReviewTests(unittest.TestCase):
     def test_privacy_delete_discards_claimed_coach_payload_without_failure_write(self):
         job = {"_maintenance_generation": runtime_maintenance.MAINTENANCE_GATE.current_generation()}
         server.privacy_delete_service().delete()
-        with patch.object(server, "chat_with_coach") as coach, patch.object(server.CoachTurnFailureService, "persist") as failure:
+        with patch.object(server, "chat_with_coach") as coach, patch("backend.coach.turn_failures.CoachTurnFailureService.persist") as failure:
             server._run_background_coach_job(job)
         coach.assert_not_called()
         failure.assert_not_called()

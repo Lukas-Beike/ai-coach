@@ -5704,3 +5704,47 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Architektur 4/4, Ruff, Compile und Diff-Check **PASS**. Der Stand ist
   noch nicht auf das aktuelle `develop` rebased oder als PR veröffentlicht;
   danach sind erneutes Review und vollständige Integrationstests nötig.
+
+## P10 Export-HTTP-Streaming — bestätigter #745-Merge
+
+- #745 auf Head `28781021`: CodeQL, SonarCloud, Container-, Browser-
+  und Codex-Code-/Security-Prüfung **PASS**, 0 offene Review-Threads.
+  Der formale Titel-Check schlug zunächst wegen fehlendem
+  Conventional-Commit-Präfix fehl; nach Titelkorrektur **PASS**.
+  Squash-Merge `30689b85b3ff3fcb5e72f8e2671467a7da33238e` am
+  `2026-09-23T20:16:10Z` bestätigt und auf `origin/develop` erreichbar.
+
+## P8 Cancellation und terminale Fehler — Integrationsreview
+
+- Root integrierte die beiden lokalen P8-Patches sequenziell auf den
+  bestätigten #745-Merge als `d0e17271` und `7ee41786`. Beim ersten
+  Rebase wurden die #744-Receipt-Owner-Prüfungen bewahrt; beim
+  Cherry-Pick wurde die ältere `coach_command_receipt`-Funktion nicht
+  in `server.py` zurückgebracht. Das generierte Inventar wurde nach
+  jedem Konflikt neu erzeugt. Root prüfte den vollständigen Diff und
+  den Code der beiden konkreten Services erneut: **PASS**.
+- `CoachCancellationService` koordiniert Session-gebundenes Attached-
+  und Background-Cancel, persistiert vor dem Event-Signal und schließt
+  Provider-Responses; Stream-Register und Job-Store behalten ihre
+  eigenen Zustände. `CoachJobStore` besitzt den atomaren Receipt-Merge
+  und löst den aktuellen DB-Manager unter Lock auf. `CoachTurnFailureService`
+  besitzt partielle Fehlerprojektion, Pending-Request, atomare
+  Nachricht/Receipt-UOW, Checkpoint-Cleanup und Post-Commit-Event.
+  Keine Server-Rückimporte oder Fach-Callbacks; Auth/CSRF und
+  Maintenance-Grenzen bleiben unverändert.
+- Sieben neue Fälle prüfen falsche Operation/Session, Cancel-Reihenfolge,
+  Restart ohne In-Memory-Event, aktiven Status/Managerwechsel, partielle
+  Effekte mit sensiblen Checkpoints, Cancellation/Replay und Rollback.
+  Vorhandene Dialog-, Background- und HTTP-Tests decken Retry,
+  Wiederaufnahme und Antwortformate ergänzend ab. Testzahl für diese
+  Teilgrenzen angemessen; der gesamte Turn und Worker-Resume sind noch
+  offen und benötigen eigene weitere Tests.
+- Integrierte Fokustests und Architektur **PASS**, 17/17; nach direkter
+  Migration zweier Test-Patch-Ziele die betroffenen Tests 2/2 erneut
+  **PASS**. Native Vollsuite **PASS**, 2.382 Tests/12 Skips;
+  Python-3.14-Docker-Build und vollständige Read-only-Docker-Suite
+  **PASS**, 2.382 Tests/11 Skips. Ruff für neue Module, Compile,
+  Inventar- und Diff-Check **PASS**. Root-Gate für `d0e17271` und
+  `7ee41786` plus Test-/Dokumentationsdiff **PASS**; PR-CI und
+  externer Review stehen aus. `server.py`: 5.240 Zeilen,
+  246 Definitionen; `backend/`: 39.537 Zeilen, zusammen 44.777.

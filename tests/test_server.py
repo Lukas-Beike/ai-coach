@@ -4836,8 +4836,8 @@ class CoachTests(unittest.TestCase):
     def test_manual_morning_quick_action_stops_before_coach_when_sleep_is_not_ready(self):
         receipt = {"request_kind": "morning_checkin"}
         error = server.AppError(503, "Garmin sleep is not ready", reason="garmin_sleep_not_ready")
-        with patch("backend.coach.job_store.CoachJobStore.message", return_value="Morgen-Check-in"), patch.object(
-            server.CoachJobStore, "merge_receipt"
+        with patch("backend.coach.job_store.CoachJobStore.message", return_value="Morgen-Check-in"), patch(
+            "backend.coach.job_store.CoachJobStore.merge_receipt"
         ), patch.object(server.ManualMorningCheckinService, "prepare", side_effect=error), patch.object(
             server, "chat_with_coach"
         ) as chat:
