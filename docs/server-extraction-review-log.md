@@ -5667,3 +5667,21 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Integrationsdiff **PASS**; PR-CI und externer Review stehen aus.
   `server.py`: 5.393 physische Zeilen, 256 Definitionen;
   `backend/`: 39.191 Zeilen, zusammen 44.584 Zeilen.
+## P8 Cancellation und dauerhafte Receipt-Merges — lokaler Prüfstand
+
+- Root-Implementierungsdiff auf #735-Basis `f6f310ec`: **PASS** nach
+  tatsächlichem Code-/Diffreview. `CoachCancellationService` besitzt
+  Attached-/Background-Cancel samt Session-Bindung, persistierter
+  Markierung vor dem Event-Signal, Provider-Response-Close und
+  fehlendem In-Memory-Event nach Restart. `CoachJobStore` besitzt den
+  atomaren Receipt-Merge und löst den aktuellen Manager erst unter
+  `DB_LOCK` auf; `server.py` komponiert und delegiert ohne frühere
+  Receipt-/Cancel-Wrapper. Der HTTP-Cancel-Pfad bleibt nach Auth/CSRF
+  außerhalb des Maintenance-Gates erreichbar.
+- Fokussierte Cancellation-/Job-Store-Tests 10/10,
+  Architekturtests 4/4, Ruff, Compile, Inventar- und Diff-Check
+  **PASS**. Vollsuite lokal **PASS**, 2.348 Tests, 12 Skips;
+  neu gebautes Read-only-Docker-Image **PASS**, 2.348 Tests,
+  11 Skips. `server.py` umfasst 5.705 physische Zeilen und
+  263 Definitionen auf dieser älteren Basis. Rebase auf aktuelles
+  `develop`, erneutes Integrationsreview, PR-CI und Merge stehen aus.

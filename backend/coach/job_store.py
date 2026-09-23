@@ -18,7 +18,7 @@ class CoachJobStore:
 
     def __init__(
         self,
-        database_manager: DatabaseManager,
+        database_manager: Callable[[], DatabaseManager],
         database_lock: Any,
         wake_event: Any,
         maintenance_gate: MaintenanceGate,
@@ -34,7 +34,7 @@ class CoachJobStore:
         with (
             self._maintenance_gate.operation(),
             self._database_lock,
-            self._database_manager.unit_of_work() as db,
+            self._database_manager().unit_of_work() as db,
         ):
             rows = db.execute(
                 "SELECT * FROM coach_commands WHERE status='queued' "
@@ -65,7 +65,7 @@ class CoachJobStore:
         return None
 
     def requeue(self, client_turn_id: str, reason: str) -> None:
-        with self._database_lock, self._database_manager.unit_of_work() as db:
+        with self._database_lock, self._database_manager().unit_of_work() as db:
             row = db.execute(
                 "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
                 (client_turn_id,),
@@ -99,7 +99,7 @@ class CoachJobStore:
     def message(self, job: dict[str, Any]) -> str:
         receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
         message_id = receipt.get("user_message_id")
-        with self._database_lock, self._database_manager.unit_of_work() as db:
+        with self._database_lock, self._database_manager().unit_of_work() as db:
             row = db.execute(
                 "SELECT content FROM messages WHERE id=? AND role='user'",
                 (message_id,),
@@ -111,3 +111,23 @@ class CoachJobStore:
                 reason="background_message_missing",
             )
         return str(row["content"])
+
+    def merge_receipt(self, client_turn_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+        """Merge progress into a queued/running command in one locked UOW."""
+        with self._database_lock, self._database_manager().unit_of_work() as db:
+            row = db.execute(
+                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
+                (client_turn_id,),
+            ).fetchone()
+            receipt = command_receipt((row or {}).get("receipt"))
+            receipt.update(updates)
+            db.execute(
+                "UPDATE coach_commands SET receipt=?, updated_at=? "
+                "WHERE client_turn_id=? AND status IN ('queued', 'running')",
+                (
+                    json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
+                    self._utc_now(),
+                    client_turn_id,
+                ),
+            )
+        return receipt

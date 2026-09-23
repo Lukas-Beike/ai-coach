@@ -812,7 +812,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         args = json.loads(call["arguments"])
         prior = {"call_id": call["call_id"], "tool": call["name"], "effect_key": coach_service.dialogue_effect_key(call["name"], args),
                  "result": {"ok": True, "status": "saved"}}
-        server._merge_coach_command_receipt(turn_id, {"openai_response_id": "synthetic-response", "command_receipts": [prior]})
+        server.coach_job_store().merge_receipt(turn_id, {"openai_response_id": "synthetic-response", "command_receipts": [prior]})
         with patch.object(server, "_structured_coach_tool_result", side_effect=AssertionError("must not replay")):
             result, model = self.turn("Müde heute", [{"output": [call]}, {"output_text": "Bereits gespeichert."}], turn=turn_id, background_job=True)
         self.assertEqual(result["status"], "completed")
@@ -822,7 +822,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         turn_id = "background-outputs"
         server.coach_job_submission_service().enqueue("Wie geht es weiter?", turn_id, "synthetic-session")
         outputs = [{"type": "function_call_output", "call_id": "read", "output": '{"ok":true}'}]
-        server._merge_coach_command_receipt(turn_id, {"openai_response_id": "old-response", "pending_tool_outputs": outputs})
+        server.coach_job_store().merge_receipt(turn_id, {"openai_response_id": "old-response", "pending_tool_outputs": outputs})
         result, model = self.turn("Wie geht es weiter?", [{"output_text": "Fortgesetzt."}], turn=turn_id, background_job=True)
         self.assertEqual(result["status"], "completed")
         self.assertEqual(model.call_args.args[0]["input"], outputs)
