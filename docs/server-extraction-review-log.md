@@ -5203,4 +5203,8 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   und prüft 503 samt datensparsamer `not_ready`-Payload. Gezielte
   Tests **PASS** (3/3); neu gebautes Read-only-Docker-Image:
   vollständige Suite **PASS**, 2.326 Tests, 11 Skips. Root-Review des
-  tatsächlichen Korrekturdiffs **PASS**; PR-CI folgt.
+  tatsächlichen Korrekturdiffs **PASS**. Der P2-Thread wurde mit Test-
+  und Commitnachweis beantwortet und aufgelöst. Die Codex-Gate-Prüfung
+  verlangt nach der Head-Änderung eine neue Erstprüfung; gemäß der
+  Repository-Regel (kein zusätzliches Review ohne P1) wird #727
+  ersetzt, nicht durch einen regelwidrigen Folgereview umgangen.
