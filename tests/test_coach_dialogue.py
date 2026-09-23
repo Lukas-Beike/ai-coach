@@ -17,6 +17,7 @@ from support import isolated_server, reset_application_state
 from backend.coach.dialogue import validate_request
 from backend.coach.outcomes import unresolved_coach_steps
 from backend.coach import service as coach_service
+from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.sync.intervals import IntervalsSyncService
 
 server = fixtures.server
@@ -106,10 +107,15 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             self.assertNotIn("previous_response_id", payload)
             self.assertTrue(json.loads(payload["input"])["confirmed_steps"][0]["result"]["ok"])
             return save(payload)
-        with patch.object(server, "_structured_coach_tool_result", wraps=server._structured_coach_tool_result) as execute:
+        executed: list[str] = []
+        original_execute = CoachToolDispatchService.execute
+        def traced_execute(dispatcher, name, arguments, **kwargs):
+            executed.append(name)
+            return original_execute(dispatcher, name, arguments, **kwargs)
+        with patch.object(CoachToolDispatchService, "execute", traced_execute):
             result, _ = self.turn("Speichere meinen Namen", [save, broken, retry, {"output_text": "Saved"}])
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(sum(call.args[0] == "update_profile" for call in execute.call_args_list), 1)
+        self.assertEqual(executed.count("update_profile"), 1)
 
     def test_repeated_invalid_state_is_bounded_and_explained_without_raw_error(self):
         def broken(_):
@@ -813,7 +819,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         prior = {"call_id": call["call_id"], "tool": call["name"], "effect_key": coach_service.dialogue_effect_key(call["name"], args),
                  "result": {"ok": True, "status": "saved"}}
         server.coach_job_store().merge_receipt(turn_id, {"openai_response_id": "synthetic-response", "command_receipts": [prior]})
-        with patch.object(server, "_structured_coach_tool_result", side_effect=AssertionError("must not replay")):
+        with patch.object(CoachToolDispatchService, "execute", side_effect=AssertionError("must not replay")):
             result, model = self.turn("Müde heute", [{"output": [call]}, {"output_text": "Bereits gespeichert."}], turn=turn_id, background_job=True)
         self.assertEqual(result["status"], "completed")
         self.assertEqual(model.call_args_list[0].kwargs["response_id"], "synthetic-response")

@@ -6000,3 +6000,77 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `server.py`: 4.964 physische Zeilen, 237 Definitionen; P0-Inventar 0.
   Nächster Schritt: PR gegen `develop` veröffentlichen und
   CI/Review/Merge verifizieren.
+
+## P7 strukturierte Planmutationen — bestätigter #752-Merge
+
+- #752 auf Head `f396cf3c` bestand Root-Gate, native und Read-only-Docker-
+  Vollsuite, CodeQL/Sonar, Qualitäts- und Containerchecks. Der einmalig
+  angeforderte Codex-Code- und Security-Review war auf diesem Head ohne
+  Befund; keine offenen Review-Threads. Ein früher Koordinationsjob wurde
+  beim manuellen Review-Wechsel abgebrochen und war nicht mergeblockierend.
+- Squash-Merge `ba61818a4365be2abf2544c8cc711ce94f972302` am
+  `2026-09-23T22:04:32Z` bestätigt und als Vorfahr von `origin/develop`
+  geprüft. Der zum Mergezeitpunkt noch laufende optionale Browser-Smoke-
+  und Accessibility-Check wurde nachträglich **PASS** (5m42s).
+
+## P7 Planungshandlungs-Werkzeuge — integrierter Patch
+
+- Der erste Worker-Diff scheiterte am Root-Gate (**FAIL**): ein alter
+  Server-Wrapper blieb bestehen. Der zweite Zwischenstand führte die
+  fachlich verschiedenen Werkzeuge unter `misc_tools` als neuem Sammelmodul;
+  ebenfalls **FAIL**. Derselbe GPT-6-Luna-Worker entfernte den Wrapper und
+  benannte die fachlich zusammengehörigen Planungshandlungen samt Tests und
+  Architektur-Guard um.
+- Finaler Worker-Commit `43c37418` wurde ohne Konflikt auf dem bestätigten
+  #752-Merge als `e9036256` integriert. Root prüfte den tatsächlichen Code
+  und Diff erneut: **PASS**. Operation-/Objekt-Scope, Action-Payload,
+  späterer Adaptive-Apply-Turn und sitzungsgebundene Undo-Proposal-Erzeugung
+  bleiben erhalten. Die vorhandenen Preview-, Apply-, Plan-, History- und
+  Proposal-Services besitzen weiterhin ihren Zustand. Keine Backend-
+  Rückimporte, Server-Fachcallbacks, Remote-Schreibausweitung oder
+  Kompatibilitätsfunktion.
+- Zwölf neue direkte Positiv-/Negativtests decken alle vier Toolnamen,
+  abgelehnte Operationen und Objektscopes, unbekannte Namen, Proposal-
+  Sitzungsbindung und Fehlerweitergabe ab. Die vorhandene Integration
+  prüft Commit, Rollback, Replay und Sync-Scope. Für diese Grenze
+  angemessen; vollständiger Coach-Tool- und Turn-Dispatch bleibt offen.
+  Integriert: fokussierte Service-/Architekturtests **PASS** (20/20),
+  Inventar-`--check`, Ruff, Compile und Diff-Check **PASS**. Native
+  Vollsuite **PASS** (2.439 Tests/12 Skips), frisch gebautes Read-only-
+  Docker-Image **PASS** (2.439 Tests/11 Skips). `server.py`: 4.932
+  physische Zeilen, 236 Definitionen; P0-Inventar 0.
+- Nächster Schritt: übergreifenden Coach-Tool-Dispatch als eigenen
+  Backend-Use-Case auslagern und alle direkten Server-Testaufrufer sowie
+  zwei Test-Patchziele auf die neue Schnittstelle migrieren; danach
+  den kombinierten Stand erneut reviewen und veröffentlichen.
+
+## P7 gesamtes strukturiertes Werkzeug-Routing — Root-Integration
+
+- Auf dem geprüften Stand `e9036256` verlagerte Root die bisherige
+  `_structured_coach_plan_tool_result`- und
+  `_structured_coach_tool_result`-Orchestrierung vollständig in
+  `CoachToolDispatchService`. Die einzige neue Server-Factory verdrahtet
+  konkrete Eigentümer verzögert; ihre Callables konstruieren Services und
+  enthalten keine Werkzeug-Fachlogik. Unbekanntes Werkzeug bleibt 400/
+  `unknown_coach_tool`, Sync-Job-Liste und Cancellation-Event behalten
+  dieselbe Instanz, und Conversation-/Turn-/Session-Bindungen gehen
+  unverändert an Planartefakt und Planungshandlungen.
+- 44 direkte Testaufrufe wechseln zur tatsächlichen Dispatcher-
+  Schnittstelle. Zwei Replay-Tests patchen nun deren Klassenmethode am
+  neuen Lookup-Ort statt eine gelöschte Server-Funktion. Acht direkte
+  Dispatcher-Tests decken Lesepriorität, lokale Mutationen, Plan- und
+  Sync-Routing, Weitergabe der Sicherheitskontexte und den Unknown-Fehler
+  ab. Zusammen mit den bestehenden 84 gezielten Dialog-/Review-Tests
+  und der vollen Regression ist diese Testmenge für das reine Routing
+  angemessen; fachliche Scope-/Transaktionsfehler bleiben zusätzlich bei
+  ihren konkreten Service-Tests. Spezialwerkzeuge und Turn-Fehlerprojektion
+  verbleiben ausdrücklich in der offenen P7/P8-Arbeit.
+- Root prüfte Code und tatsächlichen kombinierten Diff nach den
+  Testmigrationen: **PASS**. Fokussierte Dialog-/Review-/Dispatcher-/
+  Architekturtests **PASS** (68+16+14), Ruff ohne neue Server- oder
+  Legacy-Test-Findings, neue Dateien/Architektur/Generator Ruff **PASS**,
+  Compile, Inventar-`--check` und Diff-Check **PASS**. Native Vollsuite
+  **PASS** (2.447 Tests/12 Skips); frisch gebautes Read-only-Docker-Image
+  **PASS** (2.447 Tests/11 Skips). `server.py`: 4.890 physische Zeilen,
+  235 Definitionen; P0-Inventar 0. PR-CI, externer Review und Merge
+  stehen noch aus.

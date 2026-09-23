@@ -750,6 +750,7 @@ def _explicit_owner(name: str) -> str | None:
             "startup_sync_scheduler": COMPOSITION_ROOT,
             "coach_activity_read_tool_service": COMPOSITION_ROOT,
             "coach_read_tool_service": COMPOSITION_ROOT,
+            "coach_tool_dispatch_service": COMPOSITION_ROOT,
             "coach_athlete_record_tool_service": COMPOSITION_ROOT,
             "coach_library_plan_tool_service": COMPOSITION_ROOT,
             "coach_profile_update_service": COMPOSITION_ROOT,
