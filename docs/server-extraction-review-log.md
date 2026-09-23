@@ -4815,6 +4815,13 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   bereits vollständig getesteten kombinierten Stand leer. CI/Sonar des
   künftigen P8-PR-Stands stehen noch aus.
 
+- PR #713 auf Head `dd84d828`: SonarCloud `new_violations=0`,
+  Python-/Container-/Browser-CI und Codex-Review **PASS**, keine offenen
+  Threads; nach einem transienten GitHub-GraphQL-Fehler beim ersten
+  Merge-Aufruf Squash-Merge am `2026-09-23T13:50:01Z`, Commit
+  `e546089d6744794dc50246620c35f6d5fed8c8ad` auf
+  `origin/develop` erreichbar.
+
 ## P8 Tages-Loop-Lifecycle — integrierter Prüfstand
 
 - GPT-6-Luna/high-Worker-Commit `befab9e0`, nach dem geprüften
@@ -4835,4 +4842,9 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   vollständige Suite **PASS**, 2.301 Tests, 10 Skips in 20,366 s.
   `server.py` hat 6.675 physische Zeilen. Die P8-Scheduler-Checkliste
   ist fachlich abgeschlossen; Coach-Turn/Background/Streaming bleiben
-  offen. CI/Sonar des künftigen PR-Stands stehen aus.
+  offen. Nach PR #713 `origin/develop` mit `585e1ba7` integriert;
+  Produkt-, Test-, Plan- und Inventar-Konflikte aus dem Squash-Branch
+  sequenziell geprüft. Finaler Tree-Diff gegenüber dem bereits vollständig
+  getesteten kombinierten Stand leer; erneut vier Loop-, vier Startup-,
+  vier Architekturtests und Inventar-/Diff-Check **PASS**. CI/Sonar des
+  künftigen PR-Stands stehen aus.
