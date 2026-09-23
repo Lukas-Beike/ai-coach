@@ -3,15 +3,244 @@
 from __future__ import annotations
 
 import json
+import re
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
-from urllib.request import urlopen
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
-from backend.errors import AppError
+from backend import observability
+from backend.errors import COACH_ABORTED_ERROR, GEMINI_API_KEY_ERROR, AppError
 from backend.providers import http as provider_http
 
 _STREAMING_EVENT_ERROR = "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben."
+_STREAMING_RESPONSE_TOO_LARGE = "Die Streaming-Antwort von Gemini ist zu\\u00df."
+_STREAMING_TIMEOUT = "Gemini hat nicht rechtzeitig geantwortet."
+_STREAMING_UNAVAILABLE = "Gemini ist vor\\u00fcbergehend nicht verf\\u00fcgbar."
+
+
+class GeminiStreamClient:
+    """Execute and observe one Gemini GenerateContent SSE request."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None,
+        base_url: str,
+        response_timeout_seconds: int,
+        max_bytes: int,
+        app_version: str,
+        json_media_type: str,
+        provider_state: Any,
+        logger: Any,
+        opener: Any = urlopen,
+        monotonic: Callable[[], float] = time.perf_counter,
+        now: Callable[[], str],
+    ) -> None:
+        self.api_key = api_key
+        self.base_url = base_url
+        self.response_timeout_seconds = response_timeout_seconds
+        self.max_bytes = max_bytes
+        self.app_version = app_version
+        self.json_media_type = json_media_type
+        self.provider_state = provider_state
+        self.logger = logger
+        self.opener = opener
+        self.monotonic = monotonic
+        self.now = now
+
+    def stream(
+        self,
+        model: str,
+        payload: Mapping[str, Any],
+        on_text_delta: Callable[[str], None],
+        *,
+        cancel_event: Any = None,
+    ) -> dict[str, Any]:
+        """Stream one prepared Gemini request and return its raw aggregate."""
+        if not self.api_key:
+            raise AppError(503, GEMINI_API_KEY_ERROR)
+        if not re.fullmatch(r"(?a:[\w.-]{1,128})", str(model or "")):
+            raise AppError(400, "Ung\\u00fcltiges Gemini-Modell.")
+
+        body = json.dumps(payload).encode("utf-8")
+        endpoint = f"{self.base_url.rstrip('/')}/models/{model}:streamGenerateContent?alt=sse"
+        request = Request(
+            endpoint,
+            data=body,
+            headers={
+                "Accept": "text/event-stream",
+                "Content-Type": self.json_media_type,
+                "x-goog-api-key": self.api_key,
+                "User-Agent": f"IntervalsCoach/{self.app_version}",
+            },
+            method="POST",
+        )
+        parsed_endpoint = urlparse(endpoint)
+        context = {
+            "service": "gemini",
+            "method": "POST",
+            "host": observability.safe_url_netloc(parsed_endpoint),
+            "path": observability.safe_provider_path(parsed_endpoint.path),
+            "timeout_seconds": self.response_timeout_seconds,
+            "request_bytes": len(body),
+            "query_keys": ["alt"],
+        }
+        started = self.monotonic()
+        self.logger.info(
+            "External HTTP request started",
+            extra={"event": "external_request_started", "context": context},
+        )
+        response_bytes = 0
+        try:
+            self._raise_cancelled(cancel_event)
+            stream_result = read_stream_response(
+                request,
+                timeout=self.response_timeout_seconds,
+                max_bytes=self.max_bytes,
+                on_text_delta=on_text_delta,
+                cancel_event=cancel_event,
+                opener=self.opener,
+            )
+            self._raise_cancelled(cancel_event)
+            response_bytes = stream_result.response_bytes
+            aggregate = stream_result.aggregate
+            if not aggregate.get("candidates"):
+                raise AppError(502, "Gemini hat keine Coach-Antwort geliefert.", reason="invalid_response")
+            self.provider_state.record_success("gemini", 200)
+            self.provider_state.record_usage("gemini", aggregate, "generate_content_stream")
+            self.logger.info(
+                "External HTTP request completed",
+                extra={
+                    "event": "external_request_completed",
+                    "context": {
+                        **context,
+                        "status": 200,
+                        "duration_ms": round((self.monotonic() - started) * 1000, 1),
+                        "response_bytes": response_bytes,
+                    },
+                },
+            )
+            return aggregate
+        except provider_http.ProviderRequestCancelled as exc:
+            raise self._cancelled_error() from exc
+        except provider_http.ProviderResponseTooLarge as exc:
+            error = AppError(502, _STREAMING_RESPONSE_TOO_LARGE, reason="response_too_large")
+            self._record_error(error)
+            raise error from exc
+        except HTTPError as exc:
+            raw_error = provider_http.read_error_body(exc, self.max_bytes)
+            details = error_details(int(exc.code), raw_error, updated_at=self.now())
+            error = AppError(int(exc.code), details["message"], reason=details["reason"])
+            self._record_error(error)
+            raise error from exc
+        except AppError as exc:
+            self._record_error(exc)
+            raise
+        except TimeoutError as exc:
+            if self._cancelled(cancel_event):
+                raise self._cancelled_without_status() from exc
+            error = AppError(504, _STREAMING_TIMEOUT, reason="provider_timeout")
+            self._record_error(error)
+            raise error from exc
+        except (URLError, OSError, UnicodeDecodeError, ValueError) as exc:
+            if self._cancelled(cancel_event):
+                raise self._cancelled_without_status() from exc
+            error = AppError(503, _STREAMING_UNAVAILABLE, reason="provider_unavailable")
+            self._record_error(error)
+            raise error from exc
+
+    @staticmethod
+    def _cancelled(cancel_event: Any) -> bool:
+        return cancel_event is not None and cancel_event.is_set()
+
+    def _raise_cancelled(self, cancel_event: Any) -> None:
+        if self._cancelled(cancel_event):
+            raise provider_http.ProviderRequestCancelled
+
+    def _cancelled_error(self) -> AppError:
+        error = AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
+        self._record_error(error)
+        return error
+
+    @staticmethod
+    def _cancelled_without_status() -> AppError:
+        return AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
+
+    def _record_error(self, error: AppError) -> None:
+        self.provider_state.record_status(
+            "gemini",
+            state="error",
+            reason=error.reason or "request_failed",
+            message=error.message,
+            http_status=error.status,
+        )
+
+
+class GeminiJsonClient:
+    """Own Gemini model validation and one generateContent request."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        response_timeout_seconds: int,
+        http_client: provider_http.JsonHttpClient,
+        provider_state: Any,
+    ) -> None:
+        self.api_key = api_key
+        self.base_url = base_url
+        self.response_timeout_seconds = response_timeout_seconds
+        self.http_client = http_client
+        self.provider_state = provider_state
+
+    def generate(
+        self,
+        model: str,
+        payload: Mapping[str, Any],
+        *,
+        operation: str,
+        cancel_event: Any = None,
+    ) -> dict[str, Any]:
+        if not self.api_key:
+            raise AppError(503, GEMINI_API_KEY_ERROR)
+        if not re.fullmatch(r"(?a:[\w.-]{1,128})", str(model or "")):
+            raise AppError(400, "Ungültiges Gemini-Modell.")
+        try:
+            result = self.http_client.request(
+                "POST",
+                f"{self.base_url}/models/{model}:generateContent",
+                payload,
+                {"x-goog-api-key": self.api_key},
+                timeout=self.response_timeout_seconds,
+                service="gemini",
+                cancel_event=cancel_event,
+            )
+        except AppError as exc:
+            self.provider_state.record_status(
+                "gemini",
+                state="error",
+                reason=exc.reason or "request_failed",
+                message=exc.message,
+                http_status=exc.status,
+            )
+            raise
+        if not isinstance(result, dict):
+            self.provider_state.record_status(
+                "gemini",
+                state="error",
+                reason="invalid_response",
+                message="Gemini hat keine JSON-Antwort geliefert.",
+                http_status=502,
+            )
+            raise AppError(502, "Gemini hat keine gültige Antwort geliefert.", reason="invalid_response")
+        self.provider_state.record_success("gemini", None)
+        self.provider_state.record_usage("gemini", result, operation)
+        return result
 
 
 @dataclass(frozen=True)

@@ -81,3 +81,98 @@ def coach_observed_sync_lines(commands: list[dict[str, Any]]) -> str:
     }
     return "\n".join(f"Zuletzt bestätigter Stand des geprüften Plan-Sync-Auftrags: {labels.get(job.get('status'), 'Abschluss noch nicht bestätigt')}."
                      for job in jobs.values())
+
+
+def _result(entry: dict[str, Any]) -> dict[str, Any]:
+    result = entry.get("result")
+    return result if isinstance(result, dict) else {}
+
+
+def _alternative_planning_steps_repaired(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Allow an invalid patch to be repaired by an equivalent plan replacement."""
+    before_tool, after_tool = previous.get("tool"), current.get("tool")
+    alternatives = (
+        (before_tool == "apply_training_patch" and after_tool == "replace_training_plan")
+        or (before_tool == "replace_training_plan" and after_tool == "apply_training_patch")
+    )
+    before, after = _result(previous), _result(current)
+    request_key = previous.get("request_binding_key")
+    effect_key = previous.get("plan_effect_key")
+    return (
+        alternatives
+        and before.get("reason") in ("request_invalid", "tool_arguments_invalid")
+        and request_key and request_key == current.get("request_binding_key")
+        and effect_key and effect_key == current.get("plan_effect_key")
+    )
+
+
+def _profile_repair_fields(entry: dict[str, Any]) -> Any:
+    repair_key = entry.get("repair_key")
+    return repair_key.get("profile_fields") if isinstance(repair_key, dict) else None
+
+
+def _profile_steps_repaired(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    """A profile-conflict retry must affect the same fields."""
+    if previous.get("tool") != "update_profile" or _result(previous).get("reason") != "profile_conflict":
+        return True
+    previous_fields = _profile_repair_fields(previous)
+    current_fields = _profile_repair_fields(current)
+    return bool(previous_fields) and previous_fields == current_fields
+
+
+def _matching_coach_steps_repaired(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Compare equivalent actions without allowing one object to repair another."""
+    before = previous.get("request") or {}
+    after = current.get("request") or {}
+    before = before if isinstance(before, dict) else {}
+    after = after if isinstance(after, dict) else {}
+    if not before:
+        return _result(previous).get("reason") in ("request_invalid", "tool_arguments_invalid")
+    if before.get("target") != after.get("target"):
+        return False
+    if (current.get("tool") == "start_intervals_plan_sync" and after.get("sync_scope") == "all_pending"
+            and before.get("sync_scope") in ("selected", "all_pending")):
+        return True
+    try:
+        scopes_match = set(before.get("scope") or []) == set(after.get("scope") or [])
+    except TypeError:
+        return False
+    return before.get("period") == after.get("period") and scopes_match
+
+
+def _coach_steps_repaired(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Corrections resolve the same step, never a different object with the same tool."""
+    if previous.get("tool") != current.get("tool"):
+        return _alternative_planning_steps_repaired(previous, current)
+    if not _profile_steps_repaired(previous, current):
+        return False
+    scope_key = previous.get("scope_repair_key")
+    if (_result(previous).get("reason") == "request_scope" and scope_key
+            and scope_key == current.get("scope_repair_key")):
+        return True
+    return _matching_coach_steps_repaired(previous, current)
+
+
+def unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return failed steps not repaired by a later equivalent successful receipt.
+
+    Receipts are persisted and may contain malformed values. Invalid structures
+    cannot establish equivalence, except for the legacy missing-request fallback
+    on invalid-argument failures, which is preserved during this extraction.
+    """
+    latest: dict[Any, dict[str, Any]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        tool = entry.get("tool")
+        if not isinstance(tool, str) or not tool:
+            continue
+        if _result(entry).get("ok"):
+            latest = {key: previous for key, previous in latest.items()
+                      if not _coach_steps_repaired(previous, entry)}
+        step_key = entry.get("step_key") or tool
+        try:
+            latest[step_key] = entry
+        except TypeError:
+            latest[tool] = entry
+    return [entry for entry in latest.values() if not _result(entry).get("ok")]

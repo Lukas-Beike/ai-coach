@@ -1,9 +1,13 @@
+import io
 import json
 import threading
 import unittest
+from urllib.error import URLError
 
 from backend.errors import AppError
 from backend.providers.gemini import (
+    GeminiJsonClient,
+    GeminiStreamClient,
     StreamAccumulator,
     error_details,
     function_tools,
@@ -13,6 +17,130 @@ from backend.providers.gemini import (
     response_text,
 )
 from backend.providers.http import ProviderRequestCancelled, ProviderResponseTooLarge
+
+
+class _GeminiHttpClient:
+    def __init__(self, result=None, error=None):
+        self.result = result
+        self.error = error
+        self.calls = []
+
+    def request(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+class _GeminiProviderState:
+    def __init__(self):
+        self.statuses = []
+        self.successes = []
+        self.usages = []
+
+    def record_status(self, *args, **kwargs):
+        self.statuses.append((args, kwargs))
+
+    def record_success(self, *args, **kwargs):
+        self.successes.append((args, kwargs))
+
+    def record_usage(self, *args, **kwargs):
+        self.usages.append((args, kwargs))
+
+
+class GeminiJsonClientTests(unittest.TestCase):
+    def make_client(self, *, api_key="secret", result=None, error=None):
+        http_client = _GeminiHttpClient(result=result, error=error)
+        provider_state = _GeminiProviderState()
+        client = GeminiJsonClient(
+            api_key=api_key,
+            base_url="https://generativelanguage.googleapis.com/v1beta",
+            response_timeout_seconds=37,
+            http_client=http_client,
+            provider_state=provider_state,
+        )
+        return client, http_client, provider_state
+
+    def test_missing_key_is_503_without_request_or_status(self):
+        client, http_client, provider_state = self.make_client(api_key="")
+
+        with self.assertRaises(AppError) as raised:
+            client.generate("gemini-test", {}, operation="generate_content")
+
+        self.assertEqual((raised.exception.status, raised.exception.message), (503, "GEMINI_API_KEY ist nicht konfiguriert."))
+        self.assertEqual(http_client.calls, [])
+        self.assertEqual(provider_state.statuses, [])
+
+    def test_model_pattern_accepts_ascii_boundaries_and_rejects_invalid_values(self):
+        client, http_client, _provider_state = self.make_client(result={})
+        for model in ("a", "a" * 128, "gemini-2.5-flash.v1"):
+            client.generate(model, {}, operation="generate_content")
+        for model in ("", "a" * 129, "ä", "model/name"):
+            with self.subTest(model=model), self.assertRaisesRegex(AppError, "Ungültiges Gemini-Modell"):
+                client.generate(model, {}, operation="generate_content")
+        self.assertEqual(len(http_client.calls), 3)
+
+    def test_request_parameters_and_cancellation_are_forwarded(self):
+        payload = {"contents": []}
+        cancel_event = threading.Event()
+        client, http_client, _provider_state = self.make_client(result={"ok": True})
+
+        self.assertEqual(client.generate("gemini-test", payload, operation="chat", cancel_event=cancel_event), {"ok": True})
+
+        args, kwargs = http_client.calls[0]
+        self.assertEqual(args, (
+            "POST",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:generateContent",
+            payload,
+            {"x-goog-api-key": "secret"},
+        ))
+        self.assertEqual(kwargs, {"timeout": 37, "service": "gemini", "cancel_event": cancel_event})
+
+    def test_app_error_is_persisted_and_reraised(self):
+        expected = AppError(429, "rate limited", reason="rate_limit_exceeded")
+        client, _http_client, provider_state = self.make_client(error=expected)
+
+        with self.assertRaises(AppError) as raised:
+            client.generate("gemini-test", {}, operation="generate_content")
+
+        self.assertIs(raised.exception, expected)
+        self.assertEqual(provider_state.statuses, [(
+            ("gemini",),
+            {
+                "state": "error",
+                "reason": "rate_limit_exceeded",
+                "message": "rate limited",
+                "http_status": 429,
+            },
+        )])
+
+    def test_invalid_response_is_persisted_and_rejected(self):
+        client, _http_client, provider_state = self.make_client(result=["not", "json"])
+
+        with self.assertRaises(AppError) as raised:
+            client.generate("gemini-test", {}, operation="generate_content")
+
+        self.assertEqual((raised.exception.status, raised.exception.reason), (502, "invalid_response"))
+        self.assertEqual(provider_state.statuses[0], (
+            ("gemini",),
+            {
+                "state": "error",
+                "reason": "invalid_response",
+                "message": "Gemini hat keine JSON-Antwort geliefert.",
+                "http_status": 502,
+            },
+        ))
+        self.assertEqual(provider_state.successes, [])
+        self.assertEqual(provider_state.usages, [])
+
+    def test_success_records_status_and_usage_once(self):
+        result = {"candidates": []}
+        client, _http_client, provider_state = self.make_client(result=result)
+
+        self.assertIs(client.generate("gemini-test", {}, operation="generate_content"), result)
+
+        self.assertEqual(provider_state.successes, [(('gemini', None), {})])
+        self.assertEqual(provider_state.usages, [(('gemini', result, "generate_content"), {})])
 
 
 class GeminiProviderErrorTests(unittest.TestCase):
@@ -308,6 +436,180 @@ class GeminiStreamResponseReaderTests(unittest.TestCase):
         self.assertEqual(result.aggregate["usageMetadata"], {"totalTokenCount": 3})
         self.assertEqual(result.aggregate["candidates"][0]["finishReason"], "STOP")
         self.assertTrue(response.closed)
+
+
+class _StreamLogger:
+    def __init__(self):
+        self.records = []
+
+    def info(self, message, **kwargs):
+        self.records.append(("info", message, kwargs))
+
+    def warning(self, message, **kwargs):
+        self.records.append(("warning", message, kwargs))
+
+
+class GeminiStreamClientTests(unittest.TestCase):
+    def make_client(self, *, api_key="secret", response=None, opener=None, max_bytes=1000):
+        provider_state = _GeminiProviderState()
+        logger = _StreamLogger()
+        response = response or _StreamResponse([
+            b'data: {"candidates":[{"content":{"parts":[{"text":"Hallo"}]}}]}\n\n',
+        ])
+        captured = []
+
+        def open_request(request, timeout):
+            captured.append((request, timeout))
+            return response
+
+        client = GeminiStreamClient(
+            api_key=api_key,
+            base_url="https://generativelanguage.googleapis.com/v1beta",
+            response_timeout_seconds=37,
+            max_bytes=max_bytes,
+            app_version="test-version",
+            json_media_type="application/json",
+            provider_state=provider_state,
+            logger=logger,
+            opener=opener or open_request,
+            monotonic=lambda: 10.0,
+            now=lambda: "2026-09-19T10:11:12+00:00",
+        )
+        return client, provider_state, logger, captured
+
+    def test_success_builds_sse_request_without_mutating_payload(self):
+        payload = {"contents": [{"parts": [{"text": "secret payload"}]}]}
+        before = json.loads(json.dumps(payload))
+        client, state, logger, captured = self.make_client()
+
+        result = client.stream("gemini-test", payload, lambda _delta: None)
+
+        request, timeout = captured[0]
+        self.assertEqual(request.full_url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:streamGenerateContent?alt=sse")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.get_header("Accept"), "text/event-stream")
+        self.assertEqual(request.get_header("Content-type"), "application/json")
+        self.assertEqual(request.get_header("X-goog-api-key"), "secret")
+        self.assertEqual(request.get_header("User-agent"), "IntervalsCoach/test-version")
+        self.assertEqual(timeout, 37)
+        self.assertEqual(payload, before)
+        self.assertEqual(result["candidates"][0]["content"]["parts"], [{"text": "Hallo"}])
+        self.assertEqual(state.successes, [(('gemini', 200), {})])
+        self.assertEqual(state.usages[0][0][2], "generate_content_stream")
+        self.assertEqual(len(logger.records), 2)
+        self.assertNotIn("secret", json.dumps(logger.records))
+        self.assertNotIn("secret payload", json.dumps(logger.records))
+
+    def test_missing_key_and_invalid_model_are_rejected_before_open(self):
+        for api_key, model, status in (("", "gemini-test", 503), ("secret", "model/name", 400)):
+            with self.subTest(api_key=api_key, model=model):
+                client, _state, _logger, captured = self.make_client(api_key=api_key)
+                with self.assertRaises(AppError) as raised:
+                    client.stream(model, {}, lambda _delta: None)
+                self.assertEqual(raised.exception.status, status)
+                self.assertEqual(captured, [])
+
+    def test_empty_candidates_is_invalid_and_records_one_error(self):
+        response = _StreamResponse([b'data: {"usageMetadata":{"totalTokenCount":1}}\n\n'])
+        client, state, _logger, _captured = self.make_client(response=response)
+
+        with self.assertRaises(AppError) as raised:
+            client.stream("gemini-test", {}, lambda _delta: None)
+
+        self.assertEqual((raised.exception.status, raised.exception.reason), (502, "invalid_response"))
+        self.assertEqual(len(state.statuses), 1)
+        self.assertEqual(state.successes, [])
+        self.assertEqual(state.usages, [])
+
+    def test_cancellation_and_size_limit_use_safe_app_errors(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+        client, state, _logger, _captured = self.make_client()
+        with self.assertRaises(AppError) as raised:
+            client.stream("gemini-test", {}, lambda _delta: None, cancel_event=cancel_event)
+        self.assertEqual((raised.exception.status, raised.exception.reason), (499, "chat_cancelled"))
+        self.assertEqual(state.statuses[0][1]["reason"], "chat_cancelled")
+
+        oversized, oversized_state, _logger, _captured = self.make_client(max_bytes=1)
+        with self.assertRaises(AppError) as raised:
+            oversized.stream("gemini-test", {}, lambda _delta: None)
+        self.assertEqual((raised.exception.status, raised.exception.reason), (502, "response_too_large"))
+        self.assertEqual(oversized_state.statuses[0][1]["reason"], "response_too_large")
+
+    def test_cancellation_during_iteration_persists_chat_cancelled(self):
+        cancel_event = threading.Event()
+
+        def on_iter(index):
+            if index == 1:
+                cancel_event.set()
+
+        response = _StreamResponse([
+            b": comment\n",
+            b'data: {"candidates":[{"content":{"parts":[{"text":"Hallo"}]}}]}\n',
+        ], on_iter=on_iter)
+        client, state, _logger, _captured = self.make_client(response=response)
+
+        with self.assertRaises(AppError) as raised:
+            client.stream("gemini-test", {}, lambda _delta: None, cancel_event=cancel_event)
+
+        self.assertEqual((raised.exception.status, raised.exception.reason), (499, "chat_cancelled"))
+        self.assertEqual(len(state.statuses), 1)
+        self.assertEqual(state.statuses[0][1]["reason"], "chat_cancelled")
+
+    def test_cancelled_timeout_and_network_errors_do_not_persist_status(self):
+        for cause in (TimeoutError(), URLError("provider secret text")):
+            with self.subTest(cause=type(cause).__name__):
+                cancel_event = threading.Event()
+
+                class FailingResponse(_StreamResponse):
+                    def __iter__(self, cause=cause, cancel_event=cancel_event):
+                        cancel_event.set()
+                        raise cause
+                        yield b""  # pragma: no cover
+
+                client, state, _logger, _captured = self.make_client(response=FailingResponse([]))
+                with self.assertRaises(AppError) as raised:
+                    client.stream("gemini-test", {}, lambda _delta: None, cancel_event=cancel_event)
+                self.assertEqual((raised.exception.status, raised.exception.reason), (499, "chat_cancelled"))
+                self.assertEqual(state.statuses, [])
+
+    def test_callback_app_error_reason_and_message_are_not_logged(self):
+        private_error = AppError(500, "private callback details", reason="private_callback_reason")
+        client, state, logger, _captured = self.make_client()
+
+        with self.assertRaises(AppError) as raised:
+            client.stream("gemini-test", {}, lambda _delta: (_ for _ in ()).throw(private_error))
+
+        self.assertIs(raised.exception, private_error)
+        self.assertEqual(state.statuses[0][1]["reason"], "private_callback_reason")
+        self.assertNotIn("private callback details", json.dumps(logger.records))
+        self.assertNotIn("private_callback_reason", json.dumps(logger.records))
+
+    def test_http_timeout_and_network_errors_are_classified_without_provider_text(self):
+        from urllib.error import HTTPError, URLError
+
+        http_error = HTTPError(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:streamGenerateContent?alt=sse",
+            429,
+            "provider secret text",
+            {},
+            io.BytesIO(b'{"error":{"message":"provider secret text"}}'),
+        )
+        client, state, logger, _captured = self.make_client(opener=lambda _request, timeout: (_ for _ in ()).throw(http_error))
+        with self.assertRaises(AppError) as raised:
+            client.stream("gemini-test", {}, lambda _delta: None)
+        self.assertEqual((raised.exception.status, raised.exception.reason), (429, "rate_limit_exceeded"))
+        self.assertNotIn("provider secret text", json.dumps(logger.records))
+        self.assertEqual(len(state.statuses), 1)
+
+        for exc, status, reason in ((TimeoutError(), 504, "provider_timeout"), (URLError("provider secret text"), 503, "provider_unavailable")):
+            with self.subTest(exc=type(exc).__name__):
+                client, state, logger, _captured = self.make_client(opener=lambda _request, timeout, exc=exc: (_ for _ in ()).throw(exc))
+                with self.assertRaises(AppError) as raised:
+                    client.stream("gemini-test", {}, lambda _delta: None)
+                self.assertEqual((raised.exception.status, raised.exception.reason), (status, reason))
+                self.assertNotIn("provider secret text", json.dumps(logger.records))
+                self.assertEqual(len(state.statuses), 1)
 
     def test_trailing_event_is_flushed_without_blank_line(self):
         response = _StreamResponse([b'data: {"candidates":[{"content":{"parts":[{"text":"Ende"}]}}]}\n'])

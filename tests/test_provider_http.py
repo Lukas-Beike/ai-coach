@@ -2,12 +2,15 @@ import threading
 import unittest
 from urllib.error import HTTPError
 
+from backend.errors import AppError
 from backend.providers.http import (
+    JsonHttpClient,
     JsonResponse,
     ProviderInvalidResponse,
     ProviderRequestCancelled,
     ProviderResponseTooLarge,
     error_detail,
+    external_call,
     json_request_parts,
     multipart_form_data,
     open_interruptibly,
@@ -17,6 +20,42 @@ from backend.providers.http import (
     request_body,
     request_json,
 )
+
+
+class _CallLogger:
+    def __init__(self):
+        self.records = []
+
+    def info(self, message, **kwargs):
+        self.records.append(("info", message, kwargs))
+
+    def warning(self, message, **kwargs):
+        self.records.append(("warning", message, kwargs))
+
+    def exception(self, message, **kwargs):
+        self.records.append(("exception", message, kwargs))
+
+
+class _DiagnosticCapture:
+    def __init__(self):
+        self.entries = []
+
+    def capture(self, event, details):
+        self.entries.append((event, details))
+
+
+class _ProviderState:
+    def __init__(self):
+        self.calls = []
+
+    def record_rate_limits(self, headers):
+        self.calls.append(("rate_limits", headers))
+
+    def record_success(self, provider, status):
+        self.calls.append(("success", provider, status))
+
+    def record_status(self, provider, **details):
+        self.calls.append(("status", provider, details))
 
 
 class _JSONResponse:
@@ -46,6 +85,222 @@ class _JSONResponse:
 
 
 class ProviderHTTPTests(unittest.TestCase):
+    def _client(self, opener, *, state=None, max_bytes=100, redact=None, operation_context=None):
+        return JsonHttpClient(
+            "1.2.3",
+            max_bytes,
+            self.logger,
+            self.capture,
+            state or _ProviderState(),
+            redact or (lambda value: str(value).replace("secret", "[REDACTED]")),
+            lambda headers: {
+                str(key).casefold(): str(value)
+                for key, value in (headers or {}).items()
+                if str(key).casefold() in {"content-type", "retry-after"}
+            },
+            lambda: "2026-09-19T00:00:00+00:00",
+            operation_context or (lambda: {"operation_id": "op-1", "trigger": "test"}),
+            opener=opener,
+            monotonic=lambda: 1.0,
+        )
+
+    def setUp(self):
+        self.logger = _CallLogger()
+        self.capture = _DiagnosticCapture()
+
+    def test_json_http_client_success_empty_body_and_observation(self):
+        state = _ProviderState()
+        response = _JSONResponse(b"", status=204, headers={"Content-Type": "application/json"})
+        client = self._client(lambda _request, *, timeout: response, state=state)
+
+        self.assertIsNone(client.request("GET", "https://example.test/api/v1/resource", service="openai"))
+        self.assertTrue(response.closed)
+        self.assertEqual(state.calls, [
+            ("rate_limits", response.headers),
+            ("success", "openai", 204),
+        ])
+        self.assertEqual([entry[0] for entry in self.capture.entries], [
+            "external_http_started", "external_http_completed",
+        ])
+        self.assertEqual(
+            [record[2]["extra"]["event"] for record in self.logger.records],
+            ["external_request_started", "external_request_completed"],
+        )
+
+    def test_json_http_client_reads_current_operation_context_for_each_request(self):
+        context = {"operation_id": "op-1", "trigger": "first"}
+        client = self._client(
+            lambda _request, *, timeout: _JSONResponse(b"{}"),
+            operation_context=lambda: context,
+        )
+
+        client.request("GET", "https://example.test/api/v1/first")
+        context.update(operation_id="op-2", trigger="second")
+        client.request("GET", "https://example.test/api/v1/second")
+
+        started = [record[2]["extra"]["context"] for record in self.logger.records if record[2]["extra"]["event"] == "external_request_started"]
+        self.assertEqual(
+            [(entry["operation_id"], entry["trigger"]) for entry in started],
+            [("op-1", "first"), ("op-2", "second")],
+        )
+
+    def test_json_http_client_classifies_openai_http_error_and_retry_after(self):
+        state = _ProviderState()
+        body = _JSONResponse(b'{"error":{"code":"rate_limit_exceeded"}}')
+        error = HTTPError("https://api.openai.com/v1/responses", 429, "secret provider text", {"retry-after": "7"}, body)
+        client = self._client(lambda _request, *, timeout: (_ for _ in ()).throw(error), state=state)
+
+        with self.assertRaises(AppError) as raised:
+            client.request("POST", "https://api.openai.com/v1/responses", payload={"secret": "payload"}, service="openai")
+        self.assertEqual((raised.exception.status, raised.exception.reason), (429, "rate_limit_exceeded"))
+        self.assertEqual(raised.exception.retry_after_seconds, 7)
+        self.assertIs(raised.exception.__cause__, error)
+        self.assertTrue(body.closed)
+        self.assertIn(("rate_limits", error.headers), state.calls)
+        self.assertNotIn("secret provider text", repr(self.logger.records))
+        self.assertNotIn("payload", repr(self.capture.entries))
+
+    def test_json_http_client_classifies_gemini_and_intervals_http_errors(self):
+        gemini_body = _JSONResponse(b'{"error":{"status":"INTERNAL"}}')
+        gemini_error = HTTPError("https://generativelanguage.googleapis.com", 500, "failure", {}, gemini_body)
+        gemini_state = _ProviderState()
+        with self.assertRaises(AppError) as gemini_raised:
+            self._client(lambda _request, *, timeout: (_ for _ in ()).throw(gemini_error), state=gemini_state).request(
+                "POST", "https://generativelanguage.googleapis.com/v1beta/models/test", service="gemini"
+            )
+        self.assertEqual((gemini_raised.exception.status, gemini_raised.exception.reason), (500, "provider_unavailable"))
+        self.assertTrue(gemini_body.closed)
+        self.assertTrue(any(call[0:2] == ("status", "gemini") for call in gemini_state.calls))
+
+        intervals_body = _JSONResponse(b'{"error":{"message":"secret validation detail"}}')
+        intervals_error = HTTPError("https://intervals.icu", 400, "failure", {}, intervals_body)
+        with self.assertRaises(AppError) as intervals_raised:
+            self._client(lambda _request, *, timeout: (_ for _ in ()).throw(intervals_error)).request(
+                "POST", "https://intervals.icu/api/v1/workouts", service="intervals"
+            )
+        self.assertEqual(intervals_raised.exception.status, 502)
+        self.assertIn("Intervals.icu weist die Anfrage zurück (400)", intervals_raised.exception.message)
+        self.assertNotIn("secret validation detail", intervals_raised.exception.message)
+        self.assertTrue(intervals_body.closed)
+
+    def test_json_http_client_cancellation_and_cleanup(self):
+        cancel_event = threading.Event()
+        client = self._client(lambda *_args, **_kwargs: self.fail("opener must not run"))
+        cancel_event.set()
+        with self.assertRaisesRegex(AppError, "Coach-Anfrage wurde abgebrochen") as raised:
+            client.request("GET", "https://example.test/api/v1/resource", cancel_event=cancel_event)
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        self.assertEqual(self.capture.entries[-1][0], "external_http_failed")
+
+        cancel_event = threading.Event()
+        class CancellingResponse(_JSONResponse):
+            def read(self, size):
+                cancel_event.set()
+                return super().read(size)
+
+        response = CancellingResponse(b"{}")
+        with self.assertRaises(AppError) as read_raised:
+            self._client(lambda _request, *, timeout: response).request(
+                "GET", "https://example.test/api/v1/resource", cancel_event=cancel_event
+            )
+        self.assertEqual(read_raised.exception.reason, "chat_cancelled")
+        self.assertTrue(response.closed)
+
+        cancel_event = threading.Event()
+
+        class CancellingOnClose(_JSONResponse):
+            def __exit__(self, *args):
+                cancel_event.set()
+                return super().__exit__(*args)
+
+        response = CancellingOnClose(b"{}")
+        with self.assertRaises(AppError) as close_raised:
+            self._client(lambda _request, *, timeout: response).request(
+                "GET", "https://example.test/api/v1/resource", cancel_event=cancel_event
+            )
+        self.assertEqual(close_raised.exception.reason, "chat_cancelled")
+        self.assertTrue(response.closed)
+
+        cancel_event = threading.Event()
+
+        class CancellingErrorBody(_JSONResponse):
+            def read(self, size):
+                cancel_event.set()
+                return super().read(size)
+
+        error_body = CancellingErrorBody(b'{"error":"failure"}')
+        error = HTTPError("https://example.test", 400, "failure", {}, error_body)
+        with self.assertRaises(AppError) as error_raised:
+            self._client(lambda _request, *, timeout: (_ for _ in ()).throw(error)).request(
+                "GET", "https://example.test/api/v1/resource", service="intervals", cancel_event=cancel_event
+            )
+        self.assertEqual(error_raised.exception.reason, "chat_cancelled")
+        self.assertTrue(error_body.closed)
+
+    def test_json_http_client_maps_size_invalid_network_and_client_errors(self):
+        oversized = _JSONResponse(b"1234")
+        with self.assertRaises(AppError) as too_large:
+            self._client(lambda _request, *, timeout: oversized, max_bytes=3).request(
+                "GET", "https://example.test/api/v1/resource"
+            )
+        self.assertEqual(too_large.exception.status, 502)
+        self.assertIsInstance(too_large.exception.__cause__, ProviderResponseTooLarge)
+        self.assertTrue(oversized.closed)
+
+        invalid = _JSONResponse(b"not-json")
+        with self.assertRaises(AppError) as invalid_raised:
+            self._client(lambda _request, *, timeout: invalid).request(
+                "GET", "https://example.test/api/v1/resource"
+            )
+        self.assertEqual(invalid_raised.exception.reason, "provider_client_error")
+        self.assertIsInstance(invalid_raised.exception.__cause__, ProviderInvalidResponse)
+        self.assertTrue(invalid.closed)
+
+        network = OSError("secret network detail" + "x" * 600)
+        with self.assertRaises(AppError) as network_raised:
+            self._client(
+                lambda _request, *, timeout: (_ for _ in ()).throw(network),
+                redact=lambda value: value.replace("secret", "[REDACTED]"),
+            ).request(
+                "GET", "https://example.test/api/v1/resource"
+            )
+        self.assertEqual(network_raised.exception.reason, "provider_network_error")
+        self.assertIs(network_raised.exception.__cause__, network)
+        network_log = next(record for record in self.logger.records if record[2]["extra"]["event"] == "upstream_network_error")
+        network_detail = network_log[2]["extra"]["context"]["error"]
+        self.assertIn("[REDACTED]", network_detail)
+        self.assertNotIn("secret", network_detail)
+        self.assertEqual(len(network_detail), 500)
+        self.assertNotIn("exc_info", network_log[2])
+
+        client_error = RuntimeError("secret client detail" + "x" * 600)
+        with self.assertRaises(AppError) as client_raised:
+            self._client(
+                lambda _request, *, timeout: (_ for _ in ()).throw(client_error),
+                redact=lambda value: value.replace("secret", "[REDACTED]"),
+            ).request(
+                "GET", "https://example.test/api/v1/resource"
+            )
+        self.assertEqual(client_raised.exception.reason, "provider_client_error")
+        self.assertIs(client_raised.exception.__cause__, client_error)
+        client_log = [record for record in self.logger.records if record[2]["extra"]["event"] == "external_request_failed"][-1]
+        client_detail = client_log[2]["extra"]["context"]["error"]
+        self.assertIn("[REDACTED]", client_detail)
+        self.assertNotIn("secret", client_detail)
+        self.assertEqual(len(client_detail), 500)
+        self.assertNotIn("exc_info", client_log[2])
+
+    def test_json_http_client_does_not_log_url_userinfo_or_payload(self):
+        client = self._client(lambda _request, *, timeout: _JSONResponse(b'{"ok":true}'))
+        client.request(
+            "POST",
+            "https://user:secret@example.test/api/v1/resource?token=secret",
+            payload={"credential": "secret"},
+        )
+        rendered = repr((self.logger.records, self.capture.entries))
+        self.assertNotIn("user:secret", rendered)
+        self.assertNotIn('"credential": "secret"', rendered)
+        self.assertNotIn("?token=secret", rendered)
     def test_request_json_decodes_object_array_scalar_and_empty_body(self):
         cases = (
             (b'{"answer": 42}', {"answer": 42}),
@@ -460,6 +715,103 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertEqual(error_detail(raw), "authorization: [REDACTED]")
         self.assertEqual(error_detail(b'{"error":"Invalid workout type"}'), "Invalid workout type")
         self.assertEqual(error_detail(b'{"error":{},"message":"top-level detail"}'), "top-level detail")
+        self.assertEqual(error_detail(b'{"error":"","message":"top-level detail"}'), "top-level detail")
+
+    def test_external_call_logs_and_captures_safe_success_metadata_once(self):
+        logger = _CallLogger()
+        capture = _DiagnosticCapture()
+        calls = []
+        result = external_call(
+            "synthetic",
+            "fetch",
+            lambda: calls.append(True) or {"secret": "provider payload", "items": [1, 2]},
+            {"date": "2026-09-19", "secret": "must not appear"},
+            logger=logger,
+            diagnostic_capture=capture,
+            operation_context={"operation_id": "op-1", "trigger": "manual", "phase": "sync", "ignored": "nope"},
+        )
+
+        self.assertEqual(result, {"secret": "provider payload", "items": [1, 2]})
+        self.assertEqual(calls, [True])
+        self.assertEqual([record[2]["extra"]["event"] for record in logger.records], [
+            "external_call_started", "external_call_completed",
+        ])
+        start_context = logger.records[0][2]["extra"]["context"]
+        self.assertEqual(
+            {key: start_context[key] for key in ("operation_id", "trigger", "phase")},
+            {"operation_id": "op-1", "trigger": "manual", "phase": "fetch"},
+        )
+        self.assertEqual(start_context["date"], "2026-09-19")
+        self.assertNotIn("must not appear", repr(logger.records))
+        self.assertNotIn("provider payload", repr(logger.records))
+        self.assertEqual([event for event, _details in capture.entries], [
+            "external_call_started", "external_call_completed",
+        ])
+        self.assertEqual(capture.entries[1][1]["response"], {
+            "shape": {"type": "object", "field_count": 2, "fields": ["secret", "items"],
+                      "sample": {"type": "string", "length": 16}},
+        })
+        self.assertNotIn("provider payload", repr(capture.entries))
+
+    def test_external_call_reraises_app_error_unchanged_and_captures_failure(self):
+        logger = _CallLogger()
+        capture = _DiagnosticCapture()
+        expected = AppError(409, "synthetic message", reason="already_exists")
+        calls = []
+
+        def call():
+            calls.append(True)
+            raise expected
+
+        with self.assertRaises(AppError) as raised:
+            external_call("synthetic", "create", call, logger=logger, diagnostic_capture=capture)
+
+        self.assertIs(raised.exception, expected)
+        self.assertEqual(calls, [True])
+        self.assertEqual([record[2]["extra"]["event"] for record in logger.records], ["external_call_started"])
+        self.assertEqual([event for event, _details in capture.entries], [
+            "external_call_started", "external_call_failed",
+        ])
+        failure = capture.entries[1][1]
+        self.assertEqual(failure["error"], {"type": "AppError", "status": 409, "reason": "already_exists"})
+        self.assertNotIn("synthetic message", repr(capture.entries))
+
+    def test_external_call_translates_unexpected_exception_with_cause_and_no_leak(self):
+        logger = _CallLogger()
+        capture = _DiagnosticCapture()
+        expected = RuntimeError("provider payload must not leak")
+        calls = []
+
+        def call():
+            calls.append(True)
+            raise expected
+
+        with self.assertRaises(AppError) as raised:
+            external_call("synthetic", "fetch", call, logger=logger, diagnostic_capture=capture)
+
+        self.assertEqual(calls, [True])
+        self.assertIs(raised.exception.__cause__, expected)
+        self.assertEqual(raised.exception.reason, "provider_client_error")
+        self.assertEqual(logger.records[1][0], "exception")
+        self.assertEqual(logger.records[1][2]["extra"]["context"]["error_code"], "internal_error")
+        self.assertNotIn("provider payload must not leak", repr(logger.records[1][2]["extra"]))
+        self.assertEqual(capture.entries[1][1]["error"], {"type": "RuntimeError"})
+        self.assertNotIn("provider payload must not leak", repr(capture.entries))
+
+    def test_external_call_classifies_timeout_without_exposing_error_text(self):
+        logger = _CallLogger()
+        capture = _DiagnosticCapture()
+        with self.assertRaises(AppError):
+            external_call(
+                "synthetic",
+                "fetch",
+                lambda: (_ for _ in ()).throw(TimeoutError("provider timeout details")),
+                logger=logger,
+                diagnostic_capture=capture,
+            )
+
+        self.assertEqual(logger.records[1][2]["extra"]["context"]["error_code"], "timeout")
+        self.assertEqual(capture.entries[1][1]["error"], {"type": "TimeoutError"})
 
 
 if __name__ == "__main__":

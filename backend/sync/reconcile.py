@@ -3,17 +3,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
-
-@dataclass(frozen=True)
-class ReconcileDependencies:
-    redact: Callable[[str], str]
-    payload_hash: Callable[[Any], str]
-    bump_revision: Callable[[Any], None]
-    now: str
+from backend.observability import Redactor
+from backend.planning.planned_units import planned_unit_payload_hash
+from backend.planning.revision import PlanningRevisionService
 
 
 def _load_payload(row: Any) -> dict[str, Any]:
@@ -44,38 +38,48 @@ def _apply_remote_event(
     return str(remote_event.get("external_id") or "").strip()
 
 
-def persist_planned_unit_state(
-    db: Any,
-    local_id: str,
-    state: str,
-    error: str | None,
-    remote_event: dict[str, Any] | None,
-    *,
-    dependencies: ReconcileDependencies,
-) -> bool:
-    row = db.execute("SELECT payload FROM planned_units WHERE local_id = ?", (local_id,)).fetchone()
-    if not row:
-        return False
-    payload = _load_payload(row)
-    payload["sync_status"] = state
-    synced = state == "synced"
-    remote_external_id = _apply_remote_event(payload, state, remote_event)
-    db.execute(
-        "UPDATE planned_units SET payload=?, sync_dirty=?, sync_state=?, sync_error=?, "
-        "sync_conflict=?, external_id=COALESCE(?, external_id), baseline_hash=COALESCE(?, baseline_hash), "
-        "last_synced_at=COALESCE(?, last_synced_at), updated_at=? WHERE local_id=?",
-        (
-            json.dumps(payload, ensure_ascii=False),
-            0 if state in {"synced", "remote_missing"} else 1,
-            state,
-            dependencies.redact(str(error))[:1000] if error else None,
-            "" if state != "conflict" else None,
-            remote_external_id or None,
-            dependencies.payload_hash(payload) if synced else None,
-            dependencies.now if synced else None,
-            dependencies.now,
-            local_id,
-        ),
-    )
-    dependencies.bump_revision(db)
-    return True
+class PlannedUnitSyncStateWriter:
+    """Persist planned-unit sync state on a caller-owned connection."""
+
+    def __init__(self, revision_service: PlanningRevisionService, redactor: Redactor):
+        self._revision_service = revision_service
+        self._redactor = redactor
+
+    def persist(
+        self,
+        db: Any,
+        local_id: str,
+        state: str,
+        error: str | None,
+        remote_event: dict[str, Any] | None,
+        *,
+        now: str,
+    ) -> bool:
+        row = db.execute(
+            "SELECT payload FROM planned_units WHERE local_id = ?", (local_id,)
+        ).fetchone()
+        if not row:
+            return False
+        payload = _load_payload(row)
+        payload["sync_status"] = state
+        synced = state == "synced"
+        remote_external_id = _apply_remote_event(payload, state, remote_event)
+        db.execute(
+            "UPDATE planned_units SET payload=?, sync_dirty=?, sync_state=?, sync_error=?, "
+            "sync_conflict=?, external_id=COALESCE(?, external_id), baseline_hash=COALESCE(?, baseline_hash), "
+            "last_synced_at=COALESCE(?, last_synced_at), updated_at=? WHERE local_id=?",
+            (
+                json.dumps(payload, ensure_ascii=False),
+                0 if state in {"synced", "remote_missing"} else 1,
+                state,
+                self._redactor.redact_text(str(error))[:1000] if error else None,
+                "" if state != "conflict" else None,
+                remote_external_id or None,
+                planned_unit_payload_hash(payload) if synced else None,
+                now if synced else None,
+                now,
+                local_id,
+            ),
+        )
+        self._revision_service.bump(db)
+        return True

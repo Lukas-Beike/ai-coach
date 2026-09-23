@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from test_coach_dialogue import DialogueHarness, server
+from backend.planning import workouts as planning_workouts
 from backend.providers.workout_text import canonical_workout_zones, structured_steps
 
 
@@ -33,14 +34,18 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertTrue(any(row["content"] == first["message"]["content"] for row in dialogue["messages"]))
 
     def test_rate_limit_retries_response_after_sync_without_requeuing(self):
-        server.save_workout_library_entries([self.workout()])
+        server.local_plan_creation_service().save([self.workout()])
         def sync(_):
             return {**self.call("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"],
                                 target="intervals", remote_write=True, sync_scope="all_pending"), "id": "resp_sync"}
         with (
             patch.object(server.time, "sleep") as sleep,
             patch.object(server.secrets, "randbelow", return_value=0),
-            patch.object(server, "enqueue_sync_job", wraps=server.enqueue_sync_job) as enqueue,
+            patch.object(
+                server.SyncJobQueueService,
+                "enqueue",
+                wraps=server.sync_job_queue_service().enqueue,
+            ) as enqueue,
         ):
             result, model = self.turn("Bitte den Plan nochmal übertragen", [sync, limited, {"id": "resp_final", "output_text": "Sync beauftragt."}])
         self.assertEqual(result["status"], "completed")
@@ -48,7 +53,10 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         sleep.assert_called_once_with(5)
         self.assertEqual(model.call_args_list[1].args[0], model.call_args_list[2].args[0])
         self.assertEqual(model.call_args.args[0]["previous_response_id"], "resp_sync")
-        self.assertEqual(server.sync_job_state(result["sync_job_ids"][0])["status"], "queued")
+        self.assertEqual(
+            server.sync_job_queue_service().state(result["sync_job_ids"][0])["status"],
+            "queued",
+        )
         _, next_model = self.turn("Und, ist er fertig?", [{"output_text": "Ich prüfe den Auftrag."}])
         previous = json.loads(next_model.call_args.args[0]["input"])["dialogue"]["confirmed_results"][0]
         self.assertEqual(previous["sync_job_ids"], result["sync_job_ids"])
@@ -101,8 +109,12 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(model.call_args.args[0]["previous_response_id"], "resp_tool")
 
     def test_failed_answer_keeps_observed_sync_status(self):
-        server.save_workout_library_entries([self.workout()])
-        job = server.enqueue_sync_job("intervals", "plan_push", {"entries": server._pending_plan_push_entries()})
+        server.local_plan_creation_service().save([self.workout()])
+        job = server.sync_job_queue_service().enqueue(
+            "intervals",
+            "plan_push",
+            {"entries": server.planning_authority_service().pending_plan_push_entries()},
+        )
         with server.database() as db:
             db.execute("UPDATE sync_jobs SET status='completed' WHERE id=?", (job["id"],))
         with patch.object(server.time, "sleep"):
@@ -114,7 +126,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
     def test_workout_repair_finishes_in_same_turn_preserving_identity_and_distance(self):
         original = {**self.workout("2026-09-14", "Optionaler Recovery Run"), "sport": "Run",
                     "description": "- 6km Z1 HR", "target": "HR", "duration_minutes": 40}
-        unit = server.save_workout_library_entries([original])[0]
+        unit = server.local_plan_creation_service().save([original])[0]
         before = self.state()
         args = {"expected_revision": before["planning_revision"], "changes": [{
             "local_id": unit["id"], "expected_payload_hash": before["planned_units"][0]["expected_payload_hash"],
@@ -141,8 +153,11 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
     def test_explicit_zone_range_is_normalized_before_local_save(self):
         for spelling in ("Zone 1-2 HR", "Z1–2 HR", "Zone 1 – Zone 2 HR", "Z1-Z2 HR"):
             with self.subTest(spelling=spelling):
-                workout = server.normalize_workout({**self.workout(), "sport": "Run", "target": "HR", "description": "- 8km " + spelling})
-                server.validate_workout_description(workout)
+                workout = planning_workouts.normalize_workout(
+                    {**self.workout(), "sport": "Run", "target": "HR", "description": "- 8km " + spelling},
+                    today=server.local_now().date(),
+                )
+                planning_workouts.validate_workout_description(workout)
                 self.assertEqual(workout["description"], "- 8km Z1-Z2 HR")
         self.assertEqual(canonical_workout_zones("- 8km locker\nHinweis: Zone 1-2 HR"), "- 8km locker\nHinweis: Zone 1-2 HR")
 

@@ -2,16 +2,94 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import base64
 import hashlib
 import json
+from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import urlencode
 
+from backend.errors import AppError
 
 JsonGetter = Callable[[str, dict[str, Any]], Any]
 ErrorFactory = Callable[[str], Exception]
 Request = Callable[..., Any]
+INTERVALS_API_BASE_URL = "https://intervals.icu/api/v1"
+
+
+class IntervalsApiClient:
+    """Own authenticated Intervals.icu transport and collection pagination state."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        request: Callable[..., Any],
+        base_url: str = INTERVALS_API_BASE_URL,
+    ):
+        credentials = base64.b64encode(f"API_KEY:{api_key}".encode()).decode()
+        headers = {"Authorization": f"Basic {credentials}"}
+        base = base_url.rstrip("/")
+        self._read_transport = IntervalsReadTransport(base, headers, request)
+        self._write_transport = IntervalsWriteTransport(base, headers, request)
+        self._pagination: dict[str, dict[str, Any]] = {}
+
+    @property
+    def pagination(self) -> Mapping[str, Mapping[str, Any]]:
+        """Return a JSON-serializable defensive snapshot of pagination metadata."""
+        return {
+            collection: metadata.copy()
+            for collection, metadata in self._pagination.items()
+        }
+
+    def get(
+        self,
+        path: str,
+        params: Mapping[str, Any] | None = None,
+        *,
+        cancel_event: Any = None,
+    ) -> Any:
+        if cancel_event is None:
+            return self._read_transport.get(path, params)
+        return self._read_transport.get(path, params, cancel_event=cancel_event)
+
+    def get_paged_collection(
+        self,
+        path: str,
+        params: Mapping[str, Any] | None,
+        collection: str,
+        page_size: int = 500,
+        cancel_event: Any = None,
+    ) -> list[dict[str, Any]]:
+        rows, page_metadata = fetch_paged_collection(
+            self.get,
+            path,
+            params,
+            collection,
+            error=lambda message: AppError(502, message),
+            page_size=page_size,
+            cancel_event=cancel_event,
+        )
+        previous = self._pagination.get(collection) or {
+            "pages": 0,
+            "records": 0,
+            "complete": True,
+        }
+        self._pagination[collection] = {
+            "pages": int(previous["pages"]) + int(page_metadata["pages"]),
+            "records": int(previous["records"]) + int(page_metadata["records"]),
+            "complete": bool(previous["complete"]) and bool(page_metadata["complete"]),
+        }
+        return rows
+
+    def post(self, path: str, payload: Any, params: Mapping[str, Any] | None = None) -> Any:
+        return self._write_transport.post(path, payload, params)
+
+    def put(self, path: str, payload: Any, params: Mapping[str, Any] | None = None) -> Any:
+        return self._write_transport.put(path, payload, params)
+
+    def delete(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
+        return self._write_transport.delete(path, params)
 
 
 class IntervalsReadTransport:

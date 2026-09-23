@@ -15,28 +15,33 @@ class CoachResponseFailureTests(unittest.TestCase):
     call = dialogue.CoachDialogueTests.call
 
     def test_background_rate_limit_retries_summary_with_parent_and_one_sync(self):
-        server.save_workout_library_entries([self.workout("2026-09-08")])
+        server.local_plan_creation_service().save([self.workout("2026-09-08")])
         turn_id = "synthetic-sync-rate-retry"
         message = "Bitte den Plan erneut synchronisieren"
         server.enqueue_background_coach_job(message, turn_id, "synthetic-session")
         payloads = []
 
-        def create(payload):
+        def create(payload, **kwargs):
             payloads.append(payload)
+            if kwargs.get("on_response_id") is not None:
+                kwargs["on_response_id"](f"resp_{len(payloads)}")
             if len(payloads) == 1:
                 return {**self.call("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"],
                                    target="intervals", remote_write=True, sync_scope="all_pending"),
                         "id": "resp_sync", "status": "completed"}
             if len(payloads) == 2:
-                return {"id": "resp_limited", "status": "queued"}
+                raise server.AppError(429, "rate limited", reason="rate_limit_exceeded")
             return {"id": "resp_final", "status": "completed", "output_text": "Sync beauftragt."}
 
         with patch.object(server, "ensure_conversation", return_value="synthetic-conversation"), \
-                patch.object(server, "build_training_context", return_value="Synthetic local context"), \
-                patch.object(server, "responses_request", side_effect=create), \
-                patch.object(server, "http_json", return_value={"id": "resp_limited", "status": "failed", "error": {"code": "rate_limit_exceeded"}}), \
+                patch("backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic local context"), \
+                patch.object(server.openai_provider.OpenAIResponsesClient, "background", side_effect=create), \
                 patch.object(server.time, "sleep"), \
-                patch.object(server, "enqueue_sync_job", wraps=server.enqueue_sync_job) as enqueue:
+                patch.object(
+                    server.SyncJobQueueService,
+                    "enqueue",
+                    wraps=server.sync_job_queue_service().enqueue,
+                ) as enqueue:
             receipt = server.chat_with_coach(message, client_turn_id=turn_id,
                                            session_csrf_hash="synthetic-session", background_job=True)
         self.assertEqual(receipt["status"], "completed")
@@ -48,36 +53,41 @@ class CoachResponseFailureTests(unittest.TestCase):
         self.assertNotIn("previous_response_id", payloads[0])
 
     def test_failed_background_answer_keeps_sync_and_reports_provider_code(self):
-        server.save_workout_library_entries([self.workout("2026-09-08")])
+        server.local_plan_creation_service().save([self.workout("2026-09-08")])
         turn_id = "sync-provider-response-failure"
         message = "Sync zu intervals.icu durchführen"
         server.enqueue_background_coach_job(message, turn_id, "synthetic-session")
         responses = 0
 
-        def create(payload):
+        def create(payload, **kwargs):
             nonlocal responses
             responses += 1
+            if kwargs.get("on_response_id") is not None:
+                kwargs["on_response_id"](f"resp_{responses}")
             if responses == 1:
                 return {**self.call("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"],
                                    target="intervals", remote_write=True, sync_scope="all_pending"),
                         "id": "resp_sync", "status": "completed"}
             self.assertEqual(responses, 2)
-            return {"id": "resp_summary", "status": "queued"}
+            return server.provider_state_service().validate_openai_response("/responses", failed_response)
 
         failed_response = {"id": "resp_summary", "status": "failed", "error": {
             "code": "server_error", "message": "DO_NOT_EXPORT_PROVIDER_CONTENT",
         }}
         with patch.object(server, "ensure_conversation", return_value="synthetic-conversation"), \
-                patch.object(server, "build_training_context", return_value="Synthetic local context"), \
-                patch.object(server, "responses_request", side_effect=create), \
-                patch.object(server, "http_json", return_value=failed_response) as retrieve, \
-                patch.object(server, "enqueue_sync_job", wraps=server.enqueue_sync_job) as enqueue:
+                patch("backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic local context"), \
+                patch.object(server.openai_provider.OpenAIResponsesClient, "background", side_effect=create), \
+                patch.object(
+                    server.SyncJobQueueService,
+                    "enqueue",
+                    wraps=server.sync_job_queue_service().enqueue,
+                ) as enqueue:
             receipt = server.chat_with_coach(message, client_turn_id=turn_id,
                                            session_csrf_hash="synthetic-session", background_job=True)
             replay = server.chat_with_coach(message, client_turn_id=turn_id,
                                           session_csrf_hash="synthetic-session", background_job=True)
         enqueue.assert_called_once()
-        retrieve.assert_called_once()
+        self.assertEqual(responses, 2)
         self.assertEqual(receipt, replay)
         self.assertEqual(receipt["status"], "partial")
         self.assertEqual(receipt["pending_operations"], [])
@@ -87,8 +97,13 @@ class CoachResponseFailureTests(unittest.TestCase):
         self.assertIn("erneut", receipt["message"]["content"])
         self.assertIn("Plansynchronisierung beauftragt", receipt["message"]["content"])
         self.assertIn("noch nicht bestätigt", receipt["message"]["content"])
-        self.assertEqual(server.sync_job_state(receipt["sync_job_ids"][0])["status"], "queued")
-        history = server.coach_diagnostic_history()
+        self.assertEqual(
+            server.sync_job_queue_service().state(receipt["sync_job_ids"][0])[
+                "status"
+            ],
+            "queued",
+        )
+        history = server.coach_diagnostic_history_service().history()
         self.assertEqual(history[0]["error"]["provider_error_code"], "server_error")
         status = server.provider_state_service().summary("openai")["status"]
         self.assertEqual(status["provider_error_code"], "server_error")
@@ -97,7 +112,7 @@ class CoachResponseFailureTests(unittest.TestCase):
     def test_unknown_response_error_codes_and_messages_are_not_exported(self):
         for code in ("DO_NOT_EXPORT_PROVIDER_CONTENT", ["server_error"], {"secret": "content"}, None):
             with self.subTest(code_type=type(code).__name__), self.assertRaises(server.AppError) as raised:
-                server._validate_openai_response("/responses", {"error": {
+                server.provider_state_service().validate_openai_response("/responses", {"error": {
                     "code": code, "message": "DO_NOT_EXPORT_PROVIDER_CONTENT",
                 }})
             self.assertEqual(raised.exception.reason, "response_error")

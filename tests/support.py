@@ -8,6 +8,17 @@ from pathlib import Path
 from unittest.mock import patch
 
 
+def build_gemini_request_payload(server, payload, model):
+    """Exercise the concrete Gemini request owner with active test settings."""
+    return server.gemini_request_payload_service().build(
+        payload,
+        model,
+        default_max_output_tokens=server.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+        default_thinking_level=server.SETTINGS.selected_thinking_level(),
+        json_media_type=server.JSON_MEDIA_TYPE,
+    )
+
+
 class IntervalsRequestRecorder:
     """Record only safe request metadata for provider contract tests."""
 
@@ -149,7 +160,7 @@ def reset_application_state(server) -> None:
     with server.DB_LOCK, server.database() as db:
         for table in tables:
             db.execute(f"DELETE FROM {table}")
-    server.save_profile({})
+    server.profile_service().save({})
     with server.CHAT_STREAM_LOCK:
         server.CHAT_STREAMS.clear()
         server.COACH_JOB_CANCEL_EVENTS.clear()

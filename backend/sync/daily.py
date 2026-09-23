@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 
+from backend.db.manager import DatabaseManager
+from backend.db.repositories import KeyValueRepository
+
 SYNC_INTERVAL_SECONDS = 60 * 60
 
 
@@ -63,3 +66,51 @@ def mark_daily_sync_attempt(
 ) -> None:
     """Store when a scheduled provider refresh was queued."""
     set_value(daily_attempt_marker_key(source), now.isoformat())
+
+
+class DailySyncMarkerService:
+    """Persist provider refresh markers within the database unit of work."""
+
+    def __init__(
+        self,
+        database_manager: DatabaseManager,
+        key_value_repository: KeyValueRepository,
+        local_now: Callable[[], datetime],
+    ) -> None:
+        self._database_manager = database_manager
+        self._key_value_repository = key_value_repository
+        self._local_now = local_now
+
+    def is_due(self, source: str, now: datetime | None = None) -> bool:
+        """Check whether the latest provider attempt or success is due."""
+        current = now or self._local_now()
+        with self._database_manager.unit_of_work() as db:
+            return daily_sync_is_due(
+                source,
+                current,
+                get_value=lambda key: self._key_value_repository.get(db, key),
+            )
+
+    def mark(self, source: str, now: datetime | None = None) -> None:
+        """Store the provider's last successful refresh time."""
+        current = now or self._local_now()
+        with self._database_manager.unit_of_work() as db:
+            mark_daily_sync(
+                source,
+                current,
+                set_value=lambda key, value: self._key_value_repository.set(
+                    db, key, value
+                ),
+            )
+
+    def mark_attempt(self, source: str, now: datetime | None = None) -> None:
+        """Store when a scheduled provider refresh was queued."""
+        current = now or self._local_now()
+        with self._database_manager.unit_of_work() as db:
+            mark_daily_sync_attempt(
+                source,
+                current,
+                set_value=lambda key, value: self._key_value_repository.set(
+                    db, key, value
+                ),
+            )

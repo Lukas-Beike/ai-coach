@@ -545,3 +545,43 @@ def provider_attachment_data(item):
     }
     encoded = base64.b64encode(json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).decode("ascii")
     return encoded, "application/json"
+
+
+def gemini_selected_raw_attachments(message_attachments, *, max_inline_bytes=MAX_GEMINI_INLINE_IMAGE_BYTES):
+    """Choose newest raw image/activity attachments that fit Gemini's inline budget."""
+    candidates = []
+    for message_index, attachments in enumerate(message_attachments):
+        for attachment_index, attachment in enumerate(attachments):
+            if isinstance(attachment, dict) and attachment.get("type") in {"image", "gpx", "fit"} and attachment.get("data"):
+                raw_data, _ = provider_attachment_data(attachment)
+                candidates.append((message_index, attachment_index, len(raw_data)))
+    selected = set()
+    remaining_bytes = max_inline_bytes
+    for message_index, attachment_index, size in reversed(candidates):
+        if size <= remaining_bytes:
+            selected.add((message_index, attachment_index))
+            remaining_bytes -= size
+    return selected
+
+
+def gemini_history_parts(message, attachments, message_index, selected_raw):
+    """Build Gemini history parts while marking omitted raw attachments."""
+    content = str(message.get("content") or "").strip()[:6000]
+    if not content:
+        return []
+    parts = [{"text": content}]
+    for attachment_index, attachment in enumerate(attachments):
+        if not isinstance(attachment, dict):
+            continue
+        attachment_type = attachment.get("type")
+        if attachment_type in {"gpx", "fit"}:
+            parts.append({"text": json.dumps({"untrusted_attachment_name": attachment.get("name"),
+                                                f"untrusted_{attachment_type}": attachment.get("summary")}, ensure_ascii=False)})
+        if (message_index, attachment_index) in selected_raw and attachment.get("mime"):
+            data, mime = provider_attachment_data(attachment)
+            parts.append({"inlineData": {"mimeType": mime, "data": data}})
+        elif attachment_type == "image":
+            parts.append({"text": json.dumps({"untrusted_attachment_name": attachment.get("name"), "raw_image_omitted": True}, ensure_ascii=False)})
+        elif attachment_type in {"gpx", "fit"} and attachment.get("data"):
+            parts.append({"text": json.dumps({"untrusted_attachment_name": attachment.get("name"), "raw_file_omitted": True}, ensure_ascii=False)})
+    return parts

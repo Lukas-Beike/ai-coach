@@ -1,7 +1,7 @@
 # Orchestrator-Prompt für die server.py-Auslagerung
 
 Diesen Prompt im Haupt-Task mit **GPT-5.6 Sol** und Reasoning `high` verwenden.
-Die delegierten Worker sollen ausdrücklich mit **GPT-5.6 Luna** und Reasoning
+Die delegierten Worker sollen ausdrücklich mit **GPT-6 Luna** und Reasoning
 `high` gestartet werden.
 
 ```text
@@ -10,7 +10,7 @@ Setze den Plan in docs/server-monolith-extraction-plan.md vollständig um.
 Rollen und Modelle
 - Du bist der Orchestrator, Integrator und das abschließende Review-Gate.
   Verwende dafür GPT-5.6 Sol mit Reasoning high.
-- Spawne echte Subagents mit explizitem Modell gpt-5.6-luna und
+- Spawne echte Subagents mit explizitem Modell gpt-6-luna und
   Reasoning high für klar abgegrenzte Implementierungsaufgaben.
 - Prüfe vor der Delegation, ob diese Modellzuweisung unterstützt wird.
   Behaupte keinen Luna-Einsatz, wenn das Modell nicht tatsächlich
@@ -107,7 +107,7 @@ Beginne jetzt mit der Bestandsprüfung und P0.
 ## Betriebsregeln
 
 - Haupt-Task: `gpt-5.6-sol`, Reasoning `high`.
-- Luna-Worker: `gpt-5.6-luna`, Reasoning `high`, höchstens zwei parallel.
+- Luna-Worker: `gpt-6-luna`, Reasoning `high`, höchstens zwei parallel.
 - Sol entscheidet über Schnittstellen, integriert Worker-Patches und gibt den
   finalen PASS/FAIL-Status.
 - Ein grüner Worker-Testlauf ersetzt kein Sol-Review des tatsächlichen Diffs.

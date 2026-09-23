@@ -5,9 +5,18 @@ request provenance and effects. There is deliberately no intent classifier.
 """
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
+from datetime import datetime, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from backend.athlete.profile import ProfileService, timezone_name
 from backend.coach.authorization import REQUEST_SCHEMA, dialogue_tools, validate_request
+from backend.coach.conversation import CoachMessageService
+from backend.coach.service import command_receipt
+from backend.db.manager import DatabaseManager
+from backend.db.repositories import KeyValueRepository
 
 
 INSTRUCTIONS = """
@@ -165,3 +174,108 @@ language. Never mention internal authorization scopes or classification errors.
 """
 
 
+class CoachDialogueReadService:
+    """Build bounded, local-only dialogue projections without mutating state."""
+
+    def __init__(
+        self,
+        database_manager: DatabaseManager,
+        coach_messages: CoachMessageService,
+        key_values: KeyValueRepository,
+        profile: ProfileService,
+        local_clock: Callable[[tzinfo], datetime] = datetime.now,
+    ):
+        self._database_manager = database_manager
+        self._coach_messages = coach_messages
+        self._key_values = key_values
+        self._profile = profile
+        self._local_clock = local_clock
+
+    def context(self, client_turn_id: str) -> dict[str, Any]:
+        messages = self._coach_messages.list(24)
+        with self._database_manager.reader() as db:
+            current = db.execute(
+                "SELECT id FROM messages WHERE client_turn_id=? AND role='user'",
+                (client_turn_id,),
+            ).fetchone()
+            pending = json.loads(
+                self._key_values.get(db, "coach_pending_request") or "null"
+            )
+            if pending:
+                known_ids = {item["id"] for item in messages}
+                for message_id in pending.get("source_message_ids", []):
+                    if message_id in known_ids:
+                        continue
+                    row = db.execute(
+                        "SELECT id, role, content, created_at FROM messages "
+                        "WHERE id=? AND role='user'",
+                        (message_id,),
+                    ).fetchone()
+                    if row:
+                        messages.append(dict(row))
+                        known_ids.add(message_id)
+            recent_rows = db.execute(
+                "SELECT c.client_turn_id, c.receipt FROM coach_commands c "
+                "WHERE c.status='completed' AND EXISTS ("
+                "SELECT 1 FROM messages m WHERE m.client_turn_id=c.client_turn_id) "
+                "ORDER BY c.created_at DESC LIMIT 12"
+            ).fetchall()
+            timezone = timezone_name(self._profile.get_from_db(db).get("timezone"))
+
+        now = self._local_clock(ZoneInfo(timezone))
+        return {
+            "local_date": now.date().isoformat(),
+            "timezone": timezone,
+            "current_user_message_id": current["id"] if current else None,
+            "messages": [
+                {
+                    "id": item["id"],
+                    "role": item["role"],
+                    "content": item["content"][:4000],
+                }
+                for item in sorted(messages, key=lambda item: item["id"])
+            ],
+            "pending_request": pending,
+            "confirmed_results": [
+                self._command_result(row) for row in recent_rows
+            ],
+        }
+
+    def artifact_refs(self) -> list[dict[str, Any]]:
+        """Return drafts only when their turn has a corresponding local user message."""
+        with self._database_manager.reader() as db:
+            rows = db.execute(
+                "SELECT a.id, a.status, a.base_revision, a.created_at, "
+                "(SELECT m.id FROM messages m WHERE m.client_turn_id=a.client_turn_id "
+                "AND m.role='user' LIMIT 1) AS source_message_id, "
+                "json_extract(a.payload, '$.plan_name') AS name "
+                "FROM coach_plan_artifacts a WHERE a.status='draft' "
+                "AND EXISTS (SELECT 1 FROM messages m "
+                "WHERE m.client_turn_id=a.client_turn_id) "
+                "ORDER BY a.created_at DESC LIMIT 20"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def _command_result(row: dict[str, Any]) -> dict[str, Any]:
+        previous = command_receipt(row["receipt"])
+        steps = previous.get("command_receipts", [])
+        return {
+            "client_turn_id": row["client_turn_id"],
+            "status": previous.get("status"),
+            "sync_job_ids": (previous.get("sync_job_ids") or [])[:40],
+            "steps": [
+                {
+                    "tool": step.get("tool"),
+                    "ok": step.get("result", {}).get("ok"),
+                    "status": step.get("result", {}).get("status"),
+                    "reason": step.get("result", {}).get("reason"),
+                    "scope": ((step.get("request") or {}).get("scope") or [])[:40],
+                    "scope_truncated": len(
+                        (step.get("request") or {}).get("scope") or []
+                    ) > 40,
+                    "artifact_id": step.get("result", {}).get("artifact_id"),
+                }
+                for step in steps[:40]
+            ],
+        }

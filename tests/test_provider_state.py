@@ -2,6 +2,7 @@ import json
 import unittest
 from datetime import date
 
+from backend.errors import AppError
 from backend.providers.state import ProviderStateService
 
 
@@ -153,6 +154,46 @@ class ProviderStateServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["remaining_requests"], "19")
         self.assertEqual(snapshot["reset_tokens"], "30s")
         self.assertNotIn("private", json.dumps(snapshot))
+
+    def test_openai_response_validation_persists_safe_failure_and_maps_app_error(self):
+        with self.assertRaises(AppError) as raised:
+            self.service.validate_openai_response(
+                "/responses",
+                {
+                    "error": {
+                        "code": "server_error",
+                        "message": "private provider content",
+                    }
+                },
+            )
+
+        self.assertEqual(raised.exception.reason, "response_error")
+        self.assertEqual(raised.exception.provider_error_code, "server_error")
+        self.assertNotIn("private provider content", str(raised.exception))
+        status = json.loads(self.repository.values["openai_status"])
+        self.assertEqual(status["reason"], "response_error")
+        self.assertEqual(status["provider_error_code"], "server_error")
+        self.assertNotIn("private provider content", json.dumps(status))
+
+    def test_openai_response_validation_drops_untrusted_code_and_keeps_invalid_shape_out_of_state(self):
+        with self.assertRaises(AppError) as raised:
+            self.service.validate_openai_response(
+                "/responses",
+                {"error": {"code": "private_code", "message": "private provider content"}},
+            )
+        self.assertEqual(raised.exception.reason, "response_error")
+        self.assertFalse(hasattr(raised.exception, "provider_error_code"))
+        self.assertNotIn("provider_error_code", json.loads(self.repository.values["openai_status"]))
+
+        self.repository.values.pop("openai_status")
+        with self.assertRaises(AppError) as invalid:
+            self.service.validate_openai_response("/responses", None)
+        self.assertEqual(invalid.exception.reason, "invalid_response")
+        self.assertNotIn("openai_status", self.repository.values)
+
+    def test_openai_response_validation_returns_valid_result_unchanged(self):
+        result = {"id": "response-test", "status": "completed"}
+        self.assertIs(self.service.validate_openai_response("/responses", result), result)
 
     def test_usage_accumulates_atomically_and_logs_only_operation_and_counts(self):
         first = self.service.record_usage(

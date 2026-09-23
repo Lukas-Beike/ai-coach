@@ -11,13 +11,16 @@ import json
 import re
 import secrets
 import threading
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 from backend import observability
+from backend.errors import COACH_ABORTED_ERROR, AppError, provider_error
 
 _SECRET_PATTERNS = (
     (re.compile(r"(?i)https?://[^\s<>\"'`]+"), "[REDACTED_URL]"),
@@ -332,6 +335,311 @@ def request_json(
         return JsonResponse(payload, status, getattr(response, "headers", None), len(raw_body))
 
 
+class JsonHttpClient:
+    """Execute one observed, bounded JSON request without application globals."""
+
+    def __init__(
+        self,
+        app_version: str,
+        max_response_bytes: int,
+        logger: Any,
+        diagnostic_capture: Any,
+        provider_state: Any,
+        redact_text: Any,
+        safe_response_headers: Any,
+        now: Any,
+        operation_context: Callable[[], Mapping[str, Any] | None],
+        *,
+        opener: Any = urlopen,
+        monotonic: Any = time.perf_counter,
+    ) -> None:
+        self.app_version = app_version
+        self.max_response_bytes = max_response_bytes
+        self.logger = logger
+        self.diagnostic_capture = diagnostic_capture
+        self.provider_state = provider_state
+        self.redact_text = redact_text
+        self.safe_response_headers = safe_response_headers
+        self.now = now
+        self.operation_context = operation_context
+        self.opener = opener
+        self.monotonic = monotonic
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        payload: Any | None = None,
+        headers: Mapping[str, str] | None = None,
+        timeout: int = 45,
+        service: str | None = None,
+        raw_body: bytes | None = None,
+        content_type: str | None = None,
+        cancel_event: Any = None,
+    ) -> Any:
+        request, parsed_url, request_headers, request_context = json_request_parts(
+            method,
+            url,
+            payload=payload,
+            raw_body=raw_body,
+            headers=headers,
+            timeout=timeout,
+            service=service,
+            content_type=content_type,
+            app_version=self.app_version,
+            operation_context=self.operation_context() if self.operation_context is not None else None,
+        )
+        # Drop URL userinfo before metadata reaches logs or diagnostics.
+        request_context = {
+            **request_context,
+            "service": service or observability.safe_url_netloc(parsed_url),
+            "host": observability.safe_url_netloc(parsed_url),
+        }
+        started = self.monotonic()
+        self.logger.info(
+            "External HTTP request started",
+            extra={"event": "external_request_started", "context": request_context},
+        )
+        self.diagnostic_capture.capture("external_http_started", {
+            "service": request_context["service"],
+            "method": request_context["method"],
+            "host": observability.safe_url_netloc(parsed_url),
+            "path": request_context["path"],
+            "query_keys": request_context.get("query_keys", []),
+            "request_bytes": request_context["request_bytes"],
+            "content_type": request_headers.get("Content-Type"),
+        })
+        try:
+            self._raise_cancelled(cancel_event)
+            response = request_json(
+                request,
+                timeout=timeout,
+                max_bytes=self.max_response_bytes,
+                cancel_event=cancel_event,
+                opener=self.opener,
+            )
+            self._raise_cancelled(cancel_event)
+            return self._success(response, service, request_context, parsed_url, started)
+        except ProviderRequestCancelled as exc:
+            raise self._cancelled_error(request_context, parsed_url, started) from exc
+        except ProviderResponseTooLarge as exc:
+            error = AppError(502, "Die Antwort des externen Dienstes ist zu groß.")
+            self._capture_failure(request_context, parsed_url, started, error)
+            raise error from exc
+        except HTTPError as exc:
+            self._http_error(exc, service, request_context, parsed_url, started, cancel_event)
+        except (OSError, ValueError) as exc:
+            if cancel_event is not None and cancel_event.is_set():
+                raise self._cancelled_error(request_context, parsed_url, started) from exc
+            if service == "openai":
+                self.provider_state.record_status(
+                    "openai",
+                    state="error",
+                    reason="network_error",
+                    message="OpenAI ist nicht erreichbar. Bitte Netzwerkverbindung prüfen und später erneut versuchen.",
+                )
+            self.logger.exception(
+                "Upstream service is unavailable",
+                extra={
+                    "event": "upstream_network_error",
+                    "context": self._failure_context(request_context, parsed_url, started, exc),
+                },
+            )
+            self._capture_failure(request_context, parsed_url, started, exc)
+            raise provider_error(service, "network") from exc
+        except AppError as exc:
+            self._capture_failure(request_context, parsed_url, started, exc)
+            raise
+        except Exception as exc:
+            if service == "openai":
+                self.provider_state.record_status(
+                    "openai",
+                    state="error",
+                    reason="client_error",
+                    message="Die OpenAI-Antwort konnte nicht verarbeitet werden. Bitte später erneut versuchen.",
+                )
+            self.logger.exception(
+                "External HTTP request failed while processing response",
+                extra={
+                    "event": "external_request_failed",
+                    "context": self._failure_context(request_context, parsed_url, started, exc),
+                },
+            )
+            self._capture_failure(request_context, parsed_url, started, exc)
+            raise provider_error(service, "client") from exc
+
+    def _raise_cancelled(self, cancel_event: Any) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProviderRequestCancelled
+
+    def _cancelled_error(self, request_context: dict[str, Any], parsed_url: Any, started: float) -> AppError:
+        error = AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
+        self._capture_failure(request_context, parsed_url, started, error)
+        return error
+
+    def _safe_error_code(self, error: BaseException) -> str:
+        return _external_call_error_code(error)
+
+    def _failure_context(
+        self, request_context: dict[str, Any], parsed_url: Any, started: float, error: BaseException,
+    ) -> dict[str, Any]:
+        return {
+            **request_context,
+            "duration_ms": round((self.monotonic() - started) * 1000, 1),
+            "error_type": type(error).__name__,
+            "error_code": self._safe_error_code(error),
+            "error": self.redact_text(str(error))[:500],
+        }
+
+    def _capture_failure(
+        self,
+        request_context: dict[str, Any],
+        parsed_url: Any,
+        started: float,
+        error: BaseException,
+        *,
+        error_bytes: int | None = None,
+        headers: Any = None,
+    ) -> None:
+        context: dict[str, Any] = {
+            "service": request_context["service"],
+            "method": request_context["method"],
+            "host": observability.safe_url_netloc(parsed_url),
+            "path": request_context["path"],
+            "duration_ms": round((self.monotonic() - started) * 1000, 1),
+            "error": observability.safe_diagnostic_error(error),
+        }
+        if error_bytes is not None:
+            context["error_bytes"] = error_bytes
+        if headers is not None:
+            context["headers"] = self.safe_response_headers(headers)
+        self.diagnostic_capture.capture("external_http_failed", context)
+
+    def _success(
+        self,
+        response: JsonResponse,
+        service: str | None,
+        request_context: dict[str, Any],
+        parsed_url: Any,
+        started: float,
+    ) -> Any:
+        result = response.payload if response.response_bytes else None
+        if service == "openai":
+            self.provider_state.record_rate_limits(response.headers)
+            self.provider_state.record_success("openai", response.status)
+        duration_ms = round((self.monotonic() - started) * 1000, 1)
+        self.logger.info(
+            "External HTTP request completed",
+            extra={
+                "event": "external_request_completed",
+                "context": {
+                    **request_context,
+                    "status": response.status,
+                    "duration_ms": duration_ms,
+                    "response_bytes": response.response_bytes,
+                    **observability.external_result_context(result),
+                },
+            },
+        )
+        self.diagnostic_capture.capture("external_http_completed", {
+            "service": request_context["service"],
+            "method": request_context["method"],
+            "host": observability.safe_url_netloc(parsed_url),
+            "path": request_context["path"],
+            "status": response.status,
+            "duration_ms": duration_ms,
+            "response_bytes": response.response_bytes,
+            "headers": self.safe_response_headers(response.headers),
+            "response": observability.diagnostic_capture_response(result),
+        })
+        return result
+
+    def _http_error(
+        self,
+        error: HTTPError,
+        service: str | None,
+        request_context: dict[str, Any],
+        parsed_url: Any,
+        started: float,
+        cancel_event: Any,
+    ) -> None:
+        raw_body = read_error_body(error, self.max_response_bytes)
+        if cancel_event is not None and cancel_event.is_set():
+            raise self._cancelled_error(request_context, parsed_url, started) from error
+        details: dict[str, Any] | None = None
+        if service == "openai":
+            from backend.providers import openai as openai_provider
+
+            self.provider_state.record_rate_limits(getattr(error, "headers", None))
+            details = openai_provider.error_details(
+                error.code,
+                raw_body,
+                getattr(error, "headers", None),
+                updated_at=self.now(),
+            )
+            self.provider_state.record_status(
+                "openai",
+                state=details.get("state"),
+                reason=details.get("reason"),
+                message=details.get("message"),
+                http_status=details.get("http_status"),
+                provider_error_code=details.get("provider_error_code"),
+            )
+        elif service == "gemini":
+            from backend.providers import gemini as gemini_provider
+
+            details = gemini_provider.error_details(error.code, raw_body, updated_at=self.now())
+        self.logger.exception(
+            "Upstream HTTP request failed",
+            extra={
+                "event": "upstream_http_error",
+                "context": {
+                    **request_context,
+                    "status": error.code,
+                    "duration_ms": round((self.monotonic() - started) * 1000, 1),
+                    "error_type": type(error).__name__,
+                    **({"reason": details["reason"]} if details else {}),
+                },
+            },
+        )
+        self._capture_failure(
+            request_context,
+            parsed_url,
+            started,
+            error,
+            error_bytes=len(raw_body),
+            headers=getattr(error, "headers", None),
+        )
+        if details:
+            if service == "gemini":
+                self.provider_state.record_status(
+                    "gemini",
+                    state="error",
+                    reason=details["reason"],
+                    message=details["message"],
+                    http_status=error.code,
+                )
+            status = error.code if service == "gemini" or error.code == 429 else 502
+            app_error = AppError(status, details["message"], reason=details["reason"])
+            retry_after = details.get("retry_after_seconds")
+            if isinstance(retry_after, int):
+                app_error.retry_after_seconds = retry_after
+            raise app_error from error
+        detail = self._interval_error_detail(raw_body) if service == "intervals" else ""
+        message = (
+            f"Intervals.icu weist die Anfrage zurück ({error.code}): {detail}"
+            if detail and service == "intervals"
+            else f"Anfrage an externen Dienst fehlgeschlagen ({error.code})."
+        )
+        raise AppError(502, message, reason="provider_http_error") from error
+
+    def _interval_error_detail(self, raw_body: bytes) -> str:
+        return error_detail(
+            raw_body,
+            redact=lambda value, *, limit: redact_provider_text(self.redact_text(value), limit=limit),
+        )
+
+
 def _decoded_error_payload(raw_body: bytes) -> dict[str, Any]:
     try:
         payload = json.loads(raw_body.decode("utf-8", errors="replace")) if raw_body else None
@@ -354,3 +662,83 @@ def error_detail(raw_body: bytes, *, limit: int = 500, redact: Any = redact_prov
     if not detail and isinstance(error, dict):
         detail = _first_error_field(payload)
     return redact(detail, limit=limit)
+
+
+def _external_call_error_code(error: BaseException) -> str:
+    """Return a bounded technical code without retaining exception text."""
+    if isinstance(error, AppError) and error.reason:
+        return re.sub(r"[^a-z0-9_]+", "_", str(error.reason).casefold()).strip("_")[:80] or "application_error"
+    if isinstance(error, TimeoutError):
+        return "timeout"
+    return "internal_error"
+
+
+def external_call(
+    service: str,
+    operation: str,
+    call: Any,
+    details: dict[str, Any] | None = None,
+    *,
+    logger: Any,
+    diagnostic_capture: Any,
+    operation_context: Mapping[str, Any] | None = None,
+) -> Any:
+    """Observe one SDK call using caller-owned logging and diagnostics."""
+    safe_details = observability.safe_diagnostic_context(details)
+    context = {"service": service, "operation": operation, **safe_details}
+    if operation_context:
+        for key in ("operation_id", "trigger"):
+            if key in operation_context:
+                context[key] = operation_context[key]
+        context["phase"] = operation
+
+    started = time.perf_counter()
+    logger.info("External call started", extra={"event": "external_call_started", "context": context})
+    diagnostic_capture.capture("external_call_started", {
+        "service": service,
+        "operation": operation,
+        "details": safe_details,
+    })
+    try:
+        result = call()
+    except AppError as exc:
+        duration_ms = round((time.perf_counter() - started) * 1000, 1)
+        diagnostic_capture.capture("external_call_failed", {
+            "service": service,
+            "operation": operation,
+            "duration_ms": duration_ms,
+            "error": observability.safe_diagnostic_error(exc),
+        })
+        raise
+    except Exception as exc:
+        duration_ms = round((time.perf_counter() - started) * 1000, 1)
+        logger.exception(
+            "External call failed",
+            extra={
+                "event": "external_call_failed",
+                "context": {**context, "duration_ms": duration_ms, "error_code": _external_call_error_code(exc)},
+            },
+        )
+        diagnostic_capture.capture("external_call_failed", {
+            "service": service,
+            "operation": operation,
+            "duration_ms": duration_ms,
+            "error": observability.safe_diagnostic_error(exc),
+        })
+        raise provider_error(service, "client") from exc
+
+    duration_ms = round((time.perf_counter() - started) * 1000, 1)
+    logger.info(
+        "External call completed",
+        extra={
+            "event": "external_call_completed",
+            "context": {**context, "duration_ms": duration_ms, **observability.external_result_context(result)},
+        },
+    )
+    diagnostic_capture.capture("external_call_completed", {
+        "service": service,
+        "operation": operation,
+        "duration_ms": duration_ms,
+        "response": observability.diagnostic_capture_response(result),
+    })
+    return result
