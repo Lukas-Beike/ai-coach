@@ -3,6 +3,7 @@ from backend.coach.attachments import (MAX_ATTACHMENT_STORAGE_BYTES, MAX_GEMINI_
                                       MAX_REQUEST_BYTES, gemini_inline_image_bytes, model_input,
                                       provider_attachment_data,
                                       validate_attachments)
+from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 
 import hashlib
 import hmac
@@ -1570,6 +1571,14 @@ def illness_pause_sync_service() -> IllnessPauseSyncService:
     )
 
 
+def coach_adaptive_apply_service() -> CoachAdaptiveApplyService:
+    """Compose the later-turn approval and adaptive application owner."""
+    return CoachAdaptiveApplyService(
+        adaptive_replan_preview_service(), illness_pause_sync_service(),
+        database_manager(), DB_LOCK,
+    )
+
+
 def adaptive_preview_followup_service() -> AdaptivePreviewFollowupService:
     """Compose the local preview check after a provider refresh."""
     return AdaptivePreviewFollowupService(adaptive_replan_preview_service(), LOGGER)
@@ -2829,7 +2838,7 @@ def _structured_coach_misc_tool_result(
         require_coach_scope(intent, "adaptive_replan")
         return {"ok": True, **adaptive_replan_preview_service().preview()}
     if name == "apply_adaptive_replan":
-        return _apply_structured_adaptive_replan(arguments, intent, client_turn_id)
+        return coach_adaptive_apply_service().apply(arguments, intent, client_turn_id)
     if name == "update_training_plan":
         if "update_training_plan" not in _structured_authorized_operations(intent):
             raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
@@ -2852,27 +2861,6 @@ def _structured_coach_misc_tool_result(
             "proposed_action": proposal["proposed_action"],
         }
     return None
-
-
-def _apply_structured_adaptive_replan(
-    arguments: dict[str, Any], intent: dict[str, Any], client_turn_id: str,
-) -> dict[str, Any]:
-    if "apply_adaptive_replan" not in _structured_authorized_operations(intent):
-        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-    adjustment_id = str(arguments.get("adjustment_id") or "").strip()
-    require_coach_scope(intent, f"adaptive_replan:{adjustment_id}", "adaptive_replan")
-    sync_illness = bool(arguments.get("sync_illness_to_intervals"))
-    if sync_illness and (intent.get("target_system") != "intervals" or "intervals_sync" not in scope_values(intent)):
-        raise AppError(403, "Der Intervals.icu-Sync der Krankheitspause muss ausdrücklich benannt werden.", reason="intent_scope_denied")
-    latest = adaptive_replan_preview_service().latest_preview()
-    if not latest or str(latest.get("id")) != adjustment_id or latest.get("status") != "preview":
-        raise AppError(409, "Bitte zuerst die aktuelle adaptive Planungsvorschau erstellen.")
-    with DB_LOCK, database() as db:
-        current_user = db.execute(SELECT_USER_MESSAGE_SQL, (client_turn_id,)).fetchone()
-        publication = db.execute("SELECT id FROM messages WHERE id=? AND role='assistant'", (latest.get("published_message_id"),)).fetchone()
-    if not current_user or not publication or current_user["id"] <= publication["id"] or current_user["id"] not in (intent.get("request") or {}).get("source_message_ids", []):
-        raise AppError(403, "Die Vorschau muss zuerst angezeigt und in einer folgenden Nachricht freigegeben werden.", reason="adaptive_approval_required")
-    return {"ok": True, **illness_pause_sync_service().apply(adjustment_id, sync_illness_to_intervals=sync_illness)}
 
 
 def _structured_coach_tool_result(
