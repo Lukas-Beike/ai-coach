@@ -4327,3 +4327,20 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Patches einschließlich Testanpassung **PASS**. Die Sonar-Prüfung des
   veröffentlichten Stands steht noch aus. Inventar aktuell: `server.py` 6.933 Zeilen; P2 elf
   Definitionen/sieben globale Bindungen (P2 weiterhin offen).
+
+## P7.20 — Coach-Provider-Refresh-Werkzeuge
+
+- Root-Diff `2ad652e`, sequenziell als `3dea5f9` integriert und am
+  tatsächlichen integrierten Code erneut geprüft: **PASS**. Der
+  `CoachSyncToolService` besitzt jetzt auch Autorisierung, Scope-
+  Prüfung, Provider-Refresh, Performance-Refresh und turn-lokale
+  Job-ID-Buchführung. Der Server komponiert den konkreten Refresh-
+  Dienst und reicht das unveränderte Cancel-Event weiter; die beiden
+  Fachzweige wurden aus `_structured_coach_tool_result` entfernt.
+  Keine Server-Rückimporte oder Callback-Fachlogik; Remote-Write-
+  Grenzen und synchrone-vs.-queued Semantik bleiben erhalten.
+- Sechs direkte Service- und 68 Dialogtests, Ruff, Compile, Diff- und
+  Inventar-Check **PASS**. Gesamtsuite für den integrierten Stand
+  `3dea5f9`: **PASS**, 2.253 Tests, 12 Skips in 221,691 s. Inventar:
+  `server.py` 6.917 Zeilen, P7 weiterhin 103 Definitionen/31 globale
+  Bindungen; P7 ist nicht abgeschlossen. Sonar-Prüfung erst nach Push.
