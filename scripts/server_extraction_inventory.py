@@ -732,6 +732,7 @@ def _explicit_owner(name: str) -> str | None:
             "gemini_request_payload_service": COMPOSITION_ROOT,
             "gemini_response_normalization_service": COMPOSITION_ROOT,
             "gemini_conversation_response_service": COMPOSITION_ROOT,
+            "coach_conversation_provision_service": COMPOSITION_ROOT,
             "library_page_service": COMPOSITION_ROOT,
             "chat_history_page_service": COMPOSITION_ROOT,
             "daily_sync_scheduler": COMPOSITION_ROOT,

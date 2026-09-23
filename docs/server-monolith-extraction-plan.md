@@ -495,6 +495,9 @@ Abhängigkeit: P2–P6.
 - [x] Kontextaufbau, Projektionen, Prompttexte und Kontextvorschau in `coach/`
   bündeln. Der Kontext konsumiert Domänenlesefunktionen.
 - [ ] Konversationshistorie, Reset, Attachments und Usage-Zuordnung auslagern.
+  - [x] Providerabhängige Konversations-ID-Bereitstellung einschließlich
+    persistierter Wiederverwendung und OpenAI-/Gemini-Erzeugung einem
+    konkreten Coach-Service zuordnen; übrige History-/Reset-Pfade bleiben offen.
 - [ ] Vorschläge, Scope-/Owner-Prüfungen, explizite Bestätigung, TTL sowie
   Replay-/Repair-Schlüssel ihren Coach-Modulen zuordnen.
 - [ ] Tool-Dispatch samt Ergebnis-/Fehlerprojektion verschieben; Planmutationen

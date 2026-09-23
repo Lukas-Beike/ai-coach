@@ -285,7 +285,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
         def response(payload, **kwargs):
             step = next(steps)
             return step(payload) if callable(step) else step
-        with patch.object(server, "ensure_conversation", return_value="synthetic"), patch("backend.coach.context.CoachTrainingContextService.build", side_effect=["Old Garmin data", "Fresh Garmin data"]) as context, patch.object(server, "responses_request", side_effect=response) as model:
+        with patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic"))), patch("backend.coach.context.CoachTrainingContextService.build", side_effect=["Old Garmin data", "Fresh Garmin data"]) as context, patch.object(server, "responses_request", side_effect=response) as model:
             result = server.chat_with_coach("Read refreshed data", client_turn_id="refresh-context", session_csrf_hash="synthetic")
         self.assertEqual(result["status"], "completed")
         self.assertEqual(context.call_count, 2)

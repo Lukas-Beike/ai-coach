@@ -236,6 +236,7 @@ from backend.coach.context import (
 from backend.coach.sync_tools import COACH_SYNC_TOOL_NAMES, CoachSyncToolService
 from backend.coach.conversation import (
     CoachAttachmentContextService,
+    CoachConversationProvisionService,
     CoachMessageService,
     GeminiConversationHistoryService,
     GeminiConversationResponseService,
@@ -1849,6 +1850,18 @@ def openai_responses_client() -> openai_provider.OpenAIResponsesClient:
     )
 
 
+def coach_conversation_provision_service() -> CoachConversationProvisionService:
+    """Compose the Coach conversation ID provisioner from active services."""
+    return CoachConversationProvisionService(
+        SETTINGS,
+        database_manager(),
+        KEY_VALUE_REPOSITORY,
+        openai_responses_client(),
+        DB_LOCK,
+        uuid.uuid4,
+    )
+
+
 def openai_stream_client() -> openai_provider.OpenAIStreamClient:
     """Compose the OpenAI streaming client from the active runtime settings."""
     return openai_provider.OpenAIStreamClient(
@@ -2161,28 +2174,6 @@ def responses_stream_request(
         cancel_event=cancel_event,
         on_response_id=on_response_id,
     )
-
-
-def ensure_conversation(provider: str | None = None) -> str:
-    if (provider or SETTINGS.selected_ai_provider()) == "gemini":
-        existing = str(get_kv("gemini_conversation_id") or "")
-        if existing:
-            return existing
-        conversation_id = "gemini_" + uuid.uuid4().hex
-        set_kv("gemini_conversation_id", conversation_id)
-        return conversation_id
-    existing = get_kv("openai_conversation_id")
-    if existing:
-        return existing
-    result = openai_responses_client().request(
-        "/conversations",
-        {"metadata": {"app": "intervals-coach", "purpose": "personal-coach"}},
-    )
-    conversation_id = result.get("id")
-    if not isinstance(conversation_id, str):
-        raise AppError(502, "OpenAI hat keine Konversations-ID zurückgegeben.")
-    set_kv("openai_conversation_id", conversation_id)
-    return conversation_id
 
 
 def _delete_reset_coach_conversation(conversation_id: str) -> bool:
@@ -4479,7 +4470,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
     ai_provider, model, thinking_level = _chat_provider_settings(background_receipt)
     existing_conversation_id = str((existing_command or {}).get("conversation_id") or "")
-    conversation_id = existing_conversation_id or ensure_conversation(ai_provider)
+    conversation_id = existing_conversation_id or coach_conversation_provision_service().ensure(ai_provider)
     structured_intent = {"allow_mutations": allow_mutations}
     _resume_background_chat_command(background_owned, conversation_id, structured_intent, client_turn_id)
     return _chat_with_structured_coach(
@@ -6337,7 +6328,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, transcribe_audio(self.read_audio_body(), content_type))
         elif path == "/api/planning/commands":
             self.send_json(200, execute_planning_command(
-                self.read_json(), conversation_id=ensure_conversation(), session_csrf_hash=session["csrf_hash"],
+                self.read_json(), conversation_id=coach_conversation_provision_service().ensure(), session_csrf_hash=session["csrf_hash"],
             ))
         elif path == "/api/coach/actions/confirm":
             self.send_json(200, coach_proposal_confirmation_service().confirm(

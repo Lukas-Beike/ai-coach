@@ -1,4 +1,4 @@
-"""Pure helpers for bounded Gemini conversation history."""
+"""Coach conversation state and bounded Gemini conversation history."""
 from __future__ import annotations
 
 import json
@@ -18,10 +18,59 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError
 from backend.providers import gemini as gemini_provider
+from backend.providers.openai import OpenAIResponsesClient
 from backend.runtime.events import StateEventBuffer
 from backend.settings import SettingsService
 
 MESSAGE_ATTACHMENTS_QUERY = "SELECT attachments FROM messages WHERE id=?"
+
+
+class CoachConversationProvisionService:
+    """Provision and persist the active provider's conversation identifier."""
+
+    def __init__(
+        self,
+        settings_service: SettingsService,
+        database_manager: DatabaseManager,
+        key_value_repository: KeyValueRepository,
+        openai_responses_client: OpenAIResponsesClient,
+        db_lock: Any,
+        uuid_factory: Callable[[], uuid.UUID],
+    ) -> None:
+        self._settings_service = settings_service
+        self._database_manager = database_manager
+        self._key_value_repository = key_value_repository
+        self._openai_responses_client = openai_responses_client
+        self._db_lock = db_lock
+        self._uuid_factory = uuid_factory
+
+    def ensure(self, provider: str | None = None) -> str:
+        active_provider = provider or self._settings_service.selected_ai_provider()
+        provider_key = "gemini" if active_provider == "gemini" else "openai"
+        key = f"{provider_key}_conversation_id"
+        existing = self._get_id(key)
+        if existing:
+            return existing
+        if provider_key == "gemini":
+            conversation_id = f"gemini_{self._uuid_factory().hex}"
+        else:
+            result = self._openai_responses_client.request(
+                "/conversations",
+                {"metadata": {"app": "intervals-coach", "purpose": "personal-coach"}},
+            )
+            conversation_id = result.get("id")
+            if not isinstance(conversation_id, str):
+                raise AppError(502, "OpenAI hat keine Konversations-ID zurückgegeben.")
+        self._set_id(key, conversation_id)
+        return conversation_id
+
+    def _get_id(self, key: str) -> str | None:
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            return self._key_value_repository.get(db, key)
+
+    def _set_id(self, key: str, conversation_id: str) -> None:
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            self._key_value_repository.set(db, key, conversation_id)
 
 
 class CoachAttachmentContextService:
