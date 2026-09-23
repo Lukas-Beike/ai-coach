@@ -519,6 +519,9 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   Retry, Fehler-Recovery, Receipts und finaler Persistenz nach `coach/` ziehen.
 - [ ] `chat_with_coach`, Background-Claim/Resume/Cancel und Stream-Register
   auslagern; synchrone und Hintergrundausführung teilen denselben Turn-Use-Case.
+  - [x] Process-lokales Chat-Stream-Register, SSE-Queues und Background-
+    Cancel-Events einem einzigen `ChatStreamRegistry` zuordnen; durable
+    Job-Entscheidungen bleiben bis zur Coach-Job-Auslagerung offen.
 - [ ] Manuellen Morning Check-in mit Frische-Gate auslagern; die auf `develop`
   entfernte automatische Reservierungs-/Retry-Steuerung nicht wieder einführen.
   - [x] Manuellen Garmin-Schlaf-/Body-Battery-Vorbereitungspfad und
