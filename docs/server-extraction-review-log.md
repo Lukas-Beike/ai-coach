@@ -5578,3 +5578,32 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Suite **PASS**, 2.362 Tests, 11 Skips. Root-Gate des kombinierten
   lokalen Stands **PASS**. `server.py`: 5.439 physische Zeilen,
   258 Definitionen. PR-CI, externer Review und Merge stehen aus.
+
+## P7 Athletenakten/Vorlagen — bestätigter #742-Merge
+
+- #742 auf unverändertem Head `2676929c`: CodeQL, SonarCloud,
+  Container-/Browser- und Codex-Code-/Security-Prüfung **PASS**;
+  0 offene Review-Threads. Der abgebrochene Review-Koordinationsjob
+  wurde über ein reguläres PR-Reopen-Ereignis mit aktuellen Daten neu
+  bewertet, ohne zweiten Review-Auftrag. Squash-Merge
+  `8343ae13fea2a1621e928f9d68714045e4ee91ef` am
+  `2026-09-23T19:37:12Z` bestätigt und auf `origin/develop` erreichbar.
+
+## P7 lokaler Bibliotheksplan — Integrationsreview
+
+- GPT-6-Luna/high-Patch `2ec3cb26` sequenziell auf den #742-Merge
+  rebased als `87be8cbc`. Root prüfte den tatsächlichen Diff samt
+  Konfliktauflösung: **PASS**. Der alte Server-Use-Case wurde entfernt;
+  `CoachLibraryPlanToolService` besitzt Operation-/Objekt-Scope und
+  Eingabeprüfung und ruft den bestehenden atomaren, rein lokalen
+  `WorkoutLibraryPlanService` ohne Server-Fachcallback auf.
+- Fokustests 5/5 und Architektur 4/4, Ruff, Compile und Diff-Check
+  **PASS**. Die Testanzahl ist für diese Grenze angemessen: fünf neue
+  Fälle decken Autorisierung und Eingabegrenzen ab; acht vorhandene
+  Domain-Tests decken Batch-UOW, Konflikte, Rollback, Grenzen und
+  Remote-Freiheit ab. Native Gesamtsuite **PASS**, 2.367 Tests,
+  12 Skips; Python-3.14-Docker-Build und vollständige Read-only-
+  Docker-Suite **PASS**, 2.367 Tests, 11 Skips. Inventar- und
+  Diff-Check **PASS**. Root-Gate des integrierten lokalen Stands
+  `87be8cbc` plus Dokumentations-/Inventardiff **PASS**; PR-CI und
+  externer Review stehen noch aus. `server.py`: 5.428 physische Zeilen.
