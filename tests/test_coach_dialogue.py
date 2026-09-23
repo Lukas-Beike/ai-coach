@@ -409,7 +409,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["status"], "cancelled")
         self.assertIsNone(json.loads(server.get_kv("coach_pending_request")))
         server.set_kv("coach_pending_request", json.dumps({"summary": "Synthetic", "source_message_ids": []}))
-        server.reset_coach_chat()
+        server.coach_conversation_reset_service().reset()
         self.assertIsNone(json.loads(server.get_kv("coach_pending_request")))
 
     def test_remote_write_requires_per_step_sync_authority(self):
@@ -770,7 +770,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             operation_id="operation-before-reset",
         )
         self.assertEqual(job["status"], "queued")
-        server.reset_coach_chat()
+        server.coach_conversation_reset_service().reset()
         self.assertIsNone(server._claim_background_coach_job())
         self.assertEqual(server.coach_message_service().list(), [])
         with server.database() as db:

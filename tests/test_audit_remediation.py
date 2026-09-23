@@ -337,7 +337,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
 
     def test_chat_reset_changes_history_generation(self):
         before = server.chat_history_page_service().page()["generation"]
-        server.reset_coach_chat()
+        server.coach_conversation_reset_service().reset()
         self.assertNotEqual(
             server.chat_history_page_service().page()["generation"], before
         )
