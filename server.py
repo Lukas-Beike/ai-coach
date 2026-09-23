@@ -251,6 +251,7 @@ from backend.sync.scheduler import (
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.athlete_record_tools import CoachAthleteRecordToolService
 from backend.coach.library_plan_tools import CoachLibraryPlanToolService
+from backend.coach.plan_artifact_tools import CoachPlanArtifactToolService
 from backend.coach.context import (
     CoachContextPreviewLimits,
     CoachContextPreviewService,
@@ -2354,45 +2355,6 @@ COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, 
     training_plan_statuses=planning_training_plans.TRAINING_PLAN_STATUSES,
     dialogue_tools=dialogue_tools,
 )
-def _structured_coach_plan_artifact_result(
-    name: str,
-    arguments: dict[str, Any],
-    intent: dict[str, Any],
-    conversation_id: str,
-    client_turn_id: str,
-) -> dict[str, Any] | None:
-    """Authorize a plan-artifact tool before entering its concrete service."""
-    authorized_operations = _structured_authorized_operations(intent)
-    if name == "stage_training_plan":
-        if name not in authorized_operations:
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        require_coach_scope(intent, "local_plan")
-        return training_plan_artifact_service().stage(
-            arguments, conversation_id, client_turn_id
-        )
-    if name != "commit_training_plan":
-        return None
-    if name not in authorized_operations:
-        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-    artifact_id = str(intent.get("artifact_id") or "").strip()
-    if not artifact_id:
-        raise AppError(
-            400,
-            "Zum Speichern wird ein lokales Planartefakt benötigt.",
-            reason="artifact_required",
-        )
-    if str(arguments.get("artifact_id") or artifact_id).strip() != artifact_id:
-        raise AppError(
-            403,
-            "Das Planartefakt stimmt nicht mit der klassifizierten Aktion überein.",
-            reason="intent_scope_denied",
-        )
-    require_coach_scope(intent, f"artifact:{artifact_id}")
-    return training_plan_artifact_service().commit(
-        artifact_id,
-        conversation_id,
-        explicit_artifact=bool(intent.get("_artifact_explicit")),
-    )
 
 
 def _replace_structured_coach_training_plan(
@@ -2460,7 +2422,7 @@ def _structured_coach_plan_tool_result(
     name: str, arguments: dict[str, Any], *, intent: dict[str, Any],
     conversation_id: str, client_turn_id: str,
 ) -> dict[str, Any] | None:
-    artifact_result = _structured_coach_plan_artifact_result(
+    artifact_result = CoachPlanArtifactToolService(training_plan_artifact_service).execute(
         name, arguments, intent, conversation_id, client_turn_id
     )
     if artifact_result is not None:

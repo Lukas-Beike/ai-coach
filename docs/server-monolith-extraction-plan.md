@@ -526,6 +526,10 @@ Abhängigkeit: P2–P6.
   - [x] Lokales Bibliotheksplan-Werkzeug mit Operation-/Objekt-Scope und
     Eingabeprüfung `CoachLibraryPlanToolService` zuordnen; atomare
     Planung und Remote-Schreibgrenze verbleiben bei `WorkoutLibraryPlanService`.
+  - [x] Stage-/Commit-Autorisierung, Artifact-ID-Prüfung und Scope des
+    strukturierten Planartefakt-Werkzeugs `CoachPlanArtifactToolService`
+    zuordnen; `TrainingPlanArtifactService` bleibt Eigentümer von Zustand,
+    lokaler Speicherung und atomarem Commit.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.
