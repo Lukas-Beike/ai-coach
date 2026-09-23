@@ -4571,3 +4571,35 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   und 37 globale Bindungen. Die neue Factory erhöht die Definitionszahl,
   ohne den ausgelagerten fachlichen Ablauf wieder in den Server zu holen.
   CI/Sonar des veröffentlichten PR-Stands bleiben abzuwarten.
+## PR #706 — bestätigter Merge
+
+- Korrektur-Head `af77f5a5`: Root-Code-/Diff-Review **PASS**,
+  vollständige Windows-Suite 2.276 Tests/12 Skips **PASS** und
+  Read-only-Container-Suite 2.276 Tests/10 Skips **PASS**. Alle GitHub-
+  Checks einschließlich Browser/Accessibility und SonarCloud bestanden;
+  Quality Gate `OK`, `new_violations=0`, keine ungelösten Review-Threads.
+  Squash-Auto-Merge erst danach aktiviert. PR #706 ist laut GitHub
+  `MERGED` seit 2026-09-23T12:09:29Z, Merge-Commit
+  `45dd27f2848fc046ff8fa426339c222bdf12cc85` ist auf
+  `origin/develop` erreichbar. Das schließt nicht die weiterhin offenen
+  Planphasen P2/P6/P7/P8/P9/P10/P11.
+
+## P9 — datensparsame Logprojektion
+
+- GPT-6-Luna-Diff `6f4463b6` im tatsächlichen Code geprüft: **PASS**.
+  Sequenziell als `2d27cd3b` auf dem bestätigten `develop`-Merge
+  integriert und erneut geprüft: **PASS**. `RecentLogEntriesService`
+  besitzt Tail, JSON-Fallback, OSError-Projektion und Redaction;
+  `server.py` komponiert nur noch den dynamischen Logpfad. Diagnosebericht,
+  HTTP-Route und sieben bestehende Server-Tests verwenden den neuen
+  Lookup; kein Server-Rückimport, Fachcallback oder Alt-Wrapper.
+- Worker: drei direkte und vier Architekturtests, Ruff der neuen Dateien,
+  Compile/Diff-Check sowie volle Python-Suite **PASS** (2.279 Tests,
+  12 Skips in 312,020 s). Auf integriertem Stand: vier fokussierte
+  Service-/Server- und vier Architekturtests, Ruff der neuen Dateien,
+  Compile und Diff-Check **PASS**. Dateiweite Legacy-Ruff-Befunde in
+  `server.py` (26) und `tests/test_server.py` (182) sind gegenüber der
+  Basis unverändert. Neu gebautes Image und exakte Read-only-Container-
+  Gesamtsuite auf `2d27cd3b` **PASS**: 2.279 Tests, 10 Skips in
+  19,993 s. CI/Sonar dieses PR-Stands stehen noch aus; Diagnosebericht,
+  Capture und Privacy-/Backup-Pfade bleiben P9-Risiken.

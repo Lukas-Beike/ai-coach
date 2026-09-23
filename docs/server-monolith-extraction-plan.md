@@ -542,7 +542,10 @@ Abhängigkeit: P1 sowie Ressourcen-/Worker-Verträge aus P6 und P8.
 - [ ] Diagnosehistorie/-report und Logprojektion vollständig auslagern.
   - [x] Begrenzte, datensparsame Coach-Command-Historie samt SQL-Read und
     Fehlerprojektion zu `diagnostics/history.py` verschieben.
-  - [ ] Diagnosebericht, Capture-/Logprojektion und Aufrufer auslagern.
+  - [x] Begrenzte, redigierte Logprojektion und alle Aufrufer zu
+    `diagnostics/logs.py` verschieben; Diagnosebericht und Capture bleiben
+    bis zu ihrem eigenen Service-Umzug offen.
+  - [ ] Diagnosebericht, Capture-Projektion und Aufrufer auslagern.
 - [ ] HTTP-Streaming von Exportdateien bleibt im HTTP-Adapter.
 
 Abnahme: Ungültige Backups verändern keine Daten; Restore blockiert
