@@ -5245,6 +5245,11 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Architektur-, Compile- und Diff-Check **PASS**. PR-CI folgt.
   Enqueue/Resume/
   Cancel/Turn bleiben P8-offen.
+  #730 wurde am `2026-09-23T17:18:52Z` als
+  `67b4b377d8a9c7df1efc41abd73917b99307d7a0` gemergt;
+  der Commit ist auf `origin/develop` erreichbar, 0 Review-Threads
+  offen. Codex und erforderliche Checks **PASS**; der nicht
+  erforderliche Browser-Smoke lief bei diesem Eintrag noch.
 
 ## P7 Coach-Chat-Reset — lokaler Prüfstand
 
@@ -5271,6 +5276,52 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Inventar-, Architektur- und Diff-Check **PASS**. `server.py` hat
   6.099 physische Zeilen und 288 Definitionen. P7-Rest bleibt
   umfangreich; PR-CI und externer Review folgen.
+  #729 wurde am `2026-09-23T17:09:48Z` als
+  `7e064b192e237b707513f5007800c9587025804e` gemergt;
+  auf `origin/develop` erreichbar, Codex-/Browser-/CI-Checks
+  **PASS**, 0 Review-Threads offen.
+
+## P10 Session-Auth — integrierter Prüfstand
+
+- GPT-6-Luna/high-Patch `c61205de`, Testmigration `f90129ea`:
+  `SessionAuthService` besitzt Cookie-/CSRF-/Login-/Logout-/
+  Session-Touch-/Cleanup- und Coach-Session-Binding-Fachlogik;
+  `server.py` komponiert nur den konkreten Eigentümer und die
+  Handler delegieren an ihn. Erstes Root-Diffreview **FAIL**:
+  Handler-Klassenbindung hätte nach DB-Restore einen geschlossenen
+  Manager behalten. Derselbe Worker korrigierte auf Handler-Instanz
+  (`78c3ed38`); Root-Review des erneuten Integrationsdiffs
+  **FAIL**, weil eine HTTP/1.1-Keep-Alive-Verbindung dieselbe
+  Instanz für mehrere Requests verwendet. Derselbe Worker korrigierte
+  mit dynamischer Compose-Property (`a3a2c0d9`); ein echter
+  Zwei-Request-Test auf derselben TCP-Verbindung wechselt den
+  Datenbankmanager und prüft 200 sowie Socket-Identität.
+- Root prüfte den tatsächlichen Follow-up- und Gesamtdiff auf
+  #730-Merge `67b4b377`: **PASS**. Session-Lock und DB-Lock,
+  konstante Token-/CSRF-Hashprüfung, feste Expiry, begrenztes
+  Cleanup, 429-Retry und Cookie-Flags bleiben erhalten; keine
+  Backend-Rückimporte oder Kompatibilitätswrapper. Worker-Vollsuite
+  **PASS**, 2.329 Tests, 12 Skips; neu gebautes kombiniertes
+  Read-only-Docker-Image **PASS**, 2.335 Tests, 11 Skips.
+  Architektur-, Inventar-, Compile- und Diff-Check **PASS**;
+  `server.py` hat 5.912 physische Zeilen und 275 Definitionen.
+  PR-CI und externer Review folgen.
+- #731, Head `5f94d99d`: Codex-Code- und Security-Review ohne
+  Befund; Python-/Container-/Sonar-Checks **PASS**. Browser-Smoke
+  **FAIL**: ausschließlich die HTTP-Plan-Fixture schloss nach
+  `GET /api/fixture/plan` die Verbindung ohne Antwort. Root-Befund:
+  die Fixture rief den entfernten `server.require_auth`-Wrapper auf.
+  Derselbe GPT-6-Luna-Worker migrierte den Testaufrufer in `3b3659ed`
+  auf `self.auth_service.require_auth(self)`. Root prüfte den
+  tatsächlichen Ein-Zeilen-Diff und alle Auth-Lookups der Fixture:
+  **PASS**. Gezielter Browser-Test **PASS** (1/1), vollständiges
+  `mobile-small`-Profil **PASS** (51/51) mit frischer temporärer
+  Fixture-Datenbank und gemockten Providern; Compile, scoped Ruff
+  und Diff-Check **PASS**. Nach dem Push bestand auch die vollständige
+  GitHub-Browser-Suite; der Codex-Check verlangte bei neuer Head-SHA
+  dennoch eine zweite explizite Erstanforderung. Da ohne P1 kein
+  zweiter `@codex review` zulässig ist, wird #731 durch einen neuen
+  PR auf dem bestätigten #732-Merge ersetzt; keine Prüfung wird umgangen.
 
 ## P9 Restore-Validierung — integrierter lokaler Prüfstand
 
@@ -5289,5 +5340,8 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   vollständige Suite **PASS**, 2.340 Tests, 11 Skips; fokussierte
   Validierungs-/Architekturtests **PASS**, 10/10; Inventar-, Compile-
   und Diff-Check **PASS**. `server.py` umfasst 6.023 physische Zeilen
-  und 284 Definitionen. Offen bleiben Restore-Austausch, atomare
-  Ressourcen-/Worker-Wiederaufnahme und PR-CI/Review.
+  und 284 Definitionen. #732 wurde am `2026-09-23T17:40:25Z`
+  als `3c9a5fe5ff561f479f2eb462fa39ee2fbfa5ae6e` gemergt,
+  auf `origin/develop` erreichbar; alle CI-/Browser-/Codex-Checks
+  **PASS**, 0 Review-Threads offen. Offen bleiben Restore-Austausch
+  und atomare Ressourcen-/Worker-Wiederaufnahme.

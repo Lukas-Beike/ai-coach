@@ -27,6 +27,7 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
+    ("backend.http_api.auth", ("SessionAuthService",)),
     ("backend.coach.conversation", ("CoachConversationResetService",)),
     ("backend.coach.prompt", ("COACH_PROMPT",)),
     ("backend.http_api.readiness", ("ReadinessService",)),
@@ -1614,6 +1615,16 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
+    "SESSION_LOCK",
+    "SESSION_LAST_CLEANUP_MONOTONIC",
+    "authenticated_session",
+    "login_user",
+    "logout_user",
+    "require_auth",
+    "require_csrf",
+    "cleanup_expired_sessions",
+    "session_cookie_headers",
+    "_restore_coach_session_csrf_hash",
     "_delete_reset_coach_conversation",
     "_cancel_reset_coach_commands",
     "_reset_local_coach_chat_state",
