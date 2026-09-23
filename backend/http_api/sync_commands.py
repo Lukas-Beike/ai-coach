@@ -13,15 +13,20 @@ from backend.sync.queue import SyncJobQueueService
 from backend.sync.state import SyncStateRepository
 
 SYNC_JOB_RESOLVE_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)/resolve$")
+SYNC_JOBS_PATH = "/api/sync/jobs"
+SYNC_PATH = "/api/sync"
+INTERVALS_FULL_RESYNC_PATH = "/api/intervals/full-resync"
+GARMIN_SYNC_PATH = "/api/garmin/sync"
+GARMIN_FULL_RESYNC_PATH = "/api/garmin/full-resync"
 SYNC_POST_PATHS = frozenset({
-    "/api/sync/jobs", "/api/sync", "/api/intervals/full-resync",
-    "/api/performance/refresh", "/api/garmin/sync",
+    SYNC_JOBS_PATH, SYNC_PATH, INTERVALS_FULL_RESYNC_PATH,
+    "/api/performance/refresh", GARMIN_SYNC_PATH,
     "/api/external-calendar/sync", "/api/weather/sync",
-    "/api/garmin/full-resync",
+    GARMIN_FULL_RESYNC_PATH,
 })
 SYNC_BODY_PATHS = frozenset({
-    "/api/sync/jobs", "/api/sync", "/api/garmin/sync",
-    "/api/intervals/full-resync", "/api/garmin/full-resync",
+    SYNC_JOBS_PATH, SYNC_PATH, GARMIN_SYNC_PATH,
+    INTERVALS_FULL_RESYNC_PATH, GARMIN_FULL_RESYNC_PATH,
 })
 
 
@@ -55,7 +60,7 @@ class SyncCommandEndpoint:
         return path in SYNC_BODY_PATHS or SYNC_JOB_RESOLVE_RE.match(path) is not None
 
     def execute(self, path: str, payload: Any = None) -> tuple[int, dict[str, Any]]:
-        if path == "/api/sync/jobs":
+        if path == SYNC_JOBS_PATH:
             if not isinstance(payload, dict):
                 raise AppError(400, "Ein Synchronisationsjob muss als Objekt gesendet werden.", reason="invalid_job_request")
             envelope = payload.get("payload")
@@ -67,13 +72,13 @@ class SyncCommandEndpoint:
             )
         if match := SYNC_JOB_RESOLVE_RE.match(path):
             return 200, self._queue.resolve(match.group(1), payload)
-        if path == "/api/sync":
+        if path == SYNC_PATH:
             return self._enqueue_manual_refresh("intervals", payload)
-        if path == "/api/garmin/sync":
+        if path == GARMIN_SYNC_PATH:
             return self._enqueue_manual_refresh("garmin", payload)
-        if path == "/api/intervals/full-resync":
+        if path == INTERVALS_FULL_RESYNC_PATH:
             return self._full_resync_command("intervals", payload)
-        if path == "/api/garmin/full-resync":
+        if path == GARMIN_FULL_RESYNC_PATH:
             return self._full_resync_command("garmin", payload)
         if path == "/api/performance/refresh":
             return 200, self._performance.refresh()

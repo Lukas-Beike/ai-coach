@@ -4522,3 +4522,24 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   bestehen Ruff. Nächster Schritt: aktuellen PR-Head gegen `develop`
   prüfen, veröffentlichen, Sonar/CI auswerten und die verbleibende
   P10-Projektion weiter auslagern.
+
+## PR #706 — CI- und Sonar-Korrektur nach `f249f9a6`
+
+- Veröffentlichter Head `f249f9a6`: lokaler Integrationsreview **PASS**,
+  aber CI-Review-Gate **FAIL**. Der Container-Architekturtest suchte den
+  Backend-Quellbaum unter `/review/backend`, obwohl CI nur Tests und
+  `server.py` nach `/review` mountet und den Backend-Code aus dem Image
+  unter `/app/backend` bereitstellt. Damit war zuvor auch der statische
+  Backend-Importgraph-Guard im Container leer gelaufen. Root-Korrektur
+  wählt den tatsächlich vorhandenen Backend-Quellbaum und fordert
+  dessen Existenz ausdrücklich. Tatsächlichen Testdiff geprüft:
+  **PASS**; vier lokale Architekturtests, Ruff und exakt nachgebildete
+  Read-only-Container-Suite **PASS** (2.276 Tests, 10 Skips in 22,591 s).
+- SonarCloud des veröffentlichten Heads meldete fünf neue
+  `python:S1192`-Befunde in `backend/http_api/sync_commands.py`, keine
+  verbliebenen S107-/S3776-Befunde. Root-Korrektur ersetzt ausschließlich
+  die wiederholten fünf Sync-Routenliterale durch benannte Konstanten;
+  Route-Menge, Body-Policy und Dispatch bleiben unverändert. Code-/Diff-
+  Review **PASS**; fünf direkte/Handler-Regressionen, vier Architektur-
+  tests, Ruff und die neu gebaute Container-Suite **PASS**. Sonar/CI
+  dieses Korrekturstands müssen nach Veröffentlichung erneut bestehen.

@@ -13,7 +13,11 @@ from collections.abc import Iterable
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+# Container CI mounts tests and server.py under /review while the application
+# package remains at /app/backend. Keep static guards pointed at real source.
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
+if not BACKEND_ROOT.is_dir():
+    BACKEND_ROOT = Path.cwd() / "backend"
 SERVER_PATH = REPOSITORY_ROOT / "server.py"
 
 
@@ -1851,11 +1855,11 @@ def _server_import_violations(path: Path, tree: ast.AST) -> list[str]:
             for alias in node.names:
                 if _is_entrypoint_module(alias.name):
                     violations.append(
-                        f"{path.relative_to(REPOSITORY_ROOT)}:{node.lineno}: import {alias.name}"
+                        f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: import {alias.name}"
                     )
         elif isinstance(node, ast.ImportFrom) and _is_entrypoint_module(node.module):
             violations.append(
-                f"{path.relative_to(REPOSITORY_ROOT)}:{node.lineno}: from {node.module} import ..."
+                f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: from {node.module} import ..."
             )
         elif isinstance(node, ast.Call):
             function = _dotted_name(node.func)
@@ -1865,25 +1869,25 @@ def _server_import_violations(path: Path, tree: ast.AST) -> list[str]:
             } | {f"{name}.__import__" for name in importlib_names}
             if function in dynamic_import_names and _is_entrypoint_module(imported_name):
                 violations.append(
-                    f"{path.relative_to(REPOSITORY_ROOT)}:{node.lineno}: {function}({imported_name!r})"
+                    f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: {function}({imported_name!r})"
                 )
             elif _entrypoint_namespace_expression(node, sys_names, sys_modules_names):
                 violations.append(
-                    f"{path.relative_to(REPOSITORY_ROOT)}:{node.lineno}: entry-point namespace lookup"
+                    f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: entry-point namespace lookup"
                 )
             elif function in {"getattr", "hasattr"} and node.args and (
                 isinstance(node.args[0], ast.Name) and node.args[0].id in entrypoint_bindings
             or _entrypoint_namespace_expression(node.args[0], sys_names, sys_modules_names)
             ):
                 violations.append(
-                    f"{path.relative_to(REPOSITORY_ROOT)}:{node.lineno}: {function} on entry-point namespace"
+                    f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: {function} on entry-point namespace"
                 )
         elif isinstance(node, ast.Subscript):
             if _is_sys_modules(node.value, sys_names, sys_modules_names):
                 imported_name = _literal_string(node.slice)
                 if _is_entrypoint_module(imported_name):
                     violations.append(
-                        f"{path.relative_to(REPOSITORY_ROOT)}:{node.lineno}: sys.modules[{imported_name!r}]"
+                        f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: sys.modules[{imported_name!r}]"
                     )
         elif (
             isinstance(node, ast.Attribute)
@@ -1891,7 +1895,7 @@ def _server_import_violations(path: Path, tree: ast.AST) -> list[str]:
             and node.value.id in entrypoint_bindings
         ):
             violations.append(
-                f"{path.relative_to(REPOSITORY_ROOT)}:{node.lineno}: entry-point attribute access"
+                f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: entry-point attribute access"
             )
     return violations
 
@@ -1911,6 +1915,7 @@ def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
 
 class ServerArchitectureTests(unittest.TestCase):
     def test_backend_does_not_import_or_reach_server_namespace(self) -> None:
+        self.assertTrue(BACKEND_ROOT.is_dir(), "Backend source must be available")
         violations: list[str] = []
         for path in _python_files(BACKEND_ROOT):
             violations.extend(_server_import_violations(path, _parse(path)))
