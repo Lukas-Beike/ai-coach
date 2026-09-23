@@ -530,6 +530,10 @@ Abhängigkeit: P2–P6.
     strukturierten Planartefakt-Werkzeugs `CoachPlanArtifactToolService`
     zuordnen; `TrainingPlanArtifactService` bleibt Eigentümer von Zustand,
     lokaler Speicherung und atomarem Commit.
+  - [x] Autorisierung, Plan-ID-Scope und Argumentprojektion für
+    `replace_training_plan` und `apply_training_changes` dem konkreten
+    `CoachPlanningChangeToolService` zuordnen; die atomaren Replacement- und
+    Change-Planungsservices bleiben Zustandseigentümer.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.

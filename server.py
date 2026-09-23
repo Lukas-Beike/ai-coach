@@ -252,6 +252,7 @@ from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.athlete_record_tools import CoachAthleteRecordToolService
 from backend.coach.library_plan_tools import CoachLibraryPlanToolService
 from backend.coach.plan_artifact_tools import CoachPlanArtifactToolService
+from backend.coach.planning_change_tools import CoachPlanningChangeToolService
 from backend.coach.context import (
     CoachContextPreviewLimits,
     CoachContextPreviewService,
@@ -305,7 +306,6 @@ from backend.coach.authorization import (
     coach_execution_scope,
     coach_session_key,
     require_coach_scope,
-    scope_values,
     structured_action_payload,
 )
 from backend.coach.outcomes import coach_effect_label, coach_failure_lines, unresolved_coach_steps
@@ -2357,67 +2357,6 @@ COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, 
 )
 
 
-def _replace_structured_coach_training_plan(
-    arguments: dict[str, Any], intent: dict[str, Any],
-) -> dict[str, Any]:
-    if "replace_training_plan" not in _structured_authorized_operations(intent):
-        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-    selected_plan_ids = sorted(
-        token.split(":", 1)[1] for token in scope_values(intent)
-        if token.startswith(TRAINING_PLAN_SCOPE_PREFIX) and token.split(":", 1)[1]
-    )
-    if len(selected_plan_ids) > 1:
-        raise AppError(400, "Ein Planersatz darf nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
-    if not selected_plan_ids and "local_plan" not in scope_values(intent):
-        raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst diesen Plan nicht.", reason="intent_scope_denied")
-    return structured_training_plan_replacement_service().replace(
-        {**arguments, "period": intent.get("period"), "constraints": (intent.get("request") or {}).get("constraints", [])},
-        selected_plan_id=selected_plan_ids[0] if selected_plan_ids else None,
-    )
-
-
-def _validate_structured_training_change_scopes(
-    changes: list[Any], intent: dict[str, Any], selected_plan_ids: list[str],
-) -> None:
-    for change in changes:
-        if not isinstance(change, dict):
-            continue
-        action = str(change.get("action") or "update").strip().casefold()
-        if action == "create":
-            require_coach_scope(intent, "local_plan", "local_plan_create")
-            requested_plan_id = str(change.get("plan_id") or "").strip()
-            if requested_plan_id and requested_plan_id not in selected_plan_ids:
-                raise AppError(403, "Die neue Einheit darf nur dem benannten Trainingsplan zugeordnet werden.", reason="intent_scope_denied")
-        elif change.get("local_id"):
-            local_id = str(change["local_id"]).strip()
-            allowed_scopes = (f"planned_unit:{local_id}",)
-            if "local_plan_create" not in scope_values(intent):
-                allowed_scopes += ("local_plan",)
-            require_coach_scope(intent, *allowed_scopes)
-
-
-def _apply_structured_coach_training_changes(
-    arguments: dict[str, Any], intent: dict[str, Any],
-) -> dict[str, Any]:
-    if "apply_training_changes" not in _structured_authorized_operations(intent):
-        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-    changes = arguments.get("changes")
-    if not isinstance(changes, list):
-        raise AppError(400, "Coach-Änderungen müssen als Liste gesendet werden.", reason="invalid_change")
-    selected_plan_ids = sorted(
-        token.split(":", 1)[1] for token in scope_values(intent)
-        if token.startswith(TRAINING_PLAN_SCOPE_PREFIX) and token.split(":", 1)[1]
-    )
-    if len(selected_plan_ids) > 1:
-        raise AppError(400, "Die Änderungen dürfen nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
-    _validate_structured_training_change_scopes(changes, intent, selected_plan_ids)
-    return structured_training_change_service().apply(
-        arguments,
-        require_revision=bool(intent.get("bulk_change")),
-        authorized_plan_id=selected_plan_ids[0] if selected_plan_ids else None,
-    )
-
-
 def _structured_coach_plan_tool_result(
     name: str, arguments: dict[str, Any], *, intent: dict[str, Any],
     conversation_id: str, client_turn_id: str,
@@ -2427,18 +2366,20 @@ def _structured_coach_plan_tool_result(
     )
     if artifact_result is not None:
         return artifact_result
+    planning_change_result = CoachPlanningChangeToolService(
+        structured_training_plan_replacement_service,
+        structured_training_change_service,
+        TRAINING_PLAN_SCOPE_PREFIX,
+    ).execute(name, arguments, intent)
+    if planning_change_result is not None:
+        return planning_change_result
     if name == "manage_training_templates":
         return TrainingTemplateToolService(
             database_manager, DB_LOCK, workout_library_service
         ).execute(arguments, intent)
     if name == "apply_workout_library_plan":
         return coach_library_plan_tool_service().execute(arguments, intent)
-    handlers: dict[str, Callable[[], dict[str, Any]]] = {
-        "replace_training_plan": lambda: _replace_structured_coach_training_plan(arguments, intent),
-        "apply_training_changes": lambda: _apply_structured_coach_training_changes(arguments, intent),
-    }
-    handler = handlers.get(name)
-    return handler() if handler else None
+    return None
 
 
 def _structured_coach_misc_tool_result(
