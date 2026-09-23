@@ -5514,3 +5514,20 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `server.py` umfasst 5.605 physische Zeilen. Dieser Stand wird
   nach dem #739-Merge gegen aktuelles `develop` neu integriert und
   erneut geprüft, bevor ein PR veröffentlicht wird.
+
+## P10 öffentliche Projektionen — bestätigter #739-Merge und Rebase-Gate
+
+- #739 auf Head `ee1fd8da`: Container-, Sonar-, Browser- und Codex-Code-/
+  Security-Checks **PASS**, 0 offene Review-Threads. Squash-Merge
+  `62f77b11ee543511a9c56849521562b2c70bc785` am
+  `2026-09-23T18:54:39Z` bestätigt und auf `origin/develop` erreichbar.
+- Bootstrap-/Plan-/Wetterstand auf diesen Merge rebased: `738fa014`.
+  Konflikte in Testaufrufen, Architekturliste, Importen und dem generierten
+  Inventar wurden anhand der kombinierten konkreten Service-Eigentümer
+  aufgelöst. Root prüfte den tatsächlichen neuen Gesamtdiff samt
+  Handler-Delegation, Lock-/Manager-Auflösung, Local-Only- und
+  Wetter-Follow-up-Grenze erneut: **PASS**. Neu gebautes Read-only-
+  Docker-Image: vollständige Suite **PASS**, 2.357 Tests, 11 Skips;
+  Ruff für neue Module, Compile, Inventar- und Diff-Check **PASS**.
+  `server.py`: 5.517 physische Zeilen, 266 Definitionen. PR-CI,
+  externer Review und Merge dieses neuen Stands stehen noch aus.
