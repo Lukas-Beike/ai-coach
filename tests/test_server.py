@@ -22,6 +22,7 @@ from backend.coach.context import CoachIntervalsContextService, future_coach_pla
 from backend.coach.attachments import gemini_history_parts
 from backend.coach.proposals import validated_coach_action_preview_input
 from backend.http_api.chat_page import ChatHistoryPageService
+from backend.http_api import server as http_server_module
 from backend import privacy as privacy_module
 
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
@@ -333,6 +334,7 @@ class CoachTests(unittest.TestCase):
     def test_startup_explicitly_recovers_jobs_before_starting_workers(self):
         order = []
         http_server = Mock()
+        http_server_factory = Mock(return_value=http_server)
         with patch.object(server.observability, "configure_logging"), patch.object(
             server.app_config, "security_configuration_error", return_value=None
         ), patch.object(server, "initialise_database", side_effect=lambda: order.append("schema")), patch.object(
@@ -341,7 +343,7 @@ class CoachTests(unittest.TestCase):
             side_effect=lambda: order.append("sync-recovery"),
         ), patch.object(
             server, "resume_interrupted_coach_jobs", side_effect=lambda: order.append("coach-recovery")
-        ), patch.object(server, "CoachHTTPServer", return_value=http_server), patch.object(
+        ), patch.object(http_server_module, "CoachHTTPServer", http_server_factory), patch.object(
             server.SyncJobWorker, "start", side_effect=lambda _worker: order.append("sync-worker"), autospec=True
         ), patch.object(
             server, "start_coach_job_worker", side_effect=lambda: order.append("coach-worker")
@@ -352,11 +354,21 @@ class CoachTests(unittest.TestCase):
             daily_loop = Mock()
             daily_loop_factory.return_value = daily_loop
             server.main()
+        http_server_factory.assert_called_once_with(
+            ("0.0.0.0", server.CONFIG.port), server.RequestHandler
+        )
         thread_factory.assert_called_once_with(target=daily_loop.run, daemon=True)
         self.assertEqual(
             order,
             ["schema", "sync-recovery", "coach-recovery", "sync-worker", "coach-worker", "startup-sync"],
         )
+
+    def test_coach_http_server_retains_threading_contract(self):
+        from http.server import ThreadingHTTPServer
+
+        self.assertTrue(issubclass(http_server_module.CoachHTTPServer, ThreadingHTTPServer))
+        self.assertTrue(http_server_module.CoachHTTPServer.daemon_threads)
+        self.assertEqual(http_server_module.CoachHTTPServer.request_queue_size, 32)
 
     def test_worker_start_functions_do_not_repeat_recovery(self):
         with patch.object(server.SyncJobQueueService, "resume_interrupted") as sync_recovery, patch.object(

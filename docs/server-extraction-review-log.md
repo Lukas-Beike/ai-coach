@@ -4958,6 +4958,30 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `a761e2d37bddf4cd60b215d00cd825f3cf529fa2` auf
   `origin/develop` erreichbar.
 
+## P10 HTTP-Serverklasse — integrierter Prüfstand
+
+- GPT-6-Luna/high-Worker-Commit `c7b178d7`, nach #716 als `93074b15`
+  integriert. Erstes Root-Diffreview **FAIL**: Tests referenzierten die
+  neue HTTP-Modulklasse noch indirekt über `server.http_server`.
+  Derselbe Worker migrierte nur die Test-Patch-Ziele direkt auf
+  `backend.http_api.server`; Follow-up `b4841333`, integriert als
+  `d9734ce1`. Erneutes Root-Review des Produkt- und Testdiffs **PASS**:
+  `CoachHTTPServer` liegt ausschließlich in `backend/http_api/server.py`;
+  `main()` verwendet den konkreten Modulbesitzer mit identischem Bind-
+  Tupel und `RequestHandler`. Threading-Basisklasse,
+  `daemon_threads=True` und Queuegröße 32 bleiben erhalten. Kein
+  Rückimport, Alias-Wrapper oder veränderter Auth-/SSE-/Routenpfad.
+- Worker-Gesamtsuite **PASS**: 2.304 Tests, 12 Skips; gezielte Startup-,
+  Klassen- und HTTP-Tests sowie Compile/Diff und scoped Ruff **PASS**.
+  Ein versehentlich im Haupt-Checkout begonnener Cherry-pick wurde vor
+  der eigentlichen Integration abgebrochen; der Haupt-Checkout behielt
+  ausschließlich seine vorhandenen Fremdänderungen. Der korrekt
+  benannte PR-Worktree wurde danach konfliktfrei integriert.
+  Kombiniertes neu gebautes Read-only-Container-Image: vollständige
+  Suite **PASS**, 2.309 Tests, 10 Skips in 20,120 s. Vier
+  Architekturtests, Inventar-Check, scoped Ruff und Diff-Check **PASS**;
+  `server.py` hat 6.408 physische Zeilen. PR-CI/Review stehen aus.
+
 ## P9 Privacy-Löschung — eigenständig geprüfter Arbeitsstand
 
 - Root-Diffstand auf `24454a02` (#716-Head): `PrivacyDeleteService`
@@ -4984,3 +5008,15 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   vollständige Tree-Diff gegenüber dem mit 2.310 Container-Tests
   geprüften Stand ist leer. Inventar-Check und Diff-Check bleiben
   **PASS**; nur diese Review-Dokumentation wurde danach aktualisiert.
+- PR #717 auf Head `9546044e`: SonarCloud, Python-/Container-/Browser-
+  CI und explizites Codex-Review **PASS**, keine offenen Threads.
+  Squash-Merge am `2026-09-23T14:47:17Z`, Commit
+  `0fe5c7a05fbe27c67658c6d033918d2d5016e894` auf
+  `origin/develop` erreichbar. P10-HTTP-Server-PR-Branch integriert
+  diesen Zielstand sequenziell als `5f5e9ffc`; nur Inventar, Review-Text
+  und zwei Testimporte hatten Konflikte. Root-Review des endgültigen
+  Produkt-/Testdiffs gegen `origin/develop` **PASS**: nur die HTTP-
+  Serverklasse und die direkten Patch-Ziele bleiben als Unterschied.
+  Neu gebautes kombiniertes Read-only-Container-Image: vollständige
+  Suite **PASS**, 2.311 Tests, 10 Skips in 21,301 s. Inventar-
+  Check, vier Architekturtests und Diff-Check **PASS**.

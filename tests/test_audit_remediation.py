@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
+from backend.http_api import server as http_server_module
 from backend.providers import calendar as calendar_provider
 from backend.providers import weather as weather_provider
 from backend.planning import competitions as planning_competitions
@@ -230,7 +231,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
         startup = patch.object(server.app_config, "security_configuration_error", return_value=None)
         startup.start()
         self.addCleanup(startup.stop)
-        httpd = server.CoachHTTPServer(("127.0.0.1", 0), server.RequestHandler)
+        httpd = http_server_module.CoachHTTPServer(("127.0.0.1", 0), server.RequestHandler)
         worker = threading.Thread(target=httpd.serve_forever, daemon=True)
         worker.start()
         connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)
