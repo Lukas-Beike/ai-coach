@@ -1,7 +1,7 @@
 """Fresh SQLCipher runtime for local integration tests; all providers are blocked."""
+import json
 import os
 import sys
-import json
 from datetime import timedelta
 
 # This file is mounted only in disposable test containers, never normal startup.
@@ -25,7 +25,7 @@ def blocked_provider(*args, **kwargs):
     raise server.AppError(503, "Synthetic provider unavailable", reason="fixture_provider_unavailable")
 
 
-server.http_json = blocked_provider
+server.provider_http.JsonHttpClient.request = blocked_provider
 server.ensure_conversation = lambda *args, **kwargs: "fixture-conversation"
 # Browser scenarios deliberately poll and reload the single disposable fixture
 # far more aggressively than one athlete does. Rate limiting has dedicated unit
@@ -68,13 +68,13 @@ artifact = {}
 
 def stage_fixture_artifact():
     today = server.local_now().date()
-    artifact.update(server._stage_coach_artifact("fixture-conversation", "fixture-stage", {
+    artifact.update(server.training_plan_artifact_service().stage({"payload": {
         "plan_name": "Fixture sport contract",
         "workouts": [{"date": (today + timedelta(days=index)).isoformat(), "name": f"HTTP fixture {sport}", "sport": sport, "duration_minutes": 30,
                       "description": {"Run": "- 30m Z1 HR", "WeightTraining": "Synthetic local workout",
                                       "VirtualRide": "- 30m 60%", "Swim": "- 30m Z1 Pace"}[sport]}
                      for index, sport in enumerate(("Run", "WeightTraining", "VirtualRide", "Swim"))],
-    }))
+    }}, "fixture-conversation", "fixture-stage"))
 
 
 def initialise_fixture():

@@ -10,6 +10,7 @@ from datetime import date, datetime
 from typing import Any
 
 from backend import observability
+from backend.errors import AppError
 from backend.providers import openai as openai_provider
 from backend.providers import usage as provider_usage
 
@@ -177,6 +178,29 @@ class ProviderStateService:
             )
             if snapshot:
                 self._repository.set(db, _OPENAI_RATE_LIMITS_KEY, _json(snapshot))
+
+    def validate_openai_response(self, path: str, result: Any) -> dict[str, Any]:
+        """Validate one decoded response and persist only safe failure state."""
+        try:
+            return openai_provider.validate_response(
+                path,
+                result,
+                allowed_error_codes=tuple(observability.OPENAI_RESPONSE_ERROR_CODES),
+            )
+        except openai_provider.OpenAIResponseFailure as failure:
+            if failure.reason != "invalid_response":
+                self.record_status(
+                    "openai",
+                    state="error",
+                    reason=failure.reason,
+                    message=failure.message,
+                    http_status=200,
+                    provider_error_code=failure.provider_error_code,
+                )
+            error = AppError(502, failure.message, reason=failure.reason)
+            if failure.provider_error_code is not None:
+                error.provider_error_code = failure.provider_error_code
+            raise error from failure
 
     def record_usage(
         self, provider: str, response: Any, operation: Any

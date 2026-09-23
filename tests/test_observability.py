@@ -25,6 +25,7 @@ from backend.observability import (
     safe_diagnostic_context,
     safe_diagnostic_error,
     safe_provider_path,
+    safe_response_headers,
     safe_url_netloc,
 )
 
@@ -76,6 +77,71 @@ class _Clock:
 
 
 class ObservabilityTests(unittest.TestCase):
+    def test_safe_response_headers_keeps_only_allowlisted_transport_headers(self):
+        headers = {
+            "Content-Type": "application/json",
+            "Content-Length": "12",
+            "Date": "Tue, 15 Sep 2026 12:00:00 GMT",
+            "Retry-After": "30",
+            "Server": "synthetic-server",
+            "Authorization": "Bearer synthetic-token",
+            "Cookie": "session=synthetic-cookie",
+            "X-Request-ID": "synthetic-request-id",
+            "X-Unknown": "synthetic-unknown",
+        }
+
+        self.assertEqual(
+            safe_response_headers(headers, redact=lambda value: value),
+            {
+                "content-type": "application/json",
+                "content-length": "12",
+                "date": "Tue, 15 Sep 2026 12:00:00 GMT",
+                "retry-after": "30",
+                "server": "synthetic-server",
+            },
+        )
+
+    def test_safe_response_headers_normalizes_names_and_keeps_rate_limit_prefix(self):
+        headers = {
+            "  CONTENT-TYPE  ": "application/json",
+            " X-RateLimit-Remaining ": "9",
+            "x-ratelimit-reset": "123",
+        }
+
+        self.assertEqual(
+            safe_response_headers(headers, redact=lambda value: value),
+            {
+                "content-type": "application/json",
+                "x-ratelimit-remaining": "9",
+                "x-ratelimit-reset": "123",
+            },
+        )
+
+    def test_safe_response_headers_redacts_and_bounds_values(self):
+        redacted = []
+
+        def redact(value: str) -> str:
+            redacted.append(value)
+            return f"[REDACTED]{value}"
+
+        result = safe_response_headers(
+            {"Server": "sensitive-provider-value", "X-RateLimit-Limit": "x" * 200},
+            redact=redact,
+        )
+
+        self.assertEqual(redacted, ["sensitive-provider-value", "x" * 200])
+        self.assertEqual(result["server"], "[REDACTED]sensitive-provider-value")
+        self.assertEqual(result["x-ratelimit-limit"], ("[REDACTED]" + "x" * 200)[:160])
+
+    def test_safe_response_headers_returns_empty_for_invalid_header_objects(self):
+        class InvalidHeaders:
+            def items(self):
+                raise RuntimeError("synthetic provider text")
+
+        self.assertEqual(safe_response_headers(None, redact=lambda value: value), {})
+        self.assertEqual(safe_response_headers(object(), redact=lambda value: value), {})
+        self.assertEqual(safe_response_headers(InvalidHeaders(), redact=lambda value: value), {})
+
     def test_redacts_nested_values_and_secret_variants(self):
         current = _config()
         redactor = Redactor(lambda: current)

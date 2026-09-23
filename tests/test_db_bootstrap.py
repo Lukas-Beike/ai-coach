@@ -61,6 +61,19 @@ class DatabaseBootstrapTests(unittest.TestCase):
         self.assertEqual(db.execute("SELECT revision, updated_at FROM planning_state WHERE id=1").fetchone()["revision"], 0)
         self.assertEqual(db.execute("SELECT updated_at FROM planning_state WHERE id=1").fetchone()["updated_at"], self.now)
 
+    def test_bootstrap_preserves_manual_morning_checkin_state(self):
+        db = self.make_connection()
+        self.addCleanup(db.close)
+        self.bootstrap(db)
+        self.key_values.set(db, "morning_checkin_status", "ready")
+        self.key_values.set(db, "morning_checkin_date", "2026-09-15")
+
+        self.bootstrap(db)
+
+        self.assertEqual(self.key_values.get(db, "morning_checkin_status"), "ready")
+        self.assertEqual(self.key_values.get(db, "morning_checkin_date"), "2026-09-15")
+        self.assertIsNone(self.key_values.get(db, "morning_checkin_running"))
+
     def test_non_current_schema_is_rejected_without_mutation(self):
         db = self.make_connection()
         self.addCleanup(db.close)

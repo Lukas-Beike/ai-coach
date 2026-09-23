@@ -104,6 +104,12 @@ class DatabaseManager:
     @contextmanager
     def reader(self) -> Iterator[Any]:
         """Lease a reader, returning it to the pool after the read."""
+        current = self._unit_of_work.get()
+        if current is not None:
+            # A projection inside an active request transaction must observe
+            # that transaction and reuse its keyed SQLCipher connection.
+            yield current
+            return
         with self._lease():
             try:
                 connection = self._readers.get_nowait()

@@ -1,12 +1,20 @@
+import io
 import json
 import threading
 import unittest
 from types import MappingProxyType
 from unittest import mock
+from urllib.error import HTTPError
 
-from backend.errors import AppError
+from backend.errors import AppError, ClientDisconnected
+from backend.providers import openai as openai_provider
 from backend.providers.http import ProviderRequestCancelled, ProviderResponseTooLarge
 from backend.providers.openai import (
+    OpenAIResponseFailure,
+    OpenAIResponsesClient,
+    OpenAIStreamClient,
+    OpenAIStreamConfig,
+    OpenAIStreamTelemetry,
     StreamReadResult,
     StreamReadState,
     consume_sse_event,
@@ -24,6 +32,7 @@ from backend.providers.openai import (
     responses_payload,
     retry_after_seconds,
     safe_log_reason,
+    validate_response,
 )
 
 
@@ -67,6 +76,78 @@ class _StreamResponse:
         self.closed = True
         if self._close_event is not None:
             self._close_event.set()
+
+
+class _ClientHTTP:
+    def __init__(self, *responses):
+        self.calls = []
+        self.responses = list(responses)
+
+    def request(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        result = self.responses.pop(0)
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+
+class _ClientState:
+    def __init__(self):
+        self.validated = []
+        self.usage = []
+
+    def validate_openai_response(self, path, result):
+        self.validated.append((path, result))
+        return result
+
+    def record_usage(self, provider, response, operation):
+        self.usage.append((provider, response, operation))
+
+
+class _ClientLogger:
+    def __init__(self):
+        self.warnings = []
+
+    def warning(self, message, *, extra):
+        self.warnings.append((message, extra))
+
+    def info(self, message, *, extra):
+        self.infos = getattr(self, "infos", [])
+        self.infos.append((message, extra))
+
+    def log(self, level, message, *, extra):
+        self.logs = getattr(self, "logs", [])
+        self.logs.append((level, message, extra))
+
+
+class _StreamStateService:
+    def __init__(self):
+        self.usage = []
+        self.status = []
+        self.rate_limits = []
+
+    def validate_openai_response(self, _path, result):
+        return result
+
+    def record_usage(self, *args):
+        self.usage.append(args)
+
+    def record_status(self, *args, **kwargs):
+        self.status.append((args, kwargs))
+
+    def record_rate_limits(self, headers):
+        self.rate_limits.append(headers)
+
+    def record_success(self, *args):
+        self.status.append((args, {"state": "ok"}))
+
+
+class _DiagnosticCapture:
+    def __init__(self):
+        self.events = []
+
+    def capture(self, name, details):
+        self.events.append((name, details))
 
 
 class OpenAIProviderErrorTests(unittest.TestCase):
@@ -732,6 +813,54 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             "hi",
         )
 
+    def test_validate_response_returns_valid_results_unchanged(self):
+        result = {"status": "completed", "output_text": "hello"}
+        self.assertIs(validate_response("/responses", result), result)
+        non_responses_result = {"status": "unknown"}
+        self.assertIs(validate_response("/models", non_responses_result), non_responses_result)
+
+    def test_validate_response_rejects_wire_failures_with_safe_messages(self):
+        cases = (
+            ("/responses", None, "invalid_response", "OpenAI response is not a JSON object."),
+            (
+                "/responses",
+                {"error": {"code": "invalid_request_error", "message": "private provider detail"}},
+                "response_error",
+                "OpenAI returned an error response.",
+            ),
+            ("/responses", {"status": "failed"}, "response_failed", "OpenAI did not complete the coach response."),
+            (
+                "/responses",
+                {"status": "unexpected"},
+                "invalid_response_status",
+                "OpenAI returned an unknown response status.",
+            ),
+        )
+        for path, result, reason, message in cases:
+            with self.subTest(reason=reason):
+                with self.assertRaises(OpenAIResponseFailure) as raised:
+                    validate_response(path, result)
+                self.assertEqual(raised.exception.reason, reason)
+                self.assertEqual(raised.exception.message, message)
+                self.assertEqual(str(raised.exception), message)
+                self.assertIsNone(raised.exception.provider_error_code)
+                self.assertNotIn("private provider detail", str(raised.exception))
+
+    def test_validate_response_allows_only_allowlisted_error_codes(self):
+        allowed_result = {"error": {"code": "known_code", "message": "private provider detail"}}
+        with self.assertRaises(OpenAIResponseFailure) as raised:
+            validate_response("/responses", allowed_result, allowed_error_codes=("known_code",))
+        self.assertEqual(raised.exception.provider_error_code, "known_code")
+        self.assertNotIn("private provider detail", str(raised.exception))
+
+        for untrusted_code in ("other_code", 123, {"nested": "code"}):
+            with self.subTest(code=untrusted_code):
+                result = {"error": {"code": untrusted_code, "message": "private provider detail"}}
+                with self.assertRaises(OpenAIResponseFailure) as raised:
+                    validate_response("/responses", result, allowed_error_codes=("known_code",))
+                self.assertIsNone(raised.exception.provider_error_code)
+                self.assertNotIn("private provider detail", str(raised.exception))
+
     def test_retry_after_is_numeric_bounded_ceiled_and_non_negative(self):
         self.assertEqual(retry_after_seconds({"retry-after": "12.5"}), 13)
         self.assertEqual(retry_after_seconds({"retry-after": "0"}), 1)
@@ -877,6 +1006,481 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             snapshot,
             {"updated_at": "now", "remaining_requests": "19", "reset_tokens": "30s"},
         )
+
+    def _client(self, http, state=None, logger=None, **overrides):
+        settings = {
+            "api_key": "sk-test",
+            "base_url": "https://api.example.test/v1/",
+            "default_base_url": "https://api.openai.com/v1",
+            "responses_path": "/responses",
+            "response_timeout_seconds": 17,
+            "background_poll_seconds": 2,
+            "background_max_seconds": 10,
+            "thinking_level": lambda: "high",
+            "http_client": http,
+            "provider_state": state or _ClientState(),
+            "logger": logger or _ClientLogger(),
+        }
+        settings.update(overrides)
+        settings.setdefault("wait", lambda _seconds: None)
+        settings.setdefault("monotonic", lambda: 0.0)
+        return OpenAIResponsesClient(**settings)
+
+    def test_responses_client_request_builds_wire_request_and_records_usage_once(self):
+        state = _ClientState()
+        http = _ClientHTTP({"status": "completed"})
+        client = self._client(http, state)
+        payload = {"input": "hello", "_ai_provider": "openai"}
+
+        result = client.request("/responses", payload)
+
+        self.assertEqual(result, {"status": "completed"})
+        self.assertEqual(payload, {"input": "hello", "_ai_provider": "openai"})
+        args, kwargs = http.calls[0]
+        self.assertEqual(args[:2], ("POST", "https://api.example.test/v1/responses"))
+        self.assertEqual(args[2], {"input": "hello", "reasoning": {"effort": "high"}})
+        self.assertEqual(kwargs["headers"], {"Authorization": "Bearer sk-test"})
+        self.assertEqual(kwargs["timeout"], 17)
+        self.assertEqual(state.usage, [("openai", result, "responses")])
+
+    def test_responses_client_requires_api_key(self):
+        client = self._client(_ClientHTTP({"status": "completed"}), api_key=None)
+
+        with self.assertRaises(AppError) as raised:
+            client.request("/models", {})
+
+        self.assertEqual((raised.exception.status, raised.exception.message), (503, "OPENAI_API_KEY ist nicht konfiguriert."))
+
+    def test_responses_client_retries_locked_conversation_with_injected_wait(self):
+        state = _ClientState()
+        logger = _ClientLogger()
+        waits = []
+        locked = AppError(409, "locked", reason="conversation_locked")
+        http = _ClientHTTP(locked, {"status": "completed"})
+        client = self._client(http, state, logger, wait=waits.append)
+
+        result = client.responses({"input": "hello"})
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(waits, [1])
+        self.assertEqual(logger.warnings[0][1], {
+            "event": "openai_conversation_locked",
+            "context": {"attempt": 1, "retry_in_seconds": 1},
+        })
+        self.assertEqual(len(state.usage), 1)
+
+    def test_responses_client_background_lock_backoff_returns_public_cancel_error(self):
+        locked = AppError(409, "locked", reason="conversation_locked")
+        http = _ClientHTTP(locked, {"id": "resp_never_created", "status": "queued"})
+        client = self._client(http)
+
+        class Event:
+            def __init__(self):
+                self.cancelled = False
+
+            def is_set(self):
+                return self.cancelled
+
+            def wait(self, _seconds):
+                self.cancelled = True
+                return True
+
+        with self.assertRaises(AppError) as raised:
+            client.background({"input": "hello"}, cancel_event=Event())
+
+        self.assertEqual((raised.exception.status, raised.exception.reason), (499, "chat_cancelled"))
+        self.assertEqual(len(http.calls), 1)
+
+    def test_responses_client_retrieve_validates_without_recording_usage(self):
+        state = _ClientState()
+        http = _ClientHTTP({"id": "resp_a", "status": "completed"})
+        client = self._client(http, state)
+
+        result = client.retrieve(" resp_a ")
+
+        self.assertEqual(result["id"], "resp_a")
+        self.assertEqual(http.calls[0][0][:2], ("GET", "https://api.example.test/v1/responses/resp_a"))
+        self.assertEqual(state.usage, [])
+        with self.assertRaises(AppError):
+            client.retrieve("not-a-response-id")
+
+    def test_responses_client_cancel_is_best_effort_and_logs_static_event(self):
+        logger = _ClientLogger()
+        http = _ClientHTTP(RuntimeError("provider detail must not be logged"))
+        client = self._client(http, logger=logger)
+
+        client.cancel("resp_a")
+
+        self.assertEqual(logger.warnings, [(
+            "OpenAI background response cancellation failed",
+            {"event": "openai_background_cancel_failed"},
+        )])
+        self.assertNotIn("resp_a", repr(logger.warnings))
+
+    def test_responses_client_background_records_usage_after_final_retrieve_and_notifies_once(self):
+        state = _ClientState()
+        http = _ClientHTTP(
+            {"id": "resp_bg", "status": "queued"},
+            {"id": "resp_bg", "status": "completed", "output_text": "done"},
+        )
+        notified = []
+        waits = []
+        client = self._client(http, state, wait=waits.append)
+
+        result = client.background({"input": "hello"}, on_response_id=notified.append)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(notified, ["resp_bg"])
+        self.assertEqual(waits, [2])
+        self.assertEqual([entry[2] for entry in state.usage], ["responses_background"])
+        self.assertEqual(len(state.usage), 1)
+
+    def test_responses_client_background_deadline_includes_resume_retrieve(self):
+        state = _ClientState()
+        http = _ClientHTTP(
+            {"id": "resp_bg", "status": "queued"},
+            {},
+        )
+        times = iter((0.0, 11.0, 11.0, 11.0))
+        waits = []
+        client = self._client(
+            http,
+            state,
+            wait=waits.append,
+            monotonic=lambda: next(times),
+        )
+
+        with self.assertRaises(AppError) as raised:
+            client.background({}, response_id="resp_bg")
+
+        self.assertEqual((raised.exception.status, raised.exception.reason), (504, "provider_timeout"))
+        self.assertEqual(waits, [2])
+        self.assertEqual(http.calls[-1][0][:2], ("POST", "https://api.example.test/v1/responses/resp_bg/cancel"))
+        self.assertEqual(state.usage, [])
+
+    def _stream_client(self, opener, *, state=None, capture=None, logger=None, wait=None, **overrides):
+        settings = {
+            "api_key": "sk-test",
+            "base_url": "https://api.example.test/v1/",
+            "default_base_url": "https://api.openai.com/v1",
+            "responses_path": "/responses",
+            "response_timeout_seconds": 17,
+            "max_response_bytes": 10000,
+            "app_version": "test-version",
+            "json_media_type": "application/json",
+            "thinking_level": lambda: "high",
+            "provider_state": state or _StreamStateService(),
+            "diagnostic_capture": capture or _DiagnosticCapture(),
+            "logger": logger or _ClientLogger(),
+            "opener": opener,
+            "clock": lambda: 0.0,
+            "wait": wait or (lambda _seconds: None),
+            "now": lambda: "2026-09-20T10:00:00Z",
+        }
+        settings.update(overrides)
+        config = OpenAIStreamConfig(
+            api_key=settings["api_key"],
+            base_url=settings["base_url"],
+            default_base_url=settings["default_base_url"],
+            responses_path=settings["responses_path"],
+            timeout=settings["response_timeout_seconds"],
+            max_bytes=settings["max_response_bytes"],
+            app_version=settings["app_version"],
+            media_type=settings["json_media_type"],
+        )
+        telemetry = OpenAIStreamTelemetry(
+            settings["provider_state"],
+            settings["diagnostic_capture"],
+            settings["logger"],
+            settings["clock"],
+            settings["now"],
+        )
+        return OpenAIStreamClient(
+            config,
+            telemetry,
+            settings["thinking_level"],
+            settings["opener"],
+            settings["wait"],
+        )
+
+    @staticmethod
+    def _stream_lines(response_id="resp_test"):
+        return [
+            b'event: response.created\n',
+            f'data: {{"type":"response.created","response":{{"id":"{response_id}"}}}}\n'.encode(),
+            b"\n",
+            b"event: response.output_text.delta\n",
+            b'data: {"type":"response.output_text.delta","delta":"hello"}\n',
+            b"\n",
+            b"event: response.completed\n",
+            f'data: {{"type":"response.completed","response":{{"id":"{response_id}","status":"completed","output_text":"hello","usage":{{"total_tokens":1}}}}}}\n'.encode(),
+            b"\n",
+        ]
+
+    def test_stream_client_success_keeps_payload_immutable_and_wires_request(self):
+        opened = []
+
+        def opener(request, **kwargs):
+            opened.append((request, kwargs))
+            return _StreamResponse(
+                self._stream_lines(),
+                status=200,
+                headers={"x-ratelimit-remaining-requests": "3"},
+            )
+
+        state = _StreamStateService()
+        client = self._stream_client(opener, state=state)
+        payload = {"input": "hello", "stream": False, "_ai_provider": "openai"}
+        deltas = []
+        response_ids = []
+
+        result = client.stream(payload, deltas.append, on_response_id=response_ids.append)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(deltas, ["hello"])
+        self.assertEqual(response_ids, ["resp_test"])
+        self.assertEqual(payload, {"input": "hello", "stream": False, "_ai_provider": "openai"})
+        request, kwargs = opened[0]
+        self.assertEqual(request.full_url, "https://api.example.test/v1/responses")
+        self.assertEqual(json.loads(request.data), {"input": "hello", "reasoning": {"effort": "high"}, "stream": True})
+        self.assertEqual(request.headers["Accept"], "text/event-stream")
+        self.assertEqual(request.headers["Content-type"], "application/json")
+        self.assertEqual(request.headers["Authorization"], "Bearer sk-test")
+        self.assertEqual(kwargs["timeout"], 17)
+        self.assertEqual(len(state.usage), 1)
+
+    def test_stream_client_saves_final_response_before_post_read_cancellation(self):
+        cancel_event = threading.Event()
+        state = _StreamStateService()
+        response = _StreamResponse(self._stream_lines(), close_event=cancel_event)
+        client = self._stream_client(lambda *_args, **_kwargs: response, state=state)
+
+        with self.assertRaises(AppError) as raised:
+            client.stream({"input": "hello"}, lambda _delta: None, cancel_event=cancel_event)
+
+        self.assertEqual((raised.exception.status, raised.exception.reason), (499, "chat_cancelled"))
+        self.assertEqual(state.usage, [])
+
+    def test_stream_client_redacts_callback_app_error_from_logs_and_diagnostics(self):
+        state = _StreamStateService()
+        capture = _DiagnosticCapture()
+        logger = _ClientLogger()
+        expected = AppError(418, "private provider message", reason="private_provider_reason")
+        response = _StreamResponse(self._stream_lines())
+        client = self._stream_client(
+            lambda *_args, **_kwargs: response,
+            state=state,
+            capture=capture,
+            logger=logger,
+        )
+
+        with self.assertRaises(AppError) as raised:
+            client.stream({"input": "hello"}, lambda _delta: (_ for _ in ()).throw(expected))
+
+        self.assertIs(raised.exception, expected)
+        output = repr((logger.infos, logger.logs, capture.events))
+        self.assertNotIn("private provider", output)
+        self.assertNotIn("private_provider_reason", output)
+        self.assertIn("http_error", output)
+
+    def test_stream_client_retries_locked_conversation_with_one_second_wait(self):
+        locked = HTTPError(
+            "https://api.example.test/v1/responses",
+            409,
+            "locked",
+            {},
+            io.BytesIO(body({"code": "conversation_locked"})),
+        )
+        responses = iter((locked, _StreamResponse(self._stream_lines())))
+        waits = []
+
+        def opener(*_args, **_kwargs):
+            response = next(responses)
+            if isinstance(response, BaseException):
+                raise response
+            return response
+
+        client = self._stream_client(opener, wait=waits.append)
+
+        result = client.stream({"input": "hello"}, lambda _delta: None)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(waits, [1])
+
+    def test_stream_client_cancellation_before_headers_is_public_499(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+        opened = []
+        state = _StreamStateService()
+        client = self._stream_client(lambda *args, **kwargs: opened.append(args) or _StreamResponse([]), state=state)
+
+        with self.assertRaises(AppError) as raised:
+            client.stream({"input": "hello"}, lambda _delta: None, cancel_event=cancel_event)
+
+        self.assertEqual((raised.exception.status, raised.exception.reason), (499, "chat_cancelled"))
+        self.assertEqual(opened, [])
+        self.assertEqual(len(state.usage), 1)
+
+    def test_stream_client_cancellation_during_lock_backoff_records_usage_once(self):
+        class CancelDuringWait:
+            def __init__(self):
+                self.cancelled = False
+
+            def is_set(self):
+                return self.cancelled
+
+            def wait(self, _seconds):
+                self.cancelled = True
+                return True
+
+        event = CancelDuringWait()
+        state = _StreamStateService()
+
+        def wait(_seconds):
+            event.set()
+
+        def opener(*_args, **_kwargs):
+            raise HTTPError(
+                "https://api.example.test/v1/responses",
+                409,
+                "locked",
+                {},
+                io.BytesIO(body({"code": "conversation_locked"})),
+            )
+
+        client = self._stream_client(opener, state=state, wait=wait)
+        with self.assertRaises(AppError) as raised:
+            client.stream({"input": "hello"}, lambda _delta: None, cancel_event=event)
+
+        self.assertEqual((raised.exception.status, raised.exception.reason), (499, "chat_cancelled"))
+        self.assertEqual(len(state.usage), 1)
+
+    def test_stream_client_preserves_headers_on_late_size_failure(self):
+        state = _StreamStateService()
+        response = _StreamResponse(
+            [b"data: {}\n"],
+            status=200,
+            headers={"x-ratelimit-remaining-requests": "2"},
+        )
+        client = self._stream_client(lambda *_args, **_kwargs: response, state=state, max_response_bytes=1)
+
+        with self.assertRaises(AppError) as raised:
+            client.stream({"input": "hello"}, lambda _delta: None)
+
+        self.assertEqual((raised.exception.status, raised.exception.reason), (502, "response_too_large"))
+        self.assertEqual(state.rate_limits, [{"x-ratelimit-remaining-requests": "2"}])
+        self.assertEqual(state.usage, [])
+
+    def test_stream_client_http_error_keeps_retry_after_and_redacts_diagnostics(self):
+        secret = "private provider text sk-test-secret"
+        error = HTTPError(
+            "https://api.example.test/v1/responses",
+            429,
+            "rate limited",
+            {"retry-after": "1.2", "x-request-id": "req_test"},
+            io.BytesIO(json.dumps({"error": {"code": "rate_limit_exceeded", "message": secret}}).encode()),
+        )
+        state = _StreamStateService()
+        capture = _DiagnosticCapture()
+        def opener(*_args, **_kwargs):
+            raise error
+
+        client = self._stream_client(opener, state=state, capture=capture)
+
+        with self.assertRaises(AppError) as raised:
+            client.stream({"input": "hello"}, lambda _delta: None)
+
+        self.assertEqual((raised.exception.status, raised.exception.reason), (429, "rate_limit_exceeded"))
+        self.assertEqual(raised.exception.retry_after_seconds, 2)
+        self.assertNotIn("private", repr(capture.events))
+        self.assertNotIn("sk-test-secret", repr(capture.events))
+        self.assertEqual(state.rate_limits, [{"retry-after": "1.2", "x-request-id": "req_test"}])
+
+    def test_stream_client_records_http_failure_in_safe_order(self):
+        events = []
+        original_read_error_body = openai_provider.provider_http.read_error_body
+
+        class OrderedState(_StreamStateService):
+            def record_rate_limits(self, headers):
+                events.append("rate_limits")
+                super().record_rate_limits(headers)
+
+            def record_status(self, *args, **kwargs):
+                events.append("status")
+                super().record_status(*args, **kwargs)
+
+        class OrderedLogger(_ClientLogger):
+            def log(self, level, message, *, extra):
+                events.append("log")
+                super().log(level, message, extra=extra)
+
+        class OrderedCapture(_DiagnosticCapture):
+            def capture(self, name, details):
+                events.append("diagnostic")
+                super().capture(name, details)
+
+        error = HTTPError(
+            "https://api.example.test/v1/responses",
+            429,
+            "rate limited",
+            {"retry-after": "1"},
+            io.BytesIO(body({"code": "rate_limit_exceeded"})),
+        )
+        state = OrderedState()
+
+        def opener(*_args, **_kwargs):
+            events.clear()
+            raise error
+
+        client = self._stream_client(
+            opener,
+            state=state,
+            capture=OrderedCapture(),
+            logger=OrderedLogger(),
+        )
+
+        with mock.patch(
+            "backend.providers.openai.provider_http.read_error_body",
+            side_effect=lambda exc, max_bytes: events.append("parse")
+            or original_read_error_body(exc, max_bytes),
+        ), self.assertRaises(AppError):
+            client.stream({"input": "hello"}, lambda _delta: None)
+
+        self.assertEqual(events, ["rate_limits", "parse", "status", "log", "diagnostic"])
+
+    def test_stream_client_requires_final_response_and_records_usage_once_on_success(self):
+        state = _StreamStateService()
+        incomplete = _StreamResponse([b'data: {"type":"response.output_text.delta","delta":"hello"}\n', b"\n"])
+        client = self._stream_client(lambda *_args, **_kwargs: incomplete, state=state)
+
+        with self.assertRaises(AppError) as raised:
+            client.stream({"input": "hello"}, lambda _delta: None)
+
+        self.assertEqual((raised.exception.status, raised.exception.reason), (502, "invalid_response"))
+        self.assertEqual(state.usage, [])
+
+    def test_stream_client_timeout_network_and_client_disconnect_contracts(self):
+        for failure, status, reason in (
+            (TimeoutError("private timeout"), 504, "provider_timeout"),
+            (OSError("private network"), 503, "provider_unavailable"),
+        ):
+            with self.subTest(reason=reason):
+                state = _StreamStateService()
+                client = self._stream_client(
+                    lambda *_args, failure=failure, **_kwargs: (_ for _ in ()).throw(failure),
+                    state=state,
+                )
+                with self.assertRaises(AppError) as raised:
+                    client.stream({"input": "hello"}, lambda _delta: None)
+                self.assertEqual((raised.exception.status, raised.exception.reason), (status, reason))
+                self.assertEqual(state.usage, [])
+
+        disconnect = _StreamResponse(self._stream_lines())
+        state = _StreamStateService()
+        client = self._stream_client(lambda *_args, **_kwargs: disconnect, state=state)
+        with self.assertRaises(ClientDisconnected):
+            client.stream({"input": "hello"}, lambda _delta: (_ for _ in ()).throw(ClientDisconnected()))
+        self.assertEqual(len(state.usage), 1)
 
 
 if __name__ == "__main__":

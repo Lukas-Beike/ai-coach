@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from backend.config import Config
+from backend.db.manager import DatabaseManager
+from backend.db.repositories import KeyValueRepository
 from backend.sync.refresh import cleanup_refresh_history
 
 WEATHER_CACHE_KEY = "weather_cache"
@@ -45,7 +47,9 @@ def _parse_utc(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _scheduled_provider_retry_at(db: Any, provider: str, *, now: datetime) -> str | None:
+def _scheduled_provider_retry_at(
+    db: Any, provider: str, *, now: datetime
+) -> str | None:
     """Return only a future queued retry, never an advisory history timestamp."""
     rows = db.execute(
         "SELECT available_at FROM sync_jobs "
@@ -67,7 +71,9 @@ def _provider_freshness_inputs(
     profile: Mapping[str, Any],
     garmin_has_core_error: bool,
     garmin_tokenstore_exists: bool,
-) -> tuple[dict[tuple[str, str], Any], dict[tuple[str, str], Any], dict[tuple[str, str], bool]]:
+) -> tuple[
+    dict[tuple[str, str], Any], dict[tuple[str, str], Any], dict[tuple[str, str], bool]
+]:
     fallbacks = {
         ("intervals", "activities"): get_value("last_sync_at"),
         ("intervals", "competitions"): get_value("last_competition_sync_at"),
@@ -94,14 +100,20 @@ def _provider_freshness_inputs(
         ("intervals", "activities"): bool(config.intervals_api_key),
         ("intervals", "competitions"): bool(config.intervals_api_key),
         ("intervals", "performance"): bool(config.intervals_api_key),
-        ("garmin", "data"): bool(config.garmin_fixture_path or config.garmin_email or garmin_tokenstore_exists),
+        ("garmin", "data"): bool(
+            config.garmin_fixture_path
+            or config.garmin_email
+            or garmin_tokenstore_exists
+        ),
         ("weather", "forecast"): bool(profile.get("weather_location")),
         ("calendar", "events"): bool(config.calendar_ical_url),
     }
     return fallbacks, fallback_errors, configured
 
 
-def _provider_freshness_last_good_state(key: tuple[str, str], last_good: Any, *, now: datetime) -> str:
+def _provider_freshness_last_good_state(
+    key: tuple[str, str], last_good: Any, *, now: datetime
+) -> str:
     parsed = _parse_utc(last_good)
     if parsed is None:
         return "stale" if last_good else "error"
@@ -113,7 +125,9 @@ def _provider_fallback_error_code(fallback_error: bool) -> str | None:
     return "provider_error" if fallback_error else None
 
 
-def _provider_freshness_error_code(row: Mapping[str, Any] | None, fallback_error: bool) -> str | None:
+def _provider_freshness_error_code(
+    row: Mapping[str, Any] | None, fallback_error: bool
+) -> str | None:
     if row:
         error_code = str(row.get("error_code") or "")
         if error_code:
@@ -122,8 +136,13 @@ def _provider_freshness_error_code(row: Mapping[str, Any] | None, fallback_error
 
 
 def _provider_freshness_status(
-    key: tuple[str, str], configured: bool, row: Mapping[str, Any] | None,
-    last_good: Any, fallback_error: bool, *, now: datetime,
+    key: tuple[str, str],
+    configured: bool,
+    row: Mapping[str, Any] | None,
+    last_good: Any,
+    fallback_error: bool,
+    *,
+    now: datetime,
 ) -> tuple[str, str | None]:
     if not configured:
         return "not_configured", _provider_freshness_error_code(row, fallback_error)
@@ -137,7 +156,9 @@ def _provider_freshness_status(
         if status == "partial":
             return "partial", _provider_fallback_error_code(fallback_error)
     if last_good:
-        return _provider_freshness_last_good_state(key, last_good, now=now), _provider_fallback_error_code(fallback_error)
+        return _provider_freshness_last_good_state(
+            key, last_good, now=now
+        ), _provider_fallback_error_code(fallback_error)
     if fallback_error:
         return "error", "provider_error"
     return "never_loaded", None
@@ -160,7 +181,11 @@ def provider_freshness_state(
     The cleanup intentionally remains uncommitted: the caller owns transaction
     boundaries and may roll back the diagnostic cleanup together with its work.
     """
-    current_time = now.astimezone(timezone.utc) if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    current_time = (
+        now.astimezone(timezone.utc)
+        if now.tzinfo is not None
+        else now.replace(tzinfo=timezone.utc)
+    )
     fallbacks, fallback_errors, configured = _provider_freshness_inputs(
         config=config,
         get_value=get_value,
@@ -189,21 +214,63 @@ def provider_freshness_state(
         last_good = (last_success["finished_at"] if last_success else None) or fallback
         scheduled_retry = _scheduled_provider_retry_at(db, provider, now=current_time)
         state, error_code = _provider_freshness_status(
-            key, configured[key], row, last_good, fallback_error, now=current_time,
+            key,
+            configured[key],
+            row,
+            last_good,
+            fallback_error,
+            now=current_time,
         )
-        result.append({
-            "provider": provider,
-            "area": area,
-            "label": label,
-            "configured": configured[key],
-            "read_only": key != ("intervals", "competitions"),
-            "state": state,
-            "phase": row.get("phase") if row else None,
-            "last_attempt_at": last_attempt,
-            "last_success_at": last_good,
-            "error_code": error_code,
-            "next_retry_at": scheduled_retry,
-            "stale": state == "stale",
-            "has_last_good": bool(last_good),
-        })
+        result.append(
+            {
+                "provider": provider,
+                "area": area,
+                "label": label,
+                "configured": configured[key],
+                "read_only": key != ("intervals", "competitions"),
+                "state": state,
+                "phase": row.get("phase") if row else None,
+                "last_attempt_at": last_attempt,
+                "last_success_at": last_good,
+                "error_code": error_code,
+                "next_retry_at": scheduled_retry,
+                "stale": state == "stale",
+                "has_last_good": bool(last_good),
+            }
+        )
     return result
+
+
+class ProviderFreshnessService:
+    """Own the transaction and key/value reads for provider freshness state."""
+
+    def __init__(
+        self,
+        config: Config,
+        database_manager: DatabaseManager,
+        key_value_repository: KeyValueRepository,
+        now: Callable[[], datetime],
+    ) -> None:
+        self._config = config
+        self._database_manager = database_manager
+        self._key_value_repository = key_value_repository
+        self._now = now
+
+    def current(
+        self,
+        *,
+        profile: Mapping[str, Any],
+        garmin_has_core_error: bool,
+        garmin_tokenstore_exists: bool,
+    ) -> list[dict[str, Any]]:
+        now = self._now()
+        with self._database_manager.unit_of_work() as db:
+            return provider_freshness_state(
+                db,
+                config=self._config,
+                get_value=lambda key: self._key_value_repository.get(db, key),
+                profile=profile,
+                garmin_has_core_error=garmin_has_core_error,
+                garmin_tokenstore_exists=garmin_tokenstore_exists,
+                now=now,
+            )

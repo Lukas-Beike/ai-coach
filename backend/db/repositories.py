@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import json
+from collections.abc import Callable
 from typing import Any
 
 
@@ -58,8 +58,119 @@ class CompetitionRepository:
         return [dict(row) for row in db.execute(query, params).fetchall()]
 
     def get(self, db: Any, competition_id: str) -> dict[str, Any] | None:
-        row = db.execute("SELECT * FROM competitions WHERE id = ?", (competition_id,)).fetchone()
+        row = db.execute(
+            "SELECT * FROM competitions WHERE id = ?", (competition_id,)
+        ).fetchone()
         return dict(row) if row else None
+
+    def count(self, db: Any) -> int:
+        return int(
+            db.execute("SELECT COUNT(*) AS count FROM competitions").fetchone()["count"]
+        )
+
+    def create_local(self, db: Any, competition: dict[str, Any], now: str) -> None:
+        db.execute(
+            "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, 'local', '', ?, ?)",
+            (
+                competition["id"],
+                competition["name"],
+                competition["event_date"],
+                competition["sport"],
+                competition["priority"],
+                competition["distance"],
+                competition["target"],
+                competition["course_profile"],
+                competition["notes"],
+                competition["category"],
+                competition["start_date_local"],
+                competition["description"],
+                competition["moving_time"],
+                now,
+                now,
+            ),
+        )
+
+    def update_local(self, db: Any, competition: dict[str, Any], now: str) -> None:
+        db.execute(
+            "UPDATE competitions SET name=?, event_date=?, sport=?, priority=?, distance=?, target=?, course_profile=?, notes=?, category=?, start_date_local=?, description=?, moving_time=?, sync_dirty=1, sync_state='local', sync_conflict='', updated_at=? WHERE id=?",
+            (
+                competition["name"],
+                competition["event_date"],
+                competition["sport"],
+                competition["priority"],
+                competition["distance"],
+                competition["target"],
+                competition["course_profile"],
+                competition["notes"],
+                competition["category"],
+                competition["start_date_local"],
+                competition["description"],
+                competition["moving_time"],
+                now,
+                competition["id"],
+            ),
+        )
+
+    def add_tombstone(
+        self,
+        db: Any,
+        tombstone_id: str,
+        intervals_event_id: Any,
+        external_id: Any,
+        now: str,
+    ) -> None:
+        db.execute(
+            "INSERT INTO competition_sync_tombstones(id, intervals_event_id, external_id, created_at) VALUES (?, ?, ?, ?)",
+            (tombstone_id, intervals_event_id, external_id, now),
+        )
+
+    def delete(self, db: Any, competition_id: str) -> None:
+        db.execute("DELETE FROM competitions WHERE id=?", (competition_id,))
+
+    def unlink_public_event_candidate(
+        self, db: Any, competition_id: str, now: str
+    ) -> None:
+        db.execute(
+            "UPDATE public_event_candidates SET imported_competition_id=NULL, updated_at=? WHERE imported_competition_id=?",
+            (now, competition_id),
+        )
+
+    def resolve_adopt_remote(
+        self,
+        db: Any,
+        competition_id: str,
+        data: dict[str, Any],
+        external_id: str,
+        now: str,
+    ) -> None:
+        db.execute(
+            "UPDATE competitions SET name=?, event_date=?, start_date_local=?, sport=?, priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
+            (
+                data["name"],
+                data["event_date"],
+                data["start_date_local"],
+                data["sport"],
+                data["priority"],
+                data["category"],
+                data["distance"],
+                data["target"],
+                data["description"],
+                data["moving_time"],
+                data["notes"],
+                data["intervals_event_id"],
+                external_id,
+                now,
+                now,
+                competition_id,
+            ),
+        )
+
+    def resolve_keep_local(self, db: Any, competition_id: str, now: str) -> None:
+        db.execute(
+            "UPDATE competitions SET sync_dirty=1, sync_state='local_override', sync_conflict='', updated_at=? WHERE id=?",
+            (now, competition_id),
+        )
 
 
 class TrainingPlanRepository:
@@ -116,6 +227,27 @@ class TrainingPlanRepository:
 
     def delete(self, db: Any, plan_id: str) -> None:
         db.execute("DELETE FROM training_plans WHERE id = ?", (plan_id,))
+
+
+class PlanningStateRepository:
+    """Persist the singleton optimistic-concurrency revision."""
+
+    def bump(self, db: Any, amount: int, updated_at: str) -> bool:
+        updated = db.execute(
+            "UPDATE planning_state SET revision=revision+?, updated_at=? WHERE id=1",
+            (int(amount), updated_at),
+        )
+        return updated.rowcount == 1
+
+    def initialize(self, db: Any, updated_at: str) -> None:
+        db.execute(
+            "INSERT INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
+            (updated_at,),
+        )
+
+    def read(self, db: Any) -> int:
+        row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        return int((row or {}).get("revision") or 0)
 
 
 class PlanAdjustmentRepository:
@@ -188,6 +320,15 @@ class CheckinRepository:
             (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def get(self, db: Any, checkin_date: str) -> dict[str, Any] | None:
+        row = db.execute(
+            "SELECT soreness, stress, motivation, session_rpe, day_form, illness, pain, "
+            "available_minutes, availability_notes, notes "
+            "FROM athlete_checkins WHERE checkin_date = ?",
+            (checkin_date,),
+        ).fetchone()
+        return dict(row) if row else None
 
     def upsert(self, db: Any, checkin: dict[str, Any]) -> None:
         now = self._now()

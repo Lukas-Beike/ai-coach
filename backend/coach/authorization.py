@@ -6,6 +6,8 @@ from copy import deepcopy
 from datetime import date
 from typing import Any
 
+from backend.errors import AppError
+
 
 REQUEST_SCHEMA = {
     "type": "object",
@@ -87,6 +89,19 @@ def scope_values(intent: dict[str, Any]) -> set[str]:
     if not isinstance(scope, list):
         return set()
     return {str(value).strip()[:120] for value in scope if isinstance(value, str) and value.strip()}
+
+
+def coach_execution_scope(action: dict[str, Any] | None, *, background_horizon_days: int) -> dict[str, Any]:
+    """Describe the local planning workload implied by a structured action."""
+    period = (action or {}).get("period")
+    days = (date.fromisoformat(period["end"]) - date.fromisoformat(period["start"])).days + 1 if period else None
+    return {"planning": bool(period), "horizon_days": days, "planned_units": None,
+            "bulk_change": bool(days and days > background_horizon_days), "background": True}
+
+
+def require_coach_scope(intent: dict[str, Any], *tokens: str) -> None:
+    if not require_scope(intent, *tokens):
+        raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst dieses Objekt nicht.", reason="intent_scope_denied")
 
 
 def authorized_operations(intent: dict[str, Any]) -> set[str]:
