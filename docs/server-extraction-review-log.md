@@ -5208,3 +5208,11 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   verlangt nach der Head-Änderung eine neue Erstprüfung; gemäß der
   Repository-Regel (kein zusätzliches Review ohne P1) wird #727
   ersetzt, nicht durch einen regelwidrigen Folgereview umgangen.
+  Ersatz-PR #728, Head `312faeb7`: Codex meldete einen berechtigten
+  **P2** ausschließlich im Inventar — `readiness_service()` war als
+  offene P3-Fachlogik statt als reine Composition-Root-Funktion
+  klassifiziert. Root-Gate **FAIL**. Der Generator ordnet den Namen
+  nun explizit `COMPOSITION_ROOT` zu; das Inventar wurde regeneriert.
+  Root-Review des konkreten Diffs **PASS**; Inventar-Check, vier
+  Architekturtests, Compile und Diff-Check **PASS**. Laufzeitcode
+  und das bereits mit 2.326 Tests geprüfte Verhalten sind unverändert.

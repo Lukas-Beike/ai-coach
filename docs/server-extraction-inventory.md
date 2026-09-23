@@ -33,7 +33,7 @@ Der Generator führt selbst keine Tests und keine Laufzeitinitialisierung aus. S
 | P0 (Zuordnung offen) | 1 | 0 | 0 |
 | P1 | 14 | 30 | 266 |
 | P2 | 9 | 7 | 0 |
-| P3 | 2 | 0 | 0 |
+| P3 | 1 | 0 | 0 |
 | P4 | 0 | 0 | 0 |
 | P5 | 0 | 0 | 0 |
 | P6 | 2 | 15 | 0 |
@@ -41,7 +41,7 @@ Der Generator führt selbst keine Tests und keine Laufzeitinitialisierung aus. S
 | P8 | 29 | 8 | 0 |
 | P9 | 8 | 4 | 0 |
 | P10 | 22 | 14 | 0 |
-| P11 | 107 | 13 | 33 |
+| P11 | 108 | 13 | 33 |
 
 ## Referenzanalyse außerhalb von server.py
 
@@ -1224,7 +1224,7 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | Funktion | `session_token_hash` | 5328 | `http_api/auth.py` | P10 | offen | tests/support.py:147 (direkt/dynamisch unklar); tests/test_coach_review.py:132 (direkt/dynamisch unklar); tests/test_server.py:1487 (direkt/dynamisch unklar); tests/test_server.py:1516 (direkt/dynamisch unklar); tests/test_server.py:1519 (direkt/dynamisch unklar); tests/test_server.py:1568 (direkt/dynamisch unklar); tests/test_server.py:1575 (direkt/dynamisch unklar); tests/test_server.py:6355 (direkt/dynamisch unklar); tests/test_server.py:6359 (direkt/dynamisch unklar); tests/test_server.py:6374 (direkt/dynamisch unklar); tests/test_server.py:6378 (direkt/dynamisch unklar) |
 | Funktion | `session_timestamp` | 5332 | `http_api/auth.py` | P10 | offen | keine statisch gefunden |
 | Funktion | `cleanup_expired_sessions` | 5342 | `http_api/auth.py` | P10 | offen | tests/test_server.py:1529 (direkt/dynamisch unklar) |
-| Funktion | `readiness_service` | 5357 | `performance/` | P3 | offen | keine statisch gefunden |
+| Funktion | `readiness_service` | 5357 | `server.py / Composition Root` | P11 | offen | keine statisch gefunden |
 | Funktion | `authenticated_session` | 5364 | `http_api/auth.py` | P10 | offen | tests/test_server.py:1493 (direkt/dynamisch unklar); tests/test_server.py:1496 (direkt/dynamisch unklar); tests/test_server.py:1517 (direkt/dynamisch unklar); tests/test_server.py:1550 (direkt/dynamisch unklar); tests/test_server.py:1587 (direkt/dynamisch unklar); tests/test_server.py:3738 (direkt/dynamisch unklar); tests/test_server.py:8779 (Monkeypatch/getattr/sys.modules) |
 | Funktion | `login_user` | 5390 | `http_api/auth.py` | P10 | offen | tests/test_provider_review.py:204 (direkt/dynamisch unklar); tests/test_provider_review.py:208 (direkt/dynamisch unklar); tests/test_provider_review.py:378 (direkt/dynamisch unklar); tests/test_server.py:3735 (direkt/dynamisch unklar) |
 | Funktion | `logout_user` | 5409 | `http_api/auth.py` | P10 | offen | tests/test_server.py:1586 (direkt/dynamisch unklar) |
@@ -1368,14 +1368,13 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | `http_api/auth.py` | 15 |
 | `http_api/bootstrap.py` | 1 |
 | `observability.py` | 6 |
-| `performance/` | 1 |
 | `privacy.py` | 1 |
 | `providers/` | 12 |
 | `providers/http.py` | 1 |
 | `providers/intervals_client.py` | 1 |
 | `providers/openai.py` | 2 |
 | `runtime/` | 3 |
-| `server.py / Composition Root` | 153 |
+| `server.py / Composition Root` | 154 |
 | `settings.py` | 11 |
 | `sync/` | 13 |
 | `sync/garmin.py` | 2 |
