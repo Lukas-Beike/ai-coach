@@ -1635,9 +1635,14 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.db.bootstrap", ("initialize_application_database",)),
     ("backend.http_api.bootstrap_state", ("PublicBootstrapService", "bootstrap_provider_states")),
     ("backend.http_api.state_events_transport", ("StateEventTransport",)),
+    ("backend.backup.restore", ("DatabaseRestoreService",)),
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
+    "restore_database_backup",
+    "_replace_database_with_restore",
+    "_resume_after_database_restore",
+    "_restore_database_backup",
     "_structured_coach_training_template_result",
     "public_state",
     "stream_database_backup",

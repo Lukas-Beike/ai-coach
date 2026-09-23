@@ -326,7 +326,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
                     server.sync_job_store().claim()
                     backup = server.database_backup_service().read_bytes()
                     server.sync_job_outcome_service().update(job["id"], "completed")
-                    self.assertTrue(server.restore_database_backup(backup)["restored"])
+                    self.assertTrue(server.database_restore_service().restore(backup)["restored"])
                     self.assertEqual(
                         server.sync_job_queue_service().state(job["id"])["status"],
                         "queued",

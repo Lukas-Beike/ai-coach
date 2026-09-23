@@ -7652,7 +7652,7 @@ class CoachTests(unittest.TestCase):
                         ("token", "csrf", 9999999999, "now", "now"),
                     )
                 valid_backup = server.database_backup_service().read_bytes()
-                restored = server.restore_database_backup(valid_backup)
+                restored = server.database_restore_service().restore(valid_backup)
                 self.assertEqual(restored["status"], "ok")
                 self.assertEqual(server.get_kv("restore-marker"), "preserved")
                 with server.DB_LOCK, server.database() as db:
@@ -7668,7 +7668,7 @@ class CoachTests(unittest.TestCase):
                 finally:
                     connection.close()
                 with self.assertRaises(server.AppError) as error:
-                    server.restore_database_backup(incomplete_path.read_bytes())
+                    server.database_restore_service().restore(incomplete_path.read_bytes())
                 self.assertEqual(error.exception.status, 400)
                 self.assertEqual(server.get_kv("restore-marker"), "preserved")
                 self.assertEqual(list(data_dir.glob(".intervals-coach-restore-*.db")), [])
@@ -7683,7 +7683,7 @@ class CoachTests(unittest.TestCase):
                 finally:
                     connection.close()
                 with self.assertRaises(server.AppError) as error:
-                    server.restore_database_backup(unexpected_path.read_bytes())
+                    server.database_restore_service().restore(unexpected_path.read_bytes())
                 self.assertEqual(error.exception.status, 400)
                 self.assertEqual(server.get_kv("restore-marker"), "preserved")
                 self.assertEqual(list(data_dir.glob(".intervals-coach-restore-*.db")), [])

@@ -5851,3 +5851,38 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   **PASS**. Root-Gate für `122dc349` samt vollständigem Integrations-
   und Dokumentationsdiff **PASS**; PR-CI und externer Review stehen
   noch aus. `server.py`: 5.122 Zeilen, 245 Definitionen.
+
+## P10 öffentliches State-SSE — bestätigter #749-Merge
+
+- #749 auf Head `2f1f10be`: alle Container-, Browser-, CodeQL-,
+  SonarCloud-, Codex-Code-/Security- und weiteren CI-Prüfungen **PASS**,
+  0 offene Review-Threads. Squash-Merge
+  `6cca5c8a5aa60cc32da09b9e516db963e6e0938e` am
+  `2026-09-23T21:14:11Z` bestätigt und auf `origin/develop` erreichbar.
+
+## P9 vollständiger Datenbank-Restore — lokaler Zwischenstand
+
+- Root-Ausgangscommit `dd899678` auf dem bestätigten #747-Merge.
+  `DatabaseRestoreService` besitzt das
+  Wartungsgate, Staging/Validierung über den bestehenden konkreten
+  Validierungsservice, Checkpoint und DB-Drain unter `DB_LOCK`, eindeutige
+  vorherige Sicherung, atomaren Dateiaustausch, Temp-Cleanup sowie die
+  Sync-/Coach-Job-Wiederaufnahme und Wake-Events. `server.py` konstruiert
+  nur den Eigentümer; der HTTP-Handler behält Auth/CSRF und Body-Limit.
+- Fünf neue temporäre, providerfreie Tests prüfen Reihenfolge und Gate,
+  unveränderte Live-DB bei ungültigem Backup, redigierte Fehler,
+  fehlgeschlagenen Austausch und zwei eindeutige Sicherungen innerhalb
+  kurzer Zeit. Die vorhandenen SQLCipher-Integrationstests prüfen exaktes
+  Schema, Session-Bereinigung und Sync-Job-Recovery im Container.
+- Die erste Codefassung bestand native Vollsuite **PASS**,
+  2.388 Tests/12 Skips, und Read-only-Docker **PASS**,
+  2.388 Tests/11 Skips. Danach wurde die Sicherungsnamen-Kollision
+  behoben und ein fünfter Test ergänzt: fokussiert 9/9, Ruff,
+  Compile, Inventar- und Diff-Check **PASS**. Die Vollsuiten des
+  endgültigen Codes bestanden nativ mit 2.389 Tests/12 Skips und im
+  frisch gebauten Read-only-Docker mit 2.389 Tests/11 Skips. Integration
+  auf aktuelles `develop`, Root-Gate,
+  PR-CI und Merge stehen noch aus. Der existierende Vertrag rollt
+  Validierungs-/Swap-Fehler vor erfolgreichem Austausch zurück;
+  ein Fehler während der nachgelagerten Worker-Wiederaufnahme löst
+  weiterhin keinen zweiten Datenbanktausch aus.
