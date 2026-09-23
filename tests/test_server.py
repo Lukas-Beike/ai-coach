@@ -23,6 +23,8 @@ from backend.coach.context import CoachIntervalsContextService, future_coach_pla
 from backend.coach.attachments import gemini_history_parts
 from backend.coach.proposals import validated_coach_action_preview_input
 from backend.http_api.chat_page import ChatHistoryPageService
+from backend.http_api.readiness import ReadinessService
+from backend.http_api import readiness as readiness_module
 from backend.http_api import server as http_server_module
 from backend.http_api.rate_limit import RateLimiter
 from backend import privacy as privacy_module
@@ -8613,7 +8615,12 @@ class CoachTests(unittest.TestCase):
         self.assertIn("422", state["last_error"])
 
     def test_readiness_is_safe_and_separate_from_liveness(self):
-        readiness = server.readiness_state()
+        with tempfile.TemporaryDirectory() as data_dir:
+            readiness = ReadinessService(
+                server.database_manager(), server.DB_LOCK, Path(data_dir),
+                runtime_maintenance.MAINTENANCE_GATE,
+            ).state()
+            self.assertEqual([], list(Path(data_dir).glob(".readiness-*.probe")))
         self.assertEqual(readiness["status"], "ready")
         self.assertTrue(readiness["ready"])
         self.assertEqual(set(readiness["checks"]), {"database", "schema", "data_directory", "maintenance"})
@@ -8622,23 +8629,69 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("password", json.dumps(readiness).casefold())
 
     def test_readiness_fails_when_database_is_unavailable(self):
-        with patch.object(server, "database", side_effect=OSError("database unavailable")):
-            readiness = server.readiness_state()
+        manager = server.database_manager()
+        with patch.object(manager, "reader", side_effect=OSError("database unavailable")):
+            readiness = ReadinessService(
+                manager, server.DB_LOCK, Path(os.environ["DATA_DIR"]),
+                runtime_maintenance.MAINTENANCE_GATE,
+            ).state()
         self.assertEqual(readiness["status"], "not_ready")
         self.assertFalse(readiness["ready"])
         self.assertFalse(readiness["checks"]["database"])
         self.assertFalse(readiness["checks"]["schema"])
 
     def test_readiness_fails_when_data_directory_is_read_only(self):
-        with patch.object(server.tempfile, "NamedTemporaryFile", side_effect=OSError("read-only")):
-            readiness = server.readiness_state()
+        with tempfile.TemporaryDirectory() as data_dir, patch.object(
+            readiness_module.tempfile, "NamedTemporaryFile",
+            side_effect=OSError("read-only"),
+        ):
+            readiness = ReadinessService(
+                server.database_manager(), server.DB_LOCK, Path(data_dir),
+                runtime_maintenance.MAINTENANCE_GATE,
+            ).state()
         self.assertEqual(readiness["status"], "not_ready")
         self.assertFalse(readiness["ready"])
         self.assertFalse(readiness["checks"]["data_directory"])
 
+    def test_readiness_cleans_up_probe_after_write_failure(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            named_temporary_file = readiness_module.tempfile.NamedTemporaryFile
+
+            def broken_probe(**kwargs):
+                handle = named_temporary_file(**kwargs)
+
+                class BrokenWriter:
+                    name = handle.name
+
+                    def __enter__(self):
+                        handle.__enter__()
+                        return self
+
+                    def __exit__(self, *args):
+                        return handle.__exit__(*args)
+
+                    def write(self, _content):
+                        raise OSError("probe write failed")
+
+                return BrokenWriter()
+
+            with patch.object(
+                readiness_module.tempfile, "NamedTemporaryFile", side_effect=broken_probe
+            ):
+                readiness = ReadinessService(
+                    server.database_manager(), server.DB_LOCK, Path(data_dir),
+                    runtime_maintenance.MAINTENANCE_GATE,
+                ).state()
+            self.assertFalse(readiness["checks"]["data_directory"])
+            self.assertEqual([], list(Path(data_dir).glob(".readiness-*.probe")))
+
     def test_readiness_fails_during_database_maintenance(self):
-        with runtime_maintenance.MAINTENANCE_GATE.restore():
-            readiness = server.readiness_state()
+        maintenance_gate = runtime_maintenance.MaintenanceGate()
+        with tempfile.TemporaryDirectory() as data_dir, maintenance_gate.restore():
+            readiness = ReadinessService(
+                server.database_manager(), server.DB_LOCK, Path(data_dir),
+                maintenance_gate,
+            ).state()
         self.assertEqual(readiness["status"], "not_ready")
         self.assertFalse(readiness["ready"])
         self.assertFalse(readiness["checks"]["maintenance"])
