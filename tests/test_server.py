@@ -5049,7 +5049,7 @@ class CoachTests(unittest.TestCase):
         server.set_kv("openai_conversation_id", "conv-test")
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="gemini")
         with patch.object(server, "CONFIG", config), patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True) as delete:
-            result = server.reset_coach_chat()
+            result = server.coach_conversation_reset_service().reset()
         delete.assert_called_once_with("conv-test")
         self.assertTrue(result["remote_conversation_deleted"])
 
@@ -5930,12 +5930,43 @@ class CoachTests(unittest.TestCase):
             "turn-before-reset",
         )
         with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
-            result = server.reset_coach_chat()
+            result = server.coach_conversation_reset_service().reset()
         self.assertEqual(result["status"], "ok")
         with server.DB_LOCK, server.database() as db:
             row = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact["artifact_id"],)).fetchone()
         self.assertEqual(row["status"], "superseded")
         self.assertEqual(server.coach_dialogue_read_service().artifact_refs(), [])
+
+    def test_coach_reset_keeps_local_history_when_reset_transaction_fails(self):
+        message = server.coach_message_service().add("user", "Keep this message")
+        generation = server.get_kv("chat_generation")
+        original_set = server.KEY_VALUE_REPOSITORY.set
+
+        def fail_pending_request(db, key, value):
+            if key == "coach_pending_request":
+                raise RuntimeError("synthetic reset failure")
+            return original_set(db, key, value)
+
+        with patch.object(server.KEY_VALUE_REPOSITORY, "set", side_effect=fail_pending_request):
+            with self.assertRaisesRegex(RuntimeError, "synthetic reset failure"):
+                server.coach_conversation_reset_service().reset()
+        with server.DB_LOCK, server.database() as db:
+            saved = db.execute("SELECT id FROM messages WHERE id=?", (message["id"],)).fetchone()
+        self.assertIsNotNone(saved)
+        self.assertEqual(server.get_kv("chat_generation"), generation)
+
+    def test_coach_reset_clears_local_state_when_remote_delete_fails(self):
+        server.set_kv("openai_conversation_id", "conv-reset-failure")
+        server.coach_message_service().add("user", "Clear this message")
+        with patch.object(
+            server.openai_provider.OpenAIResponsesClient,
+            "delete_conversation",
+            side_effect=RuntimeError("synthetic remote failure"),
+        ):
+            result = server.coach_conversation_reset_service().reset()
+        self.assertFalse(result["remote_conversation_deleted"])
+        self.assertEqual(server.get_kv("openai_conversation_id"), "")
+        self.assertEqual(server.coach_message_service().list(), [])
 
 
     def test_complete_plan_replace_can_create_more_sessions_and_archive_old_ones(self):

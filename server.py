@@ -253,6 +253,7 @@ from backend.coach.sync_tools import COACH_SYNC_TOOL_NAMES, CoachSyncToolService
 from backend.coach.conversation import (
     CoachAttachmentContextService,
     CoachConversationProvisionService,
+    CoachConversationResetService,
     CoachMessageService,
     GeminiConversationHistoryService,
     GeminiConversationResponseService,
@@ -1878,6 +1879,15 @@ def coach_conversation_provision_service() -> CoachConversationProvisionService:
     )
 
 
+def coach_conversation_reset_service() -> CoachConversationResetService:
+    """Compose the Coach chat reset owner from concrete storage and provider adapters."""
+    return CoachConversationResetService(
+        database_manager(), KEY_VALUE_REPOSITORY, openai_responses_client(),
+        coach_streams.CHAT_STREAM_REGISTRY, DB_LOCK, OPENAI_CONVERSATION_LOCK,
+        utc_now, uuid.uuid4, LOGGER,
+    )
+
+
 def openai_stream_client() -> openai_provider.OpenAIStreamClient:
     """Compose the OpenAI streaming client from the active runtime settings."""
     return openai_provider.OpenAIStreamClient(
@@ -2190,72 +2200,6 @@ def responses_stream_request(
         cancel_event=cancel_event,
         on_response_id=on_response_id,
     )
-
-
-def _delete_reset_coach_conversation(conversation_id: str) -> bool:
-    if not conversation_id:
-        return False
-    try:
-        return openai_responses_client().delete_conversation(conversation_id)
-    except Exception:
-        LOGGER.warning(
-            "Remote OpenAI conversation could not be deleted during reset",
-            extra={"event": "openai_reset_remote_delete_failed"}, exc_info=True,
-        )
-        return False
-
-
-def _cancel_reset_coach_commands(db: sqlite3.Connection, now: str) -> list[str]:
-    active_commands = db.execute(
-        "SELECT client_turn_id, receipt FROM coach_commands WHERE status IN ('queued', 'running')"
-    ).fetchall()
-    operation_ids: list[str] = []
-    for command in active_commands:
-        receipt = _coach_command_receipt(command["receipt"])
-        operation_id = str(receipt.get("operation_id") or "")
-        if operation_id:
-            operation_ids.append(operation_id)
-        receipt.update(status="cancelled", phase="chat_reset", cancel_requested=True, message=None)
-        db.execute(
-            UPDATE_COMMAND_RECEIPT_SQL,
-            (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), now, command["client_turn_id"]),
-        )
-    return operation_ids
-
-
-def _reset_local_coach_chat_state() -> list[str]:
-    with DB_LOCK, database() as db:
-        operation_ids = _cancel_reset_coach_commands(db, utc_now())
-        db.execute("DELETE FROM messages")
-        set_kv("chat_generation", uuid.uuid4().hex, db)
-        db.execute(
-            "UPDATE coach_plan_artifacts SET status='superseded', updated_at=? WHERE status='draft'",
-            (utc_now(),),
-        )
-        set_kv("coach_pending_request", "null", db)
-    return operation_ids
-
-
-def _request_coach_operation_cancellation(operation_ids: list[str]) -> None:
-    for operation_id in operation_ids:
-        coach_streams.CHAT_STREAM_REGISTRY.cancel_background_event(operation_id)
-
-
-def _clear_coach_conversation_state() -> None:
-    set_kv("openai_conversation_id", "")
-    set_kv("gemini_conversation_id", "")
-    set_kv("gemini_conversation_history", "[]")
-    set_kv("gemini_call_names", "{}")
-    set_kv("last_chat_reset_at", utc_now())
-
-
-def reset_coach_chat() -> dict[str, Any]:
-    """Forget local chat history and delete the stored remote conversation when possible."""
-    with OPENAI_CONVERSATION_LOCK:
-        remote_deleted = _delete_reset_coach_conversation(get_kv("openai_conversation_id") or "")
-        _request_coach_operation_cancellation(_reset_local_coach_chat_state())
-        _clear_coach_conversation_state()
-    return {"status": "ok", "generation": get_kv("chat_generation"), "remote_conversation_deleted": remote_deleted, "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt."}
 
 
 def output_text(response: dict[str, Any]) -> str:
@@ -5856,7 +5800,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 request_kind=payload.get("request_kind"), attachments=payload.get("attachments"),
             ))
         elif path == "/api/chat/reset":
-            self.send_json(200, reset_coach_chat())
+            self.send_json(200, coach_conversation_reset_service().reset())
         elif path == "/api/feedback":
             self.send_json(200, checkin_service().save(self.read_json()))
         else:

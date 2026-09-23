@@ -14,6 +14,7 @@ from backend.coach.attachments import (
     gemini_selected_raw_attachments,
 )
 from backend.coach.service import command_receipt
+from backend.coach.streams import ChatStreamRegistry
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError
@@ -23,6 +24,105 @@ from backend.runtime.events import StateEventBuffer
 from backend.settings import SettingsService
 
 MESSAGE_ATTACHMENTS_QUERY = "SELECT attachments FROM messages WHERE id=?"
+
+
+class CoachConversationResetService:
+    """Own the local reset transaction and best-effort remote deletion."""
+
+    def __init__(
+        self,
+        database_manager: DatabaseManager,
+        key_values: KeyValueRepository,
+        openai_client: OpenAIResponsesClient,
+        streams: ChatStreamRegistry,
+        db_lock: Any,
+        conversation_lock: Any,
+        utc_now: Callable[[], str],
+        uuid_factory: Callable[[], uuid.UUID],
+        logger: Any,
+    ) -> None:
+        self._database_manager = database_manager
+        self._key_values = key_values
+        self._openai_client = openai_client
+        self._streams = streams
+        self._db_lock = db_lock
+        self._conversation_lock = conversation_lock
+        self._utc_now = utc_now
+        self._uuid_factory = uuid_factory
+        self._logger = logger
+
+    def _get_value(self, key: str) -> str | None:
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            return self._key_values.get(db, key)
+
+    def _set_value(self, key: str, value: str) -> None:
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            self._key_values.set(db, key, value)
+
+    def _delete_remote(self, conversation_id: str) -> bool:
+        if not conversation_id:
+            return False
+        try:
+            return self._openai_client.delete_conversation(conversation_id)
+        except Exception:
+            self._logger.warning(
+                "Remote OpenAI conversation could not be deleted during reset",
+                extra={"event": "openai_reset_remote_delete_failed"},
+                exc_info=True,
+            )
+            return False
+
+    def _reset_local(self) -> list[str]:
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            now = self._utc_now()
+            active_commands = db.execute(
+                "SELECT client_turn_id, receipt FROM coach_commands "
+                "WHERE status IN ('queued', 'running')"
+            ).fetchall()
+            operation_ids: list[str] = []
+            for command in active_commands:
+                receipt = command_receipt(command["receipt"])
+                operation_id = str(receipt.get("operation_id") or "")
+                if operation_id:
+                    operation_ids.append(operation_id)
+                receipt.update(
+                    status="cancelled", phase="chat_reset", cancel_requested=True,
+                    message=None,
+                )
+                db.execute(
+                    "UPDATE coach_commands SET status='completed', receipt=?, "
+                    "updated_at=? WHERE client_turn_id=?",
+                    (
+                        json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
+                        now, command["client_turn_id"],
+                    ),
+                )
+            db.execute("DELETE FROM messages")
+            self._key_values.set(db, "chat_generation", self._uuid_factory().hex)
+            db.execute(
+                "UPDATE coach_plan_artifacts SET status='superseded', updated_at=? "
+                "WHERE status='draft'",
+                (self._utc_now(),),
+            )
+            self._key_values.set(db, "coach_pending_request", "null")
+        return operation_ids
+
+    def reset(self) -> dict[str, Any]:
+        with self._conversation_lock:
+            remote_deleted = self._delete_remote(self._get_value("openai_conversation_id") or "")
+            for operation_id in self._reset_local():
+                self._streams.cancel_background_event(operation_id)
+            self._set_value("openai_conversation_id", "")
+            self._set_value("gemini_conversation_id", "")
+            self._set_value("gemini_conversation_history", "[]")
+            self._set_value("gemini_call_names", "{}")
+            self._set_value("last_chat_reset_at", self._utc_now())
+        return {
+            "status": "ok",
+            "generation": self._get_value("chat_generation"),
+            "remote_conversation_deleted": remote_deleted,
+            "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt.",
+        }
 
 
 class CoachConversationProvisionService:

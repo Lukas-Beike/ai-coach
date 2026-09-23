@@ -498,6 +498,10 @@ Abhängigkeit: P2–P6.
   - [x] Providerabhängige Konversations-ID-Bereitstellung einschließlich
     persistierter Wiederverwendung und OpenAI-/Gemini-Erzeugung einem
     konkreten Coach-Service zuordnen; übrige History-/Reset-Pfade bleiben offen.
+  - [x] Coach-Chat-Reset einschließlich best-effort Remote-Löschung,
+    lokaler Transaktion, Job-Cancellation und Provider-KV-Clearing einem
+    konkreten `CoachConversationResetService` zuordnen; History und
+    Usage-Zuordnung bleiben offen.
 - [ ] Vorschläge, Scope-/Owner-Prüfungen, explizite Bestätigung, TTL sowie
   Replay-/Repair-Schlüssel ihren Coach-Modulen zuordnen.
 - [ ] Tool-Dispatch samt Ergebnis-/Fehlerprojektion verschieben; Planmutationen
