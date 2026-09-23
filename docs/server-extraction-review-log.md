@@ -5039,3 +5039,8 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Inventar-/Diff-Check und scoped Ruff **PASS**; `server.py` hatte
   6.331 physische Zeilen. P8-Job-Wiederaufnahme blockiert weiterhin
   die saubere Restore-Auslagerung ohne Rückimport.
+- Der geprüfte Root-Commit `82f71abe` wurde auf den bestätigten
+  #717-Merge-Commit als `10180f0c` übernommen. Der vollständige
+  Dateibaum gegenüber dem mit 2.313 Container-Tests geprüften Stand
+  ist identisch; Inventar- und Diff-Check bleiben **PASS**. Root-Gate
+  für diesen integrierten Stand: **PASS**; PR-CI und Review folgen.
