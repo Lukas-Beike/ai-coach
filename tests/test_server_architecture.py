@@ -2057,6 +2057,11 @@ def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
 
 
 class ServerArchitectureTests(unittest.TestCase):
+    def test_extraction_inventory_has_no_unassigned_p0_symbols(self) -> None:
+        inventory = (REPOSITORY_ROOT / "docs" / "server-extraction-inventory.md").read_text(encoding="utf-8")
+        self.assertIn("| P0 (Zuordnung offen) | 0 | 0 | 0 |", inventory)
+        self.assertNotIn("| P0 (Zuordnung offen) | offen |", inventory)
+
     def test_backend_does_not_import_or_reach_server_namespace(self) -> None:
         self.assertTrue(BACKEND_ROOT.is_dir(), "Backend source must be available")
         violations: list[str] = []

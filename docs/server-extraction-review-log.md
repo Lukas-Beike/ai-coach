@@ -5897,3 +5897,22 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Validierungs-/Swap-Fehler vor erfolgreichem Austausch zurück;
   ein Fehler während der nachgelagerten Worker-Wiederaufnahme löst
   weiterhin keinen zweiten Datenbanktausch aus.
+
+## P9-Review-Nacharbeit — Inventarzuordnung
+
+- Der externe Review von PR #750 auf Head `2ff23152` meldete einen
+  berechtigten P2-Befund: `database_restore_service` war im Generator
+  noch nicht als Composition-Root-Factory erfasst. Root-Gate für diesen
+  PR-Stand deshalb **FAIL**, trotz grüner Code- und Laufzeittests.
+- Root prüfte alle elf entsprechenden offenen P0-Funktionen im
+  tatsächlichen `server.py`: sie sind reine Factory-/Transport-
+  Komposition, keine ausgelagerte Fachlogik. Alle explizit dem
+  Composition Root zugeordnet; das generierte Inventar weist nun
+  **0 offene P0-Symbole** aus. Ein Architekturtest schützt diese
+  Invariante, damit ein konsistentes, aber falsch klassifiziertes
+  Inventar künftig nicht als abgeschlossen gilt.
+- Korrigierter Code/Diff erneut **PASS** geprüft. Architekturtests 6/6,
+  Generator-`--check`, Ruff, Compile und Diff-Check **PASS**. Native
+  Vollsuite **PASS**, 2.400 Tests/12 Skips; frisch gebautes Read-only-
+  Docker-Image **PASS**, 2.400 Tests/11 Skips. Review-Thread-Auflösung,
+  aktualisierte PR-CI und Merge stehen noch aus.
