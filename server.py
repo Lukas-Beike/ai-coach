@@ -5488,7 +5488,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if path == "/api/health":
             self.send_json(200, {"status": "ok", "maintenance": runtime_maintenance.MAINTENANCE_GATE.state()})
         elif path == "/api/readiness":
-            readiness = self.readiness_service.state()
+            readiness = readiness_service().state()
             self.send_json(200 if readiness["ready"] else 503, readiness)
         elif path == "/api/auth/status":
             session = authenticated_session(self)
@@ -6069,11 +6069,9 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 def request_handler_class() -> type[RequestHandler]:
     static_assets = StaticAssetService(PUBLIC_DIR)
-    readiness = readiness_service()
 
     class ComposedRequestHandler(RequestHandler):
         static_asset_service = static_assets
-        readiness_service = readiness
 
     return ComposedRequestHandler
 

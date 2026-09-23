@@ -8655,10 +8655,20 @@ class CoachTests(unittest.TestCase):
         handler = object.__new__(handler_class)
         handler.send_json = Mock()
 
-        with patch.object(handler_class.readiness_service, "state", side_effect=[ready, not_ready]):
+        original_manager = server.database_manager()
+        switched_manager = Mock()
+        seen_managers = []
+
+        def projected_state(service):
+            seen_managers.append(service._manager)
+            return ready if len(seen_managers) == 1 else not_ready
+
+        with patch.object(server, "database_manager", side_effect=[original_manager, switched_manager]), \
+                patch.object(ReadinessService, "state", autospec=True, side_effect=projected_state):
             self.assertTrue(handler._handle_public_get("/api/readiness"))
             self.assertTrue(handler._handle_public_get("/api/readiness"))
 
+        self.assertEqual(seen_managers, [original_manager, switched_manager])
         self.assertEqual(
             handler.send_json.call_args_list,
             [call(200, ready), call(503, not_ready)],

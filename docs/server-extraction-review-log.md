@@ -5184,4 +5184,13 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   die Owner-Assertions für Limiter, Stream und Readiness bleiben
   erhalten. Der Importkonflikt enthüllte zwei doppelte bestehende
   Compose-Imports im Worker-Patch; sie wurden bei der Integration
-  entfernt. Erneutes Root-Gate und PR-CI folgen.
+  entfernt. Root-Diffreview des rebasierten Stands zunächst **FAIL**:
+  der Handler band einen `ReadinessService` bei Handler-Klassenerzeugung
+  dauerhaft und hätte nach einem Backup-Restore den geschlossenen alten
+  `DatabaseManager` weiterverwendet. Root-Integrationskorrektur:
+  pro Readiness-Anfrage wird der Service aus dem aktuellen Manager
+  komponiert; der Handler-Vertragstest wechselt den Manager zwischen
+  zwei Requests und prüft die vollständigen 200/503-Payloads.
+  Erneutes Root-Diffreview **PASS**. Neu gebautes Read-only-Docker-Image:
+  vollständige Suite **PASS**, 2.325 Tests, 11 Skips; Inventar-/Diff-
+  Check **PASS**. PR-CI für den korrigierten Stand folgt.
