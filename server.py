@@ -4,6 +4,7 @@ from backend.coach.attachments import (MAX_ATTACHMENT_STORAGE_BYTES, MAX_GEMINI_
                                       provider_attachment_data,
                                       validate_attachments)
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
+from backend.coach.profile_update import CoachProfileUpdateService
 
 import hashlib
 import hmac
@@ -1237,6 +1238,11 @@ def profile_service() -> ProfileService:
     return ProfileService(
         database_manager(), PROFILE_REPOSITORY, KEY_VALUE_REPOSITORY
     )
+
+
+def coach_profile_update_service() -> CoachProfileUpdateService:
+    """Compose the scoped transactional Coach profile update owner."""
+    return CoachProfileUpdateService(profile_service(), database_manager(), DB_LOCK)
 
 
 def change_history_service() -> ChangeHistoryService:
@@ -2611,32 +2617,6 @@ def _structured_coach_read_result(name: str, arguments: dict[str, Any]) -> dict[
     return None
 
 
-def _structured_coach_profile_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
-    if "update_profile" not in _structured_authorized_operations(intent):
-        raise AppError(403, "Dieser Auftrag erlaubt keine Profiländerung.", reason="intent_scope_denied")
-    require_coach_scope(intent, "local_profile")
-    changes = arguments.get("changes")
-    if not isinstance(changes, list) or not 1 <= len(changes) <= len(DEFAULT_PROFILE):
-        raise AppError(400, "Die Profiländerung benötigt gültige Felder.", reason="tool_arguments_invalid")
-    with DB_LOCK, database():
-        current = profile_service().get()
-        updated = dict(current)
-        seen = set()
-        for change in changes:
-            if (not isinstance(change, dict) or set(change) != {"field", "expected_value", "value"}
-                    or not isinstance(change.get("field"), str) or change["field"] not in DEFAULT_PROFILE
-                    or change["field"] in seen
-                    or any(not isinstance(change.get(key), str) or len(change[key]) > 4000 for key in ("expected_value", "value"))):
-                raise AppError(400, "Die Profiländerung enthält ungültige oder doppelte Felder.", reason="tool_arguments_invalid")
-            field = change["field"]
-            seen.add(field)
-            if current[field] != change["expected_value"]:
-                raise AppError(409, "Das Profil wurde inzwischen geändert. Lies es erneut und ergänze den aktuellen Stand.", reason="profile_conflict")
-            updated[field] = change["value"]
-        saved = profile_service().save(updated)
-    return {"ok": True, "stored_locally": True, "updated_fields": sorted(seen), "profile": saved}
-
-
 def _authorized_coach_athlete_operation(intent: dict[str, Any], operation: str, message: str) -> None:
     if not require_operation(intent, operation):
         raise AppError(403, message, reason="intent_scope_denied")
@@ -2916,7 +2896,7 @@ def _structured_coach_tool_result(
     if read_result is not None:
         return read_result
     if name == "update_profile":
-        return _structured_coach_profile_result(arguments, intent)
+        return coach_profile_update_service().apply(arguments, intent)
     athlete_record_result = _structured_coach_athlete_record_result(name, arguments, intent)
     if athlete_record_result is not None:
         return athlete_record_result
