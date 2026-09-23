@@ -4245,3 +4245,28 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `server.py`. Diese werden nicht per Sonar-Unterdrückung oder
   kosmetischen Callback-Bags behandelt, sondern mit den zuständigen
   P6/P7/P10-Use-Cases zusammengeführt.
+- GPT-6-Luna-Diff `4de41d3` (`WeatherService`) von Root am tatsächlichen
+  Code und Diff geprüft: **PASS**. `WeatherCacheStore` besitzt den
+  Standort-Recheck und atomare Cache-/History-/Failure-Transaktionen;
+  `WeatherRefreshJournal` besitzt Operation-Tracking und sichere Logs.
+  Wetter-Lock, Maintenance-Gate, Retry und Rückgabeform bleiben beim
+  Use-Case. Sequenziell als `9803c30` integriert; 14 direkte Wetter-,
+  Server- und Architekturtests sowie Ruff/Diff **PASS**. Ein zunächst
+  falsch benannter Testaufruf wurde mit vorhandenen Testnamen wiederholt.
+  Gesamtsuite nach Wetterintegration **PASS**: 2.246 Tests,
+  12 Skips in 211,745 s; erneuter Root-Code-Gate **PASS**. Neuer
+  Sonar-Head steht noch aus. Die vor dem Patch gemeldeten 13 Befunde
+  bleiben bis zur neuen Analyse offen.
+- Root-Diff `f18217f`, sequenziell als `662615c` integriert:
+  `CoachContextPreviewService` verwendet die bereits vom strukturierten
+  Kontext erzeugte, begrenzte Intervals-Projektion, statt Snapshot,
+  Planungen und Tageszeit nochmals zu lesen. Eine unveränderliche
+  Budget-Policy fasst ausschließlich die vorhandenen Grenzen zusammen;
+  die Abschnittsgrenzen werden weiter defensiv kopiert. Der Root hat
+  Diff und Code auf Daten-/Datenschutzgrenzen, Feldform und fehlende
+  Server-Rückimporte geprüft: **PASS**. Vier direkte Preview-/Server-
+  Tests, Ruff, Compile und Diff **PASS**. Gesamtsuite für diesen
+  erweiterten Stand **PASS**: 2.246 Tests, 12 Skips in 211,726 s.
+  Erneuter Root-Diff-/Code-Gate für `9803c30..662615c` **PASS**.
+  Sonar und GitHub-Gates müssen auf dem aktualisierten PR-Head neu
+  laufen; bis dahin bleibt der PR offen und Auto-Merge aus.
