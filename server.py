@@ -682,14 +682,15 @@ def database_manager() -> DatabaseManager:
 def session_auth_service() -> SessionAuthService:
     """Compose the HTTP session owner from the active persistence and security configuration."""
     global SESSION_AUTH_SERVICE, SESSION_AUTH_SIGNATURE
-    manager = database_manager()
-    signature = (manager, CONFIG, SQLCIPHER_AVAILABLE)
-    if SESSION_AUTH_SERVICE is None or SESSION_AUTH_SIGNATURE != signature:
-        SESSION_AUTH_SERVICE = SessionAuthService(
-            manager, DB_LOCK, CONFIG, SQLCIPHER_AVAILABLE, RATE_LIMITER
-        )
-        SESSION_AUTH_SIGNATURE = signature
-    return SESSION_AUTH_SERVICE
+    with DB_LOCK:
+        manager = database_manager()
+        signature = (manager, CONFIG, SQLCIPHER_AVAILABLE)
+        if SESSION_AUTH_SERVICE is None or SESSION_AUTH_SIGNATURE != signature:
+            SESSION_AUTH_SERVICE = SessionAuthService(
+                manager, DB_LOCK, CONFIG, SQLCIPHER_AVAILABLE, RATE_LIMITER
+            )
+            SESSION_AUTH_SIGNATURE = signature
+        return SESSION_AUTH_SERVICE
 
 
 def provider_state_service() -> provider_state.ProviderStateService:
@@ -5203,6 +5204,10 @@ class RequestHandler(BaseHTTPRequestHandler):
     static_asset_service: StaticAssetService
     auth_service: SessionAuthService
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.auth_service = session_auth_service()
+        super().__init__(*args, **kwargs)
+
     def log_message(self, fmt: str, *args: Any) -> None:
         LOGGER.info(
             fmt % args,
@@ -5822,11 +5827,9 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 def request_handler_class() -> type[RequestHandler]:
     static_assets = StaticAssetService(PUBLIC_DIR)
-    auth = session_auth_service()
 
     class ComposedRequestHandler(RequestHandler):
         static_asset_service = static_assets
-        auth_service = auth
 
     return ComposedRequestHandler
 
