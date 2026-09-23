@@ -2146,7 +2146,7 @@ def coach_proposal_read_service() -> CoachProposalReadService:
 def coach_command_receipt_service() -> CoachCommandReceiptService:
     """Compose session-bound Coach command receipt reads."""
     return CoachCommandReceiptService(
-        database_manager, DB_LOCK, now=time.time, proposal_view=coach_action_view,
+        database_manager, DB_LOCK, now=time.time,
     )
 
 

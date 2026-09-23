@@ -21,12 +21,10 @@ class CoachCommandReceiptService:
         database_lock: threading.RLock,
         *,
         now: Callable[[], float] = time.time,
-        proposal_view: Callable[[dict[str, Any]], dict[str, Any]] = coach_action_view,
     ) -> None:
         self._manager_factory = manager_factory
         self._database_lock = database_lock
         self._now = now
-        self._proposal_view = proposal_view
 
     def require_owner(self, receipt: dict[str, Any], session_csrf_hash: str) -> None:
         if receipt.get("session_key") != coach_session_key(session_csrf_hash):
@@ -70,7 +68,7 @@ class CoachCommandReceiptService:
                     (proposal.get("id"), session_csrf_hash),
                 ).fetchone()
                 if current:
-                    value = self._proposal_view(dict(current))
+                    value = coach_action_view(dict(current))
                     if (
                         float(value["expires_at"]) <= self._now()
                         and value["status"] in {"preview", "ready"}
