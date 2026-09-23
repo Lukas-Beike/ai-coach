@@ -23,7 +23,7 @@ const pr = {
 };
 const p1Review = { id: 10, user: { login: bot }, submitted_at: '2026-09-23T15:19:04Z', body: '[P1] Fix fixture' };
 
-async function reviewRequired({ completedAt, reviewedHead = head, reaction = true, unresolved = false } = {}) {
+async function reviewRequired({ completedAt, reviewedHead = head, reaction = true, unresolved = false, sameDiff = true } = {}) {
   const outputs = {};
   const github = {
     rest: {
@@ -40,8 +40,20 @@ async function reviewRequired({ completedAt, reviewedHead = head, reaction = tru
       reactions: { listForIssue: async () => reaction ? [{
         user: { login: bot }, content: '+1', created_at: '2026-09-23T15:32:01Z',
       }] : [] },
+      repos: {
+        getCommit: async () => ({ data: { sha: reviewedHead } }),
+        compareCommits: async ({ head: comparedHead }) => ({
+          data: {
+            merge_base_commit: { sha: comparedHead === reviewedHead ? 'c'.repeat(40) : 'd'.repeat(40) },
+            files: [{ filename: 'server.py' }],
+          },
+        }),
+      },
     },
     paginate: async (method, args) => method(args),
+    request: async (_route, { basehead }) => ({ data:
+      `diff --git a/server.py b/server.py\n@@ -1,2 +1,2 @@\n context\n-old\n+${sameDiff || basehead.endsWith(reviewedHead) ? 'new' : 'unreviewed'}\n`,
+    }),
     graphql: async () => ({ repository: { pullRequest: { reviewThreads: {
       nodes: unresolved ? [{ isResolved: false, comments: { nodes: [{ author: { login: bot }, pullRequestReview: { databaseId: 10 } }] } }] : [],
     } } } }),
@@ -63,6 +75,12 @@ test('an old or missing clean reaction cannot clear a P1', async () => {
 
 test('a clean follow-up remains valid after develop advances and the PR is rebased', async () => {
   assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:31:54Z', reviewedHead: 'b'.repeat(40) }), false);
+});
+
+test('a new unreviewed change after the clean follow-up remains blocked', async () => {
+  assert.equal(await reviewRequired({
+    completedAt: '2026-09-23T15:31:54Z', reviewedHead: 'b'.repeat(40), sameDiff: false,
+  }), true);
 });
 
 test('a clean follow-up still requires all Codex threads to be resolved', async () => {

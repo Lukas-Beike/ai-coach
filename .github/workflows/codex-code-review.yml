@@ -142,7 +142,52 @@ jobs:
               if (!(reviewCompletedAt > after)) return false;
               const summaryUpdatedAt = Date.parse(latestSummary.updated_at || latestSummary.created_at);
               return reactions.some((reaction) => codexBotLogins.has(reaction.user?.login) &&
-                reaction.content === '+1' && Date.parse(reaction.created_at) >= summaryUpdatedAt);
+                reaction.content === '+1' && Date.parse(reaction.created_at) >= summaryUpdatedAt)
+                ? completedCodeReview.match(/`([0-9a-f]{7,40})`/)?.[1] || null : null;
+            };
+            const unchangedReviewedDiff = async (pullRequest, reviewedCommit) => {
+              if (!reviewedCommit) return false;
+              try {
+                const reviewed = await github.rest.repos.getCommit({
+                  owner: context.repo.owner, repo: context.repo.repo, ref: reviewedCommit,
+                });
+                if (!reviewed.data.sha.startsWith(reviewedCommit)) return false;
+                if (pullRequest.head.sha === reviewed.data.sha) return true;
+                const base = pullRequest.base.sha;
+                const compare = (head) => github.rest.repos.compareCommits({
+                  owner: context.repo.owner, repo: context.repo.repo, base, head,
+                });
+                const [oldComparison, newComparison] = await Promise.all([
+                  compare(reviewed.data.sha), compare(pullRequest.head.sha),
+                ]);
+                const oldFiles = oldComparison.data.files;
+                const newFiles = newComparison.data.files;
+                if (!Array.isArray(oldFiles) || !Array.isArray(newFiles) ||
+                    oldFiles.length >= 300 || newFiles.length >= 300) return false;
+                const diff = async (mergeBase, head) => (await github.request(
+                  'GET /repos/{owner}/{repo}/compare/{basehead}', {
+                    owner: context.repo.owner, repo: context.repo.repo,
+                    basehead: `${mergeBase}...${head}`,
+                    headers: { accept: 'application/vnd.github.v3.diff' },
+                  }
+                )).data;
+                const [oldDiff, newDiff] = await Promise.all([
+                  diff(oldComparison.data.merge_base_commit.sha, reviewed.data.sha),
+                  diff(newComparison.data.merge_base_commit.sha, pullRequest.head.sha),
+                ]);
+                if (typeof oldDiff !== 'string' || typeof newDiff !== 'string' ||
+                    /(?:Binary files|GIT binary patch)/.test(oldDiff + newDiff)) return false;
+                const fileCount = (value) => (value.match(/^diff --git /gm) || []).length;
+                if (fileCount(oldDiff) !== oldFiles.length || fileCount(newDiff) !== newFiles.length) return false;
+                const changes = (value) => value.split('\n').filter((line) =>
+                  line.startsWith('diff --git ') ||
+                  /^(?:new file mode|deleted file mode|rename from|rename to|old mode|new mode) /.test(line) ||
+                  ((line.startsWith('+') || line.startsWith('-')) &&
+                   !line.startsWith('+++ ') && !line.startsWith('--- '))).join('\n');
+                return changes(oldDiff) === changes(newDiff);
+              } catch (_error) {
+                return false;
+              }
             };
             const getReviewRequirement = async (pullRequest) => {
               const reviews = await github.paginate(github.rest.pulls.listReviews, {
@@ -155,11 +200,15 @@ jobs:
                 pull_number: pullRequest.number, per_page: 100,
               });
               if (codexReviews.length === 0) {
-                return await hasCompletedCleanReaction(pullRequest) ? 'none' : 'initial';
+                const cleanReview = await hasCompletedCleanReaction(pullRequest);
+                return await unchangedReviewedDiff(pullRequest, cleanReview) ? 'none' : 'initial';
               }
               const latestReview = [...codexReviews]
                 .sort((left, right) => Date.parse(right.submitted_at) - Date.parse(left.submitted_at))[0];
-              const cleanFollowUp = await hasCompletedCleanReaction(pullRequest, Date.parse(latestReview.submitted_at));
+              const cleanFollowUp = await unchangedReviewedDiff(
+                pullRequest,
+                await hasCompletedCleanReaction(pullRequest, Date.parse(latestReview.submitted_at)),
+              );
               const latestReviewHasP1 = /\[P1\]/i.test(latestReview.body || '') || comments.some((comment) => (
                 codexBotLogins.has(comment.user?.login) &&
                 comment.pull_request_review_id === latestReview.id &&
