@@ -5156,4 +5156,32 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   kombinierten Diffs **PASS**. Neu gebautes Read-only-Container-Image:
   Vollsuite **PASS**, 2.323 Tests, 11 Skips in 19,996 s;
   Inventar- und Diff-Check **PASS**. PR-CI für den rebasierten Stand
-  folgt; P8-Job- und Turn-Eigentümer bleiben offen.
+  #726 wurde nach frischem Codex-Erstreview am
+  `2026-09-23T16:38:31Z` als
+  `9c7ae8730adc921e27294493a62165fd62802ee6` gemergt;
+  der Commit ist auf `origin/develop` erreichbar, 0 Review-Threads
+  offen. P8-Job- und Turn-Eigentümer bleiben offen.
+
+## P10 Readiness — integrierter Prüfstand
+
+- GPT-6-Luna/high-Patch `c075f454`: öffentliche DB-/Schema-/
+  Verzeichnis-/Wartungsprojektion als `ReadinessService.state()`.
+  Erstes Root-Diffreview **FAIL**: unaufgeforderter Wechsel von
+  `DatabaseManager.unit_of_work()` auf eine Reader-Lease und fehlender
+  Handler-Level-Vertrag für 200/503. Derselbe Worker korrigierte
+  beides in `339b4c6c`; Root-Follow-up- und Gesamtdiffreview
+  danach **PASS**. Die DB-Prüfung bleibt unter `DB_LOCK` in der
+  ursprünglichen Writer-/UOW-Grenze; der Handler-Test prüft den
+  komponierten Service, vollständige JSON-Payloads und Statuscodes.
+- Worker-Vollsuite nach Korrektur **PASS**: 2.319 Tests, 12 Skips;
+  sechs gezielte Readiness- und vier Architekturtests, Compile,
+  scoped Ruff und Diff-Check **PASS**. Konfliktfreie Integration auf
+  bestätigtem #720-Merge `2a57b317` als `479c3de3` und
+  `2cfd1be1`. Neu gebautes kombiniertes Read-only-Container-Image:
+  vollständige Suite **PASS**, 2.319 Tests, 10 Skips in 20,149 s;
+  Inventar- und Diff-Check **PASS**. `server.py` hat 6.250
+  physische Zeilen. Nach #726-Merge auf `9c7ae873` rebased;
+  die Owner-Assertions für Limiter, Stream und Readiness bleiben
+  erhalten. Der Importkonflikt enthüllte zwei doppelte bestehende
+  Compose-Imports im Worker-Patch; sie wurden bei der Integration
+  entfernt. Erneutes Root-Gate und PR-CI folgen.
