@@ -91,7 +91,11 @@ from backend.sync.intervals import (
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 from backend.weather import history as weather_history
 from backend.weather import cache as weather_cache
-from backend.weather.service import WeatherService
+from backend.weather.service import (
+    WeatherCacheStore,
+    WeatherRefreshJournal,
+    WeatherService,
+)
 from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, PlanningStateRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
@@ -1036,19 +1040,19 @@ def weather_service() -> WeatherService:
     manager = database_manager()
     if WEATHER_SERVICE is None:
         WEATHER_SERVICE = WeatherService(
-            manager,
-            KEY_VALUE_REPOSITORY,
-            profile_service(),
+            WeatherCacheStore(manager, KEY_VALUE_REPOSITORY, profile_service()),
             lambda: weather_provider.WeatherClient(
                 provider_http_client().request, utc_now, LOGGER
             ),
-            provider_refresh_tracker(),
+            WeatherRefreshJournal(
+                provider_refresh_tracker(),
+                sync_observation.OPERATION_CONTEXT,
+                lambda: uuid.uuid4().hex,
+                LOGGER,
+            ),
             runtime_maintenance.MAINTENANCE_GATE,
             lambda: datetime.now(timezone.utc),
             lambda: local_now().date(),
-            sync_observation.OPERATION_CONTEXT,
-            lambda: uuid.uuid4().hex,
-            LOGGER,
         )
     return WEATHER_SERVICE
 

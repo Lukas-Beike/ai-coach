@@ -9,7 +9,11 @@ from backend.db.repositories import KeyValueRepository, ProfileRepository
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 from backend.weather import cache
-from backend.weather.service import WeatherService
+from backend.weather.service import (
+    WeatherCacheStore,
+    WeatherRefreshJournal,
+    WeatherService,
+)
 
 
 class DatabaseManager:
@@ -115,17 +119,14 @@ class WeatherServiceTests(unittest.TestCase):
 
     def service(self, client):
         return WeatherService(
-            self.manager,
-            self.key_values,
-            self.profile,
+            WeatherCacheStore(self.manager, self.key_values, self.profile),
             lambda: client,
-            self.tracker,
+            WeatherRefreshJournal(
+                self.tracker, Context(), lambda: "generated-operation", self.logger
+            ),
             MaintenanceGate(),
             lambda: self.now,
             lambda: date(2026, 9, 20),
-            Context(),
-            lambda: "generated-operation",
-            self.logger,
         )
 
     def get(self, key):
@@ -169,6 +170,42 @@ class WeatherServiceTests(unittest.TestCase):
             self.tracker.events[-1],
             ("finish", "refresh-1", "skipped", "location_changed", None),
         )
+
+    def test_cache_and_history_writes_roll_back_together(self):
+        old_cache = {"query": "Berlin", "forecast": {"daily": {"time": []}}}
+        old_history = {"2026-09-19": {"date": "2026-09-19"}}
+        with self.manager.unit_of_work() as db:
+            self.key_values.set(db, cache.CACHE_KEY, json.dumps(old_cache))
+            self.key_values.set(db, cache.HISTORY_KEY, json.dumps(old_history))
+
+        class FailingRepository:
+            def get(_, db, key):
+                return self.key_values.get(db, key)
+
+            def set(_, db, key, value):
+                if key == cache.CACHE_KEY:
+                    raise RuntimeError("simulated cache write failure")
+                self.key_values.set(db, key, value)
+
+        store = WeatherCacheStore(self.manager, FailingRepository(), self.profile)
+        state = cache.cache_state(
+            "Berlin",
+            json.dumps(old_cache),
+            "",
+            now=self.now,
+        )
+        with self.assertRaisesRegex(RuntimeError, "simulated"):
+            store.store_refresh(
+                state,
+                {
+                    "query": "Berlin",
+                    "forecast": {"daily": {"time": ["2026-09-20"]}},
+                    "fetched_at": self.now.isoformat(),
+                },
+            )
+
+        self.assertEqual(json.loads(self.get(cache.CACHE_KEY)), old_cache)
+        self.assertEqual(json.loads(self.get(cache.HISTORY_KEY)), old_history)
 
     def test_failure_is_persisted_before_error_event_and_retry_is_bounded(self):
         client = Client(error=AppError(503, "upstream"))
