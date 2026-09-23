@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from backend.athlete.profile import ProfileService
@@ -14,6 +15,16 @@ from backend.sync.garmin_service import GarminSyncService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.state import SyncStateRepository
+
+
+@dataclass(frozen=True)
+class DailySyncSchedulerConfig:
+    calendar_url_enabled: bool
+    intervals_key_enabled: bool
+    garmin_automatic_sync_days: int
+    auto_update_label: str
+    sync_period_defaults: Mapping[str, int]
+    all_sync_days: int
 
 
 class DailySyncScheduler:
@@ -32,12 +43,7 @@ class DailySyncScheduler:
         intervals_resync_gate: ProviderResyncGate,
         maintenance_gate: MaintenanceGate,
         *,
-        calendar_url_enabled: bool,
-        intervals_key_enabled: bool,
-        garmin_automatic_sync_days: int,
-        auto_update_label: str,
-        sync_period_defaults: Mapping[str, int],
-        all_sync_days: int,
+        config: DailySyncSchedulerConfig,
     ) -> None:
         self._profile = profile
         self._queue = queue
@@ -49,12 +55,7 @@ class DailySyncScheduler:
         self._sync_state = sync_state
         self._intervals_resync_gate = intervals_resync_gate
         self._maintenance_gate = maintenance_gate
-        self._calendar_url_enabled = calendar_url_enabled
-        self._intervals_key_enabled = intervals_key_enabled
-        self._garmin_automatic_sync_days = garmin_automatic_sync_days
-        self._auto_update_label = auto_update_label
-        self._sync_period_defaults = sync_period_defaults
-        self._all_sync_days = all_sync_days
+        self._config = config
 
     def schedule(self) -> None:
         """Enqueue eligible weather, calendar, Garmin, and Intervals jobs."""
@@ -70,13 +71,13 @@ class DailySyncScheduler:
         self._queue.enqueue(
             "weather",
             "refresh",
-            {"force": False, "reason": self._auto_update_label},
+            {"force": False, "reason": self._config.auto_update_label},
             requested_by="scheduler",
         )
 
     def _schedule_calendar(self) -> None:
         if (
-            not self._calendar_url_enabled
+            not self._config.calendar_url_enabled
             or not self._markers.is_due("calendar")
             or self._queue.active("calendar")
         ):
@@ -84,7 +85,7 @@ class DailySyncScheduler:
         self._queue.enqueue(
             "calendar",
             "refresh",
-            {"reason": self._auto_update_label},
+            {"reason": self._config.auto_update_label},
             requested_by="scheduler",
         )
 
@@ -99,15 +100,15 @@ class DailySyncScheduler:
             "garmin",
             "refresh",
             {
-                "days": self._garmin_automatic_sync_days,
-                "reason": self._auto_update_label,
+                "days": self._config.garmin_automatic_sync_days,
+                "reason": self._config.auto_update_label,
             },
             requested_by="scheduler",
         )
 
     def _schedule_intervals(self) -> None:
         if (
-            not self._intervals_key_enabled
+            not self._config.intervals_key_enabled
             or not self._markers.is_due("intervals")
             or self._sync_running()
             or self._intervals_resync_gate.is_resetting()
@@ -120,9 +121,11 @@ class DailySyncScheduler:
             "refresh",
             {
                 "days": self._sync_state.sync_period(
-                    "intervals", self._sync_period_defaults, self._all_sync_days
+                    "intervals",
+                    self._config.sync_period_defaults,
+                    self._config.all_sync_days,
                 ),
-                "reason": self._auto_update_label,
+                "reason": self._config.auto_update_label,
             },
             requested_by="scheduler",
         )

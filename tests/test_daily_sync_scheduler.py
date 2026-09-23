@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.gates import ProviderResyncGate
-from backend.sync.scheduler import DailySyncScheduler
+from backend.sync.scheduler import DailySyncScheduler, DailySyncSchedulerConfig
 
 
 class _Profile:
@@ -99,12 +99,14 @@ class DailySyncSchedulerTests(unittest.TestCase):
             _SyncState(),
             reset_gate or ProviderResyncGate("Intervals.icu"),
             maintenance_gate or MaintenanceGate(),
-            calendar_url_enabled=calendar_enabled,
-            intervals_key_enabled=intervals_enabled,
-            garmin_automatic_sync_days=2,
-            auto_update_label="automatic refresh",
-            sync_period_defaults={"intervals": 90, "garmin": 30},
-            all_sync_days=-1,
+            config=DailySyncSchedulerConfig(
+                calendar_url_enabled=calendar_enabled,
+                intervals_key_enabled=intervals_enabled,
+                garmin_automatic_sync_days=2,
+                auto_update_label="automatic refresh",
+                sync_period_defaults={"intervals": 90, "garmin": 30},
+                all_sync_days=-1,
+            ),
         )
 
     def test_enqueues_due_jobs_in_order_with_existing_payloads(self):

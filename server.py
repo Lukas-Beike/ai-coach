@@ -222,7 +222,7 @@ from backend.sync.jobs import (
 )
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.queue import SyncJobQueueService
-from backend.sync.scheduler import DailySyncScheduler
+from backend.sync.scheduler import DailySyncScheduler, DailySyncSchedulerConfig
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.context import (
     CoachContextPreviewLimits,
@@ -6650,12 +6650,14 @@ def daily_sync_scheduler() -> DailySyncScheduler:
         sync_state_repository(),
         INTERVALS_RESYNC_GATE,
         runtime_maintenance.MAINTENANCE_GATE,
-        calendar_url_enabled=bool(CONFIG.calendar_ical_url),
-        intervals_key_enabled=bool(CONFIG.intervals_api_key),
-        garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
-        auto_update_label=AUTO_UPDATE_LABEL,
-        sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-        all_sync_days=ALL_SYNC_DAYS,
+        config=DailySyncSchedulerConfig(
+            calendar_url_enabled=bool(CONFIG.calendar_ical_url),
+            intervals_key_enabled=bool(CONFIG.intervals_api_key),
+            garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
+            auto_update_label=AUTO_UPDATE_LABEL,
+            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+            all_sync_days=ALL_SYNC_DAYS,
+        ),
     )
 
 
