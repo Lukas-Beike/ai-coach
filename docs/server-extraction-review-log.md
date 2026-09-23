@@ -5381,3 +5381,15 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Architektur 4/4, gezielte Submissiontests, Inventar-, Compile-
   und Diff-Check **PASS**. `server.py` umfasst 5.744 physische
   Zeilen und 267 Definitionen. Externe PR-/CI-Prüfung steht aus.
+- #734 auf Head `e1c9ae35`: SonarCloud-Gate **FAIL** mit genau einem
+  neuen `python:S3776`-Befund in `enqueue` (kognitive Komplexität
+  20 statt höchstens 15). Derselbe GPT-6-Luna-Worker zerlegte
+  Validierung und Provider-Limits ohne Schnittstellen- oder
+  Reihenfolgeänderung in `69b221e8`. Root prüfte den tatsächlichen
+  Ein-Modul-Diff: **PASS**; atomare Session-/Replay-UOW, Manager-
+  Auflösung unter Lock und Post-Commit-Side-Effects bleiben gleich.
+  23 fokussierte Tests, Ruff einschließlich `C901`, Compile und
+  Diff-Check **PASS**. Ein neu gebautes Read-only-Docker-Image auf
+  `69b221e8` bestand die vollständige kombinierte Suite erneut:
+  **PASS**, 2.344 Tests, 11 Skips. Root-Gate des korrigierten Diffs
+  **PASS**; die erneute Sonar-/Browser-/Codex-Prüfung steht noch aus.
