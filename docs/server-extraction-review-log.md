@@ -5306,3 +5306,16 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Architektur-, Inventar-, Compile- und Diff-Check **PASS**;
   `server.py` hat 5.912 physische Zeilen und 275 Definitionen.
   PR-CI und externer Review folgen.
+- #731, Head `5f94d99d`: Codex-Code- und Security-Review ohne
+  Befund; Python-/Container-/Sonar-Checks **PASS**. Browser-Smoke
+  **FAIL**: ausschließlich die HTTP-Plan-Fixture schloss nach
+  `GET /api/fixture/plan` die Verbindung ohne Antwort. Root-Befund:
+  die Fixture rief den entfernten `server.require_auth`-Wrapper auf.
+  Derselbe GPT-6-Luna-Worker migrierte den Testaufrufer in `3b3659ed`
+  auf `self.auth_service.require_auth(self)`. Root prüfte den
+  tatsächlichen Ein-Zeilen-Diff und alle Auth-Lookups der Fixture:
+  **PASS**. Gezielter Browser-Test **PASS** (1/1), vollständiges
+  `mobile-small`-Profil **PASS** (51/51) mit frischer temporärer
+  Fixture-Datenbank und gemockten Providern; Compile, scoped Ruff
+  und Diff-Check **PASS**. Nach dem Push sind die neuen CI-Checks
+  erneut erforderlich; kein Merge vor deren Abschluss.
