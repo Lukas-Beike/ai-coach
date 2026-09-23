@@ -6,7 +6,7 @@ import threading
 import unittest
 from pathlib import Path
 
-from backend.coach.training_template_tools import training_template_tool_service
+from backend.coach.training_template_tools import TrainingTemplateToolService
 from backend.db.manager import DatabaseManager
 from backend.errors import STRUCTURED_AUTHORIZATION_ERROR, AppError
 
@@ -33,7 +33,7 @@ class TrainingTemplateToolTests(unittest.TestCase):
                     return {"local_id": local_id}
 
                 def create_template(self, values):
-                    self.fail("Unexpected create")
+                    raise AssertionError("Unexpected create")
 
             def manager_factory():
                 self.assertTrue(lock._is_owned())
@@ -44,7 +44,7 @@ class TrainingTemplateToolTests(unittest.TestCase):
                 library_resolutions.append(active_manager[0])
                 return Library()
 
-            service = training_template_tool_service(manager_factory, lock, library_factory)
+            service = TrainingTemplateToolService(manager_factory, lock, library_factory)
             active_manager[0] = current_manager  # Simulate manager replacement after restore.
             intent = {
                 "operation": "manage_training_templates",
@@ -72,7 +72,7 @@ class TrainingTemplateToolTests(unittest.TestCase):
 
     def test_requires_operation_and_template_scope_before_manager_resolution(self) -> None:
         manager_calls = []
-        service = training_template_tool_service(
+        service = TrainingTemplateToolService(
             lambda: manager_calls.append("manager"),
             threading.RLock(),
             lambda: self.fail("Library must not be resolved"),

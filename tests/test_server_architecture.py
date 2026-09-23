@@ -131,7 +131,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "backend.coach.training_template_tools",
-        ("TrainingTemplateToolService", "training_template_tool_service"),
+        ("TrainingTemplateToolService",),
     ),
     (
         "backend.coach.attachments",

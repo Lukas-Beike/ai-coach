@@ -76,14 +76,3 @@ class TrainingTemplateToolService:
             "templates": results,
             "template": results[0] if len(results) == 1 else None,
         }
-
-
-def training_template_tool_service(
-    database_manager: Callable[[], DatabaseManager],
-    database_lock: Any,
-    workout_library_service: Callable[[], Any],
-) -> TrainingTemplateToolService:
-    """Build an uncached operation service from current composition-root factories."""
-    return TrainingTemplateToolService(
-        database_manager, database_lock, workout_library_service
-    )
