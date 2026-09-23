@@ -1949,7 +1949,7 @@ class CoachTests(unittest.TestCase):
                     path.unlink()
 
         handler = ExportHandler()
-        server.stream_privacy_export(handler)
+        server.export_stream_transport().stream_privacy_export(handler)
         self.assertTrue(handler.payload.startswith(b"PK"))
         self.assertFalse(handler.path.exists())
 
