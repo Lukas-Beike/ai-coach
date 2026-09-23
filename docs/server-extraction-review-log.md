@@ -5748,3 +5748,38 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `7ee41786` plus Test-/Dokumentationsdiff **PASS**; PR-CI und
   externer Review stehen aus. `server.py`: 5.240 Zeilen,
   246 Definitionen; `backend/`: 39.537 Zeilen, zusammen 44.777.
+
+## P8 Cancellation und terminale Fehler — bestätigter #746-Merge
+
+- #746 auf Head `df655ef4`: CodeQL, SonarCloud, Container-, Browser-
+  und Codex-Code-/Security-Prüfung **PASS**, 0 offene Review-Threads.
+  Squash-Merge `25d00641d928f176d1f12882ff20e1510c848108` am
+  `2026-09-23T20:30:01Z` bestätigt und auf `origin/develop` erreichbar.
+
+## P8 Restart-Recovery — integrierter lokaler Prüfstand
+
+- Root-Commit `c2b6a37a` liegt als einzelner Recovery-Commit auf dem
+  bestätigten #746-Merge; der vorherige, auf Squash-Commits zeigende
+  Rebase-Versuch wurde abgebrochen und mit `rebase --onto` ohne Übernahme
+  älterer PR-Commits wiederholt. Root prüfte den tatsächlichen Diff und
+  den Code nach der Integration erneut: **PASS**.
+- `CoachJobStore.resume_interrupted` besitzt die Restart-Entscheidung
+  einschließlich persistierter Intents, OpenAI-Response-Fortsetzung,
+  Nicht-Wiederholung unterbrochener Gemini-Turns, Queue-Phase und
+  Worker-Wake. `server.py` ruft den konkreten Eigentümer nur bei Start
+  und nach Restore auf. Die frühere Abfrage las das Gemini-Intent nicht;
+  die neue Abfrage schließt diese Lücke. Keine Server-Rückimporte,
+  Fach-Callbacks oder Änderung an Autorisierungsgrenzen.
+- Neue Unit-Tests prüfen Attached-/Gemini-Fehler samt Intent und
+  `process_interrupted`, OpenAI-/Queued-Requeue, Managerwechsel und
+  ausbleibenden Wake ohne Jobs. Bestehende Start-/Restore-/Gemini-
+  Integrationstests wurden auf den Eigentümer umgestellt und bleiben
+  wirksam. Testumfang für diese Teilgrenze angemessen; Worker-Turn-
+  Orchestrierung und gesamter Restore sind noch offen.
+- Fokussierte Unit-/Architekturtests **PASS**, 13/13; Ruff, Compile,
+  Inventar- und Diff-Check **PASS**. Native Vollsuite **PASS**,
+  2.384 Tests/12 Skips; frisch gebautes Python-3.14-Image und
+  vollständige Read-only-Docker-Suite **PASS**, 2.384 Tests/11 Skips.
+  Das Root-Gate für `c2b6a37a` samt Integrations- und Dokumentationsdiff
+  ist **PASS**; PR-CI und externer Review stehen noch aus.
+  `server.py`: 5.200 Zeilen, 245 Definitionen.
