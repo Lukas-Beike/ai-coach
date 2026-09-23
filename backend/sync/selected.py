@@ -82,9 +82,12 @@ class SelectedWorkoutSyncService:
             for item in results
             if item["status"] in {"error", "conflict"}
         ]
-        status = (
-            "ok" if not failed else "partial" if len(failed) < len(results) else "error"
-        )
+        if not failed:
+            status = "ok"
+        elif len(failed) < len(results):
+            status = "partial"
+        else:
+            status = "error"
         return {
             "ok": not failed,
             "status": status,

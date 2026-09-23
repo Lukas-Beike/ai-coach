@@ -289,7 +289,7 @@ class GarminSyncService:
             return self._wait_for_existing(cancel_event)
         try:
             return self._execute(
-                days, operation_id, reason, end_date, fixture is not None, cancel_event
+                days, operation_id, end_date, fixture is not None, cancel_event
             )
         except Exception as error:
             self._record_failure(operation_id, reason, error)
@@ -302,7 +302,6 @@ class GarminSyncService:
         self,
         days: int,
         operation_id: str,
-        reason: str,
         end_date: date | None,
         fixture: bool,
         cancel_event: threading.Event | None,

@@ -75,7 +75,7 @@ class ExternalCalendarSyncService:
                 return result
             try:
                 try:
-                    result = self._sync_locked(reason)
+                    result = self._sync_locked()
                 except AppError as exc:
                     self._record_error(self._redactor(exc.message)[:1000])
                     self._logger.exception(
@@ -110,7 +110,7 @@ class ExternalCalendarSyncService:
                 finally:
                     self._lock.release()
 
-    def _sync_locked(self, reason: str) -> dict[str, Any]:
+    def _sync_locked(self) -> dict[str, Any]:
         self._set_value(
             "external_calendar_sync_status", "Kalender: Synchronisierung läuft…"
         )

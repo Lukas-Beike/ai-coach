@@ -44,13 +44,12 @@ class SyncJobOutcomeService:
             raise AppError(
                 409, "Der Provider ist noch beschäftigt.", reason="temporary_error"
             )
-        fallback_status = (
-            "partial"
-            if result_status == "partial"
-            else "failed"
-            if result_status in {"error", "failed"}
-            else "completed"
-        )
+        if result_status == "partial":
+            fallback_status = "partial"
+        elif result_status in {"error", "failed"}:
+            fallback_status = "failed"
+        else:
+            fallback_status = "completed"
         snapshot = self._job_store.update_from_result(
             job_id, result, fallback_status, self._redactor
         )
