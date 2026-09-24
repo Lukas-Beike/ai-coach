@@ -7930,6 +7930,9 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   globale Route-Bindings und den Service-Factory-Namen sichtbar gemacht. Der
   Inventar-Eigentümer ist jetzt konkret (`http_api/` bzw. `nutrition/service.py`);
   der P0-Zuordnungstest und das regenerierte Inventar sind grün.
+- Die neue Sonar-Prüfung beanstandete 14 Konstruktorparameter. Authentifizierte
+  Routen sind jetzt in `HttpAuthenticatedPostRoutes` explizit typisiert;
+  Dispatcher-, Architektur-, Coach-Planning-Command- und 495 Servertests bestehen.
 - `server.py` enthält keine route-spezifische POST-Auswahl mehr. GET-/PUT-
   Fehlergrenzen, SSE-Schreibtransport und Datei-/JSON-Antworttransport bleiben
   offene P10-Arbeit.

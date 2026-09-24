@@ -289,6 +289,7 @@ def _explicit_owner(name: str) -> str | None:
             "HTTP_ROUTE_DISPATCHER": HTTP_API_PACKAGE,
             "HttpRouteDispatcher": HTTP_API_PACKAGE,
             "HTTP_POST_DISPATCHER": HTTP_API_PACKAGE,
+            "AUTHENTICATED_POST_ROUTES": HTTP_API_PACKAGE,
             "nutrition_service": "nutrition/service.py",
             "login_user": HTTP_AUTH,
             "logout_user": HTTP_AUTH,

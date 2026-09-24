@@ -6,7 +6,10 @@ import unittest
 from unittest.mock import Mock
 
 from backend.errors import AppError
-from backend.http_api.post_dispatch import HttpPostDispatcher
+from backend.http_api.post_dispatch import (
+    HttpAuthenticatedPostRoutes,
+    HttpPostDispatcher,
+)
 
 
 class HttpPostDispatcherTests(unittest.TestCase):
@@ -14,7 +17,8 @@ class HttpPostDispatcherTests(unittest.TestCase):
         self.routes = [Mock() for _ in range(14)]
         for route in self.routes:
             route.handle.return_value = False
-        self.dispatcher = HttpPostDispatcher(*self.routes)
+        authenticated_routes = HttpAuthenticatedPostRoutes(*self.routes[3:])
+        self.dispatcher = HttpPostDispatcher(*self.routes[:3], authenticated_routes)
         self.handler = Mock()
         self.session = {"csrf_hash": "synthetic-session"}
 

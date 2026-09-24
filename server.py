@@ -150,7 +150,10 @@ from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanState
 from backend.http_api.state_versions import StateVersionService
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
-from backend.http_api.post_dispatch import HttpPostDispatcher
+from backend.http_api.post_dispatch import (
+    HttpAuthenticatedPostRoutes,
+    HttpPostDispatcher,
+)
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.history_get import HistoryGetRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
@@ -2717,10 +2720,7 @@ HTTP_ROUTE_DISPATCHER = HttpRouteDispatcher(
     (SETTINGS_PUT_ROUTES, ATHLETE_PUT_ROUTES, NUTRITION_PUT_ROUTES),
 )
 SYNC_COMMAND_POST_ROUTE = SyncCommandPostRoute(lambda: sync_command_endpoint())
-HTTP_POST_DISPATCHER = HttpPostDispatcher(
-    AUTH_POST_ROUTES,
-    PRIVACY_RESTORE_POST_ROUTES,
-    CHAT_CANCEL_POST_ROUTES,
+AUTHENTICATED_POST_ROUTES = HttpAuthenticatedPostRoutes(
     COACH_ACTIONS_POST_ROUTES,
     CHAT_POST_ROUTES,
     TRANSCRIBE_POST_ROUTES,
@@ -2732,6 +2732,12 @@ HTTP_POST_DISPATCHER = HttpPostDispatcher(
     DIAGNOSTICS_CAPTURE_POST_ROUTES,
     PRIVACY_DELETE_POST_ROUTES,
     NUTRITION_POST_ROUTES,
+)
+HTTP_POST_DISPATCHER = HttpPostDispatcher(
+    AUTH_POST_ROUTES,
+    PRIVACY_RESTORE_POST_ROUTES,
+    CHAT_CANCEL_POST_ROUTES,
+    AUTHENTICATED_POST_ROUTES,
 )
 
 

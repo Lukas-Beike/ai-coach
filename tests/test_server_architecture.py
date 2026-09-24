@@ -58,7 +58,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
-    ("backend.http_api.post_dispatch", ("HttpPostDispatcher",)),
+    ("backend.http_api.post_dispatch", ("HttpAuthenticatedPostRoutes", "HttpPostDispatcher")),
     ("backend.http_api.sync_commands_post", ("SyncCommandPostRoute",)),
     ("backend.http_api.chat_post", ("ChatPostRoutes",)),
     ("backend.http_api.chat_stream", ("CoachChatStreamTransport",)),
@@ -2426,10 +2426,19 @@ class ServerArchitectureTests(unittest.TestCase):
         is_post_dispatch = route_name in post_routes
         is_put_dispatch = route_name in {"SETTINGS_PUT_ROUTES", "ATHLETE_PUT_ROUTES"}
         if is_post_dispatch:
+            route_owner = (
+                "HTTP_POST_DISPATCHER"
+                if route_name in {
+                    "AUTH_POST_ROUTES",
+                    "PRIVACY_RESTORE_POST_ROUTES",
+                    "CHAT_CANCEL_POST_ROUTES",
+                }
+                else "AUTHENTICATED_POST_ROUTES"
+            )
             dispatcher = next(
                 node for node in server_tree.body
                 if isinstance(node, ast.Assign)
-                and any(isinstance(target, ast.Name) and target.id == "HTTP_POST_DISPATCHER" for target in node.targets)
+                and any(isinstance(target, ast.Name) and target.id == route_owner for target in node.targets)
             )
             route_nodes = [node for node in ast.walk(dispatcher.value) if isinstance(node, ast.Name) and node.id == route_name]
             stage = {

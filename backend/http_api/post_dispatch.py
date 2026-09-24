@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from backend.errors import AppError, NOT_FOUND_ERROR
@@ -21,6 +22,23 @@ from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.transcribe_post import TranscribePostRoutes
 
 
+@dataclass(frozen=True, slots=True)
+class HttpAuthenticatedPostRoutes:
+    """Concrete authenticated routes in their preserved handler order."""
+
+    coach_actions: CoachActionsPostRoutes
+    chat: ChatPostRoutes
+    transcribe: TranscribePostRoutes
+    planning_commands: PlanningCommandsPostRoutes
+    feedback: FeedbackPostRoutes
+    chat_stream: CoachChatStreamTransport
+    sync_commands: SyncCommandPostRoute
+    history_undo: HistoryUndoPostRoutes
+    diagnostics_capture: DiagnosticsCapturePostRoutes
+    privacy_delete: PrivacyDeletePostRoutes
+    nutrition: NutritionPostRoutes
+
+
 class HttpPostDispatcher:
     """Keep POST route ordering outside the socket-owning request handler."""
 
@@ -29,32 +47,22 @@ class HttpPostDispatcher:
         auth_routes: AuthPostRoutes,
         restore_route: PrivacyRestorePostRoutes,
         cancel_route: ChatCancelPostRoutes,
-        coach_actions: CoachActionsPostRoutes,
-        chat: ChatPostRoutes,
-        transcribe: TranscribePostRoutes,
-        planning_commands: PlanningCommandsPostRoutes,
-        feedback: FeedbackPostRoutes,
-        chat_stream: CoachChatStreamTransport,
-        sync_commands: SyncCommandPostRoute,
-        history_undo: HistoryUndoPostRoutes,
-        diagnostics_capture: DiagnosticsCapturePostRoutes,
-        privacy_delete: PrivacyDeletePostRoutes,
-        nutrition: NutritionPostRoutes,
+        authenticated_routes: HttpAuthenticatedPostRoutes,
     ) -> None:
         self._auth_routes = auth_routes
         self._restore_route = restore_route
         self._cancel_route = cancel_route
-        self._coach_actions = coach_actions
-        self._chat = chat
-        self._transcribe = transcribe
-        self._planning_commands = planning_commands
-        self._feedback = feedback
-        self._chat_stream = chat_stream
-        self._sync_commands = sync_commands
-        self._history_undo = history_undo
-        self._diagnostics_capture = diagnostics_capture
-        self._privacy_delete = privacy_delete
-        self._nutrition = nutrition
+        self._coach_actions = authenticated_routes.coach_actions
+        self._chat = authenticated_routes.chat
+        self._transcribe = authenticated_routes.transcribe
+        self._planning_commands = authenticated_routes.planning_commands
+        self._feedback = authenticated_routes.feedback
+        self._chat_stream = authenticated_routes.chat_stream
+        self._sync_commands = authenticated_routes.sync_commands
+        self._history_undo = authenticated_routes.history_undo
+        self._diagnostics_capture = authenticated_routes.diagnostics_capture
+        self._privacy_delete = authenticated_routes.privacy_delete
+        self._nutrition = authenticated_routes.nutrition
 
     def handle_before_auth(self, handler: Any, path: str) -> bool:
         return self._auth_routes.handle(handler, path) or self._restore_route.handle(
