@@ -641,6 +641,11 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
     Commit einem `CoachTurnFailureService` zuordnen; der übrige Turn bleibt offen.
 - [ ] `chat_with_coach`, Background-Claim/Resume/Cancel und Stream-Register
   auslagern; synchrone und Hintergrundausführung teilen denselben Turn-Use-Case.
+  - [x] Sessiongebundene Chat-Vorprüfung, Längen-/Cancel-Grenzen,
+    idempotente Command-Lesefunktion, 15-Minuten-Stale-Recovery,
+    persistierte Providerwahl und Background-Resume
+    `CoachChatTurnService` zuordnen. Der dekorierte Server-Aufrufer
+    bleibt nur bis zur direkten HTTP-/Worker-Migration bestehen.
   - [x] Process-lokales Chat-Stream-Register, SSE-Queues und Background-
     Cancel-Events einem einzigen `ChatStreamRegistry` zuordnen; durable
     Job-Entscheidungen bleiben bis zur Coach-Job-Auslagerung offen.
