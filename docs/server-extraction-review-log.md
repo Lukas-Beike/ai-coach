@@ -7701,10 +7701,13 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - PR #797 wurde am 24.09.2026 um 09:17:56 UTC regulär per Squash-Auto-Merge
   mit `6e3a6be7aea9626033c4b1cad8a024cb35618cc4` gemergt; der Commit
   ist Vorfahr von `origin/develop`. Erforderliche Checks am PR-Head bestanden,
-  es gab keine offenen Review-Threads. Der GitHub-Test-Merge-Commit hatte
-  weiterhin keine eigenen Check-Runs; diese Gate-Zuordnung bleibt als Risiko
-  für künftige PRs festgehalten.
-- Root-Integrationsdiff auf `b89aec7e3ce3ce020870bbc4ce3869f7f318658d`:
+  es gab keine offenen Review-Threads. Regelsuite `4207195625` meldet
+  **PASS**, einschließlich `required_status_checks`; damit unterscheidet
+  sich #797 vom Bypass bei #796. Der GitHub-Test-Merge-Commit hatte keine
+  eigenen Check-Runs; die Gate-Zuordnung bleibt dennoch zu beobachten.
+- Root-Integrationsdiff `0822dab0`, nach Squash-Merge ohne Replay der vier
+  bereits integrierten POST-Commits als `99977483` auf `origin/develop`
+  übertragen und erneut geprüft:
   `RequestHandler.handle_chat_stream` wurde vollständig in
   `CoachChatStreamTransport.handle` verlagert. Der Handler bindet nur noch
   die konkrete Instanz ein und delegiert den authentifizierten Pfad. Registry,
@@ -7718,9 +7721,9 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   bestehende Integrations-Streamtests sichern den Vertrag; ein AST-Guard
   verbietet die Rückkehr der Handler-Implementierung. Die Testzahl ist für
   den begrenzten Transport ausreichend. Vollständige frisch gebaute,
-  read-only-/netzwerkisolierte SQLCipher-Suite: **2.724 Tests/11 Skips PASS**;
+  read-only-/netzwerkisolierte SQLCipher-Suite auf `99977483`:
+  **2.724 Tests/11 Skips PASS**;
   34 fokussierte Tests, Ruff, Inventar `--check` und Diff-Check PASS.
   `server.py`: 3.303 physische Zeilen; lokal 215/232 Punkte, 17 offen.
-- Offen vor Veröffentlichung: Commit/Rebase auf den bestätigten #797-Merge,
-  erneute Integrationsprüfung und PR-Gates. Fachlich bleiben P7/P8-Restaudit,
+- Offen vor Veröffentlichung: PR-Gates. Fachlich bleiben P7/P8-Restaudit,
   übriger Handler-/Body-Transport und P11 offen.
