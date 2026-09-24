@@ -24,7 +24,7 @@ import uuid
 from contextlib import nullcontext, contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from functools import partial, wraps
+from functools import partial
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Callable
@@ -273,6 +273,7 @@ from backend.coach.conversation import (
     GeminiRequestPayloadService,
     GeminiResponseNormalizationService,
 )
+from backend.coach.conversation_gate import CoachConversationGate
 from backend.coach.proposals import (
     CoachProposalCreationService,
     CoachProposalConfirmationService,
@@ -388,10 +389,7 @@ COACH_BACKGROUND_UNIT_LIMIT = 7
 COACH_TRAINING_CHANGE_LIMIT = 366
 INTERVALS_SYNC_WAIT_SECONDS = 120
 DB_LOCK = threading.RLock()
-OPENAI_CONVERSATION_LOCK = threading.RLock()
-CHAT_QUEUE_LIMIT = 3
-CHAT_QUEUE = threading.BoundedSemaphore(CHAT_QUEUE_LIMIT)
-CHAT_LOCK_TIMEOUT_SECONDS = 30
+COACH_CONVERSATION_GATE = CoachConversationGate()
 COACH_JOB_WORKER_LOCK = threading.Lock()
 COACH_JOB_WAKE = threading.Event()
 COACH_JOB_STOP = threading.Event()
@@ -617,23 +615,6 @@ LOGGER = logging.getLogger("intervals_coach")
 REDACTOR = observability.Redactor(lambda: CONFIG)
 
 
-
-
-def serialise_conversation(function):
-    @wraps(function)
-    def wrapped(*args, **kwargs):
-        if not CHAT_QUEUE.acquire(blocking=False):
-            raise AppError(429, "Der Coach ist gerade ausgelastet. Bitte später erneut versuchen.", reason="chat_queue_full")
-        acquired = OPENAI_CONVERSATION_LOCK.acquire(timeout=CHAT_LOCK_TIMEOUT_SECONDS)
-        if not acquired:
-            CHAT_QUEUE.release()
-            raise AppError(409, "Die vorherige Coach-Anfrage läuft noch. Bitte erneut versuchen.", reason="chat_request_timeout")
-        try:
-            return function(*args, **kwargs)
-        finally:
-            OPENAI_CONVERSATION_LOCK.release()
-            CHAT_QUEUE.release()
-    return wrapped
 
 
 def utc_now() -> str:
@@ -1989,7 +1970,7 @@ def coach_conversation_reset_service() -> CoachConversationResetService:
     """Compose the Coach chat reset owner from concrete storage and provider adapters."""
     return CoachConversationResetService(
         database_manager(), KEY_VALUE_REPOSITORY, openai_responses_client(),
-        coach_streams.CHAT_STREAM_REGISTRY, DB_LOCK, OPENAI_CONVERSATION_LOCK,
+        coach_streams.CHAT_STREAM_REGISTRY, DB_LOCK, COACH_CONVERSATION_GATE.lock,
         utc_now, uuid.uuid4, LOGGER,
     )
 
@@ -3100,7 +3081,7 @@ def _resume_background_chat_command(
 
 
 @runtime_maintenance.maintenance_operation
-@serialise_conversation
+@COACH_CONVERSATION_GATE.wrap
 def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "", client_turn_id: str, background_job: bool = False) -> dict[str, Any]:
     message, client_turn_id = _validated_chat_request(message, client_turn_id, cancel_event)
     existing_command, background_receipt, background_owned = _chat_command_state(

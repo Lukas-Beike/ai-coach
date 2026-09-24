@@ -9825,10 +9825,11 @@ class CoachTests(unittest.TestCase):
             coach_streams.CHAT_STREAM_REGISTRY.unregister(session_key, operation_id)
 
     def test_chat_queue_is_bounded_instead_of_waiting_indefinitely(self):
-        acquired = [server.CHAT_QUEUE.acquire(blocking=False) for _ in range(server.CHAT_QUEUE_LIMIT)]
+        gate = server.COACH_CONVERSATION_GATE
+        acquired = [gate._queue.acquire(blocking=False) for _ in range(3)]
         self.assertTrue(all(acquired))
         try:
-            @server.serialise_conversation
+            @gate.wrap
             def queued_operation():
                 return "completed"
 
@@ -9838,7 +9839,7 @@ class CoachTests(unittest.TestCase):
         finally:
             for was_acquired in acquired:
                 if was_acquired:
-                    server.CHAT_QUEUE.release()
+                    gate._queue.release()
 
     def test_responses_status_and_error_payloads_are_rejected(self):
         with self.assertRaises(server.AppError) as failed:
