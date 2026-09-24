@@ -224,12 +224,17 @@ class CoachTests(unittest.TestCase):
         endpoint.state.return_value = {"configured": True, "loading": True}
 
         auth = Mock()
-        with patch.object(server, "session_auth_service", return_value=auth), patch.object(
-            server, "public_weather_state_service", return_value=endpoint
+        with patch.object(
+            server.PLANNING_GET_ROUTES, "_session_auth_service", return_value=auth
+        ) as auth_factory, patch.object(
+            server.PLANNING_GET_ROUTES,
+            "_public_weather_state_service",
+            return_value=endpoint,
         ) as factory:
-            self.assertTrue(handler._handle_training_get("/api/weather"))
+            self.assertTrue(server.PLANNING_GET_ROUTES.handle(handler, "/api/weather"))
 
         auth.require_auth.assert_called_once_with(handler)
+        auth_factory.assert_called_once_with()
         factory.assert_called_once_with()
         endpoint.state.assert_called_once_with(local_only=True)
         handler.send_json.assert_called_once_with(
@@ -260,11 +265,21 @@ class CoachTests(unittest.TestCase):
                 service.read.return_value = {"plans": []}
                 auth = Mock()
                 with (
-                    patch.object(server, "session_auth_service", return_value=auth),
-                    patch.object(server, "public_plan_state_service", return_value=service),
+                    patch.object(
+                        server.PLANNING_GET_ROUTES,
+                        "_session_auth_service",
+                        return_value=auth,
+                    ) as auth_factory,
+                    patch.object(
+                        server.PLANNING_GET_ROUTES,
+                        "_public_plan_state_service",
+                        return_value=service,
+                    ) as service_factory,
                 ):
-                    self.assertTrue(handler._handle_training_get("/api/plan"))
+                    self.assertTrue(server.PLANNING_GET_ROUTES.handle(handler, "/api/plan"))
                 auth.require_auth.assert_called_once_with(handler)
+                auth_factory.assert_called_once_with()
+                service_factory.assert_called_once_with()
                 service.read.assert_called_once_with(local_only=local_only)
                 handler.send_json.assert_called_once_with(200, {"plans": []})
 

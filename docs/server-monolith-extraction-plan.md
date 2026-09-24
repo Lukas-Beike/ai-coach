@@ -823,6 +823,10 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     und `/api/bootstrap` einem zustandslosen `PublicGetRoutes` zuordnen;
     Maintenance-Gate, Readiness-, Session-Auth- und Bootstrap-Services
     bleiben konkrete Composition-Abhängigkeiten und Zustandseigentümer.
+  - [x] Die GET-Routen `/api/plan`, `/api/weather` und `/api/library` einem
+    zustandslosen `PlanningGetRoutes` zuordnen; Auth-, Plan-, Wetter- und
+    Library-Services bleiben konkrete, pro Request aufgelöste Composition-
+    Abhängigkeiten und Zustandseigentümer.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 
