@@ -840,6 +840,9 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     Disconnect-Cleanup `CoachChatStreamTransport` zuordnen; das durable
     Job bleibt bei `CoachJobSubmissionService`, die Event-Queue beim
     `ChatStreamRegistry` und Socket-/Schreibzustand beim Handler.
+  - [x] JSON-, Datei-, Byte- und SSE-Antworten sowie die Ausgabe sicherer
+    statischer Assets `HttpResponseTransport` zuordnen; der Handler delegiert
+    Socket-Schreibvorgänge und behält Request-ID und äußere Fehlerbehandlung.
 - [ ] Handler mit den konkret benötigten Services verbinden; keine Weitergabe
   des `server`-Moduls als Pseudo-Servicecontainer.
   - [x] Die GET-Routen `/api/chat/history`, `/api/chat/receipt` und

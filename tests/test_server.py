@@ -34,7 +34,8 @@ from backend.http_api.readiness import ReadinessService
 from backend.http_api.public_state import PublicStateService
 from backend.http_api.state_events_transport import StateEventTransport
 from backend.http_api.state_events_get import StateEventsGetRoutes
-from backend.http_api import state_events_get
+from backend.http_api import response_transport, responses, state_events_get
+from backend.http_api.response_transport import STREAM_CHUNK_BYTES
 from backend.http_api import readiness as readiness_module
 from backend.http_api import auth as http_auth
 from backend.http_api.public_weather import PublicWeatherStateService
@@ -2078,7 +2079,7 @@ class CoachTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_root:
             path = Path(temp_root) / "export.zip"
-            path.write_bytes(b"x" * (server.STREAM_CHUNK_BYTES * 2 + 1))
+            path.write_bytes(b"x" * (STREAM_CHUNK_BYTES * 2 + 1))
             handler = object.__new__(server.RequestHandler)
             handler.send_response = Mock()
             handler.send_header = Mock()
@@ -2088,8 +2089,8 @@ class CoachTests(unittest.TestCase):
             handler.client_disconnect_errors = (BrokenPipeError,)
             handler.log_client_disconnect = Mock()
             handler.send_file_stream(path, "application/octet-stream", "export.zip")
-            self.assertEqual(sum(len(data) for data in writer.writes), server.STREAM_CHUNK_BYTES * 2 + 1)
-            self.assertTrue(all(len(data) <= server.STREAM_CHUNK_BYTES for data in writer.writes))
+            self.assertEqual(sum(len(data) for data in writer.writes), STREAM_CHUNK_BYTES * 2 + 1)
+            self.assertTrue(all(len(data) <= STREAM_CHUNK_BYTES for data in writer.writes))
 
             path.write_bytes(b"x")
             handler.wfile = FailingWriter()
@@ -8741,6 +8742,9 @@ class CoachTests(unittest.TestCase):
         handler.log_client_disconnect.assert_called_once_with()
         handler.wfile.write.assert_not_called()
 
+    def test_response_transport_uses_redacted_application_logger(self):
+        self.assertIs(response_transport.LOGGER, server.LOGGER)
+
     def test_json_response_disconnect_logs_response_metadata(self):
         handler = object.__new__(server.RequestHandler)
         handler.request_id = "request-2"
@@ -8759,7 +8763,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(context["path"], "/api/activities")
         self.assertEqual(context["request_id"], "request-2")
         self.assertEqual(context["response_status"], 200)
-        self.assertEqual(context["response_bytes"], len(server.response_json_bytes({"activities": []})))
+        self.assertEqual(context["response_bytes"], len(responses.json_bytes({"activities": []})))
         self.assertEqual(context["error_type"], "ConnectionResetError")
         self.assertGreaterEqual(context["response_duration_ms"], 0)
 

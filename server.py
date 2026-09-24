@@ -336,11 +336,6 @@ from backend.coach.background_job import CoachBackgroundJobRunner
 from backend.coach.job_worker import COACH_JOB_WORKER
 from backend.coach.tools import build_tool_contracts
 from backend.coach.service import command_receipt
-from backend.http_api.responses import (
-    header_items as response_header_items,
-    json_bytes as response_json_bytes,
-    response_headers,
-)
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
 from backend.http_api.library_page import LibraryPageService
@@ -350,6 +345,7 @@ from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.state_events_transport import StateEventTransport
 from backend.http_api.state_events_get import StateEventsGetRoutes
 from backend.http_api.route_dispatch import HttpRouteDispatcher
+from backend.http_api.response_transport import HttpResponseTransport
 from backend.http_api.requests import (
     read_audio_body as read_request_audio_body,
     read_body as read_request_body,
@@ -395,7 +391,6 @@ MAX_BACKUP_BYTES = 100_000_000
 MAX_PRIVACY_EXPORT_BYTES = 100_000_000
 MIN_EXPORT_FREE_BYTES = 10_000_000
 EXPORT_TIME_LIMIT_SECONDS = 120
-STREAM_CHUNK_BYTES = 64 * 1024
 MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 # The Responses API counts both visible output and reasoning tokens against
 # max_output_tokens. Keep ordinary replies bounded, but leave enough room for
@@ -2739,6 +2734,7 @@ HTTP_POST_DISPATCHER = HttpPostDispatcher(
     CHAT_CANCEL_POST_ROUTES,
     AUTHENTICATED_POST_ROUTES,
 )
+HTTP_RESPONSE_TRANSPORT = HttpResponseTransport()
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -2836,29 +2832,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(500, {"error": INTERNAL_SERVER_ERROR})
 
     def send_sse_headers(self, *, persistent: bool = True) -> None:
-        try:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Connection", "keep-alive" if persistent else "close")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("X-Frame-Options", "DENY")
-            self.send_header("X-Accel-Buffering", "no")
-            self.end_headers()
-            self.wfile.flush()
-        except self.client_disconnect_errors as exc:
-            self.log_client_disconnect()
-            raise ClientDisconnected() from exc
+        HTTP_RESPONSE_TRANSPORT.send_sse_headers(self, persistent=persistent)
 
     def send_sse_event(self, event: str, payload: Any, event_id: int | None = None) -> None:
-        data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-        try:
-            prefix = f"id: {event_id}\n" if event_id is not None else ""
-            self.wfile.write(f"{prefix}event: {event}\ndata: {data}\n\n".encode("utf-8"))
-            self.wfile.flush()
-        except self.client_disconnect_errors as exc:
-            self.log_client_disconnect()
-            raise ClientDisconnected() from exc
+        HTTP_RESPONSE_TRANSPORT.send_sse_event(self, event, payload, event_id)
 
     def do_PUT(self) -> None:
         try:
@@ -2919,24 +2896,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         )
 
     def send_json(self, status: int, payload: Any, headers: dict[str, str | list[str]] | None = None) -> None:
-        data = response_json_bytes(payload)
-        self.send_response(status)
-        for key, value in response_headers("application/json; charset=utf-8", len(data)):
-            self.send_header(key, value)
-        for key, value in response_header_items(headers):
-            self.send_header(key, value)
-        self._response_status = status
-        self._response_bytes = len(data)
-        self._response_started_at = time.perf_counter()
-        try:
-            self.end_headers()
-            self.wfile.write(data)
-        except self.client_disconnect_errors as exc:
-            self._response_error_type = type(exc).__name__
-            self.log_client_disconnect()
-        finally:
-            for attribute in ("_response_status", "_response_bytes", "_response_started_at", "_response_error_type"):
-                self.__dict__.pop(attribute, None)
+        HTTP_RESPONSE_TRANSPORT.send_json(self, status, payload, headers)
 
     def send_file_stream(
         self,
@@ -2947,63 +2907,20 @@ class RequestHandler(BaseHTTPRequestHandler):
         deadline: float | None = None,
         cleanup: bool = False,
     ) -> None:
-        try:
-            size = path.stat().st_size
-            self.send_response(200)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(size))
-            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("X-Frame-Options", "DENY")
-            self.end_headers()
-            with path.open("rb") as source:
-                while True:
-                    if deadline is not None and time.monotonic() > deadline:
-                        LOGGER.warning("File stream exceeded time limit", extra={"event": "file_stream_timeout"})
-                        break
-                    chunk = source.read(STREAM_CHUNK_BYTES)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-        except self.client_disconnect_errors:
-            self.log_client_disconnect()
-        except OSError:
-            LOGGER.warning("File stream failed", extra={"event": "file_stream_failed"}, exc_info=True)
-        finally:
-            if cleanup:
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError:
-                    LOGGER.warning("Temporary export cleanup failed", extra={"event": "export_cleanup_failed"})
+        HTTP_RESPONSE_TRANSPORT.send_file_stream(
+            self,
+            path,
+            content_type,
+            filename,
+            deadline=deadline,
+            cleanup=cleanup,
+        )
 
     def send_bytes(self, status: int, data: bytes, content_type: str, headers: dict[str, str | list[str]] | None = None) -> None:
-        self.send_response(status)
-        for key, value in response_headers(content_type, len(data)):
-            self.send_header(key, value)
-        for key, value in response_header_items(headers):
-            self.send_header(key, value)
-        try:
-            self.end_headers()
-            self.wfile.write(data)
-        except self.client_disconnect_errors:
-            self.log_client_disconnect()
+        HTTP_RESPONSE_TRANSPORT.send_bytes(self, status, data, content_type, headers)
 
     def send_static(self, path: str) -> None:
-        response = self.static_asset_service.render(
-            path,
-            getattr(self, "path", ""),
-            getattr(self, "headers", {}).get("If-None-Match"),
-        )
-        self.send_response(response.status)
-        for name, value in response.headers:
-            self.send_header(name, value)
-        try:
-            self.end_headers()
-            if response.body:
-                self.wfile.write(response.body)
-        except self.client_disconnect_errors:
-            self.log_client_disconnect()
+        HTTP_RESPONSE_TRANSPORT.send_static(self, path)
 
 
 def request_handler_class() -> type[RequestHandler]:
