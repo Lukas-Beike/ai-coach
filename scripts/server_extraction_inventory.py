@@ -264,6 +264,7 @@ def _explicit_owner(name: str) -> str | None:
             "PRIVACY_GET_ROUTES": HTTP_API_PACKAGE,
             "STATE_EVENTS_GET_ROUTES": HTTP_API_PACKAGE,
             "SETTINGS_PUT_ROUTES": HTTP_API_PACKAGE,
+            "ATHLETE_PUT_ROUTES": HTTP_API_PACKAGE,
             "login_user": HTTP_AUTH,
             "logout_user": HTTP_AUTH,
             "bootstrap_provider_states": "http_api/bootstrap.py",

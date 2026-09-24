@@ -855,6 +855,10 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
   - [x] Die vier Settings-PUT-Routen `SettingsPutRoutes` zuordnen; der
     bestehende `SettingsService` behält Validierung und Persistenz, der
     Handler die äußere Auth-/CSRF-/Maintenance- und Fehlergrenze.
+  - [x] Die PUT-Routen `/api/athlete-context` und `/api/profile` einem
+    `AthletePutRoutes` zuordnen; Profile-/Context-Dienste behalten ihre
+    Validierung und Datenbanktransaktionen, der Handler die äußere Auth-/
+    CSRF-/Maintenance- und Fehlergrenze.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 
