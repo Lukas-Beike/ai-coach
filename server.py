@@ -310,7 +310,6 @@ from backend.coach.authorization import (
     coach_session_key,
     require_coach_scope,
 )
-from backend.coach.outcomes import unresolved_coach_steps
 from backend.http_api.responses import (
     header_items as response_header_items,
     json_bytes as response_json_bytes,
