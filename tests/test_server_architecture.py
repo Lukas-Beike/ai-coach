@@ -1668,6 +1668,11 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
+    "request_ai_provider",
+    "responses_request",
+    "responses_background_request",
+    "responses_stream_request",
+    "_raise_chat_cancelled",
     "_structured_coach_final_receipt",
     "_persist_structured_coach_final_receipt",
     "UPDATE_COMMAND_RECEIPT_SQL",

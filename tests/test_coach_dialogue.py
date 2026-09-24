@@ -69,9 +69,12 @@ class DialogueHarness:
             return step(payload) if callable(step) else step
         with patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))), patch(
             "backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic local data"
-        ), patch.object(server, "responses_request", side_effect=response) as model, patch.object(server, "responses_background_request", side_effect=response) as background_model:
+        ), patch.object(server, "coach_response_transport") as transport_factory:
+            transport = transport_factory.return_value
+            transport.request.side_effect = response
+            transport.background_request.side_effect = response
             receipt = server.chat_with_coach(message, client_turn_id=turn or f"turn-{self.counter}", session_csrf_hash="synthetic-session", **kwargs)
-        return receipt, background_model if kwargs.get("background_job") else model
+        return receipt, transport.background_request if kwargs.get("background_job") else transport.request
 
     def state(self):
         return server.structured_training_state_service().read()

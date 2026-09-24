@@ -149,9 +149,10 @@ class CoachReviewTests(unittest.TestCase):
             )
         with patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="summary-recovery-conversation"))), patch(
             "backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic summary context"
-        ), patch.object(
-            server, "responses_background_request", side_effect=server.AppError(503, "Model unavailable")
-        ):
+        ), patch.object(server, "coach_response_transport") as transport_factory:
+            transport_factory.return_value.background_request.side_effect = server.AppError(
+                503, "Model unavailable"
+            )
             result = server.chat_with_coach(
                 message,
                 client_turn_id=client_turn_id,
