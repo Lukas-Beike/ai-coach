@@ -2480,6 +2480,18 @@ class ServerArchitectureTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertNotIn("server", route_source.casefold())
 
+    def test_diagnostics_capture_post_route_is_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_data_post",
+            "DIAGNOSTICS_CAPTURE_POST_ROUTES",
+            ("/api/diagnostics/capture",),
+            "DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "diagnostics_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
     def test_settings_put_routes_are_owned_by_http_api_module(self) -> None:
         self._assert_write_route_owned(
             "_do_PUT",

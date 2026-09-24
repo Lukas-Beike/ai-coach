@@ -131,6 +131,7 @@ from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
 from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
+from backend.http_api.diagnostics_post import DiagnosticsCapturePostRoutes
 from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.rate_limit import RateLimiter
@@ -2827,6 +2828,7 @@ HISTORY_UNDO_POST_ROUTES = HistoryUndoPostRoutes(
     history_undo_service,
     coach_proposal_creation_service,
 )
+DIAGNOSTICS_CAPTURE_POST_ROUTES = DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)
 PRIVACY_GET_ROUTES = PrivacyGetRoutes(
     session_auth_service, export_stream_transport, privacy_delete_service
 )
@@ -3117,9 +3119,9 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_data_post(self, path: str, session: dict[str, Any]) -> bool:
         if HISTORY_UNDO_POST_ROUTES.handle(self, path, session):
             return True
-        if path == "/api/diagnostics/capture":
-            self.send_json(200, DIAGNOSTIC_CAPTURE.set_enabled(self.read_json().get("enabled")))
-        elif path == "/api/privacy/delete":
+        if DIAGNOSTICS_CAPTURE_POST_ROUTES.handle(self, path):
+            return True
+        if path == "/api/privacy/delete":
             payload = self.read_json()
             if payload.get("confirm") != "LOKALE DATEN LÖSCHEN":
                 raise AppError(400, "Zum Löschen muss LOKALE DATEN LÖSCHEN bestätigt werden.")
