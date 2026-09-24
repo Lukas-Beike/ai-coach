@@ -841,6 +841,9 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     `/api/diagnostics/capture` einschließlich begrenztem Log-Limit
     `DiagnosticsGetRoutes` zuordnen; die bestehenden Logs-, Report- und
     Capture-Dienste bleiben Datenschutz- und Zustandseigentümer.
+  - [x] Die GET-Route `/api/change-history` einschließlich der bestehenden
+    Limit-Grenzen `HistoryGetRoutes` zuordnen; der Change-History-Dienst
+    bleibt Eigentümer des Datenbanklesens.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 

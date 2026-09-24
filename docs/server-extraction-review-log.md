@@ -7454,3 +7454,29 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - `server.py` hat 3.413 physische Zeilen. P10-History-/Privacy-GET,
   POST-/PUT-/SSE-Transport, P7/P8-Restzuordnungen und P11 bleiben offen.
   Nächster Teilauftrag: History-GET mit unveränderter MAX_ROWS-Grenze.
+
+## P10 Change-History-GET-Route — Integrationsreview
+
+- Vorgänger-PR #787 wurde am 24.09.2026 um 07:14:04 UTC mit
+  `18b87b8905002d6804a74d5483e9e5f4b5d73e97` gemergt; sämtliche
+  Checks einschließlich Browser, Codex und Sonar sind abgeschlossen und grün.
+- GPT-6-Luna-Quellcommit `1b4b92603c96fa4c0113086fa8ca11b72c1d7338`
+  wurde als `2da01206` auf diesem `develop`-Stand sequenziell integriert.
+  Root prüfte den tatsächlichen Diff und Code einschließlich Dispatch,
+  Kompositionsbindung, Auth-Reihenfolge und Regressionstests selbst.
+- **PASS:** `HistoryGetRoutes` besitzt `/api/change-history`; der Handler
+  behält nur Transport/Dispatch. Auth wird pro Request vor Query und Service
+  aufgelöst. Das erste `limit` behält Default 100, Clamp 1..1000 und
+  invalid->100. `ChangeHistoryService` bleibt Eigentümer des DB-Lesens;
+  keine Backend-Rückimporte, Server-Fachcallbacks, neuen Locks/Caches oder
+  Remote-Schreibpfade.
+- Integrierte Abnahme: frisch gebautes Read-only-/netzwerkisoliertes
+  SQLCipher-Image mit **2.655 Tests/11 Skips PASS**; fünf direkte Routentests
+  und bestehende Architektur-/Auth-Regressionen enthalten. Ruff für Route,
+  Tests, Architektur und Inventarskript, Inventar-`--check` (P0=0) sowie
+  Diff-Check **PASS**. Die Testzahl ist für den begrenzten Read-Dispatch
+  angemessen; Query-Grenzen, Authfehler, unbekannter Pfad und wiederholte
+  Requests sind direkt geprüft.
+- `server.py` hat 3.407 physische Zeilen. Privacy-GET, POST-/PUT-/SSE-
+  Transport, P7/P8-Restzuordnungen und P11 bleiben offen. Nächster kleiner
+  Auftrag: die drei Privacy-GET-Pfade samt Stream- und Auth-Grenzen.

@@ -2408,7 +2408,20 @@ class ServerArchitectureTests(unittest.TestCase):
             node.id for node in ast.walk(server_tree) if isinstance(node, ast.Name)
         })
 
-    def test_diagnostics_get_routes_are_owned_by_http_api_module(self) -> None:
+    def test_history_get_route_is_owned_by_http_api_module(self) -> None:
+        server_tree = self._assert_get_route_owned(
+            "_handle_diagnostics_get",
+            "HISTORY_GET_ROUTES",
+            method_must_be_absent=False,
+            forbidden_paths=("/api/change-history",),
+        )
+        self._assert_route_factories(
+            server_tree,
+            "HISTORY_GET_ROUTES",
+            ["session_auth_service", "change_history_service"],
+        )
+
+    def test_diagnostics_get_keeps_only_the_three_privacy_paths(self) -> None:
         server_tree = self._assert_get_route_owned(
             "_handle_diagnostics_get",
             "DIAGNOSTICS_GET_ROUTES",
@@ -2438,7 +2451,6 @@ class ServerArchitectureTests(unittest.TestCase):
             {
                 "/api/privacy/export",
                 "/api/privacy/delete/preview",
-                "/api/change-history",
                 "/api/privacy/backup",
             },
         )
