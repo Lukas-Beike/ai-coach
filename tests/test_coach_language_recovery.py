@@ -7,6 +7,7 @@ from unittest.mock import patch
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.outcomes import coach_failure_lines
+from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.planning import workouts as planning_workouts
 from backend.providers.workout_text import canonical_workout_zones, structured_steps
 
@@ -18,6 +19,10 @@ def limited(_):
 
 
 class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.retry_policy = CoachResponseRetryPolicy(server.LOGGER)
+
     def test_response_chain_stops_at_turn_boundary_and_keeps_local_dialogue(self):
         def read(_):
             return {**self.call("read_training_state"), "id": "resp_read"}
@@ -41,8 +46,8 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
             return {**self.call("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"],
                                 target="intervals", remote_write=True, sync_scope="all_pending"), "id": "resp_sync"}
         with (
-            patch.object(server.time, "sleep") as sleep,
-            patch.object(server.secrets, "randbelow", return_value=0),
+            patch("backend.coach.response_retry.time.sleep") as sleep,
+            patch("backend.coach.response_retry.secrets.randbelow", return_value=0),
             patch.object(
                 server.SyncJobQueueService,
                 "enqueue",
@@ -65,7 +70,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertIn("intervals_sync", previous["steps"][0]["scope"])
 
     def test_rate_limit_exhaustion_has_specific_message_and_no_false_effect(self):
-        with patch.object(server.time, "sleep") as sleep, patch.object(server.secrets, "randbelow", return_value=0):
+        with patch("backend.coach.response_retry.time.sleep") as sleep, patch("backend.coach.response_retry.secrets.randbelow", return_value=0):
             result, model = self.turn("Bitte synchronisieren", [limited, limited, limited])
         self.assertEqual(model.call_count, 3)
         self.assertEqual(sleep.call_count, 2)
@@ -76,16 +81,16 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
     def test_rate_limit_retry_uses_provider_delay_and_bounded_jitter(self):
         error = server.AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded")
         error.retry_after_seconds = 7
-        with patch.object(server.secrets, "randbelow", return_value=250):
-            delay = server._response_retry_delay(
+        with patch("backend.coach.response_retry.secrets.randbelow", return_value=250):
+            delay = self.retry_policy.retry_delay(
                 error, ai_provider="openai", attempt=0, request_delta_emitted=False,
             )
         self.assertEqual(delay, 7.25)
 
     def test_rate_limit_retry_defers_when_provider_delay_exceeds_retry_budget(self):
         error = server.AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded")
-        error.retry_after_seconds = server.OPENAI_MAX_RETRY_DELAY_SECONDS + 1
-        self.assertIsNone(server._response_retry_delay(
+        error.retry_after_seconds = CoachResponseRetryPolicy.MAX_RETRY_DELAY_SECONDS + 1
+        self.assertIsNone(self.retry_policy.retry_delay(
             error, ai_provider="openai", attempt=0, request_delta_emitted=False,
         ))
 
@@ -102,7 +107,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         outputs = [{"type": "function_call_output", "call_id": "saved", "output": '{"ok":true}'}]
         server.coach_job_store().merge_receipt(turn, {"openai_response_id": "resp_waiting", "response_input": outputs,
                                                    "previous_response_id": "resp_tool"})
-        with patch.object(server.time, "sleep"):
+        with patch("backend.coach.response_retry.time.sleep"):
             result, model = self.turn("Bitte fortsetzen", [limited, {"id": "resp_final", "output_text": "Fertig."}], turn=turn, background_job=True)
         self.assertEqual(result["status"], "completed")
         self.assertEqual(model.call_args_list[0].kwargs["response_id"], "resp_waiting")
@@ -119,7 +124,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         )
         with server.database() as db:
             db.execute("UPDATE sync_jobs SET status='completed' WHERE id=?", (job["id"],))
-        with patch.object(server.time, "sleep"):
+        with patch("backend.coach.response_retry.time.sleep"):
             result, _ = self.turn("Ist der Plan übertragen?", [lambda _: self.call("get_sync_job", {"job_id": job["id"]}), limited, limited, limited])
         self.assertIn("erfolgreich abgeschlossen", result["message"]["content"])
         self.assertIn("Anfragelimit", result["message"]["content"])
