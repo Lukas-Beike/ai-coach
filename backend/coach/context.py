@@ -27,6 +27,21 @@ from backend.sync.state import SyncStateRepository
 
 COACH_RECENT_ACTIVITIES_PER_SPORT = 5
 COACH_PLANNED_EVENT_LIMIT = 50
+COACH_LOCAL_PLANNED_LIMIT = 50
+COACH_LIBRARY_LIMIT = 12
+COACH_LIBRARY_DESCRIPTION_LIMIT = 1500
+COACH_CONTEXT_TOTAL_CHAR_LIMIT = 120_000
+COACH_CONTEXT_SECTION_LIMITS = {
+    "intervals": 32_000,
+    "current_performance": 24_000,
+    "garmin": 16_000,
+    "local_feedback": 12_000,
+    "activity_feedback": 12_000,
+    "planning": 16_000,
+    "weather": 16_000,
+    "daily_planning_context": 24_000,
+    "external_calendar": 20_000,
+}
 LOGGER = logging.getLogger("intervals_coach")
 
 COACH_ACTIVITY_FIELDS = (

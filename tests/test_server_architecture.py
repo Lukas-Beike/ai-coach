@@ -113,6 +113,13 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "bounded_coach_context_value",
             "bounded_coach_context_sections",
             "coach_context_projection_meta",
+            "COACH_RECENT_ACTIVITIES_PER_SPORT",
+            "COACH_PLANNED_EVENT_LIMIT",
+            "COACH_LOCAL_PLANNED_LIMIT",
+            "COACH_LIBRARY_LIMIT",
+            "COACH_LIBRARY_DESCRIPTION_LIMIT",
+            "COACH_CONTEXT_TOTAL_CHAR_LIMIT",
+            "COACH_CONTEXT_SECTION_LIMITS",
         ),
     ),
     (

@@ -21,6 +21,7 @@ from urllib.parse import quote
 from unittest.mock import Mock, call, patch
 from support import IntervalsRequestRecorder, RecordedIntervalsClient, build_gemini_request_payload, create_test_session, parsed_workout_fixture
 from backend.coach import streams as coach_streams
+from backend.coach import context as coach_context
 from backend.coach.context import CoachIntervalsContextService, future_coach_planned_workouts
 from backend.coach.attachments import gemini_history_parts
 from backend.coach.proposals import validated_coach_action_preview_input
@@ -6067,6 +6068,43 @@ class CoachTests(unittest.TestCase):
         self.assertEqual([item["name"] for item in result["planned_workouts"]], ["Future workout"])
         self.assertEqual(result["activity_rollups_by_sport"]["Radfahren"]["last_7_days"]["sessions"], 7)
 
+    def test_coach_intervals_context_keeps_planned_event_limit(self):
+        today = server.local_now().date()
+        events = [
+            {"id": f"event-{index}", "name": f"Workout {index}",
+             "start_date_local": (today + timedelta(days=1)).isoformat()}
+            for index in range(coach_context.COACH_PLANNED_EVENT_LIMIT + 5)
+        ]
+        result = CoachIntervalsContextService().project(
+            {}, events, today
+        )
+        self.assertEqual(
+            len(result["planned_workouts"]), coach_context.COACH_PLANNED_EVENT_LIMIT
+        )
+
+    def test_context_budget_factories_use_backend_owned_values(self):
+        training = server.coach_training_context_service()
+        preview_limits = server.coach_context_preview_service()._limits
+        expected = {
+            "_local_planned_limit": coach_context.COACH_LOCAL_PLANNED_LIMIT,
+            "_library_limit": coach_context.COACH_LIBRARY_LIMIT,
+            "_library_description_limit": coach_context.COACH_LIBRARY_DESCRIPTION_LIMIT,
+            "_section_limits": coach_context.COACH_CONTEXT_SECTION_LIMITS,
+            "_total_char_limit": coach_context.COACH_CONTEXT_TOTAL_CHAR_LIMIT,
+            "_activity_limit_per_sport": coach_context.COACH_RECENT_ACTIVITIES_PER_SPORT,
+            "_planned_event_limit": coach_context.COACH_PLANNED_EVENT_LIMIT,
+        }
+        for attribute, value in expected.items():
+            with self.subTest(attribute=attribute):
+                self.assertEqual(getattr(training, attribute), value)
+        self.assertEqual(preview_limits.local_planned_limit, coach_context.COACH_LOCAL_PLANNED_LIMIT)
+        self.assertEqual(preview_limits.library_limit, coach_context.COACH_LIBRARY_LIMIT)
+        self.assertEqual(preview_limits.library_description_limit, coach_context.COACH_LIBRARY_DESCRIPTION_LIMIT)
+        self.assertEqual(preview_limits.section_limits, coach_context.COACH_CONTEXT_SECTION_LIMITS)
+        self.assertEqual(preview_limits.total_char_limit, coach_context.COACH_CONTEXT_TOTAL_CHAR_LIMIT)
+        self.assertEqual(preview_limits.activity_limit_per_sport, coach_context.COACH_RECENT_ACTIVITIES_PER_SPORT)
+        self.assertEqual(preview_limits.planned_event_limit, coach_context.COACH_PLANNED_EVENT_LIMIT)
+
     def test_future_coach_planned_workouts_excludes_invalid_and_past_dates(self):
         today = date(2026, 9, 13)
         planned = future_coach_planned_workouts([
@@ -6145,7 +6183,7 @@ class CoachTests(unittest.TestCase):
         context = server.coach_training_context_service().build()
         self.assertEqual(context.count("LOCAL PLANNED WORKOUTS"), 1)
         self.assertEqual(context.count('"local_planned_workouts"'), 1)
-        self.assertLessEqual(len(context), server.COACH_CONTEXT_TOTAL_CHAR_LIMIT)
+        self.assertLessEqual(len(context), coach_context.COACH_CONTEXT_TOTAL_CHAR_LIMIT)
         structured = server.coach_structured_context_service().build()
         self.assertIn("local_planned_workouts", structured)
         self.assertIn('"projection"', context)
@@ -6156,7 +6194,7 @@ class CoachTests(unittest.TestCase):
             first = server.coach_training_context_service().build()
             second = server.coach_training_context_service().build()
         self.assertEqual(first, second)
-        self.assertLessEqual(len(first), server.COACH_CONTEXT_TOTAL_CHAR_LIMIT)
+        self.assertLessEqual(len(first), coach_context.COACH_CONTEXT_TOTAL_CHAR_LIMIT)
 
     def test_build_training_context_uses_compact_intervals_projection(self):
         today = server.local_now().date()
