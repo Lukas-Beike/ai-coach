@@ -7,12 +7,12 @@ from typing import Any
 
 from backend.athlete.profile import ProfileService
 from backend.coach.context import CoachContextPreviewService
-from backend.planning.competition_service import CompetitionService
 from backend.http_api.auth import SessionAuthService
 from backend.http_api.public_performance import (
     PublicFeedbackStateService,
     PublicPerformanceStateService,
 )
+from backend.planning.competition_service import CompetitionService
 from backend.settings import SettingsService
 
 
