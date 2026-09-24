@@ -615,6 +615,9 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   - [x] Atomare Turn-Eröffnung mit User-Nachricht, Session-Bindung,
     Idempotenz und Rollback `CoachTurnOpeningService` zuordnen;
     Gesamtloop bleibt offen.
+  - [x] Provider-Routing, OpenAI-/Gemini-Request-/Background-/Stream-
+    Transport und beidseitige Gemini-Cancellation-Prüfung
+    `CoachResponseTransport` zuordnen; Gesamtloop bleibt offen.
   - [x] Provider-Request-Aufbau einschließlich Dialogkontext,
     Attachment-Sicherheitsanweisung, OpenAI-Kontinuität, Gemini-Medien
     und Modell-/Thinking-Auswahl `CoachRequestPayloadService` zuordnen;

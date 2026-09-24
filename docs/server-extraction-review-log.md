@@ -6656,8 +6656,8 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - #768 wurde am 24.09.2026 um 02:27:40 UTC mit Merge-Commit
   `6ef739b3f2f87842f8e0176de68e916235cd65a2` gemergt;
   der Commit ist auf `origin/develop` erreichbar und Review-Threads: 0.
-  Der optionale Browser-Check lief beim Merge noch; seine finale
-  Prüfung bleibt offen.
+  Der optionale Browser-Check war beim Merge noch offen und ist
+  inzwischen ebenfalls **PASS**.
 - GPT-6-Luna-Quellcommit `3efe9922b544593811cba16e2bbcd49edaef14d0`
   wurde konfliktfrei als `019fddab` auf diesen Stand integriert.
   Root prüfte den tatsächlichen Code/Diff: **PASS**. Die sieben
@@ -6669,3 +6669,33 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Ruff der geänderten Nicht-Server-Dateien, Compileall, Inventar- und
   Diff-Check **PASS**. `server.py`: 4.168 physische Zeilen; P0=0.
   Veröffentlichung und PR-CI stehen noch aus.
+
+## P8 Coach-Response-Transport — integrierter Diff-Stand
+
+- #769 wurde am 24.09.2026 um 02:35:50 UTC mit Merge-Commit
+  `fbbf0ef5a760fa7f28cfcdbb6c11f2daf419c6b8` gemergt;
+  Commit auf `origin/develop` erreichbar, null Review-Threads.
+  Der optionale Browser-Check war beim Merge noch offen und ist
+  inzwischen ebenfalls **PASS**.
+- Root-Produktpatch und GPT-6-Luna-Testmigration wurden als Quellcommit
+  `9eaa2757` geprüft: **PASS**. Eine zusätzliche volle Suite fand einen
+  alten Patch auf `server.responses_background_request`; derselbe Worker
+  korrigierte ausschließlich dieses freigegebene Testziel. Root prüfte
+  danach erneut Code und vollständigen Test-Diff. `CoachResponseTransport`
+  besitzt Providerwahl sowie OpenAI-/Gemini-Request-, Background- und
+  Stream-Dispatch. Nur der gewählte Adapter wird konstruiert; die
+  Gemini-Cancel-Grenze wird vor und nach dem Aufruf geprüft. Kein
+  Rückimport, Server-Callback oder dauerhafter Kompatibilitäts-Wrapper.
+- Quellstand: 15 direkte/Architektur-/Review-Tests, 600 betroffene
+  Integrationstests/4 Skips, native Vollsuite 2.555 Tests/12 Skips
+  und frisches Read-only-Docker-Image 2.555 Tests/11 Skips **PASS**.
+  Ruff des neuen Moduls, direkten Tests und Architekturtests, Compileall,
+  Diff-Check **PASS**; 194 bestehende Legacy-Test-Ruff-Befunde blieben
+  außerhalb des Umfangs.
+- Quellcommit wurde auf dem #769-Merge als `6ea7dec3` integriert;
+  einzig kollidierende Importzeilen im Test wurden additiv zusammengeführt.
+  Root-Review des integrierten Codes/Diffs: **PASS**. 15 fokussierte
+  Tests, Ruff, Compileall, Inventar- und Diff-Check **PASS**;
+  frisches Read-only-Docker-Image: 2.557 Tests/11 Skips **PASS**.
+  `server.py`: 4.119 physische Zeilen, P0=0. Veröffentlichung und
+  PR-CI stehen noch aus; die Gesamt-Response-/Tool-Schleife bleibt P8-offen.
