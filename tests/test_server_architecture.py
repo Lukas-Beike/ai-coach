@@ -1679,6 +1679,7 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "responses_background_request",
     "responses_stream_request",
     "_raise_chat_cancelled",
+    "chat_stream_status",
     "_structured_coach_final_receipt",
     "_persist_structured_coach_final_receipt",
     "UPDATE_COMMAND_RECEIPT_SQL",

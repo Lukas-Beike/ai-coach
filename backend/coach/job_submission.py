@@ -64,6 +64,23 @@ class CoachJobSubmissionService:
                 rows = self._active_rows(db)
         return self._find_active(rows, session_key, operation_id)
 
+    def stream_status(self, session_csrf_hash: str) -> dict[str, Any]:
+        """Project attached or durable background activity for this session."""
+        attached = self._stream_registry.attached_status(session_csrf_hash)
+        if attached:
+            return attached
+        job = self.active(session_csrf_hash)
+        if not job:
+            return {"status": "idle", "operation_id": None}
+        receipt = job["receipt"]
+        return {
+            "status": "running",
+            "operation_id": receipt.get("operation_id"),
+            "mode": "background",
+            "phase": receipt.get("phase") or job.get("status"),
+            "plan_scope": receipt.get("plan_scope") or {},
+        }
+
     @staticmethod
     def _active_rows(db: Any) -> list[dict[str, Any]]:
         return db.execute(

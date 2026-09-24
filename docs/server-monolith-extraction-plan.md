@@ -646,6 +646,10 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
     Anhangsquote und atomarer Command-/Message-Persistenz einem
     `CoachJobSubmissionService` zuordnen; Worker-/Turn-Ausführung bleibt
     offen. Resume und Cancel sind in den folgenden Teilaufgaben abgeschlossen.
+  - [x] Sessiongebundene Attached-/Background-Statusprojektion einschließlich
+    Attached-Priorität und idle-Fallback dem `CoachJobSubmissionService`
+    zuordnen; der HTTP-Handler delegiert direkt, Worker-/Turn-Ausführung
+    bleibt offen.
   - [x] Sessiongebundene Attached-/Background-Cancellation samt
     persistierter Cancel-Markierung, Provider-Response-Close und
     Restart-Verhalten einem `CoachCancellationService` zuordnen;
