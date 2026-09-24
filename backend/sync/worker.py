@@ -73,6 +73,11 @@ class SyncJobWorker:
             self._stop_event.set()
             self._wake_event.set()
 
+    def join(self, timeout: float | None = None) -> None:
+        thread = self._worker_thread
+        if thread is not None:
+            thread.join(timeout)
+
     def run_loop(self) -> None:
         """Run claims until stopped; non-maintenance errors remain visible."""
         while not self._stop_event.is_set():

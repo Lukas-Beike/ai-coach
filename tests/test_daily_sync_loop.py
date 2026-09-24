@@ -1,4 +1,6 @@
 import logging
+import threading
+import time
 import unittest
 from unittest.mock import Mock, call
 
@@ -107,6 +109,26 @@ class DailySyncLoopTests(unittest.TestCase):
         self.assertEqual(sleeper.calls, [300])
         morning.refresh.assert_not_called()
         logger.error.assert_not_called()
+
+    def test_stop_interrupts_wait_without_scheduling_another_refresh(self):
+        scheduler = Mock()
+        morning = Mock()
+        stop_event = threading.Event()
+        loop = DailySyncLoop(
+            scheduler,
+            morning,
+            sleep=time.sleep,
+            logger=Mock(spec=logging.Logger),
+            stop_event=stop_event,
+        )
+        thread = threading.Thread(target=loop.run)
+        thread.start()
+        loop.stop()
+        thread.join(1)
+
+        self.assertFalse(thread.is_alive())
+        scheduler.schedule.assert_not_called()
+        morning.refresh.assert_not_called()
 
 
 if __name__ == "__main__":
