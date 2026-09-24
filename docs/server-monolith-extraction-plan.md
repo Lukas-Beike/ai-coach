@@ -495,6 +495,9 @@ Abhängigkeit: P2–P6.
 
 - [x] Kontextaufbau, Projektionen, Prompttexte und Kontextvorschau in `coach/`
   bündeln. Der Kontext konsumiert Domänenlesefunktionen.
+  - [x] Die sieben Prompt-/Kontext-Budgetgrenzen dem bestehenden
+    `coach/context.py` zuordnen; beide Composition-Root-Factories
+    konsumieren dieselben Werte ohne Budgetänderung.
 - [ ] Konversationshistorie, Reset, Attachments und Usage-Zuordnung auslagern.
   - [x] Providerabhängige Konversations-ID-Bereitstellung einschließlich
     persistierter Wiederverwendung und OpenAI-/Gemini-Erzeugung einem

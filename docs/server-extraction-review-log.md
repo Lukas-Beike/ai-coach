@@ -6650,3 +6650,22 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   2.547 Tests/11 Skips und native Vollsuite 2.547 Tests/12 Skips
   **PASS**. Die 23 bestehenden Server-Ruff-Befunde sind unverändert.
   Root-Review des integrierten Stands: **PASS**; PR-CI steht noch aus.
+
+## P7 Coach-Kontextbudgets — integrierter Diff-Stand
+
+- #768 wurde am 24.09.2026 um 02:27:40 UTC mit Merge-Commit
+  `6ef739b3f2f87842f8e0176de68e916235cd65a2` gemergt;
+  der Commit ist auf `origin/develop` erreichbar und Review-Threads: 0.
+  Der optionale Browser-Check lief beim Merge noch; seine finale
+  Prüfung bleibt offen.
+- GPT-6-Luna-Quellcommit `3efe9922b544593811cba16e2bbcd49edaef14d0`
+  wurde konfliktfrei als `019fddab` auf diesen Stand integriert.
+  Root prüfte den tatsächlichen Code/Diff: **PASS**. Die sieben
+  Kontextbudgets besitzen mit `backend/coach/context.py` genau einen
+  Eigentümer; beide Composition-Root-Factories lesen dieselben Werte.
+  Keine geänderten Limits, Rückimporte, Server-Callbacks oder Wrapper.
+- Zwei neue Grenz-/Factory-Tests und sechs Architekturtests: **PASS**.
+  Frisches Read-only-Docker-Image: 2.549 Tests/11 Skips **PASS**;
+  Ruff der geänderten Nicht-Server-Dateien, Compileall, Inventar- und
+  Diff-Check **PASS**. `server.py`: 4.168 physische Zeilen; P0=0.
+  Veröffentlichung und PR-CI stehen noch aus.
