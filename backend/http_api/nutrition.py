@@ -12,6 +12,9 @@ from backend.http_api.auth import SessionAuthService
 from backend.nutrition.service import NutritionService
 from backend.nutrition.sync import IntervalsNutritionSyncService
 
+NUTRITION_ENTRY_PATH = "/api/nutrition/entry"
+INVALID_BODY = "Ungültiger Anfrageinhalt."
+
 
 class NutritionGetRoutes:
     """Handle authenticated nutrition query routes."""
@@ -62,50 +65,42 @@ class NutritionPostRoutes:
         self._nutrition_service = nutrition_service
         self._nutrition_sync_service = nutrition_sync_service
 
-    def handle(self, handler: Any, path: str, session: dict[str, Any]) -> bool:
-        if path not in {
-            "/api/nutrition/entry",
-            "/api/nutrition/entry/delete",
-            "/api/nutrition/sync",
-        }:
+    def handle(self, handler: Any, path: str) -> bool:
+        routes = {
+            NUTRITION_ENTRY_PATH: self._create,
+            f"{NUTRITION_ENTRY_PATH}/delete": self._delete,
+            "/api/nutrition/sync": self._sync,
+        }
+        route = routes.get(path)
+        if route is None:
             return False
+        route(handler)
+        return True
 
-        svc = self._nutrition_service()
+    def _create(self, handler: Any) -> None:
+        entry = self._nutrition_service().log_meal(handler.read_json())
+        handler.send_json(200, {"ok": True, "entry": entry})
 
-        if path == "/api/nutrition/entry":
-            payload = handler.read_json()
-            entry = svc.log_meal(payload)
-            handler.send_json(200, {"ok": True, "entry": entry})
-            return True
+    def _delete(self, handler: Any) -> None:
+        payload = _read_object(handler)
+        entry_id = payload.get("id") or payload.get("entry_id")
+        if not entry_id:
+            raise AppError(400, "id ist erforderlich zum Löschen.")
+        result = self._nutrition_service().delete_meal(str(entry_id))
+        handler.send_json(200, {"ok": True, **result})
 
-        if path == "/api/nutrition/entry/delete":
-            payload = handler.read_json()
-            if not isinstance(payload, dict):
-                raise AppError(400, "Ungültiger Anfrageinhalt.")
-            entry_id = payload.get("id") or payload.get("entry_id")
-            if not entry_id:
-                raise AppError(400, "id ist erforderlich zum Löschen.")
-            result = svc.delete_meal(str(entry_id))
-            handler.send_json(200, {"ok": True, **result})
-            return True
-
-        if path == "/api/nutrition/sync":
-            if not self._nutrition_sync_service:
-                raise AppError(400, "Intervals.icu Sync ist nicht verfügbar.")
-            payload = handler.read_json() if handler.headers.get("Content-Length") else {}
-            if not isinstance(payload, dict):
-                raise AppError(400, "Ungültiger Anfrageinhalt.")
-            sync_svc = self._nutrition_sync_service()
-            meal_date = payload.get("date") or payload.get("meal_date")
-            if meal_date:
-                result = sync_svc.sync_day(meal_date)
-            else:
-                limit = payload.get("limit") or 14
-                result = sync_svc.sync_pending(limit=limit)
-            handler.send_json(200, {"ok": True, **result})
-            return True
-
-        return False
+    def _sync(self, handler: Any) -> None:
+        if not self._nutrition_sync_service:
+            raise AppError(400, "Intervals.icu Sync ist nicht verfügbar.")
+        payload = _read_object(handler) if handler.headers.get("Content-Length") else {}
+        sync_service = self._nutrition_sync_service()
+        meal_date = payload.get("date") or payload.get("meal_date")
+        result = (
+            sync_service.sync_day(meal_date)
+            if meal_date
+            else sync_service.sync_pending(limit=payload.get("limit") or 14)
+        )
+        handler.send_json(200, {"ok": True, **result})
 
 
 class NutritionPutRoutes:
@@ -118,12 +113,10 @@ class NutritionPutRoutes:
         self._nutrition_service = nutrition_service
 
     def handle(self, handler: Any, path: str) -> bool:
-        if path != "/api/nutrition/entry":
+        if path != NUTRITION_ENTRY_PATH:
             return False
 
-        payload = handler.read_json()
-        if not isinstance(payload, dict):
-            raise AppError(400, "Ungültiger Anfrageinhalt.")
+        payload = _read_object(handler)
         entry_id = payload.get("id") or payload.get("entry_id")
         if not entry_id:
             raise AppError(400, "id ist erforderlich zum Aktualisieren.")
@@ -131,3 +124,10 @@ class NutritionPutRoutes:
         updated = svc.update_meal(str(entry_id), payload)
         handler.send_json(200, {"ok": True, "entry": updated})
         return True
+
+
+def _read_object(handler: Any) -> dict[str, Any]:
+    payload = handler.read_json()
+    if not isinstance(payload, dict):
+        raise AppError(400, INVALID_BODY)
+    return payload

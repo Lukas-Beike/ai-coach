@@ -30,6 +30,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "public_event_candidates": {"id", "source_id", "uid", "name", "event_date", "sport", "distance", "location", "url", "description", "imported_competition_id", "created_at", "updated_at"},
     "external_calendar_events": {"id", "uid", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day", "training_relevant", "no_intensity", "short_only", "updated_at"},
     "nutrition_logs": {"id", "meal_date", "logged_at", "meal_type", "description", "kcal", "carbs_g", "protein_g", "fat_g", "source", "sync_state", "created_at", "updated_at"},
+    "nutrition_sync_dates": {"meal_date", "revision", "sync_state", "updated_at"},
     "sessions": {"token_hash", "csrf_hash", "expires_at", "created_at", "last_seen"},
 }
 
@@ -336,6 +337,12 @@ def initialize_schema(db: Any) -> None:
         updated_at TEXT NOT NULL
     );
     CREATE INDEX idx_nutrition_logs_date ON nutrition_logs(meal_date, logged_at DESC);
+    CREATE TABLE nutrition_sync_dates (
+        meal_date TEXT PRIMARY KEY,
+        revision INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'pending' CHECK(sync_state IN ('pending', 'synced')),
+        updated_at TEXT NOT NULL
+    );
     CREATE TABLE sessions (
         token_hash TEXT PRIMARY KEY,
         csrf_hash TEXT NOT NULL,

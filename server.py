@@ -2875,7 +2875,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_coach_post(path, session)
             or self._handle_sync_post(path)
             or self._handle_data_post(path, session)
-            or NUTRITION_POST_ROUTES.handle(self, path, session)
+            or NUTRITION_POST_ROUTES.handle(self, path)
         )
         if not handled:
             raise AppError(404, NOT_FOUND_ERROR)

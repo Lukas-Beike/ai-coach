@@ -35,7 +35,8 @@ class IntervalsNutritionSyncService:
 
     def sync_day(self, meal_date: str) -> dict[str, Any]:
         """Push daily calorie and macro aggregates for a specific date to Intervals.icu."""
-        summary = self._nutrition_service.get_day_summary(meal_date)
+        summary = self._nutrition_service.get_sync_snapshot(meal_date)
+        revision = summary.pop("sync_revision")
         athlete = self._athlete_id
         if not athlete:
             raise AppError(400, "Intervals Athlete-ID ist nicht konfiguriert.")
@@ -54,10 +55,11 @@ class IntervalsNutritionSyncService:
         endpoint = f"/athlete/{athlete}/wellness/{meal_date}"
         try:
             remote_record = self._api_client.put(endpoint, payload)
-            self._nutrition_service.mark_date_synced(meal_date)
+            current = self._nutrition_service.mark_date_synced(meal_date, revision)
             return {
                 "ok": True,
                 "date": meal_date,
+                "pending": not current,
                 "remote_endpoint": endpoint,
                 "synced_summary": {
                     "kcalConsumed": summary["total_kcal"],

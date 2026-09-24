@@ -83,7 +83,7 @@ class NutritionHttpApiTests(unittest.TestCase):
             "kcal": 350,
         }
         session = {"csrf_hash": "abc"}
-        handled = self.post_routes.handle(self.handler, "/api/nutrition/entry", session)
+        handled = self.post_routes.handle(self.handler, "/api/nutrition/entry")
         self.assertTrue(handled)
         self.nutrition_service.log_meal.assert_called_once()
         self.handler.send_json.assert_called_once_with(
@@ -95,7 +95,7 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.handler.read_json.return_value = {"id": "entry-123"}
         self.nutrition_service.delete_meal.return_value = {"status": "ok", "deleted_id": "entry-123"}
         session = {"csrf_hash": "abc"}
-        handled = self.post_routes.handle(self.handler, "/api/nutrition/entry/delete", session)
+        handled = self.post_routes.handle(self.handler, "/api/nutrition/entry/delete")
         self.assertTrue(handled)
         self.nutrition_service.delete_meal.assert_called_once_with("entry-123")
         self.handler.send_json.assert_called_once_with(
@@ -107,7 +107,7 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.handler.read_json.return_value = {"date": "2026-09-24"}
         self.sync_service.sync_day.return_value = {"ok": True, "date": "2026-09-24"}
         session = {"csrf_hash": "abc"}
-        handled = self.post_routes.handle(self.handler, "/api/nutrition/sync", session)
+        handled = self.post_routes.handle(self.handler, "/api/nutrition/sync")
         self.assertTrue(handled)
         self.sync_service.sync_day.assert_called_once_with("2026-09-24")
 
@@ -138,13 +138,14 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
         mock_api = Mock()
         mock_nutrition = Mock()
 
-        mock_nutrition.get_day_summary.return_value = {
+        mock_nutrition.get_sync_snapshot.return_value = {
             "date": "2026-09-24",
             "total_kcal": 2200,
             "total_carbs_g": 250.0,
             "total_protein_g": 130.0,
             "total_fat_g": 65.0,
             "entry_count": 3,
+            "sync_revision": 4,
         }
         mock_api.put.return_value = {"id": "2026-09-24", "kcalConsumed": 2200}
 
@@ -166,7 +167,23 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
                 "fat": 65.0,
             },
         )
-        mock_nutrition.mark_date_synced.assert_called_once_with("2026-09-24")
+        mock_nutrition.mark_date_synced.assert_called_once_with("2026-09-24", 4)
+
+    def test_sync_keeps_date_pending_when_meal_changes_during_remote_write(self) -> None:
+        config = Mock(spec=Config)
+        config.intervals_athlete_id = "i12345"
+        api = Mock()
+        nutrition = Mock()
+        nutrition.get_sync_snapshot.return_value = {
+            "date": "2026-09-24", "total_kcal": 500, "total_carbs_g": 0,
+            "total_protein_g": 0, "total_fat_g": 0, "entry_count": 1,
+            "sync_revision": 7,
+        }
+        nutrition.mark_date_synced.return_value = False
+        result = IntervalsNutritionSyncService(config, api, nutrition).sync_day("2026-09-24")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["pending"])
+        nutrition.mark_date_synced.assert_called_once_with("2026-09-24", 7)
 
     def test_sync_pending_processes_all_dates(self) -> None:
         mock_config = Mock(spec=Config)
@@ -175,9 +192,9 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
         mock_nutrition = Mock()
 
         mock_nutrition.list_unsynced_dates.return_value = ["2026-09-23", "2026-09-24"]
-        mock_nutrition.get_day_summary.side_effect = [
-            {"date": "2026-09-23", "total_kcal": 1800, "total_carbs_g": 0, "total_protein_g": 0, "total_fat_g": 0},
-            {"date": "2026-09-24", "total_kcal": 2100, "total_carbs_g": 0, "total_protein_g": 0, "total_fat_g": 0},
+        mock_nutrition.get_sync_snapshot.side_effect = [
+            {"date": "2026-09-23", "total_kcal": 1800, "total_carbs_g": 0, "total_protein_g": 0, "total_fat_g": 0, "sync_revision": 1},
+            {"date": "2026-09-24", "total_kcal": 2100, "total_carbs_g": 0, "total_protein_g": 0, "total_fat_g": 0, "sync_revision": 2},
         ]
 
         sync_service = IntervalsNutritionSyncService(

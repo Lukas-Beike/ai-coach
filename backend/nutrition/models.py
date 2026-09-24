@@ -12,11 +12,11 @@ from backend.errors import AppError
 
 VALID_MEAL_TYPES = ("breakfast", "lunch", "dinner", "snack")
 VALID_SOURCES = ("manual", "voice", "photo", "coach")
-VALID_SYNC_STATES = ("local", "synced", "pending", "failed")
 
 MAX_KCAL = 10000
 MAX_MACRO_G = 1000.0
 MAX_DESCRIPTION_LEN = 500
+MEAL_DATE_REQUIRED = "meal_date ist erforderlich."
 
 
 def validate_iso_date(value: Any) -> str:
@@ -126,120 +126,92 @@ def normalize_nutrition_entry(
     """Validate and normalize one raw nutrition payload."""
     if not isinstance(raw, dict):
         raise AppError(400, "Ernährungseintrag muss ein JSON-Objekt sein.")
-
     if local_now_factory is not None:
         now_dt = local_now_factory()
-        if not default_date:
-            default_date = now_dt.date().isoformat()
-        if not default_time:
-            default_time = now_dt.isoformat()
-
-    # 1. Date
+        default_date = default_date or now_dt.date().isoformat()
+        default_time = default_time or now_dt.isoformat()
     raw_date = raw.get("meal_date") or raw.get("date") or default_date
     if not raw_date:
-        raise AppError(400, "meal_date ist erforderlich.")
+        raise AppError(400, MEAL_DATE_REQUIRED)
     meal_date = validate_iso_date(raw_date)
-
-    # 2. Logged at timestamp
-    raw_logged_at = raw.get("logged_at") or default_time
-    if not raw_logged_at and raw.get("meal_time"):
-        raw_logged_at = f"{meal_date}T{str(raw['meal_time']).strip()}"
-    if raw_logged_at:
-        try:
-            # Check ISO format
-            datetime.fromisoformat(str(raw_logged_at).replace("Z", "+00:00"))
-            logged_at = str(raw_logged_at)
-        except (ValueError, TypeError):
-            logged_at = f"{meal_date}T12:00:00"
-    else:
-        logged_at = f"{meal_date}T12:00:00"
-
-    # 3. Meal type
-    raw_meal_type = str(raw.get("meal_type") or "").strip().lower()
-    if not raw_meal_type:
-        try:
-            dt = datetime.fromisoformat(logged_at.replace("Z", "+00:00"))
-            raw_meal_type = meal_type_from_hour(dt.hour)
-        except Exception:
-            raw_meal_type = "snack"
-    if raw_meal_type not in VALID_MEAL_TYPES:
-        raise AppError(
-            400,
-            f"Ungültiger Mahlzeittyp '{raw_meal_type}'. Erlaubt sind: {', '.join(VALID_MEAL_TYPES)}.",
-        )
-    meal_type = raw_meal_type
-
-    # 4. Description
+    logged_at = _normalize_logged_at(
+        meal_date, raw.get("logged_at") or raw.get("meal_time") or default_time
+    )
+    meal_type = _normalize_meal_type(raw.get("meal_type"), logged_at)
     raw_desc = str(raw.get("description") or "").strip()
     if not raw_desc:
         raise AppError(400, "Beschreibung der Mahlzeit ist erforderlich.")
     description = raw_desc[:MAX_DESCRIPTION_LEN]
-
-    # 5. Calories (kcal)
-    raw_kcal = raw.get("kcal")
-    if raw_kcal is None:
-        raw_kcal = raw.get("calories")
-    if raw_kcal is None:
-        raise AppError(400, "Kalorienangabe (kcal) ist erforderlich.")
-    try:
-        kcal_num = float(str(raw_kcal).replace(",", "."))
-    except (TypeError, ValueError):
-        raise AppError(400, f"Ungültige Kalorienangabe: {raw_kcal}")
-    if not math.isfinite(kcal_num):
-        raise AppError(400, "Kalorien dürfen nicht unendlich oder NaN sein.")
-
-    if clamp_out_of_bounds:
-        kcal_num = max(0.0, min(kcal_num, float(MAX_KCAL)))
-    else:
-        if kcal_num < 0:
-            raise AppError(400, "Kalorien dürfen nicht negativ sein.")
-        if kcal_num > MAX_KCAL:
-            raise AppError(400, f"Kalorien übersteigen das Maximum von {MAX_KCAL} kcal.")
-    kcal = int(round(kcal_num))
-
-    # 6. Macros (optional)
-    carbs_value = next((raw[key] for key in ("carbs_g", "carbs", "carbohydrates") if raw.get(key) is not None), None)
-    protein_value = next((raw[key] for key in ("protein_g", "protein") if raw.get(key) is not None), None)
-    fat_value = next((raw[key] for key in ("fat_g", "fat") if raw.get(key) is not None), None)
-    carbs_g = _as_nonnegative_number(
-        carbs_value,
-        "Kohlenhydrate",
-        MAX_MACRO_G,
-        clamp=clamp_out_of_bounds,
-    )
-    protein_g = _as_nonnegative_number(
-        protein_value,
-        "Protein",
-        MAX_MACRO_G,
-        clamp=clamp_out_of_bounds,
-    )
-    fat_g = _as_nonnegative_number(
-        fat_value,
-        "Fett",
-        MAX_MACRO_G,
-        clamp=clamp_out_of_bounds,
-    )
-
-    # 7. Source & Sync state
-    source = str(raw.get("source") or "manual").strip().lower()
-    if source not in VALID_SOURCES:
-        source = "manual"
-
-    # Sync state is owned by the server; client payloads cannot suppress a push.
-    sync_state = "local"
-
-    entry_dict: dict[str, Any] = {
+    carbs_g, protein_g, fat_g = _normalize_macros(raw, clamp_out_of_bounds)
+    return {
         "meal_date": meal_date,
         "logged_at": logged_at,
         "meal_type": meal_type,
         "description": description,
-        "kcal": kcal,
+        "kcal": _normalize_calories(raw, clamp_out_of_bounds),
         "carbs_g": carbs_g,
         "protein_g": protein_g,
         "fat_g": fat_g,
-        "source": source,
-        "sync_state": sync_state,
+        "source": _normalize_source(raw.get("source")),
+        "sync_state": "local",
+        **({"id": str(raw["id"])} if raw.get("id") else {}),
     }
-    if raw.get("id"):
-        entry_dict["id"] = str(raw["id"])
-    return entry_dict
+
+
+def _normalize_logged_at(meal_date: str, value: Any) -> str:
+    if not value:
+        return f"{meal_date}T12:00:00"
+    try:
+        timestamp = str(value)
+        if "T" not in timestamp:
+            timestamp = f"{meal_date}T{timestamp}"
+        datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        return timestamp
+    except (ValueError, TypeError):
+        return f"{meal_date}T12:00:00"
+
+
+def _normalize_meal_type(value: Any, logged_at: str) -> str:
+    meal_type = str(value or "").strip().lower()
+    if not meal_type:
+        meal_type = meal_type_from_hour(datetime.fromisoformat(logged_at.replace("Z", "+00:00")).hour)
+    if meal_type not in VALID_MEAL_TYPES:
+        raise AppError(
+            400,
+            f"Ungültiger Mahlzeittyp '{meal_type}'. Erlaubt sind: {', '.join(VALID_MEAL_TYPES)}.",
+        )
+    return meal_type
+
+
+def _normalize_calories(raw: dict[str, Any], clamp: bool) -> int:
+    value = raw.get("kcal") if raw.get("kcal") is not None else raw.get("calories")
+    if value is None:
+        raise AppError(400, "Kalorienangabe (kcal) ist erforderlich.")
+    try:
+        calories = float(str(value).replace(",", "."))
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, f"Ungültige Kalorienangabe: {value}") from exc
+    if not math.isfinite(calories):
+        raise AppError(400, "Kalorien dürfen nicht unendlich oder NaN sein.")
+    if clamp:
+        calories = max(0.0, min(calories, float(MAX_KCAL)))
+    elif calories < 0 or calories > MAX_KCAL:
+        raise AppError(400, f"Kalorien müssen zwischen 0 und {MAX_KCAL} liegen.")
+    return int(round(calories))
+
+
+def _normalize_macros(raw: dict[str, Any], clamp: bool) -> tuple[float | None, float | None, float | None]:
+    values = []
+    for aliases, label in (
+        (("carbs_g", "carbs", "carbohydrates"), "Kohlenhydrate"),
+        (("protein_g", "protein"), "Protein"),
+        (("fat_g", "fat"), "Fett"),
+    ):
+        value = next((raw[key] for key in aliases if raw.get(key) is not None), None)
+        values.append(_as_nonnegative_number(value, label, MAX_MACRO_G, clamp=clamp))
+    return tuple(values)
+
+
+def _normalize_source(value: Any) -> str:
+    source = str(value or "manual").strip().lower()
+    return source if source in VALID_SOURCES else "manual"

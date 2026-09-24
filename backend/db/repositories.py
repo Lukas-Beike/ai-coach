@@ -419,6 +419,7 @@ class NutritionRepository:
                 now,
             ),
         )
+        self._mark_pending(db, entry["meal_date"], now)
         return self.get(db, entry_id) or entry
 
     def get(self, db: Any, entry_id: str) -> dict[str, Any] | None:
@@ -431,6 +432,9 @@ class NutritionRepository:
 
     def update(self, db: Any, entry_id: str, entry: dict[str, Any]) -> dict[str, Any] | None:
         now = self._now()
+        existing = self.get(db, entry_id)
+        if not existing:
+            return None
         cursor = db.execute(
             "UPDATE nutrition_logs SET meal_date=?, logged_at=?, meal_type=?, description=?, kcal=?, carbs_g=?, protein_g=?, fat_g=?, source=?, sync_state=?, updated_at=? "
             "WHERE id=?",
@@ -451,10 +455,17 @@ class NutritionRepository:
         )
         if cursor.rowcount == 0:
             return None
+        self._mark_pending(db, existing["meal_date"], now)
+        self._mark_pending(db, entry["meal_date"], now)
         return self.get(db, entry_id)
 
     def delete(self, db: Any, entry_id: str) -> bool:
+        existing = self.get(db, entry_id)
+        if not existing:
+            return False
         cursor = db.execute("DELETE FROM nutrition_logs WHERE id = ?", (entry_id,))
+        if cursor.rowcount:
+            self._mark_pending(db, existing["meal_date"], self._now())
         return cursor.rowcount > 0
 
     def list_by_date(self, db: Any, meal_date: str) -> list[dict[str, Any]]:
@@ -491,13 +502,42 @@ class NutritionRepository:
 
     def list_unsynced_dates(self, db: Any, limit: int = 14) -> list[str]:
         rows = db.execute(
-            "SELECT DISTINCT meal_date FROM nutrition_logs WHERE sync_state != 'synced' ORDER BY meal_date ASC LIMIT ?",
+            "SELECT meal_date FROM nutrition_sync_dates WHERE sync_state = 'pending' ORDER BY meal_date ASC LIMIT ?",
             (limit,),
         ).fetchall()
         return [str(row["meal_date"]) for row in rows]
 
-    def mark_date_synced(self, db: Any, meal_date: str, updated_at: str) -> None:
+    def day_sync_snapshot(self, db: Any, meal_date: str) -> dict[str, Any]:
         db.execute(
-            "UPDATE nutrition_logs SET sync_state = 'synced', updated_at = ? WHERE meal_date = ?",
-            (updated_at, meal_date),
+            "INSERT OR IGNORE INTO nutrition_sync_dates(meal_date, revision, sync_state, updated_at) "
+            "VALUES (?, 1, 'pending', ?)",
+            (meal_date, self._now()),
+        )
+        snapshot = self.day_summary(db, meal_date)
+        row = db.execute(
+            "SELECT revision FROM nutrition_sync_dates WHERE meal_date = ?", (meal_date,)
+        ).fetchone()
+        snapshot["sync_revision"] = int(row["revision"]) if row else 0
+        return snapshot
+
+    def mark_date_synced(self, db: Any, meal_date: str, revision: int, updated_at: str) -> bool:
+        cursor = db.execute(
+            "UPDATE nutrition_sync_dates SET sync_state = 'synced', updated_at = ? "
+            "WHERE meal_date = ? AND revision = ?",
+            (updated_at, meal_date, revision),
+        )
+        if cursor.rowcount:
+            db.execute(
+                "UPDATE nutrition_logs SET sync_state = 'synced', updated_at = ? WHERE meal_date = ?",
+                (updated_at, meal_date),
+            )
+        return bool(cursor.rowcount)
+
+    def _mark_pending(self, db: Any, meal_date: str, updated_at: str) -> None:
+        db.execute(
+            "INSERT INTO nutrition_sync_dates(meal_date, revision, sync_state, updated_at) "
+            "VALUES (?, 1, 'pending', ?) "
+            "ON CONFLICT(meal_date) DO UPDATE SET revision=revision+1, "
+            "sync_state='pending', updated_at=excluded.updated_at",
+            (meal_date, updated_at),
         )

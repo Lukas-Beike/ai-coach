@@ -55,6 +55,7 @@ PRIVACY_EXPORT_JSONL_FILES = {
     "sync_job_items.jsonl",
     "provider_sync_cursors.jsonl",
     "nutrition_logs.jsonl",
+    "nutrition_sync_dates.jsonl",
 }
 
 
@@ -220,7 +221,7 @@ class PrivacyArchiveExportService:
                     (dict(row) for row in db.execute("SELECT provider, stream, cursor, high_water_mark, updated_at FROM provider_sync_cursors ORDER BY provider, stream")),
                     deadline,
                 )
-                for table in ("athlete_checkins", "activity_feedback", "external_calendar_events", "public_event_sources", "public_event_candidates", "nutrition_logs"):
+                for table in ("athlete_checkins", "activity_feedback", "external_calendar_events", "public_event_sources", "public_event_candidates", "nutrition_logs", "nutrition_sync_dates"):
                     self._write_jsonl(
                         archive,
                         table + ".jsonl",

@@ -34,6 +34,8 @@ class CoachAthleteRecordToolService:
     def execute(
         self, name: str, arguments: dict[str, Any], intent: dict[str, Any]
     ) -> dict[str, Any] | None:
+        if name in {"save_nutrition_entry", "delete_nutrition_entry"}:
+            return self._execute_nutrition(name, arguments, intent)
         if name == "save_checkin":
             self._authorize(
                 intent,
@@ -101,35 +103,26 @@ class CoachAthleteRecordToolService:
             competition_id = str(arguments.get("competition_id") or "").strip()
             require_coach_scope(intent, f"competition:{competition_id}")
             return {"ok": True, **self._competitions.delete(competition_id)}
-        if name == "save_nutrition_entry":
-            self._authorize(
-                intent,
-                name,
-                "Die strukturierte Coach-Autorisierung erlaubt diesen Ernährungseintrag nicht.",
-            )
-            require_coach_scope(intent, "local_nutrition")
-            if not self._nutrition:
-                raise AppError(500, "NutritionService ist nicht verfügbar.")
-            payload = structured_action_payload(arguments)
-            return {
-                "ok": True,
-                "entry": self._nutrition.log_meal(payload),
-            }
-        if name == "delete_nutrition_entry":
-            self._authorize(
-                intent,
-                name,
-                "Die strukturierte Coach-Autorisierung erlaubt das Löschen dieses Eintrags nicht.",
-            )
-            require_coach_scope(intent, "local_nutrition")
-            if not self._nutrition:
-                raise AppError(500, "NutritionService ist nicht verfügbar.")
-            entry_id = str(arguments.get("id") or arguments.get("entry_id") or "").strip()
-            return {
-                "ok": True,
-                **self._nutrition.delete_meal(entry_id),
-            }
         return None
+
+    def _execute_nutrition(
+        self, name: str, arguments: dict[str, Any], intent: dict[str, Any]
+    ) -> dict[str, Any]:
+        operation = name
+        message = (
+            "Die strukturierte Coach-Autorisierung erlaubt diesen Ernährungseintrag nicht."
+            if name == "save_nutrition_entry"
+            else "Die strukturierte Coach-Autorisierung erlaubt das Löschen dieses Eintrags nicht."
+        )
+        self._authorize(intent, operation, message)
+        require_coach_scope(intent, "local_nutrition")
+        if not self._nutrition:
+            raise AppError(500, "NutritionService ist nicht verfügbar.")
+        if name == "save_nutrition_entry":
+            payload = structured_action_payload(arguments)
+            return {"ok": True, "entry": self._nutrition.log_meal(payload)}
+        entry_id = str(arguments.get("id") or arguments.get("entry_id") or "").strip()
+        return {"ok": True, **self._nutrition.delete_meal(entry_id)}
 
     @staticmethod
     def _authorize(intent: dict[str, Any], operation: str, message: str) -> None:

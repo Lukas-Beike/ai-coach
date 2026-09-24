@@ -87,18 +87,23 @@ class CoachReadToolService:
         if name == "list_training_plans":
             return {"ok": True, "training_plans": self._training_plan_service().list(100)}
         if name == "read_nutrition":
-            if not self._nutrition_service:
-                return {"ok": False, "error": "NutritionService ist nicht verfügbar."}
-            svc = self._nutrition_service()
-            meal_date = arguments.get("date")
-            if meal_date:
-                return {"ok": True, **svc.get_day_summary(str(meal_date))}
-            start = arguments.get("start")
-            end = arguments.get("end")
-            if start and end:
-                return {"ok": True, "summaries": svc.get_range_summary(str(start), str(end))}
-            return {"ok": True, **svc.get_today_summary()}
+            return self._read_nutrition(arguments)
         return None
+
+    def _read_nutrition(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        if not self._nutrition_service:
+            return {"ok": False, "error": "NutritionService ist nicht verfügbar."}
+        service = self._nutrition_service()
+        if arguments.get("date"):
+            return {"ok": True, **service.get_day_summary(str(arguments["date"]))}
+        if arguments.get("start") and arguments.get("end"):
+            return {
+                "ok": True,
+                "summaries": service.get_range_summary(
+                    str(arguments["start"]), str(arguments["end"])
+                ),
+            }
+        return {"ok": True, **service.get_today_summary()}
 
     @staticmethod
     def _bounded_integer(

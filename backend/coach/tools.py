@@ -169,9 +169,12 @@ def build_tool_contracts(
         _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete undated local templates. Resolve local_id with list_workout_library for edits; creation requires name and workout description. Scheduling is a separate local action.", {"templates": {"type": "array", "minItems": 1, "maxItems": 28, "items": {
             "type": "object", "additionalProperties": False, "required": ["action"], "properties": {
                 "action": {"type": "string", "enum": ["create", "update", "archive", "restore", "delete"]},
-                "local_id": {"type": "string"}, "name": {"type": "string"},
-                "description": {"type": "string"}, "duration_minutes": {"type": "integer"},
-                "target": {"type": "string"}, "sport": {"type": "string"}, "type": {"type": "string"},
+                "local_id": {"type": "string", "format": "uuid"}, "name": {"type": "string"},
+                "description": {"type": "string"},
+                "sport": {"type": "string", "enum": ["Ride", "VirtualRide", "Run", "Swim", "WeightTraining"]},
+                "type": {"type": "string", "enum": ["Ride", "VirtualRide", "Run", "Swim", "WeightTraining"]},
+                "duration_minutes": {"type": "integer", "minimum": 5, "maximum": 1440},
+                "target": {"type": "string", "enum": ["AUTO", "POWER", "HR", "PACE"]},
             },
         }}}),
         _canonical_coach_tool("apply_workout_library_plan", "Schedule saved templates locally after conflict checks. Resolve the template ID from list_workout_library. Never writes remotely.", {"entries": {"type": "array", "minItems": 1, "maxItems": 14, "items": {

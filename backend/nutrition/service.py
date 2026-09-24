@@ -18,6 +18,9 @@ from backend.nutrition.models import (
     validate_iso_date,
 )
 
+INVALID_ENTRY_ID = "Ungültige Eintrags-ID."
+ENTRY_NOT_FOUND = "Ernährungseintrag nicht gefunden."
+
 
 class NutritionService:
     """Orchestrates nutrition logging, daily aggregations and sync markers."""
@@ -50,39 +53,39 @@ class NutritionService:
         """Get a single meal entry by ID or raise AppError(404)."""
         clean_id = str(entry_id or "").strip()
         if not clean_id:
-            raise AppError(400, "Ungültige Eintrags-ID.")
+            raise AppError(400, INVALID_ENTRY_ID)
         with self._db_lock, self._database_manager.unit_of_work() as db:
             entry = self._nutrition_repository.get(db, clean_id)
         if not entry:
-            raise AppError(404, "Ernährungseintrag nicht gefunden.")
+            raise AppError(404, ENTRY_NOT_FOUND)
         return entry
 
     def update_meal(self, entry_id: str, payload: Any) -> dict[str, Any]:
         """Normalize and update an existing meal entry."""
         clean_id = str(entry_id or "").strip()
         if not clean_id:
-            raise AppError(400, "Ungültige Eintrags-ID.")
+            raise AppError(400, INVALID_ENTRY_ID)
         entry = normalize_nutrition_entry(payload, local_now_factory=self._local_now)
         entry["id"] = clean_id
 
         with self._db_lock, self._database_manager.unit_of_work() as db:
             existing = self._nutrition_repository.get(db, clean_id)
             if not existing:
-                raise AppError(404, "Ernährungseintrag nicht gefunden.")
+                raise AppError(404, ENTRY_NOT_FOUND)
             updated = self._nutrition_repository.update(db, clean_id, entry)
         if not updated:
-            raise AppError(404, "Ernährungseintrag nicht gefunden.")
+            raise AppError(404, ENTRY_NOT_FOUND)
         return updated
 
     def delete_meal(self, entry_id: str) -> dict[str, Any]:
         """Delete an existing meal entry by ID."""
         clean_id = str(entry_id or "").strip()
         if not clean_id:
-            raise AppError(400, "Ungültige Eintrags-ID.")
+            raise AppError(400, INVALID_ENTRY_ID)
         with self._db_lock, self._database_manager.unit_of_work() as db:
             deleted = self._nutrition_repository.delete(db, clean_id)
         if not deleted:
-            raise AppError(404, "Ernährungseintrag nicht gefunden.")
+            raise AppError(404, ENTRY_NOT_FOUND)
         return {"status": "ok", "deleted_id": clean_id}
 
     def get_day_summary(self, meal_date: str) -> dict[str, Any]:
@@ -90,6 +93,12 @@ class NutritionService:
         validated_date = validate_iso_date(meal_date)
         with self._db_lock, self._database_manager.unit_of_work() as db:
             return self._nutrition_repository.day_summary(db, validated_date)
+
+    def get_sync_snapshot(self, meal_date: str) -> dict[str, Any]:
+        """Capture totals and a revision for race-safe provider synchronization."""
+        validated_date = validate_iso_date(meal_date)
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            return self._nutrition_repository.day_sync_snapshot(db, validated_date)
 
     def get_today_summary(self) -> dict[str, Any]:
         """Return today's local nutrition totals."""
@@ -135,12 +144,14 @@ class NutritionService:
         with self._db_lock, self._database_manager.unit_of_work() as db:
             return self._nutrition_repository.list_unsynced_dates(db, limit=limit)
 
-    def mark_date_synced(self, meal_date: str) -> None:
-        """Mark entries for a given date as synced."""
+    def mark_date_synced(self, meal_date: str, revision: int) -> bool:
+        """Mark a date synced only if its records did not change during remote I/O."""
         validated_date = validate_iso_date(meal_date)
         now_str = self._utc_now()
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            self._nutrition_repository.mark_date_synced(db, validated_date, now_str)
+            return self._nutrition_repository.mark_date_synced(
+                db, validated_date, revision, now_str
+            )
 
     def context(self) -> dict[str, Any]:
         """Provide concise recent nutrition summary for coach prompts."""

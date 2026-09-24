@@ -58,6 +58,14 @@ class NutritionModelTests(unittest.TestCase):
         self.assertEqual(entry["meal_date"], "2026-09-24")
         self.assertEqual(entry["source"], "photo")
 
+    def test_meal_time_overrides_service_clock_default(self) -> None:
+        entry = normalize_nutrition_entry(
+            {"meal_date": "2026-09-24", "meal_time": "07:15", "description": "Oats", "kcal": 350},
+            local_now_factory=lambda: datetime(2026, 9, 24, 18, 30, tzinfo=timezone.utc),
+        )
+        self.assertEqual(entry["logged_at"], "2026-09-24T07:15")
+        self.assertEqual(entry["meal_type"], "breakfast")
+
     def test_normalize_defaults_and_clamps(self) -> None:
         fixed_dt = datetime(2026, 9, 24, 13, 15, tzinfo=timezone.utc)
         payload = {
@@ -164,6 +172,17 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
             self.service.get_meal(saved["id"])
         self.assertEqual(cm.exception.status, 404)
 
+    def test_deleting_last_synced_entry_keeps_empty_date_pending(self) -> None:
+        saved = self.service.log_meal({
+            "meal_date": "2026-09-24", "meal_type": "lunch", "description": "Lunch", "kcal": 500,
+        })
+        snapshot = self.service.get_sync_snapshot("2026-09-24")
+        self.assertTrue(self.service.mark_date_synced("2026-09-24", snapshot["sync_revision"]))
+        self.assertEqual(self.service.list_unsynced_dates(), [])
+        self.service.delete_meal(saved["id"])
+        self.assertEqual(self.service.list_unsynced_dates(), ["2026-09-24"])
+        self.assertEqual(self.service.get_day_summary("2026-09-24")["total_kcal"], 0)
+
     def test_day_summary(self) -> None:
         self.service.log_meal({
             "meal_date": "2026-09-24",
@@ -213,7 +232,8 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.assertIn("2026-09-23", unsynced)
         self.assertIn("2026-09-24", unsynced)
 
-        self.service.mark_date_synced("2026-09-23")
+        sync_snapshot = self.service.get_sync_snapshot("2026-09-23")
+        self.service.mark_date_synced("2026-09-23", sync_snapshot["sync_revision"])
         unsynced_after = self.service.list_unsynced_dates()
         self.assertNotIn("2026-09-23", unsynced_after)
         self.assertIn("2026-09-24", unsynced_after)

@@ -144,7 +144,7 @@ PRIVACY_DELETE_SCOPE = (
     ("plans", "Trainingspläne", ("training_plans", "planning_state")),
     ("checkins", "Tages-Check-ins", ("athlete_checkins",)),
     ("feedback", "Aktivitätsfeedback", ("activity_feedback",)),
-    ("nutrition", "Ernährungsprotokolle und Kalorientracking", ("nutrition_logs",)),
+    ("nutrition", "Ernährungsprotokolle und Kalorientracking", ("nutrition_logs", "nutrition_sync_dates")),
     ("adaptive", "Adaptive Plananpassungen", ("plan_adjustments",)),
     ("calendars", "Kalenderquellen, Kandidaten und lokale Kalenderereignisse", ("public_event_sources", "public_event_candidates", "external_calendar_events")),
     ("sessions", "Anmeldesitzungen", ("sessions",)),
