@@ -130,6 +130,7 @@ from backend.http_api.bootstrap_state import (
     PublicBootstrapService,
 )
 from backend.http_api.coach_get import CoachGetRoutes
+from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.rate_limit import RateLimiter
@@ -2793,6 +2794,15 @@ PLANNING_GET_ROUTES = PlanningGetRoutes(
     public_weather_state_service,
     library_page_service,
 )
+ATHLETE_GET_ROUTES = AthleteGetRoutes(
+    session_auth_service,
+    public_performance_state_service,
+    profile_service,
+    competition_service,
+    public_feedback_state_service,
+    coach_context_preview_service,
+    SETTINGS,
+)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -2865,23 +2875,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def _handle_training_get(self, path: str) -> bool:
-        if path == "/api/performance":
-            self.auth_service.require_auth(self)
-            self.send_json(200, public_performance_state_service().performance_state())
-        elif path == "/api/profile":
-            self.auth_service.require_auth(self)
-            self.send_json(200, {"profile": profile_service().get(), "competitions": competition_service().list(limit=100)})
-        elif path == "/api/feedback":
-            self.auth_service.require_auth(self)
-            self.send_json(200, public_feedback_state_service().feedback_state())
-        elif path == "/api/context-preview":
-            self.auth_service.require_auth(self)
-            self.send_json(200, coach_context_preview_service().preview(SETTINGS.selected_ai_provider()))
-        else:
-            return False
-        return True
-
     def _handle_diagnostics_get(self, path: str) -> bool:
         if path == "/api/logs":
             self.auth_service.require_auth(self)
@@ -2927,7 +2920,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 or PLANNING_GET_ROUTES.handle(self, path)
                 or self._handle_sync_get(path)
                 or COACH_GET_ROUTES.handle(self, path)
-                or self._handle_training_get(path)
+                or ATHLETE_GET_ROUTES.handle(self, path)
                 or self._handle_diagnostics_get(path)
             )
             if not handled and path.startswith("/api/"):

@@ -15,7 +15,7 @@ Rollen und Modelle
 - Prüfe vor der Delegation, ob diese Modellzuweisung unterstützt wird.
   Behaupte keinen Luna-Einsatz, wenn das Modell nicht tatsächlich
   entsprechend ausgewählt wurde.
-- Nutze maximal zwei Luna-Worker gleichzeitig.
+- Nutze maximal einen Luna-Worker gleichzeitig.
 - Architekturentscheidungen, schwierige Abhängigkeiten und unmittelbar
   blockierende Integrationsarbeit übernimmst du selbst.
 - Luna darf keine weiteren Subagents starten.
@@ -107,7 +107,7 @@ Beginne jetzt mit der Bestandsprüfung und P0.
 ## Betriebsregeln
 
 - Haupt-Task: `gpt-5.6-sol`, Reasoning `high`.
-- Luna-Worker: `gpt-6-luna`, Reasoning `high`, höchstens zwei parallel.
+- Luna-Worker: `gpt-6-luna`, Reasoning `high`, höchstens einer gleichzeitig.
 - Sol entscheidet über Schnittstellen, integriert Worker-Patches und gibt den
   finalen PASS/FAIL-Status.
 - Ein grüner Worker-Testlauf ersetzt kein Sol-Review des tatsächlichen Diffs.

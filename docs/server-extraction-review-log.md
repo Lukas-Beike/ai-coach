@@ -7352,3 +7352,39 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   reproduzierbar im Skript enthalten, ohne einen Testfall abzuschwächen.
 - P10-Handler- und P11-Restaudit bleiben offen; die Skriptänderung
   verändert keinen Produktivcode und keine Checklistenbewertung.
+
+## P10 Athlete-GET-Routen — Integrationsreview
+
+- Vorgänger-PR #784 wurde am 24.09.2026 um 06:28:32 UTC mit
+  `7eb7ae6fb5930a9fa949788fd83d89bc05cbcab6` gemergt; der Commit ist
+  Vorfahr von `origin/develop`. Erforderliche CI-/Browser-/Codex-/Sonar-
+  Checks bestanden, das Sonar-Gate ist OK und es gibt keine offenen
+  Review-Threads. Der abgebrochene, nicht erforderliche Review-Koordinator-
+  Nebenjob änderte diese Gates nicht.
+- Quellcommit `7e8253927a395b497d92bc04beb90ec51a97ee97` wurde als
+  `d099fd7e` integriert. **FAIL** beim ersten Root-Review: Ruff I001 in
+  `backend/http_api/athlete_get.py`. Derselbe GPT-6-Luna-Worker korrigierte
+  ausschließlich die Importfolge in `9b328fba5e91cc41a0d2e2ced913097da0100e48`,
+  integriert als `730a2065`; Ruff und fokussierte Tests wurden erneut grün.
+- Der tatsächliche Diff und die Aufrufer sind geprüft: Alle vier GET-Pfade
+  `/api/performance`, `/api/profile`, `/api/feedback` und
+  `/api/context-preview` gehören nun `AthleteGetRoutes`; `_handle_training_get`
+  entfällt vollständig. Auth wird nach Pfadmatch vor Datendiensten pro
+  Request neu aufgelöst. Profil und Wettkämpfe bleiben beim jeweiligen
+  Service, das Wettkampflimit bleibt 100. Die Preview liest die Providerwahl
+  bei jedem Request aus derselben Settings-Instanz. Keine Rückimporte,
+  Server-Fachcallbacks, neuen Caches/Locks oder Remote-Schreibpfade.
+- Der erste integrierte Volltest ergab **FAIL** (1/2.636): Das generierte
+  Inventar ordnete die neue `ATHLETE_GET_ROUTES`-Bindung mangels expliziter
+  Regel fälschlich P0 zu. Root ergänzte die Zuordnung im Inventargenerator
+  und regenerierte das Inventar; P0 zählt wieder 0 offene Einträge.
+- **PASS** auf dem korrigierten integrierten Stand: 5 direkte Routentests,
+  12 Architekturtests, 495 bestehende `test_server.py`-Tests (3 Skips),
+  vollständige frisch gebaute Read-only-/netzwerkisolierte SQLCipher-Suite
+  mit **2.636 Tests/11 Skips**, Ruff für neue Route/Tests/Inventarskript,
+  Compileall, Inventar-`--check` und Diff-Check. Die fünf direkten Tests
+  decken vier Payloads, Authfehler, unbekannte Pfade, neue Auth-Instanz auf
+  Folgeanfragen und dynamische Providerwahl angemessen ab.
+- `server.py` hat 3.425 physische Zeilen. P10-Sync-/Diagnostik-/POST-/SSE-
+  Transport sowie P7/P8-Restzuordnungen und P11 bleiben offen. Nächster
+  kleiner Auftrag: die authentifizierten Sync-GET-Routen außer SSE.

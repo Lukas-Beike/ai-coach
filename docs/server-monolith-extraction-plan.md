@@ -827,6 +827,11 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     zustandslosen `PlanningGetRoutes` zuordnen; Auth-, Plan-, Wetter- und
     Library-Services bleiben konkrete, pro Request aufgelöste Composition-
     Abhängigkeiten und Zustandseigentümer.
+  - [x] Die GET-Routen `/api/performance`, `/api/profile`, `/api/feedback`
+    und `/api/context-preview` einem zustandslosen `AthleteGetRoutes`
+    zuordnen; Auth- und Datendienste werden pro Request aufgelöst, die
+    Providerwahl bei jeder Vorschau aus dem bestehenden Settings-Eigentümer
+    gelesen.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 
