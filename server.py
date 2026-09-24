@@ -8,6 +8,7 @@ from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.profile_update import CoachProfileUpdateService
 from backend.coach.read_tools import CoachReadToolService
 from backend.coach.training_template_tools import TrainingTemplateToolService
+from backend.coach import limits as coach_limits
 from backend.coach import streams as coach_streams
 
 import json
@@ -254,6 +255,7 @@ from backend.sync.jobs import (
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.scheduler import (
+    AUTO_UPDATE_LABEL,
     DailySyncScheduler,
     DailySyncSchedulerConfig,
     DailySyncLoop,
@@ -382,7 +384,6 @@ PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
 JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
-AUTO_UPDATE_LABEL = "stündliche automatische Aktualisierung"
 APP_NAME = "Intervals Coach"
 SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
 APP_VERSION = "1.11.12"
@@ -396,16 +397,10 @@ MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 # The Responses API counts both visible output and reasoning tokens against
 # max_output_tokens. Keep ordinary replies bounded, but leave enough room for
 # an explicitly requested multi-week training plan.
-COACH_DEFAULT_MAX_OUTPUT_TOKENS = 6_000
-COACH_LONG_PLAN_MAX_OUTPUT_TOKENS = 32_000
-COACH_FOLLOWUP_MAX_OUTPUT_TOKENS = 2_500
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
-COACH_BACKGROUND_HORIZON_DAYS = 7
-COACH_BACKGROUND_UNIT_LIMIT = 7
-COACH_TRAINING_CHANGE_LIMIT = 366
 INTERVALS_SYNC_WAIT_SECONDS = 120
 DB_LOCK = threading.RLock()
 COACH_CONVERSATION_GATE = CoachConversationGate()
@@ -463,12 +458,6 @@ SYNC_JOB_RETRY_BASE_SECONDS = 15 * 60
 SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
 SYNC_JOB_POLL_SECONDS = 1.0
 GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
-MORNING_RETRY_SECONDS = 15 * 60
-MORNING_MAX_ATTEMPTS = 3
-
-LIBRARY_BULK_PREVIEW_TTL_SECONDS = 10 * 60
-
-
 def database_manager() -> DatabaseManager:
     """Return the manager for the active path and secure configuration."""
     global DATABASE_MANAGER, DATABASE_MANAGER_SIGNATURE, PROVIDER_HTTP_CLIENT, PROVIDER_REFRESH_TRACKER, PROVIDER_STATE_SERVICE, WEATHER_SERVICE, MORNING_BODY_BATTERY_SERVICE
@@ -626,7 +615,7 @@ def structured_plan_sync_service() -> StructuredPlanSyncService:
         database_manager(),
         planning_authority_service(),
         plan_push_command_service(),
-        COACH_TRAINING_CHANGE_LIMIT,
+        coach_limits.COACH_TRAINING_CHANGE_LIMIT,
     )
 
 
@@ -700,7 +689,7 @@ def coach_read_tool_service() -> CoachReadToolService:
         change_history_service,
         competition_service,
         training_plan_service,
-        COACH_TRAINING_CHANGE_LIMIT,
+        coach_limits.COACH_TRAINING_CHANGE_LIMIT,
         nutrition_service,
     )
 
@@ -1092,7 +1081,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
             ),
             MorningBatteryClock(lambda: datetime.now(timezone.utc), local_now),
             MorningBatteryEvents(runtime_events.STATE_EVENT_BUFFER.publish, LOGGER),
-            MorningBatteryRetryPolicy(MORNING_MAX_ATTEMPTS, MORNING_RETRY_SECONDS),
+            MorningBatteryRetryPolicy(),
         )
     return MORNING_BODY_BATTERY_SERVICE
 
@@ -1505,7 +1494,7 @@ def structured_training_change_service() -> planning_changes.StructuredTrainingC
         PLANNING_REVISION_SERVICE,
         training_plan_service(),
         lambda: local_now().date(),
-        COACH_TRAINING_CHANGE_LIMIT,
+        coach_limits.COACH_TRAINING_CHANGE_LIMIT,
         lambda: runtime_events.STATE_EVENT_BUFFER.publish(
             "planning", {"status": "changed"}
         ),
@@ -1519,7 +1508,7 @@ def coach_training_patch_service() -> CoachTrainingPatchService:
         structured_training_change_service(), local_plan_creation_service(),
         calendar_conflict_service(), KEY_VALUE_REPOSITORY,
         runtime_events.STATE_EVENT_BUFFER, lambda: local_now().date(),
-        COACH_TRAINING_CHANGE_LIMIT,
+        coach_limits.COACH_TRAINING_CHANGE_LIMIT,
     )
 
 
@@ -1899,7 +1888,8 @@ def coach_job_submission_service() -> CoachJobSubmissionService:
     return CoachJobSubmissionService(
         database_manager, CHAT_REPOSITORY, DB_LOCK, SETTINGS,
         runtime_events.STATE_EVENT_BUFFER, coach_streams.CHAT_STREAM_REGISTRY,
-        COACH_JOB_WORKER.wake_event, utc_now, background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS,
+        COACH_JOB_WORKER.wake_event, utc_now,
+        background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
         max_attachment_storage_bytes=MAX_ATTACHMENT_STORAGE_BYTES,
         max_gemini_inline_image_bytes=MAX_GEMINI_INLINE_IMAGE_BYTES,
     )
@@ -1990,7 +1980,7 @@ def gemini_conversation_response_service() -> GeminiConversationResponseService:
         gemini_stream_client(),
         settings_service=SETTINGS,
         default_thinking_level=SETTINGS.selected_thinking_level(),
-        default_max_output_tokens=COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+        default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
         json_media_type=JSON_MEDIA_TYPE,
     )
 
@@ -2099,7 +2089,8 @@ def coach_training_context_service() -> CoachTrainingContextService:
 def coach_request_payload_service() -> CoachRequestPayloadService:
     """Compose the stateless structured Coach request builder."""
     return CoachRequestPayloadService(
-        coach_training_context_service(), SETTINGS, COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
+        coach_training_context_service(), SETTINGS,
+        coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
     )
 
 
@@ -2133,7 +2124,7 @@ COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, 
     default_profile=DEFAULT_PROFILE,
     checkin_text_limits=CHECKIN_TEXT_LIMITS,
     checkin_score_fields=CHECKIN_SCORE_FIELDS,
-    training_change_limit=COACH_TRAINING_CHANGE_LIMIT,
+    training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
     library_bulk_max_entries=planning_library.LIBRARY_BULK_MAX_ENTRIES,
     training_plan_statuses=planning_training_plans.TRAINING_PLAN_STATUSES,
     dialogue_tools=dialogue_tools,
@@ -2258,9 +2249,9 @@ def coach_structured_tool_round_service() -> CoachStructuredToolRoundService:
         coach_structured_tool_round_journal(), coach_job_store(), coach_training_context_service(),
         coach_structured_response_service(), CoachStructuredToolRoundLimits(
             max_rounds=COACH_TOOL_MAX_ROUNDS,
-            background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS,
-            default_max_output_tokens=COACH_DEFAULT_MAX_OUTPUT_TOKENS,
-            long_plan_max_output_tokens=COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
+            background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
+            default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+            long_plan_max_output_tokens=coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
         ),
     )
 

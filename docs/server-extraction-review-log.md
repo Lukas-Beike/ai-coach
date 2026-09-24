@@ -7965,3 +7965,25 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   passes: 2,792 unit tests (12 skipped), 496 server tests (3 skipped), 36
   architecture tests, Docker build, syntax, inventory `--check`, and
   `git diff --check`.
+
+## P7/P8 policy ownership and closeout — local review
+
+- Coach response-token budgets, background horizon, and training-change limit
+  now live in `backend/coach/limits.py`; server construction consumes those
+  unchanged values. Unused follow-up/unit limits and the obsolete library
+  preview TTL constant were removed.
+- Morning Body Battery retry defaults now live with
+  `MorningBodyBatteryService`; the daily provider-update label lives with the
+  sync scheduler. Their values and scheduling order are unchanged.
+- Audited proposal creation, session/scope binding, explicit confirmation,
+  expiry, single-use execution, tool-result projection, and repair/replay keys:
+  their implementations are in Coach services. The remaining server references
+  are composition and route wiring.
+- Audited the manual Morning Check-in path: Garmin sync is followed by a
+  current-local-day sleep check before Body Battery refresh or Coach analysis.
+  The removed automatic reservation/retry scheduler remains absent.
+- Focused validation: proposal/review 16 tests, architecture 36 tests, manual
+  Morning Check-in 10 tests, Body Battery 10 tests, daily scheduler 5 tests,
+  Gemini payload 5 tests, and training-patch 6 tests passed. Full Python suite:
+  2,792 passed, 12 skipped. Docker build, Python compilation, inventory check,
+  and `git diff --check` passed.

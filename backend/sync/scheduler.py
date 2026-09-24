@@ -20,6 +20,8 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.state import SyncStateRepository
 
+AUTO_UPDATE_LABEL = "stündliche automatische Aktualisierung"
+
 
 @dataclass(frozen=True)
 class DailySyncSchedulerConfig:

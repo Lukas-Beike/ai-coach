@@ -31,6 +31,7 @@ SYNC_RECONCILE = "sync/reconcile.py"
 SYNC_SCHEDULER = "sync/scheduler.py"
 SYNC_SNAPSHOTS = "sync/snapshots.py"
 COACH_PACKAGE = "coach/"
+COACH_LIMITS = "coach/limits.py"
 COACH_CONVERSATION = "coach/conversation.py"
 COACH_CONTEXT = "coach/context.py"
 COACH_JOBS = "coach/jobs.py"
@@ -60,6 +61,7 @@ SETTINGS_MODULE = "settings.py"
 ACTIVITIES_PACKAGE = "activities/"
 ATHLETE_PACKAGE = "athlete/"
 PERFORMANCE_PACKAGE = "performance/"
+PERFORMANCE_MORNING_BATTERY = "performance/morning_battery_service.py"
 PERFORMANCE_ACTIVITY_VALIDATION = "performance/activity_validation.py"
 WEATHER_PACKAGE = "weather/"
 HISTORY_PACKAGE = "history/"
@@ -338,8 +340,8 @@ def _explicit_owner(name: str) -> str | None:
             "DEFAULT_PROFILE": ATHLETE_PACKAGE,
             "NRW_LATITUDE_BOUNDS": WEATHER_PACKAGE,
             "NRW_LONGITUDE_BOUNDS": WEATHER_PACKAGE,
-            "MORNING_RETRY_SECONDS": COACH_MORNING,
-            "MORNING_MAX_ATTEMPTS": COACH_MORNING,
+            "MORNING_RETRY_SECONDS": PERFORMANCE_MORNING_BATTERY,
+            "MORNING_MAX_ATTEMPTS": PERFORMANCE_MORNING_BATTERY,
             "morning_checkin_date": COACH_MORNING,
             "morning_checkin_state": COACH_MORNING,
             "MORNING_CHECKIN_PROMPT": COACH_MORNING,
@@ -354,7 +356,10 @@ def _explicit_owner(name: str) -> str | None:
             "_morning_checkin_garmin_ready": COACH_MORNING,
             "_wait_for_morning_intervals_sync": COACH_MORNING,
             "LIBRARY_BULK_MAX_ENTRIES": PLANNING_PACKAGE,
-            "LIBRARY_BULK_PREVIEW_TTL_SECONDS": COACH_PROPOSALS,
+            "COACH_DEFAULT_MAX_OUTPUT_TOKENS": COACH_LIMITS,
+            "COACH_LONG_PLAN_MAX_OUTPUT_TOKENS": COACH_LIMITS,
+            "COACH_BACKGROUND_HORIZON_DAYS": COACH_LIMITS,
+            "COACH_TRAINING_CHANGE_LIMIT": COACH_LIMITS,
             "DEFAULT_TIMEZONE": CONFIG_MODULE,
             "ATHLETE_RECORD_HANDLERS": COACH_TOOL_EXECUTION,
             "DB_LOCK": DB_MANAGER,
