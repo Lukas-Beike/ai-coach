@@ -6480,3 +6480,32 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   sondern Lock-Reihenfolge, innere UOW, Rollback, CSRF-Grenze und beide
   transaktionsfreien Remote-Zweige; die bestehende Dialogfolge prüft
   zusätzlich Replay ohne zweite Patch-Mutation.
+
+## P7 strukturierte Werkzeugfehler — integrierter Diff-Stand
+
+- #762 ist am 24.09.2026 um 01:14:08 UTC mit Merge-Commit
+  `75c2222f82aba335c6fbac6cde6434c91368438c` gemergt; Commit
+  auf `origin/develop` erreichbar, alle Checks einschließlich Codex
+  und Browser grün, null Review-Threads.
+- GPT-6-Luna-Worker-Commit `fa91fc2fc3e46e11edb29c5455ae7571505415d3`
+  wurde auf diesem Stand konfliktfrei als `8de7dce5` integriert.
+  Root prüfte tatsächliches Modul, Callsite, Architekturverbot und
+  direkte Tests erneut: **PASS**. Fehlerergebnis, sichere Diagnose,
+  kompletter Receipt-Eintrag und Log-Reihenfolge sind im konkreten
+  `CoachStructuredToolFailureService`; keine Server-Callbacks oder
+  Backend-Rückimporte. Unbekannte Toolnamen werden im Log zu `unknown`,
+  Nicht-AppError-Texte bleiben generisch und `validation_reason` wird
+  nur mit begrenzter `request_`-Form übernommen.
+- 84 direkte/Architektur/Dialogtests **PASS**; Worker meldete 12
+  direkte/Architektur-, 72 Dialog- und 2.518 native Tests/12 Skips
+  **PASS**. Inventargenerator um Composition-Factory ergänzt;
+  `server.py` 4.337 physische Zeilen, P7-Rest 28 Definitionen/
+  28 globale Bindungen, P0=0. Ruff der betroffenen Nicht-Serverdateien
+  **PASS**, bestehende 23 Server-Ruff-Befunde unverändert. Integrierte
+  native Vollsuite 2.518 Tests/12 Skips und frisches Read-only-Docker-
+  Image 2.518 Tests/11 Skips **PASS**; Compileall, Inventar- und
+  Diff-Check **PASS**. PR-CI steht noch aus.
+- Testangemessenheit: Die sechs direkten Fälle prüfen AppError- und
+  Nicht-AppError-Texte, beide Reason-Fallbacks, begrenzte Validation-
+  Daten, unbekannte Toolnamen sowie Append-vor-Log. Die bestehende
+  Dialogsuite prüft zusätzlich Recovery, Receipt und Reparaturfolgen.
