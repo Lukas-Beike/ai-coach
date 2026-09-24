@@ -18,7 +18,6 @@ import logging
 import os
 import queue
 import re
-import secrets
 import sqlite3
 import threading
 import time

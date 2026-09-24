@@ -597,6 +597,9 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
     Werkzeug-Rounds `CoachStructuredToolRoundJournal` zuordnen;
     `CoachJobStore` bleibt Persistenzeigentümer, Provider-Follow-up,
     Cancellation und Gesamtloop bleiben für den Turn-Use-Case offen.
+  - [x] Begrenzte OpenAI-Retry-Entscheidung und abbrechbares Warten
+    `CoachResponseRetryPolicy` zuordnen; Provider-Follow-up und Gesamtloop
+    bleiben für den Turn-Use-Case offen.
   - [x] Provider-Request-Aufbau einschließlich Dialogkontext,
     Attachment-Sicherheitsanweisung, OpenAI-Kontinuität, Gemini-Medien
     und Modell-/Thinking-Auswahl `CoachRequestPayloadService` zuordnen;
