@@ -2252,7 +2252,7 @@ class ServerArchitectureTests(unittest.TestCase):
             {"send_state_event_batch", "handle_state_events"}.isdisjoint(methods)
         )
 
-    def test_coach_get_routes_are_owned_by_http_api_module(self) -> None:
+    def _assert_get_route_owned(self, old_method: str, route_name: str) -> ast.Module:
         server_tree = _parse(SERVER_PATH)
         request_handler = next(
             node
@@ -2275,39 +2275,19 @@ class ServerArchitectureTests(unittest.TestCase):
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "COACH_GET_ROUTES"
+            and node.func.value.id == route_name
             and node.func.attr == "handle"
         ]
 
-        self.assertNotIn("_handle_coach_get", methods)
+        self.assertNotIn(old_method, methods)
         self.assertEqual(len(route_dispatches), 1)
+        return server_tree
+
+    def test_coach_get_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_get_route_owned("_handle_coach_get", "COACH_GET_ROUTES")
 
     def test_public_get_routes_are_owned_by_http_api_module(self) -> None:
-        server_tree = _parse(SERVER_PATH)
-        request_handler = next(
-            node
-            for node in server_tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
-        )
-        methods = {
-            node.name
-            for node in request_handler.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-        get_handler = next(
-            node
-            for node in request_handler.body
-            if isinstance(node, ast.FunctionDef) and node.name == "do_GET"
-        )
-        route_dispatches = [
-            node
-            for node in ast.walk(get_handler)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "PUBLIC_GET_ROUTES"
-            and node.func.attr == "handle"
-        ]
+        server_tree = self._assert_get_route_owned("_handle_public_get", "PUBLIC_GET_ROUTES")
         route_assignment = next(
             node
             for node in server_tree.body
@@ -2322,8 +2302,6 @@ class ServerArchitectureTests(unittest.TestCase):
             for argument in route_assignment.value.args
         ]
 
-        self.assertNotIn("_handle_public_get", methods)
-        self.assertEqual(len(route_dispatches), 1)
         self.assertEqual(
             factory_names,
             [

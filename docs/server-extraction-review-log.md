@@ -7254,3 +7254,21 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   erhaltenen Fehlerverträge decken die vier Routen angemessen ab.
 - Restrisiko: Die übrigen Handler-, SSE- und P11-Audit-Arbeiten bleiben
   offen; `server.py` hat auf diesem Stand 3.438 physische Zeilen.
+
+## P10 öffentliche GET-Routen — CI-Nachreview
+
+- PR #782 meldete bei SonarCloud zunächst **FAIL**, ausschließlich wegen
+  `new_duplicated_lines_density=8.4%` (Grenze 3%): 22 neue Duplikatzeilen
+  lagen im Architekturtest zwischen Coach- und Public-GET-Routenprüfungen.
+  Die Sonar-Issuesuche selbst ergab null offene Issues.
+- Die gemeinsame AST-Prüfung für Handler-Methode und genau einen
+  `do_GET`-Delegationsaufruf wurde in einen Testhelfer extrahiert. Beide
+  bisherigen Tests prüfen dieselben entfernten Methoden und Routenamen
+  weiter; der Public-Test prüft zusätzlich weiterhin alle vier konkret
+  verdrahteten Factories. Kein Produktionscode wurde geändert.
+- Aktualisierter Integrationsstand: zehn Architektur- und sieben direkte
+  Routentests **PASS**; vollständige Read-only-SQLCipher-Suite erneut
+  2.622 Tests/11 Skips **PASS**; Ruff, Compileall, Inventar-`--check`
+  und Diff-Check **PASS**. Root-Review des geänderten Testumfangs erneut
+  **PASS**. Das externe Sonar-Gate muss auf dem neuen Commit neu laufen;
+  bis zu dessen Erfolg bleibt der PR unfreigegeben.
