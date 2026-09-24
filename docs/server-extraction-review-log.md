@@ -7950,3 +7950,18 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Validierung: 2.790 Unit-Tests bestanden, 12 übersprungen; Docker-Build,
   496 Server-/Response-Tests, 35 Architekturtests, Syntaxprüfung,
   Inventar-`--check` und `git diff --check` bestanden.
+
+## P7 Conversation history and usage ownership — local review
+
+- Moved the bounded local chat-history query and its message-ID/search/attachment
+  projection from `ChatHistoryPageService` to `CoachConversationHistoryService`
+  and `ChatRepository`; the Coach service now owns the shared database unit of
+  work for messages and chat generation.
+- Message writes/reset and provider-specific Gemini history remain owned by
+  Coach conversation services. Token usage normalization and durable daily
+  accounting remain owned by `ProviderStateService` under `backend/providers/`.
+- Existing pagination, escaped search, attachment-name projection, generation
+  consistency, and provider-usage tests cover these contracts; validation
+  passes: 2,792 unit tests (12 skipped), 496 server tests (3 skipped), 36
+  architecture tests, Docker build, syntax, inventory `--check`, and
+  `git diff --check`.

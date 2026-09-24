@@ -504,14 +504,21 @@ Abhängigkeit: P2–P6.
   - [x] Die sieben Prompt-/Kontext-Budgetgrenzen dem bestehenden
     `coach/context.py` zuordnen; beide Composition-Root-Factories
     konsumieren dieselben Werte ohne Budgetänderung.
-- [ ] Konversationshistorie, Reset, Attachments und Usage-Zuordnung auslagern.
+- [x] Konversationshistorie, Reset, Attachments und Usage-Zuordnung ihren
+  Coach-, Provider- und Repository-Eigentümern zuordnen.
   - [x] Providerabhängige Konversations-ID-Bereitstellung einschließlich
     persistierter Wiederverwendung und OpenAI-/Gemini-Erzeugung einem
-    konkreten Coach-Service zuordnen; übrige History-/Reset-Pfade bleiben offen.
+    konkreten Coach-Service zuordnen.
   - [x] Coach-Chat-Reset einschließlich best-effort Remote-Löschung,
     lokaler Transaktion, Job-Cancellation und Provider-KV-Clearing einem
-    konkreten `CoachConversationResetService` zuordnen; History und
-    Usage-Zuordnung bleiben offen.
+    konkreten `CoachConversationResetService` zuordnen.
+  - [x] Begrenzte lokale Chat-Seiten einschließlich Search/Escape,
+    Nachrichten-Cursor, Attachment-Namen und Chat-Generation dem
+    `CoachConversationHistoryService` und `ChatRepository` zuordnen; der
+    HTTP-Projektor liest alle Felder über diesen Eigentümer in einer UOW.
+  - [x] Message-Writes, Attachment-Kontext und Gemini-Verlauf den bestehenden
+    Coach-Conversation-Services zuordnen; Provider-Tokenusage bleibt beim
+    `ProviderStateService` mit eigener täglicher Zusammenfassung.
   - [x] Prozessweite Chat-Queue und Konversations-Lock mit 429/409-Grenzen
     `CoachConversationGate` zuordnen; Reset und Turn teilen dieselbe
     Lock-Instanz, während die übrige Turn-Orchestrierung bis P8 offen bleibt.
@@ -805,7 +812,8 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     verbleibenden öffentlichen Felder bleiben offen.
   - [x] Begrenzte Chat-History-Pagination einschließlich Suche, Cursor,
     Generation und sitzungsgebundener Vorschläge einem konkreten
-    `http_api/`-Service mit unveränderter DB-UOW zuordnen.
+    `http_api/`-Projektor zuordnen; Coach-Query und DB-UOW liegen beim
+    `CoachConversationHistoryService`.
   - [x] Öffentliche Plan-/Kalender-/Wetterprojektion mit bestehenden
     Datenlimits und geschütztem History-Read in `PublicPlanStateService`
     verlagern; andere öffentliche Projektionen bleiben offen.
