@@ -251,6 +251,7 @@ from backend.coach.tool_replay import CoachStructuredToolReplayService
 from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.coach.planning_change_tools import CoachPlanningChangeToolService
 from backend.coach.tool_dispatch import CoachToolDispatchService
+from backend.coach import context as coach_context_module
 from backend.coach.context import (
     CoachContextPreviewLimits,
     CoachContextPreviewService,
@@ -1841,25 +1842,6 @@ SYNC_EARLIEST_DATE = date(2000, 1, 1)
 # completed, while retaining the existing five-week forward planning horizon.
 PLANNED_CALENDAR_HISTORY_DAYS = 35
 PLANNED_CALENDAR_FUTURE_DAYS = 35
-COACH_RECENT_ACTIVITIES_PER_SPORT = 5
-COACH_PLANNED_EVENT_LIMIT = 50
-COACH_LOCAL_PLANNED_LIMIT = 50
-COACH_LIBRARY_LIMIT = 12
-COACH_LIBRARY_DESCRIPTION_LIMIT = 1500
-COACH_CONTEXT_TOTAL_CHAR_LIMIT = 120_000
-COACH_CONTEXT_SECTION_LIMITS = {
-    "intervals": 32_000,
-    "current_performance": 24_000,
-    "garmin": 16_000,
-    "local_feedback": 12_000,
-    "activity_feedback": 12_000,
-    "planning": 16_000,
-    "weather": 16_000,
-    "daily_planning_context": 24_000,
-    "external_calendar": 20_000,
-}
-
-
 def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:
     if db is not None:
         KEY_VALUE_REPOSITORY.set(db, key, value)
@@ -2253,13 +2235,13 @@ def coach_training_context_service() -> CoachTrainingContextService:
     """Compose bounded Coach prompt context from concrete read services."""
     return CoachTrainingContextService(
         sync_state_repository(), coach_structured_context_service(), workout_library_service(),
-        local_planned_limit=COACH_LOCAL_PLANNED_LIMIT,
-        library_limit=COACH_LIBRARY_LIMIT,
-        library_description_limit=COACH_LIBRARY_DESCRIPTION_LIMIT,
-        section_limits=COACH_CONTEXT_SECTION_LIMITS,
-        total_char_limit=COACH_CONTEXT_TOTAL_CHAR_LIMIT,
-        activity_limit_per_sport=COACH_RECENT_ACTIVITIES_PER_SPORT,
-        planned_event_limit=COACH_PLANNED_EVENT_LIMIT,
+        local_planned_limit=coach_context_module.COACH_LOCAL_PLANNED_LIMIT,
+        library_limit=coach_context_module.COACH_LIBRARY_LIMIT,
+        library_description_limit=coach_context_module.COACH_LIBRARY_DESCRIPTION_LIMIT,
+        section_limits=coach_context_module.COACH_CONTEXT_SECTION_LIMITS,
+        total_char_limit=coach_context_module.COACH_CONTEXT_TOTAL_CHAR_LIMIT,
+        activity_limit_per_sport=coach_context_module.COACH_RECENT_ACTIVITIES_PER_SPORT,
+        planned_event_limit=coach_context_module.COACH_PLANNED_EVENT_LIMIT,
     )
 
 
@@ -2276,13 +2258,13 @@ def coach_context_preview_service() -> CoachContextPreviewService:
         sync_state_repository(), coach_message_service(), coach_training_context_service(),
         coach_structured_context_service(), workout_library_service(),
         CoachContextPreviewLimits(
-            library_limit=COACH_LIBRARY_LIMIT,
-            library_description_limit=COACH_LIBRARY_DESCRIPTION_LIMIT,
-            section_limits=COACH_CONTEXT_SECTION_LIMITS,
-            total_char_limit=COACH_CONTEXT_TOTAL_CHAR_LIMIT,
-            local_planned_limit=COACH_LOCAL_PLANNED_LIMIT,
-            activity_limit_per_sport=COACH_RECENT_ACTIVITIES_PER_SPORT,
-            planned_event_limit=COACH_PLANNED_EVENT_LIMIT,
+            library_limit=coach_context_module.COACH_LIBRARY_LIMIT,
+            library_description_limit=coach_context_module.COACH_LIBRARY_DESCRIPTION_LIMIT,
+            section_limits=coach_context_module.COACH_CONTEXT_SECTION_LIMITS,
+            total_char_limit=coach_context_module.COACH_CONTEXT_TOTAL_CHAR_LIMIT,
+            local_planned_limit=coach_context_module.COACH_LOCAL_PLANNED_LIMIT,
+            activity_limit_per_sport=coach_context_module.COACH_RECENT_ACTIVITIES_PER_SPORT,
+            planned_event_limit=coach_context_module.COACH_PLANNED_EVENT_LIMIT,
         ),
         utc_now=lambda: datetime.now(timezone.utc),
     )
