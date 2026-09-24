@@ -573,6 +573,11 @@ Abhängigkeit: P2–P6.
     Pausen-/Cancel-Grenze, Remote-Write-Abhängigkeiten und Plan-Sync-Scope
     `CoachStructuredToolPreparationService` zuordnen; konkrete Sync- und
     Planungsdienste bleiben Zustandseigentümer.
+  - [x] Spezialzweige der strukturierten Werkzeugausführung einschließlich
+    Clarification, Cancel-KV, Trainings-Patch, Duplikatvorschlag und
+    Dispatcher-Aufruf `CoachStructuredToolExecutionService` zuordnen;
+    die übergreifende Turn-Transaktion und Receipt-Reihenfolge bleiben
+    bis P8 beim Turn-Orchestrator.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.
