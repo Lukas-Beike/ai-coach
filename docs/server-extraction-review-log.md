@@ -6305,3 +6305,38 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   28 globale Bindungen, P0=0. P7 bleibt offen;
   nächster fachlicher Schritt ist die zustandsbehaftete strukturierte
   Tool-Ausführungs- und Replay-Orchestrierung.
+
+## P7 Tool-Call-Metadaten — bestätigter #758-Merge
+
+- Der integrierte Worker-Dateibaum `d91ff6f2` bestand das Root-Diff-
+  Review **PASS**; 111 kombinierte, 2.478 native/12 Skips und 2.478
+  Read-only-Docker-Tests/11 Skips sowie Ruff/Compile/Inventar **PASS**.
+  Einmalig angeforderte Codex-Code-/Security-Review, CI-Testshards,
+  Container, Qualität, Sonar, CodeQL und optionaler Browser-/Accessibility-
+  Check (5m55s) waren **PASS**, null offene Review-Threads.
+- Squash-Merge `9d84c8cb3d3129155e1cfc7c9c2f16b842259a60` am
+  `2026-09-23T23:58:27Z` mit `state=MERGED`, `mergedAt` und
+  Erreichbarkeit auf `origin/develop` bestätigt.
+
+## P7 strukturiertes Tool-Replay — sequenzielle Worker-Integration
+
+- Ein einzelner explizit als GPT-6-Luna/high gestarteter Worker lieferte
+  Commit `1cf811e0`, auf #758 konfliktfrei als `bc80e577` integriert.
+  Root prüfte den tatsächlichen Worker- und Integrationsdiff:
+  vollständige Verlagerung der Replay-Entscheidung, direkte Server-
+  Delegation ohne Wrapper/Rückimport, keine neue Cache-Eigentümerschaft,
+  aktuelle Draft-Revision unter injiziertem DB-Lock und Manager-UOW.
+  Implementierungsreview **PASS**.
+- Acht neue direkte Tests prüfen exaktes Call-ID-Replay/409-Konflikt,
+  mutierendes Effekt-Replay, Read-only-Ausnahme, fehlgeschlagene Effekte,
+  fehlendes/veraltetes Draft-Artefakt, gültige Draft-Revision und
+  bereits gespeichertes Artefakt trotz alter Basisrevision.
+  Worker: 14 fokussierte Tests **PASS**, native Vollsuite 2.486/
+  12 Skips **PASS**, Ruff/Compile/Diff-Check **PASS**. Nach Integration
+  sind 113 kombinierte Coach-/Architekturtests und die frische
+  Read-only-Docker-Vollsuite 2.486/11 Skips **PASS**; Inventar-`--check`
+  und Diff-Check **PASS**, `server.py` 4.521 physische Zeilen,
+  P7-Rest 38 Definitionen/28 globale Bindungen, P0=0. Native
+  Integrations-Vollsuite 2.486/12 Skips **PASS** (342,167 s).
+  Root prüfte den integrierten Code und alle betroffenen Aufrufer
+  erneut: **PASS**. PR-CI steht noch aus. P7 bleibt offen.

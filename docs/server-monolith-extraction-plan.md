@@ -562,6 +562,9 @@ Abhängigkeit: P2–P6.
     Schrittlimit, Argumentprüfung und stabiler Replay-/Reparatur-Schlüssel
     als reine Backend-Projektion `structured_tool_call_metadata` verlagern;
     die restliche Turn-Orchestrierung bleibt bis zur folgenden Auslagerung offen.
+  - [x] Call-ID-/Effekt-Replay einschließlich Read-only-Ausnahme und
+    Draft-Artifact-Revisionsprüfung `CoachStructuredToolReplayService`
+    zuordnen; `DatabaseManager` und DB-Lock bleiben Zustandseigentümer.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.
