@@ -2324,16 +2324,20 @@ class ServerArchitectureTests(unittest.TestCase):
         ]
         self.assertEqual(factory_names, expected_names)
 
-    def _assert_put_route_owned(
-        self, route_name: str, forbidden_paths: tuple[str, ...], factory: str
+    def _assert_write_route_owned(
+        self,
+        handler_method: str,
+        route_name: str,
+        forbidden_paths: tuple[str, ...],
+        factory: str,
     ) -> ast.Module:
         server_tree = _parse(SERVER_PATH)
-        put_handler = next(
+        handler = next(
             node
             for node in ast.walk(server_tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_do_PUT"
+            if isinstance(node, ast.FunctionDef) and node.name == handler_method
         )
-        nodes = list(ast.walk(put_handler))
+        nodes = list(ast.walk(handler))
         dispatches = [
             node
             for node in nodes
@@ -2464,8 +2468,21 @@ class ServerArchitectureTests(unittest.TestCase):
             ["session_auth_service", "change_history_service"],
         )
 
+    def test_history_undo_post_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_data_post",
+            "HISTORY_UNDO_POST_ROUTES",
+            ("/api/change-history/undo/preview", "/api/change-history/undo"),
+            "HistoryUndoPostRoutes(history_undo_service, coach_proposal_creation_service)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "history_undo_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
     def test_settings_put_routes_are_owned_by_http_api_module(self) -> None:
-        self._assert_put_route_owned(
+        self._assert_write_route_owned(
+            "_do_PUT",
             "SETTINGS_PUT_ROUTES",
             (
                 "/api/settings/model",
@@ -2477,7 +2494,8 @@ class ServerArchitectureTests(unittest.TestCase):
         )
 
     def test_athlete_put_routes_are_owned_by_http_api_module(self) -> None:
-        self._assert_put_route_owned(
+        self._assert_write_route_owned(
+            "_do_PUT",
             "ATHLETE_PUT_ROUTES",
             ("/api/athlete-context", "/api/profile"),
             "AthletePutRoutes(athlete_context_service, profile_service)",
