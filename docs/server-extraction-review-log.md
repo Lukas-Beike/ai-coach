@@ -7544,3 +7544,33 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - `server.py` hat 3.389 physische Zeilen. POST-/PUT-Transport, P7/P8-
   Restzuordnungen und P11 bleiben offen. Nächster P10-Teilauftrag: die
   vier Settings-PUT-Routen mit unveränderter Auth-/CSRF-/Maintenance-Grenze.
+
+## P10 Settings-PUT-Routen — Integrationsreview
+
+- Vorgänger-PR #790 wurde am 24.09.2026 um 07:46:02 UTC mit
+  `ea9f5446c2d51587bb63d00c0e25c3c660049391` gemergt; der Commit ist
+  Vorfahr von `origin/develop`. Sonar und Codex bestanden, Review-Threads
+  sind null; der nachgelagerte Browser-Smoke lief bei diesem Review noch.
+- GPT-6-Luna-Quellcommit `9be7903fedcb80b1cc5699ca5793e6e88a40a152`
+  wurde nach Root-Prüfung des tatsächlichen Diffs als `cab6bde8` sequenziell
+  integriert.
+- **PASS:** `SettingsPutRoutes` besitzt nur die vier lokalen Settings-Pfade
+  für Modell, AI-Provider, Thinking-Level und Kalenderanzeige. Jeder
+  erkannte Pfad liest genau einmal JSON, übergibt das bisherige Feld oder
+  den vollständigen Kalender-Payload und sendet Status 200. Unbekannte
+  Pfade lesen keinen Body. `SettingsService` behält Validierung und
+  Persistenz; die äußere per-Request-Auth-/CSRF-/Maintenance- und
+  Fehlergrenze bleibt unverändert im Handler. Keine neuen Locks/Caches,
+  Backend-Rückimporte, Server-Fachcallbacks oder Remote-Schreibpfade.
+- Sechs direkte Routentests prüfen alle Feld-/Antwortabbildungen,
+  Einmal-Lesen, unbekannte Pfade und unveränderte Fehlerweitergabe; ein
+  Architekturtest prüft Composition/Dispatch und verbietet die bisherigen
+  Inline-Pfade. Die Testzahl ist für diese lokale Grenze angemessen.
+- Integrierte Abnahme: frisch gebautes Read-only-/netzwerkisoliertes
+  SQLCipher-Image mit **2.672 Tests/11 Skips PASS**; Ruff für Route,
+  Direkttests, Architektur und Inventarskript, Compileall, Inventar-
+  `--check` (P0=0) und Diff-Check **PASS**. Die bestehenden globalen Ruff-
+  Befunde in `server.py` sind unverändert gegenüber dem Basisstand.
+- `server.py` hat 3.381 physische Zeilen. Athleten-PUT, POST-Transport,
+  RequestHandler-/Body-Grenze, P7/P8-Restzuordnungen und P11 bleiben offen.
+  Nächster kleiner Auftrag: die beiden Athleten-PUT-Routen.

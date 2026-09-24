@@ -852,6 +852,9 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     `StateEventsGetRoutes` zuordnen; Event-Puffer und die unveränderte
     Cursor-/Gap-/Heartbeat-/Disconnect-Schleife bleiben beim bestehenden
     `StateEventTransport`, Socket und SSE-Schreibmethoden beim Handler.
+  - [x] Die vier Settings-PUT-Routen `SettingsPutRoutes` zuordnen; der
+    bestehende `SettingsService` behält Validierung und Persistenz, der
+    Handler die äußere Auth-/CSRF-/Maintenance- und Fehlergrenze.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 
