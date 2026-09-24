@@ -2342,8 +2342,6 @@ class ServerArchitectureTests(unittest.TestCase):
         server_tree = self._assert_get_route_owned(
             "_handle_training_get",
             "PLANNING_GET_ROUTES",
-            method_must_be_absent=False,
-            forbidden_paths=("/api/plan", "/api/weather", "/api/library"),
         )
         self._assert_route_factories(
             server_tree,
@@ -2353,6 +2351,25 @@ class ServerArchitectureTests(unittest.TestCase):
                 "public_plan_state_service",
                 "public_weather_state_service",
                 "library_page_service",
+            ],
+        )
+
+    def test_athlete_get_routes_are_owned_by_http_api_module(self) -> None:
+        server_tree = self._assert_get_route_owned(
+            "_handle_training_get",
+            "ATHLETE_GET_ROUTES",
+        )
+        self._assert_route_factories(
+            server_tree,
+            "ATHLETE_GET_ROUTES",
+            [
+                "session_auth_service",
+                "public_performance_state_service",
+                "profile_service",
+                "competition_service",
+                "public_feedback_state_service",
+                "coach_context_preview_service",
+                "SETTINGS",
             ],
         )
 
