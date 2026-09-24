@@ -7388,3 +7388,36 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - `server.py` hat 3.425 physische Zeilen. P10-Sync-/Diagnostik-/POST-/SSE-
   Transport sowie P7/P8-Restzuordnungen und P11 bleiben offen. Nächster
   kleiner Auftrag: die authentifizierten Sync-GET-Routen außer SSE.
+
+## P10 Sync-/Aktivitäts-GET-Routen — Integrationsreview
+
+- Vorgänger-PR #785 wurde am 24.09.2026 um 06:46:55 UTC mit
+  `dbe56e9db295ced99c91edc8eefd69139004a9d3` gemergt; der Commit
+  ist Vorfahr von `origin/develop`. Browser, Sonar und Codex waren grün,
+  ohne offene Review-Threads.
+- GPT-6-Luna-Quellcommit `87dbefd7e458f7d4a189c97feb13643cbad95d93`
+  wurde als `03069632` sequenziell integriert. Root prüfte den gesamten
+  Diff, die bisherigen SSE-Handler-Tests und die neuen Testfälle selbst.
+- **PASS:** `SyncGetRoutes` besitzt nun die drei Pfade für Jobstatus,
+  allgemeinen Sync-Status und Aktivitäten sowie das unveränderte
+  `[0-9a-f-]+`-Job-ID-Muster. Auth wird nach gültigem Pfad und vor jedem
+  Datendienst pro Request neu aufgelöst. Erste `cursor`-/`limit`-/`days`-
+  Werte und Default `ALL_SYNC_DAYS` bleiben erhalten; der lokale Tag wird
+  für jede Activity-Anfrage neu gelesen. Queue, Status und Activity-Read
+  bleiben Zustandseigentümer. Keine Backend-Rückimporte, neuen Locks/
+  Caches, Server-Fachcallbacks oder Remote-Schreibpfade.
+- `_handle_sync_get` enthält ausschließlich den bisherigen authentifizierten
+  `/api/state/events`-SSE-Transport; die alten Auth-/Transporttests bleiben
+  unverändert. Die sechs neuen Direkt-Tests decken die drei Payloads,
+  ungültige Job-IDs, Query-Grenzen, Authfehler, unbekannte Pfade, erneute
+  Auth-Auflösung und den lokalen Tag ab. Die Architekturprüfung bewacht
+  Routing, Composition und SSE-Trennung ohne duplizierte AST-Testblöcke.
+- Integrierte Abnahme: frisch gebautes Read-only-/netzwerkisoliertes
+  SQLCipher-Image mit **2.643 Tests/11 Skips PASS**; 19 fokussierte
+  Routen-/Architekturtests und der bestehende SSE-Auth-Test **PASS**;
+  Ruff, Compileall, Inventar-`--check` (P0=0) und Diff-Check **PASS**.
+  Die Testzahl und Szenarien sind für diese zustandslose Dispatch-Grenze
+  angemessen. `server.py` hat 3.419 physische Zeilen.
+- Offen bleiben Diagnostik-/Datenschutz-GET, POST-/PUT-/SSE-Transport,
+  P7/P8-Restzuordnungen und der P11-Endaudit. Nächster P10-Teilauftrag:
+  nicht-streamende Diagnostik- und History-GET-Routen mit begrenzten Limits.
