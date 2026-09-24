@@ -24,6 +24,7 @@ from backend.coach import streams as coach_streams
 from backend.coach.context import CoachIntervalsContextService, future_coach_planned_workouts
 from backend.coach.attachments import gemini_history_parts
 from backend.coach.proposals import validated_coach_action_preview_input
+from backend.providers import openai as openai_provider
 from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.public_state import PublicStateService
@@ -5089,7 +5090,7 @@ class CoachTests(unittest.TestCase):
 
     def test_output_text_falls_back_to_nested_content(self):
         response = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Hello"}]}]}
-        self.assertEqual(server.output_text(response), "Hello")
+        self.assertEqual(openai_provider.response_text(response), "Hello")
 
     def test_gemini_normalizes_tool_calls_and_preserves_function_history(self):
         captured = []
@@ -5121,7 +5122,7 @@ class CoachTests(unittest.TestCase):
             if "functionResponse" in part
         )
         self.assertEqual(function_response["name"], "save_checkin")
-        self.assertEqual(server.output_text(followup), "Check-in gespeichert.")
+        self.assertEqual(openai_provider.response_text(followup), "Check-in gespeichert.")
 
     def test_gemini_stream_forwards_chunks_and_aggregates_the_final_response(self):
         captured = {}
@@ -5155,7 +5156,7 @@ class CoachTests(unittest.TestCase):
             )
 
         self.assertEqual(deltas, ["Hallo ", "Welt"])
-        self.assertEqual(server.output_text(result), "Hallo Welt")
+        self.assertEqual(openai_provider.response_text(result), "Hallo Welt")
         self.assertEqual(result["usage"]["total_tokens"], 7)
         self.assertEqual(captured["request"].full_url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse")
         self.assertEqual(captured["request"].headers["X-goog-api-key"], "test-gemini-key")
