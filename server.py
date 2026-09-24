@@ -283,6 +283,7 @@ from backend.coach.proposals import (
     coach_action_view,
 )
 from backend.coach.receipt_reads import CoachCommandReceiptService
+from backend.coach.turn_opening import CoachTurnOpeningService
 from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
@@ -309,7 +310,6 @@ from backend.coach.tools import build_tool_contracts
 from backend.coach.service import command_receipt
 from backend.coach.authorization import (
     coach_execution_scope,
-    coach_session_key,
     require_coach_scope,
 )
 from backend.http_api.responses import (
@@ -2191,6 +2191,14 @@ def coach_command_receipt_service() -> CoachCommandReceiptService:
     )
 
 
+def coach_turn_opening_service() -> CoachTurnOpeningService:
+    """Compose atomic creation and session binding for a new Coach turn."""
+    return CoachTurnOpeningService(
+        database_manager(), DB_LOCK, CHAT_REPOSITORY,
+        coach_command_receipt_service(), utc_now, uuid.uuid4,
+    )
+
+
 def coach_proposal_creation_service() -> CoachProposalCreationService:
     """Compose session-bound Coach proposal creation."""
     return CoachProposalCreationService(
@@ -2449,31 +2457,6 @@ def coach_structured_tool_preparation_service() -> CoachStructuredToolPreparatio
         SYNC_PERIOD_DEFAULTS,
         ALL_SYNC_DAYS,
     )
-
-
-def _structured_coach_receipt(
-    message: str,
-    *,
-    intent: dict[str, Any],
-    conversation_id: str,
-    client_turn_id: str,
-    session_csrf_hash: str,
-    ai_provider: str,
-    model: str | None,
-) -> dict[str, Any]:
-    with DB_LOCK, database() as db:
-        existing = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
-        receipt = command_receipt(existing["receipt"]) if existing else {}
-        if existing:
-            coach_command_receipt_service().require_owner(receipt, session_csrf_hash)
-        else:
-            user = CHAT_REPOSITORY.add(db, "user", message, client_turn_id=client_turn_id)
-            receipt = {"client_turn_id": client_turn_id, "session_key": coach_session_key(session_csrf_hash),
-                       "user_message_id": user["id"], "status": "running", "command_receipts": [],
-                       "ai_provider": ai_provider, "model": model}
-            db.execute("INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, 'none', 'running', ?, ?, ?)",
-                       (uuid.uuid4().hex, client_turn_id, conversation_id, json.dumps(intent), json.dumps(receipt), utc_now(), utc_now()))
-    return receipt
 
 
 def _send_structured_coach_response(
@@ -2790,7 +2773,7 @@ def _structured_coach_turn_request(
     session_csrf_hash: str, background_job: bool, ai_provider: str, model: str | None,
     thinking_level: str | None, on_text_delta: Any, cancel_event: threading.Event | None,
 ) -> dict[str, Any]:
-    receipt = _structured_coach_receipt(
+    receipt = coach_turn_opening_service().open(
         message, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id,
         session_csrf_hash=session_csrf_hash, ai_provider=ai_provider, model=model,
     )

@@ -28,6 +28,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.conversation_recovery", ("CoachConversationRecoveryService",)),
     ("backend.coach.response_retry", ("CoachResponseRetryPolicy",)),
     ("backend.coach.conversation_gate", ("CoachConversationGate",)),
+    ("backend.coach.turn_opening", ("CoachTurnOpeningService",)),
     ("backend.coach.tool_round_journal", ("CoachStructuredToolRoundJournal",)),
     ("backend.coach.tool_failures", ("CoachStructuredToolFailureService",)),
     ("backend.coach.tool_execution_service", ("CoachStructuredToolExecutionService",)),
@@ -1661,6 +1662,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
 FORBIDDEN_SERVER_SYMBOLS = (
     "_recover_structured_coach_conversation",
     "_recover_invalid_structured_conversation",
+    "_structured_coach_receipt",
     "_response_retry_delay",
     "_wait_for_coach_response_retry",
     "OPENAI_MAX_RETRY_DELAY_SECONDS",
