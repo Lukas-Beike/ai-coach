@@ -503,6 +503,9 @@ Abhängigkeit: P2–P6.
     lokaler Transaktion, Job-Cancellation und Provider-KV-Clearing einem
     konkreten `CoachConversationResetService` zuordnen; History und
     Usage-Zuordnung bleiben offen.
+  - [x] Prozessweite Chat-Queue und Konversations-Lock mit 429/409-Grenzen
+    `CoachConversationGate` zuordnen; Reset und Turn teilen dieselbe
+    Lock-Instanz, während die übrige Turn-Orchestrierung bis P8 offen bleibt.
 - [ ] Vorschläge, Scope-/Owner-Prüfungen, explizite Bestätigung, TTL sowie
   Replay-/Repair-Schlüssel ihren Coach-Modulen zuordnen.
   - [x] Sitzungsgebundene Command-Receipt-Lesefunktion mit 400/403/404-

@@ -6584,3 +6584,28 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Inventar- und Diff-Check sind auf diesem Stand erneut **PASS**.
   `server.py` 4.259
   physische Zeilen; P7-Rest 23 Definitionen, P0=0.
+
+## P7 Chat-Serialisierung — integrierter Diff-Stand
+
+- #766 ist am 24.09.2026 um 01:56:48 UTC mit Merge-Commit
+  `5d6999890196f2f0a926975652bc71af1c982c7a` gemergt; Commit
+  auf `origin/develop` erreichbar, alle Checks einschließlich Browser
+  grün, null Review-Threads.
+- GPT-6-Luna-Worker-Commit `a24994f4923242e9be20df4184b3a7ace5307edc`
+  wurde auf diesem Stand mit ausschließlich additiver Architekturtest-
+  Konfliktauflösung als `e5ad0f70` integriert. Root prüfte Code und Diff:
+  **PASS**. `CoachConversationGate` besitzt die eine prozessweite Queue und
+  RLock; Reset und Chat-Turn teilen genau dieselbe Lock-Instanz. 429 bei
+  voller Queue, 409 beim Lock-Timeout, Wartelimit 30 Sekunden, Queuegröße
+  3 und Freigabe im Fehlerpfad sind erhalten. Keine Rückimporte, Server-
+  Callbacks oder Kompatibilitäts-Wrapper.
+- Fünf direkte Gate-Tests prüfen Limit, Timeout, Exception-Freigabe und
+  Reset-Lock-Kohärenz. Worker: 11 direkte/Architektur-, ein migrierter
+  Server-Queue-Test und native Vollsuite 2.528/12 **PASS**; Root zusätzlich
+  12 fokussierte und Read-only-Docker 2.528/11 am Quellstand **PASS**.
+  Integriert: 96 betroffene Tests, Ruff, Compileall, Inventar- und
+  Diff-Check **PASS**. Frisches Read-only-Docker-Image: 2.538 Tests/
+  11 Skips und native Vollsuite 2.538 Tests/12 Skips **PASS**;
+  bestehende 23 Server-Ruff-Befunde unverändert. PR-CI steht noch aus.
+  `server.py`: 4.240 physische Zeilen;
+  P7-Rest 22 Definitionen/24 globale Bindungen, P0=0.
