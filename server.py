@@ -128,8 +128,9 @@ from backend.http_api.bootstrap_state import (
     PublicBootstrapDependencies,
     PublicBootstrapService,
 )
-from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.athlete_get import AthleteGetRoutes
+from backend.http_api.coach_get import CoachGetRoutes
+from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.rate_limit import RateLimiter
@@ -2802,6 +2803,12 @@ ATHLETE_GET_ROUTES = AthleteGetRoutes(
     coach_context_preview_service,
     SETTINGS,
 )
+DIAGNOSTICS_GET_ROUTES = DiagnosticsGetRoutes(
+    session_auth_service,
+    recent_log_entries_service,
+    diagnostic_report_service,
+    DIAGNOSTIC_CAPTURE,
+)
 SYNC_GET_ROUTES = SyncGetRoutes(
     session_auth_service,
     sync_job_queue_service,
@@ -2869,21 +2876,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         return True
 
     def _handle_diagnostics_get(self, path: str) -> bool:
-        if path == "/api/logs":
-            self.auth_service.require_auth(self)
-            raw_limit = parse_qs(urlparse(self.path).query).get("limit", ["200"])[0]
-            try:
-                limit = max(1, min(int(raw_limit), 500))
-            except ValueError:
-                limit = 200
-            self.send_json(200, {"entries": recent_log_entries_service().list(limit)})
-        elif path == "/api/diagnostics":
-            self.auth_service.require_auth(self)
-            self.send_json(200, diagnostic_report_service().report())
-        elif path == "/api/diagnostics/capture":
-            self.auth_service.require_auth(self)
-            self.send_json(200, DIAGNOSTIC_CAPTURE.status())
-        elif path == "/api/privacy/export":
+        if path == "/api/privacy/export":
             self.auth_service.require_auth(self)
             export_stream_transport().stream_privacy_export(self)
         elif path == "/api/privacy/delete/preview":
@@ -2915,6 +2908,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 or self._handle_sync_get(path)
                 or COACH_GET_ROUTES.handle(self, path)
                 or ATHLETE_GET_ROUTES.handle(self, path)
+                or DIAGNOSTICS_GET_ROUTES.handle(self, path)
                 or self._handle_diagnostics_get(path)
             )
             if not handled and path.startswith("/api/"):
