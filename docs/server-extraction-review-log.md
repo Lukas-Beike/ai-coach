@@ -7127,3 +7127,31 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   müssen in P11 anhand der tatsächlichen Lookup-Orte migriert werden;
   dieser Patch erweitert ihre Zahl nicht. P7/P8-Elternpunkte und P10/P11
   bleiben offen.
+
+## P10 Coach-GET-Routen — isolierter Quellstand
+
+- Die drei GET-Routen `/api/chat/history`, `/api/chat/receipt` und
+  `/api/chat/status` liegen in `backend/http_api/coach_get.py` unter einem
+  zustandslosen `CoachGetRoutes`. `server.py` komponiert die Route explizit
+  aus `SessionAuthService`, `ChatHistoryPageService`,
+  `CoachCommandReceiptService` und `CoachJobSubmissionService`.
+- Authentifizierung bleibt vor Query-/Servicezugriff; der Handler verwendet
+  pro Request die Auth-Factory. Der Route-Dienst enthält weder Lock noch Cache.
+  CSRF-Hash, Query-Defaults und URL-Decodierung, Status 200/JSON sowie
+  Fehlerpropagation bleiben erhalten. Unbekannte Pfade lösen keine Factory
+  auf. Andere GET-, POST- und SSE-Pfade wurden nicht geändert.
+- Vor Änderungen wurden alle drei Service-Factorys, `_handle_coach_get` und
+  vorhandene Testaufrufer/Patchstellen durchsucht. Es gab keine bestehenden
+  Tests, die diese Handler-Methode oder deren Route-Factory patchten.
+  Acht direkte Fake-Handler-/Fake-Service-Tests prüfen alle drei Routen,
+  Defaults und dekodierte History-Querywerte, Auth-Scope, Auth-Fehler,
+  dynamische Auth-Auflösung auf dem zweiten Request und den unbekannten Pfad.
+- **PASS**: 17 fokussierte Routen-/Architekturtests; vollständige
+  Read-only-Docker-Suite im frisch gebauten SQLCipher-Image
+  `ai-coach:p10-coach-get-routes-source-20260924`: 2.614 Tests, 11 Skips.
+  Ruff für Route, direkte Tests und Architekturtest, Compileall,
+  Inventar-`--check` und `git diff --check` bestanden. Ruff auf `server.py`
+  meldet dieselben 22 bestehenden Befunde wie `HEAD`; kein neuer Befund.
+- Quellbasis: `4d2409ad2f1e96be4d260f4c77d231485843cfdf`, Branch
+  `refactor/p10-coach-get-routes-source-20260924`. Kein Rebase, Push,
+  Pull Request oder Merge.
