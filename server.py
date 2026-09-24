@@ -49,7 +49,6 @@ from backend.errors import (
     public_app_error_status,
 )
 from backend import config as app_config
-from backend import change_history
 from backend import observability
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.calendar import external as calendar_external
@@ -150,6 +149,7 @@ from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanState
 from backend.http_api.state_versions import StateVersionService
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_get import SyncGetRoutes
+from backend.http_api.history_get import HistoryGetRoutes
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
@@ -2817,6 +2817,7 @@ SYNC_GET_ROUTES = SyncGetRoutes(
     lambda: local_now().date(),
     ALL_SYNC_DAYS,
 )
+HISTORY_GET_ROUTES = HistoryGetRoutes(session_auth_service, change_history_service)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -2882,14 +2883,6 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/privacy/delete/preview":
             self.auth_service.require_auth(self)
             self.send_json(200, privacy_delete_service().preview())
-        elif path == "/api/change-history":
-            self.auth_service.require_auth(self)
-            raw_limit = parse_qs(urlparse(self.path).query).get("limit", ["100"])[0]
-            try:
-                limit = max(1, min(int(raw_limit), change_history.MAX_ROWS))
-            except ValueError:
-                limit = 100
-            self.send_json(200, {"changes": change_history_service().list(limit)})
         elif path == "/api/privacy/backup":
             self.auth_service.require_auth(self)
             export_stream_transport().stream_database_backup(self)
@@ -2908,6 +2901,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 or self._handle_sync_get(path)
                 or COACH_GET_ROUTES.handle(self, path)
                 or ATHLETE_GET_ROUTES.handle(self, path)
+                or HISTORY_GET_ROUTES.handle(self, path)
                 or DIAGNOSTICS_GET_ROUTES.handle(self, path)
                 or self._handle_diagnostics_get(path)
             )
