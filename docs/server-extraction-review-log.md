@@ -6756,3 +6756,13 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   frisches Read-only-Docker-Image: 2.566 Tests/11 Skips **PASS**.
   Root-Review des integrierten Stands: **PASS**. `server.py`:
   3.959 physische Zeilen, P0=0. Veröffentlichung/PR-CI offen.
+- PR #771 auf Head `f1c3e906`: **FAIL** im SonarCloud-Code-Analysis-Gate
+  wegen genau eines `python:S3776`-Befunds in `respond()` (16 statt
+  erlaubter 15); übrige abgeschlossene Unit-/Container-/CodeQL-Checks
+  waren grün. Root verschob die Delta-Markierung und -Weiterleitung in
+  den zuständigen `_ResponseState`, ohne Streaming- oder Retry-Semantik
+  zu ändern. Tatsächlicher Korrektur-Diff/Code erneut geprüft: **PASS**.
+  Direkte/Architekturtests 15/15, frisches Read-only-Docker-Image
+  2.566 Tests/11 Skips, Compileall, Inventar- und Diff-Check **PASS**.
+  Erneute externe Sonar-/Browser-/Codex-Prüfung des korrigierten Heads
+  steht vor Merge aus.

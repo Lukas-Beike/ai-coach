@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from backend.coach.conversation_recovery import CoachConversationRecoveryService
@@ -21,6 +22,11 @@ from backend.errors import AppError
 class _ResponseState:
     resume_id: str
     request_delta_emitted: bool = False
+
+    def emit_delta(self, delta: str, *, on_text_delta: Callable[[str], None] | None) -> None:
+        self.request_delta_emitted = True
+        if on_text_delta is not None:
+            on_text_delta(delta)
 
 
 class CoachStructuredResponseService:
@@ -57,10 +63,7 @@ class CoachStructuredResponseService:
     ) -> dict[str, Any]:
         state = _ResponseState(resume_id)
 
-        def on_delta(delta: str) -> None:
-            state.request_delta_emitted = True
-            if on_text_delta is not None:
-                on_text_delta(delta)
+        on_delta = partial(state.emit_delta, on_text_delta=on_text_delta)
 
         def checkpoint(response_id: str) -> None:
             state.resume_id = response_id
