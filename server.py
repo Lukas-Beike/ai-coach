@@ -128,6 +128,7 @@ from backend.http_api.bootstrap_state import (
     PublicBootstrapService,
 )
 from backend.http_api.athlete_get import AthleteGetRoutes
+from backend.http_api.athlete_put import AthletePutRoutes
 from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.public_get import PublicGetRoutes
@@ -2829,6 +2830,7 @@ STATE_EVENTS_GET_ROUTES = StateEventsGetRoutes(
     StateEventTransport(runtime_events.STATE_EVENT_BUFFER),
 )
 SETTINGS_PUT_ROUTES = SettingsPutRoutes(SETTINGS)
+ATHLETE_PUT_ROUTES = AthletePutRoutes(athlete_context_service, profile_service)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -3154,13 +3156,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.auth_service.require_csrf(self, session)
             if SETTINGS_PUT_ROUTES.handle(self, path):
                 return
-            if path == "/api/athlete-context":
-                payload = self.read_json()
-                self.send_json(200, athlete_context_service().save(payload.get("profile"), payload.get("competitions")))
+            if ATHLETE_PUT_ROUTES.handle(self, path):
                 return
-            if path != "/api/profile":
-                raise AppError(404, NOT_FOUND_ERROR)
-            self.send_json(200, profile_service().save(self.read_json()))
+            raise AppError(404, NOT_FOUND_ERROR)
         except AppError as exc:
             if exc.status >= 500:
                 LOGGER.exception(

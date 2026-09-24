@@ -7574,3 +7574,37 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - `server.py` hat 3.381 physische Zeilen. Athleten-PUT, POST-Transport,
   RequestHandler-/Body-Grenze, P7/P8-Restzuordnungen und P11 bleiben offen.
   Nächster kleiner Auftrag: die beiden Athleten-PUT-Routen.
+
+## P10 Athleten-PUT-Routen — Integrationsreview
+
+- Vorgänger-PR #791 wurde am 24.09.2026 um 07:52:51 UTC mit
+  `33d6410a9cb86e5cdc223f64d7665043f2148dcc` gemergt; der Commit ist
+  Vorfahr von `origin/develop`. Browser, Codex und Sonar bestanden, ohne
+  offene Review-Threads.
+- Der erste GPT-6-Luna-Quellcommit `f45a93f0` erhielt **FAIL** wegen
+  duplizierter AST-Architekturtest-Blöcke und eines zu schwachen Factory-
+  Tests mit derselben Service-Instanz. Derselbe Worker refaktorierte beide
+  PUT-Architekturtests auf einen gemeinsamen Helper und testete zwei
+  unterscheidbare Instanzen mit verschiedenen Requests. Root prüfte den
+  amendierten Code `f876607ee8ecd19acfa50c8577d4c9a21d6afef4` erneut
+  und integrierte ihn als `87ce65cb`.
+- **PASS:** `AthletePutRoutes` besitzt nur `/api/athlete-context` und
+  `/api/profile`, liest JSON einmal und löst den passenden bestehenden
+  Context-/Profile-Service pro Request auf. Unbekannte Pfade lesen keinen
+  Body und konstruieren keinen Dienst. Fachvalidierung und DB-UOW bleiben
+  bei den bestehenden Services; die äußere dynamische Auth-/CSRF-/
+  Maintenance- und Fehlergrenze einschließlich 404 bleibt unverändert.
+  Keine Backend-Rückimporte, neuen Locks/Caches, Server-Fachcallbacks oder
+  Remote-Schreibpfade.
+- Fünf direkte Tests decken beide Payload-/Statusabbildungen, unbekannte
+  Pfade, unterschiedliche Service-Instanzen auf Folgeanfragen und Fehler-
+  propagation ab; zwei Tests mit gemeinsamem AST-Guard sichern Settings und Athlete
+  PUT ohne duplizierte Testlogik. Für diesen begrenzten Dispatch angemessen.
+- Integrierte Abnahme: frisch gebautes Read-only-/netzwerkisoliertes
+  SQLCipher-Image mit **2.678 Tests/11 Skips PASS**; Ruff für Route,
+  Direkttests, Architektur und Inventarskript, Compileall, Inventar-
+  `--check` (P0=0) und Diff-Check **PASS**. `server.py` hat 3.379
+  physische Zeilen.
+- POST-Transport, vollständiger Handler-/Body-Umzug, P7/P8-Restzuordnungen
+  und P11 bleiben offen. Nächster kleiner Auftrag: History-Undo-POST-
+  Dispatch einschließlich Vorschlagsprojektion und Revisions-/Hash-Vertrag.
