@@ -645,7 +645,7 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   - [x] Terminale Turn-Fehlerprojektion einschließlich bestätigter Effekte,
     Pending-Request, atomarem Receipt, Checkpoint-Bereinigung und Event nach
     Commit einem `CoachTurnFailureService` zuordnen; der übrige Turn bleibt offen.
-- [ ] Background-Claim/Resume/Cancel und Stream-Register
+- [x] Background-Claim/Resume/Cancel und Stream-Register
   auslagern; synchrone und Hintergrundausführung teilen denselben Turn-Use-Case.
   - [x] Sessiongebundene Chat-Vorprüfung, Längen-/Cancel-Grenzen,
     idempotente Command-Lesefunktion, 15-Minuten-Stale-Recovery,
@@ -693,7 +693,7 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   entfernte automatische Reservierungs-/Retry-Steuerung nicht wieder einführen.
   - [x] Manuellen Garmin-Schlaf-/Body-Battery-Vorbereitungspfad und
     read-only Statusprojektion ihren konkreten Coach-Services zuordnen.
-  - [ ] Verbleibende Background-Receipt-/Fehlerzustände mit dem Coach-Job-
+  - [x] Verbleibende Background-Receipt-/Fehlerzustände mit dem Coach-Job-
     Eigentümer zusammenführen und Restart-/Cancellation-Verträge prüfen.
     - [x] Morning-Job-Abschlussmarker und QuickActions-Receipt-Projektion
       `MorningCoachJobCompletionService` zuordnen; die beiden getrennten
