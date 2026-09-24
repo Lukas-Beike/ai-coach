@@ -6699,3 +6699,24 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   frisches Read-only-Docker-Image: 2.557 Tests/11 Skips **PASS**.
   `server.py`: 4.119 physische Zeilen, P0=0. Veröffentlichung und
   PR-CI stehen noch aus; die Gesamt-Response-/Tool-Schleife bleibt P8-offen.
+
+### #770 Browser-Fixture-Korrektur — erneutes Review-Gate
+
+- PR-Stand `c200da12`: **FAIL**. Codex-Review meldete P1 im offenen
+  Thread `PRRT_kwDOUHv92c6laUxA`: `e2e/fixture_runtime.py` patchte noch
+  drei entfernte `server.responses_*`-Symbole. Browser-CI reproduzierte
+  den Fehler im natürlichen Rückfrage-/Reload-/Follow-up-Fall; die
+  synthetische Antwort wurde umgangen und der Provider bewusst blockiert.
+- Derselbe GPT-6-Luna-Worker änderte ausschließlich die freigegebene
+  Fixture-Datei: ein providerfreier Adapter an der aktiven
+  `server.coach_response_transport`-Lookup-Stelle delegiert alle drei
+  Methoden weiter an dieselbe synthetische Antwortfunktion. Root ergänzte
+  einen Architekturtest, der alte Fixture-Patchziele verbietet und das
+  aktive Transport-Patchziel fordert. Root prüfte beide tatsächlichen
+  Diffs/Code erneut: **PASS**; keine Aufweichung der Browsererwartung.
+- Worker: alter Patch-Ziel-Scan, Compileall, Diff-Check und lokaler
+  `mobile-small`-Playwright-Einzelfall (1/1) **PASS**. Root:
+  Architekturtests 7/7, statische Prüfungen und frisches Read-only-
+  Docker-Image mit 2.558 Tests/11 Skips **PASS**. Keine echten Provider-
+  oder Athletendaten. Aktualisierter PR-Check und Review-Thread-
+  Auflösung stehen noch aus.

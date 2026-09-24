@@ -2188,6 +2188,25 @@ class ServerArchitectureTests(unittest.TestCase):
             + "\n".join(violations),
         )
 
+    def test_browser_fixture_does_not_patch_removed_response_functions(self) -> None:
+        fixture = REPOSITORY_ROOT / "e2e" / "fixture_runtime.py"
+        removed = {
+            "responses_request",
+            "responses_background_request",
+            "responses_stream_request",
+        }
+        patched = [
+            target.attr
+            for node in ast.walk(_parse(fixture))
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "server"
+        ]
+        self.assertTrue(removed.isdisjoint(patched))
+        self.assertIn("coach_response_transport", patched)
+
     def test_request_handler_does_not_reintroduce_state_event_orchestration(self) -> None:
         request_handler = next(
             node
