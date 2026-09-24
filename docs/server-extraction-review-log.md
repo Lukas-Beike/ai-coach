@@ -7030,3 +7030,10 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Tests, Ruff, Compileall, Inventar-/Diff-Check und frisches Read-only-
   Docker-Image mit 2.600 Tests/11 Skips **PASS**. Verbleibendes Risiko:
   temporärer Server-Caller und Worker-Loop; externe PR-Gates stehen aus.
+- PR #778 auf `47e179ba`: Sonar **FAIL** mit `python:S1192` wegen
+  dreifacher identischer Receipt-SELECT-Konstante im `CoachJobStore`.
+  Root ersetzte nur die drei identischen Literale durch `SELECT_RECEIPT_SQL`;
+  SQL, Filter, UOWs und Rückgaben bleiben unverändert. Korrektur-Diff
+  erneut geprüft: **PASS**; 20 direkte/Architekturtests, Ruff,
+  Diff-Check und frisches Read-only-Docker-Image mit 2.600 Tests/
+  11 Skips **PASS**. Externe Gates folgen erneut.
