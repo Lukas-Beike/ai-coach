@@ -131,6 +131,7 @@ from backend.http_api.athlete_put import AthletePutRoutes
 from backend.http_api.coach_actions_post import CoachActionsPostRoutes
 from backend.http_api.chat_post import ChatPostRoutes
 from backend.http_api.chat_stream import CoachChatStreamTransport
+from backend.http_api.transcribe_post import TranscribePostRoutes
 from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.diagnostics_post import DiagnosticsCapturePostRoutes
@@ -2283,16 +2284,6 @@ def coach_context_preview_service() -> CoachContextPreviewService:
     )
 
 
-def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
-    """Transcribe one short voice note; audio is intentionally never persisted."""
-    return audio_transcription_client().transcribe(
-        audio,
-        content_type,
-        provider=SETTINGS.selected_ai_provider(),
-        model=SETTINGS.selected_model(),
-    )
-
-
 def coach_response_transport() -> CoachResponseTransport:
     """Compose concrete OpenAI and Gemini response adapters."""
     return CoachResponseTransport(
@@ -2849,6 +2840,7 @@ CHAT_STREAM_TRANSPORT = CoachChatStreamTransport(
     max_request_bytes=MAX_REQUEST_BYTES,
     response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
 )
+TRANSCRIBE_POST_ROUTES = TranscribePostRoutes(SETTINGS, audio_transcription_client)
 DIAGNOSTICS_CAPTURE_POST_ROUTES = DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)
 PRIVACY_DELETE_POST_ROUTES = PrivacyDeletePostRoutes(privacy_delete_service)
 PRIVACY_GET_ROUTES = PrivacyGetRoutes(
@@ -3026,9 +3018,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             return True
         if CHAT_POST_ROUTES.handle(self, path, session):
             return True
-        if path == "/api/transcribe":
-            content_type = self.headers.get("Content-Type", "")
-            self.send_json(200, transcribe_audio(self.read_audio_body(), content_type))
+        if TRANSCRIBE_POST_ROUTES.handle(self, path):
+            return True
         elif path == "/api/planning/commands":
             self.send_json(200, coach_planning_command_service().execute(
                 self.read_json(), conversation_id=coach_conversation_provision_service().ensure(), session_csrf_hash=session["csrf_hash"],

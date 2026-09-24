@@ -5,14 +5,11 @@ Historischer Ausgangscommit: `58e352d`. Die Architekturregel in der
 Root-`AGENTS.md` ist integriert. Aktuelle Commits und offene Befunde stehen
 im `docs/server-extraction-review-log.md`; das Inventar wird pro Stand erzeugt.
 
-Aktueller Stand (24.09.2026): `develop` enthält nach PR #799 215 von 232
-markierten Punkten (92,7 %), 17 bleiben offen; `server.py` hat 3.303
-physische Zeilen. Der separat geprüfte Transkriptions-POST-Quellpatch
-`48a60f0f` ist **nicht** integriert und zählt hier nicht mit. Der
-Checklistenanteil misst nicht den Restaufwand: P7/P8-Restaudit, übrige
-HTTP-/SSE-Grenzen in P10 und der gesamte P11-Abschluss bleiben
-substantiell offen. Die Umsetzung ist auf Nutzerwunsch pausiert; letzter
-geprüfter Stand und nächster Schritt stehen im Review-Log.
+Aktueller Stand (24.09.2026): Nach Integration der Transkriptions-POST-Route
+enthält der Arbeitsstand 216 von 233 markierten Punkten (92,7 %), 17 bleiben offen;
+`server.py` hat 3.294 physische Zeilen. Checklistenanteile messen nicht den Restaufwand:
+P7/P8-Restaudit, übrige HTTP-/SSE-Grenzen in P10 und der gesamte P11-Abschluss
+bleiben substantiell offen. Letzter geprüfter Stand und nächster Schritt stehen im Review-Log.
 
 ## 1. Ziel und verbindliche Abnahmekriterien
 
@@ -891,6 +888,10 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     zuordnen; das HTTP-Body-Limit und die bisherige Turn-ID-Fehlerabbildung
     bleiben erhalten, während Job-Persistenz und Reset-Cancellation den
     bestehenden Coach-Diensten gehören.
+  - [x] Die Audio-Transkriptions-POST-Route `/api/transcribe` als
+    `TranscribePostRoutes` zuordnen; Audio-Validierung, Größenlimit und
+    Provider-Aufruf bleiben beim AudioTranscriptionClient, der Handler
+    authentifiziert und delegiert nur.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 
