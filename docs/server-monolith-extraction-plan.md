@@ -5,14 +5,14 @@ Historischer Ausgangscommit: `58e352d`. Die Architekturregel in der
 Root-`AGENTS.md` ist integriert. Aktuelle Commits und offene Befunde stehen
 im `docs/server-extraction-review-log.md`; das Inventar wird pro Stand erzeugt.
 
-Aktueller Stand (24.09.2026): `develop` enthält nach PR #797 214 von 231
-markierten Punkten (92,6 %), 17 bleiben offen; `server.py` hat dort 3.367
-physische Zeilen. Der lokal geprüfte Chat-SSE-Integrationsstand enthält
-215 von 232 Punkten (92,7 %), weiterhin 17 offene Punkte und 3.303
-physische `server.py`-Zeilen. Diese SSE-Auslagerung ist noch **nicht** auf
-`develop` gemergt. Checklistenanteile messen nicht den Restaufwand:
-P7/P8-Restaudit, übrige HTTP-/SSE-Grenzen in P10 und der gesamte
-P11-Abschluss bleiben substantiell offen.
+Aktueller Stand (24.09.2026): `develop` enthält nach PR #799 215 von 232
+markierten Punkten (92,7 %), 17 bleiben offen; `server.py` hat 3.303
+physische Zeilen. Der separat geprüfte Transkriptions-POST-Quellpatch
+`48a60f0f` ist **nicht** integriert und zählt hier nicht mit. Der
+Checklistenanteil misst nicht den Restaufwand: P7/P8-Restaudit, übrige
+HTTP-/SSE-Grenzen in P10 und der gesamte P11-Abschluss bleiben
+substantiell offen. Die Umsetzung ist auf Nutzerwunsch pausiert; letzter
+geprüfter Stand und nächster Schritt stehen im Review-Log.
 
 ## 1. Ziel und verbindliche Abnahmekriterien
 

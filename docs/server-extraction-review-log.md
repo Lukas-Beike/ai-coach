@@ -7735,3 +7735,38 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Korrekturdiff wurde erneut geprüft: **PASS**; 34 fokussierte Tests,
   Ruff und die vollständige isolierte Suite mit **2.724 Tests/11 Skips**
   bestanden erneut. Die neuen PR-Checks müssen diese Korrektur bestätigen.
+
+## Fortschrittsabgleich nach PR #799 — pausierter Stand
+
+- PR #798 wurde ohne Merge geschlossen und durch #799 mit korrigiertem
+  Stand ersetzt; damit blieb es bei einer expliziten Codex-Review-Anforderung
+  je PR. PR #799 wurde am 24.09.2026 um 09:36:29 UTC mit
+  `ae619f8cde4ab74abf586946548f46f22ad44c3b` gemergt. Der Commit ist
+  Vorfahr von `origin/develop`, und sein Tree ist identisch mit dem von Root
+  geprüften PR-Head `df565d4ff1a3f4c936e45e64a465f8a030e2f550`.
+  Codex-, Sonar-, Container-, Test-Shard-, Quality- und Browser-Checks am
+  Head bestanden; offene Review-Threads: null. **Gate-Ausnahme:** GitHub-
+  Regelsuite `4207443565` meldet `bypass`, weil `required_status_checks`
+  beim manuellen Merge „Required status check Codex code review is expected“
+  bewertete. Dieser Merge ist bestätigt, aber **kein** regulärer Branch-
+  Gate-PASS; ein weiterer Bypass ist nicht Teil des Arbeitsplans.
+- Bestätigter `develop`-Stand: **215/232** markierte Planpunkte (92,7 %),
+  **17 offen**, `server.py` **3.303 physische Zeilen**. Das generierte
+  Inventar ist aktuell (`--check` PASS, P0=0). Der letzte integrierte
+  Root-Code-Review-PASS gilt für `df565d4f` mit **2.724 Tests/11 Skips**
+  in der isolierten SQLCipher-Suite; der identische Tree ist auf `develop`.
+  Diese Kennzahlen sind keine fachliche Fertigmeldung: P7/P8-Restaudit,
+  P10-Handler-/Body-Rest und P11 bleiben offen.
+- GPT-6-Luna/high-Quellpatch `48a60f0f1544634ab7e64378d7680141a2b1b3cc`
+  lagert allein `/api/transcribe` aus. Root prüfte den tatsächlichen Diff,
+  dynamische Provider-/Modellwahl, Body-Grenze und bestehende äußere
+  Auth-/CSRF-/Maintenance-Grenze: **Quellpatch-PASS**. Vier direkte Route-
+  Tests plus bestehende Provider-/Grenzwerttests sind für den begrenzten
+  Dispatch angemessen; isolierte Suite **2.718 Tests/11 Skips PASS**.
+  Dieser Patch ist weder auf `develop` noch in einem PR integriert und
+  erfordert nach Integration einen erneuten Root-Diff- und Gesamttest-PASS.
+- **Pausiert auf Nutzerwunsch.** Nächster Schritt bei Wiederaufnahme:
+  den Pflichtcheck-/Merge-SHA-Bypass als offenen GitHub-Gate-Befund
+  berücksichtigen, den Transkriptions-Patch auf dem aktuellen `develop`
+  sequenziell integrieren und erneut prüfen; danach die P7/P8-Restverträge,
+  P10-HTTP-Grenzen und P11-Composition-Root abarbeiten.
