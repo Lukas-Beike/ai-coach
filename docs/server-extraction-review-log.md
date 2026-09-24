@@ -6856,3 +6856,8 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Root prüfte den tatsächlichen Code-/Diff-Stand einschließlich
   Transaktionseigentümer, Restart-Replay, Session-/Scope-Grenze,
   Diagnosedaten und aller Aufrufer: **PASS**. PR-CI folgt.
+- Quellcommit `aeeabaa9` wurde auf dem #773-Merge konfliktfrei als
+  `f2075f4f` integriert. Root prüfte den tatsächlichen Integrationsdiff
+  und die geänderten Aufrufer nochmals: **PASS**. 87 fokussierte Tests,
+  Ruff, Compileall, Inventar-/Diff-Check und frisches Read-only-Docker-
+  Image mit 2.582 Tests/11 Skips **PASS**. PR-CI/Sonar/Codex stehen aus.
