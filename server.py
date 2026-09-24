@@ -154,6 +154,7 @@ from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.history_get import HistoryGetRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.privacy_get import PrivacyGetRoutes
+from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
 from backend.http_api.settings_put import SettingsPutRoutes
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
 from backend.sync.authority import PlanningAuthorityService
@@ -2829,6 +2830,7 @@ HISTORY_UNDO_POST_ROUTES = HistoryUndoPostRoutes(
     coach_proposal_creation_service,
 )
 DIAGNOSTICS_CAPTURE_POST_ROUTES = DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)
+PRIVACY_DELETE_POST_ROUTES = PrivacyDeletePostRoutes(privacy_delete_service)
 PRIVACY_GET_ROUTES = PrivacyGetRoutes(
     session_auth_service, export_stream_transport, privacy_delete_service
 )
@@ -3121,14 +3123,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             return True
         if DIAGNOSTICS_CAPTURE_POST_ROUTES.handle(self, path):
             return True
-        if path == "/api/privacy/delete":
-            payload = self.read_json()
-            if payload.get("confirm") != "LOKALE DATEN LÖSCHEN":
-                raise AppError(400, "Zum Löschen muss LOKALE DATEN LÖSCHEN bestätigt werden.")
-            self.send_json(200, privacy_delete_service().delete())
-        else:
-            return False
-        return True
+        return PRIVACY_DELETE_POST_ROUTES.handle(self, path)
 
     def handle_authenticated_post(self, path: str, session: dict[str, Any]) -> None:
         handled = (

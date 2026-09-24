@@ -2492,6 +2492,19 @@ class ServerArchitectureTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertNotIn("server", route_source.casefold())
 
+    def test_privacy_delete_post_route_is_owned_by_http_api_module(self) -> None:
+        server_tree = self._assert_write_route_owned(
+            "_handle_data_post",
+            "PRIVACY_DELETE_POST_ROUTES",
+            ("/api/privacy/delete", "LOKALE DATEN LÖSCHEN"),
+            "PrivacyDeletePostRoutes(privacy_delete_service)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "privacy_delete_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+        self.assertNotIn("privacy_delete_service().delete()", ast.unparse(server_tree))
+
     def test_settings_put_routes_are_owned_by_http_api_module(self) -> None:
         self._assert_write_route_owned(
             "_do_PUT",
