@@ -7480,3 +7480,36 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - `server.py` hat 3.407 physische Zeilen. Privacy-GET, POST-/PUT-/SSE-
   Transport, P7/P8-Restzuordnungen und P11 bleiben offen. Nächster kleiner
   Auftrag: die drei Privacy-GET-Pfade samt Stream- und Auth-Grenzen.
+
+## P10 Privacy-GET-Routen — Integrationsreview
+
+- Vorgänger-PR #788 wurde am 24.09.2026 um 07:28:40 UTC mit
+  `ce9a92845b6f63c577752f2f3da3560457bd5ca6` gemergt; der Commit ist
+  Vorfahr von `origin/develop`. Browser, Codex und Sonar sind grün, ohne
+  offene Review-Threads.
+- Der erste GPT-6-Luna-Quellcommit `e2d07e65` erhielt **FAIL**: Die direkte
+  Auth-Denial-Regression deckte nur den Export-, nicht den Delete-Preview-
+  und Backup-Pfad ab. Derselbe Worker korrigierte die Tests im amendierten
+  Commit `4fe4682f80de6e13c759fbf0a1c1afbf3eb81afa`; Root prüfte den
+  tatsächlichen Code und Diff erneut und integrierte ihn als `dc110d65`.
+- **PASS:** `PrivacyGetRoutes` besitzt genau Export, Delete-Preview und
+  Backup; `_handle_diagnostics_get` entfällt. Dynamische Authentisierung
+  geschieht vor jeder Stream-/Delete-Service-Konstruktion; unbekannte Pfade
+  lösen weder Auth noch Service auf. Die bestehenden Stream- und Delete-
+  Eigentümer behalten Deadline, Cleanup, DB-/Dateizugriff und Statuslogik.
+  Keine Backend-Rückimporte, Server-Fachcallbacks, neuen Locks/Caches oder
+  Remote-Schreibpfade.
+- Die fünf direkten Routentests prüfen beide Streams, Preview-Payload und
+  Status, Auth-Denial für **alle drei** Pfade, unbekannte Pfade und aktuelle
+  Auth-Auflösung bei Folgeanfragen. Der bestehende Server-Test patcht nun
+  die tatsächlich konsumierte Route. Architekturtests fordern den Wegfall
+  des alten Handlers und die konkreten Factories.
+- Integrierte Abnahme: frisch gebautes Read-only-/netzwerkisoliertes
+  SQLCipher-Image mit **2.660 Tests/11 Skips PASS**; Ruff für neue Route,
+  Direkttests, Architektur und Inventarskript, Compileall, Inventar-
+  `--check` (P0=0) und Diff-Check **PASS**. Die Testzahl und insbesondere
+  die per-Pfad-Sicherheitsfälle sind für diesen Schritt angemessen.
+- `server.py` hat 3.397 physische Zeilen. `/api/state/events`-SSE,
+  POST-/PUT-Transport, P7/P8-Restzuordnungen und P11 bleiben offen.
+  Nächster kleiner Auftrag: den verbleibenden State-Event-GET-Dispatch
+  ohne Änderung der bestehenden Stream-Semantik auslagern.
