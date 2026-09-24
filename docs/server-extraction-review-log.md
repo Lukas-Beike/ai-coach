@@ -6578,7 +6578,9 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Attachment-Evidenz. 101 kombinierte direkte/Architektur/Dialog-/Attachment-
   Tests, Ruff, Compileall, Inventar-Check und Diff-Check **PASS**. Frisches
   Read-only-Docker-Image: 2.533 Tests/11 Skips **PASS**. Die native
-  Vollsuite mit 2.533 Tests/12 Skips ist ebenfalls **PASS**; danach
-  folgt die sequenzielle Integration auf den bestätigten #765-Merge
-  und erneute Prüfung. `server.py` 4.259
+  Vollsuite mit 2.533 Tests/12 Skips ist ebenfalls **PASS**. Quellcommit
+  `8b6aca37` wurde auf dem bestätigten #765-Merge konfliktfrei als
+  `a4ca1c70` integriert; 101 betroffene Tests sowie Ruff, Compileall,
+  Inventar- und Diff-Check sind auf diesem Stand erneut **PASS**.
+  `server.py` 4.259
   physische Zeilen; P7-Rest 23 Definitionen, P0=0.
