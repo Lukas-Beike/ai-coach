@@ -6941,6 +6941,13 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Verbleibend: Der dünne Server-Aufrufer und die Background-Worker-
   Orchestrierung müssen in den nächsten P8-Schritten entfernt werden;
   externe PR-Gates stehen für diesen Stand noch aus.
+
+- PR #776 wurde mit vollständig grünen CI-/Browser-/Sonar-/Codex-Gates,
+  null offenen Review-Threads und null offenen Sonar-Issues gemergt
+  (`mergedAt` 2026-09-24T04:27:59Z, Merge-Commit
+  `5d977a82a24a9a1cede063ce172e856f0cafe252`). Der Commit ist
+  auf `origin/develop` erreichbar: **PASS**.
+
 # P8 Morning Coach job completion receipt — isolierter Quellstand
 
 - Auf Basis des isolierten Branches `refactor/p8-morning-completion-source-20260924`
@@ -6968,3 +6975,12 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   read-only Container mit Worktree als read-only Quelle: 2.596 Tests,
   11 Skips, **PASS**. Es wurden nur temporäre Testdaten und gemockte Aufrufe
   verwendet.
+- Root prüfte den tatsächlichen Worker-Commit `a8015024` samt Service,
+  Server-Caller, DB-/Statusfiltern, JSON-Vertrag und Tests. Ein zunächst
+  fehlender Failure-Boundary-Test wurde an denselben Worker zurückgegeben
+  und vor Integration ergänzt. Die sequenzielle Integration auf dem
+  bestätigten #776-Merge ist `e35ed7a8`; 21 fokussierte Tests, Ruff,
+  Compileall, Inventar-/Diff-Check und ein frisch gebautes Read-only-
+  Docker-Image mit 2.596 Tests/11 Skips **PASS**. Externe PR-Gates
+  werden für den integrierten Stand gesondert bestätigt. Der vorläufige
+  Server-Adapter bleibt ein P8-Risiko bis zur Worker-Auslagerung.
