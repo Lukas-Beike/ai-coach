@@ -2480,6 +2480,18 @@ class ServerArchitectureTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertNotIn("server", route_source.casefold())
 
+    def test_coach_actions_post_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_coach_post",
+            "COACH_ACTIONS_POST_ROUTES",
+            ("/api/coach/actions/confirm", "/api/coach/actions/execute"),
+            "CoachActionsPostRoutes(coach_proposal_confirmation_service, coach_proposal_execution_service)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "coach_actions_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
     def test_diagnostics_capture_post_route_is_owned_by_http_api_module(self) -> None:
         self._assert_write_route_owned(
             "_handle_data_post",

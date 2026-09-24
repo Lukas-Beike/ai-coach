@@ -129,6 +129,7 @@ from backend.http_api.bootstrap_state import (
 )
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
+from backend.http_api.coach_actions_post import CoachActionsPostRoutes
 from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.diagnostics_post import DiagnosticsCapturePostRoutes
@@ -2829,6 +2830,10 @@ HISTORY_UNDO_POST_ROUTES = HistoryUndoPostRoutes(
     history_undo_service,
     coach_proposal_creation_service,
 )
+COACH_ACTIONS_POST_ROUTES = CoachActionsPostRoutes(
+    coach_proposal_confirmation_service,
+    coach_proposal_execution_service,
+)
 DIAGNOSTICS_CAPTURE_POST_ROUTES = DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)
 PRIVACY_DELETE_POST_ROUTES = PrivacyDeletePostRoutes(privacy_delete_service)
 PRIVACY_GET_ROUTES = PrivacyGetRoutes(
@@ -3075,21 +3080,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     def _handle_coach_post(self, path: str, session: dict[str, Any]) -> bool:
+        if COACH_ACTIONS_POST_ROUTES.handle(self, path, session):
+            return True
         if path == "/api/transcribe":
             content_type = self.headers.get("Content-Type", "")
             self.send_json(200, transcribe_audio(self.read_audio_body(), content_type))
         elif path == "/api/planning/commands":
             self.send_json(200, coach_planning_command_service().execute(
                 self.read_json(), conversation_id=coach_conversation_provision_service().ensure(), session_csrf_hash=session["csrf_hash"],
-            ))
-        elif path == "/api/coach/actions/confirm":
-            self.send_json(200, coach_proposal_confirmation_service().confirm(
-                self.read_json().get("proposal_id"), session["csrf_hash"],
-            ))
-        elif path == "/api/coach/actions/execute":
-            payload = self.read_json()
-            self.send_json(200, coach_proposal_execution_service().execute(
-                payload.get("action_token"), session["csrf_hash"], payload.get("payload_hash"),
             ))
         elif path == "/api/chat/stream":
             self.handle_chat_stream(session)
