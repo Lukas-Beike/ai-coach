@@ -7101,3 +7101,29 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Docs-Mount. Tests nutzten temporäre Daten und abgefangene Provideraufrufe.
 - Quellstand: Branch `refactor/p8-chat-adapter-cleanup-source-20260924`,
   Basis `e5d85bb593d36bed3873628673e725b990bf2e49`. Kein Rebase.
+
+## P8 Testadapter — Sol-Integrationsreview
+
+- Vorgänger-PR #779 wurde am 24.09.2026 um 05:15:00 UTC mit
+  `002dea5a2c1607273568de562485e542283a7733` gemergt; der Commit ist
+  Vorfahr von `origin/develop`. Container-, Sonar-, Codex- und nachlaufender
+  Browser-Check waren erfolgreich; keine offenen Review-Threads.
+- Quellcommit `af7fd92a78f14a004276c17c9ae547b18f341f1a` wurde als
+  `bfbb8305c240d691dd4c8a3cf99f065b33dadd15` auf genau diesen
+  `develop`-Stand übernommen. Geprüft wurden der tatsächliche Quell-Diff,
+  alle elf migrierten Aufrufer, die konsumierte Backend-Schnittstelle und
+  der integrierte Diff.
+- **PASS**: Nur der ungenutzte Server-Weiterleiter entfiel. Der HTTP-Handler
+  und der Background-Runner konsumieren bereits `CoachChatTurnService.run`;
+  die Tests rufen dieselbe Use-Case-Grenze direkt auf. Kein neuer Callback,
+  Rückimport, Zustandsbesitzer oder gelockerter Sicherheitsvertrag.
+- Integrationstests: 520 Coach-Tests **PASS**; frisch gebautes Read-only-
+  SQLCipher-Image mit vollständiger Suite 2.605 Tests/11 Skips **PASS**;
+  Compileall, Inventar-`--check`, `git diff --check` und Definitionen-Suche
+  **PASS**. Die elf ersetzten Testaufrufe behalten ihre Assertions; ein
+  Architekturtest schützt gegen erneute Einführung des Adapters. Diese
+  Testzahl ist für die reine Weiterleiter-Entfernung angemessen.
+- Restrisiko: Die umfangreichen noch vorhandenen `server.*`-Testpatches
+  müssen in P11 anhand der tatsächlichen Lookup-Orte migriert werden;
+  dieser Patch erweitert ihre Zahl nicht. P7/P8-Elternpunkte und P10/P11
+  bleiben offen.
