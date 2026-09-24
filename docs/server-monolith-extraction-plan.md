@@ -606,6 +606,9 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   - [x] Einmalige Recovery bei ungültigem Remote-Konversationszustand samt
     lokalem Kontext, Attachment-Evidenz und durablem Checkpoint
     `CoachConversationRecoveryService` zuordnen; Gesamtloop bleibt offen.
+  - [x] Finales Turn-Receipt, atomare Assistant-Nachricht,
+    Preview-Publikationsbindung und Event nach Commit
+    `CoachFinalReceiptService` zuordnen; Gesamtloop bleibt offen.
   - [x] Provider-Request-Aufbau einschließlich Dialogkontext,
     Attachment-Sicherheitsanweisung, OpenAI-Kontinuität, Gemini-Medien
     und Modell-/Thinking-Auswahl `CoachRequestPayloadService` zuordnen;

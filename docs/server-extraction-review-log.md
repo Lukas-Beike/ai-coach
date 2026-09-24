@@ -6609,3 +6609,23 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   bestehende 23 Server-Ruff-Befunde unverändert. PR-CI steht noch aus.
   `server.py`: 4.240 physische Zeilen;
   P7-Rest 22 Definitionen/24 globale Bindungen, P0=0.
+## P8 finales Turn-Receipt — vorbereiteter Root-Diff-Stand
+
+- Root hat auf dem geprüften #766-Quellstand den konkreten
+  `CoachFinalReceiptService` implementiert und am tatsächlichen Code/Diff
+  geprüft: **PASS** für finale Projektion, atomare Assistant-Nachricht,
+  Preview-Publikationsbindung, Provider-Marker, bereinigtes Receipt und
+  Event erst nach Commit. Der alte Server-Code und die verwaiste SQL-
+  Konstante sind entfernt; kein Rückimport, Server-Callback oder Wrapper.
+- Fünf direkte Fälle decken Status-/Checkpoint-Projektion,
+  Idempotenz, Preview-/Event-Reihenfolge und Fehler ab. Ein Test verwendet
+  eine temporäre echte SQLite-UOW und beweist, dass ein KV-Fehler die bereits
+  eingefügte Assistant-Nachricht zurückrollt und kein Event veröffentlicht.
+  Betroffene Dialog-/Fehler-/Architekturtests, Ruff, Compileall, Inventar-
+  und Diff-Check **PASS**. Native Vollsuite vor dem zusätzlichen SQLite-
+  Test: 2.537 Tests/12 Skips **PASS**; danach direkter SQLite-Test **PASS**
+  und Read-only-Docker-Vollsuite 2.538 Tests/11 Skips **PASS**. `server.py`
+  4.222 physische Zeilen, P7-Rest 21 Definitionen, P0=0.
+- Nächster Schritt: nach #767-Merge auf dessen bestätigtem Stand
+  sequenziell integrieren, betroffene Aufrufer erneut testen und erst
+  nach Root-PASS gegen `develop` veröffentlichen.

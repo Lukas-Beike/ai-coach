@@ -25,6 +25,7 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 # backend-owned implementations, not server callbacks or compatibility
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("backend.coach.final_receipt", ("CoachFinalReceiptService",)),
     ("backend.coach.conversation_recovery", ("CoachConversationRecoveryService",)),
     ("backend.coach.response_retry", ("CoachResponseRetryPolicy",)),
     ("backend.coach.conversation_gate", ("CoachConversationGate",)),
@@ -1660,6 +1661,9 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
+    "_structured_coach_final_receipt",
+    "_persist_structured_coach_final_receipt",
+    "UPDATE_COMMAND_RECEIPT_SQL",
     "_recover_structured_coach_conversation",
     "_recover_invalid_structured_conversation",
     "_structured_coach_receipt",
