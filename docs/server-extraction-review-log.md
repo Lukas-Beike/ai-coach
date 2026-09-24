@@ -7651,3 +7651,47 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Diagnostik-/Privacy-/Coach-POST, RequestHandler-/Body-Grenze,
   P7/P8-Restzuordnungen und P11 bleiben offen. Nächster kleiner Auftrag:
   Diagnostik-Capture-POST mit unverändertem Capture-Lock.
+
+## P10 POST-Routen — bestätigter #796-Merge und sauberer Integrationsstand
+
+- PR #796 ist am 24.09.2026 um 09:04:00 UTC mit
+  `76c5f6feb914d697944d38aeefb2dc67743f215a` gemergt; dieser Commit
+  ist Vorfahr von `origin/develop`. Alle PR-Head-Checks waren grün und
+  Review-Threads null. **Ausnahme:** GitHubs Regelsuite `4207013481`
+  protokolliert den vom Nutzer ausgelösten Merge als `bypass`: die
+  Required-Status-Check-Regel scheiterte mit „Required status check
+  Codex code review is expected“, obwohl der gleichnamige Check am
+  PR-Head erfolgreich war. Dieser Merge wird nicht als regulärer
+  Branch-Gate-PASS dargestellt. Vor weiteren Merges ist die Check-SHA-
+  Zuordnung des Review-Gates zu prüfen; kein erneuter Bypass durch Root.
+- Auf dem bestätigten `develop`-Merge wurden vier zuvor einzeln von Root
+  am tatsächlichen Diff geprüfte GPT-6-Luna-Quellpatches sequenziell und
+  ohne Rebase-/Merge-Commit integriert: Diagnostik-Capture-POST
+  `0f7a0f5e` → `d02c5a40`, Privacy-Delete-POST `1f7ce307` →
+  `ceee237f`, Coach-Aktions-POST `0d116088` → `0594f77b` und Chat-
+  Submission-/Reset-POST `386ef8a5` → `1ed33023`. Die ersten Coach-
+  Aktions- und Chat-Quellstände erhielten **FAIL** wegen fehlender
+  Execute- beziehungsweise Reset-Fehlerprobe; dieselben Worker
+  ergänzten die Tests, Root prüfte die tatsächlichen Korrekturen und
+  gab erst die amendierten Quellstände frei.
+- **PASS für den lokalen kombinierten Diff-Stand `1ed33023` plus
+  Inventar-/Plan-Nachtrag:** Die vier HTTP-Adapter besitzen nur Dispatch,
+  Body-Limits/Lesen und Status-/JSON-Projektion. Die bestehenden Dienste
+  behalten Capture-Lock, lokale Privacy-Löschtransaktion samt exakter
+  Bestätigung, Coach-Proposal-Session-/Token-/Payload-Hash samt expliziter
+  Remote-Freigabe sowie Job-Persistenz und Reset-Cancellation. Die äußere
+  Auth-/CSRF-/Maintenance-/Fehlergrenze bleibt im Handler. Keine Backend-
+  Rückimporte, neuen Zustandseigentümer, Server-Fachcallbacks oder
+  dauerhaften Wrapper. Direkte Tests decken alle Mappings, unbekannte
+  Pfade, Factory-Auflösung, Grenzwerte und Fehler ohne Antwort ab;
+  bestehende Service-/Rollback-Regressionen bleiben aktiv. Die Testzahl
+  ist für diesen HTTP-Transportumfang angemessen.
+- Frisch gebautes read-only-/netzwerkisoliertes SQLCipher-Image auf dem
+  finalen Integrationsbranch: **2.713 Tests/11 Skips PASS**. Gezielter
+  Ruff-Check für Routen, Domainänderung, Tests und Inventarskript;
+  Compileall, Inventar `--check` (P0=0) und Diff-Check PASS. `server.py`
+  hat 3.367 physische Zeilen; lokal 214/231 Planpunkte, 17 offen.
+  Noch kein PR für diesen POST-Block. Verbleibendes Veröffentlichungs-
+  risiko: Der für #796 beobachtete Review-Check war nur am Head sichtbar,
+  nicht am GitHub-Test-Merge-Commit; vor Auto-Merge jedes neuen PR sind
+  Test-Merge-SHA und Regelsuite zu kontrollieren.

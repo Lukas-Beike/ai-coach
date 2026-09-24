@@ -5,6 +5,15 @@ Historischer Ausgangscommit: `58e352d`. Die Architekturregel in der
 Root-`AGENTS.md` ist integriert. Aktuelle Commits und offene Befunde stehen
 im `docs/server-extraction-review-log.md`; das Inventar wird pro Stand erzeugt.
 
+Aktueller Stand (24.09.2026): `develop` enthält nach PR #796 210 von 227
+markierten Punkten (92,5 %), 17 bleiben offen; `server.py` hat dort 3.375
+physische Zeilen. Der lokal auf diesem Merge basierende und erneut geprüfte
+POST-Integrationsstand enthält 214 von 231 Punkten (92,6 %), weiterhin 17
+offene Punkte und 3.367 physische `server.py`-Zeilen. Die vier zusätzlichen
+P10-Punkte sind noch **nicht** auf `develop` gemergt. Checklistenanteile
+messen nicht den Restaufwand: P7/P8-Restaudit, HTTP-/SSE-Grenzen in P10 und
+der gesamte P11-Abschluss bleiben substantiell offen.
+
 ## 1. Ziel und verbindliche Abnahmekriterien
 
 `server.py` wird zum Einstiegspunkt und zur Composition Root: Konfiguration
@@ -863,6 +872,20 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     `HistoryUndoPostRoutes` zuordnen; Proposal-Sitzungsbindung sowie
     Revisions-/Hash-Prüfung und atomarer Undo bleiben bei den bestehenden
     Coach- und History-Diensten.
+  - [x] `/api/diagnostics/capture` als POST-Route
+    `DiagnosticsCapturePostRoutes` zuordnen; Capture-Lock und Zustand bleiben
+    bei `DiagnosticCapture`.
+  - [x] `/api/privacy/delete` als POST-Route `PrivacyDeletePostRoutes`
+    zuordnen; die exakte Bestätigung wird vor Wartungsgate, DB und Remote-
+    Versuch im `PrivacyDeleteService` geprüft.
+  - [x] Coach-Aktionsbestätigung und -ausführung als POST-Routen
+    `CoachActionsPostRoutes` zuordnen; Session-/Token-/Payload-Hash,
+    atomarer Verbrauch und explizite Remote-Schreibfreigabe bleiben bei
+    den Coach-Proposal-Services.
+  - [x] Chat-Submission und Reset als POST-Routen `ChatPostRoutes`
+    zuordnen; das HTTP-Body-Limit und die bisherige Turn-ID-Fehlerabbildung
+    bleiben erhalten, während Job-Persistenz und Reset-Cancellation den
+    bestehenden Coach-Diensten gehören.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 
