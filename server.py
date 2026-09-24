@@ -2469,14 +2469,6 @@ def coach_chat_turn_service() -> CoachChatTurnService:
     )
 
 
-def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "", client_turn_id: str, background_job: bool = False) -> dict[str, Any]:
-    return coach_chat_turn_service().run(
-        message, allow_mutations=allow_mutations, on_text_delta=on_text_delta,
-        cancel_event=cancel_event, session_csrf_hash=session_csrf_hash,
-        client_turn_id=client_turn_id, background_job=background_job,
-    )
-
-
 def morning_coach_job_completion_service() -> MorningCoachJobCompletionService:
     return MorningCoachJobCompletionService(
         database_manager(), DB_LOCK, KEY_VALUE_REPOSITORY,

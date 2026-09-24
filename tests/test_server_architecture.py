@@ -2175,6 +2175,11 @@ def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
 
 
 class ServerArchitectureTests(unittest.TestCase):
+    def test_chat_turn_has_no_server_adapter(self) -> None:
+        implementations = _top_level_implementations(_parse(SERVER_PATH))
+        self.assertNotIn("chat_with_coach", implementations)
+        self.assertIn("coach_chat_turn_service", implementations)
+
     def test_extraction_inventory_has_no_unassigned_p0_symbols(self) -> None:
         inventory = (REPOSITORY_ROOT / "docs" / "server-extraction-inventory.md").read_text(encoding="utf-8")
         self.assertIn("| P0 (Zuordnung offen) | 0 | 0 | 0 |", inventory)

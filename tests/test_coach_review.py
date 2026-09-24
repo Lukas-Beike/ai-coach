@@ -153,7 +153,7 @@ class CoachReviewTests(unittest.TestCase):
             transport_factory.return_value.background_request.side_effect = server.AppError(
                 503, "Model unavailable"
             )
-            result = server.chat_with_coach(
+            result = server.coach_chat_turn_service().run(
                 message,
                 client_turn_id=client_turn_id,
                 session_csrf_hash=csrf_hash,

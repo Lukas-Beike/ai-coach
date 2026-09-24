@@ -7071,4 +7071,59 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   **PASS**. 26 fokussierte Tests, Ruff, Compileall, Inventar-/Diff-
   Check und frisch gebautes Read-only-Docker-Image mit 2.604 Tests/
   11 Skips **PASS**. Externe PR-Gates und die reine Test-Adapter-
-  Bereinigung `server.chat_with_coach` bleiben offen.
+  Bereinigung `server.chat_with_coach` blieb als reine Testmigration offen.
+
+## P8 `server.chat_with_coach`-Testadapter — isolierter Quellstand
+
+- Vor jeder Löschung wurde `rg` über Produktiv-Python-Code ausgeführt:
+  außer der Adapterdefinition gab es keinen Produktiven Aufrufer; die
+  Tests nutzten noch elf direkte Aufrufstellen. `CoachBackgroundJobRunner`
+  konsumiert bereits `CoachChatTurnService.run`.
+- Der Adapter wurde entfernt. Tests rufen über die Composition-Factory
+  `server.coach_chat_turn_service().run` auf; bestehende Assertions und
+  `CoachChatTurnService.run`-Patchziele bleiben auf dem konsumierten Backend-
+  Use-Case. Ein Architekturtest verhindert eine erneute Server-Definition.
+- Die elf migrierten Testaufrufe decken Kontextaktualisierung, Attachments,
+  synchrone und persistente Hintergrundausführung, Sessionbindung,
+  Providerstreaming, Retry, Receipt-Replay und Review-Regressionspfade ab.
+  Zusammen mit dem Architekturguard ist diese direkte Testfläche für die
+  Entfernung eines reinen Einzeilen-Weiterleiters angemessen; die Service-
+  Verträge selbst bleiben durch die vorhandenen Coach-Use-Case-Tests geprüft.
+- Sieben betroffene Module einschließlich Architekturtest: 630 Tests,
+  4 erwartete SQLCipher-Skips **PASS**. Compileall, Inventar-`--check`
+  und `git diff --check` **PASS**. Ruff fand im vollständigen Umfang der
+  großen bestehenden Server-/Testmodule 223 bestehende Befunde; keiner liegt
+  auf den geänderten Testaufrufen oder dem neuen Architekturguard.
+- Frisches Docker-Image `sha256:c59271324b09d723580b05e83400f2beb8ed9f54d085d067cfddbfbc83a0cd05`;
+  read-only Container-Suite: 2.605 Tests, 11 Skips **PASS**. Das kanonische
+  Skript mountet `docs/` nicht und hatte daher zunächst zwei Dokumentlese-
+  fehler; derselbe Containerlauf bestand mit zusätzlichem read-only-
+  Docs-Mount. Tests nutzten temporäre Daten und abgefangene Provideraufrufe.
+- Quellstand: Branch `refactor/p8-chat-adapter-cleanup-source-20260924`,
+  Basis `e5d85bb593d36bed3873628673e725b990bf2e49`. Kein Rebase.
+
+## P8 Testadapter — Sol-Integrationsreview
+
+- Vorgänger-PR #779 wurde am 24.09.2026 um 05:15:00 UTC mit
+  `002dea5a2c1607273568de562485e542283a7733` gemergt; der Commit ist
+  Vorfahr von `origin/develop`. Container-, Sonar-, Codex- und nachlaufender
+  Browser-Check waren erfolgreich; keine offenen Review-Threads.
+- Quellcommit `af7fd92a78f14a004276c17c9ae547b18f341f1a` wurde als
+  `bfbb8305c240d691dd4c8a3cf99f065b33dadd15` auf genau diesen
+  `develop`-Stand übernommen. Geprüft wurden der tatsächliche Quell-Diff,
+  alle elf migrierten Aufrufer, die konsumierte Backend-Schnittstelle und
+  der integrierte Diff.
+- **PASS**: Nur der ungenutzte Server-Weiterleiter entfiel. Der HTTP-Handler
+  und der Background-Runner konsumieren bereits `CoachChatTurnService.run`;
+  die Tests rufen dieselbe Use-Case-Grenze direkt auf. Kein neuer Callback,
+  Rückimport, Zustandsbesitzer oder gelockerter Sicherheitsvertrag.
+- Integrationstests: 520 Coach-Tests **PASS**; frisch gebautes Read-only-
+  SQLCipher-Image mit vollständiger Suite 2.605 Tests/11 Skips **PASS**;
+  Compileall, Inventar-`--check`, `git diff --check` und Definitionen-Suche
+  **PASS**. Die elf ersetzten Testaufrufe behalten ihre Assertions; ein
+  Architekturtest schützt gegen erneute Einführung des Adapters. Diese
+  Testzahl ist für die reine Weiterleiter-Entfernung angemessen.
+- Restrisiko: Die umfangreichen noch vorhandenen `server.*`-Testpatches
+  müssen in P11 anhand der tatsächlichen Lookup-Orte migriert werden;
+  dieser Patch erweitert ihre Zahl nicht. P7/P8-Elternpunkte und P10/P11
+  bleiben offen.

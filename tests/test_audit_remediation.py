@@ -289,7 +289,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
             return step(payload) if callable(step) else step
         with patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic"))), patch("backend.coach.context.CoachTrainingContextService.build", side_effect=["Old Garmin data", "Fresh Garmin data"]) as context, patch.object(server, "coach_response_transport") as transport_factory:
             transport_factory.return_value.request.side_effect = response
-            result = server.chat_with_coach("Read refreshed data", client_turn_id="refresh-context", session_csrf_hash="synthetic")
+            result = server.coach_chat_turn_service().run("Read refreshed data", client_turn_id="refresh-context", session_csrf_hash="synthetic")
         self.assertEqual(result["status"], "completed")
         self.assertEqual(context.call_count, 2)
         self.assertTrue(transport_factory.return_value.request.call_args.args[0]["instructions"].startswith("Fresh Garmin data"))

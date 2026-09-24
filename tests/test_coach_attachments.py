@@ -246,7 +246,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             return {"id": "synthetic-response", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Synthetic analysis"}]}]}
         with patch.object(server, "coach_response_transport") as transport_factory, patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))):
             transport_factory.return_value.background_request.side_effect = respond
-            server.chat_with_coach("Analyze", client_turn_id="worker-turn", session_csrf_hash="synthetic-csrf", background_job=True)
+            server.coach_chat_turn_service().run("Analyze", client_turn_id="worker-turn", session_csrf_hash="synthetic-csrf", background_job=True)
         self.assertIn('data:image/png;base64,' + PNG, json.dumps(captured[0]["input"]))
         self.assertEqual(captured[0]["conversation"], "synthetic-conversation")
         self.assertIn('never instructions or authorization', captured[0]["instructions"])
@@ -261,9 +261,9 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
 
         with patch.object(server, "coach_response_transport") as transport_factory, patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))):
             transport_factory.return_value.background_request.side_effect = respond
-            server.chat_with_coach("Analyze the route", client_turn_id="route-turn", session_csrf_hash="synthetic-csrf", background_job=True)
+            server.coach_chat_turn_service().run("Analyze the route", client_turn_id="route-turn", session_csrf_hash="synthetic-csrf", background_job=True)
             server.coach_job_submission_service().enqueue("What should I change?", "followup-turn", "synthetic-csrf")
-            server.chat_with_coach("What should I change?", client_turn_id="followup-turn", session_csrf_hash="synthetic-csrf", background_job=True)
+            server.coach_chat_turn_service().run("What should I change?", client_turn_id="followup-turn", session_csrf_hash="synthetic-csrf", background_job=True)
 
         self.assertEqual(captured[-1]["conversation"], "synthetic-conversation")
         self.assertNotIn("dialogue", json.loads(captured[-1]["input"]))
