@@ -2088,7 +2088,7 @@ class CoachTests(unittest.TestCase):
     def test_privacy_delete_reports_remote_attempt_and_failure(self):
         server.set_kv("openai_conversation_id", "conv-test")
         with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", side_effect=server.AppError(503, "upstream")):
-            result = server.privacy_delete_service().delete()
+            result = server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         self.assertTrue(result["remote_delete_attempted"])
         self.assertFalse(result["remote_conversation_deleted"])
         self.assertTrue(result["local_data_deleted"])
@@ -2104,7 +2104,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(preview["confirmation_text"], "LOKALE DATEN LÖSCHEN")
         self.assertTrue(preview["remote_untouched"])
         with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
-            result = server.privacy_delete_service().delete()
+            result = server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         self.assertTrue(result["local_data_deleted"])
         self.assertEqual(set(result["deleted_categories"]), {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE})
         with server.DB_LOCK, server.database() as db:
@@ -2124,7 +2124,7 @@ class CoachTests(unittest.TestCase):
             )
         try:
             with self.assertRaises(sqlite3.DatabaseError):
-                server.privacy_delete_service().delete()
+                server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         finally:
             with server.DB_LOCK, server.database() as db:
                 db.execute("DROP TRIGGER synthetic_privacy_abort")
@@ -10138,7 +10138,7 @@ class CoachTests(unittest.TestCase):
         server.profile_service().save({"name": "Ada"})
         self.assertTrue(server.change_history_service().list())
         with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
-            server.privacy_delete_service().delete()
+            server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         self.assertEqual(server.change_history_service().list(), [])
 
 

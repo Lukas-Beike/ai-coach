@@ -17,6 +17,7 @@ from backend.calendar import public_events as public_event_calendar
 from backend.calendar.external import ExternalCalendarReader
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
+from backend.errors import AppError
 from backend.planning import season as planning_season
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.competition_service import CompetitionService
@@ -133,6 +134,8 @@ class PrivacyDataExportService:
         }
 
 
+PRIVACY_DELETE_CONFIRMATION_TEXT = "LOKALE DATEN LÖSCHEN"
+
 PRIVACY_DELETE_SCOPE = (
     ("chats", "Chats, Coach-Werkzeug- und Aktionsprotokolle", ("messages", "coach_commands", "coach_plan_artifacts", "coach_action_proposals")),
     ("snapshots", "Trainings-Snapshots", ("snapshots",)),
@@ -188,7 +191,7 @@ class PrivacyDeleteService:
             counts = self._counts(db)
         return {
             "status": "preview",
-            "confirmation_text": "LOKALE DATEN LÖSCHEN",
+            "confirmation_text": PRIVACY_DELETE_CONFIRMATION_TEXT,
             "categories": [
                 {"id": category, "label": label, "records": counts[category]}
                 for category, label, _tables in PRIVACY_DELETE_SCOPE
@@ -197,7 +200,12 @@ class PrivacyDeleteService:
             "openai_conversation": "Eine vorhandene OpenAI-Konversation wird vor dem Löschen zum Löschen angefragt; ein Fehlschlag wird separat ausgewiesen.",
         }
 
-    def delete(self) -> dict[str, Any]:
+    def delete(self, confirm: Any) -> dict[str, Any]:
+        if confirm != PRIVACY_DELETE_CONFIRMATION_TEXT:
+            raise AppError(
+                400,
+                "Zum Löschen muss LOKALE DATEN LÖSCHEN bestätigt werden.",
+            )
         dependencies = self._dependencies
         with dependencies.maintenance_gate.restore():
             with dependencies.database_lock, dependencies.database_manager.unit_of_work() as db:

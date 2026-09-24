@@ -129,8 +129,11 @@ from backend.http_api.bootstrap_state import (
 )
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
+from backend.http_api.coach_actions_post import CoachActionsPostRoutes
+from backend.http_api.chat_post import ChatPostRoutes
 from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
+from backend.http_api.diagnostics_post import DiagnosticsCapturePostRoutes
 from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.rate_limit import RateLimiter
@@ -153,6 +156,7 @@ from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.history_get import HistoryGetRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.privacy_get import PrivacyGetRoutes
+from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
 from backend.http_api.settings_put import SettingsPutRoutes
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
 from backend.sync.authority import PlanningAuthorityService
@@ -2827,6 +2831,17 @@ HISTORY_UNDO_POST_ROUTES = HistoryUndoPostRoutes(
     history_undo_service,
     coach_proposal_creation_service,
 )
+COACH_ACTIONS_POST_ROUTES = CoachActionsPostRoutes(
+    coach_proposal_confirmation_service,
+    coach_proposal_execution_service,
+)
+CHAT_POST_ROUTES = ChatPostRoutes(
+    coach_job_submission_service,
+    coach_conversation_reset_service,
+    MAX_REQUEST_BYTES,
+)
+DIAGNOSTICS_CAPTURE_POST_ROUTES = DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)
+PRIVACY_DELETE_POST_ROUTES = PrivacyDeletePostRoutes(privacy_delete_service)
 PRIVACY_GET_ROUTES = PrivacyGetRoutes(
     session_auth_service, export_stream_transport, privacy_delete_service
 )
@@ -3071,6 +3086,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     def _handle_coach_post(self, path: str, session: dict[str, Any]) -> bool:
+        if COACH_ACTIONS_POST_ROUTES.handle(self, path, session):
+            return True
+        if CHAT_POST_ROUTES.handle(self, path, session):
+            return True
         if path == "/api/transcribe":
             content_type = self.headers.get("Content-Type", "")
             self.send_json(200, transcribe_audio(self.read_audio_body(), content_type))
@@ -3078,28 +3097,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, coach_planning_command_service().execute(
                 self.read_json(), conversation_id=coach_conversation_provision_service().ensure(), session_csrf_hash=session["csrf_hash"],
             ))
-        elif path == "/api/coach/actions/confirm":
-            self.send_json(200, coach_proposal_confirmation_service().confirm(
-                self.read_json().get("proposal_id"), session["csrf_hash"],
-            ))
-        elif path == "/api/coach/actions/execute":
-            payload = self.read_json()
-            self.send_json(200, coach_proposal_execution_service().execute(
-                payload.get("action_token"), session["csrf_hash"], payload.get("payload_hash"),
-            ))
         elif path == "/api/chat/stream":
             self.handle_chat_stream(session)
-        elif path == "/api/chat":
-            payload = self.read_json(MAX_REQUEST_BYTES)
-            client_turn_id = str(payload.get("client_turn_id") or "").strip()
-            if not client_turn_id:
-                raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
-            self.send_json(202, coach_job_submission_service().enqueue(
-                str(payload.get("message", "")), client_turn_id, session["csrf_hash"],
-                request_kind=payload.get("request_kind"), attachments=payload.get("attachments"),
-            ))
-        elif path == "/api/chat/reset":
-            self.send_json(200, coach_conversation_reset_service().reset())
         elif path == "/api/feedback":
             self.send_json(200, checkin_service().save(self.read_json()))
         else:
@@ -3117,16 +3116,9 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_data_post(self, path: str, session: dict[str, Any]) -> bool:
         if HISTORY_UNDO_POST_ROUTES.handle(self, path, session):
             return True
-        if path == "/api/diagnostics/capture":
-            self.send_json(200, DIAGNOSTIC_CAPTURE.set_enabled(self.read_json().get("enabled")))
-        elif path == "/api/privacy/delete":
-            payload = self.read_json()
-            if payload.get("confirm") != "LOKALE DATEN LÖSCHEN":
-                raise AppError(400, "Zum Löschen muss LOKALE DATEN LÖSCHEN bestätigt werden.")
-            self.send_json(200, privacy_delete_service().delete())
-        else:
-            return False
-        return True
+        if DIAGNOSTICS_CAPTURE_POST_ROUTES.handle(self, path):
+            return True
+        return PRIVACY_DELETE_POST_ROUTES.handle(self, path)
 
     def handle_authenticated_post(self, path: str, session: dict[str, Any]) -> None:
         handled = (

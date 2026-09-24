@@ -58,6 +58,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
+    ("backend.http_api.chat_post", ("ChatPostRoutes",)),
     ("backend.http_api.public_get", ("PublicGetRoutes",)),
     ("backend.http_api.planning_get", ("PlanningGetRoutes",)),
     ("backend.http_api.sync_get", ("SyncGetRoutes", "SYNC_JOB_RE")),
@@ -2479,6 +2480,55 @@ class ServerArchitectureTests(unittest.TestCase):
             BACKEND_ROOT / "http_api" / "history_undo_post.py"
         ).read_text(encoding="utf-8")
         self.assertNotIn("server", route_source.casefold())
+
+    def test_coach_actions_post_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_coach_post",
+            "COACH_ACTIONS_POST_ROUTES",
+            ("/api/coach/actions/confirm", "/api/coach/actions/execute"),
+            "CoachActionsPostRoutes(coach_proposal_confirmation_service, coach_proposal_execution_service)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "coach_actions_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_chat_post_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_coach_post",
+            "CHAT_POST_ROUTES",
+            ("/api/chat", "/api/chat/reset", "client_turn_id"),
+            "ChatPostRoutes(coach_job_submission_service, coach_conversation_reset_service, MAX_REQUEST_BYTES)",
+        )
+        route_source = (BACKEND_ROOT / "http_api" / "chat_post.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_diagnostics_capture_post_route_is_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_data_post",
+            "DIAGNOSTICS_CAPTURE_POST_ROUTES",
+            ("/api/diagnostics/capture",),
+            "DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "diagnostics_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_privacy_delete_post_route_is_owned_by_http_api_module(self) -> None:
+        server_tree = self._assert_write_route_owned(
+            "_handle_data_post",
+            "PRIVACY_DELETE_POST_ROUTES",
+            ("/api/privacy/delete", "LOKALE DATEN LÖSCHEN"),
+            "PrivacyDeletePostRoutes(privacy_delete_service)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "privacy_delete_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+        self.assertNotIn("privacy_delete_service().delete()", ast.unparse(server_tree))
 
     def test_settings_put_routes_are_owned_by_http_api_module(self) -> None:
         self._assert_write_route_owned(
