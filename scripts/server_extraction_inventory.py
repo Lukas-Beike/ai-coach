@@ -257,6 +257,7 @@ def _explicit_owner(name: str) -> str | None:
             "external_result_context": OBSERVABILITY_MODULE,
             "provider_error": ERRORS_MODULE,
             "CoachHTTPServer": HTTP_API_PACKAGE,
+            "ATHLETE_GET_ROUTES": HTTP_API_PACKAGE,
             "login_user": HTTP_AUTH,
             "logout_user": HTTP_AUTH,
             "bootstrap_provider_states": "http_api/bootstrap.py",
