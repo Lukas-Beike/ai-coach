@@ -32,6 +32,8 @@ from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.public_state import PublicStateService
 from backend.http_api.state_events_transport import StateEventTransport
+from backend.http_api.state_events_get import StateEventsGetRoutes
+from backend.http_api import state_events_get
 from backend.http_api import readiness as readiness_module
 from backend.http_api import auth as http_auth
 from backend.http_api.public_weather import PublicWeatherStateService
@@ -2536,29 +2538,49 @@ class CoachTests(unittest.TestCase):
         handler.send_sse_headers = Mock()
         handler.send_sse_event = Mock()
         auth = Mock()
+        transport = Mock()
+        routes = StateEventsGetRoutes(lambda: auth, transport)
 
-        with patch.object(server, "session_auth_service", return_value=auth), patch.object(
-            StateEventTransport, "handle"
-        ) as handle:
-            self.assertTrue(handler._handle_sync_get("/api/state/events"))
+        with patch.object(transport, "handle") as handle:
+            self.assertTrue(routes.handle(handler, "/api/state/events"))
             auth.require_auth.assert_called_once_with(handler)
-            handle.assert_called_once()
+            handle.assert_called_once_with(
+                handler.path,
+                send_headers=handler.send_sse_headers,
+                send_event=handler.send_sse_event,
+                set_connection_timeout=handler.connection.settimeout,
+            )
 
         denied = server.AppError(401, "unauthorized")
         auth.require_auth.side_effect = denied
         auth.require_auth.reset_mock()
         handler.connection.settimeout.reset_mock()
-        with patch.object(server, "session_auth_service", return_value=auth), patch.object(
-            StateEventTransport, "handle"
-        ) as handle:
+        with patch.object(transport, "handle") as handle:
             with self.assertRaises(server.AppError) as caught:
-                handler._handle_sync_get("/api/state/events")
+                routes.handle(handler, "/api/state/events")
             self.assertIs(caught.exception, denied)
             auth.require_auth.assert_called_once_with(handler)
             handle.assert_not_called()
             handler.connection.settimeout.assert_not_called()
             handler.send_sse_headers.assert_not_called()
             handler.send_sse_event.assert_not_called()
+
+        auth.require_auth.side_effect = None
+        auth.require_auth.reset_mock()
+        transport.handle.reset_mock()
+        self.assertFalse(routes.handle(handler, "/api/state/events/extra"))
+        auth.require_auth.assert_not_called()
+        transport.handle.assert_not_called()
+        handler.connection.settimeout.assert_not_called()
+
+        second_auth = Mock()
+        auth_factory = Mock(side_effect=[auth, second_auth])
+        routes = StateEventsGetRoutes(auth_factory, transport)
+        routes.handle(handler, "/api/state/events")
+        routes.handle(handler, "/api/state/events")
+        self.assertEqual(auth_factory.call_count, 2)
+        auth.require_auth.assert_called_once_with(handler)
+        second_auth.require_auth.assert_called_once_with(handler)
 
     def test_bootstrap_reuses_one_database_connection_for_local_reads(self):
         with patch.object(server.sqlite3, "connect", wraps=sqlite3.connect) as connect:
@@ -2988,7 +3010,10 @@ class CoachTests(unittest.TestCase):
         self.assertLess(index.index('/components.js?v=217'), index.index('/app.js?v=220'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
-        self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
+        self.assertIn(
+            'path != "/api/state/events"',
+            Path(state_events_get.__file__).read_text(encoding="utf-8"),
+        )
 
     def test_main_navigation_uses_stable_hash_links_and_focuses_active_panel(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
