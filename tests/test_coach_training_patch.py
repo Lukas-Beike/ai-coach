@@ -49,7 +49,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
             )
         self.assertEqual(error.exception.reason, "plan_date_conflict")
         self.assertEqual(self.state()["planning_revision"], before)
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM training_plans").fetchone()["count"], 0)
 
     def test_approved_constraints_are_attached_to_created_plan(self):
@@ -60,10 +60,10 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
              "changes": [], "workouts": [self.workout()]},
             action,
         )
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             plan_id = db.execute("SELECT id FROM training_plans").fetchone()["id"]
         self.assertEqual(
-            json.loads(server.get_kv(COACH_PLAN_CONSTRAINTS_PREFIX + plan_id)),
+            json.loads(server.key_value_service().get(COACH_PLAN_CONSTRAINTS_PREFIX + plan_id)),
             action["request"]["constraints"],
         )
 

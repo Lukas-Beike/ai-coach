@@ -146,7 +146,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         server.coach_job_submission_service().enqueue("", "attachments-turn", "synthetic-csrf", attachments=[self.upload(), {"name": "chart.png", "data": PNG}])
         job = server.coach_job_store().claim()
         self.assertTrue(server.coach_job_store().message(job))
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             row = db.execute("SELECT attachments FROM messages WHERE role='user'").fetchone()
         saved = json.loads(row["attachments"])
         self.assertEqual(saved[0]["summary"]["point_count"], 2)

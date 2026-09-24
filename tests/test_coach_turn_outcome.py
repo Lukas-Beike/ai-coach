@@ -39,11 +39,11 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         )
 
     def test_successful_effect_uses_provider_text_and_clears_pending_request(self):
-        server.set_kv("coach_pending_request", '{"summary":"old"}')
+        server.key_value_service().set("coach_pending_request", '{"summary":"old"}')
         receipts = [self.success()]
         status, text, failures = self.finalize(self.response("Saved"), receipts)
         self.assertEqual((status, text, failures), ("completed", "Saved", []))
-        self.assertEqual(server.get_kv("coach_pending_request"), "null")
+        self.assertEqual(server.key_value_service().get("coach_pending_request"), "null")
         self.assertEqual(receipts[0]["result"]["status"], "saved")
 
     def test_partial_failure_persists_request_provenance_and_confirmed_effect(self):
@@ -54,40 +54,40 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(failures, [failed])
         self.assertIn("Synthetic conflict", text)
         self.assertIn("Gespeichert beziehungsweise beauftragt", text)
-        self.assertEqual(json.loads(server.get_kv("coach_pending_request")), {
+        self.assertEqual(json.loads(server.key_value_service().get("coach_pending_request")), {
             "summary": "Repair profile", "source_message_ids": [17],
             "status": "failed", "question": None,
             "completed_steps": [{"tool": "save_checkin", "status": "saved"}],
         })
 
     def test_question_keeps_existing_pending_request_and_text(self):
-        server.set_kv("coach_pending_request", '{"summary":"previous"}')
+        server.key_value_service().set("coach_pending_request", '{"summary":"previous"}')
         status, text, failures = self.finalize(
             self.response("Ignored"), [self.failure()], question="Which date?"
         )
         self.assertEqual(status, "completed")
         self.assertEqual(text, "Which date?")
         self.assertEqual(len(failures), 1)
-        self.assertEqual(server.get_kv("coach_pending_request"), '{"summary":"previous"}')
+        self.assertEqual(server.key_value_service().get("coach_pending_request"), '{"summary":"previous"}')
 
     def test_incomplete_answer_uses_local_fallback_provenance(self):
         status, text, failures = self.finalize(self.response("Partial", status="incomplete"), [])
         self.assertEqual(status, "partial")
         self.assertIn("Fortsetzung", text)
         self.assertEqual(failures, [])
-        pending = json.loads(server.get_kv("coach_pending_request"))
+        pending = json.loads(server.key_value_service().get("coach_pending_request"))
         self.assertEqual(pending["summary"], "Synthetic user request")
         self.assertEqual(pending["source_message_ids"], [17])
         self.assertEqual(pending["completed_steps"], [])
 
     def test_read_only_turn_never_mutates_pending_request(self):
-        server.set_kv("coach_pending_request", '{"summary":"previous"}')
+        server.key_value_service().set("coach_pending_request", '{"summary":"previous"}')
         status, _, failures = self.finalize(
             self.response("Partial", status="incomplete"), [self.failure()], allow_mutations=False
         )
         self.assertEqual(status, "partial")
         self.assertEqual(len(failures), 1)
-        self.assertEqual(server.get_kv("coach_pending_request"), '{"summary":"previous"}')
+        self.assertEqual(server.key_value_service().get("coach_pending_request"), '{"summary":"previous"}')
 
     def test_repaired_failure_is_marked_resolved_before_final_projection(self):
         failed = self.failure()
@@ -96,11 +96,11 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         status, _, failures = self.finalize(self.response("Repaired"), receipts)
         self.assertEqual((status, failures), ("completed", []))
         self.assertTrue(failed["resolved"])
-        self.assertEqual(server.get_kv("coach_pending_request"), "null")
+        self.assertEqual(server.key_value_service().get("coach_pending_request"), "null")
 
     def test_missing_answer_without_effect_fails_without_pending_mutation(self):
-        server.set_kv("coach_pending_request", '{"summary":"previous"}')
+        server.key_value_service().set("coach_pending_request", '{"summary":"previous"}')
         status, text, failures = self.finalize(self.response(""), [])
         self.assertEqual((status, failures), ("failed", []))
         self.assertIn("nicht abgeschlossen", text)
-        self.assertEqual(server.get_kv("coach_pending_request"), '{"summary":"previous"}')
+        self.assertEqual(server.key_value_service().get("coach_pending_request"), '{"summary":"previous"}')

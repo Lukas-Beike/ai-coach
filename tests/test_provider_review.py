@@ -164,7 +164,7 @@ class ProviderReviewTests(unittest.TestCase):
         def execute(_job):
             entered.set()
             release.wait(5)
-            server.set_kv("private_after_fetch", "synthetic")
+            server.key_value_service().set("private_after_fetch", "synthetic")
             raise server.AppError(400, "Synthetic provider failure")
 
         def erase():
@@ -191,7 +191,7 @@ class ProviderReviewTests(unittest.TestCase):
             deletion.join(5)
         self.assertFalse(worker.is_alive())
         self.assertTrue(deleted.is_set())
-        self.assertFalse(server.get_kv("private_after_fetch"))
+        self.assertFalse(server.key_value_service().get("private_after_fetch"))
         self.assertEqual(server.sync_job_queue_service().list(), [])
 
     def test_utf8_login_does_not_normalize_password_or_expose_it(self):
@@ -223,7 +223,7 @@ class ProviderReviewTests(unittest.TestCase):
         for source in sources:
             for historical in (False, True):
                 with self.subTest(source=source, historical=historical):
-                    server.set_kv("garmin_snapshot", json.dumps(previous))
+                    server.key_value_service().set("garmin_snapshot", json.dumps(previous))
                     server.sync_state_repository().update_cursor("garmin", "data", "2026-09-01", "synthetic")
                     server.sync_state_repository().update_cursor("garmin", "historical", "2026-08-01", "synthetic")
                     payload = {"synced_at": "2026-09-05T00:00:00+00:00", "start": "2026-08-01", "end": "2026-09-05",
@@ -295,7 +295,7 @@ class ProviderReviewTests(unittest.TestCase):
             performance_history.append_garmin_performance_history(
                 second, first, server.local_now().date()
             )
-            server.set_kv("garmin_snapshot", json.dumps(second))
+            server.key_value_service().set("garmin_snapshot", json.dumps(second))
             server.sync_state_repository().save_snapshot({"synced_at": second["synced_at"], "athlete": {}, "recent_wellness": [], "recent_activities": []})
             public = performance_context.current_performance_context(
                 server.sync_state_repository().latest_snapshot(),
@@ -374,14 +374,14 @@ class ProviderReviewTests(unittest.TestCase):
         with patch.object(server, "DB_PATH", encrypted_path), patch.object(server, "CONFIG", configured), \
                 patch.object(RateLimiter, "allow", autospec=True, return_value=(True, 0)) as rate_limit:
             server.initialise_database()
-            server.set_kv("marker", "fresh")
+            server.key_value_service().set("marker", "fresh")
             result = server.session_auth_service().login_user(Mock(client_address=("127.0.0.1", 0)), configured.app_password)
             self.assertTrue(result["authenticated"])
             rate_limit.assert_called_with(server.RATE_LIMITER, "login:127.0.0.1", 5, 900)
             server.database_manager().close()
             server.DATABASE_MANAGER = None
             server.DATABASE_MANAGER_SIGNATURE = None
-            self.assertEqual(server.get_kv("marker"), "fresh")
+            self.assertEqual(server.key_value_service().get("marker"), "fresh")
 
 
 class GarminRangeContractTests(unittest.TestCase):

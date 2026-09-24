@@ -25,8 +25,8 @@ class DiagnosticFollowupTests(unittest.TestCase):
     turn = dialogue.CoachDialogueTests.turn
 
     def test_yesterdays_ready_status_is_not_todays_success(self):
-        server.set_kv("morning_checkin_status", "ready")
-        server.set_kv("morning_checkin_date", "2026-09-06")
+        server.key_value_service().set("morning_checkin_status", "ready")
+        server.key_value_service().set("morning_checkin_date", "2026-09-06")
         result = server.public_bootstrap_service().read()["morning_checkin"]
         self.assertEqual(result["status"], "waiting")
         self.assertFalse(result["current_for_today"])
@@ -68,7 +68,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             self.assertEqual(fetch.call_count, 1)
             snapshot = server.garmin_payload_service().snapshot()
             snapshot["morning_body_battery"]["attempted_at"] = (datetime.now(timezone.utc) - timedelta(minutes=16)).isoformat()
-            server.set_kv("garmin_snapshot", json.dumps(snapshot))
+            server.key_value_service().set("garmin_snapshot", json.dumps(snapshot))
             ready = {"sleep_date": day.isoformat(), "status": "ready", "attempted_at": server.utc_now(), "morning": {"value": 78}, "before_sleep": {"value": 30}}
             with patch.object(performance_morning_battery, "morning_body_battery_record", return_value=ready):
                 self.assertEqual(service.sync(day)["status"], "ready")
@@ -94,7 +94,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
 
     def test_body_battery_lock_contention_does_not_replace_saved_recovery(self):
         snapshot = {"morning_body_battery": {"sleep_date": "2026-09-06", "status": "ready", "morning": {"value": 70}}}
-        server.set_kv("garmin_snapshot", json.dumps(snapshot))
+        server.key_value_service().set("garmin_snapshot", json.dumps(snapshot))
         service = server.morning_body_battery_service()
         with patch.object(
             service._execution_gate,
@@ -145,7 +145,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         snapshot = {"synced_at": server.utc_now(), "weight": {"calendarDate": "2026-08-12", "weight": 72}, "errors": []}
         garmin_sync.merge_sources(snapshot, {})
         original = json.dumps(snapshot, sort_keys=True)
-        server.set_kv("garmin_snapshot", original)
+        server.key_value_service().set("garmin_snapshot", original)
         metric = performance_garmin_metrics.garmin_performance_metrics(
             snapshot, server.local_now().date()
         )["weight_kg"]
@@ -156,7 +156,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertEqual(server.garmin_projection_service().public_state()["source_freshness"]["weight"]["measurement_age_days"], 26)
         self.assertEqual(server.garmin_projection_service().coach_context()["source_freshness"]["weight"]["measurement_status"], "earlier")
         self.assertEqual(json.dumps(snapshot, sort_keys=True), original)
-        self.assertEqual(server.get_kv("garmin_snapshot"), original)
+        self.assertEqual(server.key_value_service().get("garmin_snapshot"), original)
 
     def test_feedback_answer_after_plain_text_morning_question_is_saved_once(self):
         server.sync_state_repository().save_snapshot({"synced_at": server.utc_now(), "recent_activities": [{"id": "synthetic-ride", "name": "Synthetic recovery ride", "type": "Ride", "start_date_local": "2026-09-06T10:00:00"}]})

@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from unittest.mock import Mock, call, patch
 from support import IntervalsRequestRecorder, RecordedIntervalsClient, build_gemini_request_payload, create_test_session, parsed_workout_fixture
@@ -163,7 +163,7 @@ def create_test_session(server_module):
     token = f"session-{uuid.uuid4().hex}"
     now = server_module.time.time()
     auth = server_module.session_auth_service()
-    with server_module.DB_LOCK, server_module.database() as db:
+    with server_module.DB_LOCK, server_module.database_manager().unit_of_work() as db:
         db.execute(
             "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
             (
@@ -334,7 +334,7 @@ class CoachTests(unittest.TestCase):
         shutil.rmtree(cls._class_data_dir, ignore_errors=True)
 
     def setUp(self):
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute("DELETE FROM messages")
             db.execute("DELETE FROM coach_commands")
             db.execute("DELETE FROM coach_plan_artifacts")
@@ -371,7 +371,7 @@ class CoachTests(unittest.TestCase):
 
     def test_database_uses_exact_current_schema(self):
         server.initialise_database()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"], 1)
             self.assertTrue(database_schema_is_current(db))
             self.assertEqual(database_table_names(db), set(CURRENT_DATABASE_SCHEMA))
@@ -807,7 +807,7 @@ class CoachTests(unittest.TestCase):
         template = server.workout_library_service().create_template({
             "sport": "Ride", "name": "Local tempo", "description": "- 60m 85%", "duration_minutes": 60,
         })
-        tomorrow = (server.local_now().date() + server.timedelta(days=1)).isoformat()
+        tomorrow = (server.local_now().date() + timedelta(days=1)).isoformat()
         intent = {
             "intent": "local_action", "operation": "apply_workout_library_plan", "target_system": "local",
             "artifact_id": None, "ambiguities": [], "authorization_scope": [f"library_workout:{template['id']}"],
@@ -924,7 +924,7 @@ class CoachTests(unittest.TestCase):
             )
         self.assertEqual(second["id"], first["id"])
         self.assertEqual(second["payload"], {"reason": "first"})
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual(
                 db.execute("SELECT COUNT(*) AS count FROM sync_jobs WHERE type='performance_refresh'").fetchone()["count"],
                 1,
@@ -979,7 +979,7 @@ class CoachTests(unittest.TestCase):
         competition = server.competition_service().save({
             "name": "Linked Race", "event_date": "2099-01-02", "sport": "Cycling",
         })["competition"]
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE competitions SET intervals_event_id='123', sync_dirty=1, sync_state='local', sync_conflict='' WHERE id=?",
                 (competition["id"],),
@@ -990,7 +990,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(local_override["intervals_event_id"], "123")
         self.assertEqual(local_override["sync_state"], "local_override")
 
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE competitions SET sync_state='conflict', sync_conflict=? WHERE id=?",
                 (json.dumps({"type": "remote_missing"}), competition["id"]),
@@ -1004,7 +1004,7 @@ class CoachTests(unittest.TestCase):
             "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "Local",
             "description": "- 30m 60% easy",
         })
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE planned_units SET sync_state='conflict', sync_dirty=1, sync_conflict=? WHERE local_id=?",
                 (json.dumps({"type": "remote_changed", "remote": {"name": "Remote"}}), planned["id"]),
@@ -1333,7 +1333,7 @@ class CoachTests(unittest.TestCase):
 
     def test_public_calendar_source_delete_cascades_to_candidates(self):
         now = server.utc_now()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO public_event_sources(id, name, url, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
                 ("source", "Source", "https://example.test/calendar", now, now),
@@ -1354,7 +1354,7 @@ class CoachTests(unittest.TestCase):
 
     def test_key_value_repository_preserves_get_and_upsert_contract(self):
         repository = server.KeyValueRepository(lambda: "2026-09-01T00:00:00+00:00")
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertIsNone(repository.get(db, "repository-test"))
             repository.set(db, "repository-test", "first")
             self.assertEqual(repository.get(db, "repository-test"), "first")
@@ -1363,7 +1363,7 @@ class CoachTests(unittest.TestCase):
 
     def test_chat_repository_preserves_trimmed_insert_and_order_contract(self):
         repository = server.ChatRepository(lambda: "2026-09-01T00:00:00+00:00")
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             first = repository.add(db, "user", "  first  ")
             second = repository.add(db, "assistant", "second")
             self.assertEqual(first["content"], "first")
@@ -1377,7 +1377,7 @@ class CoachTests(unittest.TestCase):
             "availability_notes": "", "notes": "older",
         }
         newer = dict(older, checkin_date="2026-08-31", notes="newer")
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             repository.upsert(db, older)
             repository.upsert(db, newer)
             repository.upsert(db, dict(newer, notes="updated"))
@@ -1389,7 +1389,7 @@ class CoachTests(unittest.TestCase):
     def test_profile_repository_preserves_serialized_profile_contract(self):
         repository = server.ProfileRepository(server.KeyValueRepository(lambda: "2026-09-01T00:00:00+00:00"))
         payload = json.dumps({"name": "Ada", "timezone": "Europe/Berlin"}, ensure_ascii=False)
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertIsInstance(repository.get(db), str)
             repository.set(db, payload)
             self.assertEqual(repository.get(db), payload)
@@ -1403,7 +1403,7 @@ class CoachTests(unittest.TestCase):
             "distance": "10 km",
         })
         repository = server.CompetitionRepository()
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             rows = repository.list(db)
             row = repository.get(db, saved["competition"]["id"])
         self.assertEqual(rows[0]["name"], "Repository race")
@@ -1412,7 +1412,7 @@ class CoachTests(unittest.TestCase):
 
     def test_training_plan_repository_preserves_create_and_newest_first_contract(self):
         repository = server.TrainingPlanRepository()
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             repository.create(db, "plan-old", "Old", "Base", "2026-09-01", "2026-09-07", "draft", "2026-09-01T00:00:00+00:00")
             repository.create(db, "plan-new", "New", "Build", "2026-09-08", "2026-09-14", "planned", "2026-09-02T00:00:00+00:00")
             repository.update(db, "plan-old", "Renamed", "Updated", "2026-09-02", "2026-09-09", "active", "2026-09-02T01:00:00+00:00")
@@ -1421,14 +1421,14 @@ class CoachTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in rows], ["plan-new", "plan-old"])
         self.assertEqual(rows[0]["status"], "planned")
         self.assertEqual(updated["name"], "Renamed")
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             repository.delete(db, "plan-old")
             self.assertIsNone(repository.get(db, "plan-old"))
 
     def test_plan_adjustment_repository_preserves_preview_lookup_and_status_contract(self):
         repository = server.PlanAdjustmentRepository()
         payload = json.dumps({"changes": [], "message": "No changes"}, ensure_ascii=False)
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             repository.create_preview(db, "adjustment-test", payload, "2026-09-01T00:00:00+00:00")
             self.assertEqual(repository.latest(db)["id"], "adjustment-test")
             self.assertEqual(repository.get(db, "adjustment-test")["status"], "preview")
@@ -1439,7 +1439,7 @@ class CoachTests(unittest.TestCase):
         repository = server.ActivityFeedbackRepository(lambda: "2026-09-01T00:00:00+00:00")
         older = {"activity_id": "activity-old", "activity_name": "Run", "activity_date": "2026-08-30", "notes": "older"}
         newer = {"activity_id": "activity-new", "activity_name": "Ride", "activity_date": "2026-08-31", "notes": "newer"}
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             repository.upsert(db, older)
             repository.upsert(db, newer)
             repository.upsert(db, dict(newer, notes="updated"))
@@ -1450,7 +1450,7 @@ class CoachTests(unittest.TestCase):
 
     def test_snapshot_repository_preserves_latest_payload_and_retention_contract(self):
         repository = server.SnapshotRepository()
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             for index in range(13):
                 repository.save(db, {"synced_at": f"2026-09-{index + 1:02d}", "index": index}, f"2026-09-{index + 1:02d}")
             payload = repository.latest_payload(db)
@@ -1510,9 +1510,9 @@ class CoachTests(unittest.TestCase):
 
     def test_changing_weather_location_invalidates_previous_forecast(self):
         server.profile_service().save({"weather_location": "Münster"})
-        server.set_kv(weather_cache.CACHE_KEY, json.dumps({"query": "Münster", "forecast": {}}))
+        server.key_value_service().set(weather_cache.CACHE_KEY, json.dumps({"query": "Münster", "forecast": {}}))
         server.profile_service().save({"weather_location": "Köln"})
-        self.assertEqual(server.get_kv(weather_cache.CACHE_KEY), "")
+        self.assertEqual(server.key_value_service().get(weather_cache.CACHE_KEY), "")
 
     def test_local_public_state_does_not_fetch_weather(self):
         server.profile_service().save({"weather_location": "Berlin"})
@@ -1646,17 +1646,17 @@ class CoachTests(unittest.TestCase):
 
     def test_changing_weather_location_clears_negative_cache(self):
         server.profile_service().save({"weather_location": "Berlin"})
-        server.set_kv(weather_cache.FAILURE_KEY, json.dumps({"count": 2, "retry_at": "2099-01-01T00:00:00+00:00"}))
+        server.key_value_service().set(weather_cache.FAILURE_KEY, json.dumps({"count": 2, "retry_at": "2099-01-01T00:00:00+00:00"}))
         server.profile_service().save({"weather_location": "Koeln"})
-        self.assertEqual(server.get_kv(weather_cache.FAILURE_KEY), "")
+        self.assertEqual(server.key_value_service().get(weather_cache.FAILURE_KEY), "")
 
     def test_athlete_context_location_change_clears_weather_caches(self):
         server.profile_service().save({"weather_location": "Berlin"})
-        server.set_kv(weather_cache.CACHE_KEY, json.dumps({"query": "Berlin", "forecast": {}}))
-        server.set_kv(weather_cache.FAILURE_KEY, json.dumps({"count": 2, "retry_at": "2099-01-01T00:00:00+00:00"}))
+        server.key_value_service().set(weather_cache.CACHE_KEY, json.dumps({"query": "Berlin", "forecast": {}}))
+        server.key_value_service().set(weather_cache.FAILURE_KEY, json.dumps({"count": 2, "retry_at": "2099-01-01T00:00:00+00:00"}))
         server.athlete_context_service().save({"weather_location": "Koeln"}, [])
-        self.assertEqual(server.get_kv(weather_cache.CACHE_KEY), "")
-        self.assertEqual(server.get_kv(weather_cache.FAILURE_KEY), "")
+        self.assertEqual(server.key_value_service().get(weather_cache.CACHE_KEY), "")
+        self.assertEqual(server.key_value_service().get(weather_cache.FAILURE_KEY), "")
 
     def test_local_weather_state_does_not_fetch_without_complete_plan_state(self):
         server.profile_service().save({"weather_location": "Berlin"})
@@ -1701,7 +1701,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("Wetterdaten", first["error"])
         self.assertIn("noch nicht erneut", second["error"])
         self.assertEqual(forced["fetched_at"], forecast["fetched_at"])
-        self.assertEqual(server.get_kv(weather_cache.FAILURE_KEY), "")
+        self.assertEqual(server.key_value_service().get(weather_cache.FAILURE_KEY), "")
 
     def test_session_cookies_secure_flag_is_configurable_without_changing_csrf_visibility(self):
         insecure = server.session_auth_service().session_cookie_headers("session-token", "csrf-token")
@@ -1796,15 +1796,15 @@ class CoachTests(unittest.TestCase):
         auth = server.session_auth_service()
         token_hash = auth.session_token_hash(token)
         old_seen = "2020-01-01T00:00:00+00:00"
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             original = db.execute("SELECT expires_at FROM sessions WHERE token_hash=?", (token_hash,)).fetchone()["expires_at"]
             db.execute("UPDATE sessions SET last_seen=? WHERE token_hash=?", (old_seen, token_hash))
 
         first = auth.authenticated_session(Handler(f"ic_session={token}"))
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             touched = db.execute("SELECT expires_at, last_seen FROM sessions WHERE token_hash=?", (token_hash,)).fetchone()
         second = auth.authenticated_session(Handler(f"ic_session={token}"))
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             unchanged = db.execute("SELECT expires_at, last_seen FROM sessions WHERE token_hash=?", (token_hash,)).fetchone()
 
         self.assertIsNotNone(first)
@@ -1823,14 +1823,14 @@ class CoachTests(unittest.TestCase):
 
         token = create_test_session(server)
         auth = server.session_auth_service()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute("UPDATE sessions SET expires_at=? WHERE token_hash=?", (server.time.time() - 1, auth.session_token_hash(token)))
         self.assertIsNone(auth.authenticated_session(Handler(f"ic_session={token}")))
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertIsNone(db.execute("SELECT token_hash FROM sessions WHERE token_hash=?", (auth.session_token_hash(token),)).fetchone())
 
     def test_expired_session_cleanup_is_bounded_and_periodic(self):
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             for index in range(http_auth.SESSION_CLEANUP_BATCH_SIZE + 1):
                 db.execute(
                     "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
@@ -1904,11 +1904,11 @@ class CoachTests(unittest.TestCase):
             "description": "- 60m 60% local", "duration_minutes": 60,
         }])[0]
         server.workout_library_service().update(archived["id"], {"action": "archive"})
-        server.set_kv("garmin_snapshot", json.dumps({"source": "Garmin", "days": []}))
-        server.set_kv(weather_cache.CACHE_KEY, json.dumps({"query": "Berlin", "forecast": {}}))
-        server.set_kv("calendar_display", json.dumps({"past_weeks": 2, "future_weeks": 6}))
-        server.set_kv("openai_conversation_id", "conv-test")
-        with server.DB_LOCK, server.database() as db:
+        server.key_value_service().set("garmin_snapshot", json.dumps({"source": "Garmin", "days": []}))
+        server.key_value_service().set(weather_cache.CACHE_KEY, json.dumps({"query": "Berlin", "forecast": {}}))
+        server.key_value_service().set("calendar_display", json.dumps({"past_weeks": 2, "future_weeks": 6}))
+        server.key_value_service().set("openai_conversation_id", "conv-test")
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO competition_sync_tombstones(intervals_event_id, external_id, created_at) VALUES (?, ?, ?)",
                 ("event-1", "external-1", server.utc_now()),
@@ -1931,12 +1931,12 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("test-password-123", export_text)
 
     def test_privacy_json_projection_filters_runtime_keys_and_preserves_malformed_json_fallbacks(self):
-        server.set_kv("profile", json.dumps({"name": "Private profile"}))
-        server.set_kv("garmin_snapshot", "{")
-        server.set_kv(weather_cache.CACHE_KEY, "{")
-        server.set_kv("ordinary_state", "{")
-        server.set_kv("job_running", "true")
-        server.set_kv("job_status", "done")
+        server.key_value_service().set("profile", json.dumps({"name": "Private profile"}))
+        server.key_value_service().set("garmin_snapshot", "{")
+        server.key_value_service().set(weather_cache.CACHE_KEY, "{")
+        server.key_value_service().set("ordinary_state", "{")
+        server.key_value_service().set("job_running", "true")
+        server.key_value_service().set("job_status", "done")
 
         exported = server.privacy_data_export_service().export()
 
@@ -2111,7 +2111,7 @@ class CoachTests(unittest.TestCase):
             self.assertFalse(path.exists())
 
     def test_privacy_delete_reports_remote_attempt_and_failure(self):
-        server.set_kv("openai_conversation_id", "conv-test")
+        server.key_value_service().set("openai_conversation_id", "conv-test")
         with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", side_effect=server.AppError(503, "upstream")):
             result = server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         self.assertTrue(result["remote_delete_attempted"])
@@ -2123,7 +2123,7 @@ class CoachTests(unittest.TestCase):
         expected_tables = set(CURRENT_DATABASE_SCHEMA)
         scoped_tables = {table for _category, _label, tables in privacy_module.PRIVACY_DELETE_SCOPE for table in tables}
         self.assertEqual(scoped_tables, expected_tables)
-        server.set_kv("openai_conversation_id", "conv-test")
+        server.key_value_service().set("openai_conversation_id", "conv-test")
         preview = server.privacy_delete_service().preview()
         self.assertEqual({item["id"] for item in preview["categories"]}, {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE})
         self.assertEqual(preview["confirmation_text"], "LOKALE DATEN LÖSCHEN")
@@ -2132,7 +2132,7 @@ class CoachTests(unittest.TestCase):
             result = server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         self.assertTrue(result["local_data_deleted"])
         self.assertEqual(set(result["deleted_categories"]), {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE})
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             for table in expected_tables - {"kv"}:
                 self.assertEqual(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"], 0)
 
@@ -2142,7 +2142,7 @@ class CoachTests(unittest.TestCase):
             "synced_at": "synthetic", "recent_activities": [], "recent_wellness": [],
             "upcoming_calendar": [],
         })
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "CREATE TRIGGER synthetic_privacy_abort BEFORE DELETE ON snapshots "
                 "BEGIN SELECT RAISE(ABORT, 'synthetic rollback'); END"
@@ -2151,9 +2151,9 @@ class CoachTests(unittest.TestCase):
             with self.assertRaises(sqlite3.DatabaseError):
                 server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         finally:
-            with server.DB_LOCK, server.database() as db:
+            with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                 db.execute("DROP TRIGGER synthetic_privacy_abort")
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertGreater(db.execute("SELECT COUNT(*) AS count FROM messages").fetchone()["count"], 0)
             self.assertGreater(db.execute("SELECT COUNT(*) AS count FROM snapshots").fetchone()["count"], 0)
 
@@ -2178,7 +2178,7 @@ class CoachTests(unittest.TestCase):
 
     def test_coach_context_reads_weather_cache_without_refreshing_it(self):
         server.profile_service().save({"weather_location": "Berlin"})
-        server.set_kv(weather_cache.CACHE_KEY, json.dumps({
+        server.key_value_service().set(weather_cache.CACHE_KEY, json.dumps({
             "query": "Berlin",
             "location": {"name": "Berlin", "country": "Deutschland"},
             "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
@@ -2318,13 +2318,13 @@ class CoachTests(unittest.TestCase):
                 "notes": "Nur locker möglich",
             }
         )
-        server.set_kv("garmin_snapshot", json.dumps({
+        server.key_value_service().set("garmin_snapshot", json.dumps({
             "sleep": [{"calendarDate": today, "sleepTimeSeconds": 28800, "sleepScore": 82}],
             "hrv": [{"calendarDate": today, "lastNightAvg": 48}],
             "readiness": [{"calendarDate": today, "trainingReadinessScore": 55}],
             "daily_stats": [{"calendarDate": today, "totalSteps": 9876, "floorsAscended": 12, "totalKilocalories": 2345}],
         }))
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ("appointment-1", "uid-1", "Familientermin", today, f"{today}T18:00:00", f"{today}T20:00:00", 120, 0, 1, 0, server.utc_now()),
@@ -2410,7 +2410,7 @@ class CoachTests(unittest.TestCase):
             server.coach_message_service().add("user", f"cursor message {index}")
             for index in range(5)
         ]
-        server.set_kv("chat_generation", "synthetic-generation")
+        server.key_value_service().set("chat_generation", "synthetic-generation")
         manager = server.database_manager()
         page_service = ChatHistoryPageService(
             server.coach_conversation_history_service(),
@@ -2693,11 +2693,11 @@ class CoachTests(unittest.TestCase):
         )
 
     def test_sync_status_is_bounded_and_contains_versions(self):
-        server.set_kv("sync_operation_id", "operation-test")
-        server.set_kv("sync_operation_status", "running")
-        server.set_kv("sync_operation_phase", "fetching")
-        server.set_kv("sync_operation_progress", "35")
-        server.set_kv("sync_operation_message", "Daten werden gelesen…")
+        server.key_value_service().set("sync_operation_id", "operation-test")
+        server.key_value_service().set("sync_operation_status", "running")
+        server.key_value_service().set("sync_operation_phase", "fetching")
+        server.key_value_service().set("sync_operation_progress", "35")
+        server.key_value_service().set("sync_operation_message", "Daten werden gelesen…")
         with patch.object(server, "state_version_service") as versions:
             versions.return_value.versions.return_value = {"activities": "v1"}
             status = server.sync_public_state_service().state()
@@ -3267,7 +3267,7 @@ class CoachTests(unittest.TestCase):
 
     def test_external_calendar_keeps_last_good_events_on_invalid_feed(self):
         today = server.local_now().date().isoformat()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ("good-event", "good-event", "Good event", today, today + "T10:00:00+02:00", today + "T11:00:00+02:00", 60, 0, 1, server.utc_now()),
@@ -3284,7 +3284,7 @@ class CoachTests(unittest.TestCase):
 
     def test_ical_no_training_marker_is_excluded_from_adaptive_constraints(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ("info-only", "info-only", "Informational event", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, 0, server.utc_now()),
@@ -3302,7 +3302,7 @@ class CoachTests(unittest.TestCase):
             "date": tomorrow, "sport": "Ride", "name": "Short threshold",
             "description": "- 5m 110%\n- 40m 55%", "duration_minutes": 45, "target": "POWER",
         }])[0]
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ("no-intensity", "family-no-intensity", "Evening event", tomorrow, tomorrow + "T18:00:00+02:00", tomorrow + "T18:30:00+02:00", 30, 0, 1, 1, server.utc_now()),
@@ -3377,7 +3377,7 @@ class CoachTests(unittest.TestCase):
 
     def test_external_calendar_sync_keeps_last_successful_events_on_failure(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ("event-old", "family-old", "Existing appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T11:00:00+02:00", 60, 0, server.utc_now()),
@@ -3396,7 +3396,7 @@ class CoachTests(unittest.TestCase):
             "date": tomorrow, "sport": "Ride", "name": "Threshold intervals",
             "description": "- 5m 110%\n- 115m 55%", "duration_minutes": 120, "target": "POWER",
         }])[0]
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ("event-1", "family-3", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, server.utc_now()),
@@ -3527,7 +3527,7 @@ class CoachTests(unittest.TestCase):
             "date": tomorrow, "sport": "Ride", "name": "Threshold intervals",
             "description": "- 5m 110%\n- 115m 55%", "duration_minutes": 120, "target": "POWER",
         }])[0]
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ("event-2", "family-4", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, server.utc_now()),
@@ -3540,22 +3540,22 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.planned_unit_service().list()[0]["id"], draft["id"])
 
     def test_unlimited_retention_does_not_delete_history(self):
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute("INSERT INTO messages(role, content, created_at) VALUES (?, ?, ?)", ("user", "old chat", "2000-01-01T00:00:00+00:00"))
             db.execute("INSERT INTO snapshots(payload, created_at) VALUES (?, ?)", (json.dumps({"synced_at": "2000-01-01T00:00:00+00:00"}), "2000-01-01T00:00:00+00:00"))
         with patch.object(server, "CONFIG", replace(server.CONFIG, data_retention_days=-1)):
             server.initialise_database()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM messages WHERE content = 'old chat'").fetchone()["count"], 1)
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM snapshots WHERE created_at LIKE '2000-%'").fetchone()["count"], 1)
 
     def test_finite_retention_clears_unstamped_gemini_history(self):
-        server.set_kv("gemini_conversation_history", json.dumps([{"role": "user", "parts": [{"text": "old coach context"}]}]))
-        server.set_kv("gemini_call_names", json.dumps({"gemini_old": "save_checkin"}))
+        server.key_value_service().set("gemini_conversation_history", json.dumps([{"role": "user", "parts": [{"text": "old coach context"}]}]))
+        server.key_value_service().set("gemini_call_names", json.dumps({"gemini_old": "save_checkin"}))
         with patch.object(server, "CONFIG", replace(server.CONFIG, data_retention_days=30)):
             server.initialise_database()
-        self.assertEqual(server.get_kv("gemini_conversation_history"), "[]")
-        self.assertEqual(server.get_kv("gemini_call_names"), "{}")
+        self.assertEqual(server.key_value_service().get("gemini_conversation_history"), "[]")
+        self.assertEqual(server.key_value_service().get("gemini_call_names"), "{}")
 
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher ist in dieser Testumgebung nicht verfügbar.")
     def test_sqlcipher_database_returns_mapping_rows(self):
@@ -3564,7 +3564,7 @@ class CoachTests(unittest.TestCase):
             config = replace(server.CONFIG, app_password="test-password-123")
             with patch.object(server, "DATA_DIR", data_dir), patch.object(server, "DB_PATH", data_dir / "intervals-coach.db"), patch.object(server, "CONFIG", config):
                 server.initialise_database()
-                with server.database() as db:
+                with server.database_manager().unit_of_work() as db:
                     row = db.execute("SELECT value FROM kv WHERE key = 'profile'").fetchone()
                     self.assertIsInstance(row, dict)
                     self.assertIn("value", row)
@@ -3764,7 +3764,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(remote_row["sync_source"], "intervals")
         self.assertFalse(remote_row["is_local"])
 
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             payload = json.loads(db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local["id"],)).fetchone()["payload"])
             payload["remote_event_id"] = "remote-event-1"
             db.execute("UPDATE planned_units SET payload=? WHERE local_id=?", (json.dumps(payload), local["id"]))
@@ -3854,7 +3854,7 @@ class CoachTests(unittest.TestCase):
 
     def test_non_relevant_external_events_are_stored_but_not_in_canonical_calendar_or_coach(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ("external-relevant", "relevant", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T11:00:00+02:00", 60, 0, 1, server.utc_now()),
@@ -4021,7 +4021,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("instruction", result)
 
     def test_garmin_coach_context_keeps_only_latest_recovery_records(self):
-        server.set_kv("garmin_snapshot", json.dumps({
+        server.key_value_service().set("garmin_snapshot", json.dumps({
             "synced_at": "now",
             "sleep": [
                 {"calendarDate": "2026-08-28", "sleepTimeSeconds": 25200, "sleepScore": 70},
@@ -4045,7 +4045,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("race_predictions", result)
 
     def test_garmin_coach_context_extracts_nested_latest_recovery_record(self):
-        server.set_kv("garmin_snapshot", json.dumps({
+        server.key_value_service().set("garmin_snapshot", json.dumps({
             "sleep": [{"id": "wrapper-z", "dailySleepDTO": {"calendarDate": "2026-08-29", "sleepTimeSeconds": 27000, "sleepScore": 82}}],
             "readiness": {"trainingReadiness": {"calendarDate": "2026-08-29", "trainingReadinessScore": 78}},
         }))
@@ -4056,7 +4056,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["recovery"]["readiness"]["trainingReadinessScore"], 78)
 
     def test_structured_context_keeps_garmin_value_in_performance_only(self):
-        server.set_kv("garmin_snapshot", json.dumps({
+        server.key_value_service().set("garmin_snapshot", json.dumps({
             "max_metrics": {"running": {"vo2MaxValue": 55}},
             "race_predictions": {"5k": 1320},
             "activities": [{"activityId": 1, "activityName": "Duplicate raw activity"}],
@@ -4104,7 +4104,7 @@ class CoachTests(unittest.TestCase):
         self.assertIsNone(performance_garmin_metrics.garmin_duration_seconds("00:00"))
 
     def test_garmin_values_have_priority_in_performance_metrics(self):
-        server.set_kv("garmin_snapshot", json.dumps({
+        server.key_value_service().set("garmin_snapshot", json.dumps({
             "max_metrics": {"running": {"vo2Max": 55}},
             "race_predictions": {"5k": 1320},
         }))
@@ -4168,7 +4168,7 @@ class CoachTests(unittest.TestCase):
                 restored = auth.authenticated_session(Handler(f"ic_session={token}", csrf))
                 self.assertIsNotNone(restored)
                 auth.require_csrf(Handler(f"ic_session={token}", csrf), restored)
-                with server.database() as db:
+                with server.database_manager().unit_of_work() as db:
                     row = db.execute("SELECT token_hash, csrf_hash FROM sessions").fetchone()
                     self.assertNotEqual(row["token_hash"], token)
                     self.assertNotEqual(row["csrf_hash"], csrf)
@@ -4222,7 +4222,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(metrics["cycling_max_hr_bpm"]["note"], "Garmin Connect Herzfrequenzzonen")
 
     def test_garmin_threshold_metrics_are_used_without_confusing_ftp_and_eftp(self):
-        server.set_kv("garmin_snapshot", json.dumps({
+        server.key_value_service().set("garmin_snapshot", json.dumps({
             "cycling_ftp": {"functionalThresholdPower": 302},
             "running_threshold": {
                 "speed_and_heart_rate": {"speed": 3.8, "heartRate": 176, "heartRateCycling": 169},
@@ -4258,7 +4258,7 @@ class CoachTests(unittest.TestCase):
 
     def test_garmin_recovery_values_take_precedence_and_keep_provenance(self):
         today = server.local_now().date().isoformat()
-        server.set_kv("garmin_snapshot", json.dumps({
+        server.key_value_service().set("garmin_snapshot", json.dumps({
             "sleep": [{"id": "sleep-wrapper", "dailySleepDTO": {"calendarDate": today, "sleepTimeSeconds": 28800, "sleepScore": 91}}],
             "resting_hr": [{"calendarDate": today, "restingHeartRate": 49}],
             "hrv": [{"calendarDate": today, "lastNightAvg": 63}],
@@ -4277,7 +4277,7 @@ class CoachTests(unittest.TestCase):
 
     def test_garmin_daily_health_is_averaged_over_the_last_seven_days(self):
         today = server.local_now().date()
-        server.set_kv("garmin_snapshot", json.dumps({
+        server.key_value_service().set("garmin_snapshot", json.dumps({
             "daily_stats": [
                 {
                     "calendarDate": today.isoformat(),
@@ -4318,7 +4318,7 @@ class CoachTests(unittest.TestCase):
                  "sport_info": [{"types": ["Ride"], "ftp": 280}, {"types": ["Run"], "lthr": 170}]},
             ],
         }
-        server.set_kv("garmin_snapshot", json.dumps({
+        server.key_value_service().set("garmin_snapshot", json.dumps({
             "race_predictions": {"5k": 1500},
             "performance_history": [{"date": (today - timedelta(days=29)).isoformat(), "metrics": {"run_5k_seconds": 1600}}],
         }))
@@ -4338,7 +4338,7 @@ class CoachTests(unittest.TestCase):
             "synced_at": "now", "athlete": {}, "recent_activities": [],
             "recent_wellness": [{"id": today.isoformat(), "sport_info": [{"types": ["Ride"], "ftp": 280}]}],
         }
-        server.set_kv("garmin_snapshot", json.dumps({
+        server.key_value_service().set("garmin_snapshot", json.dumps({
             "cycling_ftp": {"functionalThresholdPower": 300},
             "performance_history": [],
         }))
@@ -5021,16 +5021,16 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.garmin_projection_service().public_state()["morning_body_battery"]["morning"]["value"], 78)
         self.assertEqual(
             weather_history.decode_history(
-                server.get_kv(MORNING_BATTERY_HISTORY_KEY)
+                server.key_value_service().get(MORNING_BATTERY_HISTORY_KEY)
             )["2026-09-04"],
             78,
         )
-        server.set_kv("garmin_snapshot", "{}")
+        server.key_value_service().set("garmin_snapshot", "{}")
         recovery = performance_planning_recovery.planning_recovery_by_date(
             [],
             {},
             weather_history.decode_history(
-                server.get_kv(MORNING_BATTERY_HISTORY_KEY)
+                server.key_value_service().get(MORNING_BATTERY_HISTORY_KEY)
             ),
             None,
         )
@@ -5038,7 +5038,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(recovery["2026-09-04"]["sources"]["body_battery"], "Garmin Connect")
 
     def test_body_battery_only_error_does_not_degrade_garmin_public_state(self):
-        server.set_kv("last_garmin_error", json.dumps([
+        server.key_value_service().set("last_garmin_error", json.dumps([
             {"source": "body_battery", "message": "optional request unavailable"},
         ]))
 
@@ -5292,7 +5292,7 @@ class CoachTests(unittest.TestCase):
             with self.assertRaises(server.AppError):
                 server.gemini_conversation_response_service().request({"conversation": "gemini-persist-response", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "parallel_tool_calls": False})
 
-        history = json.loads(server.get_kv("gemini_conversation_history") or "[]")
+        history = json.loads(server.key_value_service().get("gemini_conversation_history") or "[]")
         self.assertEqual(history[-2]["parts"][0]["functionCall"]["name"], "save_checkin")
         self.assertEqual(history[-1]["parts"][0]["functionResponse"]["name"], "save_checkin")
 
@@ -5348,7 +5348,7 @@ class CoachTests(unittest.TestCase):
             ])
 
         # Reproduce a legacy raw slice that starts with a tool response.
-        server.set_kv("gemini_conversation_history", json.dumps(history[-60:]))
+        server.key_value_service().set("gemini_conversation_history", json.dumps(history[-60:]))
         trimmed = server.gemini_conversation_history_service().load()
 
         self.assertEqual(len(trimmed), 58)
@@ -5372,7 +5372,7 @@ class CoachTests(unittest.TestCase):
         server.coach_message_service().add("user", "Was war mein letzter Schwerpunkt?")
         server.coach_message_service().add("assistant", "Der Schwerpunkt war die Schwelle.")
         server.coach_message_service().add("user", "Und wie geht es weiter?")
-        server.set_kv("gemini_conversation_history", json.dumps([
+        server.key_value_service().set("gemini_conversation_history", json.dumps([
             {"role": "user", "parts": [{"text": "Veraltete Gemini-Frage"}]},
             {"role": "model", "parts": [{"text": "Veraltete Gemini-Antwort"}]},
         ]))
@@ -5385,7 +5385,7 @@ class CoachTests(unittest.TestCase):
         ])
 
     def test_gemini_keeps_repeated_text_after_a_model_turn(self):
-        server.set_kv("gemini_conversation_history", json.dumps([
+        server.key_value_service().set("gemini_conversation_history", json.dumps([
             {"role": "user", "parts": [{"text": "Ja"}]},
             {"role": "model", "parts": [{"text": "Ja"}]},
         ]))
@@ -5405,7 +5405,7 @@ class CoachTests(unittest.TestCase):
             "gemini-draft",
         )
 
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             server.CHAT_REPOSITORY.add(db, "user", "Synthetic draft request", client_turn_id="gemini-draft")
         refs = server.coach_dialogue_read_service().artifact_refs()
 
@@ -5422,7 +5422,7 @@ class CoachTests(unittest.TestCase):
                 server.gemini_conversation_response_service().request({"conversation": "gemini-single-tool", "input": "Aktualisiere meine Daten.", "parallel_tool_calls": False})
 
         self.assertEqual(raised.exception.reason, "parallel_tool_calls_unsupported")
-        self.assertEqual(json.loads(server.get_kv("gemini_conversation_history") or "[]"), [])
+        self.assertEqual(json.loads(server.key_value_service().get("gemini_conversation_history") or "[]"), [])
 
     def test_gemini_transcription_keeps_audio_server_side_and_returns_text(self):
         captured = {}
@@ -5473,7 +5473,7 @@ class CoachTests(unittest.TestCase):
 
     def test_gemini_background_job_is_not_replayed_after_restart(self):
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
-        server.set_kv("gemini_conversation_history", json.dumps([
+        server.key_value_service().set("gemini_conversation_history", json.dumps([
             {"role": "user", "parts": [{"text": "Erstelle einen Plan."}]},
             {"role": "model", "parts": [{"functionCall": {"name": "stage_training_plan", "args": {}}}]},
         ]))
@@ -5485,7 +5485,7 @@ class CoachTests(unittest.TestCase):
             )
             self.assertIsNotNone(server.coach_job_store().claim())
             self.assertEqual(server.coach_job_store().resume_interrupted(server.coach_turn_failure_service()), 0)
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-gemini-background-restart",)).fetchone()
         self.assertEqual(command["status"], "completed")
         self.assertEqual(json.loads(command["receipt"])["status"], "failed")
@@ -5495,7 +5495,7 @@ class CoachTests(unittest.TestCase):
         ])
 
     def test_gemini_reset_deletes_an_existing_openai_conversation(self):
-        server.set_kv("openai_conversation_id", "conv-test")
+        server.key_value_service().set("openai_conversation_id", "conv-test")
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="gemini")
         with patch.object(server, "CONFIG", config), patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True) as delete:
             result = server.coach_conversation_reset_service().reset()
@@ -5508,7 +5508,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.public_app_error_status(server.AppError(401, "Anmeldung erforderlich.")), 401)
 
     def test_gemini_http_errors_keep_the_provider_status(self):
-        upstream_error = server.HTTPError(
+        upstream_error = HTTPError(
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
             401,
             "Unauthorized",
@@ -5795,7 +5795,7 @@ class CoachTests(unittest.TestCase):
                     [item["name"] for item in server.planned_unit_service().list(1000, include_archived=True)],
                     [f"Changed {index}" for index in range(count)],
                 )
-                with server.DB_LOCK, server.database() as db:
+                with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                     self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM sync_jobs").fetchone()["count"], 0)
 
     def test_structured_training_changes_move_and_create_in_one_atomic_batch(self):
@@ -5931,7 +5931,7 @@ class CoachTests(unittest.TestCase):
     def test_structured_training_create_inherits_unambiguous_plan_membership(self):
         plan_id = "mixed-create-plan"
         plan_name = "Mixed Create Plan"
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
                 db, plan_id, plan_name, "Build", "2099-01-01", "2099-01-31", "planned", server.utc_now(),
             )
@@ -5954,7 +5954,7 @@ class CoachTests(unittest.TestCase):
 
     def test_structured_training_create_can_explicitly_stay_standalone(self):
         plan_id = "explicit-standalone-plan"
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
                 db, plan_id, "Explicit standalone", "Build", "2099-03-01", "2099-03-31", "planned", server.utc_now(),
             )
@@ -5977,7 +5977,7 @@ class CoachTests(unittest.TestCase):
 
     def test_named_plan_scope_assigns_create_without_unit_reference(self):
         plan_id = "named-create-plan"
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
                 db, plan_id, "Named create", "Build", "2099-04-01", "2099-04-30", "planned", server.utc_now(),
             )
@@ -5999,7 +5999,7 @@ class CoachTests(unittest.TestCase):
 
     def test_standalone_create_does_not_recompute_referenced_plan_bounds(self):
         plan_id = "standalone-bounds-plan"
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
                 db, plan_id, "Standalone bounds", "Build", "2099-05-01", "2099-05-31", "planned", server.utc_now(),
             )
@@ -6013,13 +6013,13 @@ class CoachTests(unittest.TestCase):
              "description": "- 20m 60% easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test",
              "plan_id": ""},
         ]})
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             plan = server.TRAINING_PLAN_REPOSITORY.get(db, plan_id)
         self.assertEqual((plan["start_date"], plan["end_date"]), ("2099-05-01", "2099-05-31"))
 
     def test_mixed_batch_recomputes_each_affected_plan_bounds(self):
         plan_ids = ["mixed-bounds-a", "mixed-bounds-b"]
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             for index, plan_id in enumerate(plan_ids):
                 server.TRAINING_PLAN_REPOSITORY.create(
                     db, plan_id, f"Mixed {index}", "Build", "2099-06-01", "2099-06-30", "planned", server.utc_now(),
@@ -6036,7 +6036,7 @@ class CoachTests(unittest.TestCase):
             {"local_id": units[0]["id"], "action": "update", "date": "2099-06-15"},
             {"local_id": units[1]["id"], "action": "update", "date": "2099-06-16"},
         ]})
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             plans = [server.TRAINING_PLAN_REPOSITORY.get(db, plan_id) for plan_id in plan_ids]
         self.assertEqual([(plan["start_date"], plan["end_date"]) for plan in plans], [
             ("2099-06-15", "2099-06-15"), ("2099-06-16", "2099-06-16"),
@@ -6044,7 +6044,7 @@ class CoachTests(unittest.TestCase):
 
     def test_structured_training_plan_membership_includes_archived_and_standalone_references(self):
         plan_id = "membership-boundary-plan"
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
                 db, plan_id, "Membership Boundary", "Build", "2099-02-01", "2099-02-28", "planned", server.utc_now(),
             )
@@ -6338,7 +6338,7 @@ class CoachTests(unittest.TestCase):
         intervals_before = json.dumps(intervals_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         garmin_before = json.dumps(garmin_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         server.sync_state_repository().save_snapshot(intervals_snapshot)
-        server.set_kv("garmin_snapshot", json.dumps(garmin_snapshot, ensure_ascii=False))
+        server.key_value_service().set("garmin_snapshot", json.dumps(garmin_snapshot, ensure_ascii=False))
 
         context = server.coach_training_context_service().build()
 
@@ -6376,7 +6376,7 @@ class CoachTests(unittest.TestCase):
             server.SETTINGS.save_calendar_display_settings({"past_weeks": -1})
         with self.assertRaises(server.AppError):
             server.SETTINGS.save_calendar_display_settings({"future_weeks": 53})
-        server.set_kv("calendar_display_past_weeks", "invalid")
+        server.key_value_service().set("calendar_display_past_weeks", "invalid")
         self.assertEqual(server.SETTINGS.calendar_display_settings()["past_weeks"], 1)
 
     def test_responses_request_uses_selected_thinking_level(self):
@@ -6418,14 +6418,14 @@ class CoachTests(unittest.TestCase):
         with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
             result = server.coach_conversation_reset_service().reset()
         self.assertEqual(result["status"], "ok")
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             row = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact["artifact_id"],)).fetchone()
         self.assertEqual(row["status"], "superseded")
         self.assertEqual(server.coach_dialogue_read_service().artifact_refs(), [])
 
     def test_coach_reset_keeps_local_history_when_reset_transaction_fails(self):
         message = server.coach_message_service().add("user", "Keep this message")
-        generation = server.get_kv("chat_generation")
+        generation = server.key_value_service().get("chat_generation")
         original_set = server.KEY_VALUE_REPOSITORY.set
 
         def fail_pending_request(db, key, value):
@@ -6436,13 +6436,13 @@ class CoachTests(unittest.TestCase):
         with patch.object(server.KEY_VALUE_REPOSITORY, "set", side_effect=fail_pending_request):
             with self.assertRaisesRegex(RuntimeError, "synthetic reset failure"):
                 server.coach_conversation_reset_service().reset()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             saved = db.execute("SELECT id FROM messages WHERE id=?", (message["id"],)).fetchone()
         self.assertIsNotNone(saved)
-        self.assertEqual(server.get_kv("chat_generation"), generation)
+        self.assertEqual(server.key_value_service().get("chat_generation"), generation)
 
     def test_coach_reset_clears_local_state_when_remote_delete_fails(self):
-        server.set_kv("openai_conversation_id", "conv-reset-failure")
+        server.key_value_service().set("openai_conversation_id", "conv-reset-failure")
         server.coach_message_service().add("user", "Clear this message")
         with patch.object(
             server.openai_provider.OpenAIResponsesClient,
@@ -6451,7 +6451,7 @@ class CoachTests(unittest.TestCase):
         ):
             result = server.coach_conversation_reset_service().reset()
         self.assertFalse(result["remote_conversation_deleted"])
-        self.assertEqual(server.get_kv("openai_conversation_id"), "")
+        self.assertEqual(server.key_value_service().get("openai_conversation_id"), "")
         self.assertEqual(server.coach_message_service().list(), [])
 
 
@@ -6491,7 +6491,7 @@ class CoachTests(unittest.TestCase):
             "date": (date.today() + timedelta(days=2)).isoformat(),
             "sport": "Ride", "name": "Archived", "description": "- 30m 60% easy",
         })
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (archived["id"],)).fetchone()
             payload = json.loads(row["payload"])
             payload.update({"archived": True, "local_deleted": True})
@@ -6579,7 +6579,7 @@ class CoachTests(unittest.TestCase):
     def test_complete_plan_replace_archives_selected_plan_without_future_units(self):
         past_plan_id = str(uuid.uuid4())
         past = (date.today() - timedelta(days=10)).isoformat()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(db, past_plan_id, "Past Plan", "", past, past, "planned", server.utc_now())
         state = server.structured_training_state_service().read()
         intent = {
@@ -6602,7 +6602,7 @@ class CoachTests(unittest.TestCase):
         empty_plan_id = str(uuid.uuid4())
         starts = (date.today() + timedelta(days=1)).isoformat()
         ends = (date.today() + timedelta(days=7)).isoformat()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
                 db, empty_plan_id, "Empty Future Plan", "", starts, ends, "planned", server.utc_now(),
             )
@@ -6861,7 +6861,7 @@ class CoachTests(unittest.TestCase):
             server.coach_job_submission_service().stream_status("csrf-other"),
             {"status": "idle", "operation_id": None},
         )
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             command = db.execute(
                 "SELECT status, receipt FROM coach_commands WHERE client_turn_id='turn-background-persisted'"
             ).fetchone()
@@ -6900,7 +6900,7 @@ class CoachTests(unittest.TestCase):
 
         def publish_after_commit(topic, event):
             self.assertEqual(topic, "coach")
-            with server.database() as db:
+            with server.database_manager().unit_of_work() as db:
                 command = db.execute(
                     "SELECT status FROM coach_commands WHERE client_turn_id=?",
                     (event["client_turn_id"],),
@@ -6973,7 +6973,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], server.AppError)
         self.assertEqual(errors[0].reason, "chat_already_running")
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             commands = db.execute(
                 "SELECT client_turn_id, status FROM coach_commands "
                 "WHERE client_turn_id IN (?, ?)",
@@ -6990,7 +6990,7 @@ class CoachTests(unittest.TestCase):
     def test_background_worker_restores_session_binding_from_persisted_key(self):
         auth = server.session_auth_service()
         csrf_hash = auth.session_token_hash("csrf-background-bound")
-        with auth.session_lock, server.DB_LOCK, server.database() as db:
+        with auth.session_lock, server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                 (auth.session_token_hash("session-background-bound"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
@@ -7010,7 +7010,7 @@ class CoachTests(unittest.TestCase):
     def test_background_worker_forwards_live_deltas_and_completion_to_attached_stream(self):
         auth = server.session_auth_service()
         csrf_hash = auth.session_token_hash("csrf-background-streamed")
-        with auth.session_lock, server.DB_LOCK, server.database() as db:
+        with auth.session_lock, server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                 (auth.session_token_hash("session-background-streamed"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
@@ -7043,7 +7043,7 @@ class CoachTests(unittest.TestCase):
 
     def test_attached_durable_job_uses_provider_stream_instead_of_background_polling(self):
         csrf_hash = "csrf-attached-provider-stream"
-        server.set_kv("openai_conversation_id", "conv-attached-provider-stream")
+        server.key_value_service().set("openai_conversation_id", "conv-attached-provider-stream")
         server.coach_job_submission_service().enqueue(
             "Wie soll ich heute trainieren?", "turn-attached-provider-stream", csrf_hash,
             operation_id="operation-attached-provider-stream",
@@ -7083,7 +7083,7 @@ class CoachTests(unittest.TestCase):
             side_effect=server.AppError(429, "busy", reason="chat_queue_full"),
         ), patch.object(auth, "restore_coach_session_csrf_hash", return_value="csrf-background-requeue"):
             server.coach_background_job_runner().run(job)
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             command = db.execute(
                 "SELECT status, receipt FROM coach_commands WHERE client_turn_id='turn-background-requeue'"
             ).fetchone()
@@ -7105,7 +7105,7 @@ class CoachTests(unittest.TestCase):
             "turn-background-recovery-phase",
             {"openai_response_id": "resp-recovery-phase", "phase": "waiting_final_response", "tool_rounds": 1},
         )
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             row = db.execute(
                 "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
                 ("turn-background-recovery-phase",),
@@ -7114,7 +7114,7 @@ class CoachTests(unittest.TestCase):
         seen = {}
 
         def capture_phase(*_args, **_kwargs):
-            with server.DB_LOCK, server.database() as db:
+            with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                 row = db.execute(
                     "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
                     ("turn-background-recovery-phase",),
@@ -7235,12 +7235,12 @@ class CoachTests(unittest.TestCase):
                     cancel_event=cancel_event,
                 )
         self.assertEqual(raised.exception.reason, "chat_cancelled")
-        self.assertFalse(server.get_kv("last_library_sync_error"))
+        self.assertFalse(server.key_value_service().get("last_library_sync_error"))
 
     def test_sync_intervals_persists_activity_coverage_with_snapshot(self):
         snapshot = {"synced_at": "new", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
         config = replace(server.CONFIG, intervals_api_key="test-key")
-        server.set_kv("last_sync_activity_days", "7")
+        server.key_value_service().set("last_sync_activity_days", "7")
         cancellation = server.AppError(499, "abgebrochen", reason="chat_cancelled")
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
@@ -7251,8 +7251,8 @@ class CoachTests(unittest.TestCase):
                     activity_days=42,
                     cancel_event=threading.Event(),
                 )
-        self.assertEqual(server.get_kv("last_sync_at"), "new")
-        self.assertEqual(server.get_kv("last_sync_activity_days"), "42")
+        self.assertEqual(server.key_value_service().get("last_sync_at"), "new")
+        self.assertEqual(server.key_value_service().get("last_sync_activity_days"), "42")
 
     def test_workout_library_refresh_forwards_cancellation(self):
         cancel_event = threading.Event()
@@ -7295,7 +7295,7 @@ class CoachTests(unittest.TestCase):
                 )
             }
         self.assertEqual(raised.exception.reason, "chat_cancelled")
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             row = db.execute(
                 "SELECT status, phase, error_code FROM provider_refresh_history "
                 "WHERE provider='intervals' AND area='activities' ORDER BY started_at DESC LIMIT 1"
@@ -7365,7 +7365,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(second["planned_import"]["imported"], 0)
         planned = server.planned_unit_service().list()
         self.assertEqual([item["name"] for item in planned], ["Initiale Planung"])
-        self.assertEqual(server.get_kv("planned_units_initial_import_at"), "first")
+        self.assertEqual(server.key_value_service().get("planned_units_initial_import_at"), "first")
 
     def test_initial_planning_import_retries_after_import_failure(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -7388,11 +7388,11 @@ class CoachTests(unittest.TestCase):
                 server.intervals_sync_service().sync(
                     "initial attempt", activity_days=42
                 )
-            self.assertIsNone(server.get_kv("planned_units_initial_import_at"))
+            self.assertIsNone(server.key_value_service().get("planned_units_initial_import_at"))
             server.intervals_sync_service().sync("retry", activity_days=42)
 
         self.assertEqual(import_units.call_count, 2)
-        self.assertEqual(server.get_kv("planned_units_initial_import_at"), "retryable")
+        self.assertEqual(server.key_value_service().get("planned_units_initial_import_at"), "retryable")
 
 
     def test_intervals_sync_imports_remote_templates_alongside_local_library(self):
@@ -7611,7 +7611,7 @@ class CoachTests(unittest.TestCase):
             "sport": "Cycling",
         }])
         competition_id = saved["competitions"][0]["id"]
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE competitions SET intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced' WHERE id=?",
                 ("123", planning_competitions.competition_external_id(competition_id), competition_id),
@@ -7678,7 +7678,7 @@ class CoachTests(unittest.TestCase):
             "id": "old-workout", "name": "Local template", "type": "Ride",
             "description": "- 30m Z2", "moving_time": 1800,
         }])
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute("INSERT INTO snapshots(payload, created_at) VALUES (?, ?)", (json.dumps({"synced_at": "old"}), "old"))
             db.execute(
                 "INSERT INTO competition_sync_tombstones(id, intervals_event_id, external_id, created_at) VALUES (?, ?, ?, ?)",
@@ -7731,7 +7731,7 @@ class CoachTests(unittest.TestCase):
             {competition["name"] for competition in server.competition_service().list()},
             {"Old local race"},
         )
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM workout_library").fetchone()["count"], 1)
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM competition_sync_tombstones").fetchone()["count"], 1)
         self.assertEqual(server.workout_library_service().list()[0]["external_id"], "old-workout")
@@ -7754,7 +7754,7 @@ class CoachTests(unittest.TestCase):
         )
 
     def test_full_garmin_resync_keeps_last_snapshot_on_provider_failure(self):
-        server.set_kv("garmin_snapshot", json.dumps({"old": True}))
+        server.key_value_service().set("garmin_snapshot", json.dumps({"old": True}))
         config = replace(server.CONFIG, garmin_fixture_path="fixture.json")
         with patch.object(server, "CONFIG", config), patch.object(
             server.GarminSyncService,
@@ -7763,7 +7763,7 @@ class CoachTests(unittest.TestCase):
         ):
             with self.assertRaises(RuntimeError):
                 server.full_provider_resync_service().resync("garmin")
-        self.assertEqual(json.loads(server.get_kv("garmin_snapshot")), {"old": True})
+        self.assertEqual(json.loads(server.key_value_service().get("garmin_snapshot")), {"old": True})
 
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher ist in dieser Testumgebung nicht verfügbar.")
     def test_restore_accepts_only_exact_schema_and_invalidates_sessions(self):
@@ -7773,8 +7773,8 @@ class CoachTests(unittest.TestCase):
             db_path = data_dir / "intervals-coach.db"
             with patch.object(server, "DATA_DIR", data_dir), patch.object(server, "DB_PATH", db_path), patch.object(server, "CONFIG", config):
                 server.initialise_database()
-                server.set_kv("restore-marker", "preserved")
-                with server.DB_LOCK, server.database() as db:
+                server.key_value_service().set("restore-marker", "preserved")
+                with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                     db.execute(
                         "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                         ("token", "csrf", 9999999999, "now", "now"),
@@ -7782,8 +7782,8 @@ class CoachTests(unittest.TestCase):
                 valid_backup = server.database_backup_service().read_bytes()
                 restored = server.database_restore_service().restore(valid_backup)
                 self.assertEqual(restored["status"], "ok")
-                self.assertEqual(server.get_kv("restore-marker"), "preserved")
-                with server.DB_LOCK, server.database() as db:
+                self.assertEqual(server.key_value_service().get("restore-marker"), "preserved")
+                with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                     self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM sessions").fetchone()["count"], 0)
 
                 incomplete_path = data_dir / "incomplete.db"
@@ -7798,7 +7798,7 @@ class CoachTests(unittest.TestCase):
                 with self.assertRaises(server.AppError) as error:
                     server.database_restore_service().restore(incomplete_path.read_bytes())
                 self.assertEqual(error.exception.status, 400)
-                self.assertEqual(server.get_kv("restore-marker"), "preserved")
+                self.assertEqual(server.key_value_service().get("restore-marker"), "preserved")
                 self.assertEqual(list(data_dir.glob(".intervals-coach-restore-*.db")), [])
 
                 unexpected_path = data_dir / "unexpected.db"
@@ -7813,7 +7813,7 @@ class CoachTests(unittest.TestCase):
                 with self.assertRaises(server.AppError) as error:
                     server.database_restore_service().restore(unexpected_path.read_bytes())
                 self.assertEqual(error.exception.status, 400)
-                self.assertEqual(server.get_kv("restore-marker"), "preserved")
+                self.assertEqual(server.key_value_service().get("restore-marker"), "preserved")
                 self.assertEqual(list(data_dir.glob(".intervals-coach-restore-*.db")), [])
 
     def test_full_resync_blocks_intervals_operations(self):
@@ -7841,8 +7841,8 @@ class CoachTests(unittest.TestCase):
             server.INTERVALS_RESYNC_GATE.end_reset()
 
     def test_full_garmin_resync_replaces_local_snapshot_without_touching_tokens(self):
-        server.set_kv("garmin_snapshot", json.dumps({"old": True}))
-        server.set_kv("last_garmin_sync_at", "old")
+        server.key_value_service().set("garmin_snapshot", json.dumps({"old": True}))
+        server.key_value_service().set("last_garmin_sync_at", "old")
         with tempfile.TemporaryDirectory() as temp_root:
             fixture = Path(temp_root) / "garmin.json"
             fixture.write_text(json.dumps({"activities": [], "errors": []}), encoding="utf-8")
@@ -7850,7 +7850,7 @@ class CoachTests(unittest.TestCase):
             with patch.object(server, "CONFIG", config):
                 result = server.full_provider_resync_service().resync("garmin")
         self.assertEqual(result["status"], "ok")
-        self.assertNotEqual(server.get_kv("garmin_snapshot"), json.dumps({"old": True}))
+        self.assertNotEqual(server.key_value_service().get("garmin_snapshot"), json.dumps({"old": True}))
         self.assertEqual(server.garmin_payload_service().snapshot().get("source"), "fixture")
 
     def test_settings_persist_in_data_for_container_restart(self):
@@ -7971,7 +7971,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(updated["competition"]["name"], "Münsterland Giro 2027")
         self.assertEqual(updated["competition"]["priority"], "B")
 
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE competitions SET intervals_event_id=?, external_id=? WHERE id=?",
                 ("123", planning_competitions.competition_external_id(competition_id), competition_id),
@@ -7980,7 +7980,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(deleted["status"], "deleted")
         self.assertTrue(deleted["remote_sync_pending"])
         self.assertEqual(server.competition_service().list(), [])
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             tombstone = db.execute("SELECT intervals_event_id, external_id FROM competition_sync_tombstones").fetchone()
         self.assertEqual(tombstone["intervals_event_id"], "123")
 
@@ -7990,7 +7990,7 @@ class CoachTests(unittest.TestCase):
         saved = server.athlete_context_service().save({}, [{"name": "Old Race", "event_date": event_date, "sport": "Cycling"}])
         competition_id = saved["competitions"][0]["id"]
         external_id = planning_competitions.competition_external_id(competition_id)
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE competitions SET intervals_event_id=?, external_id=?, sync_dirty=0 WHERE id=?",
                 ("123", external_id, competition_id),
@@ -8144,7 +8144,7 @@ class CoachTests(unittest.TestCase):
             "sport": "Cycling", "priority": "B",
         })
         self.assertEqual(saved["competition"]["sync_state"], "local")
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute("UPDATE competitions SET intervals_event_id=NULL, sync_dirty=1, sync_state='local', sync_conflict='' WHERE id=?", (competition_id,))
         with patch.object(server, "intervals_client", return_value=client), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
@@ -9000,8 +9000,8 @@ class CoachTests(unittest.TestCase):
 
     def test_coach_quick_actions_hide_completed_morning_and_limit_plan_blockers_to_three_days(self):
         today = server.local_now().date()
-        server.set_kv("morning_checkin_status", "ready")
-        server.set_kv("morning_checkin_date", today.isoformat())
+        server.key_value_service().set("morning_checkin_status", "ready")
+        server.key_value_service().set("morning_checkin_date", today.isoformat())
         preview = {
             "changes": [
                 {"date": (today + timedelta(days=2)).isoformat(), "name": "Lange Ausfahrt", "blocking_triggers": ["weather"]},
@@ -9009,7 +9009,7 @@ class CoachTests(unittest.TestCase):
                 {"date": today.isoformat(), "name": "Intervalle", "blocking_triggers": []},
             ]
         }
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.PLAN_ADJUSTMENT_REPOSITORY.create_preview(db, str(uuid.uuid4()), json.dumps(preview), server.utc_now())
         actions = server.coach_quick_actions_service().state()
         self.assertFalse(actions["morning_checkin"])
@@ -9018,7 +9018,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(actions["horizon_days"], 3)
 
     def test_sync_intervals_waits_for_active_sync_and_uses_its_new_snapshot(self):
-        server.set_kv("last_sync_at", "old-sync")
+        server.key_value_service().set("last_sync_at", "old-sync")
         INTERVALS_SYNC_LOCK.acquire()
         previous_snapshot_read = threading.Event()
         service = server.intervals_sync_service()
@@ -9035,7 +9035,7 @@ class CoachTests(unittest.TestCase):
             if not previous_snapshot_read.wait(2):
                 INTERVALS_SYNC_LOCK.release()
                 return
-            server.set_kv("last_sync_at", "new-sync")
+            server.key_value_service().set("last_sync_at", "new-sync")
             INTERVALS_SYNC_LOCK.release()
 
         worker = threading.Thread(target=finish_active_sync)
@@ -9116,7 +9116,7 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(calendar_error.exception.reason, "provider_client_error")
             self.assertNotIn(email, str(calendar_error.exception))
 
-            server.set_kv("last_garmin_error", json.dumps([{"source": "login", "message": f"{email} {calendar_url}"}]))
+            server.key_value_service().set("last_garmin_error", json.dumps([{"source": "login", "message": f"{email} {calendar_url}"}]))
             state = server.garmin_projection_service().public_state()
             report = json.dumps(server.diagnostic_report_service().report(), ensure_ascii=False)
         self.assertNotIn(email, json.dumps(state, ensure_ascii=False))
@@ -9128,7 +9128,7 @@ class CoachTests(unittest.TestCase):
         calendar_url = "https://calendar.example.invalid/private/fake-calendar-token-1234567890.ics"
         config = replace(server.CONFIG, garmin_email=email, calendar_ical_url=calendar_url)
         error_body = json.dumps({"error": {"message": f"rejected {email} {calendar_url}"}}).encode("utf-8")
-        upstream_error = server.HTTPError("https://intervals.icu/api/v1/athlete/0", 422, "Unprocessable Entity", {}, BytesIO(error_body))
+        upstream_error = HTTPError("https://intervals.icu/api/v1/athlete/0", 422, "Unprocessable Entity", {}, BytesIO(error_body))
         server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         with patch.object(server, "CONFIG", config), patch.object(server.provider_http_client(), "opener", side_effect=upstream_error):
             with self.assertRaises(server.AppError) as raised:
@@ -9159,7 +9159,7 @@ class CoachTests(unittest.TestCase):
 
     def test_http_error_response_body_is_closed_after_reading(self):
         response_body = BytesIO(b'{"error":{"message":"temporary failure"}}')
-        upstream_error = server.HTTPError(
+        upstream_error = HTTPError(
             "https://intervals.icu/api/v1/athlete/0",
             503,
             "Service Unavailable",
@@ -9226,7 +9226,7 @@ class CoachTests(unittest.TestCase):
 
     def test_intervals_validation_error_includes_safe_provider_detail(self):
         error_body = json.dumps({"error": {"message": "Invalid workout type"}}).encode("utf-8")
-        upstream_error = server.HTTPError(
+        upstream_error = HTTPError(
             "https://intervals.icu/api/v1/athlete/0/workouts",
             422,
             "Unprocessable Entity",
@@ -9243,7 +9243,7 @@ class CoachTests(unittest.TestCase):
     def test_intervals_public_state_reports_sync_health(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
-            server.set_kv("last_library_sync_at", "2026-08-31T08:00:00+00:00")
+            server.key_value_service().set("last_library_sync_at", "2026-08-31T08:00:00+00:00")
             state = server.public_state_service().read(local_only=True)["intervals"]
         self.assertEqual(state["state"], "connected")
         self.assertIsNone(state["last_sync_at"])
@@ -9253,7 +9253,7 @@ class CoachTests(unittest.TestCase):
     def test_intervals_public_state_reports_library_error(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
-            server.set_kv("last_library_sync_error", "Intervals.icu weist die Anfrage zurück (422): Invalid workout type")
+            server.key_value_service().set("last_library_sync_error", "Intervals.icu weist die Anfrage zurück (422): Invalid workout type")
             state = server.public_state_service().read(local_only=True)["intervals"]
         self.assertEqual(state["state"], "error")
         self.assertIn("422", state["last_error"])
@@ -9540,7 +9540,7 @@ class CoachTests(unittest.TestCase):
                 "code": "credit_balance_exhausted",
             }
         }).encode("utf-8")
-        upstream_error = server.HTTPError(
+        upstream_error = HTTPError(
             "https://api.openai.com/v1/responses",
             429,
             "Too Many Requests",
@@ -9564,7 +9564,7 @@ class CoachTests(unittest.TestCase):
 
     def test_openai_retry_after_is_attached_to_transient_http_error(self):
         error_body = json.dumps({"error": {"code": "rate_limit_exceeded"}}).encode("utf-8")
-        upstream_error = server.HTTPError(
+        upstream_error = HTTPError(
             "https://api.openai.com/v1/responses",
             429,
             "Too Many Requests",
@@ -9579,7 +9579,7 @@ class CoachTests(unittest.TestCase):
 
     def test_openai_stream_retry_after_is_attached_to_transient_http_error(self):
         error_body = json.dumps({"error": {"code": "rate_limit_exceeded"}}).encode("utf-8")
-        upstream_error = server.HTTPError(
+        upstream_error = HTTPError(
             "https://api.openai.com/v1/responses",
             429,
             "Too Many Requests",
@@ -9615,7 +9615,7 @@ class CoachTests(unittest.TestCase):
                 "message": "athlete-private provider failure",
             },
         }).encode("utf-8")
-        upstream_error = server.HTTPError(
+        upstream_error = HTTPError(
             "https://api.openai.com/v1/responses", 400, "Bad Request", {"x-request-id": "req_test_456"}, BytesIO(raw_error)
         )
         server.DIAGNOSTIC_CAPTURE.set_enabled(True)
@@ -9907,7 +9907,7 @@ class CoachTests(unittest.TestCase):
                 patch.object(registry, "events", return_value=events):
             server.CHAT_STREAM_TRANSPORT.handle(handler, {"csrf_hash": session_key})
 
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertIsNotNone(db.execute("SELECT 1 FROM coach_commands WHERE client_turn_id='turn-disconnect-test' AND status='queued'").fetchone())
         self.assertFalse(cancel_event.is_set())
         unregister.assert_called_once_with(session_key, operation_id)
@@ -9985,7 +9985,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(error.exception.reason, "response_error")
 
     def test_openai_request_is_not_blocked_by_local_usage_total(self):
-        server.set_kv("openai_usage", json.dumps({"date": server.local_now().date().isoformat(), "total_tokens": 10}))
+        server.key_value_service().set("openai_usage", json.dumps({"date": server.local_now().date().isoformat(), "total_tokens": 10}))
         config = replace(server.CONFIG, openai_api_key="test-key")
         with patch.object(server, "CONFIG", config), patch.object(server.provider_http_client(), "request", return_value={"status": "completed"}) as request:
             result = server.openai_responses_client().request("/responses", {"model": "gpt-5.6-sol"})
@@ -10061,7 +10061,7 @@ class CoachTests(unittest.TestCase):
 
                         thread = threading.Thread(target=worker)
                         try:
-                            with server.DB_LOCK, server.database():
+                            with server.DB_LOCK, server.database_manager().unit_of_work():
                                 thread.start()
                                 self.assertTrue(database_lock.worker_waiting.wait(timeout=3))
                                 state = state_reader()
@@ -10216,7 +10216,7 @@ class CoachTests(unittest.TestCase):
             server.provider_refresh_tracker().finish(
                 refresh_id, "success", "complete"
             )
-            with server.DB_LOCK, server.database() as db:
+            with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                 stale_at = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
                 db.execute(
                     "UPDATE provider_refresh_history SET started_at=?, finished_at=? WHERE id=?",
@@ -10236,7 +10236,7 @@ class CoachTests(unittest.TestCase):
             server.provider_refresh_tracker().finish(
                 refresh_id, "success", "complete"
             )
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             count = db.execute("SELECT COUNT(*) AS count FROM provider_refresh_history").fetchone()["count"]
         self.assertEqual(count, server.sync_freshness.PROVIDER_REFRESH_MAX_ROWS)
         report = server.diagnostic_report_service().report()

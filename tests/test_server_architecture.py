@@ -1685,10 +1685,14 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.http_api.bootstrap_state", ("PublicBootstrapService", "bootstrap_provider_states")),
     ("backend.http_api.state_events_transport", ("StateEventTransport",)),
     ("backend.backup.restore", ("DatabaseRestoreService",)),
+    ("backend.db.key_value", ("KeyValueService",)),
     ("backend.coach.structured_response", ("CoachStructuredResponseService",)),
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
+    "database",
+    "get_kv",
+    "set_kv",
     "_send_structured_coach_response",
     "_resume_background_coach_response",
     "_StructuredCoachResponseAttemptContext",

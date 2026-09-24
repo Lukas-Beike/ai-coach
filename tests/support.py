@@ -144,7 +144,7 @@ def create_test_session(server) -> str:
     token = f"session-{uuid.uuid4().hex}"
     now = server.time.time()
     auth = server.session_auth_service()
-    with server.DB_LOCK, server.database() as db:
+    with server.DB_LOCK, server.database_manager().unit_of_work() as db:
         db.execute(
             "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
             (auth.session_token_hash(token), auth.session_token_hash("csrf"), now + SESSION_TTL_SECONDS, server.utc_now(), server.utc_now()),
@@ -162,7 +162,7 @@ def reset_application_state(server) -> None:
         "provider_sync_cursors", "public_event_candidates", "public_event_sources",
         "external_calendar_events", "sessions", "kv",
     )
-    with server.DB_LOCK, server.database() as db:
+    with server.DB_LOCK, server.database_manager().unit_of_work() as db:
         for table in tables:
             db.execute(f"DELETE FROM {table}")
     server.profile_service().save({})
