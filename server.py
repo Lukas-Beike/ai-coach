@@ -2466,7 +2466,7 @@ def coach_chat_turn_service() -> CoachChatTurnService:
     """Compose the session-bound chat turn owner."""
     return CoachChatTurnService(
         database_manager, DB_LOCK, coach_command_receipt_service(), SETTINGS,
-        coach_conversation_provision_service(), coach_structured_turn_service(), utc_now,
+        coach_conversation_provision_service, coach_structured_turn_service, utc_now,
     )
 
 

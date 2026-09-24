@@ -5,7 +5,7 @@
 ## Ausgangsstand
 
 - Geprüfter P0-Basiscommit: `362d6caa4c27951af86b82b11b3a43d48dadceee`
-- Inventarisierter `server.py`-Quelltext (SHA-256): `e844993e0b2a7919d051302581bad190750aa35b958e15548df2eef82b08f409`; dieser Fingerprint ist unabhängig von HEAD und Arbeitsbaum stabil.
+- Inventarisierter `server.py`-Quelltext (SHA-256): `d7ce00ba7d0321d1f97a4632dca6c72af24d1d8c6d2ef74d7e74a5bf4b3dedce`; dieser Fingerprint ist unabhängig von HEAD und Arbeitsbaum stabil.
 - `server.py`: 3.614 physische Zeilen
 - Inventareinträge: 591
 - Definitionen (Funktionen/Klassen): 184
@@ -494,7 +494,7 @@ Die folgende Tabelle ist die statische Grundlage für P1. Reads/Writes sind nur 
 | `coach_structured_tool_round_service` | 2416 | `coach_job_store`, `coach_structured_response_service`, `coach_structured_tool_execution_service`, `coach_structured_tool_failure_service`, `coach_structured_tool_preparation_service`, `coach_structured_tool_replay_service`, `coach_structured_tool_round_journal`, `coach_training_context_service` | `COACH_BACKGROUND_HORIZON_DAYS`, `COACH_DEFAULT_MAX_OUTPUT_TOKENS`, `COACH_LONG_PLAN_MAX_OUTPUT_TOKENS`, `COACH_TOOL_MAX_ROUNDS`, `CoachStructuredToolRoundLimits`, `CoachStructuredToolRoundService`, `DB_LOCK`, `coach_job_store`, `coach_structured_response_service`, `coach_structured_tool_execution_service`, `coach_structured_tool_failure_service`, `coach_structured_tool_preparation_service`, … (+4) | – | – |
 | `coach_final_receipt_service` | 2436 | `database_manager` | `CHAT_REPOSITORY`, `CoachFinalReceiptService`, `DB_LOCK`, `KEY_VALUE_REPOSITORY`, `database_manager`, `runtime_events`, `utc_now` | – | – |
 | `coach_structured_turn_service` | 2444 | `coach_attachment_context_service`, `coach_dialogue_read_service`, `coach_final_receipt_service`, `coach_request_payload_service`, `coach_structured_outcome_service`, `coach_structured_response_service`, `coach_structured_tool_round_service`, `coach_turn_failure_service`, `coach_turn_opening_service` | `COACH_DIALOGUE_TOOLS`, `CoachStructuredTurnDependencies`, `CoachStructuredTurnService`, `LOGGER`, `ROOT`, `STRUCTURED_READ_ONLY_TOOLS`, `coach_attachment_context_service`, `coach_dialogue_read_service`, `coach_final_receipt_service`, `coach_request_payload_service`, `coach_structured_outcome_service`, `coach_structured_response_service`, … (+3) | – | – |
-| `coach_chat_turn_service` | 2465 | `coach_command_receipt_service`, `coach_conversation_provision_service`, `coach_structured_turn_service` | `CoachChatTurnService`, `DB_LOCK`, `SETTINGS`, `coach_command_receipt_service`, `coach_conversation_provision_service`, `coach_structured_turn_service`, `database_manager`, `utc_now` | – | – |
+| `coach_chat_turn_service` | 2465 | `coach_command_receipt_service` | `CoachChatTurnService`, `DB_LOCK`, `SETTINGS`, `coach_command_receipt_service`, `coach_conversation_provision_service`, `coach_structured_turn_service`, `database_manager`, `utc_now` | – | – |
 | `chat_with_coach` | 2475 | `coach_chat_turn_service` | `Any`, `COACH_CONVERSATION_GATE`, `coach_chat_turn_service`, `runtime_maintenance`, `threading` | – | – |
 | `_background_coach_stream_delta` | 2483 | – | `coach_streams` | – | – |
 | `_background_coach_delta_callback` | 2487 | `_background_coach_stream_delta` | `Any`, `_background_coach_stream_delta` | – | – |

@@ -28,8 +28,8 @@ class CoachChatTurnService:
         database_lock: Any,
         receipts: CoachCommandReceiptService,
         settings: SettingsService,
-        conversations: CoachConversationProvisionService,
-        structured_turn: CoachStructuredTurnService,
+        conversations: Callable[[], CoachConversationProvisionService],
+        structured_turn: Callable[[], CoachStructuredTurnService],
         utc_now: Callable[[], str],
     ) -> None:
         self._database_manager = database_manager
@@ -138,10 +138,10 @@ class CoachChatTurnService:
             raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
         ai_provider, model, thinking_level = self._provider_settings(background_receipt)
         existing_conversation_id = str((existing_command or {}).get("conversation_id") or "")
-        conversation_id = existing_conversation_id or self._conversations.ensure(ai_provider)
+        conversation_id = existing_conversation_id or self._conversations().ensure(ai_provider)
         structured_intent = {"allow_mutations": allow_mutations}
         self._resume_background_command(background_owned, conversation_id, structured_intent, client_turn_id)
-        return self._structured_turn.run(
+        return self._structured_turn().run(
             message, intent=structured_intent, conversation_id=conversation_id, client_turn_id=client_turn_id,
             session_csrf_hash=session_csrf_hash, on_text_delta=on_text_delta, cancel_event=cancel_event,
             background_job=background_job, ai_provider=ai_provider, model=model, thinking_level=thinking_level,

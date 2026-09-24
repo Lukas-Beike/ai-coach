@@ -6893,3 +6893,17 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Server-Adapter erneut: **PASS**. Ruff, Compileall, Inventar-/Diff-
   Check und frisches Read-only-Docker-Image mit 2.589 Tests/11 Skips
   **PASS**. PR-CI/Sonar/Codex stehen aus.
+- PR #775 auf `3f4d363c`: Codex-Code-Review **FAIL** mit P2 im Thread
+  `PRRT_kwDOUHv92c6lbvJ7`. Die eager Server-Composition baute den
+  vollständigen Turn-Graphen vor Validation, Cancellation, Session-
+  Owner-Check oder idempotentem Read und konnte dadurch DB-Lesezugriffe
+  zu früh auslösen. Root injizierte nur noch reine Composition-Factories
+  für Conversation-Provision und Structured-Turn; beide werden erst
+  nach erfolgreicher Vorprüfung bzw. bei fehlender Conversation-ID
+  aufgelöst. Keine Server-Callbacks mit Fachlogik. Direkte Tests
+  assertieren nun, dass beide Factories bei ungültiger, abgebrochener,
+  fremder, abgeschlossener und jüngst laufender Anfrage unberührt
+  bleiben. Root prüfte den konkreten Korrektur-Diff erneut: **PASS**;
+  7 direkte Tests, Ruff, Compileall, Inventar-/Diff-Check und frisches
+  Read-only-Docker-Image mit 2.589 Tests/11 Skips **PASS**. Erneute
+  externe CI-/Sonar-/Codex-Prüfung und Thread-Auflösung offen.
