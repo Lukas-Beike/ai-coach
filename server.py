@@ -293,6 +293,7 @@ from backend.coach.tool_call_metadata import structured_tool_call_metadata
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
 from backend.coach.tool_failures import CoachStructuredToolFailureService
+from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
 from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
@@ -2432,6 +2433,11 @@ def coach_structured_tool_failure_service() -> CoachStructuredToolFailureService
     )
 
 
+def coach_structured_tool_round_journal() -> CoachStructuredToolRoundJournal:
+    """Compose the round journal with its durable Coach job-store owner."""
+    return CoachStructuredToolRoundJournal(coach_job_store())
+
+
 def coach_planning_command_service() -> CoachPlanningCommandService:
     """Compose the durable, session-bound local planning command owner."""
     return CoachPlanningCommandService(
@@ -2814,26 +2820,6 @@ def _execute_structured_coach_tool_call(
     return name, call_id, result, action
 
 
-def _structured_coach_function_calls(response: dict[str, Any]) -> list[dict[str, Any]]:
-    return [item for item in response.get("output", []) if isinstance(item, dict) and item.get("type") == "function_call"]
-
-
-def _record_structured_coach_tool_output(
-    *, name: str, call_id: str, result: dict[str, Any], outputs: list[dict[str, Any]],
-    pending: list[dict[str, str]], command_receipts: list[dict[str, Any]], client_turn_id: str,
-    question: str, cancelled: bool,
-) -> tuple[str, bool, list[dict[str, str]]]:
-    outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False)})
-    pending = [entry for entry in pending if entry["call_id"] != call_id]
-    coach_job_store().merge_receipt(client_turn_id, {"command_receipts": command_receipts, "pending_tool_calls": pending,
-        "phase": "executing_tools" if pending else "waiting_final_response", "pending_tool_outputs": outputs if not pending else []})
-    if name == "clarify_coach_request" and result.get("ok"):
-        question = result["question"]
-    if name == "cancel_coach_request" and result.get("ok"):
-        cancelled = True
-    return question, cancelled, pending
-
-
 def _structured_coach_followup_response(
     response: dict[str, Any], *, outputs: list[dict[str, Any]], state: _StructuredCoachRoundState,
     question: str, cancelled: bool, rounds: int,
@@ -2854,29 +2840,30 @@ def _run_structured_coach_tool_rounds(
     response: dict[str, Any], *, rounds: int, question: str, cancelled: bool,
     state: _StructuredCoachRoundState,
 ) -> tuple[dict[str, Any], int, str, bool, str]:
+    journal = coach_structured_tool_round_journal()
     while rounds < COACH_TOOL_MAX_ROUNDS:
-        calls = _structured_coach_function_calls(response)
+        calls = journal.function_calls(response)
         if not calls:
             break
-        pending = [{"call_id": str(item.get("call_id") or ""), "tool": str(item.get("name") or "")} for item in calls]
-        coach_job_store().merge_receipt(state.client_turn_id, {"phase": "executing_tools", "pending_tool_calls": pending, "pending_tool_outputs": []})
+        pending = journal.start_round(state.client_turn_id, calls)
         outputs = []
         for item in calls:
             _raise_chat_cancelled(state.cancel_event)
             name, call_id, result, _ = _execute_structured_coach_tool_call(
                 item, state=state, question=question, cancelled=cancelled,
             )
-            question, cancelled, pending = _record_structured_coach_tool_output(
-                name=name, call_id=call_id, result=result, outputs=outputs, pending=pending,
-                command_receipts=state.command_receipts, client_turn_id=state.client_turn_id,
+            question, cancelled, pending = journal.record_output(
+                client_turn_id=state.client_turn_id, name=name, call_id=call_id,
+                result=result, outputs=outputs, pending=pending,
+                command_receipts=state.command_receipts,
                 question=question, cancelled=cancelled,
             )
         rounds += 1
-        coach_job_store().merge_receipt(state.client_turn_id, {"tool_rounds": rounds})
+        journal.finish_round(state.client_turn_id, rounds)
         response = _structured_coach_followup_response(
             response, outputs=outputs, state=state, question=question, cancelled=cancelled, rounds=rounds,
         )
-        coach_job_store().merge_receipt(state.client_turn_id, {"pending_tool_outputs": []})
+        journal.clear_outputs(state.client_turn_id)
         if question or cancelled:
             break
     return response, rounds, question, cancelled, state.model_instructions

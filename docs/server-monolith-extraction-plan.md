@@ -593,6 +593,10 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
 
 - [ ] Die gesamte strukturierte Response-/Tool-Rundenschleife einschließlich
   Retry, Fehler-Recovery, Receipts und finaler Persistenz nach `coach/` ziehen.
+  - [x] Durable Phase-/Pending-/Output-Übergänge eines strukturierten
+    Werkzeug-Rounds `CoachStructuredToolRoundJournal` zuordnen;
+    `CoachJobStore` bleibt Persistenzeigentümer, Provider-Follow-up,
+    Cancellation und Gesamtloop bleiben für den Turn-Use-Case offen.
   - [x] Provider-Request-Aufbau einschließlich Dialogkontext,
     Attachment-Sicherheitsanweisung, OpenAI-Kontinuität, Gemini-Medien
     und Modell-/Thinking-Auswahl `CoachRequestPayloadService` zuordnen;
