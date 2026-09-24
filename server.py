@@ -311,6 +311,7 @@ from backend.coach.turn_failures import (
 )
 from backend.coach.job_submission import CoachJobSubmissionService
 from backend.coach.morning import ManualMorningCheckinService, MorningCheckinStateService
+from backend.coach.morning_completion import MorningCoachJobCompletionService
 from backend.coach.tools import build_tool_contracts
 from backend.coach.service import command_receipt
 from backend.coach.authorization import (
@@ -2507,19 +2508,10 @@ def _background_coach_cancel_event(operation_id: str, client_turn_id: str) -> th
 
 
 def _persist_completed_morning_coach_job(client_turn_id: str) -> dict[str, Any] | None:
-    with DB_LOCK, database() as db:
-        set_kv("morning_checkin_date", local_now().date().isoformat(), db)
-        set_kv("morning_checkin_status", "ready", db)
-    quick_actions = coach_quick_actions_service().state()
-    with DB_LOCK, database() as db:
-        row = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
-        completed_receipt = command_receipt((row or {}).get("receipt"))
-        completed_receipt["coach_quick_actions"] = quick_actions
-        db.execute(
-            "UPDATE coach_commands SET receipt=?, updated_at=? WHERE client_turn_id=? AND status='completed'",
-            (json.dumps(completed_receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
-        )
-    return completed_receipt
+    return MorningCoachJobCompletionService(
+        database_manager(), DB_LOCK, KEY_VALUE_REPOSITORY,
+        coach_quick_actions_service, local_now, utc_now,
+    ).complete(client_turn_id)
 
 
 def _execute_background_coach_job(
