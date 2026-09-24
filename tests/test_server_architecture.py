@@ -58,6 +58,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
+    ("backend.http_api.post_dispatch", ("HttpPostDispatcher",)),
     ("backend.http_api.sync_commands_post", ("SyncCommandPostRoute",)),
     ("backend.http_api.chat_post", ("ChatPostRoutes",)),
     ("backend.http_api.chat_stream", ("CoachChatStreamTransport",)),
@@ -2189,6 +2190,28 @@ def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
 
 
 class ServerArchitectureTests(unittest.TestCase):
+    def test_post_handler_preserves_authentication_csrf_and_maintenance_order(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        handler = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
+        )
+        post = next(
+            node for node in handler.body
+            if isinstance(node, ast.FunctionDef) and node.name == "do_POST"
+        )
+        source = ast.unparse(post)
+        ordered_calls = (
+            "HTTP_POST_DISPATCHER.handle_before_auth",
+            "self.auth_service.require_auth",
+            "self.auth_service.require_csrf",
+            "HTTP_POST_DISPATCHER.handle_before_maintenance",
+            "runtime_maintenance.MAINTENANCE_GATE.operation",
+            "HTTP_POST_DISPATCHER.handle_authenticated",
+        )
+        positions = [source.index(call) for call in ordered_calls]
+        self.assertEqual(positions, sorted(positions))
+
     def test_chat_turn_has_no_server_adapter(self) -> None:
         implementations = _top_level_implementations(_parse(SERVER_PATH))
         self.assertNotIn("chat_with_coach", implementations)
@@ -2384,10 +2407,78 @@ class ServerArchitectureTests(unittest.TestCase):
         factory: str,
     ) -> ast.Module:
         server_tree = _parse(SERVER_PATH)
-        handler = next(node for node in ast.walk(server_tree) if isinstance(node, ast.FunctionDef) and node.name == handler_method)
-        nodes = list(ast.walk(handler))
+        post_routes = {
+            "AUTH_POST_ROUTES",
+            "PRIVACY_RESTORE_POST_ROUTES",
+            "CHAT_CANCEL_POST_ROUTES",
+            "COACH_ACTIONS_POST_ROUTES",
+            "CHAT_POST_ROUTES",
+            "TRANSCRIBE_POST_ROUTES",
+            "PLANNING_COMMANDS_POST_ROUTES",
+            "FEEDBACK_POST_ROUTES",
+            "CHAT_STREAM_TRANSPORT",
+            "SYNC_COMMAND_POST_ROUTE",
+            "HISTORY_UNDO_POST_ROUTES",
+            "DIAGNOSTICS_CAPTURE_POST_ROUTES",
+            "PRIVACY_DELETE_POST_ROUTES",
+            "NUTRITION_POST_ROUTES",
+        }
+        is_post_dispatch = route_name in post_routes
         is_put_dispatch = route_name in {"SETTINGS_PUT_ROUTES", "ATHLETE_PUT_ROUTES"}
-        if is_put_dispatch:
+        if is_post_dispatch:
+            dispatcher = next(
+                node for node in server_tree.body
+                if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "HTTP_POST_DISPATCHER" for target in node.targets)
+            )
+            route_nodes = [node for node in ast.walk(dispatcher.value) if isinstance(node, ast.Name) and node.id == route_name]
+            stage = {
+                "AUTH_POST_ROUTES": "handle_before_auth",
+                "PRIVACY_RESTORE_POST_ROUTES": "handle_before_auth",
+                "CHAT_CANCEL_POST_ROUTES": "handle_before_maintenance",
+            }.get(route_name, "handle_authenticated")
+            dispatcher_fields = {
+                "AUTH_POST_ROUTES": "_auth_routes",
+                "PRIVACY_RESTORE_POST_ROUTES": "_restore_route",
+                "CHAT_CANCEL_POST_ROUTES": "_cancel_route",
+                "CHAT_STREAM_TRANSPORT": "_chat_stream",
+                "SYNC_COMMAND_POST_ROUTE": "_sync_commands",
+                "HISTORY_UNDO_POST_ROUTES": "_history_undo",
+                "DIAGNOSTICS_CAPTURE_POST_ROUTES": "_diagnostics_capture",
+                "PRIVACY_DELETE_POST_ROUTES": "_privacy_delete",
+                "NUTRITION_POST_ROUTES": "_nutrition",
+            }
+            field = dispatcher_fields.get(
+                route_name, "_" + route_name.removesuffix("_POST_ROUTES").lower()
+            )
+            dispatcher_source = (
+                BACKEND_ROOT / "http_api" / "post_dispatch.py"
+            ).read_text(encoding="utf-8")
+            dispatcher_tree = ast.parse(dispatcher_source)
+            stage_method = next(
+                node for node in ast.walk(dispatcher_tree)
+                if isinstance(node, ast.FunctionDef) and node.name == stage
+            )
+            dispatches = [
+                node for node in ast.walk(stage_method)
+                if isinstance(node, ast.Attribute)
+                and node.attr == field
+            ]
+            self.assertTrue(route_nodes)
+            self.assertTrue(dispatches)
+            handler = next(
+                node for node in ast.walk(server_tree)
+                if isinstance(node, ast.FunctionDef) and node.name == "do_POST"
+            )
+            nodes = list(ast.walk(handler))
+            self.assertTrue(any(
+                isinstance(node, ast.Call)
+                and "HTTP_POST_DISPATCHER" in ast.unparse(node.func)
+                for node in nodes
+            ))
+        elif is_put_dispatch:
+            handler = next(node for node in ast.walk(server_tree) if isinstance(node, ast.FunctionDef) and node.name == handler_method)
+            nodes = list(ast.walk(handler))
             dispatcher = next(
                 node for node in server_tree.body
                 if isinstance(node, ast.Assign)
@@ -2396,6 +2487,8 @@ class ServerArchitectureTests(unittest.TestCase):
             route_nodes = [node for node in ast.walk(dispatcher.value) if isinstance(node, ast.Name) and node.id == route_name]
             dispatches = [node for node in nodes if isinstance(node, ast.Call) and "HTTP_ROUTE_DISPATCHER.handle_put" in ast.unparse(node)]
         else:
+            handler = next(node for node in ast.walk(server_tree) if isinstance(node, ast.FunctionDef) and node.name == handler_method)
+            nodes = list(ast.walk(handler))
             route_nodes = [node for node in nodes if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == route_name and node.func.attr == "handle"]
             dispatches = route_nodes
         if is_put_dispatch:
@@ -2404,11 +2497,7 @@ class ServerArchitectureTests(unittest.TestCase):
         else:
             self.assertEqual(len(dispatches), 1)
         self.assertEqual(len(dispatches), 1)
-        paths = {
-            node.value
-            for node in nodes
-            if isinstance(node, ast.Constant) and isinstance(node.value, str)
-        }
+        paths = {node.value for node in nodes if isinstance(node, ast.Constant) and isinstance(node.value, str)}
         self.assertTrue(set(forbidden_paths).isdisjoint(paths))
         assignment = next(
             node
@@ -2570,14 +2659,18 @@ class ServerArchitectureTests(unittest.TestCase):
             isinstance(node, ast.FunctionDef) and node.name == "handle_chat_stream"
             for node in handler.body
         ))
+        dispatcher_source = (
+            BACKEND_ROOT / "http_api" / "post_dispatch.py"
+        ).read_text(encoding="utf-8")
+        dispatcher_tree = ast.parse(dispatcher_source)
         coach_post = next(
-            node for node in handler.body
-            if isinstance(node, ast.FunctionDef) and node.name == "_handle_coach_post"
+            node for node in ast.walk(dispatcher_tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "handle_authenticated"
         )
         self.assertEqual(
             sum(
                 isinstance(node, ast.Call)
-                and ast.unparse(node.func) == "CHAT_STREAM_TRANSPORT.handle"
+                and ast.unparse(node.func) == "self._chat_stream.handle"
                 for node in ast.walk(coach_post)
             ),
             1,

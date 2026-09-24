@@ -36,7 +36,6 @@ from backend.diagnostics.report import (
 )
 from backend.errors import (
     INTERNAL_SERVER_ERROR,
-    NOT_FOUND_ERROR,
     AppError,
     ClientDisconnected,
     public_app_error_status,
@@ -151,6 +150,7 @@ from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanState
 from backend.http_api.state_versions import StateVersionService
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
+from backend.http_api.post_dispatch import HttpPostDispatcher
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.history_get import HistoryGetRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
@@ -2717,6 +2717,22 @@ HTTP_ROUTE_DISPATCHER = HttpRouteDispatcher(
     (SETTINGS_PUT_ROUTES, ATHLETE_PUT_ROUTES, NUTRITION_PUT_ROUTES),
 )
 SYNC_COMMAND_POST_ROUTE = SyncCommandPostRoute(lambda: sync_command_endpoint())
+HTTP_POST_DISPATCHER = HttpPostDispatcher(
+    AUTH_POST_ROUTES,
+    PRIVACY_RESTORE_POST_ROUTES,
+    CHAT_CANCEL_POST_ROUTES,
+    COACH_ACTIONS_POST_ROUTES,
+    CHAT_POST_ROUTES,
+    TRANSCRIBE_POST_ROUTES,
+    PLANNING_COMMANDS_POST_ROUTES,
+    FEEDBACK_POST_ROUTES,
+    CHAT_STREAM_TRANSPORT,
+    SYNC_COMMAND_POST_ROUTE,
+    HISTORY_UNDO_POST_ROUTES,
+    DIAGNOSTICS_CAPTURE_POST_ROUTES,
+    PRIVACY_DELETE_POST_ROUTES,
+    NUTRITION_POST_ROUTES,
+)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -2787,16 +2803,14 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.request_id = uuid.uuid4().hex[:12]
         try:
             path = urlparse(self.path).path
-            if AUTH_POST_ROUTES.handle(self, path):
-                return
-            if PRIVACY_RESTORE_POST_ROUTES.handle(self, path):
+            if HTTP_POST_DISPATCHER.handle_before_auth(self, path):
                 return
             session = self.auth_service.require_auth(self)
             self.auth_service.require_csrf(self, session)
-            if CHAT_CANCEL_POST_ROUTES.handle(self, path, session):
+            if HTTP_POST_DISPATCHER.handle_before_maintenance(self, path, session):
                 return
             with runtime_maintenance.MAINTENANCE_GATE.operation():
-                self.handle_authenticated_post(path, session)
+                HTTP_POST_DISPATCHER.handle_authenticated(self, path, session)
         except AppError as exc:
             if exc.status >= 500:
                 LOGGER.exception(
@@ -2839,40 +2853,6 @@ class RequestHandler(BaseHTTPRequestHandler):
         except self.client_disconnect_errors as exc:
             self.log_client_disconnect()
             raise ClientDisconnected() from exc
-
-    def _handle_coach_post(self, path: str, session: dict[str, Any]) -> bool:
-        if COACH_ACTIONS_POST_ROUTES.handle(self, path, session):
-            return True
-        if CHAT_POST_ROUTES.handle(self, path, session):
-            return True
-        if TRANSCRIBE_POST_ROUTES.handle(self, path):
-            return True
-        if PLANNING_COMMANDS_POST_ROUTES.handle(self, path, session):
-            return True
-        if FEEDBACK_POST_ROUTES.handle(self, path):
-            return True
-        elif path == "/api/chat/stream":
-            CHAT_STREAM_TRANSPORT.handle(self, session)
-        else:
-            return False
-        return True
-
-    def _handle_data_post(self, path: str, session: dict[str, Any]) -> bool:
-        if HISTORY_UNDO_POST_ROUTES.handle(self, path, session):
-            return True
-        if DIAGNOSTICS_CAPTURE_POST_ROUTES.handle(self, path):
-            return True
-        return PRIVACY_DELETE_POST_ROUTES.handle(self, path)
-
-    def handle_authenticated_post(self, path: str, session: dict[str, Any]) -> None:
-        handled = (
-            self._handle_coach_post(path, session)
-            or SYNC_COMMAND_POST_ROUTE.handle(self, path)
-            or self._handle_data_post(path, session)
-            or NUTRITION_POST_ROUTES.handle(self, path)
-        )
-        if not handled:
-            raise AppError(404, NOT_FOUND_ERROR)
 
     def do_PUT(self) -> None:
         try:

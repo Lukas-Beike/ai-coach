@@ -7913,3 +7913,23 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `--check` und `git diff --check` ebenfalls PASS.
 - `server.py` sinkt um sechs Zeilen auf **3.064**. Nächster Auftrag: übrige
   POST-/SSE-Transportgrenzen und anschließend P11 weiter prüfen.
+
+## P10 POST-Routenauswahl — lokaler Prüfstand
+
+- `HttpPostDispatcher` in `backend/http_api/post_dispatch.py` besitzt jetzt die
+  Reihenfolge aller öffentlichen, vor dem Maintenance-Gate und authentifizierten
+  POST-Routen, einschließlich Nutrition und Coach-Stream-Dispatch.
+- `RequestHandler.do_POST` behält die Sicherheitsreihenfolge: öffentliche
+  Auth-/Restore-Routen, Authentisierung, CSRF, Chat-Cancel, Maintenance-Gate,
+  authentifizierte Auswahl. Die drei serverseitigen Dispatch-Methoden wurden
+  entfernt; Testaufrufer verwenden konkrete Route- oder Dispatcher-Eigentümer.
+- Direkte Dispatcher-, Architektur-, Coach-Planning-Command- und Servertests
+  bestehen. Die vollständige Suite besteht mit 2.789 Tests und 12 Skips;
+  Python-Syntaxprüfung, Inventar-`--check` und `git diff --check` bestehen.
+- Die aktuelle Nutrition-Erweiterung in `develop` hat drei zuvor unzugeordnete
+  globale Route-Bindings und den Service-Factory-Namen sichtbar gemacht. Der
+  Inventar-Eigentümer ist jetzt konkret (`http_api/` bzw. `nutrition/service.py`);
+  der P0-Zuordnungstest und das regenerierte Inventar sind grün.
+- `server.py` enthält keine route-spezifische POST-Auswahl mehr. GET-/PUT-
+  Fehlergrenzen, SSE-Schreibtransport und Datei-/JSON-Antworttransport bleiben
+  offene P10-Arbeit.
