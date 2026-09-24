@@ -9228,8 +9228,7 @@ class CoachTests(unittest.TestCase):
             },
             "maintenance": {"active": True},
         }
-        handler_class = server.request_handler_class()
-        handler = object.__new__(handler_class)
+        handler = object.__new__(server.request_handler_class())
         handler.send_json = Mock()
 
         original_manager = server.database_manager()
@@ -9242,8 +9241,8 @@ class CoachTests(unittest.TestCase):
 
         with patch.object(server, "database_manager", side_effect=[original_manager, switched_manager]), \
                 patch.object(ReadinessService, "state", autospec=True, side_effect=projected_state):
-            self.assertTrue(handler._handle_public_get("/api/readiness"))
-            self.assertTrue(handler._handle_public_get("/api/readiness"))
+            self.assertTrue(server.PUBLIC_GET_ROUTES.handle(handler, "/api/readiness"))
+            self.assertTrue(server.PUBLIC_GET_ROUTES.handle(handler, "/api/readiness"))
 
         self.assertEqual(seen_managers, [original_manager, switched_manager])
         self.assertEqual(
@@ -9269,7 +9268,7 @@ class CoachTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as data_dir, \
                 patch.object(server, "DATA_DIR", Path(data_dir)), \
                 patch.object(server, "database_manager", side_effect=OSError("mount unavailable")):
-            self.assertTrue(handler._handle_public_get("/api/readiness"))
+            self.assertTrue(server.PUBLIC_GET_ROUTES.handle(handler, "/api/readiness"))
         status, payload = handler.send_json.call_args.args
         self.assertEqual(status, 503)
         self.assertEqual(payload["status"], "not_ready")

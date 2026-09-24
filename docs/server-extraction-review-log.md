@@ -7180,3 +7180,95 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Verzweigungen sowie Auth-, Query- und Keep-Alive-Grenzen ausführen.
 - Restrisiko: Die übrigen Handler-Routen, Body-/SSE-Transport und der
   komplette P11-Architektur-/Testpatch-Audit sind noch offen.
+
+## P10 öffentliche GET-Routen — isolierter Quellstand
+
+- `/api/health`, `/api/readiness`, `/api/auth/status` und `/api/bootstrap`
+  liegen in `backend/http_api/public_get.py` unter einem zustandslosen
+  `PublicGetRoutes`. `server.py` verdrahtet explizit
+  `runtime_maintenance.MAINTENANCE_GATE`, `readiness_service`,
+  `session_auth_service` und `public_bootstrap_service`.
+- Maintenance-Gate, Readiness-, Session-Auth- und Bootstrap-Service bleiben
+  die Zustandseigentümer. Unbekannte Pfade lösen keine Factory oder Gate-Abfrage
+  aus; Auth wird für jeden Request neu aufgelöst. `/api/auth/status` nutzt
+  ausschließlich `authenticated_session`; Bootstrap authentifiziert vor dem
+  Read. Status, JSON, Fehlerpropagation und bestehende Servicegrenzen bleiben
+  erhalten.
+- Vor der Änderung wurden `_handle_public_get`, alle vier Pfade, Route-Dispatch,
+  Service-Factorys und Test-Patchstellen gesucht. Die zwei bestehenden
+  Readiness-Handler-Vertragstests bleiben erhalten und rufen nun
+  `server.PUBLIC_GET_ROUTES.handle(handler, "/api/readiness")` auf. Ihre
+  Assertions zu dynamischem DatabaseManager auf Folgeanfragen sowie 503 und
+  redigiertem JSON bei Kompositionsfehlern sind unverändert.
+- **Review-Fix:** Die erste Sol-Vorabprüfung meldete **FAIL**, weil dieser
+  Zwischenstand beide bestehenden Readiness-Handler-Vertragstests entfernt
+  hatte; die neuen Fake-Route-Tests deckten ihre Risiken nicht gleichwertig ab.
+  Beide Testfälle wurden wiederhergestellt und auf den neuen Call-Site-Lookup
+  migriert, ohne Assertions zu entfernen oder abzuschwächen. Beide Tests liefen
+  danach gezielt erfolgreich.
+- Sieben direkte Fake-Handler-/Service-Tests prüfen alle vier Routen,
+  Readiness true/false, Authstatus false/true, Bootstrap-Auth-Reihenfolge und
+  Fehlerpropagation, dynamische Auth-Auflösung bei Keep-Alive sowie unbekannte
+  Pfade ohne Abhängigkeitsaufrufe. Ein zusätzlicher Architekturtest prüft
+  Route-Dispatch, konkrete Composition-Factories und die Entfernung des alten
+  Handler-Dispatchers.
+- **PASS:** Frisch gebautes SQLCipher-Image
+  `ai-coach:p10-public-get-routes-source-20260924`, read-only mit ausschließlich
+  read-only Test-/Dokumentations-/Workflow-/Fixture-/Playwright-Mounts und
+  flüchtigen `/tmp`-/`/data`-tmpfs: vollständige Python-Suite mit 2.622 Tests,
+  11 Skips. Die ersten zwei Containeraufrufe zeigten fehlende Test-Source-
+  Mounts im Image; nach Ergänzung des fehlenden `/app/playwright.config.cjs`
+  bestand der vollständige Lauf. Es wurden keine Testdateien geändert, um
+  Mountfehler zu umgehen.
+- Ruff für `public_get.py`, die direkten Routentests und den Architekturtest,
+  Compileall, Inventar-`--check` und `git diff --check` bestanden.
+  Die Readiness-Vertragstests liefen zusätzlich gezielt unter der lokalen
+  Python-Umgebung erfolgreich.
+- Kein Rebase, Push, Pull Request oder Merge.
+
+## P10 öffentliche GET-Routen — Sol-Integrationsreview
+
+- Vorgänger-PR #781 wurde am 24.09.2026 um 05:40:26 UTC mit
+  `08c81c11f868b8b287e93e6caa09b875ea31bff6` gemergt; der Commit
+  ist Vorfahr von `origin/develop`. Auch der nachlaufende Browser-Check
+  endete erfolgreich. Keine offenen Review-Threads oder Sonar-Issues.
+- Quellcommit `22b2e478` wurde als `d728619c70fa619713fe9bd9deb1d7bf5a72aaa9`
+  auf den bestätigten `develop`-Stand übernommen. Tatsächlicher Quell-
+  und Integrations-Diff, alle vier Handler-Pfade, die Factory-Lookups,
+  bestehenden Readiness-Verträge und die neuen Tests wurden geprüft.
+- **FAIL → Korrektur → PASS**: Im ersten Worker-Diff fehlten zwei alte
+  Readiness-Handler-Tests. Nach konkretem Korrekturauftrag wurden beide
+  mit sämtlichen Assertions auf `PUBLIC_GET_ROUTES.handle` migriert;
+  dynamische DB-Manager-Bindung, redigierter 503-Fehler und JSON-Vertrag
+  sind weiterhin getestet. Der korrigierte Diff enthält keine
+  Testabschächung.
+- Route und Zusammensetzung sind zustandslos. Maintenance-, Readiness-,
+  Session- und Bootstrap-Eigentümer bleiben unverändert; unbekannte
+  Pfade lösen nichts auf, Authstatus bleibt optional, Bootstrap verlangt
+  Auth vor dem Read. Kein Backend-Rückimport oder Fachlogik-Callback.
+- Integrierte Abnahme: sieben direkte Routen- und zehn Architekturtests
+  **PASS**; beide migrierten Readiness-Verträge **PASS**; frisch gebautes
+  Read-only-SQLCipher-Image mit vollständiger Suite 2.622 Tests/11 Skips
+  **PASS**; Ruff für neue Route/Tests, Compileall, Inventar-`--check`
+  und `git diff --check` **PASS**. Die sieben direkten Tests plus die
+  erhaltenen Fehlerverträge decken die vier Routen angemessen ab.
+- Restrisiko: Die übrigen Handler-, SSE- und P11-Audit-Arbeiten bleiben
+  offen; `server.py` hat auf diesem Stand 3.438 physische Zeilen.
+
+## P10 öffentliche GET-Routen — CI-Nachreview
+
+- PR #782 meldete bei SonarCloud zunächst **FAIL**, ausschließlich wegen
+  `new_duplicated_lines_density=8.4%` (Grenze 3%): 22 neue Duplikatzeilen
+  lagen im Architekturtest zwischen Coach- und Public-GET-Routenprüfungen.
+  Die Sonar-Issuesuche selbst ergab null offene Issues.
+- Die gemeinsame AST-Prüfung für Handler-Methode und genau einen
+  `do_GET`-Delegationsaufruf wurde in einen Testhelfer extrahiert. Beide
+  bisherigen Tests prüfen dieselben entfernten Methoden und Routenamen
+  weiter; der Public-Test prüft zusätzlich weiterhin alle vier konkret
+  verdrahteten Factories. Kein Produktionscode wurde geändert.
+- Aktualisierter Integrationsstand: zehn Architektur- und sieben direkte
+  Routentests **PASS**; vollständige Read-only-SQLCipher-Suite erneut
+  2.622 Tests/11 Skips **PASS**; Ruff, Compileall, Inventar-`--check`
+  und Diff-Check **PASS**. Root-Review des geänderten Testumfangs erneut
+  **PASS**. Das externe Sonar-Gate muss auf dem neuen Commit neu laufen;
+  bis zu dessen Erfolg bleibt der PR unfreigegeben.

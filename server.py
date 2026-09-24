@@ -130,6 +130,7 @@ from backend.http_api.bootstrap_state import (
     PublicBootstrapService,
 )
 from backend.http_api.coach_get import CoachGetRoutes
+from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.auth import SessionAuthService
@@ -2779,6 +2780,12 @@ COACH_GET_ROUTES = CoachGetRoutes(
     coach_command_receipt_service,
     coach_job_submission_service,
 )
+PUBLIC_GET_ROUTES = PublicGetRoutes(
+    runtime_maintenance.MAINTENANCE_GATE,
+    readiness_service,
+    session_auth_service,
+    public_bootstrap_service,
+)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -2823,23 +2830,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "context": context,
             },
         )
-
-    def _handle_public_get(self, path: str) -> bool:
-        if path == "/api/health":
-            self.send_json(200, {"status": "ok", "maintenance": runtime_maintenance.MAINTENANCE_GATE.state()})
-        elif path == "/api/readiness":
-            readiness = readiness_service().state()
-            self.send_json(200 if readiness["ready"] else 503, readiness)
-        elif path == "/api/auth/status":
-            session = self.auth_service.authenticated_session(self)
-            result = {"authenticated": bool(session), "maintenance": runtime_maintenance.MAINTENANCE_GATE.state()}
-            self.send_json(200, result)
-        elif path == "/api/bootstrap":
-            self.auth_service.require_auth(self)
-            self.send_json(200, public_bootstrap_service().read())
-        else:
-            return False
-        return True
 
     def _handle_sync_get(self, path: str) -> bool:
         if path == "/api/state/events":
@@ -2940,7 +2930,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             path = urlparse(self.path).path
             handled = (
-                self._handle_public_get(path)
+                PUBLIC_GET_ROUTES.handle(self, path)
                 or self._handle_sync_get(path)
                 or COACH_GET_ROUTES.handle(self, path)
                 or self._handle_training_get(path)

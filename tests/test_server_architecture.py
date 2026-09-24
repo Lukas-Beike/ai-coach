@@ -58,6 +58,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
+    ("backend.http_api.public_get", ("PublicGetRoutes",)),
     ("backend.http_api.export_streams", ("ExportStreamTransport",)),
     ("backend.coach.conversation", ("CoachConversationResetService",)),
     ("backend.coach.prompt", ("COACH_PROMPT",)),
@@ -2251,7 +2252,7 @@ class ServerArchitectureTests(unittest.TestCase):
             {"send_state_event_batch", "handle_state_events"}.isdisjoint(methods)
         )
 
-    def test_coach_get_routes_are_owned_by_http_api_module(self) -> None:
+    def _assert_get_route_owned(self, old_method: str, route_name: str) -> ast.Module:
         server_tree = _parse(SERVER_PATH)
         request_handler = next(
             node
@@ -2274,12 +2275,42 @@ class ServerArchitectureTests(unittest.TestCase):
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "COACH_GET_ROUTES"
+            and node.func.value.id == route_name
             and node.func.attr == "handle"
         ]
 
-        self.assertNotIn("_handle_coach_get", methods)
+        self.assertNotIn(old_method, methods)
         self.assertEqual(len(route_dispatches), 1)
+        return server_tree
+
+    def test_coach_get_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_get_route_owned("_handle_coach_get", "COACH_GET_ROUTES")
+
+    def test_public_get_routes_are_owned_by_http_api_module(self) -> None:
+        server_tree = self._assert_get_route_owned("_handle_public_get", "PUBLIC_GET_ROUTES")
+        route_assignment = next(
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "PUBLIC_GET_ROUTES"
+                for target in node.targets
+            )
+        )
+        factory_names = [
+            argument.id if isinstance(argument, ast.Name) else ast.unparse(argument)
+            for argument in route_assignment.value.args
+        ]
+
+        self.assertEqual(
+            factory_names,
+            [
+                "runtime_maintenance.MAINTENANCE_GATE",
+                "readiness_service",
+                "session_auth_service",
+                "public_bootstrap_service",
+            ],
+        )
 
     def test_intervals_client_does_not_retain_snapshot_use_cases(self) -> None:
         intervals_client = next(

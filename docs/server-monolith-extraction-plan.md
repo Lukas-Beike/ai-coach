@@ -819,6 +819,10 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     `/api/chat/status` einem zustandslosen `CoachGetRoutes` zuordnen;
     Auth-, History-, Receipt- und Jobstatus-Services werden über ihre
     konkreten Composition-Factories eingebunden.
+  - [x] Die GET-Routen `/api/health`, `/api/readiness`, `/api/auth/status`
+    und `/api/bootstrap` einem zustandslosen `PublicGetRoutes` zuordnen;
+    Maintenance-Gate, Readiness-, Session-Auth- und Bootstrap-Services
+    bleiben konkrete Composition-Abhängigkeiten und Zustandseigentümer.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 
