@@ -114,7 +114,7 @@ class FixtureHandler(server.RequestHandler):
         if self.path == "/api/fixture/plan":
             try:
                 self.auth_service.require_auth(self)
-                with server.DB_LOCK, server.database() as db:
+                with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                     current = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact.get("artifact_id"),)).fetchone()
                 if not current or current["status"] != "draft":
                     stage_fixture_artifact()
