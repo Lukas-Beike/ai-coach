@@ -21,8 +21,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from contextlib import nullcontext, contextmanager
-from dataclasses import dataclass
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from http.server import BaseHTTPRequestHandler
@@ -279,17 +278,15 @@ from backend.coach.proposals import (
     CoachProposalConfirmationService,
     CoachProposalExecutionService,
     CoachProposalReadService,
-    coach_action_hash,
     coach_action_view,
 )
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.turn_opening import CoachTurnOpeningService
-from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools
+from backend.coach.dialogue import CoachDialogueReadService, dialogue_tools
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.coach.clarification import CoachClarificationService
 from backend.coach.turn_outcome import CoachStructuredOutcomeService
-from backend.coach.tool_call_metadata import structured_tool_call_metadata
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
 from backend.coach.tool_failures import CoachStructuredToolFailureService
@@ -299,6 +296,11 @@ from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.coach.final_receipt import CoachFinalReceiptService
 from backend.coach.response_transport import CoachResponseTransport, raise_if_chat_cancelled
 from backend.coach.structured_response import CoachStructuredResponseService
+from backend.coach.structured_tool_round import (
+    CoachStructuredToolRoundLimits,
+    CoachStructuredToolRoundService,
+    StructuredCoachRoundState,
+)
 from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
@@ -312,7 +314,6 @@ from backend.coach.morning import ManualMorningCheckinService, MorningCheckinSta
 from backend.coach.tools import build_tool_contracts
 from backend.coach.service import command_receipt
 from backend.coach.authorization import (
-    coach_execution_scope,
     require_coach_scope,
 )
 from backend.http_api.responses import (
@@ -2413,132 +2414,22 @@ def coach_structured_response_service() -> CoachStructuredResponseService:
     )
 
 
-@dataclass
-class _StructuredCoachRoundState:
-    tools: list[dict[str, Any]]
-    command_receipts: list[dict[str, Any]]
-    sync_job_ids: list[str]
-    context: dict[str, Any]
-    allow_mutations: bool
-    conversation_id: str
-    client_turn_id: str
-    session_csrf_hash: str
-    cancel_event: threading.Event | None
-    ai_provider: str
-    request_payload: dict[str, Any]
-    model_instructions: str
-    message: str
-    attachments: list[dict[str, Any]]
-    background_owned: bool
-    on_text_delta: Any
-    recovery_state: dict[str, bool]
-
-
-def _execute_structured_coach_tool_call(
-    item: dict[str, Any], *, state: _StructuredCoachRoundState, question: str, cancelled: bool,
-) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
-    name = str(item.get("name") or "")
-    call_id = str(item.get("call_id") or "")
-    action = {"operation": name, "authorization_scope": []}
-    effect_key = coach_action_hash({"tool": name, "arguments": item.get("arguments")})
-    step_key = name
-    repair_key = scope_repair_key = request_binding_key = plan_effect_key = None
-    model_instructions = state.model_instructions
-    try:
-        metadata = structured_tool_call_metadata(item, state.tools, state.command_receipts)
-        name, call_id = metadata["name"], metadata["call_id"]
-        action = metadata["action"]
-        effect_key, step_key = metadata["effect_key"], metadata["step_key"]
-        repair_key = metadata["repair_key"]
-        scope_repair_key = metadata["scope_repair_key"]
-        request_binding_key = metadata["request_binding_key"]
-        plan_effect_key = metadata["plan_effect_key"]
-        cached = coach_structured_tool_replay_service().lookup(metadata, state.command_receipts)
-        if cached:
-            result = cached["result"]
-        else:
-            action = coach_structured_tool_preparation_service().prepare(
-                metadata, state.command_receipts, question=question, cancelled=cancelled,
-                context=state.context, allow_mutations=state.allow_mutations,
-            )
-            local_transaction = name not in {"start_provider_refresh", "apply_adaptive_replan"}
-            with (DB_LOCK if local_transaction else nullcontext()), (database() if local_transaction else nullcontext()):
-                result = coach_structured_tool_execution_service().execute(
-                    metadata, action=action, context=state.context, conversation_id=state.conversation_id,
-                    client_turn_id=state.client_turn_id, session_csrf_hash=state.session_csrf_hash,
-                    sync_job_ids=state.sync_job_ids, cancel_event=state.cancel_event,
-                )
-                state.command_receipts.append({
-                    "call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key,
-                    "repair_key": repair_key, "scope_repair_key": scope_repair_key,
-                    "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key,
-                    "request": action.get("request"), "result": result,
-                })
-                coach_job_store().merge_receipt(state.client_turn_id, {"command_receipts": state.command_receipts, "sync_job_ids": state.sync_job_ids})
-        if result.get("synchronous_refresh") or (name == "get_sync_job" and result.get("ok")):
-            model_instructions = coach_training_context_service().build() + "\n\n" + COACH_DIALOGUE_INSTRUCTIONS
-        if action.get("period"):
-            scope = coach_execution_scope(action, background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS)
-            state.request_payload["max_output_tokens"] = COACH_LONG_PLAN_MAX_OUTPUT_TOKENS if scope["planning"] else COACH_DEFAULT_MAX_OUTPUT_TOKENS
-            coach_job_store().merge_receipt(state.client_turn_id, {"plan_scope": scope})
-    except (AppError, ValueError, TypeError, KeyError) as exc:
-        result = coach_structured_tool_failure_service().project(
-            exc, name=name, call_id=call_id, effect_key=effect_key, step_key=step_key,
-            repair_key=repair_key, scope_repair_key=scope_repair_key,
-            request_binding_key=request_binding_key, plan_effect_key=plan_effect_key,
-            action=action, command_receipts=state.command_receipts,
-        )
-    state.model_instructions = model_instructions
-    return name, call_id, result, action
-
-
-def _structured_coach_followup_response(
-    response: dict[str, Any], *, outputs: list[dict[str, Any]], state: _StructuredCoachRoundState,
-    question: str, cancelled: bool, rounds: int,
-) -> dict[str, Any]:
-    followup = {**state.request_payload, "instructions": state.model_instructions, "input": outputs,
-                "tool_choice": "none" if question or cancelled or rounds >= COACH_TOOL_MAX_ROUNDS else "auto"}
-    if state.ai_provider == "openai" and response.get("id") and not followup.get("conversation"):
-        followup["previous_response_id"] = response["id"]
-    return coach_structured_response_service().respond(
-        followup, request_payload=state.request_payload, context=state.context, message=state.message,
-        command_receipts=state.command_receipts, attachments=state.attachments, client_turn_id=state.client_turn_id,
-        ai_provider=state.ai_provider, background_owned=state.background_owned, on_text_delta=state.on_text_delta,
-        cancel_event=state.cancel_event, recovery_state=state.recovery_state,
+def coach_structured_tool_round_service() -> CoachStructuredToolRoundService:
+    """Compose the concrete owners of tool transactions and provider follow-up."""
+    return CoachStructuredToolRoundService(
+        database_manager, DB_LOCK,
+        coach_structured_tool_replay_service(), coach_structured_tool_preparation_service(),
+        coach_structured_tool_execution_service(), coach_structured_tool_failure_service(),
+        coach_structured_tool_round_journal(), coach_job_store(), coach_training_context_service(),
+        coach_structured_response_service(), CoachStructuredToolRoundLimits(
+            max_rounds=COACH_TOOL_MAX_ROUNDS,
+            background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS,
+            default_max_output_tokens=COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+            long_plan_max_output_tokens=COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
+        ),
     )
 
 
-def _run_structured_coach_tool_rounds(
-    response: dict[str, Any], *, rounds: int, question: str, cancelled: bool,
-    state: _StructuredCoachRoundState,
-) -> tuple[dict[str, Any], int, str, bool, str]:
-    journal = coach_structured_tool_round_journal()
-    while rounds < COACH_TOOL_MAX_ROUNDS:
-        calls = journal.function_calls(response)
-        if not calls:
-            break
-        pending = journal.start_round(state.client_turn_id, calls)
-        outputs = []
-        for item in calls:
-            raise_if_chat_cancelled(state.cancel_event)
-            name, call_id, result, _ = _execute_structured_coach_tool_call(
-                item, state=state, question=question, cancelled=cancelled,
-            )
-            question, cancelled, pending = journal.record_output(
-                client_turn_id=state.client_turn_id, name=name, call_id=call_id,
-                result=result, outputs=outputs, pending=pending,
-                command_receipts=state.command_receipts,
-                question=question, cancelled=cancelled,
-            )
-        rounds += 1
-        journal.finish_round(state.client_turn_id, rounds)
-        response = _structured_coach_followup_response(
-            response, outputs=outputs, state=state, question=question, cancelled=cancelled, rounds=rounds,
-        )
-        journal.clear_outputs(state.client_turn_id)
-        if question or cancelled:
-            break
-    return response, rounds, question, cancelled, state.model_instructions
 
 
 def _structured_coach_turn_request(
@@ -2642,7 +2533,7 @@ def _chat_with_structured_coach_impl(
     background_owned = state["background_owned"]
     recovery_state = state["recovery_state"]
     response = state["response"]
-    round_state = _StructuredCoachRoundState(
+    round_state = StructuredCoachRoundState(
         tools=tools, command_receipts=command_receipts, sync_job_ids=sync_job_ids,
         context=context, allow_mutations=allow_mutations, conversation_id=conversation_id,
         client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash,
@@ -2650,7 +2541,7 @@ def _chat_with_structured_coach_impl(
         model_instructions=model_instructions, message=message, attachments=attachments,
         background_owned=background_owned, on_text_delta=on_text_delta, recovery_state=recovery_state,
     )
-    response, rounds, question, cancelled, model_instructions = _run_structured_coach_tool_rounds(
+    response, rounds, question, cancelled, model_instructions = coach_structured_tool_round_service().run(
         response,
         rounds=int(receipt.get("tool_rounds") or 0),
         question="",
