@@ -2220,6 +2220,24 @@ class ServerArchitectureTests(unittest.TestCase):
             self.assertIn("TRAINING_PLAN_SCOPE_PREFIX", source)
             self.assertNotIn("training_plan_scope_prefix", source)
 
+    def test_coach_tool_round_limit_is_owned_by_its_execution_service(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        self.assertFalse(
+            any(
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name)
+                    and target.id == "COACH_TOOL_MAX_ROUNDS"
+                    for target in node.targets
+                )
+                for node in server_tree.body
+            )
+        )
+        round_service = (
+            BACKEND_ROOT / "coach" / "structured_tool_round.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("COACH_TOOL_MAX_ROUNDS = 12", round_service)
+
     def test_backend_does_not_import_or_reach_server_namespace(self) -> None:
         self.assertTrue(BACKEND_ROOT.is_dir(), "Backend source must be available")
         violations: list[str] = []

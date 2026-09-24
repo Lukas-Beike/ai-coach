@@ -305,6 +305,7 @@ from backend.coach.final_receipt import CoachFinalReceiptService
 from backend.coach.response_transport import CoachResponseTransport
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.structured_tool_round import (
+    COACH_TOOL_MAX_ROUNDS,
     CoachStructuredToolRoundLimits,
     CoachStructuredToolRoundService,
 )
@@ -2088,7 +2089,6 @@ def coach_response_transport() -> CoachResponseTransport:
     )
 
 
-COACH_TOOL_MAX_ROUNDS = 12
 COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, COACH_DIALOGUE_TOOLS = build_tool_contracts(
     default_profile=DEFAULT_PROFILE,
     checkin_text_limits=CHECKIN_TEXT_LIMITS,
