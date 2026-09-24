@@ -313,6 +313,7 @@ from backend.coach.job_submission import CoachJobSubmissionService
 from backend.coach.morning import ManualMorningCheckinService, MorningCheckinStateService
 from backend.coach.morning_completion import MorningCoachJobCompletionService
 from backend.coach.background_job import CoachBackgroundJobRunner
+from backend.coach.job_worker import COACH_JOB_WORKER
 from backend.coach.tools import build_tool_contracts
 from backend.coach.service import command_receipt
 from backend.coach.authorization import (
@@ -394,10 +395,6 @@ COACH_TRAINING_CHANGE_LIMIT = 366
 INTERVALS_SYNC_WAIT_SECONDS = 120
 DB_LOCK = threading.RLock()
 COACH_CONVERSATION_GATE = CoachConversationGate()
-COACH_JOB_WORKER_LOCK = threading.Lock()
-COACH_JOB_WAKE = threading.Event()
-COACH_JOB_STOP = threading.Event()
-COACH_JOB_WORKER: threading.Thread | None = None
 SYNC_JOB_WORKER: SyncJobWorker | None = None
 RATE_LIMITER = RateLimiter()
 SYNC_JOB_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)$")
@@ -2021,7 +2018,7 @@ def coach_message_service() -> CoachMessageService:
 def coach_job_store() -> CoachJobStore:
     """Compose durable Coach background-job persistence."""
     return CoachJobStore(
-        database_manager, DB_LOCK, COACH_JOB_WAKE,
+        database_manager, DB_LOCK, COACH_JOB_WORKER.wake_event,
         runtime_maintenance.MAINTENANCE_GATE, utc_now,
     )
 
@@ -2048,7 +2045,7 @@ def coach_job_submission_service() -> CoachJobSubmissionService:
     return CoachJobSubmissionService(
         database_manager, CHAT_REPOSITORY, DB_LOCK, SETTINGS,
         runtime_events.STATE_EVENT_BUFFER, coach_streams.CHAT_STREAM_REGISTRY,
-        COACH_JOB_WAKE, utc_now, background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS,
+        COACH_JOB_WORKER.wake_event, utc_now, background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS,
         max_attachment_storage_bytes=MAX_ATTACHMENT_STORAGE_BYTES,
         max_gemini_inline_image_bytes=MAX_GEMINI_INLINE_IMAGE_BYTES,
     )
@@ -2496,36 +2493,6 @@ def coach_background_job_runner() -> CoachBackgroundJobRunner:
     )
 
 
-def _run_background_coach_job(job: dict[str, Any]) -> None:
-    coach_background_job_runner().run(job)
-
-
-def _coach_job_worker_loop() -> None:
-    while not COACH_JOB_STOP.is_set():
-        try:
-            with runtime_maintenance.MAINTENANCE_GATE.operation():
-                job = coach_job_store().claim()
-                if job:
-                    _run_background_coach_job(job)
-                    continue
-        except AppError as exc:
-            if exc.reason != "maintenance":
-                raise
-        COACH_JOB_WAKE.wait(5)
-        COACH_JOB_WAKE.clear()
-
-
-def start_coach_job_worker() -> None:
-    """Start the single durable Coach worker after database initialization."""
-    global COACH_JOB_WORKER
-    with COACH_JOB_WORKER_LOCK:
-        if COACH_JOB_WORKER is not None and COACH_JOB_WORKER.is_alive():
-            return
-        COACH_JOB_STOP.clear()
-        COACH_JOB_WORKER = threading.Thread(target=_coach_job_worker_loop, name="coach-job-worker", daemon=True)
-        COACH_JOB_WORKER.start()
-
-
 def local_now() -> datetime:
     configured_timezone = timezone_name(profile_service().get().get("timezone"))
     try:
@@ -2800,7 +2767,7 @@ def database_restore_service() -> DatabaseRestoreService:
         coach_job_store(),
         coach_turn_failure_service(),
         shared_sync_job_wake_event(),
-        COACH_JOB_WAKE,
+        COACH_JOB_WORKER.wake_event,
         DatabaseRestoreConfig(DATA_DIR, DB_PATH),
         REDACTOR.redact_text,
     )
@@ -3485,7 +3452,7 @@ def main() -> None:
     server = http_server.CoachHTTPServer(("0.0.0.0", CONFIG.port), request_handler_class())
     server.allow_reuse_address = True
     sync_job_worker().start()
-    start_coach_job_worker()
+    COACH_JOB_WORKER.start(coach_job_store, coach_background_job_runner, runtime_maintenance.MAINTENANCE_GATE)
     startup_sync_scheduler().schedule()
     threading.Thread(target=daily_sync_loop_service().run, daemon=True).start()
     LOGGER.info(f"{APP_NAME} listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})

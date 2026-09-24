@@ -7037,3 +7037,38 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   erneut geprüft: **PASS**; 20 direkte/Architekturtests, Ruff,
   Diff-Check und frisches Read-only-Docker-Image mit 2.600 Tests/
   11 Skips **PASS**. Externe Gates folgen erneut.
+- PR #778 wurde nach erneutem Codex-Review und grünen CI-/Sonar-Gates
+  gemergt (`mergedAt` 2026-09-24T05:07:32Z, Merge-Commit
+  `208565fac1bd4547deca590a89b3097026a06c83`). Review-Threads:
+  null; Merge-Commit auf `origin/develop` erreichbar: **PASS**.
+
+## P8 Coach-Worker-Lifecycle — isolierter Quellstand
+
+- Root verlagerte die processweite Thread-/Wake-/Stop-/Lock-
+  Eigentümerschaft und die Maintenance-Claim-Pollschleife nach
+  `CoachJobWorker`. `server.py` importiert nur die konkrete Backend-
+  Instanz, verdrahtet ihre Wake-Event-Referenz für Store, Enqueue und
+  Restore und startet sie erst nach Schema und Job-Recovery. Der
+  temporäre `_run_background_coach_job`-Adapter, Server-Worker-Globals
+  und beide Server-Lifecycle-Funktionen sind entfernt. Runner und
+  Job-Store tragen weiterhin die fachliche Ausführung und durable Daten.
+- Direkte Tests prüfen idempotenten Daemon-Start, äußere Maintenance-
+  Operation um Claim und Ausführung, Wartungsablehnung ohne Claim,
+  Stop-Wakeup sowie Propagation unerwarteter Claim-Fehler. Startup-
+  Reihenfolge und acht Worker-Testaufrufer wurden auf konkrete Backend-
+  Eigentümer migriert. 13 fokussierte und 108 betroffene Regressionen
+  (2 Skips), Ruff, Compileall, Inventar-/Diff-Check und frisches
+  Read-only-Docker-Image mit 2.604 Tests/11 Skips **PASS**. Root prüfte
+  den tatsächlichen Quell-Diff einschließlich Queue-/Stop-Eigentum,
+  unveränderter fünfsekündiger Poll-/Wake-Semantik, Startreihenfolge,
+  Restore-Gate und Test-Patchzielen: **PASS**. Integration auf dem
+  bestätigten #778-Merge und externe PR-Gates stehen noch aus.
+- Quellcommit `092ff440` wurde nach dem bestätigten #778-Merge
+  `208565fa` als `4259d303` integriert; der Dokumentkonflikt bewahrte
+  sowohl den #778-Sonar-Fix als auch den Lifecycle-Befund. Root prüfte
+  den tatsächlichen Integrationsdiff, Wake-Referenzen aller drei
+  Verbraucher, Startup-/Restart-Reihenfolge und Patch-Ziele erneut:
+  **PASS**. 26 fokussierte Tests, Ruff, Compileall, Inventar-/Diff-
+  Check und frisch gebautes Read-only-Docker-Image mit 2.604 Tests/
+  11 Skips **PASS**. Externe PR-Gates und die reine Test-Adapter-
+  Bereinigung `server.chat_with_coach` bleiben offen.
