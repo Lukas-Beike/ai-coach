@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 
 $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $testsDirectory = Join-Path $repositoryRoot "tests"
+$docsDirectory = Join-Path $repositoryRoot "docs"
 $publicDirectory = Join-Path $repositoryRoot "public"
 $serverFile = Join-Path $repositoryRoot "server.py"
 $e2eDirectory = Join-Path $repositoryRoot "e2e"
@@ -24,16 +25,20 @@ Write-Host "Running the container unit-test suite with a read-only source mount.
 # never enter the test container.
 & docker run --rm `
     --read-only `
+    --network none `
     --security-opt no-new-privileges:true `
     --cap-drop=ALL `
     --pids-limit=256 `
     --memory=512m `
     --cpus=1 `
     --tmpfs /tmp `
+    --tmpfs /data `
     --volume "${testsDirectory}:/review/tests:ro" `
+    --volume "${docsDirectory}:/review/docs:ro" `
     --volume "${publicDirectory}:/review/public:ro" `
     --volume "${serverFile}:/review/server.py:ro" `
     --volume "${playwrightConfig}:/review/playwright.config.cjs:ro" `
+    --volume "${playwrightConfig}:/app/playwright.config.cjs:ro" `
     --volume "${e2eDirectory}:/app/e2e:ro" `
     --volume "${e2eDirectory}:/review/e2e:ro" `
     --volume "${githubDirectory}:/review/.github:ro" `
