@@ -61,6 +61,11 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.http_api.chat_post", ("ChatPostRoutes",)),
     ("backend.http_api.chat_stream", ("CoachChatStreamTransport",)),
     ("backend.http_api.transcribe_post", ("TranscribePostRoutes",)),
+    ("backend.http_api.planning_commands_post", ("PlanningCommandsPostRoutes",)),
+    ("backend.http_api.feedback_post", ("FeedbackPostRoutes",)),
+    ("backend.http_api.chat_cancel_post", ("ChatCancelPostRoutes",)),
+    ("backend.http_api.privacy_restore_post", ("PrivacyRestorePostRoutes",)),
+    ("backend.http_api.auth_post", ("AuthPostRoutes",)),
     ("backend.http_api.public_get", ("PublicGetRoutes",)),
     ("backend.http_api.planning_get", ("PlanningGetRoutes",)),
     ("backend.http_api.sync_get", ("SyncGetRoutes", "SYNC_JOB_RE")),
@@ -68,6 +73,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.http_api.export_streams", ("ExportStreamTransport",)),
     ("backend.coach.conversation", ("CoachConversationResetService",)),
     ("backend.coach.prompt", ("COACH_PROMPT",)),
+    ("backend.providers.intervals_client", ("IntervalsClient",)),
     ("backend.http_api.readiness", ("ReadinessService",)),
     (
         "backend.http_api.public_performance",
@@ -2580,6 +2586,66 @@ class ServerArchitectureTests(unittest.TestCase):
             },
         )
 
+    def test_planning_commands_post_route_is_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_coach_post",
+            "PLANNING_COMMANDS_POST_ROUTES",
+            ("/api/planning/commands",),
+            "PlanningCommandsPostRoutes(coach_planning_command_service, lambda: coach_conversation_provision_service())",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "planning_commands_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_feedback_post_route_is_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_coach_post",
+            "FEEDBACK_POST_ROUTES",
+            ("/api/feedback",),
+            "FeedbackPostRoutes(checkin_service)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "feedback_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_chat_cancel_post_route_is_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "do_POST",
+            "CHAT_CANCEL_POST_ROUTES",
+            ("/api/chat/cancel",),
+            "ChatCancelPostRoutes(coach_cancellation_service)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "chat_cancel_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_privacy_restore_post_route_is_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "do_POST",
+            "PRIVACY_RESTORE_POST_ROUTES",
+            ("/api/privacy/restore",),
+            "PrivacyRestorePostRoutes(session_auth_service, database_restore_service, MAX_BACKUP_BYTES)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "privacy_restore_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_auth_post_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "do_POST",
+            "AUTH_POST_ROUTES",
+            ("/api/login", "/api/logout"),
+            "AuthPostRoutes(session_auth_service, runtime_maintenance.MAINTENANCE_GATE)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "auth_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
     def test_diagnostics_capture_post_route_is_owned_by_http_api_module(self) -> None:
         self._assert_write_route_owned(
             "_handle_data_post",
@@ -2663,7 +2729,7 @@ class ServerArchitectureTests(unittest.TestCase):
     def test_intervals_client_does_not_retain_snapshot_use_cases(self) -> None:
         intervals_client = next(
             node
-            for node in _parse(SERVER_PATH).body
+            for node in _parse(BACKEND_ROOT / "providers" / "intervals_client.py").body
             if isinstance(node, ast.ClassDef) and node.name == "IntervalsClient"
         )
         methods = {

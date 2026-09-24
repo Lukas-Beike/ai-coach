@@ -7788,4 +7788,46 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   - Inventar: `python scripts/server_extraction_inventory.py --check` PASS (P0 = 0).
   - Code-Qualität: `ruff check` auf neuen Modulen PASS (0 Fehler), `mypy` PASS (0 Fehler).
 - `server.py`: 3.294 physische Zeilen (Reduktion um 9 Zeilen); 216 von 233 markierten Planpunkten (92,7 %), 17 offen.
-- Nächster Schritt: PR öffnen, CI-Gates prüfen, MCP link_pull_request registrieren, danach P7/P8-Restaudit und verbleibende P10/P11-Schritte.
+- Pull Request & Integration: PR #801 auf `develop` gemergt als `c8ed971fdc15f571666efeabd529934a81e43d22`.
+  - Codex Code & Security Review: PASS (ohne Befunde).
+  - SonarCloud Quality Gate: PASS (0 neue/akzeptierte Issues, 0 Hotspots).
+  - CI-Test-Shards & Browser Smoke / Accessibility Checks: PASS.
+  - MCP `link_pull_request` registriert.
+- Nächster Schritt: P7/P8-Restaudit, verbleibende P10-HTTP-Endpunkte (`/api/planning/commands`, `/api/feedback`, Session/Auth-Wiring) und P11-Composition-Root angehen.
+
+## P10 übrige POST-Routen und Intervals-Client — lokaler Prüfstand
+
+- Basis: integrierter `develop`-Stand nach PR #801 (`c8ed971`).
+- `PlanningCommandsPostRoutes`, `FeedbackPostRoutes`,
+  `ChatCancelPostRoutes`, `PrivacyRestorePostRoutes` und `AuthPostRoutes`
+  besitzen jetzt die jeweiligen POST-Dispatches. Der Handler behält die
+  äußere Auth-/CSRF-/Maintenance-/Fehlergrenze; Restore authentifiziert vor
+  dem Backup-Service. Die Coach-Dienste behalten Idempotenz, Persistenz und
+  Cancellation.
+- `IntervalsClient` ist aus `server.py` in `backend/providers/intervals_client.py`
+  verschoben. Der Provider verlangt Konfiguration und Request-Funktion explizit;
+  der Composition Root baut den Client aus den aktiven HTTP-/Zeitzonen-Diensten.
+- Direkte Routen-/Provider-/Planungstests und Architekturtests: **51 PASS**.
+  Die vollständige native Suite: **2.748 Tests PASS, 12 SQLCipher-Skips**.
+  `py_compile`, Inventar-`--check`, `git diff --check` und Docker-Build
+  (`ai-coach:local`, Python 3.14/SQLCipher) PASS.
+- Quellreview: **PASS**. Keine Provider- oder DB-Aufrufe beim Import;
+  Route-Dispatch erhält Body-Limits und Cookie-/CSRF-Verträge. Der erste
+  volle lokale Testlauf hatte zwei Fehler durch eager gebundene Callback-Abhängigkeiten;
+  nach Behebung war die native Suite grün.
+- CI-Nachprüfung nach PR-Erstellung: Der `/api/planning/commands`-Browserfall
+  reproduzierte eine beim Import erfasste Conversation-Factory. Die Composition
+  löst sie dynamisch; der betroffene mobile-small SQLCipher-E2E-Test PASS.
+  Der Architekturtest wurde auf den Lazy-Callback angepasst. Die explizite
+  Codex-Prüfung fand außerdem einen fehlerhaften optionalen IntervalsClient-
+  Konstruktor; der Client verlangt jetzt seine Infrastruktur explizit, und der
+  Composition Root stellt eine konkrete Factory bereit. Die vorherigen Tests,
+  die den Konstruktor als Service-Factory gepatcht hatten, patchen nun den
+  Kompositionspunkt. Sieben betroffene Provider-/Sync-Fälle und die vollständige
+  native Suite (**2.748 PASS, 12 SQLCipher-Skips**) bestehen mit dieser
+  Korrektur; aktueller PR-CI-Lauf muss den finalen Head bestätigen.
+- Der lokale Stand wurde als PR #802 geöffnet; Squash-Auto-Merge ist aktiviert.
+  P7/P8-Restaudit, übriger HTTP-Transport und P11 bleiben offen.
+- Nächster Schritt: P7/P8-Review-Log-Befunde abgleichen und den konkreten
+  offenen Morning-Receipt-/Restart-Vertrag vor weiterer HTTP-Auslagerung
+  prüfen.
