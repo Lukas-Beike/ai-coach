@@ -639,17 +639,17 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   - [x] Terminale Turn-Fehlerprojektion einschließlich bestätigter Effekte,
     Pending-Request, atomarem Receipt, Checkpoint-Bereinigung und Event nach
     Commit einem `CoachTurnFailureService` zuordnen; der übrige Turn bleibt offen.
-- [ ] `chat_with_coach`, Background-Claim/Resume/Cancel und Stream-Register
+- [ ] Background-Claim/Resume/Cancel und Stream-Register
   auslagern; synchrone und Hintergrundausführung teilen denselben Turn-Use-Case.
   - [x] Sessiongebundene Chat-Vorprüfung, Längen-/Cancel-Grenzen,
     idempotente Command-Lesefunktion, 15-Minuten-Stale-Recovery,
     persistierte Providerwahl und Background-Resume
-    `CoachChatTurnService` zuordnen. Der dekorierte Server-Aufrufer
-    bleibt nur bis zur direkten HTTP-/Worker-Migration bestehen.
+    `CoachChatTurnService` zuordnen. HTTP und Worker rufen den
+    Use-Case direkt auf; der temporäre Testadapter wurde entfernt.
   - [x] Maintenance- und Conversation-Gate in derselben äußeren/inneren
     Reihenfolge dem `CoachChatTurnService` zuordnen; die vorhandene
     processweite `CoachConversationGate`-Instanz teilt ihren Lock weiter
-    mit Reset. Der vorläufige Server-Aufrufer ist nur Transportadapter.
+    mit Reset. Es gibt keinen Server-Transportadapter mehr.
   - [x] Process-lokales Chat-Stream-Register, SSE-Queues und Background-
     Cancel-Events einem einzigen `ChatStreamRegistry` zuordnen; durable
     Job-Entscheidungen bleiben bis zur Coach-Job-Auslagerung offen.
@@ -660,8 +660,8 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   - [x] Claimed-Generation-Ausführung, Session-Binding, persistiertes
     Cancel-Read, Coach-Turn-Aufruf, Morning-Abschluss, Contention-Retry,
     terminale Fehler und SSE-Publikation einem `CoachBackgroundJobRunner`
-    zuordnen. Der vorläufige Server-Aufrufer entfällt mit dem folgenden
-    Worker-Lifecycle-Umzug.
+    zuordnen. Der produktive Server-Aufrufer entfiel mit dem Worker-Lifecycle-
+    Umzug; der verbleibende reine Testadapter wurde im P8-Nachtrag entfernt.
   - [x] Worker-Thread, Lock, Wake-/Stop-Events, begrenztes Polling und
     Maintenance-Claim-Schleife einem `CoachJobWorker` zuordnen; `server.py`
     registriert beim Start nur die konkreten Backend-Factories. Der

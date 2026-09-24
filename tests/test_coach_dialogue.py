@@ -73,7 +73,7 @@ class DialogueHarness:
             transport = transport_factory.return_value
             transport.request.side_effect = response
             transport.background_request.side_effect = response
-            receipt = server.chat_with_coach(message, client_turn_id=turn or f"turn-{self.counter}", session_csrf_hash="synthetic-session", **kwargs)
+            receipt = server.coach_chat_turn_service().run(message, client_turn_id=turn or f"turn-{self.counter}", session_csrf_hash="synthetic-session", **kwargs)
         return receipt, transport.background_request if kwargs.get("background_job") else transport.request
 
     def state(self):
@@ -988,7 +988,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
     def test_foreign_session_cannot_replay_receipt(self):
         self.turn("Wie geht es weiter?", [{"output_text": "Synthetic advice"}], turn="owned-turn")
         with self.assertRaises(server.AppError) as raised:
-            server.chat_with_coach("Weiter", client_turn_id="owned-turn", session_csrf_hash="other-session")
+            server.coach_chat_turn_service().run("Weiter", client_turn_id="owned-turn", session_csrf_hash="other-session")
         self.assertEqual(raised.exception.reason, "command_scope_denied")
 
     def test_local_draft_commit_uses_local_dialogue_with_fresh_response_chain(self):
