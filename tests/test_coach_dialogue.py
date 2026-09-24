@@ -854,7 +854,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 db.execute("UPDATE coach_commands SET status='completed' WHERE client_turn_id='morning-quick'")
             return {"status": "completed", "message": {"id": 1}}
         with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
-            server, "chat_with_coach", side_effect=complete_command,
+            server.CoachChatTurnService, "run", side_effect=complete_command,
         ):
             server._run_background_coach_job(job)
         self.assertEqual(server.get_kv("morning_checkin_date"), "2026-09-07")
@@ -877,7 +877,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             return {"status": "completed", "message": {"id": 1}, "awaiting_clarification": True}
 
         with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
-            server, "chat_with_coach", side_effect=complete_with_question,
+            server.CoachChatTurnService, "run", side_effect=complete_with_question,
         ):
             server._run_background_coach_job(job)
         self.assertNotEqual(server.get_kv("morning_checkin_status"), "ready")

@@ -4876,11 +4876,11 @@ class CoachTests(unittest.TestCase):
         error = server.AppError(503, "Garmin sleep is not ready", reason="garmin_sleep_not_ready")
         with patch("backend.coach.job_store.CoachJobStore.message", return_value="Morgen-Check-in"), patch(
             "backend.coach.job_store.CoachJobStore.merge_receipt"
-        ), patch.object(server.ManualMorningCheckinService, "prepare", side_effect=error), patch.object(
-            server, "chat_with_coach"
+        ), patch.object(server.ManualMorningCheckinService, "prepare", side_effect=error), patch(
+            "backend.coach.chat_turn.CoachChatTurnService.run"
         ) as chat:
             with self.assertRaises(server.AppError):
-                server._execute_background_coach_job(
+                server.coach_background_job_runner()._execute(
                     {}, receipt, "operation", "client-turn", "session", threading.Event(), False
                 )
         chat.assert_not_called()
@@ -4889,15 +4889,14 @@ class CoachTests(unittest.TestCase):
         completion = {"status": "completed", "coach_quick_actions": {"morning_checkin": False}}
         with patch("backend.coach.job_store.CoachJobStore.message", return_value="Morgen-Check-in"), patch(
             "backend.coach.job_store.CoachJobStore.merge_receipt"
-        ), patch.object(server.ManualMorningCheckinService, "prepare"), patch.object(
-            server, "chat_with_coach",
+        ), patch.object(server.ManualMorningCheckinService, "prepare"), patch(
+            "backend.coach.chat_turn.CoachChatTurnService.run",
             return_value={"status": "completed", "message": {"content": "Guten Morgen"}},
-        ), patch.object(
-            server,
-            "_persist_completed_morning_coach_job",
+        ), patch(
+            "backend.coach.morning_completion.MorningCoachJobCompletionService.complete",
             return_value=completion,
         ) as persist_completion:
-            result = server._execute_background_coach_job(
+            result = server.coach_background_job_runner()._execute(
                 {}, {"request_kind": "morning_checkin"}, "operation", "turn-morning", "session",
                 threading.Event(), False,
             )
@@ -6936,7 +6935,7 @@ class CoachTests(unittest.TestCase):
         )
         job = server.coach_job_store().claim()
         seen = {}
-        with patch.object(server, "chat_with_coach", side_effect=lambda *args, **kwargs: seen.update(kwargs) or {}):
+        with patch("backend.coach.chat_turn.CoachChatTurnService.run", side_effect=lambda *args, **kwargs: seen.update(kwargs) or {}):
             server._run_background_coach_job(job)
         self.assertEqual(seen["session_csrf_hash"], csrf_hash)
 
@@ -6961,7 +6960,7 @@ class CoachTests(unittest.TestCase):
                 kwargs["on_text_delta"]("Teil")
                 return {"status": "completed", "session_key": "must-not-leave-server", "message": {"id": 42, "role": "assistant", "content": "Erster Teil"}}
 
-            with patch.object(server, "chat_with_coach", side_effect=complete_chat):
+            with patch("backend.coach.chat_turn.CoachChatTurnService.run", side_effect=complete_chat):
                 server._run_background_coach_job(job)
 
             events = coach_streams.CHAT_STREAM_REGISTRY.events(csrf_hash, operation_id)
@@ -7011,9 +7010,8 @@ class CoachTests(unittest.TestCase):
         )
         job = server.coach_job_store().claim()
         auth = server.session_auth_service()
-        with patch.object(
-            server,
-            "chat_with_coach",
+        with patch(
+            "backend.coach.chat_turn.CoachChatTurnService.run",
             side_effect=server.AppError(429, "busy", reason="chat_queue_full"),
         ), patch.object(auth, "restore_coach_session_csrf_hash", return_value="csrf-background-requeue"):
             server._run_background_coach_job(job)
@@ -7056,7 +7054,7 @@ class CoachTests(unittest.TestCase):
             seen["phase"] = json.loads(row["receipt"])["phase"]
             return {}
 
-        with patch.object(server, "chat_with_coach", side_effect=capture_phase), patch.object(
+        with patch("backend.coach.chat_turn.CoachChatTurnService.run", side_effect=capture_phase), patch.object(
             server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="csrf-background-recovery-phase"
         ):
             server._run_background_coach_job(job)

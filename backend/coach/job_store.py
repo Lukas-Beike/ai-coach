@@ -13,6 +13,8 @@ from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 
+SELECT_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
+
 
 class CoachJobStore:
     """Claim, requeue, and read persisted Coach background jobs."""
@@ -68,7 +70,7 @@ class CoachJobStore:
     def requeue(self, client_turn_id: str, reason: str) -> None:
         with self._database_lock, self._database_manager().unit_of_work() as db:
             row = db.execute(
-                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
+                SELECT_RECEIPT_SQL,
                 (client_turn_id,),
             ).fetchone()
             if not row:
@@ -113,11 +115,20 @@ class CoachJobStore:
             )
         return str(row["content"])
 
+    def cancel_requested(self, client_turn_id: str) -> bool:
+        """Read a persisted cancel flag before a claimed worker resumes."""
+        with self._database_lock, self._database_manager().unit_of_work() as db:
+            row = db.execute(
+                SELECT_RECEIPT_SQL,
+                (client_turn_id,),
+            ).fetchone()
+        return bool(row and command_receipt(row["receipt"]).get("cancel_requested"))
+
     def merge_receipt(self, client_turn_id: str, updates: dict[str, Any]) -> dict[str, Any]:
         """Merge progress into a queued/running command in one locked UOW."""
         with self._database_lock, self._database_manager().unit_of_work() as db:
             row = db.execute(
-                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
+                SELECT_RECEIPT_SQL,
                 (client_turn_id,),
             ).fetchone()
             receipt = command_receipt((row or {}).get("receipt"))

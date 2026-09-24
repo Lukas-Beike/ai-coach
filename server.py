@@ -312,6 +312,7 @@ from backend.coach.turn_failures import (
 from backend.coach.job_submission import CoachJobSubmissionService
 from backend.coach.morning import ManualMorningCheckinService, MorningCheckinStateService
 from backend.coach.morning_completion import MorningCoachJobCompletionService
+from backend.coach.background_job import CoachBackgroundJobRunner
 from backend.coach.tools import build_tool_contracts
 from backend.coach.service import command_receipt
 from backend.coach.authorization import (
@@ -368,7 +369,6 @@ PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 AUTO_UPDATE_LABEL = "stündliche automatische Aktualisierung"
 APP_NAME = "Intervals Coach"
 SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
-SELECT_COMMAND_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
 APP_VERSION = "1.11.11"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
@@ -2480,128 +2480,24 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     )
 
 
-def _background_coach_stream_delta(operation_id: str, text: str) -> None:
-    coach_streams.CHAT_STREAM_REGISTRY.publish(operation_id, "delta", {"text": text})
-
-
-def _background_coach_delta_callback(
-    operation_id: str, receipt: dict[str, Any], stream_attached: bool,
-) -> Any:
-    if not stream_attached or receipt.get("openai_response_id"):
-        return None
-    return lambda text: _background_coach_stream_delta(operation_id, text)
-
-
-def _background_coach_stream_receipt(operation_id: str, value: dict[str, Any]) -> None:
-    coach_streams.CHAT_STREAM_REGISTRY.publish(
-        operation_id, "completed", {key: item for key, item in value.items() if key != "session_key"},
-    )
-
-
-def _background_coach_cancel_event(operation_id: str, client_turn_id: str) -> threading.Event:
-    cancel_event = coach_streams.CHAT_STREAM_REGISTRY.get_or_create_background_event(operation_id)
-    with DB_LOCK, database() as db:
-        current = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
-    if current and command_receipt(current["receipt"]).get("cancel_requested"):
-        coach_streams.CHAT_STREAM_REGISTRY.cancel_background_event(operation_id)
-    return cancel_event
-
-
-def _persist_completed_morning_coach_job(client_turn_id: str) -> dict[str, Any] | None:
+def morning_coach_job_completion_service() -> MorningCoachJobCompletionService:
     return MorningCoachJobCompletionService(
         database_manager(), DB_LOCK, KEY_VALUE_REPOSITORY,
         coach_quick_actions_service, local_now, utc_now,
-    ).complete(client_turn_id)
-
-
-def _execute_background_coach_job(
-    job: dict[str, Any], receipt: dict[str, Any], operation_id: str, client_turn_id: str,
-    session_csrf_hash: str, cancel_event: threading.Event, stream_attached: bool,
-) -> dict[str, Any]:
-    if not session_csrf_hash:
-        raise AppError(401, "Die Sitzung des Coach-Auftrags ist abgelaufen.", reason="session_expired")
-    message = coach_job_store().message(job)
-    worker_phase = {"status": "running"}
-    if not receipt.get("openai_response_id"):
-        worker_phase["phase"] = "preparing"
-    coach_job_store().merge_receipt(client_turn_id, worker_phase)
-    if receipt.get("request_kind") == "morning_checkin":
-        manual_morning_checkin_service().prepare()
-    result = chat_with_coach(
-        message,
-        on_text_delta=_background_coach_delta_callback(operation_id, receipt, stream_attached),
-        cancel_event=cancel_event,
-        session_csrf_hash=session_csrf_hash,
-        client_turn_id=client_turn_id,
-        background_job=True,
-    )
-    if (
-        receipt.get("request_kind") == "morning_checkin"
-        and result.get("status") == "completed"
-        and result.get("message")
-        and not result.get("awaiting_clarification")
-    ):
-        result = _persist_completed_morning_coach_job(client_turn_id) or result
-    return result
-
-
-def _handle_background_coach_error(
-    client_turn_id: str, operation_id: str, exc: AppError,
-) -> None:
-    if exc.reason in {"chat_queue_full", "chat_request_timeout"}:
-        coach_job_store().requeue(client_turn_id, exc.reason)
-        LOGGER.warning(
-            "Persistent Coach background job requeued after contention",
-            extra={"event": "coach_background_job_requeued", "context": {"operation_id": operation_id, "reason": exc.reason}},
-        )
-        coach_streams.CHAT_STREAM_REGISTRY.publish(operation_id, "background", {
-            "status": "queued", "mode": "background", "operation_id": operation_id,
-        })
-        return
-    failed = coach_turn_failure_service().persist(client_turn_id, {}, exc)
-    if failed:
-        _background_coach_stream_receipt(operation_id, failed)
-        return
-    coach_streams.CHAT_STREAM_REGISTRY.publish(operation_id, "error", {
-        "reason": exc.reason or "request_failed", "message": REDACTOR.redact_text(exc.message)[:1000],
-    })
-
-
-def _handle_background_coach_exception(client_turn_id: str, operation_id: str, exc: Exception) -> None:
-    failed = coach_turn_failure_service().persist(client_turn_id, {}, exc)
-    if failed:
-        _background_coach_stream_receipt(operation_id, failed)
-    else:
-        coach_streams.CHAT_STREAM_REGISTRY.publish(operation_id, "error", {
-            "reason": "internal_error", "message": INTERNAL_SERVER_ERROR,
-        })
-    LOGGER.exception(
-        "Persistent Coach background job failed",
-        extra={"event": "coach_background_job_failed", "context": {"operation_id": operation_id, "error_code": sync_observation.operation_error_code(exc)}},
     )
 
 
-@runtime_maintenance.claimed_maintenance_operation
+def coach_background_job_runner() -> CoachBackgroundJobRunner:
+    return CoachBackgroundJobRunner(
+        coach_job_store(), coach_chat_turn_service, session_auth_service,
+        coach_streams.CHAT_STREAM_REGISTRY, manual_morning_checkin_service,
+        morning_coach_job_completion_service, coach_turn_failure_service,
+        runtime_maintenance.MAINTENANCE_GATE, REDACTOR, LOGGER,
+    )
+
+
 def _run_background_coach_job(job: dict[str, Any]) -> None:
-    receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
-    operation_id = str(receipt.get("operation_id") or "")
-    client_turn_id = str(job.get("client_turn_id") or "")
-    session_csrf_hash = session_auth_service().restore_coach_session_csrf_hash(
-        receipt.get("session_key")
-    )
-    cancel_event = _background_coach_cancel_event(operation_id, client_turn_id)
-    stream_attached = coach_streams.CHAT_STREAM_REGISTRY.events(session_csrf_hash, operation_id) is not None
-    try:
-        result = _execute_background_coach_job(
-            job, receipt, operation_id, client_turn_id, session_csrf_hash, cancel_event, stream_attached,
-        )
-        _background_coach_stream_receipt(operation_id, result)
-    except AppError as exc:
-        _handle_background_coach_error(client_turn_id, operation_id, exc)
-    except Exception as exc:
-        _handle_background_coach_exception(client_turn_id, operation_id, exc)
-    finally:
-        coach_streams.CHAT_STREAM_REGISTRY.remove_background_event(operation_id)
+    coach_background_job_runner().run(job)
 
 
 def _coach_job_worker_loop() -> None:
