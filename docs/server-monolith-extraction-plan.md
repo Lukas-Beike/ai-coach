@@ -578,6 +578,10 @@ Abhängigkeit: P2–P6.
     Dispatcher-Aufruf `CoachStructuredToolExecutionService` zuordnen;
     die übergreifende Turn-Transaktion und Receipt-Reihenfolge bleiben
     bis P8 beim Turn-Orchestrator.
+  - [x] Strukturierte Werkzeugfehler samt sicheren Diagnosen, begrenztem
+    `validation_reason`, Receipt-Anhang und redigiertem Log-Ereignis
+    `CoachStructuredToolFailureService` zuordnen; die Turn- und
+    Rundenschleife bleibt bis P8 beim Coach-Turn.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.
