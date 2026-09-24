@@ -1,14 +1,14 @@
 # Plan: server.py vollständig in fachliche Backend-Module aufteilen
 
-Stand: 24.09.2026. P0–P9 integriert; P10 und P11 in Arbeit.
+Stand: 24.09.2026. P0–P11 integriert und abgenommen.
 Historischer Ausgangscommit: `58e352d`. Die Architekturregel in der
 Root-`AGENTS.md` ist integriert. Aktuelle Commits und offene Befunde stehen
 im `docs/server-extraction-review-log.md`; das Inventar wird pro Stand erzeugt.
 
-Aktueller Stand (24.09.2026): 233 von 244 markierten Punkten (95,5 %) sind abgeschlossen;
-11 bleiben offen. `server.py` hat 3.008 physische Zeilen. Checklistenanteile messen nicht
-den Restaufwand: übrige HTTP-/SSE-Grenzen in P10 und der gesamte P11-Abschluss bleiben
-offen. Letzter geprüfter Stand und nächster Schritt stehen im Review-Log.
+Aktueller Stand (24.09.2026): 244 von 244 markierten Punkten (100 %) sind
+abgeschlossen. `server.py` hat 2.984 physische Zeilen als Composition Root,
+HTTP-Adapter und Prozess-Einstiegspunkt. Der geprüfte Endstand und die
+Abnahmebefunde stehen im Review-Log.
 
 ## 1. Ziel und verbindliche Abnahmekriterien
 
@@ -939,18 +939,30 @@ Implementierung von Planänderungen, Provider-Sync oder Coach-Tool-Ausführung.
 Abhängigkeit: alle vorigen Phasen.
 
 - [x] `main()` auf konkrete Konstruktion, Startreihenfolge und Shutdown reduzieren.
-- [ ] Alle Übergangs-Wrapper, alten Imports und verwaisten Konstanten entfernen.
-- [ ] Alle verbleibenden `server.*`-Testpatches migrieren; nur Tests des
-  Einstiegspunkts dürfen noch `server` als Testgegenstand benötigen.
-- [ ] Inventar vollständig schließen; jede ursprüngliche Definition anhand
-  des finalen Codes und ihrer Aufrufer prüfen.
-- [ ] Importgraph auf Zyklen und unerlaubte Richtungen prüfen; indirekte Zugriffe
-  mittels `sys.modules`, dynamischen Imports, `getattr` und Namespace-Proxies
-  zusätzlich im Review ausschließen.
-- [ ] Architekturprüfung auf den final erlaubten Inhalt von `server.py`
-  verschärfen und in bestehende CI integrieren.
-- [ ] Vollständige Regression, Docker-Build und isolierte integrierte Abläufe
-  ausführen; Dokumentation auf den tatsächlichen Endzustand aktualisieren.
+- [x] Übergangs-Wrapper, alte Imports und verwaiste Konstanten prüfen und
+  entfernen. Die unreferenzierte Kalenderprojektion, `ClientDisconnected`-Re-
+  Export sowie zwei ungenutzte Konstanten sind entfernt; verbleibende Funktionen
+  sind konkrete Composition-Root-Verdrahtung, verwendete Zeit-Helfer oder HTTP-
+  und Prozessadapter.
+- [x] Alle verbleibenden `server.*`-Testpatches anhand ihres Lookup-Orts prüfen.
+  Provider-Patches liegen bei den Provider-Modulen; verbliebene Konfigurations-,
+  Datenbank- und Service-Fabrik-Patches testen isolierte Composition-Root-
+  Integrationen.
+- [x] Inventar neu erzeugen und mit `--check` abgleichen; alle verbleibenden
+  Top-Level-Funktionen und ihre statischen Aufrufer prüfen. Es gibt keine
+  unzugeordneten P0-Symbole oder unaufgerufenen server-Funktionen.
+- [x] Importgraph auf eager Runtime-Zyklen und unerlaubte Richtungen prüfen;
+  indirekte Zugriffe mittels `sys.modules`, dynamischen Imports, `getattr` und
+  Namespace-Proxies zusätzlich im Review ausschließen. Die CI-Architekturtests
+  prüfen Backend-Rückgriffe sowie Zyklen und ignorieren TYPE_CHECKING- und
+  funktionslokale Imports.
+- [x] Architekturprüfung auf die erlaubte Menge von Top-Level-Funktionen und
+  Klassen in `server.py` verschärfen. Importzyklen, Backend-Rückgriffe und
+  extrahierte Server-Neudefinitionen werden in der bestehenden CI-Testmatrix
+  geprüft.
+- [x] Vollständige Regression und isolierte integrierte Abläufe ausführen;
+  Docker-Build sowie Container-Testlauf bestehen. Inventar, Review-Log und
+  dieser Plan entsprechen dem geprüften Endzustand.
 
 Abnahme: Alle Kriterien aus Abschnitt 1 erfüllt. Keine Restphase mit dem
 Status „Helfer ausgelagert, eigentlicher Ablauf später“.
@@ -1028,13 +1040,14 @@ für interne Testimports. Jeder abgeschlossene PR bleibt start- und testfähig.
 Bei einer Regression wird der betreffende Code-PR gezielt zurückgenommen;
 es gibt keine Datenmigration und keine Rücknahme durch Löschen von Nutzerdaten.
 
-## 8. Nächster ausführbarer Schritt
+## 8. Abschlussstand
 
-Die P10-Service-/Transportgrenzen sind integriert. P11 mit dem Entfernen
-verbliebener Wrapper, der Migration von Test-Patch-Targets, dem Importgraph-
-Audit und der vollständigen integrierten Abnahme abschließen. Jeder Schritt
-bleibt an den aktuellen Inventar- und Aufruferbefunden ausgerichtet, bis kein
-fachlicher Rest in `server.py` bleibt.
+P10-Service-/Transportgrenzen und P11-Komposition, Restcode-Audit,
+Architekturprüfung und integrierte Abnahme sind abgeschlossen. Fachlogik,
+Provider-Aufrufe, Persistenz und Use-Case-Orchestrierung liegen in ihren
+Backend-Eigentümern; `server.py` enthält die geprüften Verdrahtungsfunktionen,
+HTTP-Adapter und den Start-/Shutdown-Einstiegspunkt.
 
-Dieser Plan beschreibt die Umsetzung. Er selbst führt weder Refactoring noch
-Tests, Commits, PR-Erstellung oder Veröffentlichung aus.
+Die Architekturtests begrenzen neue Top-Level-Funktionen in `server.py`, prüfen
+Backend-Rückgriffe und eager Importzyklen. Der Inventargenerator bleibt für
+künftige Änderungen als reproduzierbare Regression verfügbar.

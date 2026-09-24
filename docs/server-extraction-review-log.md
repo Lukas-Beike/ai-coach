@@ -1,5 +1,25 @@
 # Review-Log der server.py-Auslagerung
 
+## P11-Abschluss — Composition Root und Gesamtprüfung
+
+- Basis: PR #816 ist als `2e16f9a781c437bcc3a7129941a4c9fd8ce3bd2d`
+  auf `origin/develop` gemergt. Der einzige fehlgeschlagene Check war die
+  erschöpfte Codex-Review-Usage; der abgeschlossene Sicherheitsreview war
+  sauber und es gab keine Review-Threads. Der Merge erfolgte mit dem vom
+  Nutzer ausdrücklich autorisierten Admin-Bypass.
+- P11 entfernte die unreferenzierte Kalenderprojektion, den nicht mehr
+  benötigten `ClientDisconnected`-Server-Re-Export und zwei tote Konstanten.
+  Die verbliebenen Server-Funktionen sind geprüfte Composition-Root-, HTTP-
+  oder Prozessadapter und werden durch eine explizite Architektur-Allowlist
+  begrenzt. Testpatches richten sich nach den tatsächlichen Lookup-Orten.
+- Das aktualisierte Inventar hat 1.297 Zeilen und besteht `--check`; kein
+  P0-Ziel oder Server-Funktionsaufrufer blieb offen. Eager Backend-Importgraph
+  ohne Zyklen; dynamische Rückgriffe auf `server` werden ebenfalls geprüft.
+- Validierung: lokale volle Suite 2.797 Tests, 12 Skips, PASS; finaler
+  isolierter Python-3.14-Containerlauf 2.798 Tests, 11 Skips, PASS; Docker-Build,
+  39 Architekturtests, `ruff` F401/F841, Syntaxprüfung und `git diff --check`
+  PASS. Keine Frontend- oder PWA-Dateien geändert.
+
 Dieses Log hält nur tatsächlich vom Orchestrator geprüfte integrierte Stände
 fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 

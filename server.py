@@ -31,7 +31,6 @@ from backend.diagnostics.report import (
 from backend.errors import (
     INTERNAL_SERVER_ERROR,
     AppError,
-    ClientDisconnected,
     public_app_error_status,
 )
 from backend import config as app_config
@@ -227,7 +226,6 @@ from backend.planning import adaptive as planning_adaptive
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.calendar_service import CalendarConflictService
 from backend.planning import changes as planning_changes
-from backend.planning import context as planning_context
 from backend.planning.daily_context_service import DailyPlanningContextService
 from backend.planning import competitions as planning_competitions
 from backend.planning.competition_service import CompetitionService
@@ -374,7 +372,6 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
 PROVIDER_INTERVALS_NAME = "Intervals.icu"
-PROVIDER_GARMIN_NAME = "Garmin Connect"
 PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
 JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
@@ -1798,20 +1795,6 @@ def openai_stream_client() -> openai_provider.OpenAIStreamClient:
     )
 
 
-def external_calendar_events_for_date(target_date: str) -> list[dict[str, Any]]:
-    today = local_now().date()
-    return [
-        event
-        for event in external_calendar_reader().list_events(1000)
-        if target_date
-        in planning_context.external_calendar_event_dates(
-            event,
-            today=today,
-            window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
-        )
-    ]
-
-
 def coach_quick_actions_service() -> CoachQuickActionsService:
     """Compose local quick-action reads and their public Coach projection."""
     return CoachQuickActionsService(
@@ -2021,9 +2004,6 @@ def coach_proposal_execution_service() -> CoachProposalExecutionService:
         intervals_client, runtime_maintenance.MAINTENANCE_GATE,
         now=time.time, utc_now=utc_now,
     )
-
-
-LIBRARY_SYNC_PREVIEW_TTL_SECONDS = 10 * 60
 
 
 def coach_structured_context_service() -> CoachStructuredContextService:
