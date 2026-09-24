@@ -251,6 +251,7 @@ from backend.coach.athlete_record_tools import CoachAthleteRecordToolService
 from backend.coach.library_plan_tools import CoachLibraryPlanToolService
 from backend.coach.planning_action_tools import CoachPlanningActionToolService
 from backend.coach.plan_artifact_tools import CoachPlanArtifactToolService
+from backend.coach.tool_replay import CoachStructuredToolReplayService
 from backend.coach.planning_change_tools import CoachPlanningChangeToolService
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.coach.context import (
@@ -364,7 +365,6 @@ APP_NAME = "Intervals Coach"
 SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
 UPDATE_COMMAND_RECEIPT_SQL = "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?"
 SELECT_COMMAND_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
-SELECT_PLANNING_REVISION_SQL = "SELECT revision FROM planning_state WHERE id=1"
 APP_VERSION = "1.11.11"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
@@ -2423,6 +2423,13 @@ def coach_planning_command_service() -> CoachPlanningCommandService:
     )
 
 
+def coach_structured_tool_replay_service() -> CoachStructuredToolReplayService:
+    """Compose structured tool replay lookup with the active DB and allowlist."""
+    return CoachStructuredToolReplayService(
+        database_manager(), DB_LOCK, frozenset(STRUCTURED_READ_ONLY_TOOLS)
+    )
+
+
 def _structured_coach_receipt(
     message: str,
     *,
@@ -2773,32 +2780,6 @@ def _structured_coach_outcome(
     return status, text, failures
 
 
-def _cached_structured_tool_call(
-    metadata: dict[str, Any], command_receipts: list[dict[str, Any]],
-) -> dict[str, Any] | None:
-    call_id = metadata["call_id"]
-    name = metadata["name"]
-    effect_key = metadata["effect_key"]
-    cached = next((entry for entry in command_receipts if entry.get("call_id") == call_id), None)
-    if cached and cached.get("effect_key") != effect_key:
-        raise AppError(409, "Der wiederholte Werkzeugaufruf wurde verändert.", reason="tool_call_conflict")
-    if cached is None and name not in STRUCTURED_READ_ONLY_TOOLS:
-        cached = next(
-            (entry for entry in command_receipts if entry.get("effect_key") == effect_key and entry.get("result", {}).get("ok")),
-            None,
-        )
-    if cached and name == "stage_training_plan" and cached.get("result", {}).get("ok"):
-        with DB_LOCK, database() as db:
-            row = db.execute(
-                "SELECT status, base_revision FROM coach_plan_artifacts WHERE id=?",
-                (cached["result"].get("artifact_id"),),
-            ).fetchone()
-            revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
-        if not row or (row["status"] == "draft" and row["base_revision"] != revision):
-            return None
-    return cached
-
-
 def _prepare_structured_plan_sync(
     arguments: dict[str, Any], action: dict[str, Any], command_receipts: list[dict[str, Any]],
 ) -> None:
@@ -2978,7 +2959,7 @@ def _execute_structured_coach_tool_call(
         scope_repair_key = metadata["scope_repair_key"]
         request_binding_key = metadata["request_binding_key"]
         plan_effect_key = metadata["plan_effect_key"]
-        cached = _cached_structured_tool_call(metadata, state.command_receipts)
+        cached = coach_structured_tool_replay_service().lookup(metadata, state.command_receipts)
         if cached:
             result = cached["result"]
         else:
