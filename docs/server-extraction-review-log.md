@@ -7936,3 +7936,17 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - `server.py` enthält keine route-spezifische POST-Auswahl mehr. GET-/PUT-
   Fehlergrenzen, SSE-Schreibtransport und Datei-/JSON-Antworttransport bleiben
   offene P10-Arbeit.
+
+## P10 HTTP-Antworttransport — lokaler Prüfstand
+
+- Socket-Ausgabe für JSON, Bytes, Datei-Downloads, SSE-Header/Ereignisse und
+  sichere statische Antworten liegt jetzt bei `HttpResponseTransport`.
+- `RequestHandler` behält dünne Socket-Adapter, Disconnect-Logging und die
+  äußeren Request-Fehlergrenzen; Response-Header, Status, Body-Limits,
+  Dateistream-Timeout/Cleanup und SSE-Abbruchverhalten bleiben erhalten.
+- Die unveränderten Request-Adapter verwenden weiter `requests.py` und
+  `responses.py`; die Stream-Chunkgröße hat einen Eigentümer in diesem
+  Transportmodul.
+- Validierung: 2.790 Unit-Tests bestanden, 12 übersprungen; Docker-Build,
+  496 Server-/Response-Tests, 35 Architekturtests, Syntaxprüfung,
+  Inventar-`--check` und `git diff --check` bestanden.

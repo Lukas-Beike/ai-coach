@@ -59,6 +59,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
     ("backend.http_api.post_dispatch", ("HttpAuthenticatedPostRoutes", "HttpPostDispatcher")),
+    ("backend.http_api.response_transport", ("HttpResponseTransport",)),
     ("backend.http_api.sync_commands_post", ("SyncCommandPostRoute",)),
     ("backend.http_api.chat_post", ("ChatPostRoutes",)),
     ("backend.http_api.chat_stream", ("CoachChatStreamTransport",)),
@@ -2190,6 +2191,34 @@ def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
 
 
 class ServerArchitectureTests(unittest.TestCase):
+    def test_request_handler_response_methods_only_delegate_socket_writes(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        handler = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
+        )
+        delegated_methods = {
+            "send_sse_headers": "send_sse_headers",
+            "send_sse_event": "send_sse_event",
+            "send_json": "send_json",
+            "send_file_stream": "send_file_stream",
+            "send_bytes": "send_bytes",
+            "send_static": "send_static",
+        }
+        for method_name, transport_method in delegated_methods.items():
+            with self.subTest(method=method_name):
+                method = next(
+                    node for node in handler.body
+                    if isinstance(node, ast.FunctionDef) and node.name == method_name
+                )
+                calls = [
+                    node for node in ast.walk(method)
+                    if isinstance(node, ast.Call)
+                    and ast.unparse(node.func)
+                    == f"HTTP_RESPONSE_TRANSPORT.{transport_method}"
+                ]
+                self.assertEqual(len(calls), 1)
+
     def test_post_handler_preserves_authentication_csrf_and_maintenance_order(self) -> None:
         server_tree = _parse(SERVER_PATH)
         handler = next(
