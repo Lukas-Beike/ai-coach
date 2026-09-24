@@ -859,6 +859,10 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     `AthletePutRoutes` zuordnen; Profile-/Context-Dienste behalten ihre
     Validierung und Datenbanktransaktionen, der Handler die äußere Auth-/
     CSRF-/Maintenance- und Fehlergrenze.
+  - [x] History-Undo-Vorschau und -Anwendung als POST-Routen
+    `HistoryUndoPostRoutes` zuordnen; Proposal-Sitzungsbindung sowie
+    Revisions-/Hash-Prüfung und atomarer Undo bleiben bei den bestehenden
+    Coach- und History-Diensten.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 

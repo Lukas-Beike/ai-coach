@@ -2324,50 +2324,12 @@ class ServerArchitectureTests(unittest.TestCase):
         ]
         self.assertEqual(factory_names, expected_names)
 
-    def _assert_put_route_owned(
-        self, route_name: str, forbidden_paths: tuple[str, ...], factory: str
-    ) -> ast.Module:
-        server_tree = _parse(SERVER_PATH)
-        put_handler = next(
-            node
-            for node in ast.walk(server_tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_do_PUT"
-        )
-        nodes = list(ast.walk(put_handler))
-        dispatches = [
-            node
-            for node in nodes
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == route_name
-            and node.func.attr == "handle"
-        ]
-        self.assertEqual(len(dispatches), 1)
-        paths = {
-            node.value
-            for node in nodes
-            if isinstance(node, ast.Constant) and isinstance(node.value, str)
-        }
-        self.assertTrue(set(forbidden_paths).isdisjoint(paths))
-        assignment = next(
-            node
-            for node in server_tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == route_name
-                for target in node.targets
-            )
-        )
-        self.assertEqual(ast.unparse(assignment.value), factory)
-        return server_tree
-
-    def _assert_post_route_owned(
+    def _assert_write_route_owned(
         self,
+        handler_method: str,
         route_name: str,
         forbidden_paths: tuple[str, ...],
         factory: str,
-        handler_method: str = "_handle_data_post",
     ) -> ast.Module:
         server_tree = _parse(SERVER_PATH)
         handler = next(
@@ -2507,7 +2469,8 @@ class ServerArchitectureTests(unittest.TestCase):
         )
 
     def test_history_undo_post_routes_are_owned_by_http_api_module(self) -> None:
-        self._assert_post_route_owned(
+        self._assert_write_route_owned(
+            "_handle_data_post",
             "HISTORY_UNDO_POST_ROUTES",
             ("/api/change-history/undo/preview", "/api/change-history/undo"),
             "HistoryUndoPostRoutes(history_undo_service, coach_proposal_creation_service)",
@@ -2518,7 +2481,8 @@ class ServerArchitectureTests(unittest.TestCase):
         self.assertNotIn("server", route_source.casefold())
 
     def test_settings_put_routes_are_owned_by_http_api_module(self) -> None:
-        self._assert_put_route_owned(
+        self._assert_write_route_owned(
+            "_do_PUT",
             "SETTINGS_PUT_ROUTES",
             (
                 "/api/settings/model",
@@ -2530,7 +2494,8 @@ class ServerArchitectureTests(unittest.TestCase):
         )
 
     def test_athlete_put_routes_are_owned_by_http_api_module(self) -> None:
-        self._assert_put_route_owned(
+        self._assert_write_route_owned(
+            "_do_PUT",
             "ATHLETE_PUT_ROUTES",
             ("/api/athlete-context", "/api/profile"),
             "AthletePutRoutes(athlete_context_service, profile_service)",

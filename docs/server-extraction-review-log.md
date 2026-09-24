@@ -7608,3 +7608,39 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - POST-Transport, vollständiger Handler-/Body-Umzug, P7/P8-Restzuordnungen
   und P11 bleiben offen. Nächster kleiner Auftrag: History-Undo-POST-
   Dispatch einschließlich Vorschlagsprojektion und Revisions-/Hash-Vertrag.
+
+## P10 History-Undo-POST-Routen — Integrationsreview
+
+- Vorgänger-PR #792 wurde am 24.09.2026 um 08:02:47 UTC mit
+  `129612433f762ba8c0550b1a057c47e4bd35b427` gemergt; der Commit ist
+  Vorfahr von `origin/develop`. Browser, Codex und Sonar bestanden, ohne
+  offene Review-Threads.
+- GPT-6-Luna-Quellcommit `cd2d56ea` erhielt **FAIL** wegen eines langen
+  duplizierenden AST-Architekturtests. Der Worker änderte ihn in
+  `88430350a631b6933d817badf1cde6ad82b5061e` auf einen POST-Helper;
+  Root erkannte im erneuten Diff noch die Duplizierung zum bestehenden PUT-
+  Helper und führte beide in der Integration zu einem gemeinsamen
+  `_assert_write_route_owned` zusammen. Der Quellpatch wurde als `5a6529db`
+  sequenziell integriert; der finale Integrationsstand wurde erneut geprüft.
+- **PASS:** `HistoryUndoPostRoutes` besitzt genau Undo-Vorschau und Undo-
+  Anwendung. Die Vorschau liest einmal `change_id`, erhält das bestehende
+  `proposal`-Pop-/Antwortformat und bindet den Vorschlag an den Session-
+  CSRF-Hash. Apply übergibt den vollständigen Payload an den bestehenden
+  `HistoryUndoService`; dieser behält Revisions-/Hash-Prüfung, DB-UOW und
+  Rollback. Unbekannte Pfade lösen keine Body-/Service-Aktion aus. Äußere
+  Auth-/CSRF-/Maintenance-/404-Grenzen und Remote-Schreibgrenze bleiben
+  unverändert. Keine Backend-Rückimporte, neuen Locks/Caches oder Server-
+  Fachcallbacks.
+- Sechs direkte Routentests prüfen Preview-Projektion/Session-Bindung,
+  Apply-Payload, unbekannte Pfade, unterschiedliche Factories je Request
+  und Fehler vor Proposal-Erstellung beziehungsweise Antwort. Bestehende
+  History-Service-Tests sichern Revision/Hash und Transaktion; 25 fokussierte
+  Architektur-/Routentests bestanden. Diese Testverteilung ist angemessen.
+- Integrierte Abnahme: frisch gebautes Read-only-/netzwerkisoliertes
+  SQLCipher-Image mit **2.685 Tests/11 Skips PASS**; Ruff für Route,
+  Direkttests, Architektur und Inventarskript, Compileall, Inventar-
+  `--check` (P0=0) und Diff-Check **PASS**. `server.py` hat 3.375
+  physische Zeilen.
+- Diagnostik-/Privacy-/Coach-POST, RequestHandler-/Body-Grenze,
+  P7/P8-Restzuordnungen und P11 bleiben offen. Nächster kleiner Auftrag:
+  Diagnostik-Capture-POST mit unverändertem Capture-Lock.
