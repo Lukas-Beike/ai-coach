@@ -13,6 +13,9 @@ from backend.performance import garmin_projection, morning_battery
 from backend.providers.garmin_morning import merge_garmin_records
 from backend.weather import history as weather_history
 
+MORNING_RETRY_SECONDS = 15 * 60
+MORNING_MAX_ATTEMPTS = 3
+
 MORNING_BATTERY_HISTORY_KEY = "morning_body_battery_history"
 _GARMIN_SNAPSHOT_KEY = "garmin_snapshot"
 _GARMIN_ERROR_KEY = "last_garmin_error"
@@ -191,8 +194,8 @@ class MorningBatteryClock:
 
 @dataclass(frozen=True)
 class MorningBatteryRetryPolicy:
-    max_attempts: int = 3
-    retry_seconds: int = 900
+    max_attempts: int = MORNING_MAX_ATTEMPTS
+    retry_seconds: int = MORNING_RETRY_SECONDS
 
 
 class MorningBatteryEvents:

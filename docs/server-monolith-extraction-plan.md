@@ -1,15 +1,14 @@
 # Plan: server.py vollständig in fachliche Backend-Module aufteilen
 
-Stand: 24.09.2026. P0–P6 und P9 integriert; P7, P8, P10 und P11 in Arbeit.
+Stand: 24.09.2026. P0–P9 integriert; P10 und P11 in Arbeit.
 Historischer Ausgangscommit: `58e352d`. Die Architekturregel in der
 Root-`AGENTS.md` ist integriert. Aktuelle Commits und offene Befunde stehen
 im `docs/server-extraction-review-log.md`; das Inventar wird pro Stand erzeugt.
 
-Aktueller Stand (24.09.2026): Nach Integration der Transkriptions-POST-Route
-enthält der Arbeitsstand 216 von 233 markierten Punkten (92,7 %), 17 bleiben offen;
-`server.py` hat 3.294 physische Zeilen. Checklistenanteile messen nicht den Restaufwand:
-P7/P8-Restaudit, übrige HTTP-/SSE-Grenzen in P10 und der gesamte P11-Abschluss
-bleiben substantiell offen. Letzter geprüfter Stand und nächster Schritt stehen im Review-Log.
+Aktueller Stand (24.09.2026): 233 von 244 markierten Punkten (95,5 %) sind abgeschlossen;
+11 bleiben offen. `server.py` hat 3.008 physische Zeilen. Checklistenanteile messen nicht
+den Restaufwand: übrige HTTP-/SSE-Grenzen in P10 und der gesamte P11-Abschluss bleiben
+offen. Letzter geprüfter Stand und nächster Schritt stehen im Review-Log.
 
 ## 1. Ziel und verbindliche Abnahmekriterien
 
@@ -522,12 +521,12 @@ Abhängigkeit: P2–P6.
   - [x] Prozessweite Chat-Queue und Konversations-Lock mit 429/409-Grenzen
     `CoachConversationGate` zuordnen; Reset und Turn teilen dieselbe
     Lock-Instanz, während die übrige Turn-Orchestrierung bis P8 offen bleibt.
-- [ ] Vorschläge, Scope-/Owner-Prüfungen, explizite Bestätigung, TTL sowie
+- [x] Vorschläge, Scope-/Owner-Prüfungen, explizite Bestätigung, TTL sowie
   Replay-/Repair-Schlüssel ihren Coach-Modulen zuordnen.
   - [x] Sitzungsgebundene Command-Receipt-Lesefunktion mit 400/403/404-
     Grenzen, aktuellen Vorschlägen, TTL-Projektion und Entfernung des
     Session-Schlüssels einem konkreten `CoachCommandReceiptService` zuordnen.
-- [ ] Tool-Dispatch samt Ergebnis-/Fehlerprojektion verschieben; Planmutationen
+- [x] Tool-Dispatch samt Ergebnis-/Fehlerprojektion verschieben; Planmutationen
   rufen die in P4 abgeschlossenen Planungs-Use-Cases auf.
   - [x] Das Limit strukturierter Werkzeugrunden bei
     `CoachStructuredToolRoundService` verankern; die Composition-Root importiert
@@ -702,7 +701,7 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
     Restart-Verhalten einem `CoachCancellationService` zuordnen;
     Receipt-Merge gehört dem `CoachJobStore`. Turn-Ausführung und
     Worker-Ausführung bleiben offen.
-- [ ] Manuellen Morning Check-in mit Frische-Gate auslagern; die auf `develop`
+- [x] Manuellen Morning Check-in mit Frische-Gate auslagern; die auf `develop`
   entfernte automatische Reservierungs-/Retry-Steuerung nicht wieder einführen.
   - [x] Manuellen Garmin-Schlaf-/Body-Battery-Vorbereitungspfad und
     read-only Statusprojektion ihren konkreten Coach-Services zuordnen.
@@ -1031,10 +1030,10 @@ es gibt keine Datenmigration und keine Rücknahme durch Löschen von Nutzerdaten
 
 ## 8. Nächster ausführbarer Schritt
 
-Mit P0 beginnen: vollständiges symbolbasiertes Inventar, Test-/Importabhängigkeiten
-und Baseline anlegen. Danach P1 mit Fehlerklassen und gemeinsam genutzten
-Ressourcen umsetzen. Die konkrete Aufteilung aller weiteren Phasen wird anhand
-dieses Inventars abgearbeitet, bis kein fachlicher Rest in `server.py` bleibt.
+Mit den offenen P10-Service-/Transportgrenzen fortfahren, danach die P11-
+Composition-Root-, Patch-Target-, Importgraph- und Gesamtabnahme abschließen.
+Jeder Schritt bleibt an den aktuellen Inventar- und Aufruferbefunden ausgerichtet,
+bis kein fachlicher Rest in `server.py` bleibt.
 
 Dieser Plan beschreibt die Umsetzung. Er selbst führt weder Refactoring noch
 Tests, Commits, PR-Erstellung oder Veröffentlichung aus.

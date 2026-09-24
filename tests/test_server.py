@@ -28,6 +28,7 @@ from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.context import CoachIntervalsContextService, future_coach_planned_workouts
 from backend.coach.attachments import gemini_history_parts
 from backend.coach.proposals import validated_coach_action_preview_input
+from backend.coach import limits as coach_limits
 from backend.providers import openai as openai_provider
 from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.readiness import ReadinessService
@@ -5764,7 +5765,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(too_many.exception.reason, "invalid_job_request")
 
     def test_structured_training_changes_accept_complete_bounded_plan_without_remote_write(self):
-        for count in (29, server.COACH_TRAINING_CHANGE_LIMIT):
+        for count in (29, coach_limits.COACH_TRAINING_CHANGE_LIMIT):
             with self.subTest(count=count):
                 self.setUp()
                 planned = [server.planned_unit_service().create({
@@ -6094,7 +6095,7 @@ class CoachTests(unittest.TestCase):
         with self.assertRaises(server.AppError) as raised:
             server.structured_training_change_service().apply({
                 "changes": [{"local_id": str(uuid.uuid4()), "action": "delete"}]
-                * (server.COACH_TRAINING_CHANGE_LIMIT + 1),
+                * (coach_limits.COACH_TRAINING_CHANGE_LIMIT + 1),
             })
         self.assertEqual(raised.exception.reason, "change_limit")
 
@@ -6102,7 +6103,7 @@ class CoachTests(unittest.TestCase):
         tool = next(tool for tool in server.COACH_STRUCTURED_TOOLS if tool["name"] == "apply_training_changes")
         changes = tool["parameters"]["properties"]["changes"]
         self.assertEqual(changes["minItems"], 1)
-        self.assertEqual(changes["maxItems"], server.COACH_TRAINING_CHANGE_LIMIT)
+        self.assertEqual(changes["maxItems"], coach_limits.COACH_TRAINING_CHANGE_LIMIT)
 
     def test_context_preview_exposes_context_and_last_chat_input(self):
         server.coach_message_service().add("user", "Wie soll ich morgen trainieren?")
@@ -6537,7 +6538,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(restored["name"], "Metadata Plan")
 
     def test_history_capacity_covers_one_complete_plan_replacement(self):
-        self.assertGreaterEqual(change_history.MAX_ROWS, server.COACH_TRAINING_CHANGE_LIMIT * 2)
+        self.assertGreaterEqual(change_history.MAX_ROWS, coach_limits.COACH_TRAINING_CHANGE_LIMIT * 2)
 
     def test_complete_plan_replacement_rejects_oversized_history_atomically(self):
         old = server.local_plan_creation_service().save([{
@@ -6667,7 +6668,7 @@ class CoachTests(unittest.TestCase):
 
 
     def test_structured_training_reads_expose_complete_bounded_plan(self):
-        for index in range(server.COACH_TRAINING_CHANGE_LIMIT):
+        for index in range(coach_limits.COACH_TRAINING_CHANGE_LIMIT):
             server.planned_unit_service().create({
                 "date": (date(2098, 1, 1) + timedelta(days=index)).isoformat(),
                 "sport": "Ride", "name": f"Session {index}", "description": "- 30m 60% easy",
@@ -6677,12 +6678,12 @@ class CoachTests(unittest.TestCase):
             "read_training_state", {}, intent=intent, conversation_id="read-plan", client_turn_id="read-plan",
             session_csrf_hash="", sync_job_ids=[],
         )
-        self.assertEqual(len(state["planned_units"]), server.COACH_TRAINING_CHANGE_LIMIT)
+        self.assertEqual(len(state["planned_units"]), coach_limits.COACH_TRAINING_CHANGE_LIMIT)
         listed = server.coach_tool_dispatch_service().execute(
-            "list_planned_workouts", {"limit": server.COACH_TRAINING_CHANGE_LIMIT}, intent=intent,
+            "list_planned_workouts", {"limit": coach_limits.COACH_TRAINING_CHANGE_LIMIT}, intent=intent,
             conversation_id="read-plan", client_turn_id="read-plan", session_csrf_hash="", sync_job_ids=[],
         )
-        self.assertEqual(len(listed["local"]), server.COACH_TRAINING_CHANGE_LIMIT)
+        self.assertEqual(len(listed["local"]), coach_limits.COACH_TRAINING_CHANGE_LIMIT)
 
     def test_structured_training_state_filters_inactive_rows_before_limit(self):
         with patch(

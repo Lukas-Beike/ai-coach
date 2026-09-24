@@ -7,6 +7,7 @@ import unittest
 
 from test_coach_dialogue import DialogueHarness, server
 
+from backend.coach import limits as coach_limits
 from backend.planning.training_plans import COACH_PLAN_CONSTRAINTS_PREFIX
 
 
@@ -80,7 +81,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
         service = server.coach_training_patch_service()
         for arguments in (
             {"changes": [], "workouts": []},
-            {"changes": [], "workouts": [self.workout()] * (server.COACH_TRAINING_CHANGE_LIMIT + 1)},
+            {"changes": [], "workouts": [self.workout()] * (coach_limits.COACH_TRAINING_CHANGE_LIMIT + 1)},
         ):
             with self.subTest(size=len(arguments["workouts"])), self.assertRaises(server.AppError) as error:
                 service.apply(arguments, self.action("local_plan"))
