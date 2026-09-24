@@ -6867,8 +6867,8 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - PR #774 wurde am 24.09.2026 um 03:57:52 UTC mit Squash-Commit
   `fb413ae79961b37aecd5153941ebda00544d82dd` gemergt;
   der Commit ist auf `origin/develop` erreichbar, null offene Threads.
-  SonarCloud, CodeQL, Unit-/Container-, Qualitäts- und Codex-Checks
-  **PASS**; Browser lief unmittelbar nach dem Merge noch nach.
+  SonarCloud, CodeQL, Unit-/Container-, Qualitäts-, Browser- und
+  Codex-Checks **PASS**.
 - Root verlagerte Nachricht-/Turn-ID-Grenzen, frühe Cancellation,
   Session-Owner-Prüfung, idempotentes Completed-Read,
   15-Minuten-Stale-Recovery, gespeicherte Provider-/Modellwahl,
@@ -6887,3 +6887,9 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Zeilen, P0=0. Root prüfte den tatsächlichen Quell-Diff samt
   Session-/DB-Grenze, Providerwahl, Stale-Cutoff und allen Aufrufern:
   **PASS**. Integrationsreview und PR-Gates ausstehend.
+- Quellcommit `d5ffe493` wurde auf dem #774-Merge konfliktfrei als
+  `3b526915` integriert. Root prüfte den konkreten Integrationsdiff,
+  Session-/Owner-/Stale-/Provider-Aufrufer und den vorläufigen
+  Server-Adapter erneut: **PASS**. Ruff, Compileall, Inventar-/Diff-
+  Check und frisches Read-only-Docker-Image mit 2.589 Tests/11 Skips
+  **PASS**. PR-CI/Sonar/Codex stehen aus.
