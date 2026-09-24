@@ -6766,3 +6766,24 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   2.566 Tests/11 Skips, Compileall, Inventar- und Diff-Check **PASS**.
   Erneute externe Sonar-/Browser-/Codex-Prüfung des korrigierten Heads
   steht vor Merge aus.
+
+## P8 Chat-Statusprojektion — sequenziell integrierter Stand
+
+- PR #771 wurde am 24.09.2026 um 03:16:42 UTC als Squash-Commit
+  `d912ca1059fd80d531af85d5d8f050d2d803cb61` gemergt;
+  `origin/develop` enthält ihn. SonarCloud, CodeQL, alle Test-/Container-,
+  Browser- und Codex-Checks **PASS**, null offene Review-Threads.
+- GPT-6-Luna-Commit `514ca611f6896481f846c4d88e7068f67df792f4`
+  wurde auf diesem Merge konfliktfrei als `be267d97` integriert. Root
+  prüfte den tatsächlichen Quell- und Integrationsdiff samt
+  `CoachJobSubmissionService.active()`-Sessiongrenze: **PASS**. Der
+  Service besitzt Attached-Priorität und Background-/Idle-Projektion;
+  `server.py` enthält keinen `chat_stream_status`-Wrapper mehr.
+- Fünf direkte Statusfälle prüfen Priorität, exakte Antwortformen und
+  fremde Sessions. Zwei migrierte Server-Aufrufer und ein Architekturtest
+  sichern die neue Lookup-Stelle. Integriert: 14 fokussierte Tests,
+  Ruff, Compileall, Inventar-/Diff-Check und frisches Read-only-Docker-
+  Image mit 2.571 Tests/11 Skips **PASS**. Keine echten Provider- oder
+  Athletendaten. `server.py`: 3.941 physische Zeilen, P0=0.
+  PR-CI und externe Reviews für diesen Stand stehen noch aus;
+  Gesamt-Turn-/Worker-Orchestrierung bleibt P8-offen.
