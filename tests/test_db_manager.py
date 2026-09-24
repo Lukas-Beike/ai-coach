@@ -62,6 +62,20 @@ class DatabaseManagerTests(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM records").fetchone()[0], 4)
             manager.close()
 
+    def test_reader_nested_in_unit_of_work_reuses_writer_and_sees_uncommitted_row(self):
+        with tempfile.TemporaryDirectory() as root:
+            manager = self.make_manager(root)
+            with manager.unit_of_work() as writer:
+                writer.execute("CREATE TABLE records (value TEXT NOT NULL)")
+                writer.execute("INSERT INTO records(value) VALUES ('pending')")
+                with manager.reader() as reader:
+                    self.assertIs(reader, writer)
+                    self.assertEqual(
+                        reader.execute("SELECT value FROM records").fetchone()[0],
+                        "pending",
+                    )
+            manager.close()
+
     def test_restore_drain_closes_connections_and_resumes_current_database(self):
         with tempfile.TemporaryDirectory() as root:
             manager = self.make_manager(root)

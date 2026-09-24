@@ -10,8 +10,20 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import test_server as fixtures
-from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data, normalize_range_records
+from backend.http_api.rate_limit import RateLimiter
+from backend.performance import context as performance_context
+from backend.performance import garmin_metrics as performance_garmin_metrics
+from backend.performance import history as performance_history
+from backend.providers.garmin import (
+    GarminCollectionOptions,
+    collect_garmin_data,
+    normalize_range_records,
+)
 from backend.runtime import maintenance as runtime_maintenance
+from backend.sync import garmin as garmin_sync
+from backend.sync import garmin_service
+from backend.sync.intervals import IntervalsSnapshotReader
+from backend.sync.worker import SyncJobWorker
 
 server = fixtures.server
 
@@ -60,7 +72,7 @@ class ProviderReviewTests(unittest.TestCase):
             "provider_sync": {"calendar_window": {"start": "2025-01-01"}, "pagination": {"activities": {"complete": True}}},
             "historical_sync": {"window": "past"},
         }
-        server.save_snapshot(initial)
+        server.sync_state_repository().save_snapshot(initial)
         entered, release = threading.Event(), threading.Event()
         errors = []
 
@@ -74,22 +86,22 @@ class ProviderReviewTests(unittest.TestCase):
 
         def refresh():
             try:
-                server.refresh_current_performance()
+                server.performance_refresh_service().refresh()
             except Exception as exc:
                 errors.append(exc)
 
-        with patch.object(server.IntervalsClient, "fetch_performance_snapshot", side_effect=fetch):
+        with patch.object(IntervalsSnapshotReader, "fetch_performance_snapshot", side_effect=fetch):
             worker = threading.Thread(target=refresh)
             worker.start()
             self.assertTrue(entered.wait(5))
             latest = {**initial, "recent_activities": [{"id": "concurrent"}],
                       "raw_provider_data": {**initial["raw_provider_data"], "activities": [{"id": "concurrent", "extra": "new"}]}}
-            server.save_snapshot(latest)
+            server.sync_state_repository().save_snapshot(latest)
             release.set()
             worker.join(5)
         self.assertFalse(worker.is_alive())
         self.assertEqual(errors, [])
-        saved = server.latest_snapshot()
+        saved = server.sync_state_repository().latest_snapshot()
         self.assertEqual(saved["recent_activities"], latest["recent_activities"])
         self.assertEqual(saved["raw_provider_data"]["activities"], latest["raw_provider_data"]["activities"])
         self.assertEqual(saved["provider_sync"]["calendar_window"], initial["provider_sync"]["calendar_window"])
@@ -107,13 +119,13 @@ class ProviderReviewTests(unittest.TestCase):
                 entered.set()
                 release.wait(5)
                 with runtime_maintenance.MAINTENANCE_GATE.operation():
-                    server.save_snapshot({"synced_at": "synthetic", "recent_activities": [{"id": "private"}]})
+                    server.sync_state_repository().save_snapshot({"synced_at": "synthetic", "recent_activities": [{"id": "private"}]})
             except Exception as exc:
                 errors.append(exc)
 
         def erase():
             with runtime_maintenance.MAINTENANCE_GATE.operation():
-                server.delete_local_data()
+                server.privacy_delete_service().delete()
             deleted.set()
 
         worker = threading.Thread(target=writer)
@@ -127,31 +139,26 @@ class ProviderReviewTests(unittest.TestCase):
         deletion.join(5)
         self.assertEqual(errors, [])
         self.assertTrue(deleted.is_set())
-        self.assertIsNone(server.latest_snapshot())
+        self.assertIsNone(server.sync_state_repository().latest_snapshot())
         self.assertEqual(runtime_maintenance.MAINTENANCE_GATE.state(), {"active": False, "running_operations": 0})
 
-    def test_privacy_delete_discards_queued_and_claimed_provider_payloads(self):
-        server.enqueue_sync_job("intervals", "refresh", {"days": 7})
-        claimed = server._claim_sync_job()
-        server.enqueue_sync_job("garmin", "refresh", {"days": 7})
-        server.delete_local_data()
-        with patch.object(server, "_execute_sync_job") as execute:
-            server._run_claimed_sync_job(claimed)
-        execute.assert_not_called()
-        self.assertIsNone(server._claim_sync_job())
-        self.assertEqual(server.sync_jobs_state(), [])
+    def test_privacy_delete_discards_queued_provider_payloads(self):
+        server.sync_job_queue_service().enqueue("intervals", "refresh", {"days": 7})
+        server.sync_job_queue_service().enqueue("garmin", "refresh", {"days": 7})
+        server.privacy_delete_service().delete()
+        self.assertIsNone(server.sync_job_store().claim())
+        self.assertEqual(server.sync_job_queue_service().list(), [])
 
     def test_privacy_delete_discards_claimed_coach_payload_without_failure_write(self):
         job = {"_maintenance_generation": runtime_maintenance.MAINTENANCE_GATE.current_generation()}
-        server.delete_local_data()
-        with patch.object(server, "chat_with_coach") as coach, patch.object(server, "_persist_structured_command_failure") as failure:
-            server._run_background_coach_job(job)
+        server.privacy_delete_service().delete()
+        with patch("backend.coach.chat_turn.CoachChatTurnService.run") as coach, patch("backend.coach.turn_failures.CoachTurnFailureService.persist") as failure:
+            server.coach_background_job_runner().run(job)
         coach.assert_not_called()
         failure.assert_not_called()
 
     def test_running_job_failure_cleanup_is_drained_before_deletion(self):
-        server.enqueue_sync_job("intervals", "refresh", {"days": 7})
-        job = server._claim_sync_job()
+        server.sync_job_queue_service().enqueue("intervals", "refresh", {"days": 7})
         entered, release, deleted = threading.Event(), threading.Event(), threading.Event()
 
         def execute(_job):
@@ -161,34 +168,44 @@ class ProviderReviewTests(unittest.TestCase):
             raise server.AppError(400, "Synthetic provider failure")
 
         def erase():
-            server.delete_local_data()
+            server.privacy_delete_service().delete()
             deleted.set()
 
-        with patch.object(server, "_execute_sync_job", side_effect=execute):
-            worker = threading.Thread(target=server._run_claimed_sync_job, args=(job,))
+        executor = server.sync_job_executor()
+        sync_worker = SyncJobWorker(
+            server.sync_job_store(),
+            executor,
+            runtime_maintenance.MAINTENANCE_GATE,
+            0.01,
+        )
+        with patch.object(executor, "execute", side_effect=execute):
+            worker = threading.Thread(target=sync_worker.run_loop)
             worker.start()
             self.assertTrue(entered.wait(5))
             deletion = threading.Thread(target=erase)
             deletion.start()
             self.assertFalse(deleted.wait(.05))
             release.set()
+            sync_worker.stop()
             worker.join(5)
             deletion.join(5)
+        self.assertFalse(worker.is_alive())
         self.assertTrue(deleted.is_set())
         self.assertFalse(server.get_kv("private_after_fetch"))
-        self.assertEqual(server.sync_jobs_state(), [])
+        self.assertEqual(server.sync_job_queue_service().list(), [])
 
     def test_utf8_login_does_not_normalize_password_or_expose_it(self):
         for password in ("synthetic-ascii-123", "synthetic-\u00e4\u00f6\u00fc-123", "synthetic-\U0001f6b4-123"):
             with self.subTest(kind="utf8"), patch.object(server, "CONFIG", replace(server.CONFIG, app_password=password)), \
                     patch.object(server.app_config, "security_configuration_error", return_value=None), \
-                    patch.object(server, "allow_rate", return_value=(True, 0)):
+                    patch.object(RateLimiter, "allow", autospec=True, return_value=(True, 0)) as rate_limit:
                 # The storage fixture stays SQLite; login uses the real comparison and session SQL.
                 with patch.object(server, "database_manager", return_value=self.manager_for_login()):
-                    result = server.login_user(Mock(client_address=("127.0.0.1", 0)), password)
+                    result = server.session_auth_service().login_user(Mock(client_address=("127.0.0.1", 0)), password)
                     self.assertTrue(result["authenticated"])
+                    rate_limit.assert_called_with(server.RATE_LIMITER, "login:127.0.0.1", 5, 900)
                     with self.assertRaises(server.AppError) as error:
-                        server.login_user(Mock(client_address=("127.0.0.1", 0)), password + "x")
+                        server.session_auth_service().login_user(Mock(client_address=("127.0.0.1", 0)), password + "x")
                     self.assertEqual(error.exception.status, 401)
                     self.assertNotIn(password, error.exception.message)
 
@@ -207,33 +224,36 @@ class ProviderReviewTests(unittest.TestCase):
             for historical in (False, True):
                 with self.subTest(source=source, historical=historical):
                     server.set_kv("garmin_snapshot", json.dumps(previous))
-                    server.update_provider_sync_cursor("garmin", "data", "2026-09-01", "synthetic")
-                    server.update_provider_sync_cursor("garmin", "historical", "2026-08-01", "synthetic")
+                    server.sync_state_repository().update_cursor("garmin", "data", "2026-09-01", "synthetic")
+                    server.sync_state_repository().update_cursor("garmin", "historical", "2026-08-01", "synthetic")
                     payload = {"synced_at": "2026-09-05T00:00:00+00:00", "start": "2026-08-01", "end": "2026-09-05",
                                "errors": [{"source": source, "message": "synthetic outage"}],
                                "provider_sync": {"pagination": {"activities": {"complete": source != "activities"}}}}
-                    with patch.object(server, "mark_daily_sync") as mark, patch.object(
-                        server, "Garmin", return_value=client
-                    ), patch.object(server, "collect_garmin_data", return_value=payload):
-                        result = server.sync_garmin(days=2, end_date=date(2026, 8, 30) if historical else None)
-                    if historical:
-                        mark.assert_not_called()
-                    else:
-                        mark.assert_called_once_with("garmin")
-                    saved = server.garmin_snapshot()
+                    with patch.object(
+                        server.GarminClientFactory, "available", return_value=True
+                    ), patch.object(
+                        server.GarminClientFactory, "create", return_value=client
+                    ), patch.object(
+                        garmin_service, "collect_garmin_data", return_value=payload
+                    ):
+                        result = server.garmin_sync_service().sync(
+                            days=2,
+                            end_date=date(2026, 8, 30) if historical else None,
+                        )
+                    saved = server.garmin_payload_service().snapshot()
                     self.assertEqual(saved[source], previous[source])
                     self.assertEqual(saved["source_freshness"][source]["fetched_at"], previous["source_freshness"][source]["fetched_at"])
                     self.assertEqual(saved["source_freshness"][source]["freshness"], "stale")
                     self.assertEqual(result["status"], "partial")
-                    self.assertEqual(server.provider_sync_cursor("garmin", "data")["cursor"], "2026-09-01")
-                    self.assertEqual(server.provider_sync_cursor("garmin", "historical")["cursor"], "2026-08-01")
+                    self.assertEqual(server.sync_state_repository().cursor("garmin", "data")["cursor"], "2026-09-01")
+                    self.assertEqual(server.sync_state_repository().cursor("garmin", "historical")["cursor"], "2026-08-01")
 
     def test_garmin_raw_duplicate_records_survive_fixture_and_sdk_sync(self):
         original = {"activityId": 123, "activityName": "Synthetic ride", "startTimeLocal": "2026-09-04 10:00:00",
                     "activityType": {"typeKey": "cycling"}, "duration": 3600, "distance": 30000,
                     "garmin_specific": {"sample": "preserved"}}
         intervals = {"id": "canonical", "start_date_local": "2026-09-04T10:00:00", "type": "Ride", "moving_time": 3600, "distance": 30000}
-        server.save_snapshot({"synced_at": "synthetic", "recent_activities": [intervals]})
+        server.sync_state_repository().save_snapshot({"synced_at": "synthetic", "recent_activities": [intervals]})
         for fixture in (False, True):
             with self.subTest(fixture=fixture):
                 payload = {"synced_at": "2026-09-05T00:00:00+00:00", "start": "2026-09-04", "end": date.today().isoformat(),
@@ -241,17 +261,18 @@ class ProviderReviewTests(unittest.TestCase):
                            "provider_sync": {"pagination": {"activities": {"complete": True}}}}
                 client = Mock()
                 client.login.return_value = (False, None)
-                with patch.object(server, "Garmin", return_value=client), \
-                        patch.object(server, "garmin_fixture_path", return_value=Path("synthetic.json") if fixture else None), \
-                        patch.object(server, "load_garmin_fixture", return_value=payload), \
-                        patch.object(server, "collect_garmin_data", return_value=payload):
-                    result = server.sync_garmin(days=2)
+                with patch.object(server.GarminClientFactory, "available", return_value=True), \
+                        patch.object(server.GarminClientFactory, "create", return_value=client), \
+                        patch.object(garmin_sync.GarminFixtureLoader, "path", return_value=Path("synthetic.json") if fixture else None), \
+                        patch.object(garmin_sync.GarminFixtureLoader, "load", return_value=payload), \
+                        patch.object(garmin_service, "collect_garmin_data", return_value=payload):
+                    result = server.garmin_sync_service().sync(days=2)
                 self.assertEqual(result["status"], "ok")
-                self.assertEqual(server.garmin_snapshot()["activities"], [original])
-                self.assertEqual(server.garmin_public_state()["activities"], 0)
-                self.assertEqual(server.garmin_snapshot()["activity_matches"], [{"garmin_activity_id": 123, "intervals_activity_id": "canonical"}])
-                self.assertEqual(server.provider_sync_cursor("garmin", "data")["cursor"], payload["end"])
-                context = server.build_training_context()
+                self.assertEqual(server.garmin_payload_service().snapshot()["activities"], [original])
+                self.assertEqual(server.garmin_projection_service().public_state()["activities"], 0)
+                self.assertEqual(server.garmin_payload_service().snapshot()["activity_matches"], [{"garmin_activity_id": 123, "intervals_activity_id": "canonical"}])
+                self.assertEqual(server.sync_state_repository().cursor("garmin", "data")["cursor"], payload["end"])
+                context = server.coach_training_context_service().build()
                 self.assertNotIn("garmin_specific", context)
                 self.assertEqual(context.count('"id":"canonical"'), 1)
 
@@ -260,19 +281,28 @@ class ProviderReviewTests(unittest.TestCase):
                  "cycling_ftp": {"calendarDate": "2026-08-30", "functionalThresholdPower": 302},
                  "readiness": {"calendarDate": "2026-09-01", "score": 73},
                  "weight": {"calendarDate": "2026-08-31", "weight": 72}}
-        server.merge_garmin_sources(first, {})
-        server.append_garmin_performance_history(first, {})
+        garmin_sync.merge_sources(first, {})
+        performance_history.append_garmin_performance_history(
+            first, {}, server.local_now().date()
+        )
         history = first["performance_history"]
         self.assertEqual([row["date"] for row in history], ["2026-08-30", "2026-08-31", "2026-09-01"])
         for failed in (True, False):
             second = {"synced_at": "2026-09-05T09:00:00+00:00", "errors": [
                 {"source": source, "message": "synthetic outage"} for source in ("cycling_ftp", "readiness", "weight")
             ] if failed else [], "activities": [{"activityId": 8, "startTimeLocal": "2025-02-01T12:00:00"}]}
-            server.merge_garmin_sources(second, first)
-            server.append_garmin_performance_history(second, first)
+            garmin_sync.merge_sources(second, first)
+            performance_history.append_garmin_performance_history(
+                second, first, server.local_now().date()
+            )
             server.set_kv("garmin_snapshot", json.dumps(second))
-            server.save_snapshot({"synced_at": second["synced_at"], "athlete": {}, "recent_wellness": [], "recent_activities": []})
-            public = server.current_performance_context()
+            server.sync_state_repository().save_snapshot({"synced_at": second["synced_at"], "athlete": {}, "recent_wellness": [], "recent_activities": []})
+            public = performance_context.current_performance_context(
+                server.sync_state_repository().latest_snapshot(),
+                server.garmin_payload_service().snapshot(),
+                server.profile_service().get(),
+                server.local_now().date(),
+            )
             for key in ("cycling_ftp_watts", "weight_kg"):
                 data = public["metrics"][key]
                 self.assertEqual(data["freshness"], "stale")
@@ -282,10 +312,10 @@ class ProviderReviewTests(unittest.TestCase):
             readiness = public["recovery"]["source_freshness"]["readiness"]
             self.assertEqual(readiness["freshness"], "stale")
             self.assertEqual(readiness["observed_at"], "2026-09-01")
-            self.assertEqual(server.garmin_public_state()["source_freshness"]["readiness"]["fetched_at"], first["synced_at"])
-            coach = server.garmin_coach_context(include_performance=True)
+            self.assertEqual(server.garmin_projection_service().public_state()["source_freshness"]["readiness"]["fetched_at"], first["synced_at"])
+            coach = server.garmin_projection_service().coach_context(include_performance=True)
             self.assertEqual(coach["performance"]["thresholds"]["cycling_ftp_watts"]["freshness"], "stale")
-            context = server.build_training_context()
+            context = server.coach_training_context_service().build()
             self.assertIn('"freshness":"stale"', context)
             self.assertIn('"observed_at":"2026-08-30"', context)
             self.assertEqual(second["performance_history"], history)
@@ -293,9 +323,13 @@ class ProviderReviewTests(unittest.TestCase):
     def test_undated_successful_metrics_do_not_fabricate_observation_history(self):
         payload = {"synced_at": "2026-09-05T09:00:00+00:00", "errors": [],
                    "cycling_ftp": {"functionalThresholdPower": 300}}
-        server.merge_garmin_sources(payload, {})
-        server.append_garmin_performance_history(payload, {})
-        metric = server.garmin_performance_metrics(payload)["cycling_ftp_watts"]
+        garmin_sync.merge_sources(payload, {})
+        performance_history.append_garmin_performance_history(
+            payload, {}, server.local_now().date()
+        )
+        metric = performance_garmin_metrics.garmin_performance_metrics(
+            payload, server.local_now().date()
+        )["cycling_ftp_watts"]
         self.assertEqual(metric["freshness"], "current")
         self.assertIsNone(metric["observed_at"])
         self.assertEqual(metric["fetched_at"], payload["synced_at"])
@@ -304,13 +338,19 @@ class ProviderReviewTests(unittest.TestCase):
     def test_backfill_does_not_redate_retained_activity_maximum(self):
         first = {"synced_at": "2026-09-01T09:00:00+00:00", "errors": [],
                  "activities": [{"activityId": 1, "startTimeLocal": "2026-08-31T12:00:00", "activityType": "cycling", "maxHR": 180}]}
-        server.merge_garmin_sources(first, {})
-        server.append_garmin_performance_history(first, {})
+        garmin_sync.merge_sources(first, {})
+        performance_history.append_garmin_performance_history(
+            first, {}, server.local_now().date()
+        )
         second = {"synced_at": "2026-09-05T09:00:00+00:00", "errors": [],
                   "activities": [{"activityId": 2, "startTimeLocal": "2025-02-01T12:00:00", "activityType": "cycling", "maxHR": 150}]}
-        server.merge_garmin_sources(second, first)
-        server.append_garmin_performance_history(second, first)
-        metric = server.garmin_performance_metrics(second)["cycling_max_hr_bpm"]
+        garmin_sync.merge_sources(second, first)
+        performance_history.append_garmin_performance_history(
+            second, first, server.local_now().date()
+        )
+        metric = performance_garmin_metrics.garmin_performance_metrics(
+            second, server.local_now().date()
+        )["cycling_max_hr_bpm"]
         self.assertEqual(metric["value"], 180)
         self.assertEqual(metric["observed_at"], "2026-08-31")
         self.assertEqual(second["performance_history"], first["performance_history"])
@@ -332,11 +372,12 @@ class ProviderReviewTests(unittest.TestCase):
         encrypted_path = Path(self.directory.name) / "encrypted.db"
         configured = replace(server.CONFIG, app_password="synthetic-\u00e4-\U0001f6b4-123")
         with patch.object(server, "DB_PATH", encrypted_path), patch.object(server, "CONFIG", configured), \
-                patch.object(server, "allow_rate", return_value=(True, 0)):
+                patch.object(RateLimiter, "allow", autospec=True, return_value=(True, 0)) as rate_limit:
             server.initialise_database()
             server.set_kv("marker", "fresh")
-            result = server.login_user(Mock(client_address=("127.0.0.1", 0)), configured.app_password)
+            result = server.session_auth_service().login_user(Mock(client_address=("127.0.0.1", 0)), configured.app_password)
             self.assertTrue(result["authenticated"])
+            rate_limit.assert_called_with(server.RATE_LIMITER, "login:127.0.0.1", 5, 900)
             server.database_manager().close()
             server.DATABASE_MANAGER = None
             server.DATABASE_MANAGER_SIGNATURE = None
@@ -367,7 +408,7 @@ class GarminRangeContractTests(unittest.TestCase):
                 result = self.collect([{"hrvSummaries": [{"calendarDate": "2026-09-01", "lastNightAvg": 51}]}, value])
                 self.assertEqual(len(result["hrv"]), 1)
                 self.assertFalse(result["provider_sync"]["pagination"]["hrv"]["complete"])
-                self.assertFalse(server.garmin_collection_complete(result))
+                self.assertFalse(garmin_sync.collection_complete(result))
         self.assertEqual(normalize_range_records("hrv", {"hrvSummaries": []}), [])
         self.assertEqual(normalize_range_records("hrv", []), [])
 

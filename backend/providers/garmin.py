@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
+try:
+    from garminconnect import Garmin as GarminClient
+except ImportError:  # Optional dependency for installations without Garmin enabled.
+    GarminClient = None  # type: ignore[assignment,misc]
+
 
 ExternalCall = Callable[[str, str, Callable[[], Any], dict[str, Any] | None], Any]
 Redact = Callable[[str], str]
@@ -27,6 +32,20 @@ CapabilitySuccess = Callable[[str], None]
 class GarminCollectionOptions:
     include_recovery: bool = True
     include_current_metrics: bool = True
+
+
+class GarminClientFactory:
+    """Create the optional Garmin SDK client without leaking it into the app root."""
+
+    @staticmethod
+    def available() -> bool:
+        return GarminClient is not None
+
+    @staticmethod
+    def create(email: str | None, password: str | None) -> Any:
+        if GarminClient is None:
+            raise RuntimeError("The optional Garmin client library is unavailable.")
+        return GarminClient(email, password)
 
 
 def normalize_range_records(source: str, value: Any) -> list[dict[str, Any]]:

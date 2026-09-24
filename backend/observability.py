@@ -70,6 +70,22 @@ def safe_url_netloc(parsed: Any) -> str:
     return f"{host}:{port}" if port else host
 
 
+def safe_response_headers(headers: Any, *, redact: Callable[[str], str]) -> dict[str, str]:
+    """Keep only bounded transport headers suitable for diagnostics."""
+    if headers is None:
+        return {}
+    allowed = {"content-type", "content-length", "date", "retry-after", "server"}
+    result: dict[str, str] = {}
+    try:
+        for key, value in headers.items():
+            name = str(key).strip().casefold()
+            if name in allowed or name.startswith("x-ratelimit-"):
+                result[name] = redact(str(value))[:160]
+    except (AttributeError, TypeError, ValueError, RuntimeError):
+        return {}
+    return result
+
+
 def safe_provider_path(path: str) -> str:
     """Keep route structure while removing provider resource identifiers."""
     safe_segments = []

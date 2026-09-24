@@ -1,7 +1,7 @@
 """Fresh SQLCipher runtime for local integration tests; all providers are blocked."""
+import json
 import os
 import sys
-import json
 from datetime import timedelta
 
 # This file is mounted only in disposable test containers, never normal startup.
@@ -25,12 +25,19 @@ def blocked_provider(*args, **kwargs):
     raise server.AppError(503, "Synthetic provider unavailable", reason="fixture_provider_unavailable")
 
 
-server.http_json = blocked_provider
-server.ensure_conversation = lambda *args, **kwargs: "fixture-conversation"
+server.provider_http.JsonHttpClient.request = blocked_provider
+
+
+class FixtureConversationProvisionService:
+    def ensure(self, *args, **kwargs):
+        return "fixture-conversation"
+
+
+server.coach_conversation_provision_service = FixtureConversationProvisionService
 # Browser scenarios deliberately poll and reload the single disposable fixture
 # far more aggressively than one athlete does. Rate limiting has dedicated unit
-# coverage; keeping it active here makes unrelated UI scenarios order-dependent.
-server.allow_rate = lambda *args, **kwargs: (True, 0)
+# coverage; disable it here to keep unrelated UI scenarios order-independent.
+server.RATE_LIMITER.allow = lambda key, limit, window_seconds: (True, 0)
 
 
 def fixture_coach_response(payload, **kwargs):
@@ -57,24 +64,44 @@ def fixture_coach_response(payload, **kwargs):
                         "call_id": f"fixture-dialogue-{current_id}", "arguments": json.dumps(arguments)}]}
 
 
-server.responses_request = fixture_coach_response
-server.responses_background_request = fixture_coach_response
-# The application uses the streaming path for browser chat. Reuse the canned
-# response so the fixture remains provider-free while exercising the UI flow.
-server.responses_stream_request = lambda payload, on_text_delta, cancel_event=None, on_response_id=None: fixture_coach_response(payload)
+class FixtureResponseTransport:
+    """Provider-free adapter for the canned browser conversation fixture."""
+
+    def request(self, payload):
+        return fixture_coach_response(payload)
+
+    def background_request(self, payload, *, response_id=None, on_response_id=None, cancel_event=None):
+        return fixture_coach_response(
+            payload,
+            response_id=response_id,
+            on_response_id=on_response_id,
+            cancel_event=cancel_event,
+        )
+
+    def stream_request(self, payload, on_text_delta, cancel_event=None, on_response_id=None):
+        # Preserve the fixture's previous behavior: no synthetic text deltas.
+        return fixture_coach_response(
+            payload,
+            on_text_delta=on_text_delta,
+            cancel_event=cancel_event,
+            on_response_id=on_response_id,
+        )
+
+
+server.coach_response_transport = FixtureResponseTransport
 initialise = server.initialise_database
 artifact = {}
 
 
 def stage_fixture_artifact():
     today = server.local_now().date()
-    artifact.update(server._stage_coach_artifact("fixture-conversation", "fixture-stage", {
+    artifact.update(server.training_plan_artifact_service().stage({"payload": {
         "plan_name": "Fixture sport contract",
         "workouts": [{"date": (today + timedelta(days=index)).isoformat(), "name": f"HTTP fixture {sport}", "sport": sport, "duration_minutes": 30,
                       "description": {"Run": "- 30m Z1 HR", "WeightTraining": "Synthetic local workout",
                                       "VirtualRide": "- 30m 60%", "Swim": "- 30m Z1 Pace"}[sport]}
                      for index, sport in enumerate(("Run", "WeightTraining", "VirtualRide", "Swim"))],
-    }))
+    }}, "fixture-conversation", "fixture-stage"))
 
 
 def initialise_fixture():
@@ -86,7 +113,7 @@ class FixtureHandler(server.RequestHandler):
     def do_GET(self):
         if self.path == "/api/fixture/plan":
             try:
-                server.require_auth(self)
+                self.auth_service.require_auth(self)
                 with server.DB_LOCK, server.database() as db:
                     current = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact.get("artifact_id"),)).fetchone()
                 if not current or current["status"] != "draft":

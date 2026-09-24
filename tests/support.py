@@ -7,6 +7,19 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
+from backend.coach import streams as coach_streams
+
+
+def build_gemini_request_payload(server, payload, model):
+    """Exercise the concrete Gemini request owner with active test settings."""
+    return server.gemini_request_payload_service().build(
+        payload,
+        model,
+        default_max_output_tokens=server.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+        default_thinking_level=server.SETTINGS.selected_thinking_level(),
+        json_media_type=server.JSON_MEDIA_TYPE,
+    )
+
 
 class IntervalsRequestRecorder:
     """Record only safe request metadata for provider contract tests."""
@@ -125,13 +138,15 @@ def isolated_server(server, root: Path, *, app_password: str = ""):
 def create_test_session(server) -> str:
     """Create one authenticated session without depending on a test case."""
     import uuid
+    from backend.http_api.auth import SESSION_TTL_SECONDS
 
     token = f"session-{uuid.uuid4().hex}"
     now = server.time.time()
+    auth = server.session_auth_service()
     with server.DB_LOCK, server.database() as db:
         db.execute(
             "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-            (server.session_token_hash(token), server.session_token_hash("csrf"), now + server.SESSION_TTL_SECONDS, server.utc_now(), server.utc_now()),
+            (auth.session_token_hash(token), auth.session_token_hash("csrf"), now + SESSION_TTL_SECONDS, server.utc_now(), server.utc_now()),
         )
     return token
 
@@ -149,8 +164,6 @@ def reset_application_state(server) -> None:
     with server.DB_LOCK, server.database() as db:
         for table in tables:
             db.execute(f"DELETE FROM {table}")
-    server.save_profile({})
-    with server.CHAT_STREAM_LOCK:
-        server.CHAT_STREAMS.clear()
-        server.COACH_JOB_CANCEL_EVENTS.clear()
+    server.profile_service().save({})
+    coach_streams.CHAT_STREAM_REGISTRY.clear_state()
 

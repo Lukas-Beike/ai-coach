@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 from datetime import date
 from typing import Any
+
+from backend.errors import AppError
+
+
+def coach_session_key(session_csrf_hash: str) -> str:
+    """Bind persisted Coach work to a session without storing its CSRF hash."""
+    return hashlib.sha256(str(session_csrf_hash or "").encode("utf-8")).hexdigest()
 
 
 REQUEST_SCHEMA = {
@@ -89,6 +97,19 @@ def scope_values(intent: dict[str, Any]) -> set[str]:
     return {str(value).strip()[:120] for value in scope if isinstance(value, str) and value.strip()}
 
 
+def coach_execution_scope(action: dict[str, Any] | None, *, background_horizon_days: int) -> dict[str, Any]:
+    """Describe the local planning workload implied by a structured action."""
+    period = (action or {}).get("period")
+    days = (date.fromisoformat(period["end"]) - date.fromisoformat(period["start"])).days + 1 if period else None
+    return {"planning": bool(period), "horizon_days": days, "planned_units": None,
+            "bulk_change": bool(days and days > background_horizon_days), "background": True}
+
+
+def require_coach_scope(intent: dict[str, Any], *tokens: str) -> None:
+    if not require_scope(intent, *tokens):
+        raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst dieses Objekt nicht.", reason="intent_scope_denied")
+
+
 def authorized_operations(intent: dict[str, Any]) -> set[str]:
     operations = {str(intent.get("operation") or "").strip()}
     follow_ups = intent.get("follow_up_operations")
@@ -103,3 +124,11 @@ def require_scope(intent: dict[str, Any], *tokens: str) -> bool:
 
 def require_operation(intent: dict[str, Any], operation: str) -> bool:
     return operation in authorized_operations(intent)
+
+
+def structured_action_payload(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Return a structured local-action payload or the shared client error."""
+    payload = arguments.get("payload")
+    if isinstance(payload, dict):
+        return payload
+    raise AppError(400, "Diese Aktion benoetigt payload.", reason="invalid_action")

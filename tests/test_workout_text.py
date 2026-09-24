@@ -5,6 +5,7 @@ import unittest
 from copy import deepcopy
 from unittest.mock import patch
 
+from backend.planning import workouts as planning_workouts
 from test_server import server
 from support import parsed_workout_fixture
 
@@ -23,7 +24,7 @@ class WorkoutTextTests(unittest.TestCase):
 
     def assert_invalid(self, workout, reason):
         with self.assertRaises(server.AppError) as raised:
-            server.validate_workout_description(workout)
+            planning_workouts.validate_workout_description(workout)
         self.assertEqual(raised.exception.reason, reason)
 
     def test_screenshot_prose_is_rejected_before_any_provider_write(self):
@@ -39,7 +40,9 @@ class WorkoutTextTests(unittest.TestCase):
                 lambda: client.create_library_workouts([self.workout("- 61m 60%"), workout]),
                 lambda: client.update_library_workout("synthetic", workout),
                 lambda: client.plan_library_workout("synthetic", workout, workout["date"]),
-                lambda: server.workout_event_payload("synthetic", workout),
+                lambda: planning_workouts.workout_event_payload(
+                    "synthetic", workout, today=server.local_now().date()
+                ),
             ):
                 with self.assertRaises(server.AppError):
                     operation()
@@ -50,7 +53,9 @@ class WorkoutTextTests(unittest.TestCase):
     def test_sweetspot_counts_recovery_only_between_efforts(self):
         description = "- 15m 50-70%\n- 15m 88-92%\n- 6m 50-60%\n- 15m 88-92%\n- 10m 50-60%"
         self.assert_invalid(self.workout(description, 65), "workout_duration_mismatch")
-        payload = server.workout_event_payload("synthetic", self.workout(description))
+        payload = planning_workouts.workout_event_payload(
+            "synthetic", self.workout(description), today=server.local_now().date()
+        )
         self.assertEqual(payload["moving_time"], 3660)
         self.assertEqual(payload["description"], description)
 
@@ -76,21 +81,26 @@ class WorkoutTextTests(unittest.TestCase):
             "Cooldown\n- 10m 50-60%"
         )
         workout = self.workout(description, 63)
-        self.assertEqual(server.workout_event_payload("synthetic", workout)["moving_time"], 3780)
+        self.assertEqual(
+            planning_workouts.workout_event_payload(
+                "synthetic", workout, today=server.local_now().date()
+            )["moving_time"],
+            3780,
+        )
         rows = [(900, 50, 70), (180, 80, 80), (180, 50, 60),
                 (480, 88, 92), (240, 50, 60), (480, 88, 92), (240, 50, 60), (480, 88, 92), (600, 50, 60)]
         steps = [{"duration": seconds, "power": {"units": "%ftp", **({"value": low} if low == high else {"start": low, "end": high})}} for seconds, low, high in rows]
         steps[0]["ramp"] = True
         reply = {"type": "Ride", "moving_time": 3780, "icu_training_load": 55, "workout_doc": {"duration": 3780, "steps": steps}}
-        server.validate_intervals_workout_result(workout, reply)
+        planning_workouts.validate_intervals_workout_result(workout, reply)
         # The reported 43-minute graph has lost two efforts and one recovery.
         broken_steps = [step for index, step in enumerate(steps) if index not in {5, 6, 7}]
         with self.assertRaises(server.AppError):
-            server.validate_intervals_workout_result(workout, {**reply, "moving_time": 2580, "workout_doc": {"duration": 2580, "steps": broken_steps}})
+            planning_workouts.validate_intervals_workout_result(workout, {**reply, "moving_time": 2580, "workout_doc": {"duration": 2580, "steps": broken_steps}})
 
     def test_repeats_count_every_rest_and_end_at_blank_line(self):
         workout = self.workout("Warmup\n- 15m 60%\n\nMain set 2x\n- 15m 90%\n- 6m 55%\n\nCooldown\n- 10m 55%", 67)
-        self.assertEqual(server.validate_workout_description(workout), 4020)
+        self.assertEqual(planning_workouts.validate_workout_description(workout), 4020)
         self.assert_invalid({**workout, "duration_minutes": 61}, "workout_duration_mismatch")
 
     def test_missing_or_localized_targets_do_not_silently_lose_load(self):
@@ -107,19 +117,34 @@ class WorkoutTextTests(unittest.TestCase):
 
     def test_composite_and_second_durations_export_exact_seconds(self):
         workout = self.workout("- 1h2m30s Z2\n- 30s Z1\n- 5' Z1\n- 20\" Z1", 68)
-        self.assertEqual(server.workout_event_payload("synthetic", workout)["moving_time"], 4100)
+        self.assertEqual(
+            planning_workouts.workout_event_payload(
+                "synthetic", workout, today=server.local_now().date()
+            )["moving_time"],
+            4100,
+        )
 
     def test_distance_steps_preserve_provider_time_estimation(self):
         workout = self.workout("- 1km Z1 HR\n- 4km Z2 HR\n- 1km Z1 HR", 40, sport="Run", target="HR")
-        self.assertIsNone(server.validate_workout_description(workout))
-        self.assertEqual(server.workout_event_payload("synthetic", workout)["moving_time"], 2400)
+        self.assertIsNone(planning_workouts.validate_workout_description(workout))
+        self.assertEqual(
+            planning_workouts.workout_event_payload(
+                "synthetic", workout, today=server.local_now().date()
+            )["moving_time"],
+            2400,
+        )
 
     def test_mixed_distance_steps_preserve_the_known_timed_subtotal(self):
         for description in ("- 10h Z1 HR\n- 1km Z1 HR", "Main 3x\n- 11m Z1 HR\n- 1km Z1 HR"):
             self.assert_invalid(self.workout(description, 30, sport="Run"), "workout_duration_mismatch")
         workout = self.workout("- 10m Z1 HR\n- 1km Z1 HR", 30, sport="Run")
-        self.assertIsNone(server.validate_workout_description(workout))
-        self.assertEqual(server.workout_event_payload("synthetic", workout)["moving_time"], 1800)
+        self.assertIsNone(planning_workouts.validate_workout_description(workout))
+        self.assertEqual(
+            planning_workouts.workout_event_payload(
+                "synthetic", workout, today=server.local_now().date()
+            )["moving_time"],
+            1800,
+        )
 
     def test_supported_power_hr_and_pace_targets(self):
         for target, suffix in (
@@ -129,7 +154,7 @@ class WorkoutTextTests(unittest.TestCase):
             ("PACE", "5:00-5:30/km Pace"), ("PACE", "2:00/100m-2:30/100m Pace"),
         ):
             with self.subTest(suffix=suffix):
-                self.assertEqual(server.validate_workout_description(self.workout(f"- 30m {suffix}", 30, target=target)), 1800)
+                self.assertEqual(planning_workouts.validate_workout_description(self.workout(f"- 30m {suffix}", 30, target=target)), 1800)
 
     def test_incompatible_workout_target_is_rejected(self):
         self.assert_invalid(self.workout("- 30m Z2", 30, target="HR"), "workout_target_mismatch")
@@ -141,30 +166,34 @@ class WorkoutTextTests(unittest.TestCase):
                 self.assert_invalid(self.workout(description, 30), "invalid_workout_repeat")
 
     def test_strength_remains_free_text(self):
-        self.assertIsNone(server.validate_workout_description(self.workout("Oberkoerperkraft: 3x8 Wiederholungen", 35, sport="WeightTraining")))
+        self.assertIsNone(planning_workouts.validate_workout_description(self.workout("Oberkoerperkraft: 3x8 Wiederholungen", 35, sport="WeightTraining")))
 
     def test_non_endurance_sports_preserve_prose_through_normalization_and_readback(self):
-        for sport in server.INTERVALS_WORKOUT_TYPES - server.INTERVALS_ENDURANCE_WORKOUT_TYPES:
+        for sport in planning_workouts.INTERVALS_WORKOUT_TYPES - planning_workouts.INTERVALS_ENDURANCE_WORKOUT_TYPES:
             with self.subTest(sport=sport):
                 workout = self.workout("Technik und Beweglichkeit nach Bedarf", 30, sport=sport)
-                normalized = server.normalize_workout(workout)
+                normalized = planning_workouts.normalize_workout(
+                    workout, today=server.local_now().date()
+                )
                 self.assertEqual(normalized["description"], workout["description"])
-                payload = server.workout_event_payload("synthetic", normalized)
+                payload = planning_workouts.workout_event_payload(
+                    "synthetic", normalized, today=server.local_now().date()
+                )
                 self.assertEqual(payload["type"], sport)
                 self.assertEqual(payload["moving_time"], 1800)
-                server.validate_intervals_workout_result(normalized, {"type": sport, "moving_time": 1800})
+                planning_workouts.validate_intervals_workout_result(normalized, {"type": sport, "moving_time": 1800})
                 with self.assertRaises(server.AppError):
-                    server.validate_intervals_workout_result(normalized, {"type": "Run"})
+                    planning_workouts.validate_intervals_workout_result(normalized, {"type": "Run"})
 
     def test_all_endurance_families_still_require_executable_steps(self):
-        for sport in server.INTERVALS_ENDURANCE_WORKOUT_TYPES:
+        for sport in planning_workouts.INTERVALS_ENDURANCE_WORKOUT_TYPES:
             with self.subTest(sport=sport):
                 self.assert_invalid(self.workout("Locker trainieren", 30, sport=sport), "missing_workout_steps")
 
     def test_run_cannot_be_confirmed_as_weight_training(self):
         workout = self.workout("- 30m Z1 HR", 30, sport="Run")
         with self.assertRaises(server.AppError) as raised:
-            server.validate_intervals_workout_result(workout, parsed_workout_fixture(sport="WeightTraining", kind="hr", units="hr_zone", value=1))
+            planning_workouts.validate_intervals_workout_result(workout, parsed_workout_fixture(sport="WeightTraining", kind="hr", units="hr_zone", value=1))
         self.assertEqual(raised.exception.reason, "intervals_workout_sport_mismatch")
 
     def test_library_exports_preserve_target_and_local_duration(self):
@@ -184,7 +213,7 @@ class WorkoutTextTests(unittest.TestCase):
     def test_provider_readback_must_confirm_every_step_target_and_calculated_load(self):
         workout = self.workout("- 30m 85%", 30)
         valid = parsed_workout_fixture()
-        server.validate_intervals_workout_result(workout, valid)
+        planning_workouts.validate_intervals_workout_result(workout, valid)
         invalid = [
             {"id": "synthetic", "type": "Ride"}, {**valid, "workout_doc": {}},
             {**valid, "icu_training_load": None}, {**valid, "icu_training_load": 0},
@@ -198,7 +227,7 @@ class WorkoutTextTests(unittest.TestCase):
             invalid.append(reply)
         for reply in invalid:
             with self.subTest(reply=reply), self.assertRaises(server.AppError) as raised:
-                server.validate_intervals_workout_result(workout, reply)
+                planning_workouts.validate_intervals_workout_result(workout, reply)
             self.assertEqual(raised.exception.reason, "intervals_workout_verification_failed")
 
     def test_provider_repeat_reply_is_compared_in_execution_order(self):
@@ -209,10 +238,10 @@ class WorkoutTextTests(unittest.TestCase):
         ]
         reply = {"type": "Ride", "moving_time": 2520, "icu_training_load": 35,
                  "workout_doc": {"duration": 2520, "steps": [{"reps": 2, "steps": steps}]}}
-        server.validate_intervals_workout_result(workout, reply)
+        planning_workouts.validate_intervals_workout_result(workout, reply)
         reply["workout_doc"]["steps"][0]["steps"] = list(reversed(steps))
         with self.assertRaises(server.AppError):
-            server.validate_intervals_workout_result(workout, reply)
+            planning_workouts.validate_intervals_workout_result(workout, reply)
 
 
 if __name__ == "__main__":

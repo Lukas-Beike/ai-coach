@@ -1,8 +1,9 @@
 # Plan: server.py vollständig in fachliche Backend-Module aufteilen
 
-Stand: 14.09.2026. Arbeitsbranch: `docs/backend-logic-boundary`.
-Ausgangscommit: `58e352d`. Status: Plan erstellt, Umsetzung noch nicht begonnen.
-Die Architekturregel in der Root-`AGENTS.md` ist bereits lokal ergänzt.
+Stand: 24.09.2026. P0–P6 und P9 integriert; P7, P8, P10 und P11 in Arbeit.
+Historischer Ausgangscommit: `58e352d`. Die Architekturregel in der
+Root-`AGENTS.md` ist integriert. Aktuelle Commits und offene Befunde stehen
+im `docs/server-extraction-review-log.md`; das Inventar wird pro Stand erzeugt.
 
 ## 1. Ziel und verbindliche Abnahmekriterien
 
@@ -187,16 +188,16 @@ Abnahme: Fachmodule können Fehler, Ressourcen und Events verwenden, ohne
 
 Abhängigkeit: P1.
 
-- [ ] `http_json`, begrenzte Reads, Providerfehler und sichere HTTP-Aufrufe
+- [x] `http_json`, begrenzte Reads, Providerfehler und sichere HTTP-Aufrufe
   mit `providers/http.py` zusammenführen.
   - [x] Request-Body/-Header-Aufbau, begrenzte Erfolgs-/Fehler-Reads,
     abbrechbares Header-Warten samt Response-Handle-Lifecycle und redigierte
     Providerfehler in reine Adapter verschieben.
   - [x] Begrenzte JSON-Request-Ausführung einschließlich Öffnen, Lesen,
     UTF-8-/JSON-Dekodierung, Status-/Header-Metadaten und Cleanup auslagern.
-  - [ ] Netzwerk-, Retry-/Cancellation- und Statusorchestrierung vollständig
+  - [x] Netzwerk-, Retry-/Cancellation- und Statusorchestrierung vollständig
     aus `server.py` entfernen.
-- [ ] OpenAI Request/Response, Background Retrieve/Cancel, SSE-Verarbeitung,
+- [x] OpenAI Request/Response, Background Retrieve/Cancel, SSE-Verarbeitung,
   Usage-/Rate-Limit-Auswertung und Audio-Transkription in konkrete Provider-Module
   ziehen. Nutzungs-Persistenz bleibt außerhalb des reinen Transports.
   - [x] Response-/Fehlerparsing, SSE-Ereignisse, Response-ID-, Payload-,
@@ -208,16 +209,24 @@ Abhängigkeit: P1.
   - [x] Persistierten OpenAI-/Gemini-Status, tägliche Usage und OpenAI-
     Rate-Limits in einem transaktionalen Provider-State-Service besitzen;
     DB-Lock, Manager-Lebenszyklus und redigiertes Logging bleiben eindeutig.
-  - [ ] Request- und Background-Transport einschließlich Abbruch und Polling
+  - [x] Request- und Background-Transport einschließlich Abbruch und Polling
     vollständig im OpenAI-Adapter besitzen.
-- [ ] Gemini Payload-/Tool-Konvertierung und Streaming zum Gemini-Adapter ziehen;
+  - [x] Stream-Request, Conversation-Lock-Retry, Fehler-/Diagnosepfade,
+    Cancellation, finale Usage und Rate-Limit-Status vollständig im konkreten
+    OpenAI-Stream-Client besitzen; `server.py` routet nur noch.
+  - [x] Audio-Validierung, providerabhängige Transkriptionsorchestrierung,
+    transiente Base64-/Multipart-Payloads und Response-Prüfung im konkreten
+    Audio-Client besitzen; `server.py` komponiert nur noch.
+- [x] Gemini Payload-/Tool-Konvertierung und Streaming zum Gemini-Adapter ziehen;
   persistierte Dialoghistorie gehört zu `coach/conversation.py`.
   - [x] Payload-/Tool-/Medienkonvertierung und Stream-Akkumulation auslagern.
   - [x] Stream-Transport einschließlich Header-Abbruch, Response-Handle,
     Größenlimit und SSE-Akkumulation auslagern.
-  - [ ] Persistierte Historie in P7 nach `coach/conversation.py` verschieben.
+  - [x] Stream-Request, Fehlerklassifizierung, Status-/Usage-Persistenz und
+    Cancellation vollständig im konkreten Gemini-Stream-Client besitzen.
+  - [x] Persistierte Historie in P7 nach `coach/conversation.py` verschieben.
 - [x] Kalenderabruf einschließlich SSRF-Prüfung und iCalendar-Parsing auslagern.
-- [ ] Vorhandene Garmin-/Intervals-Adapter erweitern, ohne Sync-Use-Cases in
+- [x] Vorhandene Garmin-/Intervals-Adapter erweitern, ohne Sync-Use-Cases in
   Provider-Module zu verschieben.
 
 Abnahme: Adaptertests decken Fehler, Timeout, Größenlimits, fragmentiertes SSE,
@@ -228,14 +237,31 @@ Tokenbudgets bleiben erhalten; Tests verwenden ausschließlich Provider-Fakes.
 
 Abhängigkeit: P1; Transportnutzer zusätzlich P2.
 
-- [ ] Profil, Check-ins und Aktivitätsfeedback samt Validierung und Persistenz
+- [x] Profil, Check-ins und Aktivitätsfeedback samt Validierung und Persistenz
   in `athlete/` ziehen; vorhandene Repositories wiederverwenden.
-- [ ] Aktivitätsidentität, Duplikaterkennung und Detailprojektion in `activities/`
+  - [x] Profil-/Check-in-/Feedback-Normalisierung sowie Check-in- und
+    Feedback-Persistenz besitzen fachliche Module.
+  - [x] Profilpersistenz einschließlich History-Writer und
+    Wetter-Cache-Invalidierung vollständig aus `server.py` lösen.
+- [x] Aktivitätsidentität, Duplikaterkennung und Detailprojektion in `activities/`
   bündeln. Remote-Löschen bleibt ein ausdrücklich autorisierter Use Case.
-- [ ] Garmin-Metriken, Trends, Recovery, Leistungswerte und Aktivitätsvalidierung
+  - [x] Identität, Duplikaterkennung und Gruppierung paralleler
+    Radausfahrten sind ohne Server-Callbacks ausgelagert.
+  - [x] Detailprojektion und verbleibende Kalender-/Matching-Helfer zuordnen.
+- [x] Garmin-Metriken, Trends, Recovery, Leistungswerte und Aktivitätsvalidierung
   nach `performance/` verschieben; Rohdaten und Quellenlabels erhalten.
-- [ ] Externe/öffentliche Kalender und Wetter-Cache/-Projektion auslagern.
-- [ ] Reine Kontextbausteine von Datenabruf und Synchronisierung trennen.
+  - [x] Beobachtungsfreshness, Aktivitätsvalidierung, Load/ATL,
+    Wellness-Vergleiche und 30-Tage-eFTP sind reine Eigentümermodule.
+  - [x] Garmin-Metriken, Recovery-, Trend- und Kontextorchestrierung auslagern.
+    - [x] Max-HR-Zusammenführung, Freshness, kompakte Garmin-Projektion,
+      Gewichtsnormalisierung, Recovery-Datensuche sowie Garmin-/Intervals-
+      Trendmittelwerte sind zustandsfreie Eigentümermodule.
+    - [x] Garmin-Metriknormalisierung und Daily-Health-Projektion besitzen
+      konkrete, zustandsfreie Performance-Module mit explizitem Datum.
+    - [x] Verbleibende Performance-/Recovery-Kontextorchestrierung vollständig
+      aus `server.py` lösen.
+- [x] Externe/öffentliche Kalender und Wetter-Cache/-Projektion auslagern.
+- [x] Reine Kontextbausteine von Datenabruf und Synchronisierung trennen.
 
 Abnahme: Quellenpriorität, Messdatum/Freshness, fehlende Werte, Duplikate,
 Kalenderrekurrenz und Wetter-Cache-Verhalten sind mit bestehenden bzw.
@@ -245,15 +271,102 @@ gezielt ergänzten Fixtures abgesichert.
 
 Abhängigkeit: P1, benötigte Berechnungen aus P3.
 
-- [ ] Workout-Normalisierung, Library/Templates, geplante Units, Wettkämpfe,
+- [x] Workout-Normalisierung, Library/Templates, geplante Units, Wettkämpfe,
   Trainingskalender und Compliance in fachliche `planning/`-Module ziehen.
-- [ ] CRUD, Bounds, Revisionen, Validierung, Planersatz und strukturierte
+  - [x] Workout-Normalisierung, Text-/Dauerprüfung, Event-Payload und Remote-
+    Readback besitzen `planning/workouts.py` ohne Server-Callback.
+  - [x] Saisonphasen und kombinierter Planning-State werden rein in
+    `planning/season.py` projiziert.
+  - [x] Snapshot-, Sport- und lokale Kalenderprojektionen besitzen
+    `planning/context.py` mit expliziter Zeit-/Vollsync-Injektion.
+  - [x] Wettkampf-Sport-, Payload-, Remote- und Konfliktprojektionen besitzen
+    `planning/competitions.py`; der Konfliktzeitpunkt wird explizit injiziert.
+  - [x] Kalender-Zeitfenster und Konfliktprojektionen besitzen
+    `planning/calendar.py`; DB-, Library- und externe Kalenderquellen bleiben
+    explizite Composition-Abhängigkeiten.
+  - [x] Library-Identität, Normalisierung, Dauer und konservatives Matching
+    besitzen `planning/library.py`; die Kandidatenliste wird explizit
+    übergeben.
+  - [x] Planned-Unit-Normalisierung, Update- und Remote-Projektionen besitzen
+    `planning/planned_units.py`; das aktuelle Datum wird explizit übergeben.
+  - [x] Reine Adaptive-/Illness-Projektionen besitzen `planning/adaptive.py`;
+    Datum, Grenzwerte und Kalenderkennungen werden explizit injiziert.
+  - [x] Library-Bulk-Auswahl und Payload-Hashing besitzen
+    `planning/library.py`; Eingabegrenzen, UUID-/Datums-/Hash-Verträge und
+    Reihenfolge entsprechen dem bisherigen Verhalten.
+  - [x] Reine Wettkampf-Sync-Planung besitzt `planning/competitions.py`;
+    Remote-Match-Priorität, Konflikte, Tombstones, Fingerprint und Summary
+    werden ohne Provider- oder Datenbankzugriff erzeugt.
+  - [x] Lokales Wettkampf-CRUD und Konfliktauflösung besitzen einen
+    transaktionalen `CompetitionService`; Audit, Tombstones und lokale
+    Änderungen committen oder rollen gemeinsam zurück.
+  - [x] Planungsrevisionen besitzen `PlanningRevisionService`; Initialisierung,
+    Recovery nach Privacy-Reset und konkurrierende Bumps bleiben unter der
+    `DatabaseManager`-Transaktions- und Lockgrenze.
+  - [x] Trainingsplan-Metadaten, Status, Bounds und Constraints besitzen einen
+    transaktionalen `TrainingPlanService` einschließlich Audit und Events.
+  - [x] Strukturierte Artifact-/Change-/Replacement-Vorbereitung sowie
+    Planreferenzauflösung besitzen `planning/`-Module ohne Server-Rückimport.
+  - [x] Library- und Planned-Unit-Mutationsnormalisierung besitzen ihre
+    fachlichen Module; Persistenz-Use-Cases bleiben bis zum Service-Umzug offen.
+  - [x] Der tagesbezogene Planning-Read besitzt einen
+    `DailyPlanningContextService`; Garmin-/Battery-History, Check-ins,
+    relevante externe Termine und Feedback werden über ihre konkreten
+    Eigentümer geladen und anschließend rein projiziert.
+  - [x] Die kombinierte Kalender-, Compliance-, Wetter- und Parallel-Cycling-
+    Projektion besitzt `planning/calendar_read_model.py`; Provider-I/O bleibt
+    als explizite Composition-Abhängigkeit außerhalb des Read-Modells.
+  - [x] Strukturierte Trainingsplan-Artefakte besitzen einen
+    `TrainingPlanArtifactService`; Stage/Commit, Conversation-Bindung,
+    Revisions-/Kalenderprüfung, Limits und lokaler Plan-Commit laufen unter
+    einer gemeinsamen transaktionalen Eigentümergrenze.
+  - [x] Lokale Library-/Template-, Planned-Unit- und Wettkampf-Use-Cases sowie
+    Trainingskalender und Compliance vollständig auslagern; Reconciliation,
+    Provider-Reads und Remote-Schreiben bleiben explizit P6.
+- [x] CRUD, Bounds, Revisionen, Validierung, Planersatz und strukturierte
   Batch-Änderungen einschließlich sämtlicher privater Helfer verschieben.
-- [ ] `PlanningChangeDependencies` und `AdaptiveDependencies` prüfen:
-  fachinterne Callbacks durch direkte modulinterne Aufrufe ersetzen.
-- [ ] Adaptive Vorschau/Apply und Krankheitspausen lokal vollständig zuordnen;
-  Remote-Synchronisation über einen separaten Sync-Einstieg aufrufen.
-- [ ] Hash-/Revisionsprüfungen, Historieneinträge und Atomarität innerhalb
+  - [x] Kalenderkonflikte besitzen einen konkreten `CalendarConflictService`;
+    lokale, Library- und externe Quellen bleiben explizite Abhängigkeiten.
+  - [x] Der vollständige strukturierte Planning-State-Read einschließlich
+    Pagination besitzt einen `StructuredTrainingStateService`.
+  - [x] Batch-Datums-, Revisions- und Payload-Hash-Prüfungen besitzen einen
+    `StructuredTrainingChangeValidator` innerhalb der Aufrufertransaktion.
+  - [x] Lokale Planned-Unit-Erzeugung, generisches transaktionsgebundenes
+    Insert und Listing besitzen einen `PlannedUnitService`; Audit,
+    Planungsrevision und Sync-Fehler-Redaktion bleiben erhalten.
+  - [x] Lokale Library-Erzeugung, Template-Validierung und Listing besitzen
+    einen `WorkoutLibraryService`; Transaktions- und historisches
+    Korruptionsverhalten bleiben unverändert.
+  - [x] Planned-Unit-Update/Archive/Restore/Delete einschließlich
+    Kalenderkonflikt, Audit und optionaler Revision sowie Library-
+    Update/Archive/Restore/Delete einschließlich Sync-Grenzen liegen in den
+    jeweiligen Services; Events werden erst nach erfolgreichem Commit
+    publiziert.
+  - [x] Lokale Planned-Unit-Konfliktauflösung besitzt der
+    `PlannedUnitService`; Keep-local, Remote-Übernahme und persistenter
+    Remote-Deletion-Tombstone bleiben transaktional und revisionsgesichert.
+  - [x] Das lokale Einplanen von Library-Vorlagen besitzt einen
+    `WorkoutLibraryPlanService`; Lookup, vollständige Konfliktprüfung und alle
+    Creates bilden einen atomaren Batch mit Event erst nach Commit.
+  - [x] Lokale Coach-Planerzeugung besitzt einen
+    `LocalTrainingPlanCreationService`; Normalisierung, Kalenderprüfung,
+    Template-Wiederverwendung, optionale Planmetadaten, History, Unit-Erzeugung
+    und genau ein Revisionsbump liegen in derselben Unit-of-Work.
+  - [x] Planned-Unit-/Library-Persistenz, Batch-Apply und Planersatz als
+    vollständige Services auslagern und alle zugehörigen Server-Callbacks
+    entfernen; Sync-State-/Remote-Persistenz folgt der P6-Grenze.
+    `StructuredTrainingChangeService` besitzt Vorbereitung, Validierung,
+    Planauflösung, Row-Mutationen, Bounds, Revision und Post-Commit-Event;
+    `StructuredTrainingPlanReplacementService` besitzt Auswahl, History-
+    Kapazität, Archivierung, Constraints, Neuanlage und Revision in einer
+    Unit-of-Work.
+- [x] `AdaptiveDependencies` und `PlanningChangeDependencies` entfernen;
+  Adaptive Preview und Apply besitzen konkrete Services mit direkten
+  Modul-/Repository-Abhängigkeiten statt fachlicher Server-Callbacks.
+- [x] Adaptive Vorschau/Apply und Krankheitspausen lokal vollständig zuordnen;
+  Remote-Synchronisation bleibt als separater, nachgelagerter Sync-Einstieg
+  außerhalb der lokalen Transaktion erhalten.
+- [x] Hash-/Revisionsprüfungen, Historieneinträge und Atomarität innerhalb
   derselben Transaktion bewahren.
 
 Abnahme: Vollständiger Planersatz, Teiländerung und Adaptive Apply funktionieren
@@ -264,11 +377,19 @@ einer Batch-Änderung rollen alle zugehörigen lokalen Änderungen zurück.
 
 Abhängigkeit: P4.
 
-- [ ] Projektionen, Hashes, Kapazitätsprüfung und Historienpersistenz zuordnen.
-- [ ] Undo-Preview und Undo-Apply nach `history/` verschieben; fachliche
+- [x] Projektionen, Hashes, Kapazitätsprüfung und Historienpersistenz zuordnen.
+- [x] Undo-Preview und Undo-Apply nach `history/` verschieben; fachliche
   Wiederherstellung nutzt transaktionsfähige Operationen der Domänen.
-- [ ] Zyklen vermeiden: Domänen dürfen einen kleinen History-Writer verwenden;
+- [x] Zyklen vermeiden: Domänen dürfen einen kleinen History-Writer verwenden;
   nur der Undo-Orchestrator ruft Domänenoperationen auf, nicht der Writer.
+  - [x] `ChangeHistoryService` besitzt Cleanup, Listenprojektion, aktuellen
+    lokalen Audit-Zustand und die Rekonstruktion des Undo-Ziels.
+  - [x] `HistoryUndoService` besitzt Preview-Hashbindung, atomaren Apply,
+    genau einen Undo-Audit-Eintrag und den revisionsgesicherten Dispatch an
+    Profil, Wettkampf, Library, Planned Unit und Trainingsplan.
+  - [x] Die fünf Domänendienste stellen schmale
+    `restore_in_transaction`-Operationen bereit; sie öffnen keine eigene
+    Transaktion und schreiben weder Undo-History noch Providerzustand.
 
 Abnahme: Profil-, Wettkampf-, Library- und Plan-Undo behalten Eigentümerprüfung,
 Konflikterkennung und Rollback. Keine Rückabhängigkeit auf HTTP oder Coach.
@@ -277,15 +398,92 @@ Konflikterkennung und Rollback. Keine Rückabhängigkeit auf HTTP oder Coach.
 
 Abhängigkeit: P2–P5.
 
-- [ ] Garmin-, Intervals-, Library-, Planned-Unit- und Wettkampf-Sync mit
+- [x] Garmin-, Intervals-, Library-, Planned-Unit- und Wettkampf-Sync mit
   ihren vollständigen Abläufen nach `sync/` ziehen.
-- [ ] Snapshots, Freshness, Cursors, historische Fenster, Performance-Refresh
+  - [x] Wettkampf-Reconciliation, Provider-Orchestrierung, Cleanup und
+    gemeinsamer Single-flight-Lock liegen vollständig in `sync/competitions.py`.
+  - [x] Remote-Planned-Unit-Import einschließlich Konflikten, Missing-State,
+    CAS und gemeinsamer Revision liegt in `sync/planned_units.py`.
+  - [x] Einzelne Workout-Library-Remote-Mutation, initialer Read-Refresh,
+    lokaler Remote-Read-Reconcile und ihr gemeinsamer Lock liegen vollständig
+    in `sync/library.py`; der Selected-Batch liegt mit Hash-/Konfliktprüfung,
+    Repair-Verifikation und denselben Resync-/Single-flight-Grenzen in
+    `sync/selected.py`.
+  - [x] Der normale Planned-Unit-Kalender-Push liegt einschließlich
+    Remote-Readback, Löschung und per-ID-Lock in `sync/planned_calendar.py`.
+  - [x] Den Planned-Unit-Repair-Batch vollständig auslagern; er muss denselben
+    per-ID-Lock wie der normale Push verwenden.
+  - [x] Garmin-Fixture-Laden, Sleep-Datumsnormalisierung, Source-Merge und
+    Collection-Completion sowie Intervals-Snapshot-/Initialimport- und
+    Fensterpersistenz besitzen konkrete `sync/garmin.py`- beziehungsweise
+    `sync/intervals.py`-Eigentümer ohne Server-Callbacks.
+  - [x] Garmin- und Intervals-Gesamtabläufe einschließlich äußerer Gates,
+    Cancellation, Status und Eventprojektion vollständig auslagern.
+    - [x] Der Intervals-Gesamtablauf besitzt mit `IntervalsSyncService` den
+      äußeren Observer, das Provider-Resync-Gate, den gemeinsamen Lock,
+      Cancellation, Wait-for-existing, Status-/Eventpersistenz, Snapshot-
+      Speicherung, Daily-Marker, Library-Initialisierung, Performance-
+      Follow-up, Fehlerredaktion und deterministisches Cleanup. Alle früheren
+      Server-Helper und der `sync_intervals`-Einstieg sind entfernt.
+    - [x] `GarminSyncService` besitzt Observer, Provider-Resync-Gate, den mit
+      Morning-Body-Battery geteilten Lock, Fixture-/Remote-Orchestrierung,
+      MFA und Cancellation, Wait-for-existing, Status-/Eventpersistenz,
+      Payload-Aufbereitung, Fehlerzustand und deterministisches Cleanup. Der
+      SDK-Client und alle früheren Garmin-Ablauf-Helper sind aus `server.py`
+      entfernt.
+  - [x] Garmin-/Sync-Public-State und Garmin-Coach-Projektion auslagern; die
+    Services konsumieren konkrete Snapshot-/Freshness-Eigentümer und erhalten
+    weder `server.py`-Callbacks noch Zugriff auf dessen Namensraum.
+  - [x] Adaptive Krankheitspausen-Remote-Sync sowie strukturierte Refresh-,
+    Plan-Sync-, Retry- und Konfliktbefehle in konkrete Sync-Use-Cases
+    verschieben. Coach-Autorisierung bleibt vorgelagert und Remote-Schreiben
+    bleibt an die bestehende explizite Freigabe gebunden.
+- [x] Snapshots, Freshness, Cursors, historische Fenster, Performance-Refresh
   und vollständigen Provider-Resync konsolidieren.
-- [ ] `ReconcileDependencies` von fachlichen Server-Callbacks befreien.
-- [ ] Durable Job-Queue, Claim, Retry, Ergebnis-Persistenz, Restart-Recovery
+  - [x] Snapshot-Merge, Sync-Snapshot/-Cursor/-Zeitraum-Persistenz und
+    begrenzte Datumsfenster besitzen konkrete `sync/`-Module.
+  - [x] Provider-Freshness einschließlich Cleanup-Transaktion und sämtlicher
+    KV-Fallbacks besitzt einen konkreten Service mit genau einer DB-UOW.
+  - [x] Intervals- und Garmin-Resync-Gates sowie ihre Operation-Decorators
+    besitzen `sync/gates.py`.
+  - [x] Maintenance, Korrelationskontext, Refresh-Historie, Statusprojektion
+    und sichere Lifecycle-Logs einer Provideroperation besitzen den gemeinsamen
+    Eigentümer `sync/observation.py`; die Übergangsdekoration verbleibender
+    Server-Sync-Einstiege wird mit deren vollständigem Service-Umzug entfernt.
+  - [x] Der innere Performance-Refresh besitzt Provider-Read, atomaren
+    Snapshot-Merge, Marker, Fehlerredaktion, Event und seinen Single-flight-
+    Lock in `sync/performance.py`; die gemeinsame äußere Beobachtung ist
+    ausgelagert, der Intervals-Gate-gebundene Service-Einstieg bleibt bis zum
+    vollständigen Sync-Service-Umzug offen.
+  - [x] Performance-Refresh und vollständigen Provider-Resync auslagern.
+    - [x] Performance-Refresh einschließlich konkretem Snapshot-Reader sowie
+      Queue-/Polling-Follow-up besitzt vollständig Backend-Eigentümer ohne
+      fachliche Server-Callbacks.
+    - [x] `FullProviderResyncService` besitzt Validierung, Gates, Provider-
+      Orchestrierung, Status-/Fehlerpersistenz, Observation und Cleanup ohne
+      Rückimport oder Fachcallback aus `server.py`.
+- [x] `ReconcileDependencies` von fachlichen Server-Callbacks befreien.
+- [x] Durable Job-Queue, Claim, Retry, Ergebnis-Persistenz, Restart-Recovery
   und Worker-Lebenszyklus auslagern.
-- [ ] Konfliktbehandlung, Remote-Readback, Tombstones und lokale Dirty-Zustände
-  zusammen mit den Mutationspfaden prüfen.
+  - [x] Request-Normalisierung, Store, atomarer Claim, Retry-/Result-State und
+    Restart-Recovery liegen in `sync/jobs.py`.
+  - [x] Queue-Steuerung sowie Ergebnis-/Fehler-, Retry- und Requeue-
+    Orchestrierung besitzen `SyncJobQueueService` und
+    `SyncJobOutcomeService`; die früheren Server-Helper sind entfernt.
+  - [x] Worker-Thread, Wakeup/Stop und Executor-Dispatch auslagern.
+    - [x] `SyncJobWorker` besitzt Thread, Start-Lock, Wakeup/Stop, Claim,
+      Restore-Generation und den dauerhaften Polling-Lebenszyklus ohne
+      `server.py`-Import.
+    - [x] `SyncJobExecutor` besitzt konkreten Providerdispatch, historische
+      Fenster, Competition-Observation/-Gate, Garmin-Fixture-/Morning-Regeln,
+      Ergebnis-/Retry-Persistenz und Backfill-Folgejobs. `server.py` komponiert
+      Executor und Worker ausschließlich aus konkreten Backend-Services.
+- [x] Konfliktbehandlung, Remote-Readback, Tombstones und lokale Dirty-Zustände
+  zusammen mit den Mutationspfaden prüfen. Planned Units verwenden CAS und
+  begrenzte Missing-Fenster, Library-Reads überschreiben keine Dirty-Zeilen,
+  Competition-Tombstones werden nur im expliziten Push gelöscht und Planned-
+  Calendar-Mutationen prüfen Hash, Identität und Readback vor dem lokalen
+  Abschluss.
 
 Abnahme: Keine doppelte Jobausführung bei konkurrierenden Claims/Neustart;
 Resync und Restore respektieren dieselben Gates. Explizite Remote-Autorisierung
@@ -295,13 +493,101 @@ und bestehende automatische Lese-Syncs behalten ihren jeweiligen Vertrag.
 
 Abhängigkeit: P2–P6.
 
-- [ ] Kontextaufbau, Projektionen, Prompttexte und Kontextvorschau in `coach/`
+- [x] Kontextaufbau, Projektionen, Prompttexte und Kontextvorschau in `coach/`
   bündeln. Der Kontext konsumiert Domänenlesefunktionen.
+  - [x] Die sieben Prompt-/Kontext-Budgetgrenzen dem bestehenden
+    `coach/context.py` zuordnen; beide Composition-Root-Factories
+    konsumieren dieselben Werte ohne Budgetänderung.
 - [ ] Konversationshistorie, Reset, Attachments und Usage-Zuordnung auslagern.
+  - [x] Providerabhängige Konversations-ID-Bereitstellung einschließlich
+    persistierter Wiederverwendung und OpenAI-/Gemini-Erzeugung einem
+    konkreten Coach-Service zuordnen; übrige History-/Reset-Pfade bleiben offen.
+  - [x] Coach-Chat-Reset einschließlich best-effort Remote-Löschung,
+    lokaler Transaktion, Job-Cancellation und Provider-KV-Clearing einem
+    konkreten `CoachConversationResetService` zuordnen; History und
+    Usage-Zuordnung bleiben offen.
+  - [x] Prozessweite Chat-Queue und Konversations-Lock mit 429/409-Grenzen
+    `CoachConversationGate` zuordnen; Reset und Turn teilen dieselbe
+    Lock-Instanz, während die übrige Turn-Orchestrierung bis P8 offen bleibt.
 - [ ] Vorschläge, Scope-/Owner-Prüfungen, explizite Bestätigung, TTL sowie
   Replay-/Repair-Schlüssel ihren Coach-Modulen zuordnen.
+  - [x] Sitzungsgebundene Command-Receipt-Lesefunktion mit 400/403/404-
+    Grenzen, aktuellen Vorschlägen, TTL-Projektion und Entfernung des
+    Session-Schlüssels einem konkreten `CoachCommandReceiptService` zuordnen.
 - [ ] Tool-Dispatch samt Ergebnis-/Fehlerprojektion verschieben; Planmutationen
   rufen die in P4 abgeschlossenen Planungs-Use-Cases auf.
+  - [x] Gesamtwerkzeug-Routing einschließlich unbekanntem Werkzeug,
+    Plan-/Sync-/Athleten-/Lesezweigen und Session-/Cancel-Weitergabe in
+    `CoachToolDispatchService` verlagern; Turn-spezifische
+    Ergebnis-/Fehlerprojektion und Spezialwerkzeuge bleiben offen.
+  - [x] Read-only Coach-Toolauswahl, begrenzte Limits und Antwortprojektion
+    einem zustandslosen `CoachReadToolService` zuordnen; konkrete Profil-,
+    Planning-, Activity- und History-Dienste bleiben ihre Zustandseigentümer.
+  - [x] Strukturierte Coach-Sync-Werkzeuge einschließlich Scope-/Remote-
+    Prüfung und Job-ID-Buchführung dem konkreten Sync-Tool-Service zuordnen.
+  - [x] Adaptive Apply-Freigabe mit späterem Nutzerturn und atomare
+    Coach-Profiländerungen in eigene konkrete Services verlagern.
+  - [x] Die fünf lokalen Athletenakten-Werkzeuge (Check-in,
+    Aktivitätsfeedback, Wettkampf) samt Operation-/Objekt-Scope-Prüfung
+    einem konkreten `CoachAthleteRecordToolService` zuordnen.
+  - [x] Lokale Trainingsvorlagen-Batches mit 1–28-Eintragsgrenze,
+    Objekt-Scope und gemeinsamem Rollback einem konkreten
+    `TrainingTemplateToolService` zuordnen.
+  - [x] Lokales Bibliotheksplan-Werkzeug mit Operation-/Objekt-Scope und
+    Eingabeprüfung `CoachLibraryPlanToolService` zuordnen; atomare
+    Planung und Remote-Schreibgrenze verbleiben bei `WorkoutLibraryPlanService`.
+  - [x] Stage-/Commit-Autorisierung, Artifact-ID-Prüfung und Scope des
+    strukturierten Planartefakt-Werkzeugs `CoachPlanArtifactToolService`
+    zuordnen; `TrainingPlanArtifactService` bleibt Eigentümer von Zustand,
+    lokaler Speicherung und atomarem Commit.
+  - [x] Autorisierung, Plan-ID-Scope und Argumentprojektion für
+    `replace_training_plan` und `apply_training_changes` dem konkreten
+    `CoachPlanningChangeToolService` zuordnen; die atomaren Replacement- und
+    Change-Planungsservices bleiben Zustandseigentümer.
+  - [x] Autorisierung, Scope und Argumentprojektion der vier übrigen
+    strukturierten Adaptive-, Planupdate- und Undo-Werkzeuge einem konkreten
+    `CoachPlanningActionToolService` zuordnen; die zuständigen Preview-, Apply-, Plan-,
+    History- und Proposal-Services bleiben Zustandseigentümer.
+  - [x] Dialogbezogene Datums-, Planned-Unit-, Library- und Draft-Scopes in
+    `CoachDialoguePlanScopeService` verlagern; lokale SQL-Lesegrenzen und der
+    gemeinsame DatabaseManager/DB-Lock bleiben unverändert.
+  - [x] Dialog-Request-Bindung, Anbieter-/Remote-Schreibgrenzen, lebende
+    Objekt-Scopes und Reparaturzeitraum in `CoachDialogueActionService`
+    verlagern; `server.py` komponiert nur die bestehenden Zustandseigentümer.
+  - [x] Provenienz-/Textprüfung und KV-Persistenz einer konkreten Coach-
+    Rückfrage `CoachClarificationService` zuordnen; ungültige oder fremde
+    Quellen verändern den ausstehenden Auftrag nicht.
+  - [x] Atomaren Coach-Trainings-Patch mit Revisions- und Kalenderprüfung,
+    gemeinsamer Planänderung/-erstellung, Constraints und Rollback in
+    `CoachTrainingPatchService` verlagern; Planung bleibt Zustandseigentümer.
+  - [x] Explizite lokale Planungskommandos einschließlich Vorbereitung,
+    Scope, Session-/Conversation-Claim, Replay, atomarer Tool-Ausführung
+    und finalem Receipt `CoachPlanningCommandService` zuordnen; der
+    HTTP-Handler delegiert direkt.
+  - [x] Strukturierte Tool-Call-Metadaten einschließlich Allowlist,
+    Schrittlimit, Argumentprüfung und stabiler Replay-/Reparatur-Schlüssel
+    als reine Backend-Projektion `structured_tool_call_metadata` verlagern;
+    die restliche Turn-Orchestrierung bleibt bis zur folgenden Auslagerung offen.
+  - [x] Call-ID-/Effekt-Replay einschließlich Read-only-Ausnahme und
+    Draft-Artifact-Revisionsprüfung `CoachStructuredToolReplayService`
+    zuordnen; `DatabaseManager` und DB-Lock bleiben Zustandseigentümer.
+  - [x] Strukturierte Turn-Ergebnisprojektion einschließlich reparierter
+    Fehler, bestätigter Effekte, Antwort-/Status-Fallback und atomarer
+    Pending-Request-Persistenz `CoachStructuredOutcomeService` zuordnen;
+    Provider- und Tool-Rundenschleife bleiben bis P8 offen.
+  - [x] Strukturierte Werkzeugvorbereitung einschließlich Dialogautorisierung,
+    Pausen-/Cancel-Grenze, Remote-Write-Abhängigkeiten und Plan-Sync-Scope
+    `CoachStructuredToolPreparationService` zuordnen; konkrete Sync- und
+    Planungsdienste bleiben Zustandseigentümer.
+  - [x] Spezialzweige der strukturierten Werkzeugausführung einschließlich
+    Clarification, Cancel-KV, Trainings-Patch, Duplikatvorschlag und
+    Dispatcher-Aufruf `CoachStructuredToolExecutionService` zuordnen;
+    die übergreifende Turn-Transaktion und Receipt-Reihenfolge bleiben
+    bis P8 beim Turn-Orchestrator.
+  - [x] Strukturierte Werkzeugfehler samt sicheren Diagnosen, begrenztem
+    `validation_reason`, Receipt-Anhang und redigiertem Log-Ereignis
+    `CoachStructuredToolFailureService` zuordnen; die Turn- und
+    Rundenschleife bleibt bis P8 beim Coach-Turn.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.
@@ -311,13 +597,113 @@ Abgelaufene oder fremde Vorschläge dürfen keine Mutation auslösen.
 
 Abhängigkeit: P7 und Sync-Worker aus P6.
 
-- [ ] Die gesamte strukturierte Response-/Tool-Rundenschleife einschließlich
+- [x] Die gesamte strukturierte Response-/Tool-Rundenschleife einschließlich
   Retry, Fehler-Recovery, Receipts und finaler Persistenz nach `coach/` ziehen.
-- [ ] `chat_with_coach`, Background-Claim/Resume/Cancel und Stream-Register
+  - [x] Durable Phase-/Pending-/Output-Übergänge eines strukturierten
+    Werkzeug-Rounds `CoachStructuredToolRoundJournal` zuordnen;
+    `CoachJobStore` bleibt Persistenzeigentümer, Provider-Follow-up,
+    Cancellation und Gesamtloop bleiben für den Turn-Use-Case offen.
+  - [x] Die vollständige begrenzte strukturierte Tool-Rundenschleife
+    einschließlich Replay, lokaler Tool-Transaktion, Receipt-Reihenfolge,
+    Cancellation, Plan-Scope, Provider-Follow-up und Round-Journal einem
+    `CoachStructuredToolRoundService` zuordnen. Der umgebende Turn mit
+    Eröffnung und finaler Persistenz bleibt offen.
+  - [x] Begrenzte OpenAI-Retry-Entscheidung und abbrechbares Warten
+    `CoachResponseRetryPolicy` zuordnen; Provider-Follow-up und Gesamtloop
+    bleiben für den Turn-Use-Case offen.
+  - [x] Einmalige Recovery bei ungültigem Remote-Konversationszustand samt
+    lokalem Kontext, Attachment-Evidenz und durablem Checkpoint
+    `CoachConversationRecoveryService` zuordnen; Gesamtloop bleibt offen.
+  - [x] Finales Turn-Receipt, atomare Assistant-Nachricht,
+    Preview-Publikationsbindung und Event nach Commit
+    `CoachFinalReceiptService` zuordnen; Gesamtloop bleibt offen.
+  - [x] Atomare Turn-Eröffnung mit User-Nachricht, Session-Bindung,
+    Idempotenz und Rollback `CoachTurnOpeningService` zuordnen;
+    Gesamtloop bleibt offen.
+  - [x] Provider-Routing, OpenAI-/Gemini-Request-/Background-/Stream-
+    Transport und beidseitige Gemini-Cancellation-Prüfung
+    `CoachResponseTransport` zuordnen; Gesamtloop bleibt offen.
+  - [x] Einen strukturierten Provider-Response-Versuch einschließlich
+    Background-Checkpoint, Resume, einmaliger Recovery, begrenztem
+    Retry und Delta-/Cancel-Grenze `CoachStructuredResponseService`
+    zuordnen; Tool-Rundenschleife und finaler Turn bleiben offen.
+  - [x] Den vollständigen strukturierten Turn mit atomarer Eröffnung,
+    Restart-Replay, Response, Tool-Runden, Ergebnis-/Fehlerprojektion
+    und finaler Persistenz `CoachStructuredTurnService` zuordnen.
+    Session-/Provider-Vorprüfung, Background-Worker und Stream-Lifecycle
+    verbleiben im folgenden P8-Teilauftrag.
+  - [x] Provider-Request-Aufbau einschließlich Dialogkontext,
+    Attachment-Sicherheitsanweisung, OpenAI-Kontinuität, Gemini-Medien
+    und Modell-/Thinking-Auswahl `CoachRequestPayloadService` zuordnen;
+    die Response-/Tool-Rundenschleife bleibt offen.
+  - [x] Terminale Turn-Fehlerprojektion einschließlich bestätigter Effekte,
+    Pending-Request, atomarem Receipt, Checkpoint-Bereinigung und Event nach
+    Commit einem `CoachTurnFailureService` zuordnen; der übrige Turn bleibt offen.
+- [ ] Background-Claim/Resume/Cancel und Stream-Register
   auslagern; synchrone und Hintergrundausführung teilen denselben Turn-Use-Case.
-- [ ] Morning Check-in und seine Reservierung/Retry-Steuerung auslagern.
-- [ ] Tages-/Startup-Scheduler nach `sync/scheduler.py` ziehen; die Composition
-  Root registriert den konkreten Morning-Check-in-Aufruf ohne Importzyklus.
+  - [x] Sessiongebundene Chat-Vorprüfung, Längen-/Cancel-Grenzen,
+    idempotente Command-Lesefunktion, 15-Minuten-Stale-Recovery,
+    persistierte Providerwahl und Background-Resume
+    `CoachChatTurnService` zuordnen. HTTP und Worker rufen den
+    Use-Case direkt auf; der temporäre Testadapter wurde entfernt.
+  - [x] Maintenance- und Conversation-Gate in derselben äußeren/inneren
+    Reihenfolge dem `CoachChatTurnService` zuordnen; die vorhandene
+    processweite `CoachConversationGate`-Instanz teilt ihren Lock weiter
+    mit Reset. Es gibt keinen Server-Transportadapter mehr.
+  - [x] Process-lokales Chat-Stream-Register, SSE-Queues und Background-
+    Cancel-Events einem einzigen `ChatStreamRegistry` zuordnen; durable
+    Job-Entscheidungen bleiben bis zur Coach-Job-Auslagerung offen.
+  - [x] Durable Background-Claims, Contention-Requeue und gespeicherte
+    Nutzernachrichten einem konkreten `CoachJobStore` zuordnen; Enqueue,
+    Resume und Cancel sind in den folgenden Teilaufgaben abgeschlossen,
+    Worker-Turn-Orchestrierung bleibt offen.
+  - [x] Claimed-Generation-Ausführung, Session-Binding, persistiertes
+    Cancel-Read, Coach-Turn-Aufruf, Morning-Abschluss, Contention-Retry,
+    terminale Fehler und SSE-Publikation einem `CoachBackgroundJobRunner`
+    zuordnen. Der produktive Server-Aufrufer entfiel mit dem Worker-Lifecycle-
+    Umzug; der verbleibende reine Testadapter wurde im P8-Nachtrag entfernt.
+  - [x] Worker-Thread, Lock, Wake-/Stop-Events, begrenztes Polling und
+    Maintenance-Claim-Schleife einem `CoachJobWorker` zuordnen; `server.py`
+    registriert beim Start nur die konkreten Backend-Factories. Der
+    temporäre `_run_background_coach_job`-Adapter ist entfernt.
+  - [x] Restart-Recovery für unterbrochene synchrone, OpenAI- und Gemini-
+    Background-Turns einschließlich persistierter Intents, Queue-Phase und
+    Worker-Wake dem `CoachJobStore` zuordnen; Worker-Turn-Orchestrierung
+    bleibt offen.
+  - [x] Background-Enqueue samt Validierung, Session-Bindung, Replay,
+    Anhangsquote und atomarer Command-/Message-Persistenz einem
+    `CoachJobSubmissionService` zuordnen; Worker-/Turn-Ausführung bleibt
+    offen. Resume und Cancel sind in den folgenden Teilaufgaben abgeschlossen.
+  - [x] Sessiongebundene Attached-/Background-Statusprojektion einschließlich
+    Attached-Priorität und idle-Fallback dem `CoachJobSubmissionService`
+    zuordnen; der HTTP-Handler delegiert direkt, Worker-/Turn-Ausführung
+    bleibt offen.
+  - [x] Sessiongebundene Attached-/Background-Cancellation samt
+    persistierter Cancel-Markierung, Provider-Response-Close und
+    Restart-Verhalten einem `CoachCancellationService` zuordnen;
+    Receipt-Merge gehört dem `CoachJobStore`. Turn-Ausführung und
+    Worker-Ausführung bleiben offen.
+- [ ] Manuellen Morning Check-in mit Frische-Gate auslagern; die auf `develop`
+  entfernte automatische Reservierungs-/Retry-Steuerung nicht wieder einführen.
+  - [x] Manuellen Garmin-Schlaf-/Body-Battery-Vorbereitungspfad und
+    read-only Statusprojektion ihren konkreten Coach-Services zuordnen.
+  - [ ] Verbleibende Background-Receipt-/Fehlerzustände mit dem Coach-Job-
+    Eigentümer zusammenführen und Restart-/Cancellation-Verträge prüfen.
+    - [x] Morning-Job-Abschlussmarker und QuickActions-Receipt-Projektion
+      `MorningCoachJobCompletionService` zuordnen; die beiden getrennten
+      UOW-Grenzen und das Completed-Status-Filter bleiben erhalten.
+- [x] Tages-/Startup-Scheduler nach `sync/scheduler.py` ziehen; die Composition
+  Root registriert die konkreten Sync-Dienste ohne Importzyklus. Automatische
+  Morning-Check-ins sind seit dem `develop`-Abgleich kein Scheduler-Auftrag.
+  - [x] Die vier täglichen Providerentscheidungen einschließlich Due-Marker,
+    Queue-/Resync-/Maintenance-Gates und Payload-Reihenfolge gehören einem
+    konkreten `DailySyncScheduler`; `server.py` komponiert nur noch.
+  - [x] Startup-Provider- und Historical-Backfill-Entscheidungen einem
+    konkreten `StartupSyncScheduler` zuordnen; Reihenfolge und aktive Jobs
+    bleiben erhalten.
+  - [x] Verbleibende Tages-Loop-Lifecycle-Steuerung einschließlich
+    300-Sekunden-Takt, Fehlerbehandlung und Morning-Battery-Refresh
+    dem konkreten `DailySyncLoop` zuordnen.
 
 Abnahme: SSE liefert inkrementelle Texte und finale Receipts; Disconnect,
 Cancel, Retry nach bereits ausgeführtem Tool und Neustart verursachen keine
@@ -328,12 +714,47 @@ Tages, bevor davon abhängiger Sync oder Coach-Analyse startet.
 
 Abhängigkeit: P1 sowie Ressourcen-/Worker-Verträge aus P6 und P8.
 
-- [ ] Archivaufbau, Exportgrenzen, Backupvalidierung, Restore und
+- [x] Archivaufbau, Exportgrenzen, Backupvalidierung, Restore und
   Wiederaufnahme nach `backup/` verschieben.
-- [ ] Lokalen Privacy-Export/-Delete und autorisierte Remote-Konversations-
+  - [x] Begrenzten lokalen Privacy-ZIP-Aufbau einschließlich SQL-/KV-
+    Auswahl, Manifest, Zeit-/Platz-/Größenlimits und Temp-Datei-Cleanup
+    einem konkreten `PrivacyArchiveExportService` zuordnen.
+  - [x] Datenbank-WAL-Checkpoint, Byte-Backup und den über die gesamte
+    HTTP-Dateiausgabe gehaltenen Lock mit Platz-/Größen-/Zeitgrenzen
+    einem konkreten `DatabaseBackupService` zuordnen; die Wiederaufnahme
+    nach Restore gehört dem `DatabaseRestoreService`.
+  - [x] Restore-Payload-Staging, Schema-/Integritäts-/Fremdschlüsselprüfung
+    und Session-Bereinigung einem konkreten `DatabaseRestoreValidationService`
+    zuordnen; Austausch und Worker-Wiederaufnahme gehören dem folgenden
+    Restore-Eigentümer.
+  - [x] Wartungsgate, WAL-Checkpoint, DB-Drain, vorherige Sicherung,
+    atomaren Dateiaustausch, temporäres Cleanup und anschließende Sync-/
+    Coach-Job-Wiederaufnahme `DatabaseRestoreService` zuordnen.
+- [x] Lokalen Privacy-Export/-Delete und autorisierte Remote-Konversations-
   löschung nach `privacy.py` bzw. zum zuständigen Provider aufteilen.
-- [ ] Diagnosehistorie/-report und Logprojektion vollständig auslagern.
-- [ ] HTTP-Streaming von Exportdateien bleibt im HTTP-Adapter.
+  - [x] Lokale JSON-Datenprojektion einschließlich sensibler KV-Ausnahmen,
+    fehlerhaftem JSON und getrennter DB-Lesegrenzen einem konkreten
+    `PrivacyDataExportService` zuordnen.
+  - [x] Preview, Wartungsgate, lokale Löschtransaktion und best-effort-
+    Remote-Ergebnis gehören `PrivacyDeleteService`; der einzige
+    autorisierte OpenAI-DELETE gehört `OpenAIResponsesClient`.
+- [x] Diagnosehistorie/-report und Logprojektion vollständig auslagern.
+  - [x] Begrenzte, datensparsame Coach-Command-Historie samt SQL-Read und
+    Fehlerprojektion zu `diagnostics/history.py` verschieben.
+  - [x] Begrenzte, redigierte Logprojektion und alle Aufrufer zu
+    `diagnostics/logs.py` verschieben; Diagnosebericht und Capture bleiben
+    bis zu ihrem eigenen Service-Umzug offen.
+  - [x] Diagnosebericht, Capture-Projektion und Aufrufer auslagern;
+    Capture-Status und Enable bleiben bereits dem konkreten
+    `DiagnosticCapture` zugeordnet, die HTTP-Aufrufer sind nur Transport.
+    - [x] Vollständigen Diagnosebericht einschließlich redigierter Logs,
+      Capture-Status/Entries, DB-Zähler und Provider-Frische einem
+      konkreten `DiagnosticReportService` zuordnen; der eigenständige
+      Capture-Endpunkt delegiert unverändert an `DiagnosticCapture`.
+- [x] HTTP-Streaming von Exportdateien bleibt im HTTP-Adapter.
+  `ExportStreamTransport` besitzt die Download-Orchestrierung; jede Route
+  konstruiert nur ihren eigenen Backup-/Privacy-Service und behält
+  Authentisierung, Deadline, Lock-Lebensdauer und Cleanup bei.
 
 Abnahme: Ungültige Backups verändern keine Daten; Restore blockiert
 konkurrierende Operationen korrekt und verwendet anschließend konsistente
@@ -344,13 +765,102 @@ Ressourcen. Tests laufen ausschließlich mit temporären Datenbanken/Archiven.
 Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Cases beginnen.
 
 - [ ] Auth, Session-Cookies, CSRF, Rate-Limits und Readiness in `http_api/` ziehen.
+  - [x] Den Login-/API-Rate-Limiter einschließlich Lock, Buckets,
+    begrenztem Cleanup und Retry-After einem konkreten
+    `http_api/`-Zustandseigentümer zuordnen.
+  - [x] Öffentliche Readiness-Prüfung mit bestehender DB-UOW,
+    kurzlebiger Verzeichnisprobe und Wartungsstatus einem konkreten
+    `ReadinessService` zuordnen; Handler sendet nur Status und JSON.
+  - [x] Session-Lebenszyklus, Cookie-/CSRF-Prüfung, Login-/Logout-
+    Autorisierung und persistierten Coach-Session-Binding-Read einem
+    konkreten `SessionAuthService` zuordnen. Der Handler löst den
+    aktuellen Eigentümer auch auf Keep-Alive-Verbindungen dynamisch
+    auf; Rate-Limit-Zustand bleibt bei `RateLimiter`.
 - [ ] Öffentliche Bootstrap-/State-Projektionen und Pagination zuordnen;
   Projektionen erhalten Daten über Domänenlesefunktionen.
+  - [x] Begrenzte Performance-/Garmin- und lokale Feedback-/Check-in-
+    Projektionen konkreten `http_api/`-Services zuordnen.
+  - [x] Die vollständige bisherige `public_state`-Projektion in einen
+    konkreten Service verschieben und Performance-/Feedback-Felder
+    über dieselben Projektionseigentümer erzeugen; die frühere Funktion
+    hatte nur Testaufrufer, aber keinen produktiven HTTP-Route-Caller.
+    Bootstrap und weitere P10-Transportaufgaben bleiben offen.
+  - [x] Lokalen Bootstrap-Lesevorlauf und Wetter-Follow-up mit
+    bestehender UOW-/Lock-Grenze in konkrete `http_api/`-Eigentümer
+    verschieben; übrige `public_state`-Projektionen bleiben offen.
+  - [x] Kalender-, Wettkampf- und Tageskontext-Projektion als konkreten
+    Service innerhalb der bestehenden Bootstrap-UOW zuordnen; die
+    verbleibenden öffentlichen Felder bleiben offen.
+  - [x] Begrenzte Chat-History-Pagination einschließlich Suche, Cursor,
+    Generation und sitzungsgebundener Vorschläge einem konkreten
+    `http_api/`-Service mit unveränderter DB-UOW zuordnen.
+  - [x] Öffentliche Plan-/Kalender-/Wetterprojektion mit bestehenden
+    Datenlimits und geschütztem History-Read in `PublicPlanStateService`
+    verlagern; andere öffentliche Projektionen bleiben offen.
+  - [x] Den vollständigen bounded Local-Only-Bootstrap einschließlich
+    Providerstatus und aller Felder in `PublicBootstrapService` verlagern;
+    der Handler authentifiziert und sendet nur die Antwort.
+  - [x] Den separaten `/api/weather`-Read mit unveränderter
+    Refresh-/Local-Only-Regel in `PublicWeatherStateService` verlagern.
 - [ ] `RequestHandler`, Route-Dispatch, Body-Limits, statische Dateien und SSE
   transportseitig auslagern; vorhandene `requests.py`/`responses.py` nutzen.
+  - [x] Cursor-Validierung, Initialereignisse, Gap-Reset, Heartbeat und
+    Verbindungsschleife des authentifizierten `/api/state/events`-Streams
+    `StateEventTransport` zuordnen; Event-Puffer bleibt `runtime_events`,
+    Socket-/Schreibzustand bleibt beim Handler.
+  - [x] Sync-POST-Fachentscheidungen in `SyncCommandEndpoint` verlagern;
+    Handler behält ausschließlich Transport, Body-Lesen und Antwort.
+  - [x] Statische Asset-Allowlist, Pfadsperre, Cache-/ETag-Projektion und
+    Sicherheitsheader `StaticAssetService` zuordnen; Handler sendet nur
+    Status, Header und Bytes.
 - [ ] Handler mit den konkret benötigten Services verbinden; keine Weitergabe
   des `server`-Moduls als Pseudo-Servicecontainer.
-- [ ] `CoachHTTPServer` dem HTTP-Bereich zuordnen.
+  - [x] Die GET-Routen `/api/chat/history`, `/api/chat/receipt` und
+    `/api/chat/status` einem zustandslosen `CoachGetRoutes` zuordnen;
+    Auth-, History-, Receipt- und Jobstatus-Services werden über ihre
+    konkreten Composition-Factories eingebunden.
+  - [x] Die GET-Routen `/api/health`, `/api/readiness`, `/api/auth/status`
+    und `/api/bootstrap` einem zustandslosen `PublicGetRoutes` zuordnen;
+    Maintenance-Gate, Readiness-, Session-Auth- und Bootstrap-Services
+    bleiben konkrete Composition-Abhängigkeiten und Zustandseigentümer.
+  - [x] Die GET-Routen `/api/plan`, `/api/weather` und `/api/library` einem
+    zustandslosen `PlanningGetRoutes` zuordnen; Auth-, Plan-, Wetter- und
+    Library-Services bleiben konkrete, pro Request aufgelöste Composition-
+    Abhängigkeiten und Zustandseigentümer.
+  - [x] Die GET-Routen `/api/performance`, `/api/profile`, `/api/feedback`
+    und `/api/context-preview` einem zustandslosen `AthleteGetRoutes`
+    zuordnen; Auth- und Datendienste werden pro Request aufgelöst, die
+    Providerwahl bei jeder Vorschau aus dem bestehenden Settings-Eigentümer
+    gelesen.
+  - [x] Die GET-Routen `/api/sync/jobs/<id>`, `/api/sync/status` und
+    `/api/activities` einschließlich Job-ID-Muster und Query-Defaults
+    `SyncGetRoutes` zuordnen; Queue, Status und Aktivitätsleser bleiben
+    Zustandseigentümer. Der SSE-Pfad `/api/state/events` bleibt bis zur
+    abschließenden HTTP-Transportauslagerung getrennt.
+  - [x] Die GET-Routen `/api/logs`, `/api/diagnostics` und
+    `/api/diagnostics/capture` einschließlich begrenztem Log-Limit
+    `DiagnosticsGetRoutes` zuordnen; die bestehenden Logs-, Report- und
+    Capture-Dienste bleiben Datenschutz- und Zustandseigentümer.
+  - [x] Die GET-Route `/api/change-history` einschließlich der bestehenden
+    Limit-Grenzen `HistoryGetRoutes` zuordnen; der Change-History-Dienst
+    bleibt Eigentümer des Datenbanklesens.
+  - [x] Die Privacy-GET-Routen für Export, Löschvorschau und Backup einem
+    zustandslosen `PrivacyGetRoutes` zuordnen; Authentisierung erfolgt vor
+    jeder Service-Konstruktion, die bestehenden Stream- und Delete-Dienste
+    behalten Datenschutz-, Cleanup- und Zustandseigentümerschaft.
+  - [x] Den authentifizierten GET-Dispatch für `/api/state/events` einem
+    `StateEventsGetRoutes` zuordnen; Event-Puffer und die unveränderte
+    Cursor-/Gap-/Heartbeat-/Disconnect-Schleife bleiben beim bestehenden
+    `StateEventTransport`, Socket und SSE-Schreibmethoden beim Handler.
+  - [x] Die vier Settings-PUT-Routen `SettingsPutRoutes` zuordnen; der
+    bestehende `SettingsService` behält Validierung und Persistenz, der
+    Handler die äußere Auth-/CSRF-/Maintenance- und Fehlergrenze.
+  - [x] Die PUT-Routen `/api/athlete-context` und `/api/profile` einem
+    `AthletePutRoutes` zuordnen; Profile-/Context-Dienste behalten ihre
+    Validierung und Datenbanktransaktionen, der Handler die äußere Auth-/
+    CSRF-/Maintenance- und Fehlergrenze.
+- [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
+  und Queue-Vertrag bleiben unverändert.
 
 Abnahme: Endpunkte, Statuscodes, JSON-Formate, Cookies, SSE-Events und statische
 Assets bestehen die Vertrags-/Browserprüfungen. HTTP enthält keine eigene

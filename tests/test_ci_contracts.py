@@ -207,6 +207,15 @@ class CodexReviewWorkflowTests(unittest.TestCase):
             check=True,
         )
 
+    @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
+    def test_codex_review_followup(self):
+        root = Path(__file__).resolve().parents[1]
+        subprocess.run(
+            ["node", "--test", str(root / "tests/codex-review-followup.test.cjs")],
+            cwd=root,
+            check=True,
+        )
+
 
 class DiscoveryTests(unittest.TestCase):
     def test_direct_cli_discovers_backend_modules_from_any_working_directory(self):

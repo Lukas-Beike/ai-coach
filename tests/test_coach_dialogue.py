@@ -9,11 +9,16 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from backend.coach import streams as coach_streams
 import test_server as fixtures
 from support import isolated_server, reset_application_state
 from backend.coach.dialogue import validate_request
+from backend.coach.outcomes import unresolved_coach_steps
+from backend.coach import service as coach_service
+from backend.coach.tool_dispatch import CoachToolDispatchService
+from backend.sync.intervals import IntervalsSyncService
 
 server = fixtures.server
 
@@ -28,6 +33,14 @@ class DialogueHarness:
         fixed = patch.object(server, "local_now", return_value=datetime(2026, 9, 7, 12, tzinfo=timezone.utc))
         fixed.start()
         self.addCleanup(fixed.stop)
+        original_dialogue_service = server.coach_dialogue_read_service
+        def fixed_dialogue_service():
+            service = original_dialogue_service()
+            service._local_clock = lambda _timezone: server.local_now()
+            return service
+        dialogue_clock = patch.object(server, "coach_dialogue_read_service", side_effect=fixed_dialogue_service)
+        dialogue_clock.start()
+        self.addCleanup(dialogue_clock.stop)
         self.counter = 0
 
     def workout(self, day="2026-09-09", name="Oberkörper moderat + Core"):
@@ -35,7 +48,7 @@ class DialogueHarness:
                 "duration_minutes": 30, "target": "AUTO", "rationale": "Synthetic training goal"}
 
     def request(self, scope, target="local", period=None, remote_write=False, sync_scope=None):
-        current = [item for item in server.list_messages() if item["role"] == "user"][-1]
+        current = [item for item in server.coach_message_service().list() if item["role"] == "user"][-1]
         return {"summary": "Synthetic current request", "source_message_ids": [current["id"]],
                 "target": target, "scope": scope, "period": period, "constraints": [],
                 "remote_write": remote_write, "sync_scope": sync_scope}
@@ -54,22 +67,95 @@ class DialogueHarness:
         def response(payload, *args, **extra):
             step = next(steps)
             return step(payload) if callable(step) else step
-        with patch.object(server, "ensure_conversation", return_value="synthetic-conversation"), patch.object(
-            server, "build_training_context", return_value="Synthetic local data"
-        ), patch.object(server, "responses_request", side_effect=response) as model, patch.object(server, "responses_background_request", side_effect=response) as background_model:
-            receipt = server.chat_with_coach(message, client_turn_id=turn or f"turn-{self.counter}", session_csrf_hash="synthetic-session", **kwargs)
-        return receipt, background_model if kwargs.get("background_job") else model
+        with patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))), patch(
+            "backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic local data"
+        ), patch.object(server, "coach_response_transport") as transport_factory:
+            transport = transport_factory.return_value
+            transport.request.side_effect = response
+            transport.background_request.side_effect = response
+            receipt = server.coach_chat_turn_service().run(message, client_turn_id=turn or f"turn-{self.counter}", session_csrf_hash="synthetic-session", **kwargs)
+        return receipt, transport.background_request if kwargs.get("background_job") else transport.request
 
     def state(self):
-        return server._structured_training_state()
+        return server.structured_training_state_service().read()
 
 
 class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
+    def test_clarification_service_persists_valid_user_provenance_and_limits(self):
+        messages = [{"id": item, "role": "user"} for item in range(1, 25)]
+        context = {"messages": messages, "current_user_message_id": 24}
+        summary, question = "s" * 4000, "Zurück? " + "ä" * 992
+        arguments = {
+            "source_message_ids": list(range(1, 25)),
+            "summary": summary,
+            "question": question,
+        }
+
+        result = server.coach_clarification_service().save_question(arguments, context)
+
+        self.assertEqual(result, {"ok": True, "status": "needs_clarification", "question": question})
+        stored = server.get_kv("coach_pending_request")
+        self.assertIn("ä", stored)
+        self.assertNotIn("\\u00e4", stored)
+        self.assertEqual(json.loads(stored), {
+            "summary": summary,
+            "question": question,
+            "source_message_ids": list(range(1, 25)),
+            "status": "needs_clarification",
+        })
+
+    def test_clarification_service_rejects_unbound_message_ids_without_writing(self):
+        context = {
+            "messages": [
+                {"id": 1, "role": "user"},
+                {"id": 2, "role": "user"},
+                {"id": 3, "role": "assistant"},
+            ],
+            "current_user_message_id": 2,
+        }
+        server.set_kv("coach_pending_request", json.dumps({"summary": "previous"}))
+        service = server.coach_clarification_service()
+        invalid_ids = (None, [], [1], [2, 3], [2, 99], [True, 2], [2] * 25)
+        for ids in invalid_ids:
+            with self.subTest(ids=ids), self.assertRaises(server.AppError) as raised:
+                service.save_question(
+                    {"source_message_ids": ids, "summary": "Synthetic", "question": "When?"},
+                    context,
+                )
+            self.assertEqual((raised.exception.status, raised.exception.reason), (400, "request_provenance"))
+        self.assertEqual(json.loads(server.get_kv("coach_pending_request")), {"summary": "previous"})
+
+        assistant_current = {**context, "current_user_message_id": 3}
+        with self.assertRaises(server.AppError) as raised:
+            service.save_question(
+                {"source_message_ids": [2, 3], "summary": "Synthetic", "question": "When?"},
+                assistant_current,
+            )
+        self.assertEqual((raised.exception.status, raised.exception.reason), (400, "request_provenance"))
+
+    def test_clarification_service_rejects_empty_or_oversized_text_without_writing(self):
+        context = {"messages": [{"id": 8, "role": "user"}], "current_user_message_id": 8}
+        service = server.coach_clarification_service()
+        server.set_kv("coach_pending_request", json.dumps({"summary": "previous"}))
+        invalid_text = (
+            {"summary": "", "question": "When?"},
+            {"summary": " " * 3, "question": "When?"},
+            {"summary": "s" * 4001, "question": "When?"},
+            {"summary": "Synthetic", "question": ""},
+            {"summary": "Synthetic", "question": " "},
+            {"summary": "Synthetic", "question": "q" * 1001},
+        )
+        for text in invalid_text:
+            with self.subTest(summary_length=len(text["summary"]), question_length=len(text["question"])), self.assertRaises(server.AppError) as raised:
+                service.save_question({"source_message_ids": [8], **text}, context)
+            self.assertEqual((raised.exception.status, raised.exception.reason), (400, "request_question"))
+        self.assertEqual(json.loads(server.get_kv("coach_pending_request")), {"summary": "previous"})
+
     def test_question_survives_final_provider_failure_and_reply_continues(self):
         def question(_):
             return self.call("clarify_coach_request", {
-                "source_message_ids": [server.list_messages()[-1]["id"]],
+                "source_message_ids": [server.coach_message_service().list()[-1]["id"]],
                 "summary": "Plan the route", "question": "Samstag oder Sonntag?"})
         def broken(_):
             raise server.AppError(502, "Synthetic internal detail", reason="response_failed")
@@ -94,10 +180,15 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             self.assertNotIn("previous_response_id", payload)
             self.assertTrue(json.loads(payload["input"])["confirmed_steps"][0]["result"]["ok"])
             return save(payload)
-        with patch.object(server, "_structured_coach_tool_result", wraps=server._structured_coach_tool_result) as execute:
+        executed: list[str] = []
+        original_execute = CoachToolDispatchService.execute
+        def traced_execute(dispatcher, name, arguments, **kwargs):
+            executed.append(name)
+            return original_execute(dispatcher, name, arguments, **kwargs)
+        with patch.object(CoachToolDispatchService, "execute", traced_execute):
             result, _ = self.turn("Speichere meinen Namen", [save, broken, retry, {"output_text": "Saved"}])
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(sum(call.args[0] == "update_profile" for call in execute.call_args_list), 1)
+        self.assertEqual(executed.count("update_profile"), 1)
 
     def test_repeated_invalid_state_is_bounded_and_explained_without_raw_error(self):
         def broken(_):
@@ -110,7 +201,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertNotIn("private upstream", result["message"]["content"])
 
     def test_profile_proposal_acceptance_preserves_existing_fields_and_replays_once(self):
-        server.save_profile({"name": "Synthetic Athlete", "training_background": "Regular cycling.", "equipment": "Indoor bike"})
+        server.profile_service().save({"name": "Synthetic Athlete", "training_background": "Regular cycling.", "equipment": "Indoor bike"})
         self.turn("Ich gehe täglich spazieren.", [{"output_text": "Soll ich die tägliche Alltagsbewegung dauerhaft im Profil ergänzen?"}])
         change = {"field": "training_background", "expected_value": "Regular cycling.", "value": "Regular cycling. Daily easy walks."}
         result, _ = self.turn("Ja bitte füge das dauerhaft in mein Profil hinzu", [
@@ -119,21 +210,21 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             {"output_text": "Im Profil gespeichert."},
         ], turn="profile-acceptance")
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(server.get_profile()["equipment"], "Indoor bike")
-        self.assertEqual(server.get_profile()["name"], "Synthetic Athlete")
-        self.assertEqual(server.get_profile()["training_background"], change["value"])
+        self.assertEqual(server.profile_service().get()["equipment"], "Indoor bike")
+        self.assertEqual(server.profile_service().get()["name"], "Synthetic Athlete")
+        self.assertEqual(server.profile_service().get()["training_background"], change["value"])
         replay, model = self.turn("Ja bitte füge das dauerhaft in mein Profil hinzu", [], turn="profile-acceptance")
         model.assert_not_called()
         self.assertEqual(replay, result)
         self.assertEqual(result["sync_job_ids"], [])
 
     def test_profile_patch_conflict_is_atomic_and_can_be_repaired(self):
-        server.save_profile({"name": "Synthetic", "training_background": "Current facts"})
-        original = server.get_profile()
+        server.profile_service().save({"name": "Synthetic", "training_background": "Current facts"})
+        original = server.profile_service().get()
         changes = [{"field": "name", "expected_value": "Synthetic", "value": "Updated"},
                    {"field": "training_background", "expected_value": "Old facts", "value": "New facts"}]
         def repair(_):
-            self.assertEqual(server.get_profile(), original)
+            self.assertEqual(server.profile_service().get(), original)
             return self.call("update_profile", {"changes": [changes[0], {"field": "training_background", "expected_value": "Current facts", "value": "Current facts. Daily walking."}]}, ["local_profile"])
         result, _ = self.turn("Bitte dauerhaft merken", [
             lambda _: self.call("update_profile", {"changes": changes}, ["local_profile"]),
@@ -141,10 +232,10 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         ])
         self.assertEqual(result["status"], "completed")
         self.assertTrue(result["command_receipts"][0]["resolved"])
-        self.assertEqual(server.get_profile()["name"], "Updated")
+        self.assertEqual(server.profile_service().get()["name"], "Updated")
 
     def test_profile_conflict_repair_does_not_hide_an_independent_field_failure(self):
-        server.save_profile({"name": "Synthetic", "training_background": "Current facts"})
+        server.profile_service().save({"name": "Synthetic", "training_background": "Current facts"})
         result, _ = self.turn("Bitte speichere beide Profilangaben", [
             lambda _: self.call("update_profile", {"changes": [
                 {"field": "training_background", "expected_value": "Old facts", "value": "New facts"},
@@ -156,8 +247,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         ])
         self.assertEqual(result["status"], "partial")
         self.assertFalse(result["command_receipts"][0].get("resolved"))
-        self.assertEqual(server.get_profile()["name"], "Updated")
-        self.assertEqual(server.get_profile()["training_background"], "Current facts")
+        self.assertEqual(server.profile_service().get()["name"], "Updated")
+        self.assertEqual(server.profile_service().get()["training_background"], "Current facts")
 
     def test_profile_rejects_unknown_duplicate_invalid_and_unscoped_changes(self):
         good = {"field": "name", "expected_value": "", "value": "Synthetic"}
@@ -165,16 +256,16 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                  ([{**good, "field": "api_key"}], ["local_profile"]),
                  ([{**good, "value": None}], ["local_profile"]),
                  ([{**good, "value": "x" * 4001}], ["local_profile"]),
-                 ([good, {"field": "timezone", "expected_value": server.get_profile()["timezone"], "value": "Mars/Test"}], ["local_profile"])]
-        before = server.get_profile()
+                 ([good, {"field": "timezone", "expected_value": server.profile_service().get()["timezone"], "value": "Mars/Test"}], ["local_profile"])]
+        before = server.profile_service().get()
         for changes, scope in cases:
             result, _ = self.turn("Bitte speichern", [lambda _, c=changes, s=scope: self.call("update_profile", {"changes": c}, s), {"output_text": "Nicht gespeichert."}])
             self.assertEqual(result["status"], "failed")
-            self.assertEqual(server.get_profile(), before)
+            self.assertEqual(server.profile_service().get(), before)
 
     def test_sync_invalid_id_repair_clears_error_and_queues_only_selected_unit(self):
-        units = server.save_workout_library_entries([self.workout("2026-09-09"), self.workout("2026-09-11")])
-        entry = next(item for item in server._pending_plan_push_entries() if item["library_workout_id"] == units[0]["id"])
+        units = server.local_plan_creation_service().save([self.workout("2026-09-09"), self.workout("2026-09-11")])
+        entry = next(item for item in server.planning_authority_service().pending_plan_push_entries() if item["library_workout_id"] == units[0]["id"])
         scope = ["intervals_sync", f"planned_unit:{units[0]['id']}"]
         self.turn("Freitag bitte lockerer", [{"output_text": "Die lokale Planung ist gespeichert."}])
         result, _ = self.turn("Bitte zu intervals.icu synchronisieren", [
@@ -193,7 +284,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual([item["library_workout_id"] for item in json.loads(job["payload"])["entries"]], [units[0]["id"]])
 
     def test_selected_sync_validates_hash_before_changing_state(self):
-        unit = server.save_workout_library_entries([self.workout()])[0]
+        unit = server.local_plan_creation_service().save([self.workout()])[0]
         before = self.state()
         result, _ = self.turn("Diese Einheit übertragen", [lambda _: self.call("start_intervals_plan_sync", {
             "entries": [{"library_workout_id": unit["id"], "expected_payload_hash": "0" * 64}]},
@@ -204,7 +295,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["sync_job_ids"], [])
 
     def test_sync_conflict_resolution_queues_hash_of_validated_updated_payload(self):
-        unit = server.save_workout_library_entries([self.workout()])[0]
+        unit = server.local_plan_creation_service().save([self.workout()])[0]
         with server.database() as db:
             row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (unit["id"],)).fetchone()
             payload = json.loads(row["payload"])
@@ -227,31 +318,37 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             {"tool": "start_intervals_plan_sync", "step_key": "first", "request": {"target": "intervals", "scope": ["planned_unit:first"], "sync_scope": "selected"}, "result": {"ok": False, "reason": "tool_arguments_invalid"}},
             {"tool": "start_intervals_plan_sync", "step_key": "second", "request": {"target": "intervals", "scope": ["planned_unit:second"], "sync_scope": "selected"}, "result": {"ok": True}},
         ]
-        self.assertEqual(server._unresolved_coach_steps(entries), [entries[0]])
+        self.assertEqual(unresolved_coach_steps(entries), [entries[0]])
         entries[1]["request"].update(scope=["local_plan", "intervals_sync"], sync_scope="all_pending")
-        self.assertEqual(server._unresolved_coach_steps(entries), [])
+        self.assertEqual(unresolved_coach_steps(entries), [])
 
     def test_retry_uses_original_job_provider_and_write_authority(self):
         for provider, kind, remote, scope in (("intervals", "plan_push", True, "intervals_sync"),
                                               ("garmin", "refresh", False, "garmin_refresh")):
             payload = {"reason": "Synthetic retry", "days": 7}
             if remote:
-                server.save_workout_library_entries([self.workout()])
-                payload = {"reason": "Synthetic retry", "entries": server._pending_plan_push_entries()}
-            job = server.enqueue_sync_job(provider, kind, payload, requested_by="coach")
+                server.local_plan_creation_service().save([self.workout()])
+                payload = {"reason": "Synthetic retry", "entries": server.planning_authority_service().pending_plan_push_entries()}
+            job = server.sync_job_queue_service().enqueue(
+                provider, kind, payload, requested_by="coach"
+            )
             with server.database() as db:
                 db.execute("UPDATE sync_jobs SET status='failed' WHERE id=?", (job["id"],))
             result, _ = self.turn("Bitte nochmal versuchen", [lambda _, j=job: self.call("resolve_training_sync_conflict", {"job_id": j["id"]}, [f"sync_job:{j['id']}"]),
                                                     {"output_text": "Noch nicht gestartet."}])
             self.assertEqual(result["status"], "failed")
-            self.assertEqual(server.sync_job_state(job["id"])["status"], "failed")
+            self.assertEqual(
+                server.sync_job_queue_service().state(job["id"])["status"], "failed"
+            )
             result, _ = self.turn("Ja, bei dem Anbieter nochmal versuchen", [
                 lambda _, j=job: self.call("get_sync_job", {"job_id": j["id"]}),
                 lambda _, j=job, p=provider, r=remote, s=scope: self.call("resolve_training_sync_conflict", {"job_id": j["id"]},
                     [f"sync_job:{j['id']}", s], target=p, remote_write=r), {"output_text": "Erneut beauftragt."},
             ])
             self.assertEqual(result["status"], "completed")
-            self.assertEqual(server.sync_job_state(job["id"])["status"], "queued")
+            self.assertEqual(
+                server.sync_job_queue_service().state(job["id"])["status"], "queued"
+            )
             self.assertEqual(result["sync_job_ids"], [job["id"]])
 
     def test_every_tool_exposes_nested_object_fields_and_rejects_advice_writes(self):
@@ -264,13 +361,53 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 inspect(schema["items"], name)
         with server.database() as db:
             server.CHAT_REPOSITORY.add(db, "user", "Synthetic current request", client_turn_id="tool-audit")
-        context = server.coach_dialogue_context("tool-audit")
+        context = server.coach_dialogue_read_service().context("tool-audit")
         for tool in server.COACH_DIALOGUE_TOOLS:
             with self.subTest(tool=tool["name"]):
                 inspect(tool["parameters"], tool["name"])
                 if tool["name"] not in server.STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}:
                     with self.assertRaises(server.AppError):
-                        server._dialogue_action(tool["name"], {}, context, allow_mutations=False)
+                        server.coach_dialogue_action_service().classify(
+                            tool["name"], {}, context, allow_mutations=False
+                        )
+
+    def test_dialogue_action_service_enforces_live_request_and_remote_boundaries(self):
+        with server.database() as db:
+            server.CHAT_REPOSITORY.add(db, "user", "Synthetic scoped request", client_turn_id="scope-check")
+        context = server.coach_dialogue_read_service().context("scope-check")
+        service = server.coach_dialogue_action_service()
+
+        def classify(name, scope, *, target="local", remote_write=False, sync_scope=None, extra=None):
+            request = self.request(scope, target, remote_write=remote_write, sync_scope=sync_scope)
+            return service.classify(name, {"_request": request, **(extra or {})}, context, allow_mutations=True)
+
+        with self.assertRaises(server.AppError) as denied:
+            service.classify("save_coach_activity_feedback", {}, context, allow_mutations=False)
+        self.assertEqual(denied.exception.reason, "intent_scope_denied")
+        with self.assertRaises(server.AppError) as invalid:
+            foreign_request = self.request(["activity_feedback"]) | {"source_message_ids": [999999]}
+            service.classify(
+                "save_coach_activity_feedback", {"_request": foreign_request}, context,
+                allow_mutations=True,
+            )
+        self.assertEqual(invalid.exception.reason, "request_invalid")
+        with self.assertRaises(server.AppError) as remote:
+            classify("start_intervals_plan_sync", ["intervals_sync"], target="intervals", sync_scope="selected")
+        self.assertEqual(remote.exception.reason, "remote_scope_denied")
+        with self.assertRaises(server.AppError) as provider:
+            classify("start_provider_refresh", ["garmin_refresh"], target="intervals")
+        self.assertEqual(provider.exception.reason, "request_target")
+        with self.assertRaises(server.AppError) as missing:
+            classify("save_coach_activity_feedback", ["planned_unit:missing"])
+        self.assertEqual(missing.exception.reason, "request_object_missing")
+        with self.assertRaises(server.AppError) as repair:
+            classify("start_intervals_plan_sync", ["intervals_sync"], target="intervals", remote_write=True,
+                     sync_scope="selected", extra={"repair": True})
+        self.assertEqual(repair.exception.reason, "request_sync")
+        action = classify("save_coach_activity_feedback", ["activity_feedback"])
+        self.assertEqual(action["authorization_scope"], ["activity_feedback"])
+        self.assertEqual(action["intent"], "local_action")
+
     @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
     def test_receipt_cards_show_only_unresolved_failures(self):
         subprocess.run(["node", "--test", str(Path(__file__).with_name("coach-receipts.test.cjs"))], check=True)
@@ -300,9 +437,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             validate_request(request, {1}, 1)
 
     def test_screenshot_followup_moves_and_adds_atomically_without_literal_name(self):
-        existing = server.save_workout_library_entries([self.workout()], plan_name="September")[0]
+        existing = server.local_plan_creation_service().save([self.workout()], plan_name="September")[0]
         def question(_):
-            current = server.list_messages()[-1]["id"]
+            current = server.coach_message_service().list()[-1]["id"]
             return self.call("clarify_coach_request", {"source_message_ids": [current],
                 "summary": "Diese Woche anpassen, Donnerstag bleibt frei.", "question": "Wie soll ich Dienstag und Mittwoch anpassen?"})
         first, _ = self.turn("Diese Woche müssen wir etwas anpassen.", [question, {"output_text": "Wie soll ich Dienstag und Mittwoch anpassen?"}])
@@ -323,7 +460,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertIsNone(json.loads(server.get_kv("coach_pending_request")))
 
     def test_failed_addition_rolls_back_move_and_revision(self):
-        existing = server.save_workout_library_entries([self.workout()])[0]
+        existing = server.local_plan_creation_service().save([self.workout()])[0]
         before = self.state()
         def action(_):
             return self.call("apply_training_patch", {"changes": [{"local_id": existing["id"], "action": "update", "date": "2026-09-08",
@@ -336,7 +473,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertNotEqual(result["message"]["content"], "Gespeichert.")
 
     def test_stale_hash_rolls_back_whole_patch(self):
-        existing = server.save_workout_library_entries([self.workout()])[0]
+        existing = server.local_plan_creation_service().save([self.workout()])[0]
         before = self.state()
         result, _ = self.turn("Dann morgen", [lambda _: self.call("apply_training_patch", {
             "changes": [{"local_id": existing["id"], "date": "2026-09-08", "action": "update", "expected_payload_hash": "0" * 64}],
@@ -346,7 +483,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(self.state(), before)
 
     def test_bounded_giro_rebuild_preserves_later_units_and_plan_constraints(self):
-        entries = server.save_workout_library_entries([self.workout(), self.workout("2026-10-05", "Nach dem Giro")], plan_name="Alter Plan")
+        entries = server.local_plan_creation_service().save([self.workout(), self.workout("2026-10-05", "Nach dem Giro")], plan_name="Alter Plan")
         before = self.state()
         def rebuild(_):
             response = self.call("replace_training_plan", {"expected_revision": before["planning_revision"], "payload": {
@@ -359,13 +496,13 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         result, _ = self.turn("Bitte bis zum Giro durchplanen, zweimal Oberkörper pro Woche.", [rebuild, {"output_text": "Der Zeitraum ist geplant."}])
         self.assertEqual(result["status"], "completed")
         self.assertTrue(any(item["local_id"] == entries[1]["id"] for item in self.state()["planned_units"]))
-        old_plan = next(item for item in server.list_training_plans() if item["name"] == "Alter Plan")
+        old_plan = next(item for item in server.training_plan_service().list() if item["name"] == "Alter Plan")
         self.assertNotEqual(old_plan["status"], "archived")
-        new_plan = next(item for item in server.list_training_plans() if item["name"] == "Bis zum Giro")
+        new_plan = next(item for item in server.training_plan_service().list() if item["name"] == "Bis zum Giro")
         self.assertIn("Zweimal Oberkörper pro Woche", new_plan["constraints"])
 
     def test_out_of_period_change_is_rejected(self):
-        existing = server.save_workout_library_entries([self.workout("2026-10-05")])[0]
+        existing = server.local_plan_creation_service().save([self.workout("2026-10-05")])[0]
         before = self.state()
         result, _ = self.turn("Bis zum Giro", [lambda _: self.call("apply_training_patch", {
             "changes": [{"local_id": existing["id"], "action": "delete", "expected_payload_hash": before["planned_units"][0]["expected_payload_hash"]}],
@@ -376,7 +513,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_provider_switch_retains_pending_question(self):
         def question(_):
-            return self.call("clarify_coach_request", {"source_message_ids": [server.list_messages()[-1]["id"]],
+            return self.call("clarify_coach_request", {"source_message_ids": [server.coach_message_service().list()[-1]["id"]],
                 "summary": "Eine von zwei Einheiten verschieben", "question": "Die lockere oder die intensive Einheit?"})
         self.turn("Die Einheit verschieben", [question, {"output_text": "Welche Einheit?"}])
         with patch.object(server.SETTINGS, "selected_ai_provider", return_value="gemini"):
@@ -391,18 +528,18 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["status"], "cancelled")
         self.assertIsNone(json.loads(server.get_kv("coach_pending_request")))
         server.set_kv("coach_pending_request", json.dumps({"summary": "Synthetic", "source_message_ids": []}))
-        server.reset_coach_chat()
+        server.coach_conversation_reset_service().reset()
         self.assertIsNone(json.loads(server.get_kv("coach_pending_request")))
 
     def test_remote_write_requires_per_step_sync_authority(self):
-        with patch.object(server, "enqueue_sync_job") as enqueue:
+        with patch.object(server.SyncJobQueueService, "enqueue") as enqueue:
             result, _ = self.turn("Ja, speichern", [lambda _: self.call("start_intervals_plan_sync", {}, ["local_plan"],
                 target="intervals", sync_scope="all_pending"), {"output_text": "Nicht synchronisiert."}])
         enqueue.assert_not_called()
         self.assertEqual(result["status"], "failed")
 
     def test_current_refresh_runs_before_next_model_response_without_trigger_gate(self):
-        with patch.object(server, "sync_intervals", return_value={"status": "ok", "activity_days": 7}) as sync:
+        with patch.object(IntervalsSyncService, "sync", return_value={"status": "ok", "activity_days": 7}) as sync:
             result, model = self.turn("Sind die Zahlen wirklich von heute? Bitte damit bewerten.", [
                 lambda _: self.call("start_provider_refresh", {"days": 7}, ["intervals_refresh"], target="intervals"),
                 lambda _: {"output_text": "Aktuelle Daten bewertet."} if sync.called else self.fail("refresh must finish first"),
@@ -494,7 +631,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertTrue(result["command_receipts"][1]["result"]["ok"])
         self.assertEqual(result["message"]["content"], "Plan gespeichert.")
         self.assertEqual([unit["date"] for unit in self.state()["planned_units"]], ["2026-09-12"])
-        history = server.coach_diagnostic_history()
+        history = server.coach_diagnostic_history_service().history()
         self.assertEqual(history[0]["steps"][0]["error"]["validation_reason"], "request_provenance")
 
     def test_plan_replacement_does_not_resolve_invalid_patch_for_other_period(self):
@@ -507,7 +644,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             "result": {"ok": True},
         }
 
-        self.assertEqual(server._unresolved_coach_steps([first, second]), [first])
+        self.assertEqual(unresolved_coach_steps([first, second]), [first])
 
     def test_plan_replacement_does_not_resolve_different_workout_with_same_request(self):
         first = {
@@ -519,7 +656,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             "plan_effect_key": "monday", "result": {"ok": True},
         }
 
-        self.assertEqual(server._unresolved_coach_steps([first, second]), [first])
+        self.assertEqual(unresolved_coach_steps([first, second]), [first])
 
     def test_other_workout_success_does_not_resolve_invalid_scope(self):
         period = {"start": "2026-09-12", "end": "2026-09-14"}
@@ -552,7 +689,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(len(self.state()["planned_units"]), 1)
 
     def test_request_provenance_rejects_assistant_or_missing_current_message(self):
-        server.add_message("user", "Synthetic request")
+        server.coach_message_service().add("user", "Synthetic request")
         value = self.request(["local_checkin"])
         current = value["source_message_ids"][0]
         for ids in ([current + 1], [current - 1], [], [True]):
@@ -560,8 +697,12 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 validate_request({**value, "source_message_ids": ids}, {current}, current)
 
     def test_foreign_drafts_are_not_candidates(self):
-        server._stage_coach_artifact("foreign", "foreign-turn", {"workouts": [self.workout()], "plan_name": "Foreign"})
-        self.assertEqual(server.coach_dialogue_artifact_refs(), [])
+        server.training_plan_artifact_service().stage(
+            {"payload": {"workouts": [self.workout()], "plan_name": "Foreign"}},
+            "foreign",
+            "foreign-turn",
+        )
+        self.assertEqual(server.coach_dialogue_read_service().artifact_refs(), [])
 
     def test_all_mutating_tool_schemas_carry_request_provenance(self):
         exempt = server.STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}
@@ -584,33 +725,33 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertIsNotNone(json.loads(server.get_kv("coach_pending_request")))
 
     def test_two_matching_units_can_be_disambiguated_by_question(self):
-        server.save_workout_library_entries([self.workout("2026-09-08"), self.workout("2026-09-11")])
+        server.local_plan_creation_service().save([self.workout("2026-09-08"), self.workout("2026-09-11")])
         before = self.state()
         def question(_):
-            return self.call("clarify_coach_request", {"source_message_ids": [server.list_messages()[-1]["id"]],
+            return self.call("clarify_coach_request", {"source_message_ids": [server.coach_message_service().list()[-1]["id"]],
                 "summary": "Oberkörper verschieben", "question": "Meinst du Oberkörper am Dienstag oder Freitag?"})
         result, _ = self.turn("Die Oberkörpereinheit bitte verschieben", [lambda _: self.call("read_training_state"), question, {"output_text": "Welche?"}])
         self.assertEqual(result["message"]["content"], "Meinst du Oberkörper am Dienstag oder Freitag?")
         self.assertEqual(self.state(), before)
 
     def test_competition_edit_uses_resolved_id_without_literal_name(self):
-        competition = server.save_coach_competition({"name": "Synthetic Giro", "event_date": "2026-10-03", "sport": "Ride", "priority": "A"})
+        competition = server.competition_service().save({"name": "Synthetic Giro", "event_date": "2026-10-03", "sport": "Ride", "priority": "A"})
         competition_id = competition.get("competition", competition).get("id")
         if not competition_id:
-            competition_id = server.list_competitions()[0]["id"]
+            competition_id = server.competition_service().list()[0]["id"]
         result, _ = self.turn("Den bitte einen Tag später", [lambda _: self.call("save_competition", {
             "payload": {"competition_id": competition_id, "event_date": "2026-10-04"}}, [f"competition:{competition_id}"]), {"output_text": "Auf den 4. Oktober verschoben."}])
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(server.list_competitions()[0]["event_date"], "2026-10-04")
+        self.assertEqual(server.competition_service().list()[0]["event_date"], "2026-10-04")
 
     def test_different_target_id_cannot_escape_action_scope(self):
         for name in ("First", "Second"):
-            server.save_coach_competition({"name": name, "event_date": "2026-10-03", "sport": "Ride", "priority": "A"})
-        one, two = server.list_competitions()
+            server.competition_service().save({"name": name, "event_date": "2026-10-03", "sport": "Ride", "priority": "A"})
+        one, two = server.competition_service().list()
         result, _ = self.turn("Den ersten entfernen", [lambda _: self.call("delete_competition", {"competition_id": two["id"]},
             [f"competition:{one['id']}"]), {"output_text": "Nicht entfernt."}])
         self.assertEqual(result["status"], "failed")
-        self.assertEqual(len(server.list_competitions()), 2)
+        self.assertEqual(len(server.competition_service().list()), 2)
 
     def test_plan_create_and_explicit_sync_use_separate_step_targets(self):
         before = self.state()
@@ -628,7 +769,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(len(json.loads(job["payload"])["entries"]), 1)
 
     def test_sync_followup_can_read_job_and_inspect_duplicates(self):
-        server.save_workout_library_entries([self.workout("2026-09-08")])
+        server.local_plan_creation_service().save([self.workout("2026-09-08")])
         def inspect(payload):
             output = json.loads(payload["input"][0]["output"])
             return self.call("get_sync_job", {"job_id": output["sync_job_id"]})
@@ -640,13 +781,20 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         ])
         self.assertEqual(result["status"], "completed")
         self.assertTrue(all(step["result"]["ok"] for step in result["command_receipts"]))
-        self.assertEqual(server.sync_job_state(result["sync_job_ids"][0])["status"], "queued")
+        self.assertEqual(
+            server.sync_job_queue_service().state(result["sync_job_ids"][0])["status"],
+            "queued",
+        )
 
     def test_sync_followup_failure_distinguishes_coach_interruption_and_keeps_job(self):
-        server.save_workout_library_entries([self.workout("2026-09-08")])
+        server.local_plan_creation_service().save([self.workout("2026-09-08")])
         def broken(_):
             raise server.AppError(503, "Synthetic model unavailable", reason="provider_unavailable")
-        with patch.object(server, "enqueue_sync_job", wraps=server.enqueue_sync_job) as enqueue:
+        with patch.object(
+            server.SyncJobQueueService,
+            "enqueue",
+            wraps=server.sync_job_queue_service().enqueue,
+        ) as enqueue:
             result, _ = self.turn("Sync zu intervals.icu durchführen", [
                 lambda _: self.call("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"],
                                    target="intervals", remote_write=True, sync_scope="all_pending"), broken,
@@ -665,25 +813,28 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertIn("unabhängig vom Coach", text)
         self.assertIn("noch nicht bestätigt", text)
         self.assertNotIn("Der Coach-Auftrag konnte nicht abgeschlossen werden", text)
-        self.assertEqual(server.sync_job_state(result["sync_job_ids"][0])["status"], "queued")
+        self.assertEqual(
+            server.sync_job_queue_service().state(result["sync_job_ids"][0])["status"],
+            "queued",
+        )
 
     def test_failed_plan_cannot_sync_created_entries(self):
-        with patch.object(server, "enqueue_sync_job") as enqueue:
+        with patch.object(server.SyncJobQueueService, "enqueue") as enqueue:
             result, _ = self.turn("Planen und übertragen", [lambda _: self.call("start_intervals_plan_sync", {}, ["intervals_sync"],
                 target="intervals", remote_write=True, sync_scope="created"), {"output_text": "Noch nicht gespeichert."}])
         enqueue.assert_not_called()
         self.assertEqual(result["status"], "failed")
 
     def test_all_pending_sync_is_not_narrowed_to_model_entries(self):
-        server.save_workout_library_entries([self.workout("2026-09-08"), self.workout("2026-09-09")])
+        server.local_plan_creation_service().save([self.workout("2026-09-08"), self.workout("2026-09-09")])
         result, _ = self.turn("Alle offenen Einheiten übertragen", [lambda _: self.call("start_intervals_plan_sync", {"entries": []},
             ["intervals_sync", "local_plan"], target="intervals", remote_write=True, sync_scope="all_pending"), {"output_text": "Alle beauftragt."}])
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["command_receipts"][0]["result"]["entries"], 2)
 
     def test_selected_existing_planned_unit_sync_accepts_planned_unit_scope(self):
-        planned = server.save_workout_library_entries([self.workout("2026-09-08")])[0]
-        entry = server._pending_plan_push_entries()[0]
+        planned = server.local_plan_creation_service().save([self.workout("2026-09-08")])[0]
+        entry = server.planning_authority_service().pending_plan_push_entries()[0]
         result, _ = self.turn("Nur diese Einheit übertragen", [lambda _: self.call(
             "start_intervals_plan_sync", {"entries": [entry]},
             ["intervals_sync", f"planned_unit:{planned['id']}"], target="intervals",
@@ -693,66 +844,73 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(len(result["sync_job_ids"]), 1)
 
     def test_successful_morning_quick_action_is_marked_complete_without_word_matching(self):
-        server.enqueue_background_coach_job(
+        server.coach_job_submission_service().enqueue(
             "Natural wording without a fixed trigger", "morning-quick", "synthetic-session",
             request_kind="morning_checkin",
         )
-        job = server._claim_background_coach_job()
+        job = server.coach_job_store().claim()
         def complete_command(*args, **kwargs):
             with server.database() as db:
                 db.execute("UPDATE coach_commands SET status='completed' WHERE client_turn_id='morning-quick'")
             return {"status": "completed", "message": {"id": 1}}
-        with patch.object(server, "_restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
-            server, "chat_with_coach", side_effect=complete_command,
+        with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
+            server.CoachChatTurnService, "run", side_effect=complete_command,
         ):
-            server._run_background_coach_job(job)
+            server.coach_background_job_runner().run(job)
         self.assertEqual(server.get_kv("morning_checkin_date"), "2026-09-07")
         self.assertEqual(server.get_kv("morning_checkin_status"), "ready")
-        self.assertFalse(server.coach_quick_actions_state()["morning_checkin"])
+        self.assertFalse(server.coach_quick_actions_service().state()["morning_checkin"])
         with server.database() as db:
             row = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id='morning-quick'").fetchone()
         self.assertFalse(json.loads(row["receipt"])["coach_quick_actions"]["morning_checkin"])
 
     def test_morning_quick_action_stays_pending_while_coach_awaits_clarification(self):
-        server.enqueue_background_coach_job(
+        server.coach_job_submission_service().enqueue(
             "Natural wording without a fixed trigger", "morning-question", "synthetic-session",
             request_kind="morning_checkin",
         )
-        job = server._claim_background_coach_job()
+        job = server.coach_job_store().claim()
 
         def complete_with_question(*args, **kwargs):
             with server.database() as db:
                 db.execute("UPDATE coach_commands SET status='completed' WHERE client_turn_id='morning-question'")
             return {"status": "completed", "message": {"id": 1}, "awaiting_clarification": True}
 
-        with patch.object(server, "_restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
-            server, "chat_with_coach", side_effect=complete_with_question,
+        with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
+            server.CoachChatTurnService, "run", side_effect=complete_with_question,
         ):
-            server._run_background_coach_job(job)
+            server.coach_background_job_runner().run(job)
         self.assertNotEqual(server.get_kv("morning_checkin_status"), "ready")
-        self.assertTrue(server.coach_quick_actions_state()["morning_checkin"])
+        self.assertTrue(server.coach_quick_actions_service().state()["morning_checkin"])
 
     def test_chat_reset_cancels_queued_background_turn_without_reappearing_message(self):
-        job = server.enqueue_background_coach_job(
+        job = server.coach_job_submission_service().enqueue(
             "Plan something", "queued-before-reset", "synthetic-session",
             operation_id="operation-before-reset",
         )
         self.assertEqual(job["status"], "queued")
-        server.reset_coach_chat()
-        self.assertIsNone(server._claim_background_coach_job())
-        self.assertEqual(server.list_messages(), [])
+        server.coach_conversation_reset_service().reset()
+        self.assertIsNone(server.coach_job_store().claim())
+        self.assertEqual(server.coach_message_service().list(), [])
         with server.database() as db:
             command = db.execute(
                 "SELECT status, receipt FROM coach_commands WHERE client_turn_id='queued-before-reset'"
             ).fetchone()
         self.assertEqual(command["status"], "completed")
         self.assertEqual(json.loads(command["receipt"])["status"], "cancelled")
-        self.assertTrue(server.COACH_JOB_CANCEL_EVENTS["operation-before-reset"].is_set())
+        self.assertTrue(
+            coach_streams.CHAT_STREAM_REGISTRY.get_background_event(
+                "operation-before-reset"
+            ).is_set()
+        )
 
     def test_same_effect_and_call_are_idempotent_inside_turn(self):
         def save(_):
             return self.call("save_checkin", {"payload": {"notes": "Synthetic tired"}}, ["local_checkin"], call_id="same-call")
-        with patch.object(server, "save_coach_checkin", wraps=server.save_coach_checkin) as save_checkin:
+        service = server.checkin_service()
+        with patch.object(server, "checkin_service", return_value=service), patch.object(
+            service, "save_coach", wraps=service.save_coach
+        ) as save_checkin:
             result, _ = self.turn("Müde heute", [save, save, {"output_text": "Gespeichert."}])
         self.assertEqual(result["status"], "completed")
         save_checkin.assert_called_once()
@@ -768,22 +926,22 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_background_resumes_response_and_committed_effect_without_replaying(self):
         turn_id = "background-resume"
-        server.enqueue_background_coach_job("Müde heute", turn_id, "synthetic-session")
+        server.coach_job_submission_service().enqueue("Müde heute", turn_id, "synthetic-session")
         call = self.call("save_checkin", {"payload": {"notes": "Synthetic tired"}}, ["local_checkin"], call_id="saved-call")["output"][0]
         args = json.loads(call["arguments"])
-        prior = {"call_id": call["call_id"], "tool": call["name"], "effect_key": server._dialogue_effect_key(call["name"], args),
+        prior = {"call_id": call["call_id"], "tool": call["name"], "effect_key": coach_service.dialogue_effect_key(call["name"], args),
                  "result": {"ok": True, "status": "saved"}}
-        server._merge_coach_command_receipt(turn_id, {"openai_response_id": "synthetic-response", "command_receipts": [prior]})
-        with patch.object(server, "_structured_coach_tool_result", side_effect=AssertionError("must not replay")):
+        server.coach_job_store().merge_receipt(turn_id, {"openai_response_id": "synthetic-response", "command_receipts": [prior]})
+        with patch.object(CoachToolDispatchService, "execute", side_effect=AssertionError("must not replay")):
             result, model = self.turn("Müde heute", [{"output": [call]}, {"output_text": "Bereits gespeichert."}], turn=turn_id, background_job=True)
         self.assertEqual(result["status"], "completed")
         self.assertEqual(model.call_args_list[0].kwargs["response_id"], "synthetic-response")
 
     def test_background_replays_checkpointed_outputs_before_new_response(self):
         turn_id = "background-outputs"
-        server.enqueue_background_coach_job("Wie geht es weiter?", turn_id, "synthetic-session")
+        server.coach_job_submission_service().enqueue("Wie geht es weiter?", turn_id, "synthetic-session")
         outputs = [{"type": "function_call_output", "call_id": "read", "output": '{"ok":true}'}]
-        server._merge_coach_command_receipt(turn_id, {"openai_response_id": "old-response", "pending_tool_outputs": outputs})
+        server.coach_job_store().merge_receipt(turn_id, {"openai_response_id": "old-response", "pending_tool_outputs": outputs})
         result, model = self.turn("Wie geht es weiter?", [{"output_text": "Fortgesetzt."}], turn=turn_id, background_job=True)
         self.assertEqual(result["status"], "completed")
         self.assertEqual(model.call_args.args[0]["input"], outputs)
@@ -821,7 +979,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         def cancel(_):
             cancelled.set()
             return self.call("save_checkin", {"payload": {"notes": "Synthetic"}}, ["local_checkin"])
-        with patch.object(server, "save_coach_checkin") as save:
+        service = server.checkin_service()
+        with patch.object(server, "checkin_service", return_value=service), patch.object(service, "save_coach") as save:
             result, _ = self.turn("Heute müde", [cancel], cancel_event=cancelled)
         save.assert_not_called()
         self.assertEqual(result["status"], "cancelled")
@@ -829,14 +988,18 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
     def test_foreign_session_cannot_replay_receipt(self):
         self.turn("Wie geht es weiter?", [{"output_text": "Synthetic advice"}], turn="owned-turn")
         with self.assertRaises(server.AppError) as raised:
-            server.chat_with_coach("Weiter", client_turn_id="owned-turn", session_csrf_hash="other-session")
+            server.coach_chat_turn_service().run("Weiter", client_turn_id="owned-turn", session_csrf_hash="other-session")
         self.assertEqual(raised.exception.reason, "command_scope_denied")
 
     def test_local_draft_commit_uses_local_dialogue_with_fresh_response_chain(self):
-        server.add_message("user", "Ein Entwurf bitte")
+        server.coach_message_service().add("user", "Ein Entwurf bitte")
         with server.database() as db:
             origin = server.CHAT_REPOSITORY.add(db, "user", "Synthetic draft", client_turn_id="draft-source")
-        draft = server._stage_coach_artifact("old-conversation", "draft-source", {"plan_name": "Synthetic", "workouts": [self.workout()]})
+        draft = server.training_plan_artifact_service().stage(
+            {"payload": {"plan_name": "Synthetic", "workouts": [self.workout()]}},
+            "old-conversation",
+            "draft-source",
+        )
         def commit(_):
             call = self.call("commit_training_plan", {"artifact_id": draft["artifact_id"]}, ["artifact:" + draft["artifact_id"]],
                 {"start": "2026-09-09", "end": "2026-09-09"})
@@ -876,7 +1039,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         initial = self.state()["planning_revision"]
         def reread(_):
             with server.database() as db:
-                server._bump_planning_revision(db)
+                server.PLANNING_REVISION_SERVICE.bump(db)
             return self.call("read_training_state")
         result, _ = self.turn("Bitte den aktuellen Stand prüfen", [lambda _: self.call("read_training_state"), reread,
             {"output_text": "Aktuellen Stand gelesen."}])
@@ -889,7 +1052,10 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             args["_request"]["summary"] = "Same request rephrased by the model"
             response["output"][0]["arguments"] = json.dumps(args)
             return response
-        with patch.object(server, "save_coach_checkin", wraps=server.save_coach_checkin) as save:
+        service = server.checkin_service()
+        with patch.object(server, "checkin_service", return_value=service), patch.object(
+            service, "save_coach", wraps=service.save_coach
+        ) as save:
             result, _ = self.turn("Müde heute", [lambda _: self.call("save_checkin", {"payload": {"notes": "Synthetic tired"}},
                 ["local_checkin"]), again, {"output_text": "Gespeichert."}])
         self.assertEqual(result["status"], "completed")
@@ -904,7 +1070,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(self.state(), before)
 
     def test_failed_local_step_blocks_following_all_pending_push(self):
-        server.save_workout_library_entries([self.workout()])
+        server.local_plan_creation_service().save([self.workout()])
         result, _ = self.turn("Plan ändern und alles übertragen", [lambda _: self.call("apply_training_patch", {
             "workouts": [self.workout()], "expected_revision": -1}, ["local_plan"],
             {"start": "2026-09-09", "end": "2026-09-09"}),
@@ -914,8 +1080,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["sync_job_ids"], [])
 
     def test_archived_plan_cannot_be_replaced_as_current_plan(self):
-        server.save_workout_library_entries([self.workout()], plan_name="Archived")
-        plan = server.list_training_plans()[0]
+        server.local_plan_creation_service().save([self.workout()], plan_name="Archived")
+        plan = server.training_plan_service().list()[0]
         with server.database() as db:
             db.execute("UPDATE training_plans SET status='archived' WHERE id=?", (plan["id"],))
         before = self.state()
