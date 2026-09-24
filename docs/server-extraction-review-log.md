@@ -7063,3 +7063,12 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   unveränderter fünfsekündiger Poll-/Wake-Semantik, Startreihenfolge,
   Restore-Gate und Test-Patchzielen: **PASS**. Integration auf dem
   bestätigten #778-Merge und externe PR-Gates stehen noch aus.
+- Quellcommit `092ff440` wurde nach dem bestätigten #778-Merge
+  `208565fa` als `4259d303` integriert; der Dokumentkonflikt bewahrte
+  sowohl den #778-Sonar-Fix als auch den Lifecycle-Befund. Root prüfte
+  den tatsächlichen Integrationsdiff, Wake-Referenzen aller drei
+  Verbraucher, Startup-/Restart-Reihenfolge und Patch-Ziele erneut:
+  **PASS**. 26 fokussierte Tests, Ruff, Compileall, Inventar-/Diff-
+  Check und frisch gebautes Read-only-Docker-Image mit 2.604 Tests/
+  11 Skips **PASS**. Externe PR-Gates und die reine Test-Adapter-
+  Bereinigung `server.chat_with_coach` bleiben offen.
