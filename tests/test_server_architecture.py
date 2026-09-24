@@ -2198,6 +2198,28 @@ class ServerArchitectureTests(unittest.TestCase):
         self.assertIn("| P0 (Zuordnung offen) | 0 | 0 | 0 |", inventory)
         self.assertNotIn("| P0 (Zuordnung offen) | offen |", inventory)
 
+    def test_training_plan_scope_prefix_is_owned_by_coach_authorization(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        self.assertFalse(
+            any(
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name)
+                    and target.id == "TRAINING_PLAN_SCOPE_PREFIX"
+                    for target in node.targets
+                )
+                for node in server_tree.body
+            )
+        )
+        authorization = (
+            BACKEND_ROOT / "coach" / "authorization.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('TRAINING_PLAN_SCOPE_PREFIX = "training_plan:"', authorization)
+        for module_name in ("dialogue_action.py", "planning_change_tools.py", "planning_action_tools.py"):
+            source = (BACKEND_ROOT / "coach" / module_name).read_text(encoding="utf-8")
+            self.assertIn("TRAINING_PLAN_SCOPE_PREFIX", source)
+            self.assertNotIn("training_plan_scope_prefix", source)
+
     def test_backend_does_not_import_or_reach_server_namespace(self) -> None:
         self.assertTrue(BACKEND_ROOT.is_dir(), "Backend source must be available")
         violations: list[str] = []

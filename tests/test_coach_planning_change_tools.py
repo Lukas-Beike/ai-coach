@@ -16,7 +16,7 @@ class CoachPlanningChangeToolServiceTests(unittest.TestCase):
         self.replacement_factory = Mock(return_value=self.replacement)
         self.changes_factory = Mock(return_value=self.changes)
         self.service = CoachPlanningChangeToolService(
-            self.replacement_factory, self.changes_factory, "training_plan:"
+            self.replacement_factory, self.changes_factory
         )
 
     def test_replace_projects_period_constraints_and_selected_plan(self) -> None:

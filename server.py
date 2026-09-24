@@ -372,7 +372,6 @@ PROVIDER_GARMIN_NAME = "Garmin Connect"
 PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
 JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
-TRAINING_PLAN_SCOPE_PREFIX = "training_plan:"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 AUTO_UPDATE_LABEL = "stündliche automatische Aktualisierung"
 APP_NAME = "Intervals Coach"
@@ -1888,7 +1887,6 @@ def coach_dialogue_action_service() -> CoachDialogueActionService:
         sync_job_queue_service,
         CoachDialoguePlanScopeService(manager, DB_LOCK),
         lambda: local_now().date(),
-        TRAINING_PLAN_SCOPE_PREFIX,
     )
 
 
@@ -2112,7 +2110,6 @@ def coach_tool_dispatch_service() -> CoachToolDispatchService:
         lambda: CoachPlanningChangeToolService(
             structured_training_plan_replacement_service,
             structured_training_change_service,
-            TRAINING_PLAN_SCOPE_PREFIX,
         ),
         lambda: TrainingTemplateToolService(
             database_manager, DB_LOCK, workout_library_service
@@ -2125,7 +2122,6 @@ def coach_tool_dispatch_service() -> CoachToolDispatchService:
             training_plan_service,
             history_undo_service,
             coach_proposal_creation_service,
-            TRAINING_PLAN_SCOPE_PREFIX,
         ),
     )
 

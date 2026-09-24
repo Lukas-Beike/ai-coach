@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.coach.authorization import (
+    TRAINING_PLAN_SCOPE_PREFIX,
     authorized_operations,
     require_coach_scope,
     scope_values,
@@ -24,11 +25,9 @@ class CoachPlanningChangeToolService:
         self,
         plan_replacement_service: Callable[[], StructuredTrainingPlanReplacementService],
         training_change_service: Callable[[], StructuredTrainingChangeService],
-        training_plan_scope_prefix: str,
     ) -> None:
         self._plan_replacement_service = plan_replacement_service
         self._training_change_service = training_change_service
-        self._training_plan_scope_prefix = training_plan_scope_prefix
 
     def execute(
         self, name: str, arguments: dict[str, Any], intent: dict[str, Any]
@@ -98,7 +97,7 @@ class CoachPlanningChangeToolService:
         )
 
     def _selected_plan_ids(self, intent: dict[str, Any]) -> list[str]:
-        scope_prefix = self._training_plan_scope_prefix
+        scope_prefix = TRAINING_PLAN_SCOPE_PREFIX
         return sorted(
             token.split(":", 1)[1]
             for token in scope_values(intent)
