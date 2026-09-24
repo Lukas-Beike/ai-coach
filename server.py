@@ -129,6 +129,7 @@ from backend.http_api.bootstrap_state import (
     PublicBootstrapDependencies,
     PublicBootstrapService,
 )
+from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.auth import SessionAuthService
@@ -2772,6 +2773,14 @@ def readiness_service() -> ReadinessService:
     )
 
 
+COACH_GET_ROUTES = CoachGetRoutes(
+    session_auth_service,
+    chat_history_page_service,
+    coach_command_receipt_service,
+    coach_job_submission_service,
+)
+
+
 class RequestHandler(BaseHTTPRequestHandler):
     server_version = f"IntervalsCoach/{APP_VERSION}"
     client_disconnect_errors = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
@@ -2859,27 +2868,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def _handle_coach_get(self, path: str) -> bool:
-        if path == "/api/chat/history":
-            session = self.auth_service.require_auth(self)
-            query = parse_qs(urlparse(self.path).query)
-            self.send_json(200, chat_history_page_service().page(
-                query.get("cursor", [None])[0], query.get("limit", [None])[0],
-                query.get("q", [None])[0], session_csrf_hash=session["csrf_hash"],
-            ))
-        elif path == "/api/chat/receipt":
-            session = self.auth_service.require_auth(self)
-            query = parse_qs(urlparse(self.path).query)
-            self.send_json(200, coach_command_receipt_service().read(
-                query.get("client_turn_id", [None])[0], session["csrf_hash"],
-            ))
-        elif path == "/api/chat/status":
-            session = self.auth_service.require_auth(self)
-            self.send_json(200, coach_job_submission_service().stream_status(session["csrf_hash"]))
-        else:
-            return False
-        return True
-
     def _handle_training_get(self, path: str) -> bool:
         if path == "/api/plan":
             self.auth_service.require_auth(self)
@@ -2954,7 +2942,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             handled = (
                 self._handle_public_get(path)
                 or self._handle_sync_get(path)
-                or self._handle_coach_get(path)
+                or COACH_GET_ROUTES.handle(self, path)
                 or self._handle_training_get(path)
                 or self._handle_diagnostics_get(path)
             )

@@ -815,6 +815,10 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     Status, Header und Bytes.
 - [ ] Handler mit den konkret benötigten Services verbinden; keine Weitergabe
   des `server`-Moduls als Pseudo-Servicecontainer.
+  - [x] Die GET-Routen `/api/chat/history`, `/api/chat/receipt` und
+    `/api/chat/status` einem zustandslosen `CoachGetRoutes` zuordnen;
+    Auth-, History-, Receipt- und Jobstatus-Services werden über ihre
+    konkreten Composition-Factories eingebunden.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 
