@@ -7860,3 +7860,19 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Status: Die offene P8-Teilaufgabe zum Background-Receipt-/Fehlerabgleich und
   Restart-/Cancellation-Audit ist abgeschlossen. Die übergeordnete manuelle
   Morning-Check-in-Auslagerung bleibt offen.
+
+## P10 HTTP-Route-Dispatch — integrierter Diff-Stand
+
+- Der neue `HttpRouteDispatcher` besitzt die geordnete GET-Routenauswahl,
+  API-404-Grenze, statische Fallback-Übergabe und PUT-Routenauswahl. Die
+  `RequestHandler`-Fehlergrenzen sowie Auth-, CSRF- und Maintenance-Reihenfolge
+  bleiben unverändert beim HTTP-Einstieg.
+- Die Routen werden als konkrete Abhängigkeiten im bestehenden Composition
+  Root zusammengestellt; das neue Modul importiert `server.py` nicht. Der
+  symbolbasierte Generator ordnet Dispatcher und Instanz `http_api/` zu.
+- Direkte Dispatch- und Architekturtests: **34 PASS**. Vollständige native
+  Suite: **2.752 PASS, 12 SQLCipher-Skips**. `py_compile`, Inventar-`--check`,
+  `git diff --check` und Docker-Build (`ai-coach:local`, Python 3.14/SQLCipher)
+  **PASS**.
+- Dieser Schritt ist ein erster Transport-Teilumzug; POST-/SSE-Dispatch,
+  Body-/Response-Schreibtransport und die Handler-Klasse bleiben P10-offen.
