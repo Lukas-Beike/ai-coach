@@ -7620,8 +7620,9 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `88430350a631b6933d817badf1cde6ad82b5061e` auf einen POST-Helper;
   Root erkannte im erneuten Diff noch die Duplizierung zum bestehenden PUT-
   Helper und führte beide in der Integration zu einem gemeinsamen
-  `_assert_write_route_owned` zusammen. Der Quellpatch wurde als `5a6529db`
-  sequenziell integriert; der finale Integrationsstand wurde erneut geprüft.
+  `_assert_write_route_owned` zusammen. Der Quellpatch wurde auf dem aktuellen
+  Release-Stand `5634b947` als `f32be481` sequenziell integriert; der finale
+  Integrationsstand wurde erneut geprüft.
 - **PASS:** `HistoryUndoPostRoutes` besitzt genau Undo-Vorschau und Undo-
   Anwendung. Die Vorschau liest einmal `change_id`, erhält das bestehende
   `proposal`-Pop-/Antwortformat und bindet den Vorschlag an den Session-
@@ -7641,6 +7642,12 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Direkttests, Architektur und Inventarskript, Compileall, Inventar-
   `--check` (P0=0) und Diff-Check **PASS**. `server.py` hat 3.375
   physische Zeilen.
+- Der erste Veröffentlichungsstand von PR #795 enthielt durch den
+  nachträglichen `develop`-Abgleich einen nicht-konventionell benannten
+  Merge-Commit und scheiterte ausschließlich am Commit-Subject-Validator.
+  Root baute den identischen Fachpatch direkt auf `5634b947` neu auf,
+  ohne Merge-Commit in der PR-Historie; Review und Vollsuite werden für
+  diesen korrigierten PR-Stand erneut bestätigt.
 - Diagnostik-/Privacy-/Coach-POST, RequestHandler-/Body-Grenze,
   P7/P8-Restzuordnungen und P11 bleiben offen. Nächster kleiner Auftrag:
   Diagnostik-Capture-POST mit unverändertem Capture-Lock.
