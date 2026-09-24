@@ -772,6 +772,7 @@ def _explicit_owner(name: str) -> str | None:
             "coach_conversation_recovery_service": COMPOSITION_ROOT,
             "COACH_CONVERSATION_GATE": COMPOSITION_ROOT,
             "coach_final_receipt_service": COMPOSITION_ROOT,
+            "coach_turn_opening_service": COMPOSITION_ROOT,
             "coach_command_receipt_service": COMPOSITION_ROOT,
             "coach_request_payload_service": COMPOSITION_ROOT,
             "recent_log_entries_service": COMPOSITION_ROOT,

@@ -609,6 +609,9 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   - [x] Finales Turn-Receipt, atomare Assistant-Nachricht,
     Preview-Publikationsbindung und Event nach Commit
     `CoachFinalReceiptService` zuordnen; Gesamtloop bleibt offen.
+  - [x] Atomare Turn-Eröffnung mit User-Nachricht, Session-Bindung,
+    Idempotenz und Rollback `CoachTurnOpeningService` zuordnen;
+    Gesamtloop bleibt offen.
   - [x] Provider-Request-Aufbau einschließlich Dialogkontext,
     Attachment-Sicherheitsanweisung, OpenAI-Kontinuität, Gemini-Medien
     und Modell-/Thinking-Auswahl `CoachRequestPayloadService` zuordnen;

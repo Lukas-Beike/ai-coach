@@ -30,7 +30,7 @@ Der Generator führt selbst keine Tests und keine Laufzeitinitialisierung aus. S
 
 | Phase | Funktionen/Klassen | Globale Bindungen | Importbindungen |
 | --- | ---: | ---: | ---: |
-| P0 (Zuordnung offen) | 1 | 0 | 0 |
+| P0 (Zuordnung offen) | 0 | 0 | 0 |
 | P1 | 14 | 25 | 284 |
 | P2 | 7 | 6 | 0 |
 | P3 | 1 | 0 | 0 |
@@ -41,7 +41,7 @@ Der Generator führt selbst keine Tests und keine Laufzeitinitialisierung aus. S
 | P8 | 13 | 8 | 0 |
 | P9 | 0 | 4 | 0 |
 | P10 | 4 | 4 | 0 |
-| P11 | 142 | 16 | 29 |
+| P11 | 143 | 16 | 29 |
 
 ## Referenzanalyse außerhalb von server.py
 
@@ -1058,7 +1058,7 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | Funktion | `chat_history_page_service` | 2171 | `server.py / Composition Root` | P11 | offen | tests/test_audit_remediation.py:339 (direkt/dynamisch unklar); tests/test_audit_remediation.py:342 (direkt/dynamisch unklar); tests/test_coach_review.py:303 (direkt/dynamisch unklar); tests/test_coach_review.py:308 (direkt/dynamisch unklar); tests/test_server.py:2327 (direkt/dynamisch unklar); tests/test_server.py:2349 (direkt/dynamisch unklar) |
 | Funktion | `coach_proposal_read_service` | 2182 | `server.py / Composition Root` | P11 | offen | tests/test_coach_review.py:363 (direkt/dynamisch unklar); tests/test_coach_review.py:373 (direkt/dynamisch unklar) |
 | Funktion | `coach_command_receipt_service` | 2187 | `server.py / Composition Root` | P11 | offen | keine statisch gefunden |
-| Funktion | `coach_turn_opening_service` | 2194 | `unklar: config.py, errors.py, observability.py, runtime/, db/, sync/, history/, settings.py` | P0 (Zuordnung offen) | offen | keine statisch gefunden |
+| Funktion | `coach_turn_opening_service` | 2194 | `server.py / Composition Root` | P11 | offen | keine statisch gefunden |
 | Funktion | `coach_proposal_creation_service` | 2202 | `server.py / Composition Root` | P11 | offen | tests/test_coach_review.py:41 (direkt/dynamisch unklar); tests/test_server.py:333 (direkt/dynamisch unklar) |
 | Funktion | `coach_proposal_confirmation_service` | 2210 | `server.py / Composition Root` | P11 | offen | tests/test_coach_review.py:268 (direkt/dynamisch unklar); tests/test_coach_review.py:269 (direkt/dynamisch unklar); tests/test_coach_review.py:293 (direkt/dynamisch unklar); tests/test_coach_review.py:313 (direkt/dynamisch unklar); tests/test_coach_review.py:354 (direkt/dynamisch unklar); tests/test_coach_review.py:372 (direkt/dynamisch unklar); tests/test_coach_review.py:374 (direkt/dynamisch unklar); tests/test_coach_review.py:379 (direkt/dynamisch unklar); tests/test_server.py:10016 (direkt/dynamisch unklar); tests/test_server.py:10028 (direkt/dynamisch unklar) |
 | Funktion | `coach_proposal_execution_service` | 2215 | `server.py / Composition Root` | P11 | offen | tests/test_coach_review.py:272 (direkt/dynamisch unklar); tests/test_coach_review.py:274 (direkt/dynamisch unklar); tests/test_coach_review.py:281 (direkt/dynamisch unklar); tests/test_coach_review.py:296 (direkt/dynamisch unklar); tests/test_coach_review.py:315 (direkt/dynamisch unklar); tests/test_coach_review.py:376 (direkt/dynamisch unklar); tests/test_coach_review.py:377 (direkt/dynamisch unklar); tests/test_server.py:10017 (direkt/dynamisch unklar); tests/test_server.py:10029 (direkt/dynamisch unklar) |
@@ -1313,13 +1313,12 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | `providers/intervals_client.py` | 1 |
 | `providers/openai.py` | 2 |
 | `runtime/` | 3 |
-| `server.py / Composition Root` | 187 |
+| `server.py / Composition Root` | 188 |
 | `settings.py` | 11 |
 | `sync/` | 13 |
 | `sync/garmin.py` | 2 |
 | `sync/planned_units.py` | 2 |
 | `sync/scheduler.py` | 2 |
-| `unklar: config.py, errors.py, observability.py, runtime/, db/, sync/, history/, settings.py` | 1 |
 | `weather/` | 1 |
 
 ## Grenzen und offene Unsicherheiten
