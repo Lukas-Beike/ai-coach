@@ -6810,3 +6810,9 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   und Neugenerierung: 2.576 Tests/11 Skips, Inventar-Check **PASS**.
   `server.py`: 3.826 physische Zeilen, P0=0. Externe PR-Gates offen;
   finaler Turn und Background-Worker bleiben P8-offen.
+- Quellcommit `d08bf729` wurde auf dem bestätigten #772-Merge
+  konfliktfrei als `42c98d07` integriert. Root prüfte den tatsächlichen
+  Integrationsdiff samt Aufrufern und Transaktions-/Rollback-Grenze
+  erneut: **PASS**. 97 fokussierte Tests, Ruff, Compileall,
+  Inventar-/Diff-Check und frisches Read-only-Docker-Image mit
+  2.576 Tests/11 Skips **PASS**. PR-CI/Sonar/Codex stehen aus.
