@@ -204,7 +204,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
 
     def test_snapshot_import_is_deferred_between_repair_chunks_and_until_final_completion(self):
         entries = []
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             for offset in range(29):
                 local_id = str(uuid.uuid4())
                 unit = planning_planned_units.normalize_planned_unit({
@@ -234,7 +234,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 )
                 self.assertEqual(result["status"], "ok")
                 self.assertTrue(result["planned_import"]["deferred_for_repair"])
-                self.assertIsNone(server.get_kv("planned_units_initial_import_at"))
+                self.assertIsNone(server.key_value_service().get("planned_units_initial_import_at"))
                 imported.assert_not_called()
                 for entry in entries:
                     self.assertEqual(self.selection(entry["library_workout_id"]), entry)
@@ -243,7 +243,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 "Synthetic after final verification", activity_days=42
             )
             imported.assert_called_once()
-            self.assertEqual(server.get_kv("planned_units_initial_import_at"), snapshot["synced_at"])
+            self.assertEqual(server.key_value_service().get("planned_units_initial_import_at"), snapshot["synced_at"])
 
     def test_repair_queued_during_snapshot_fetch_prevents_import(self):
         local_id = self.seed()
@@ -263,7 +263,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 ]["deferred_for_repair"]
             )
             imported.assert_not_called()
-            self.assertIsNone(server.get_kv("planned_units_initial_import_at"))
+            self.assertIsNone(server.key_value_service().get("planned_units_initial_import_at"))
 
     def test_multi_unit_repair_reads_calendar_twice_and_checks_all_final_results(self):
         ids = []
@@ -535,7 +535,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
 
     def test_training_state_pages_every_active_unit_and_archived_predecessor(self):
         expected = set()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             for offset in range(366):
                 for archived in (False, True):
                     local_id = str(uuid.uuid4())
@@ -607,7 +607,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
 
     def test_coach_repair_resolves_complete_manifest_beyond_one_page(self):
         expected = set()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             for offset in range(400):
                 local_id = str(uuid.uuid4())
                 expected.add(local_id)

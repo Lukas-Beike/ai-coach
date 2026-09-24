@@ -209,7 +209,7 @@ def _explicit_owner(name: str) -> str | None:
             "ClientDisconnected": ERRORS_MODULE,
             "security_configuration_error": CONFIG_MODULE,
             "database_manager": DB_MANAGER,
-            "database": DB_MANAGER,
+            "key_value_service": COMPOSITION_ROOT,
             "initialise_database": "db/bootstrap.py",
             "checkin_service": COMPOSITION_ROOT,
             "profile_service": COMPOSITION_ROOT,

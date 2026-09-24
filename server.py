@@ -18,13 +18,11 @@ import sqlite3
 import threading
 import time
 import uuid
-from contextlib import contextmanager
-from datetime import date, datetime, timedelta, timezone  # noqa: F401
+from datetime import date, datetime, timezone
 from functools import partial
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError  # noqa: F401
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
@@ -99,6 +97,7 @@ from backend.weather.service import (
 )
 from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
+from backend.db.key_value import KeyValueService
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, NutritionRepository, PlanAdjustmentRepository, PlanningStateRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db.manager import DatabaseManager
 from backend.db.schema import configure_cipher, database_schema_is_current
@@ -1633,15 +1632,8 @@ def athlete_context_service() -> AthleteContextService:
     )
 
 
-@contextmanager
-def database():
-    """Use the database manager as the sole nested transaction owner."""
-    with database_manager().unit_of_work() as db:
-        yield db
-
-
 def initialise_database() -> None:
-    with DB_LOCK, database() as db:
+    with DB_LOCK, database_manager().unit_of_work() as db:
         initialize_application_database(
             db,
             key_values=KEY_VALUE_REPOSITORY,
@@ -1654,11 +1646,8 @@ def initialise_database() -> None:
         )
 
 
-def get_kv(key: str, db: sqlite3.Connection | None = None) -> str | None:
-    if db is not None:
-        return KEY_VALUE_REPOSITORY.get(db, key)
-    with DB_LOCK, database() as owned:
-        return get_kv(key, owned)
+def key_value_service() -> KeyValueService:
+    return KeyValueService(database_manager(), KEY_VALUE_REPOSITORY)
 
 
 SYNC_PERIOD_DEFAULTS = {"intervals": 90, "garmin": 30}
@@ -1669,16 +1658,17 @@ SYNC_EARLIEST_DATE = date(2000, 1, 1)
 # completed, while retaining the existing five-week forward planning horizon.
 PLANNED_CALENDAR_HISTORY_DAYS = 35
 PLANNED_CALENDAR_FUTURE_DAYS = 35
-def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:
-    if db is not None:
-        KEY_VALUE_REPOSITORY.set(db, key, value)
-        return
-    with DB_LOCK, database() as owned:
-        set_kv(key, value, owned)
-
-
-SETTINGS = SettingsService(lambda: CONFIG, get_kv, set_kv)
-DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(get_kv, set_kv, REDACTOR, utc_now)
+SETTINGS = SettingsService(
+    lambda: CONFIG,
+    lambda key: key_value_service().get(key),
+    lambda key, value: key_value_service().set(key, value),
+)
+DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
+    lambda key: key_value_service().get(key),
+    lambda key, value: key_value_service().set(key, value),
+    REDACTOR,
+    utc_now,
+)
 
 
 def provider_http_client() -> provider_http.JsonHttpClient:
@@ -2476,7 +2466,7 @@ def recent_log_entries_service() -> RecentLogEntriesService:
 
 def coach_diagnostic_history_service() -> CoachDiagnosticHistoryService:
     return CoachDiagnosticHistoryService(
-        database=database,
+        database=database_manager().unit_of_work,
         db_lock=DB_LOCK,
         redact=REDACTOR.sanitize_log_value,
         receipt_parser=command_receipt,

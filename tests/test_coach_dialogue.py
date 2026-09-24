@@ -95,7 +95,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         result = server.coach_clarification_service().save_question(arguments, context)
 
         self.assertEqual(result, {"ok": True, "status": "needs_clarification", "question": question})
-        stored = server.get_kv("coach_pending_request")
+        stored = server.key_value_service().get("coach_pending_request")
         self.assertIn("ä", stored)
         self.assertNotIn("\\u00e4", stored)
         self.assertEqual(json.loads(stored), {
@@ -114,7 +114,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             ],
             "current_user_message_id": 2,
         }
-        server.set_kv("coach_pending_request", json.dumps({"summary": "previous"}))
+        server.key_value_service().set("coach_pending_request", json.dumps({"summary": "previous"}))
         service = server.coach_clarification_service()
         invalid_ids = (None, [], [1], [2, 3], [2, 99], [True, 2], [2] * 25)
         for ids in invalid_ids:
@@ -124,7 +124,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                     context,
                 )
             self.assertEqual((raised.exception.status, raised.exception.reason), (400, "request_provenance"))
-        self.assertEqual(json.loads(server.get_kv("coach_pending_request")), {"summary": "previous"})
+        self.assertEqual(json.loads(server.key_value_service().get("coach_pending_request")), {"summary": "previous"})
 
         assistant_current = {**context, "current_user_message_id": 3}
         with self.assertRaises(server.AppError) as raised:
@@ -137,7 +137,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
     def test_clarification_service_rejects_empty_or_oversized_text_without_writing(self):
         context = {"messages": [{"id": 8, "role": "user"}], "current_user_message_id": 8}
         service = server.coach_clarification_service()
-        server.set_kv("coach_pending_request", json.dumps({"summary": "previous"}))
+        server.key_value_service().set("coach_pending_request", json.dumps({"summary": "previous"}))
         invalid_text = (
             {"summary": "", "question": "When?"},
             {"summary": " " * 3, "question": "When?"},
@@ -150,7 +150,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             with self.subTest(summary_length=len(text["summary"]), question_length=len(text["question"])), self.assertRaises(server.AppError) as raised:
                 service.save_question({"source_message_ids": [8], **text}, context)
             self.assertEqual((raised.exception.status, raised.exception.reason), (400, "request_question"))
-        self.assertEqual(json.loads(server.get_kv("coach_pending_request")), {"summary": "previous"})
+        self.assertEqual(json.loads(server.key_value_service().get("coach_pending_request")), {"summary": "previous"})
 
     def test_question_survives_final_provider_failure_and_reply_continues(self):
         def question(_):
@@ -279,7 +279,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertTrue(result["command_receipts"][0]["resolved"])
         self.assertEqual(result["pending_operations"], [])
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             job = db.execute("SELECT payload FROM sync_jobs WHERE id=?", (result["sync_job_ids"][0],)).fetchone()
         self.assertEqual([item["library_workout_id"] for item in json.loads(job["payload"])["entries"]], [units[0]["id"]])
 
@@ -296,7 +296,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_sync_conflict_resolution_queues_hash_of_validated_updated_payload(self):
         unit = server.local_plan_creation_service().save([self.workout()])[0]
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (unit["id"],)).fetchone()
             payload = json.loads(row["payload"])
             payload["sync_status"] = "conflict"
@@ -307,7 +307,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             ["intervals_sync", f"planned_unit:{unit['id']}"], target="intervals", remote_write=True, sync_scope="selected"),
             {"output_text": "Beauftragt."}])
         self.assertEqual(result["status"], "completed")
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             job = db.execute("SELECT payload FROM sync_jobs WHERE id=?", (result["sync_job_ids"][0],)).fetchone()
         queued = json.loads(job["payload"])["entries"][0]["expected_payload_hash"]
         self.assertNotEqual(queued, before["expected_payload_hash"])
@@ -332,7 +332,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             job = server.sync_job_queue_service().enqueue(
                 provider, kind, payload, requested_by="coach"
             )
-            with server.database() as db:
+            with server.database_manager().unit_of_work() as db:
                 db.execute("UPDATE sync_jobs SET status='failed' WHERE id=?", (job["id"],))
             result, _ = self.turn("Bitte nochmal versuchen", [lambda _, j=job: self.call("resolve_training_sync_conflict", {"job_id": j["id"]}, [f"sync_job:{j['id']}"]),
                                                     {"output_text": "Noch nicht gestartet."}])
@@ -359,7 +359,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                     inspect(value, name)
             if "items" in schema:
                 inspect(schema["items"], name)
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             server.CHAT_REPOSITORY.add(db, "user", "Synthetic current request", client_turn_id="tool-audit")
         context = server.coach_dialogue_read_service().context("tool-audit")
         for tool in server.COACH_DIALOGUE_TOOLS:
@@ -372,7 +372,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                         )
 
     def test_dialogue_action_service_enforces_live_request_and_remote_boundaries(self):
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             server.CHAT_REPOSITORY.add(db, "user", "Synthetic scoped request", client_turn_id="scope-check")
         context = server.coach_dialogue_read_service().context("scope-check")
         service = server.coach_dialogue_action_service()
@@ -457,7 +457,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         units = self.state()["planned_units"]
         self.assertEqual([(item["date"], item["name"]) for item in units], [("2026-09-08", "Oberkörper moderat + Core"), ("2026-09-09", "Lockerer 10-km-Lauf")])
         self.assertEqual(units[0]["local_id"], existing["id"])
-        self.assertIsNone(json.loads(server.get_kv("coach_pending_request")))
+        self.assertIsNone(json.loads(server.key_value_service().get("coach_pending_request")))
 
     def test_failed_addition_rolls_back_move_and_revision(self):
         existing = server.local_plan_creation_service().save([self.workout()])[0]
@@ -523,13 +523,13 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["status"], "completed")
 
     def test_cancel_and_chat_reset_close_pending_request(self):
-        server.set_kv("coach_pending_request", json.dumps({"summary": "Synthetic", "source_message_ids": []}))
+        server.key_value_service().set("coach_pending_request", json.dumps({"summary": "Synthetic", "source_message_ids": []}))
         result, _ = self.turn("Lass es doch", [lambda _: self.call("cancel_coach_request"), {"output_text": "Abgebrochen."}])
         self.assertEqual(result["status"], "cancelled")
-        self.assertIsNone(json.loads(server.get_kv("coach_pending_request")))
-        server.set_kv("coach_pending_request", json.dumps({"summary": "Synthetic", "source_message_ids": []}))
+        self.assertIsNone(json.loads(server.key_value_service().get("coach_pending_request")))
+        server.key_value_service().set("coach_pending_request", json.dumps({"summary": "Synthetic", "source_message_ids": []}))
         server.coach_conversation_reset_service().reset()
-        self.assertIsNone(json.loads(server.get_kv("coach_pending_request")))
+        self.assertIsNone(json.loads(server.key_value_service().get("coach_pending_request")))
 
     def test_remote_write_requires_per_step_sync_authority(self):
         with patch.object(server.SyncJobQueueService, "enqueue") as enqueue:
@@ -592,7 +592,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(failed["result"]["reason"], "request_scope")
         self.assertTrue(failed["resolved"])
         self.assertEqual(len(self.state()["planned_units"]), 2)
-        self.assertIsNone(json.loads(server.get_kv("coach_pending_request")))
+        self.assertIsNone(json.loads(server.key_value_service().get("coach_pending_request")))
         replay, model = self.turn("Samstag 100 km flach, Montag Recoverylauf", [], turn="scope-repaired")
         model.assert_not_called()
         self.assertEqual(replay, result)
@@ -719,10 +719,10 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 self.assertEqual(result["command_receipts"][0]["tool"], "list_planned_workouts")
 
     def test_hypothetical_reply_preserves_pending_request_without_writes(self):
-        server.set_kv("coach_pending_request", json.dumps({"source_message_ids": [], "summary": "Einheit verschieben", "question": "Dienstag oder Mittwoch?"}))
+        server.key_value_service().set("coach_pending_request", json.dumps({"source_message_ids": [], "summary": "Einheit verschieben", "question": "Dienstag oder Mittwoch?"}))
         result, _ = self.turn("Was wäre wenn ich stattdessen ausruhe?", [{"output_text": "Ein Ruhetag wäre eine Option."}])
         self.assertEqual(result["command_receipts"], [])
-        self.assertIsNotNone(json.loads(server.get_kv("coach_pending_request")))
+        self.assertIsNotNone(json.loads(server.key_value_service().get("coach_pending_request")))
 
     def test_two_matching_units_can_be_disambiguated_by_question(self):
         server.local_plan_creation_service().save([self.workout("2026-09-08"), self.workout("2026-09-11")])
@@ -764,7 +764,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual([step["request"]["target"] for step in result["command_receipts"]], ["local", "intervals"])
         self.assertEqual(len(result["sync_job_ids"]), 1)
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             job = db.execute("SELECT payload FROM sync_jobs WHERE id=?", (result["sync_job_ids"][0],)).fetchone()
         self.assertEqual(len(json.loads(job["payload"])["entries"]), 1)
 
@@ -850,17 +850,17 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         )
         job = server.coach_job_store().claim()
         def complete_command(*args, **kwargs):
-            with server.database() as db:
+            with server.database_manager().unit_of_work() as db:
                 db.execute("UPDATE coach_commands SET status='completed' WHERE client_turn_id='morning-quick'")
             return {"status": "completed", "message": {"id": 1}}
         with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
             server.CoachChatTurnService, "run", side_effect=complete_command,
         ):
             server.coach_background_job_runner().run(job)
-        self.assertEqual(server.get_kv("morning_checkin_date"), "2026-09-07")
-        self.assertEqual(server.get_kv("morning_checkin_status"), "ready")
+        self.assertEqual(server.key_value_service().get("morning_checkin_date"), "2026-09-07")
+        self.assertEqual(server.key_value_service().get("morning_checkin_status"), "ready")
         self.assertFalse(server.coach_quick_actions_service().state()["morning_checkin"])
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             row = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id='morning-quick'").fetchone()
         self.assertFalse(json.loads(row["receipt"])["coach_quick_actions"]["morning_checkin"])
 
@@ -872,7 +872,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         job = server.coach_job_store().claim()
 
         def complete_with_question(*args, **kwargs):
-            with server.database() as db:
+            with server.database_manager().unit_of_work() as db:
                 db.execute("UPDATE coach_commands SET status='completed' WHERE client_turn_id='morning-question'")
             return {"status": "completed", "message": {"id": 1}, "awaiting_clarification": True}
 
@@ -880,7 +880,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             server.CoachChatTurnService, "run", side_effect=complete_with_question,
         ):
             server.coach_background_job_runner().run(job)
-        self.assertNotEqual(server.get_kv("morning_checkin_status"), "ready")
+        self.assertNotEqual(server.key_value_service().get("morning_checkin_status"), "ready")
         self.assertTrue(server.coach_quick_actions_service().state()["morning_checkin"])
 
     def test_chat_reset_cancels_queued_background_turn_without_reappearing_message(self):
@@ -892,7 +892,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         server.coach_conversation_reset_service().reset()
         self.assertIsNone(server.coach_job_store().claim())
         self.assertEqual(server.coach_message_service().list(), [])
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             command = db.execute(
                 "SELECT status, receipt FROM coach_commands WHERE client_turn_id='queued-before-reset'"
             ).fetchone()
@@ -993,7 +993,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_local_draft_commit_uses_local_dialogue_with_fresh_response_chain(self):
         server.coach_message_service().add("user", "Ein Entwurf bitte")
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             origin = server.CHAT_REPOSITORY.add(db, "user", "Synthetic draft", client_turn_id="draft-source")
         draft = server.training_plan_artifact_service().stage(
             {"payload": {"plan_name": "Synthetic", "workouts": [self.workout()]}},
@@ -1010,13 +1010,13 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         result, _ = self.turn("Ja, so ?bernehmen", [commit, {"output_text": "Gespeichert."}])
         self.assertEqual(result["status"], "completed")
         self.assertEqual(len(self.state()["planned_units"]), 1)
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             row = db.execute("SELECT conversation_id FROM coach_plan_artifacts WHERE id=?", (draft["artifact_id"],)).fetchone()
         self.assertEqual(row["conversation_id"], "synthetic-conversation")
 
     def test_garmin_refresh_and_job_read_use_current_tool_results(self):
         def job(_):
-            with server.database() as db:
+            with server.database_manager().unit_of_work() as db:
                 row = db.execute("SELECT id FROM sync_jobs WHERE provider='garmin'").fetchone()
             return self.call("get_sync_job", {"job_id": row["id"]})
         result, _ = self.turn("Bitte Garmin aktualisieren", [lambda _: self.call("start_provider_refresh", {"days": 3},
@@ -1038,7 +1038,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
     def test_repeated_read_fetches_current_revision_instead_of_cached_state(self):
         initial = self.state()["planning_revision"]
         def reread(_):
-            with server.database() as db:
+            with server.database_manager().unit_of_work() as db:
                 server.PLANNING_REVISION_SERVICE.bump(db)
             return self.call("read_training_state")
         result, _ = self.turn("Bitte den aktuellen Stand prüfen", [lambda _: self.call("read_training_state"), reread,
@@ -1082,7 +1082,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
     def test_archived_plan_cannot_be_replaced_as_current_plan(self):
         server.local_plan_creation_service().save([self.workout()], plan_name="Archived")
         plan = server.training_plan_service().list()[0]
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute("UPDATE training_plans SET status='archived' WHERE id=?", (plan["id"],))
         before = self.state()
         result, _ = self.turn("Diesen Plan ersetzen", [lambda _: self.call("replace_training_plan", {

@@ -36,7 +36,7 @@ class AuditRemediationTests(unittest.TestCase):
     def competition(self):
         item = server.competition_service().save({"name": "Synthetic race", "event_date": "2026-10-01", "sport": "Cycling"})["competition"]
         external = planning_competitions.competition_external_id(item["id"])
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute("UPDATE competitions SET intervals_event_id='123', external_id=?, sync_dirty=0, sync_state='synced' WHERE id=?", (external, item["id"]))
         remote = {"id": 123, "external_id": external, "name": "Synthetic race", "start_date_local": "2026-10-01T08:00:00", "category": "RACE_B", "type": "Ride"}
         return item, remote
@@ -72,12 +72,12 @@ class AuditRemediationTests(unittest.TestCase):
         client = Mock()
         client.fetch_competition_events.return_value = [remote]
         def delete(_):
-            with server.DB_LOCK, server.database() as db:
+            with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                 db.execute("INSERT INTO competition_sync_tombstones VALUES ('later', '456', 'later-external', ?)", (server.utc_now(),))
         client.bulk_delete_events.side_effect = delete
         with patch.object(server, "IntervalsClient", return_value=client):
             server.competition_sync_service().sync(push_local=True)
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual([row["id"] for row in db.execute("SELECT id FROM competition_sync_tombstones")], ["later"])
 
     def test_weather_fetch_participates_in_maintenance_and_rechecks_location(self):
@@ -88,8 +88,8 @@ class AuditRemediationTests(unittest.TestCase):
             return {"query": query, "forecast": {}, "fetched_at": server.utc_now()}
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=fetch):
             self.assertEqual(server.weather_service().state()["state"], "not_configured")
-        self.assertFalse(server.get_kv(weather_cache.CACHE_KEY))
-        self.assertFalse(server.get_kv(weather_cache.HISTORY_KEY))
+        self.assertFalse(server.key_value_service().get(weather_cache.CACHE_KEY))
+        self.assertFalse(server.key_value_service().get(weather_cache.HISTORY_KEY))
 
     def test_privacy_delete_drains_a_direct_weather_read(self):
         server.profile_service().save({"weather_location": "Synthetic city"})
@@ -125,8 +125,8 @@ class AuditRemediationTests(unittest.TestCase):
             deletion.join(5)
         self.assertEqual(failures, [])
         self.assertTrue(deleted.is_set())
-        self.assertFalse(server.get_kv(weather_cache.CACHE_KEY))
-        self.assertFalse(server.get_kv(weather_cache.HISTORY_KEY))
+        self.assertFalse(server.key_value_service().get(weather_cache.CACHE_KEY))
+        self.assertFalse(server.key_value_service().get(weather_cache.HISTORY_KEY))
 
     def test_test_bootstrap_never_reads_dotenv_or_inherits_provider_credentials(self):
         script = """
@@ -150,7 +150,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
 
     def test_cached_weather_remains_stale_without_refresh(self):
         server.profile_service().save({"weather_location": "Synthetic city"})
-        server.set_kv(weather_cache.CACHE_KEY, json.dumps({"query": "Synthetic city", "forecast": {}, "fetched_at": "2020-01-01T00:00:00+00:00"}))
+        server.key_value_service().set(weather_cache.CACHE_KEY, json.dumps({"query": "Synthetic city", "forecast": {}, "fetched_at": "2020-01-01T00:00:00+00:00"}))
         self.assertEqual(server.weather_service().state(refresh=False)["state"], "stale")
         with patch.object(
             server.weather_service(),
@@ -158,14 +158,14 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
             return_value={"stale": True, "days": [{}], "error": "Synthetic failure"},
         ):
             server.weather_sync_service().sync()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT status FROM provider_refresh_history ORDER BY started_at DESC LIMIT 1").fetchone()["status"], "error")
 
     def test_garmin_daily_schedule_is_independent_of_intervals(self):
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="", calendar_ical_url="")), patch.object(garmin_sync.GarminFixtureLoader, "path", return_value=Path("synthetic")), patch.object(server, "daily_sync_marker_service") as marker_service:
             marker_service.return_value.is_due.return_value = True
             server.daily_sync_scheduler().schedule()
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             rows = db.execute("SELECT provider, payload FROM sync_jobs").fetchall()
         self.assertEqual([row["provider"] for row in rows], ["garmin"])
         self.assertEqual(json.loads(rows[0]["payload"])["days"], 2)
@@ -208,7 +208,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
                     "notes": "Synthetic",
                 }
             )
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.executemany("INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)", [(str(i), str(i), json.dumps({"id": str(i), "name": "Synthetic"}), server.utc_now()) for i in range(1001)])
         temporary = server.privacy_archive_export_service().create_file()
         try:
@@ -222,7 +222,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
     def test_library_http_pagination_reaches_every_active_template_beyond_1000(self):
         records = [{"id": f"template-{i:04}", "name": f"Synthetic {i:04}", "type": "Ride"} for i in range(1001)]
         records += [{"id": "archived", "name": "Archived", "archived": True}, {"id": "dated", "name": "Dated", "date": "2026-09-09"}]
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.executemany("INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)",
                            [(item["id"], item["id"], json.dumps(item), server.utc_now()) for item in records])
         from support import create_test_session
@@ -276,7 +276,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
         result, _ = self.turn("Explain the week", [{"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}, "output_text": "Monday starts"}])
         self.assertEqual(result["status"], "partial")
         self.assertIn("nicht abgeschlossen", result["message"]["content"])
-        self.assertIsNotNone(json.loads(server.get_kv("coach_pending_request")))
+        self.assertIsNotNone(json.loads(server.key_value_service().get("coach_pending_request")))
 
     def test_completed_async_job_refreshes_model_context(self):
         job = server.sync_job_queue_service().enqueue(
@@ -301,7 +301,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
         def restore(_):
             self.assertEqual(server.coach_cancellation_service().cancel("synthetic-session", "cancel-operation")["status"], "cancelling")
             self.assertIsNone(coach_streams.CHAT_STREAM_REGISTRY.get_background_event("cancel-operation"))
-            with server.database() as db:
+            with server.database_manager().unit_of_work() as db:
                 receipt = db.execute(
                     "SELECT receipt FROM coach_commands WHERE client_turn_id='cancel-race'"
                 ).fetchone()
