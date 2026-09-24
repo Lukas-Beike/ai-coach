@@ -2324,6 +2324,44 @@ class ServerArchitectureTests(unittest.TestCase):
         ]
         self.assertEqual(factory_names, expected_names)
 
+    def _assert_put_route_owned(
+        self, route_name: str, forbidden_paths: tuple[str, ...], factory: str
+    ) -> ast.Module:
+        server_tree = _parse(SERVER_PATH)
+        put_handler = next(
+            node
+            for node in ast.walk(server_tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_do_PUT"
+        )
+        nodes = list(ast.walk(put_handler))
+        dispatches = [
+            node
+            for node in nodes
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == route_name
+            and node.func.attr == "handle"
+        ]
+        self.assertEqual(len(dispatches), 1)
+        paths = {
+            node.value
+            for node in nodes
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        self.assertTrue(set(forbidden_paths).isdisjoint(paths))
+        assignment = next(
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == route_name
+                for target in node.targets
+            )
+        )
+        self.assertEqual(ast.unparse(assignment.value), factory)
+        return server_tree
+
     def test_coach_get_routes_are_owned_by_http_api_module(self) -> None:
         self._assert_get_route_owned("_handle_coach_get", "COACH_GET_ROUTES")
 
@@ -2427,50 +2465,27 @@ class ServerArchitectureTests(unittest.TestCase):
         )
 
     def test_settings_put_routes_are_owned_by_http_api_module(self) -> None:
-        server_tree = _parse(SERVER_PATH)
-        request_handler = next(
-            node
-            for node in server_tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
-        )
-        put_handler = next(
-            node
-            for node in request_handler.body
-            if isinstance(node, ast.FunctionDef) and node.name == "_do_PUT"
-        )
-        route_dispatches = [
-            node
-            for node in ast.walk(put_handler)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "SETTINGS_PUT_ROUTES"
-            and node.func.attr == "handle"
-        ]
-        self.assertEqual(len(route_dispatches), 1)
-        route_paths = {
-            node.value
-            for node in ast.walk(put_handler)
-            if isinstance(node, ast.Constant) and isinstance(node.value, str)
-        }
-        self.assertTrue(
-            {
+        self._assert_put_route_owned(
+            "SETTINGS_PUT_ROUTES",
+            (
                 "/api/settings/model",
                 "/api/settings/ai-provider",
                 "/api/settings/thinking-level",
                 "/api/settings/calendar-display",
-            }.isdisjoint(route_paths)
+            ),
+            "SettingsPutRoutes(SETTINGS)",
         )
-        route_assignment = next(
-            node
-            for node in server_tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == "SETTINGS_PUT_ROUTES"
-                for target in node.targets
-            )
+
+    def test_athlete_put_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_put_route_owned(
+            "ATHLETE_PUT_ROUTES",
+            ("/api/athlete-context", "/api/profile"),
+            "AthletePutRoutes(athlete_context_service, profile_service)",
         )
-        self.assertEqual(ast.unparse(route_assignment.value), "SettingsPutRoutes(SETTINGS)")
+        route_source = (BACKEND_ROOT / "http_api" / "athlete_put.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("server", route_source.casefold())
 
     def test_diagnostics_and_privacy_get_routes_are_owned_by_http_api_modules(self) -> None:
         server_tree = self._assert_get_route_owned(
