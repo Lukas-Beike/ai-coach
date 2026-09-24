@@ -4885,6 +4885,26 @@ class CoachTests(unittest.TestCase):
                 )
         chat.assert_not_called()
 
+    def test_completed_morning_background_job_returns_persisted_completion_receipt(self):
+        completion = {"status": "completed", "coach_quick_actions": {"morning_checkin": False}}
+        with patch("backend.coach.job_store.CoachJobStore.message", return_value="Morgen-Check-in"), patch(
+            "backend.coach.job_store.CoachJobStore.merge_receipt"
+        ), patch.object(server.ManualMorningCheckinService, "prepare"), patch.object(
+            server, "chat_with_coach",
+            return_value={"status": "completed", "message": {"content": "Guten Morgen"}},
+        ), patch.object(
+            server,
+            "_persist_completed_morning_coach_job",
+            return_value=completion,
+        ) as persist_completion:
+            result = server._execute_background_coach_job(
+                {}, {"request_kind": "morning_checkin"}, "operation", "turn-morning", "session",
+                threading.Event(), False,
+            )
+
+        self.assertEqual(result, completion)
+        persist_completion.assert_called_once_with("turn-morning")
+
     def test_garmin_source_observed_at_uses_latest_nested_valid_date(self):
         observed_at = garmin_observations.garmin_source_observed_at({
             "calendarDate": "invalid-date",

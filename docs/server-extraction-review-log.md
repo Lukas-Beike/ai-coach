@@ -6941,3 +6941,46 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Verbleibend: Der dünne Server-Aufrufer und die Background-Worker-
   Orchestrierung müssen in den nächsten P8-Schritten entfernt werden;
   externe PR-Gates stehen für diesen Stand noch aus.
+
+- PR #776 wurde mit vollständig grünen CI-/Browser-/Sonar-/Codex-Gates,
+  null offenen Review-Threads und null offenen Sonar-Issues gemergt
+  (`mergedAt` 2026-09-24T04:27:59Z, Merge-Commit
+  `5d977a82a24a9a1cede063ce172e856f0cafe252`). Der Commit ist
+  auf `origin/develop` erreichbar: **PASS**.
+
+# P8 Morning Coach job completion receipt — isolierter Quellstand
+
+- Auf Basis des isolierten Branches `refactor/p8-morning-completion-source-20260924`
+  (`5863e91c`, vor dem Merge von PR #776) besitzt
+  `MorningCoachJobCompletionService.complete()` die persistierten lokalen
+  Morning-Status-/Datumsmarker und die atomare Receipt-Projektion. Der Service
+  bekommt DatabaseManager/Lock, KeyValueRepository, QuickActions-Servicefactory
+  sowie lokale/UTC-Uhr injiziert. `server.py` verdrahtet diese Abhängigkeiten
+  am dünnen `_persist_completed_morning_coach_job`-Adapter; dieser bleibt bis
+  zur folgenden Worker-Migration temporär. Backend-Code importiert kein
+  `server.py`.
+- Die zwei getrennten UOWs, QuickActions-Read dazwischen, Datum des lokalen
+  Tages, Completed-Statusfilter, `updated_at`, `client_turn_id`-Filter,
+  Unicode-/kompaktes JSON und bisherige Rückgabe auch für fehlende oder nicht
+  abgeschlossene Commands bleiben erhalten. Direkte Tests prüfen Erfolg,
+  fehlende/nicht abgeschlossene Zeile, beide Transaktionsgrenzen und die
+  Reihenfolge von QuickActions nach dem Commit des `ready`-Markers. Eine
+  Worker-Regression prüft weiterhin das zurückgegebene Receipt. Ein Fehler
+  der QuickActions-Projektion propagiert nach der ersten UOW; der bereits
+  committed Marker bleibt erhalten und Receipt samt `updated_at` unberührt.
+- Vier direkte Service-Tests, Worker-/Morning-/Background-Regressionen,
+  Architekturtests, Ruff für das neue Backendmodul und direkte Tests,
+  `compileall`, Inventar-`--check` und `git diff --check`: **PASS**.
+  Frischer Python-3.14-Docker-Build: **PASS**. Vollständige Suite im frischen
+  read-only Container mit Worktree als read-only Quelle: 2.596 Tests,
+  11 Skips, **PASS**. Es wurden nur temporäre Testdaten und gemockte Aufrufe
+  verwendet.
+- Root prüfte den tatsächlichen Worker-Commit `a8015024` samt Service,
+  Server-Caller, DB-/Statusfiltern, JSON-Vertrag und Tests. Ein zunächst
+  fehlender Failure-Boundary-Test wurde an denselben Worker zurückgegeben
+  und vor Integration ergänzt. Die sequenzielle Integration auf dem
+  bestätigten #776-Merge ist `e35ed7a8`; 21 fokussierte Tests, Ruff,
+  Compileall, Inventar-/Diff-Check und ein frisch gebautes Read-only-
+  Docker-Image mit 2.596 Tests/11 Skips **PASS**. Externe PR-Gates
+  werden für den integrierten Stand gesondert bestätigt. Der vorläufige
+  Server-Adapter bleibt ein P8-Risiko bis zur Worker-Auslagerung.

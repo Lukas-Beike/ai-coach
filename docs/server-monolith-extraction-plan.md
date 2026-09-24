@@ -680,6 +680,9 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
     read-only Statusprojektion ihren konkreten Coach-Services zuordnen.
   - [ ] Verbleibende Background-Receipt-/Fehlerzustände mit dem Coach-Job-
     Eigentümer zusammenführen und Restart-/Cancellation-Verträge prüfen.
+    - [x] Morning-Job-Abschlussmarker und QuickActions-Receipt-Projektion
+      `MorningCoachJobCompletionService` zuordnen; die beiden getrennten
+      UOW-Grenzen und das Completed-Status-Filter bleiben erhalten.
 - [x] Tages-/Startup-Scheduler nach `sync/scheduler.py` ziehen; die Composition
   Root registriert die konkreten Sync-Dienste ohne Importzyklus. Automatische
   Morning-Check-ins sind seit dem `develop`-Abgleich kein Scheduler-Auftrag.

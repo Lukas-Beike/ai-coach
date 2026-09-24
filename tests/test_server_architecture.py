@@ -52,6 +52,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.training_patch", ("CoachTrainingPatchService",)),
     ("backend.coach.planning_commands", ("CoachPlanningCommandService",)),
     ("backend.coach.cancellation", ("CoachCancellationService",)),
+    ("backend.coach.morning_completion", ("MorningCoachJobCompletionService",)),
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
