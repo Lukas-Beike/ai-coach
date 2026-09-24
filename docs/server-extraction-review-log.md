@@ -7817,6 +7817,11 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Route-Dispatch erhält Body-Limits und Cookie-/CSRF-Verträge. Der erste
   volle Testlauf hatte zwei Fehler durch eager gebundene Callback-Abhängigkeiten;
   beide sind behoben und der komplette Wiederholungslauf ist grün.
+- CI-Nachprüfung nach PR-Erstellung: Der `/api/planning/commands`-Browserfall
+  reproduzierte eine beim Import erfasste Conversation-Factory. Die Composition
+  löst sie jetzt dynamisch; der betroffene mobile-small SQLCipher-E2E-Test PASS.
+  Der Architekturtest wurde auf den Lazy-Callback angepasst. Diese Korrektur
+  ist auf `43dcee2` und der finale CI-Lauf läuft erneut.
 - `server.py`: 3.297 physische Zeilen. Die Änderungen sind lokal und noch
   nicht in einem PR. P7/P8-Restaudit, übriger HTTP-Transport und P11 bleiben
   offen.

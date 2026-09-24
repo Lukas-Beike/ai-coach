@@ -2591,7 +2591,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "PLANNING_COMMANDS_POST_ROUTES",
             ("/api/planning/commands",),
-            "PlanningCommandsPostRoutes(coach_planning_command_service, coach_conversation_provision_service)",
+            "PlanningCommandsPostRoutes(coach_planning_command_service, lambda: coach_conversation_provision_service())",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "planning_commands_post.py"
