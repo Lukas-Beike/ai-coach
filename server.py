@@ -151,6 +151,7 @@ from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.history_get import HistoryGetRoutes
 from backend.http_api.privacy_get import PrivacyGetRoutes
+from backend.http_api.settings_put import SettingsPutRoutes
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
@@ -2827,6 +2828,7 @@ STATE_EVENTS_GET_ROUTES = StateEventsGetRoutes(
     session_auth_service,
     StateEventTransport(runtime_events.STATE_EVENT_BUFFER),
 )
+SETTINGS_PUT_ROUTES = SettingsPutRoutes(SETTINGS)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -3150,17 +3152,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             path = urlparse(self.path).path
             session = self.auth_service.require_auth(self)
             self.auth_service.require_csrf(self, session)
-            if path == "/api/settings/model":
-                self.send_json(200, SETTINGS.save_model(self.read_json().get("model")))
-                return
-            if path == "/api/settings/ai-provider":
-                self.send_json(200, SETTINGS.save_ai_provider(self.read_json().get("provider")))
-                return
-            if path == "/api/settings/thinking-level":
-                self.send_json(200, SETTINGS.save_thinking_level(self.read_json().get("thinking_level")))
-                return
-            if path == "/api/settings/calendar-display":
-                self.send_json(200, SETTINGS.save_calendar_display_settings(self.read_json()))
+            if SETTINGS_PUT_ROUTES.handle(self, path):
                 return
             if path == "/api/athlete-context":
                 payload = self.read_json()
