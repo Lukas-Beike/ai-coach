@@ -113,6 +113,15 @@ class CoachJobStore:
             )
         return str(row["content"])
 
+    def cancel_requested(self, client_turn_id: str) -> bool:
+        """Read a persisted cancel flag before a claimed worker resumes."""
+        with self._database_lock, self._database_manager().unit_of_work() as db:
+            row = db.execute(
+                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
+                (client_turn_id,),
+            ).fetchone()
+        return bool(row and command_receipt(row["receipt"]).get("cancel_requested"))
+
     def merge_receipt(self, client_turn_id: str, updates: dict[str, Any]) -> dict[str, Any]:
         """Merge progress into a queued/running command in one locked UOW."""
         with self._database_lock, self._database_manager().unit_of_work() as db:

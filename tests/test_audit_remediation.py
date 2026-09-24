@@ -310,7 +310,7 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
         def coach(*args, **kwargs):
             self.assertTrue(kwargs["cancel_event"].is_set())
             return {"status": "cancelled"}
-        with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", side_effect=restore), patch.object(server, "chat_with_coach", side_effect=coach) as execute:
+        with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", side_effect=restore), patch("backend.coach.chat_turn.CoachChatTurnService.run", side_effect=coach) as execute:
             server._run_background_coach_job(job)
         execute.assert_called_once()
 

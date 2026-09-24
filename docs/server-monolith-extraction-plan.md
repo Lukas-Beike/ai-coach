@@ -657,6 +657,11 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
     Nutzernachrichten einem konkreten `CoachJobStore` zuordnen; Enqueue,
     Resume und Cancel sind in den folgenden Teilaufgaben abgeschlossen,
     Worker-Turn-Orchestrierung bleibt offen.
+  - [x] Claimed-Generation-Ausführung, Session-Binding, persistiertes
+    Cancel-Read, Coach-Turn-Aufruf, Morning-Abschluss, Contention-Retry,
+    terminale Fehler und SSE-Publikation einem `CoachBackgroundJobRunner`
+    zuordnen. Der vorläufige Server-Aufrufer entfällt mit dem folgenden
+    Worker-Lifecycle-Umzug.
   - [x] Restart-Recovery für unterbrochene synchrone, OpenAI- und Gemini-
     Background-Turns einschließlich persistierter Intents, Queue-Phase und
     Worker-Wake dem `CoachJobStore` zuordnen; Worker-Turn-Orchestrierung

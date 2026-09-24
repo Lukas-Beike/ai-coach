@@ -6984,3 +6984,41 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Docker-Image mit 2.596 Tests/11 Skips **PASS**. Externe PR-Gates
   werden für den integrierten Stand gesondert bestätigt. Der vorläufige
   Server-Adapter bleibt ein P8-Risiko bis zur Worker-Auslagerung.
+
+- PR #777 wurde mit grünen CI-/Browser-/Sonar-/Codex-Gates, null offenen
+  Review-Threads und null offenen Sonar-Issues gemergt (`mergedAt`
+  2026-09-24T04:43:26Z, Merge-Commit
+  `032c4a9f6439c7d7ad4a45be724f7cef03a689b5`). Der Commit ist
+  auf `origin/develop` erreichbar: **PASS**.
+
+## P8 Background-Job-Runner — isolierter Quellstand
+
+- Root verlagert aus `server.py` die komplette Ausführung eines geclaimten
+  Coach-Jobs einschließlich Session-Binding, persistiertem Cancel-Read,
+  Turn-Aufruf, Morning-Abschluss, Contention-Requeue, Fehlerprojektion,
+  SSE-Delta-/Receipt-/Error-Publikation und Event-Cleanup nach
+  `CoachBackgroundJobRunner`. `CoachJobStore` besitzt weiter den durable
+  Claim und das neue Cancel-Read; `ChatStreamRegistry` behält Queue und
+  process-lokale Cancel-Events. Kein Backend-Rückimport aus `server.py`.
+- Initialer Root-Diff-Review fand ein **FAIL**: Der Runner-Composer
+  konstruierte den Chat-Service vor Generation-/Session-Prüfung und hätte
+  den in #775 korrigierten Lazy-Composition-Vertrag erneut verletzt.
+  Die konkreten Service-Factories werden jetzt ausschließlich an ihrem
+  fachlichen Einsatzpunkt aufgelöst. Direkter Regressionstest prüft, dass
+  invalidierte Claims weder Factories noch Session-/Failure-Pfade berühren.
+- Der vorläufige `_run_background_coach_job`-Caller und die processweite
+  Worker-Loop verbleiben nur bis zum unmittelbar folgenden Lifecycle-Umzug;
+  dauerhafte Kompatibilitäts-Wrapper sind nicht zulässig. Die bisherigen
+  Worker-Test-Patchziele wurden auf `CoachChatTurnService.run` und den
+  Morning-Completion-Service verlegt, sodass Tests keine ungemockten
+  Provideraufrufe auslösen. Der Session-Binding-Vertrag ist als enger
+  Coach-Protocol typisiert; es entsteht keine Coach→HTTP-Importkante.
+  Vier direkte Runner-Tests sichern Claim-Invalidation, persistiertes Cancel,
+  Contention-Requeue/SSE und Morning-Abschluss. 72 Dialog-Tests, 32 Audit-/
+  Provider-Tests (2 Skips), 495 Server-Tests (3 Skips), Architektur-, Ruff-,
+  Compileall-, Inventar- und Diff-Checks **PASS**. Ein erster vollständiger
+  Docker-Lauf meldete **FAIL**, weil zwei neue Composition-Factories noch
+  nicht dem Inventar zugeordnet waren; der Generator wurde konkret ergänzt.
+  Danach: frisches Read-only-Docker-Image mit 2.600 Tests/11 Skips **PASS**.
+  Der Root-Review des Quell-Diffs ist nach Lazy- und Importkorrektur **PASS**;
+  sequenzielle Integration und externe PR-Gates stehen noch aus.
