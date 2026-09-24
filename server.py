@@ -18,7 +18,6 @@ import logging
 import os
 import queue
 import re
-import secrets
 import sqlite3
 import threading
 import time
@@ -294,6 +293,7 @@ from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
 from backend.coach.tool_failures import CoachStructuredToolFailureService
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
+from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
@@ -2034,9 +2034,6 @@ def external_calendar_events_for_date(target_date: str) -> list[dict[str, Any]]:
     ]
 
 
-OPENAI_MAX_RETRY_DELAY_SECONDS = 60
-
-
 def coach_quick_actions_service() -> CoachQuickActionsService:
     """Compose local quick-action reads and their public Coach projection."""
     return CoachQuickActionsService(
@@ -2592,29 +2589,9 @@ def _recover_invalid_structured_conversation(
     return True
 
 
-def _response_retry_delay(exc: AppError, *, ai_provider: str, attempt: int, request_delta_emitted: bool) -> float | None:
-    rate_limited = exc.reason == "rate_limit_exceeded" or getattr(exc, "provider_error_code", None) == "rate_limit_exceeded"
-    if ai_provider != "openai" or not rate_limited or attempt == 2 or request_delta_emitted:
-        return None
-    retry_after = getattr(exc, "retry_after_seconds", None)
-    if isinstance(retry_after, int):
-        if retry_after > OPENAI_MAX_RETRY_DELAY_SECONDS:
-            return None
-        base_delay = retry_after
-    else:
-        base_delay = 5 * (attempt + 1)
-    return base_delay + secrets.randbelow(1000) / 1000
-
-
-def _wait_for_coach_response_retry(delay: float, cancel_event: threading.Event | None, attempt: int) -> None:
-    LOGGER.warning(
-        "Coach response rate limited; retrying",
-        extra={"event": "coach_response_retry", "context": {"attempt": attempt + 1, "retry_in_seconds": delay}},
-    )
-    if cancel_event is not None:
-        cancel_event.wait(delay)
-    else:
-        time.sleep(delay)
+def coach_response_retry_policy() -> CoachResponseRetryPolicy:
+    """Compose retry policy with the application logger."""
+    return CoachResponseRetryPolicy(LOGGER)
 
 
 @dataclass(frozen=True)
@@ -2668,14 +2645,15 @@ def _structured_coach_response_attempt(
         ):
             state["resume_id"] = ""
             return None
-        delay = _response_retry_delay(
+        retry_policy = coach_response_retry_policy()
+        delay = retry_policy.retry_delay(
             exc, ai_provider=ai_provider, attempt=attempt,
             request_delta_emitted=state["request_delta_emitted"],
         )
         if delay is None:
             raise
         state["resume_id"] = ""
-        _wait_for_coach_response_retry(delay, cancel_event, attempt)
+        retry_policy.wait(delay, cancel_event, attempt)
         return None
 
 

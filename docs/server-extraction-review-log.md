@@ -6535,3 +6535,27 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Server-Ruff-Befunde sind unverändert. `server.py` hat 4.324
   physische Zeilen, P7-Rest 26 Definitionen/28 globale Bindungen,
   P8-Rest 13 Definitionen/8 Bindungen, P0=0. PR-CI steht noch aus.
+
+## P8 begrenzte Response-Retry-Policy — integrierter Diff-Stand
+
+- #764 ist am 24.09.2026 um 01:34:00 UTC mit Merge-Commit
+  `b041142b09fe875aec5c1a8ef109d0d59beae1a1` gemergt; Commit auf
+  `origin/develop` erreichbar, null Review-Threads und alle Checks,
+  einschließlich des nach dem Merge abgeschlossenen Browser-Checks, grün.
+- GPT-6-Luna-Worker-Commit `bb7ac8a4e51c5155ec717b1443e639b0ad3450ae`
+  wurde auf diesem Stand konfliktfrei als `42de0414` integriert. Root-Diff-
+  Review: zunächst **FAIL**, weil `server.py` nach der Verlagerung einen
+  ungenutzten `secrets`-Import behielt (Ruff 24 statt 23 bestehende Befunde).
+  Der Import wurde im integrierten Worktree entfernt; erneutes Code-/Diff-
+  Review: **PASS**. `CoachResponseRetryPolicy` besitzt Rate-Limit-Entscheidung,
+  begrenztes Retry-After/Jitter und abbrechbares Warten; Provider- und Turn-
+  Loop bleiben offen. Kein Backend-Rückimport, Callback oder Wrapper.
+- Die sechs direkten Tests decken Provider/Reason-Grenze, Retry-Erschöpfung,
+  Streaming-Deltas, Retry-After-Budget, Jitter und Cancellation-Wait ab.
+  Bestehende Language-Recovery-Tests patchen nun das Backend-Ziel. 24
+  fokussierte Tests, Architektur-, Compileall-, Ruff-Nicht-Server- und
+  Inventarprüfungen **PASS**. Integrierte native Vollsuite 2.529 Tests/
+  12 Skips, frisches Read-only-Docker-Image 2.529 Tests/11 Skips **PASS**;
+  bestehende 23 Server-Ruff-Befunde unverändert, Diff-Check **PASS**.
+  `server.py`: 4.302 physische Zeilen; P7-Rest 25 Definitionen,
+  P8-Rest 13, P0=0. PR-CI steht noch aus.
