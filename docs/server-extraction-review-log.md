@@ -7770,3 +7770,22 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   berücksichtigen, den Transkriptions-Patch auf dem aktuellen `develop`
   sequenziell integrieren und erneut prüfen; danach die P7/P8-Restverträge,
   P10-HTTP-Grenzen und P11-Composition-Root abarbeiten.
+
+
+## P10 Audio-Transkription POST-Route — integrierter Prüfstand
+
+- Basis: `a406d6d02279338647e1772bc7dddbffd08023ab` (`origin/develop`, PR #800 Statusabgleich).
+- Integrierter Quellpatch: `48a60f0f1544634ab7e64378d7680141a2b1b3cc` (P10 transcribe POST route).
+- Auslagerungsumfang:
+  - `backend/http_api/transcribe_post.py` mit `TranscribePostRoutes` besitzt das Routing von `POST /api/transcribe`.
+  - Delegation an `AudioTranscriptionClient` mit unveränderter Validierung, Fehlerweiterleitung und Payload-Grenze.
+  - In `server.py` wurde `transcribe_audio` entfernt; der RequestHandler delegiert via `TRANSCRIBE_POST_ROUTES.handle(self, path)`.
+  - 4 dedizierte Unit-Tests in `tests/test_http_transcribe_post.py` sowie Migration der Server-Tests auf `_transcribe_via_http_route`.
+  - Architekturtest `test_transcribe_post_route_is_owned_by_http_api_module` sichert Modulbesitz und Server-Unabhängigkeit.
+- Prüfungen:
+  - Unit-Testsuite: 396 Tests PASS.
+  - Architekturtest: 25 Tests PASS (`tests/test_server_architecture.py`).
+  - Inventar: `python scripts/server_extraction_inventory.py --check` PASS (P0 = 0).
+  - Code-Qualität: `ruff check` auf neuen Modulen PASS (0 Fehler), `mypy` PASS (0 Fehler).
+- `server.py`: 3.294 physische Zeilen (Reduktion um 9 Zeilen); 216 von 233 markierten Planpunkten (92,7 %), 17 offen.
+- Nächster Schritt: PR öffnen, CI-Gates prüfen, MCP link_pull_request registrieren, danach P7/P8-Restaudit und verbleibende P10/P11-Schritte.

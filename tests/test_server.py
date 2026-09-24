@@ -42,6 +42,17 @@ from backend.http_api import server as http_server_module
 from backend.http_api.rate_limit import RateLimiter
 from backend import privacy as privacy_module
 
+
+def _transcribe_via_http_route(audio: bytes, content_type: str) -> dict[str, str]:
+    handler = SimpleNamespace(
+        headers={"Content-Type": content_type},
+        read_audio_body=Mock(return_value=audio),
+        send_json=Mock(),
+    )
+    if not server.TRANSCRIBE_POST_ROUTES.handle(handler, "/api/transcribe"):
+        raise AssertionError("transcription route was not handled")
+    return handler.send_json.call_args.args[1]
+
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
 os.environ.update({
     "AI_PROVIDER": "openai",
@@ -5411,7 +5422,7 @@ class CoachTests(unittest.TestCase):
 
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
         with patch.object(server, "CONFIG", config), patch.object(server.provider_http_client(), "request", side_effect=fake_http_json):
-            result = server.transcribe_audio(b"fake-webm-audio", "audio/webm;codecs=opus")
+            result = _transcribe_via_http_route(b"fake-webm-audio", "audio/webm;codecs=opus")
 
         self.assertEqual(result, {"transcript": "Wie soll ich morgen trainieren?"})
         self.assertEqual(captured["headers"]["x-goog-api-key"], "test-gemini-key")
@@ -5660,7 +5671,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="test-key", openai_base_url="https://foundry.example.invalid/openai/v1/")), patch.object(
             server.provider_http_client(), "request", side_effect=fake_http_json
         ):
-            result = server.transcribe_audio(audio, "audio/webm;codecs=opus")
+            result = _transcribe_via_http_route(audio, "audio/webm;codecs=opus")
 
         self.assertEqual(result, {"transcript": "Wie soll ich morgen trainieren?"})
         self.assertEqual(captured["method"], "POST")
@@ -5717,9 +5728,9 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, openai_api_key="test-key")
         with patch.object(server, "CONFIG", config):
             with self.assertRaises(server.AppError) as unsupported:
-                server.transcribe_audio(b"audio", "audio/flac")
+                _transcribe_via_http_route(b"audio", "audio/flac")
             with self.assertRaises(server.AppError) as oversized:
-                server.transcribe_audio(b"x" * (server.MAX_AUDIO_BODY_BYTES + 1), "audio/webm")
+                _transcribe_via_http_route(b"x" * (server.MAX_AUDIO_BODY_BYTES + 1), "audio/webm")
         self.assertEqual(unsupported.exception.status, 415)
         self.assertEqual(oversized.exception.status, 413)
 

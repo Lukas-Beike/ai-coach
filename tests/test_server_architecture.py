@@ -60,6 +60,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.http_api.auth", ("SessionAuthService",)),
     ("backend.http_api.chat_post", ("ChatPostRoutes",)),
     ("backend.http_api.chat_stream", ("CoachChatStreamTransport",)),
+    ("backend.http_api.transcribe_post", ("TranscribePostRoutes",)),
     ("backend.http_api.public_get", ("PublicGetRoutes",)),
     ("backend.http_api.planning_get", ("PlanningGetRoutes",)),
     ("backend.http_api.sync_get", ("SyncGetRoutes", "SYNC_JOB_RE")),
@@ -2555,6 +2556,29 @@ class ServerArchitectureTests(unittest.TestCase):
             and any(alias.name == "server" for alias in node.names)
             for node in ast.walk(route_tree)
         ))
+
+    def test_transcribe_post_route_is_owned_by_http_api_module(self) -> None:
+        server_tree = self._assert_write_route_owned(
+            "_handle_coach_post",
+            "TRANSCRIBE_POST_ROUTES",
+            ("/api/transcribe",),
+            "TranscribePostRoutes(SETTINGS, audio_transcription_client)",
+        )
+        route_source = (BACKEND_ROOT / "http_api" / "transcribe_post.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("server", route_source.casefold())
+        self.assertIn("handler.read_audio_body()", route_source)
+        self.assertIn("selected_ai_provider()", route_source)
+        self.assertIn("selected_model()", route_source)
+        self.assertNotIn(
+            "transcribe_audio",
+            {
+                node.name
+                for node in ast.walk(server_tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            },
+        )
 
     def test_diagnostics_capture_post_route_is_owned_by_http_api_module(self) -> None:
         self._assert_write_route_owned(
