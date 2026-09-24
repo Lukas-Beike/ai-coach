@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
-from backend.coach.authorization import require_coach_scope
+from backend.coach.authorization import TRAINING_PLAN_SCOPE_PREFIX, require_coach_scope
 from backend.coach.dialogue import validate_request
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.db.manager import DatabaseManager
@@ -43,14 +43,12 @@ class CoachDialogueActionService:
         sync_jobs: Callable[[], SyncJobQueueService],
         plan_scope: CoachDialoguePlanScopeService,
         today: Callable[[], date],
-        training_plan_scope_prefix: str,
     ) -> None:
         self._database_manager = database_manager
         self._db_lock = db_lock
         self._sync_jobs = sync_jobs
         self._plan_scope = plan_scope
         self._today = today
-        self._training_plan_scope_prefix = training_plan_scope_prefix
 
     def classify(
         self,
@@ -205,7 +203,7 @@ class CoachDialogueActionService:
         if name == "update_training_plan":
             require_coach_scope(
                 action,
-                self._training_plan_scope_prefix + str((arguments.get("payload") or {}).get("plan_id") or ""),
+                TRAINING_PLAN_SCOPE_PREFIX + str((arguments.get("payload") or {}).get("plan_id") or ""),
             )
         if name == "apply_adaptive_replan":
             require_coach_scope(action, "adaptive_replan:" + str(arguments.get("adjustment_id") or ""))

@@ -7876,3 +7876,16 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   **PASS**.
 - Dieser Schritt ist ein erster Transport-Teilumzug; POST-/SSE-Dispatch,
   Body-/Response-Schreibtransport und die Handler-Klasse bleiben P10-offen.
+
+## P7 Coach-Autorisierung — Scope-Präfix
+
+- `TRAINING_PLAN_SCOPE_PREFIX` liegt jetzt in `backend/coach/authorization.py`.
+  Dialog-, Planänderungs- und Planaktionsdienste beziehen die Scope-Policy von
+  dort; `server.py` reicht sie nicht mehr als Composition-Abhängigkeit durch.
+  Ein Architekturtest sichert die Eigentümerschaft ab. Das aktualisierte
+  Inventar weist vier entfernte Zeilen und eine weniger globale Bindung aus.
+- Fokussierte Scope-, Planning-Tool- und Architekturtests: **67 PASS**;
+  `test_coach_dialogue.py` per Discovery: **72 PASS**. Vollständige native
+  Suite: **2.741 PASS, 12 SQLCipher-Skips**. `py_compile`, Inventar-`--check`,
+  `git diff --check` und Docker-Build (`ai-coach:local`, Python 3.14/SQLCipher)
+  **PASS**.

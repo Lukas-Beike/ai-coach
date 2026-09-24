@@ -36,7 +36,6 @@ class CoachPlanningActionToolServiceTests(unittest.TestCase):
             self.factories["plans"],
             self.factories["history"],
             self.factories["proposals"],
-            "training_plan:",
         )
 
     def test_preview_returns_local_preview_only_after_operation_and_scope_checks(self) -> None:

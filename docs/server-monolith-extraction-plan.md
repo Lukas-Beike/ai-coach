@@ -554,6 +554,9 @@ Abhängigkeit: P2–P6.
     strukturierten Adaptive-, Planupdate- und Undo-Werkzeuge einem konkreten
     `CoachPlanningActionToolService` zuordnen; die zuständigen Preview-, Apply-, Plan-,
     History- und Proposal-Services bleiben Zustandseigentümer.
+  - [x] Das `training_plan:`-Scope-Token in `coach/authorization.py`
+    verankern; Coach-Services konsumieren die Autorisierungspolitik direkt
+    statt den Präfix als Composition-Abhängigkeit zu erhalten.
   - [x] Dialogbezogene Datums-, Planned-Unit-, Library- und Draft-Scopes in
     `CoachDialoguePlanScopeService` verlagern; lokale SQL-Lesegrenzen und der
     gemeinsame DatabaseManager/DB-Lock bleiben unverändert.

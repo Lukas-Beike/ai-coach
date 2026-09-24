@@ -9,6 +9,8 @@ from typing import Any
 
 from backend.errors import AppError
 
+TRAINING_PLAN_SCOPE_PREFIX = "training_plan:"
+
 
 def coach_session_key(session_csrf_hash: str) -> str:
     """Bind persisted Coach work to a session without storing its CSRF hash."""

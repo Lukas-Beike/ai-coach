@@ -7,6 +7,7 @@ from typing import Any
 
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.authorization import (
+    TRAINING_PLAN_SCOPE_PREFIX,
     authorized_operations,
     require_coach_scope,
     structured_action_payload,
@@ -28,14 +29,12 @@ class CoachPlanningActionToolService:
         training_plan_service: Callable[[], TrainingPlanService],
         history_undo_service: Callable[[], HistoryUndoService],
         proposal_creation_service: Callable[[], CoachProposalCreationService],
-        training_plan_scope_prefix: str,
     ) -> None:
         self._adaptive_preview_service = adaptive_preview_service
         self._adaptive_apply_service = adaptive_apply_service
         self._training_plan_service = training_plan_service
         self._history_undo_service = history_undo_service
         self._proposal_creation_service = proposal_creation_service
-        self._training_plan_scope_prefix = training_plan_scope_prefix
 
     def execute(
         self,
@@ -67,7 +66,7 @@ class CoachPlanningActionToolService:
             plan_id = str(payload.get("plan_id") or "").strip()
             require_coach_scope(
                 intent,
-                f"{self._training_plan_scope_prefix}{plan_id}",
+                f"{TRAINING_PLAN_SCOPE_PREFIX}{plan_id}",
                 "local_plan",
             )
             return {"ok": True, **self._training_plan_service().update(plan_id, payload)}
