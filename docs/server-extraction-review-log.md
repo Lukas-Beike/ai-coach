@@ -7180,3 +7180,48 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Verzweigungen sowie Auth-, Query- und Keep-Alive-Grenzen ausführen.
 - Restrisiko: Die übrigen Handler-Routen, Body-/SSE-Transport und der
   komplette P11-Architektur-/Testpatch-Audit sind noch offen.
+
+## P10 öffentliche GET-Routen — isolierter Quellstand
+
+- `/api/health`, `/api/readiness`, `/api/auth/status` und `/api/bootstrap`
+  liegen in `backend/http_api/public_get.py` unter einem zustandslosen
+  `PublicGetRoutes`. `server.py` verdrahtet explizit
+  `runtime_maintenance.MAINTENANCE_GATE`, `readiness_service`,
+  `session_auth_service` und `public_bootstrap_service`.
+- Maintenance-Gate, Readiness-, Session-Auth- und Bootstrap-Service bleiben
+  die Zustandseigentümer. Unbekannte Pfade lösen keine Factory oder Gate-Abfrage
+  aus; Auth wird für jeden Request neu aufgelöst. `/api/auth/status` nutzt
+  ausschließlich `authenticated_session`; Bootstrap authentifiziert vor dem
+  Read. Status, JSON, Fehlerpropagation und bestehende Servicegrenzen bleiben
+  erhalten.
+- Vor der Änderung wurden `_handle_public_get`, alle vier Pfade, Route-Dispatch,
+  Service-Factorys und Test-Patchstellen gesucht. Die zwei bestehenden
+  Readiness-Handler-Vertragstests bleiben erhalten und rufen nun
+  `server.PUBLIC_GET_ROUTES.handle(handler, "/api/readiness")` auf. Ihre
+  Assertions zu dynamischem DatabaseManager auf Folgeanfragen sowie 503 und
+  redigiertem JSON bei Kompositionsfehlern sind unverändert.
+- **Review-Fix:** Die erste Sol-Vorabprüfung meldete **FAIL**, weil dieser
+  Zwischenstand beide bestehenden Readiness-Handler-Vertragstests entfernt
+  hatte; die neuen Fake-Route-Tests deckten ihre Risiken nicht gleichwertig ab.
+  Beide Testfälle wurden wiederhergestellt und auf den neuen Call-Site-Lookup
+  migriert, ohne Assertions zu entfernen oder abzuschwächen. Beide Tests liefen
+  danach gezielt erfolgreich.
+- Sieben direkte Fake-Handler-/Service-Tests prüfen alle vier Routen,
+  Readiness true/false, Authstatus false/true, Bootstrap-Auth-Reihenfolge und
+  Fehlerpropagation, dynamische Auth-Auflösung bei Keep-Alive sowie unbekannte
+  Pfade ohne Abhängigkeitsaufrufe. Ein zusätzlicher Architekturtest prüft
+  Route-Dispatch, konkrete Composition-Factories und die Entfernung des alten
+  Handler-Dispatchers.
+- **PASS:** Frisch gebautes SQLCipher-Image
+  `ai-coach:p10-public-get-routes-source-20260924`, read-only mit ausschließlich
+  read-only Test-/Dokumentations-/Workflow-/Fixture-/Playwright-Mounts und
+  flüchtigen `/tmp`-/`/data`-tmpfs: vollständige Python-Suite mit 2.622 Tests,
+  11 Skips. Die ersten zwei Containeraufrufe zeigten fehlende Test-Source-
+  Mounts im Image; nach Ergänzung des fehlenden `/app/playwright.config.cjs`
+  bestand der vollständige Lauf. Es wurden keine Testdateien geändert, um
+  Mountfehler zu umgehen.
+- Ruff für `public_get.py`, die direkten Routentests und den Architekturtest,
+  Compileall, Inventar-`--check` und `git diff --check` bestanden.
+  Die Readiness-Vertragstests liefen zusätzlich gezielt unter der lokalen
+  Python-Umgebung erfolgreich.
+- Kein Rebase, Push, Pull Request oder Merge.
