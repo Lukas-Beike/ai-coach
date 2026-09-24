@@ -5,14 +5,14 @@ Historischer Ausgangscommit: `58e352d`. Die Architekturregel in der
 Root-`AGENTS.md` ist integriert. Aktuelle Commits und offene Befunde stehen
 im `docs/server-extraction-review-log.md`; das Inventar wird pro Stand erzeugt.
 
-Aktueller Stand (24.09.2026): `develop` enthält nach PR #796 210 von 227
-markierten Punkten (92,5 %), 17 bleiben offen; `server.py` hat dort 3.375
-physische Zeilen. Der lokal auf diesem Merge basierende und erneut geprüfte
-POST-Integrationsstand enthält 214 von 231 Punkten (92,6 %), weiterhin 17
-offene Punkte und 3.367 physische `server.py`-Zeilen. Die vier zusätzlichen
-P10-Punkte sind noch **nicht** auf `develop` gemergt. Checklistenanteile
-messen nicht den Restaufwand: P7/P8-Restaudit, HTTP-/SSE-Grenzen in P10 und
-der gesamte P11-Abschluss bleiben substantiell offen.
+Aktueller Stand (24.09.2026): `develop` enthält nach PR #797 214 von 231
+markierten Punkten (92,6 %), 17 bleiben offen; `server.py` hat dort 3.367
+physische Zeilen. Der lokal geprüfte Chat-SSE-Integrationsstand enthält
+215 von 232 Punkten (92,7 %), weiterhin 17 offene Punkte und 3.303
+physische `server.py`-Zeilen. Diese SSE-Auslagerung ist noch **nicht** auf
+`develop` gemergt. Checklistenanteile messen nicht den Restaufwand:
+P7/P8-Restaudit, übrige HTTP-/SSE-Grenzen in P10 und der gesamte
+P11-Abschluss bleiben substantiell offen.
 
 ## 1. Ziel und verbindliche Abnahmekriterien
 
@@ -822,6 +822,11 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
   - [x] Statische Asset-Allowlist, Pfadsperre, Cache-/ETag-Projektion und
     Sicherheitsheader `StaticAssetService` zuordnen; Handler sendet nur
     Status, Header und Bytes.
+  - [x] Den endlichen `/api/chat/stream`-SSE-Lebenszyklus einschließlich
+    Restart-Replay, Background-Fallback, Heartbeat, Receipt-Lesen und
+    Disconnect-Cleanup `CoachChatStreamTransport` zuordnen; das durable
+    Job bleibt bei `CoachJobSubmissionService`, die Event-Queue beim
+    `ChatStreamRegistry` und Socket-/Schreibzustand beim Handler.
 - [ ] Handler mit den konkret benötigten Services verbinden; keine Weitergabe
   des `server`-Moduls als Pseudo-Servicecontainer.
   - [x] Die GET-Routen `/api/chat/history`, `/api/chat/receipt` und

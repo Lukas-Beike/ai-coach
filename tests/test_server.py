@@ -1,4 +1,5 @@
 import os
+import queue
 import sys
 import tempfile
 import threading
@@ -9871,7 +9872,7 @@ class CoachTests(unittest.TestCase):
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
         handler.send_sse_event = Mock(side_effect=[None, server.ClientDisconnected()])
-        events = server.queue.Queue()
+        events = queue.Queue()
         events.put(("delta", {"text": "Antwort bleibt gespeichert"}))
         events.put(("completed", {"message": {"id": 2}}))
 
@@ -9879,7 +9880,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(registry, "register", return_value=(operation_id, cancel_event)), \
                 patch.object(registry, "unregister") as unregister, \
                 patch.object(registry, "events", return_value=events):
-            handler.handle_chat_stream({"csrf_hash": session_key})
+            server.CHAT_STREAM_TRANSPORT.handle(handler, {"csrf_hash": session_key})
 
         with server.database() as db:
             self.assertIsNotNone(db.execute("SELECT 1 FROM coach_commands WHERE client_turn_id='turn-disconnect-test' AND status='queued'").fetchone())
@@ -9898,7 +9899,7 @@ class CoachTests(unittest.TestCase):
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
         handler.send_sse_event = Mock()
-        events = server.queue.Queue()
+        events = queue.Queue()
         events.put(("delta", {"text": "Dein Plan "}))
         events.put(("delta", {"text": "ist fertig."}))
         events.put(("completed", {"status": "completed", "message": {"id": 2, "content": "Dein Plan ist fertig."}}))
@@ -9907,7 +9908,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(registry, "register", return_value=(operation_id, cancel_event)), patch.object(
             registry, "unregister"
         ) as unregister, patch.object(registry, "events", return_value=events):
-            handler.handle_chat_stream({"csrf_hash": session_key})
+            server.CHAT_STREAM_TRANSPORT.handle(handler, {"csrf_hash": session_key})
 
         events = [call.args[0] for call in handler.send_sse_event.call_args_list]
         self.assertEqual(events, ["started", "delta", "delta", "completed"])

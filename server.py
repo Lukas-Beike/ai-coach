@@ -15,7 +15,6 @@ import hmac
 import json
 import logging
 import os
-import queue
 import sqlite3
 import threading
 import time
@@ -131,6 +130,7 @@ from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
 from backend.http_api.coach_actions_post import CoachActionsPostRoutes
 from backend.http_api.chat_post import ChatPostRoutes
+from backend.http_api.chat_stream import CoachChatStreamTransport
 from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.diagnostics_post import DiagnosticsCapturePostRoutes
@@ -2840,6 +2840,15 @@ CHAT_POST_ROUTES = ChatPostRoutes(
     coach_conversation_reset_service,
     MAX_REQUEST_BYTES,
 )
+CHAT_STREAM_TRANSPORT = CoachChatStreamTransport(
+    coach_streams.CHAT_STREAM_REGISTRY,
+    coach_job_submission_service,
+    coach_command_receipt_service,
+    REDACTOR.redact_text,
+    LOGGER,
+    max_request_bytes=MAX_REQUEST_BYTES,
+    response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+)
 DIAGNOSTICS_CAPTURE_POST_ROUTES = DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)
 PRIVACY_DELETE_POST_ROUTES = PrivacyDeletePostRoutes(privacy_delete_service)
 PRIVACY_GET_ROUTES = PrivacyGetRoutes(
@@ -3012,79 +3021,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.log_client_disconnect()
             raise ClientDisconnected() from exc
 
-    def handle_chat_stream(self, session: dict[str, Any]) -> None:  # NOSONAR - SSE lifecycle must remain atomic around durable job ownership
-        payload = self.read_json(MAX_REQUEST_BYTES)
-        message = str(payload.get("message", ""))
-        client_turn_id = str(payload.get("client_turn_id") or "").strip()
-        request_kind = payload.get("request_kind")
-        if not client_turn_id:
-            raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
-        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(session["csrf_hash"])
-        client_connected = True
-
-        def send_event(event: str, data: Any) -> None:
-            nonlocal client_connected
-            if not client_connected:
-                return
-            try:
-                self.send_sse_event(event, data)
-            except ClientDisconnected:
-                # The browser may be reloaded or moved to another tab while
-                # the provider request is still running. The chat operation
-                # must finish and persist its answer independently of SSE.
-                client_connected = False
-
-        try:
-            self.connection.settimeout(OPENAI_RESPONSE_TIMEOUT_SECONDS + 30)
-            try:
-                self.send_sse_headers(persistent=False)
-                send_event("started", {"operation_id": operation_id})
-            except ClientDisconnected:
-                client_connected = False
-            job = coach_job_submission_service().enqueue(
-                message, client_turn_id, session["csrf_hash"],
-                operation_id=operation_id, cancel_event=cancel_event, request_kind=request_kind, attachments=payload.get("attachments"),
-            )
-            persisted_operation_id = str(job.get("operation_id") or "")
-            if persisted_operation_id and persisted_operation_id != operation_id:
-                # A retry after restart may resolve to the original durable
-                # operation. The new finite stream cannot own that queue, so
-                # return its receipt and let the client resume via polling.
-                send_event("background", job)
-                return
-            events = coach_streams.CHAT_STREAM_REGISTRY.events(session["csrf_hash"], operation_id)
-            if events is None:
-                send_event("background", job)
-            else:
-                while True:
-                    try:
-                        event, data = events.get(timeout=15)
-                    except queue.Empty:
-                        active = coach_job_submission_service().active(session["csrf_hash"], operation_id)
-                        if active:
-                            send_event("heartbeat", {"operation_id": operation_id})
-                            continue
-                        try:
-                            send_event("completed", coach_command_receipt_service().read(client_turn_id, session["csrf_hash"]))
-                        except AppError as exc:
-                            send_event("error", {"reason": exc.reason or "request_failed", "message": REDACTOR.redact_text(exc.message)[:1000]})
-                        break
-                    send_event(event, data)
-                    if event in {"completed", "error", "background"}:
-                        break
-        except AppError as exc:
-            send_event("error", {"reason": exc.reason or "request_failed", "message": REDACTOR.redact_text(exc.message)[:1000]})
-        except Exception:
-            LOGGER.exception(
-                "Unhandled coach stream error",
-                extra={"event": "chat_stream_error", "context": {"request_id": self.request_id}},
-                exc_info=True,
-            )
-            send_event("error", {"reason": "internal_error", "message": INTERNAL_SERVER_ERROR})
-        finally:
-            coach_streams.CHAT_STREAM_REGISTRY.unregister(session["csrf_hash"], operation_id)
-            self.close_connection = True
-
     def _handle_coach_post(self, path: str, session: dict[str, Any]) -> bool:
         if COACH_ACTIONS_POST_ROUTES.handle(self, path, session):
             return True
@@ -3098,7 +3034,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.read_json(), conversation_id=coach_conversation_provision_service().ensure(), session_csrf_hash=session["csrf_hash"],
             ))
         elif path == "/api/chat/stream":
-            self.handle_chat_stream(session)
+            CHAT_STREAM_TRANSPORT.handle(self, session)
         elif path == "/api/feedback":
             self.send_json(200, checkin_service().save(self.read_json()))
         else:
