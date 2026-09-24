@@ -8,11 +8,13 @@ import functools
 import json
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
+from test_coach_dialogue import DialogueHarness, server
+
+from backend.coach.training_patch import CoachTrainingPatchService
 from backend.planning import library as planning_library
 from backend.sync.intervals import IntervalsSyncService
-from test_coach_dialogue import DialogueHarness, server
 
 
 def covers(*cases):
@@ -469,8 +471,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             current = json.loads(payload["input"][0]["output"])
             corrected.update(changes=[change], expected_revision=current["planning_revision"])
             return self.call("apply_training_patch", corrected, ["planned_unit:" + friday], period=period)
-        patch_service = Mock(wraps=server.coach_training_patch_service())
-        with patch.object(server, "coach_training_patch_service", return_value=patch_service):
+        original_apply = CoachTrainingPatchService.apply
+        with patch.object(CoachTrainingPatchService, "apply", autospec=True) as patch_apply:
+            patch_apply.side_effect = lambda service, *args: original_apply(service, *args)
             result, _ = self.turn("Freitag lieber einen sehr lockeren 8-km-Lauf, Sonntag Kraft behalten.", [
                 lambda _: self.call("apply_training_patch", {"changes": [change], "expected_revision": -1}, ["planned_unit:" + friday], period=period),
                 lambda _: self.call("read_training_state"), repair,
@@ -479,7 +482,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             ], turn="friday-repair")
         self.assertEqual(result["status"], "completed")
         self.assertTrue(result["command_receipts"][0]["resolved"])
-        self.assertEqual(patch_service.apply.call_count, 2)  # Rejected attempt, successful write; replay is cached.
+        self.assertEqual(patch_apply.call_count, 2)  # Rejected attempt, successful write; replay is cached.
         self.assertEqual(self.state()["planning_revision"], initial["planning_revision"] + 1)
         self.assertEqual(next(u for u in self.state()["planned_units"] if u["local_id"] == sunday), sunday_before)
         self.assertEqual(next(u["sport"] for u in self.state()["planned_units"] if u["local_id"] == friday), "Run")
