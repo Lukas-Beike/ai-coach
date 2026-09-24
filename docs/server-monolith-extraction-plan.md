@@ -825,10 +825,13 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     Socket-/Schreibzustand bleibt beim Handler.
   - [x] Sync-POST-Fachentscheidungen in `SyncCommandEndpoint` verlagern;
     Handler behält ausschließlich Transport, Body-Lesen und Antwort.
-    - [x] Body-/Antwort-Dispatch für Sync-Kommandos aus `RequestHandler` nach
+  - [x] Body-/Antwort-Dispatch für Sync-Kommandos aus `RequestHandler` nach
       `SyncCommandPostRoute` in `http_api/` verschieben; der globale Factory-
       Lookup bleibt dynamisch und die äußere Auth-/CSRF-/Maintenance-Reihenfolge
       bleibt beim Handler.
+  - [x] Die gesamte POST-Routenauswahl in `HttpPostDispatcher` verschieben;
+    öffentliche Auth-/Restore-Routen, CSRF-geschützte Routen, Chat-Abbruch vor
+    dem Maintenance-Gate und dessen übrige Reihenfolge unverändert erhalten.
   - [x] Statische Asset-Allowlist, Pfadsperre, Cache-/ETag-Projektion und
     Sicherheitsheader `StaticAssetService` zuordnen; Handler sendet nur
     Status, Header und Bytes.
@@ -911,6 +914,9 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
   - [x] Login/Logout und Datenbank-Restore als POST-Routen zuordnen;
     Session-/CSRF-Prüfung, Maintenance-Gate und Restore-Transaktion bleiben
     bei den bestehenden Auth-, Runtime- und Backup-Eigentümern.
+  - [x] Öffentliche POST-Routen, POST vor dem Maintenance-Gate und die
+    authentifizierte Routenfolge `HttpPostDispatcher` zuordnen; der Handler
+    besitzt weiter die äußere Auth-/CSRF-/Maintenance-/Fehlergrenze.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 

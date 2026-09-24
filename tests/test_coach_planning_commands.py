@@ -29,8 +29,9 @@ class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
         provision = Mock()
         provision.ensure.return_value = "synthetic-conversation"
         routes = server.PlanningCommandsPostRoutes(lambda: service, lambda: provision)
-        with patch.object(server, "PLANNING_COMMANDS_POST_ROUTES", routes):
-            handled = handler._handle_coach_post("/api/planning/commands", {"csrf_hash": "synthetic-session"})
+        handled = routes.handle(
+            handler, "/api/planning/commands", {"csrf_hash": "synthetic-session"}
+        )
         self.assertTrue(handled)
         service.execute.assert_called_once_with(
             self.payload(), conversation_id="synthetic-conversation",
