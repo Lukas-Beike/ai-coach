@@ -1,6 +1,6 @@
 # Plan: server.py vollständig in fachliche Backend-Module aufteilen
 
-Stand: 23.09.2026. P0–P6 integriert; P7–P11 in Arbeit.
+Stand: 24.09.2026. P0–P6 und P9 integriert; P7, P8, P10 und P11 in Arbeit.
 Historischer Ausgangscommit: `58e352d`. Die Architekturregel in der
 Root-`AGENTS.md` ist integriert. Aktuelle Commits und offene Befunde stehen
 im `docs/server-extraction-review-log.md`; das Inventar wird pro Stand erzeugt.
@@ -569,6 +569,10 @@ Abhängigkeit: P2–P6.
     Fehler, bestätigter Effekte, Antwort-/Status-Fallback und atomarer
     Pending-Request-Persistenz `CoachStructuredOutcomeService` zuordnen;
     Provider- und Tool-Rundenschleife bleiben bis P8 offen.
+  - [x] Strukturierte Werkzeugvorbereitung einschließlich Dialogautorisierung,
+    Pausen-/Cancel-Grenze, Remote-Write-Abhängigkeiten und Plan-Sync-Scope
+    `CoachStructuredToolPreparationService` zuordnen; konkrete Sync- und
+    Planungsdienste bleiben Zustandseigentümer.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.

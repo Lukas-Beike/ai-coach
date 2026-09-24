@@ -6398,3 +6398,40 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   11 Skips (23,106 s) **PASS**; Ruff/Compile/Inventar/Diff-Check
   **PASS**. Root prüfte den tatsächlichen integrierten Diff und die
   beiden Aufrufer erneut: **PASS**. PR-CI steht noch aus.
+
+## P7 strukturierte Werkzeugvorbereitung — integrierter Diff-Stand
+
+- #760 ist am 24.09.2026 um 00:35:59 UTC mit Merge-Commit
+  `efbd51c305e1cfe57abe386889b26f1bfe6e8e1e` gemergt; der Commit
+  ist auf `origin/develop` erreichbar, alle Checks einschließlich Codex-
+  Review und Browser sind grün, und die PR hat null Review-Threads.
+- GPT-6-Luna-Worker-Commit `3d794cd87501a8d4c09ee940395a47924d72fc02`
+  wurde auf diesem bestätigten Stand sequenziell als `fe512aa6` integriert.
+  Ein `server.py`-Konflikt mit #760 betraf benachbarte Funktionen; Root
+  behielt die Outcome-Factory, ergänzte die Preparation-Factory und
+  entfernte ausschließlich die beiden alten Preparation-Funktionen.
+- Root-Diff-Review: zunächst **FAIL** für den integrierten Stand
+  `fe512aa6`: Die native Vollsuite hatte 2.506 Tests/12 Skips und
+  genau einen Fehler im P0-Architekturvertrag, weil die neue Factory
+  im Inventargenerator nicht als Composition Root eingetragen war.
+  Root ergänzte diese Zuordnung, entfernte zudem einen nach der
+  Verlagerung ungenutzten Server-Import und generierte das Inventar
+  erneut; 34 fokussierte Tests sowie `--check` sind danach **PASS**.
+  Die korrigierte Read-only-Docker-Vollsuite ist mit 2.506 Tests/
+  11 Skips **PASS**; die native Vollsuite mit 2.506 Tests/12 Skips
+  ebenfalls **PASS**. Ruff für die neuen/geänderten Nicht-Serverdateien,
+  Compileall, Inventar-Check und Diff-Check sind **PASS**; `server.py`
+  behält nur die 23 Ruff-Baseline-Befunde. Der erneut geprüfte
+  integrierte Stand erhält **PASS**. PR-CI steht noch aus.
+- Code-Review des korrigierten Diffs: fachlich **PASS** für die Verlagerung einschließlich
+  Pause/Cancel, Dialogautorisierung, Remote-Write-Abhängigkeit, Sync-Scopes
+  und Planungskonflikt. Das Backend importiert `server.py` nicht und erhält
+  keinen Server-Callback. Der integrierte Stand hat 4.390 physische
+  `server.py`-Zeilen, P7-Rest 30 Definitionen/28 globale Bindungen,
+  P0=0. 34 fokussierte Tests **PASS**. Der Worker prüfte zuvor
+  19 fokussierte und 2.499 native Tests/12 Skips erfolgreich.
+- Testangemessenheit: Die 13 direkten Preparation-Verträge decken die
+  sechs sicherheitsrelevanten Zweige samt positiven und negativen Sync-
+  Varianten ab; Architekturtests verhindern die Rückverlagerung. Die
+  integrierten Tool-/Turn-/Replay-Regressionen und die Docker-Vollsuite
+  sind zusätzlich erforderlich, bevor dieser Stand veröffentlicht wird.
