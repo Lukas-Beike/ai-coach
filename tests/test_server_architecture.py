@@ -2288,19 +2288,21 @@ class ServerArchitectureTests(unittest.TestCase):
             for node in request_handler.body
             if isinstance(node, ast.FunctionDef) and node.name == "do_GET"
         )
-        route_dispatches = [
+        dispatcher = next(
             node
-            for node in ast.walk(get_handler)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == route_name
-            and node.func.attr == "handle"
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "HTTP_ROUTE_DISPATCHER" for target in node.targets)
+        )
+        route_dispatches = [
+            node for node in ast.walk(dispatcher.value)
+            if isinstance(node, ast.Name) and node.id == route_name
         ]
 
         if method_must_be_absent:
             self.assertNotIn(old_method, methods)
         self.assertEqual(len(route_dispatches), 1)
+        self.assertIn("HTTP_ROUTE_DISPATCHER.handle_get", ast.unparse(get_handler))
         if forbidden_paths:
             old_method_node = next(
                 node
@@ -2341,21 +2343,25 @@ class ServerArchitectureTests(unittest.TestCase):
         factory: str,
     ) -> ast.Module:
         server_tree = _parse(SERVER_PATH)
-        handler = next(
-            node
-            for node in ast.walk(server_tree)
-            if isinstance(node, ast.FunctionDef) and node.name == handler_method
-        )
+        handler = next(node for node in ast.walk(server_tree) if isinstance(node, ast.FunctionDef) and node.name == handler_method)
         nodes = list(ast.walk(handler))
-        dispatches = [
-            node
-            for node in nodes
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == route_name
-            and node.func.attr == "handle"
-        ]
+        is_put_dispatch = route_name in {"SETTINGS_PUT_ROUTES", "ATHLETE_PUT_ROUTES"}
+        if is_put_dispatch:
+            dispatcher = next(
+                node for node in server_tree.body
+                if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "HTTP_ROUTE_DISPATCHER" for target in node.targets)
+            )
+            route_nodes = [node for node in ast.walk(dispatcher.value) if isinstance(node, ast.Name) and node.id == route_name]
+            dispatches = [node for node in nodes if isinstance(node, ast.Call) and "HTTP_ROUTE_DISPATCHER.handle_put" in ast.unparse(node)]
+        else:
+            route_nodes = [node for node in nodes if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == route_name and node.func.attr == "handle"]
+            dispatches = route_nodes
+        if is_put_dispatch:
+            self.assertEqual(len(route_nodes), 1)
+            self.assertEqual(len(dispatches), 1)
+        else:
+            self.assertEqual(len(dispatches), 1)
         self.assertEqual(len(dispatches), 1)
         paths = {
             node.value

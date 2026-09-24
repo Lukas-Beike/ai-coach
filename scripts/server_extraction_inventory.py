@@ -283,6 +283,8 @@ def _explicit_owner(name: str) -> str | None:
             "CHAT_CANCEL_POST_ROUTES": HTTP_API_PACKAGE,
             "PRIVACY_RESTORE_POST_ROUTES": HTTP_API_PACKAGE,
             "AUTH_POST_ROUTES": HTTP_API_PACKAGE,
+            "HTTP_ROUTE_DISPATCHER": HTTP_API_PACKAGE,
+            "HttpRouteDispatcher": HTTP_API_PACKAGE,
             "login_user": HTTP_AUTH,
             "logout_user": HTTP_AUTH,
             "bootstrap_provider_states": "http_api/bootstrap.py",

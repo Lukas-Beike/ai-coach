@@ -810,6 +810,9 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     Refresh-/Local-Only-Regel in `PublicWeatherStateService` verlagern.
 - [ ] `RequestHandler`, Route-Dispatch, Body-Limits, statische Dateien und SSE
   transportseitig auslagern; vorhandene `requests.py`/`responses.py` nutzen.
+  - [x] Reihenfolge, 404-Grenze und statischen GET-Fallback sowie die PUT-
+    Routenauswahl in `HttpRouteDispatcher` bündeln; Auth-/CSRF-/Maintenance-
+    Reihenfolge und die äußere Request-Fehlergrenze bleiben beim Handler.
   - [x] Cursor-Validierung, Initialereignisse, Gap-Reset, Heartbeat und
     Verbindungsschleife des authentifizierten `/api/state/events`-Streams
     `StateEventTransport` zuordnen; Event-Puffer bleibt `runtime_events`,
