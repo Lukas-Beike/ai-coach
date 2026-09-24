@@ -6906,4 +6906,38 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   bleiben. Root prüfte den konkreten Korrektur-Diff erneut: **PASS**;
   7 direkte Tests, Ruff, Compileall, Inventar-/Diff-Check und frisches
   Read-only-Docker-Image mit 2.589 Tests/11 Skips **PASS**. Erneute
-  externe CI-/Sonar-/Codex-Prüfung und Thread-Auflösung offen.
+  Externe CI-/Sonar-/Codex-Prüfung und Thread-Auflösung wurden vor
+  dem Merge erneut bestätigt.
+- PR #775 wurde nach Korrektur auf `2bdcfd61` mit grünen Checks und
+  aufgelöstem Review-Thread gemergt (`mergedAt` 2026-09-24T04:17:26Z,
+  Merge-Commit `92670bf62663d3769b0fd2f62285cc50929e2cf0`).
+  Der Merge-Commit ist auf `origin/develop` erreichbar: **PASS**.
+
+## P8 Chat-Gate-Grenze — isolierter Quellstand
+
+- Root verlagerte die bisherige äußere Maintenance- und innere
+  Conversation-Gate-Reihenfolge vom dekorierten `server.chat_with_coach`
+  in `CoachChatTurnService.run()`. `CoachConversationGate.operation()`
+  besitzt weiterhin Queue-Slot und denselben Reset-geteilten Lock;
+  `wrap()` delegiert auf dieselbe Grenze. Damit kann der Background-
+  Worker später den konkreten Turn-Service direkt aufrufen.
+- Zwei neue direkte Tests sichern Wartungs-Frühabbruch vor DB/Queue und
+  Freigabe der äußeren Wartungsoperation bei voller Chat-Queue.
+  Neun direkte Tests, Ruff, Compileall, Inventar-/Diff-Check sowie
+  frisches Read-only-Docker-Image mit 2.591 Tests/11 Skips **PASS**.
+  `server.py`: 3.613 physische Zeilen, P0=0.
+- Der isolierte Quellstand `ec6cfdb7` basiert noch auf dem ersten
+  #775-Head. Die Gate-Änderung wird nach dem bestätigten Merge des
+  korrigierten Heads sequenziell integriert und erneut geprüft.
+- Integrationscommit `afee359b` auf dem bestätigten #775-Merge
+  `92670bf6`: Root prüfte den tatsächlichen Diff und die Aufrufer.
+  Die Lazy-Factories des #775-Review-Fixes bleiben erhalten; die
+  Maintenance-Operation umfasst weiterhin den äußeren Queue-Zugriff,
+  der Conversation-Lock bleibt mit Reset geteilt, und Fehler geben
+  beide Ressourcen frei. Kein Rückimport aus `backend` nach `server.py`,
+  keine veränderte Autorisierung oder Remote-Schreibgrenze: **PASS**.
+  88 fokussierte Tests, Ruff, Inventar-/Diff-Check und vollständiges
+  frisches Read-only-Docker-Image mit 2.591 Tests/11 Skips **PASS**.
+  Verbleibend: Der dünne Server-Aufrufer und die Background-Worker-
+  Orchestrierung müssen in den nächsten P8-Schritten entfernt werden;
+  externe PR-Gates stehen für diesen Stand noch aus.

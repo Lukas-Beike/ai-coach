@@ -8,12 +8,14 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.coach.conversation import CoachConversationProvisionService
+from backend.coach.conversation_gate import CoachConversationGate
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.service import command_receipt
 from backend.coach.structured_turn import CoachStructuredTurnService
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
+from backend.runtime.maintenance import MaintenanceGate
 from backend.settings import SettingsService
 
 COMMAND_STALE_SECONDS = 15 * 60
@@ -31,6 +33,8 @@ class CoachChatTurnService:
         conversations: Callable[[], CoachConversationProvisionService],
         structured_turn: Callable[[], CoachStructuredTurnService],
         utc_now: Callable[[], str],
+        conversation_gate: CoachConversationGate,
+        maintenance_gate: MaintenanceGate,
     ) -> None:
         self._database_manager = database_manager
         self._database_lock = database_lock
@@ -39,6 +43,8 @@ class CoachChatTurnService:
         self._conversations = conversations
         self._structured_turn = structured_turn
         self._utc_now = utc_now
+        self._conversation_gate = conversation_gate
+        self._maintenance_gate = maintenance_gate
 
     @staticmethod
     def _validate(message: str, client_turn_id: str, cancel_event: threading.Event | None) -> tuple[str, str]:
@@ -125,6 +131,24 @@ class CoachChatTurnService:
         background_job: bool = False,
     ) -> dict[str, Any]:
         """Resume or execute a Coach turn under its existing session claim."""
+        with self._maintenance_gate.operation(), self._conversation_gate.operation():
+            return self._run(
+                message, allow_mutations=allow_mutations, on_text_delta=on_text_delta,
+                cancel_event=cancel_event, session_csrf_hash=session_csrf_hash,
+                client_turn_id=client_turn_id, background_job=background_job,
+            )
+
+    def _run(
+        self,
+        message: str,
+        *,
+        allow_mutations: bool,
+        on_text_delta: Callable[[str], None] | None,
+        cancel_event: threading.Event | None,
+        session_csrf_hash: str,
+        client_turn_id: str,
+        background_job: bool,
+    ) -> dict[str, Any]:
         message, client_turn_id = self._validate(message, client_turn_id, cancel_event)
         existing_command, background_receipt, background_owned = self._command_state(
             client_turn_id, session_csrf_hash, background_job,

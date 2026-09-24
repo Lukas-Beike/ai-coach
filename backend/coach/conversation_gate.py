@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from functools import wraps
 from typing import Any, TypeVar
 
@@ -32,27 +33,33 @@ class CoachConversationGate:
     def lock(self) -> threading.RLock:
         return self._lock
 
+    @contextmanager
+    def operation(self) -> Iterator[None]:
+        """Hold the same bounded queue slot and reset-shared conversation lock."""
+        if not self._queue.acquire(blocking=False):
+            raise AppError(
+                429,
+                "Der Coach ist gerade ausgelastet. Bitte später erneut versuchen.",
+                reason="chat_queue_full",
+            )
+        acquired = self._lock.acquire(timeout=self._lock_timeout_seconds)
+        if not acquired:
+            self._queue.release()
+            raise AppError(
+                409,
+                "Die vorherige Coach-Anfrage läuft noch. Bitte erneut versuchen.",
+                reason="chat_request_timeout",
+            )
+        try:
+            yield
+        finally:
+            self._lock.release()
+            self._queue.release()
+
     def wrap(self, function: Callable[..., _ReturnT]) -> Callable[..., _ReturnT]:
         @wraps(function)
         def wrapped(*args: Any, **kwargs: Any) -> _ReturnT:
-            if not self._queue.acquire(blocking=False):
-                raise AppError(
-                    429,
-                    "Der Coach ist gerade ausgelastet. Bitte später erneut versuchen.",
-                    reason="chat_queue_full",
-                )
-            acquired = self._lock.acquire(timeout=self._lock_timeout_seconds)
-            if not acquired:
-                self._queue.release()
-                raise AppError(
-                    409,
-                    "Die vorherige Coach-Anfrage läuft noch. Bitte erneut versuchen.",
-                    reason="chat_request_timeout",
-                )
-            try:
+            with self.operation():
                 return function(*args, **kwargs)
-            finally:
-                self._lock.release()
-                self._queue.release()
 
         return wrapped

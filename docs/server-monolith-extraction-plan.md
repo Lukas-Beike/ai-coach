@@ -646,6 +646,10 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
     persistierte Providerwahl und Background-Resume
     `CoachChatTurnService` zuordnen. Der dekorierte Server-Aufrufer
     bleibt nur bis zur direkten HTTP-/Worker-Migration bestehen.
+  - [x] Maintenance- und Conversation-Gate in derselben äußeren/inneren
+    Reihenfolge dem `CoachChatTurnService` zuordnen; die vorhandene
+    processweite `CoachConversationGate`-Instanz teilt ihren Lock weiter
+    mit Reset. Der vorläufige Server-Aufrufer ist nur Transportadapter.
   - [x] Process-lokales Chat-Stream-Register, SSE-Queues und Background-
     Cancel-Events einem einzigen `ChatStreamRegistry` zuordnen; durable
     Job-Entscheidungen bleiben bis zur Coach-Job-Auslagerung offen.

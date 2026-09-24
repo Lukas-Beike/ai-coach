@@ -2467,11 +2467,10 @@ def coach_chat_turn_service() -> CoachChatTurnService:
     return CoachChatTurnService(
         database_manager, DB_LOCK, coach_command_receipt_service(), SETTINGS,
         coach_conversation_provision_service, coach_structured_turn_service, utc_now,
+        COACH_CONVERSATION_GATE, runtime_maintenance.MAINTENANCE_GATE,
     )
 
 
-@runtime_maintenance.maintenance_operation
-@COACH_CONVERSATION_GATE.wrap
 def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "", client_turn_id: str, background_job: bool = False) -> dict[str, Any]:
     return coach_chat_turn_service().run(
         message, allow_mutations=allow_mutations, on_text_delta=on_text_delta,

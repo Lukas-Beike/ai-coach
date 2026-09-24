@@ -8,7 +8,9 @@ import unittest
 from unittest.mock import MagicMock, Mock
 
 from backend.coach.chat_turn import CoachChatTurnService
+from backend.coach.conversation_gate import CoachConversationGate
 from backend.errors import AppError
+from backend.runtime.maintenance import MaintenanceGate
 
 
 class CoachChatTurnTests(unittest.TestCase):
@@ -32,6 +34,7 @@ class CoachChatTurnTests(unittest.TestCase):
         self.service = CoachChatTurnService(
             lambda: self.manager, MagicMock(), self.receipts, self.settings,
             self.conversations_factory, self.structured_factory, lambda: "synthetic-time",
+            CoachConversationGate(), MaintenanceGate(),
         )
 
     def test_new_turn_validates_and_forwards_exact_session_and_provider(self) -> None:
@@ -150,6 +153,29 @@ class CoachChatTurnTests(unittest.TestCase):
         self.structured.run.assert_not_called()
         self.conversations_factory.assert_not_called()
         self.structured_factory.assert_not_called()
+
+    def test_maintenance_blocks_before_database_or_conversation_slot(self) -> None:
+        with self.service._maintenance_gate.restore(), self.assertRaises(AppError) as caught:
+            self.service.run("synthetic", client_turn_id="turn", session_csrf_hash="owner")
+
+        self.assertEqual(caught.exception.reason, "maintenance")
+        self.manager.unit_of_work.assert_not_called()
+        with self.service._conversation_gate.operation():
+            pass
+
+    def test_full_conversation_queue_releases_outer_maintenance_operation(self) -> None:
+        gate = CoachConversationGate(queue_limit=1)
+        self.service._conversation_gate = gate
+        self.assertTrue(gate._queue.acquire(blocking=False))
+        try:
+            with self.assertRaises(AppError) as caught:
+                self.service.run("synthetic", client_turn_id="turn", session_csrf_hash="owner")
+        finally:
+            gate._queue.release()
+
+        self.assertEqual(caught.exception.reason, "chat_queue_full")
+        self.assertEqual(self.service._maintenance_gate.state()["running_operations"], 0)
+        self.manager.unit_of_work.assert_not_called()
 
 
 if __name__ == "__main__":
