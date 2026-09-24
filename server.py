@@ -130,6 +130,7 @@ from backend.http_api.bootstrap_state import (
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
 from backend.http_api.coach_actions_post import CoachActionsPostRoutes
+from backend.http_api.chat_post import ChatPostRoutes
 from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.diagnostics_post import DiagnosticsCapturePostRoutes
@@ -2834,6 +2835,11 @@ COACH_ACTIONS_POST_ROUTES = CoachActionsPostRoutes(
     coach_proposal_confirmation_service,
     coach_proposal_execution_service,
 )
+CHAT_POST_ROUTES = ChatPostRoutes(
+    coach_job_submission_service,
+    coach_conversation_reset_service,
+    MAX_REQUEST_BYTES,
+)
 DIAGNOSTICS_CAPTURE_POST_ROUTES = DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)
 PRIVACY_DELETE_POST_ROUTES = PrivacyDeletePostRoutes(privacy_delete_service)
 PRIVACY_GET_ROUTES = PrivacyGetRoutes(
@@ -3082,6 +3088,8 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_coach_post(self, path: str, session: dict[str, Any]) -> bool:
         if COACH_ACTIONS_POST_ROUTES.handle(self, path, session):
             return True
+        if CHAT_POST_ROUTES.handle(self, path, session):
+            return True
         if path == "/api/transcribe":
             content_type = self.headers.get("Content-Type", "")
             self.send_json(200, transcribe_audio(self.read_audio_body(), content_type))
@@ -3091,17 +3099,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             ))
         elif path == "/api/chat/stream":
             self.handle_chat_stream(session)
-        elif path == "/api/chat":
-            payload = self.read_json(MAX_REQUEST_BYTES)
-            client_turn_id = str(payload.get("client_turn_id") or "").strip()
-            if not client_turn_id:
-                raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
-            self.send_json(202, coach_job_submission_service().enqueue(
-                str(payload.get("message", "")), client_turn_id, session["csrf_hash"],
-                request_kind=payload.get("request_kind"), attachments=payload.get("attachments"),
-            ))
-        elif path == "/api/chat/reset":
-            self.send_json(200, coach_conversation_reset_service().reset())
         elif path == "/api/feedback":
             self.send_json(200, checkin_service().save(self.read_json()))
         else:

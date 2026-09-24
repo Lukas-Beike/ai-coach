@@ -58,6 +58,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
+    ("backend.http_api.chat_post", ("ChatPostRoutes",)),
     ("backend.http_api.public_get", ("PublicGetRoutes",)),
     ("backend.http_api.planning_get", ("PlanningGetRoutes",)),
     ("backend.http_api.sync_get", ("SyncGetRoutes", "SYNC_JOB_RE")),
@@ -2490,6 +2491,18 @@ class ServerArchitectureTests(unittest.TestCase):
         route_source = (
             BACKEND_ROOT / "http_api" / "coach_actions_post.py"
         ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_chat_post_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_coach_post",
+            "CHAT_POST_ROUTES",
+            ("/api/chat", "/api/chat/reset", "client_turn_id"),
+            "ChatPostRoutes(coach_job_submission_service, coach_conversation_reset_service, MAX_REQUEST_BYTES)",
+        )
+        route_source = (BACKEND_ROOT / "http_api" / "chat_post.py").read_text(
+            encoding="utf-8"
+        )
         self.assertNotIn("server", route_source.casefold())
 
     def test_diagnostics_capture_post_route_is_owned_by_http_api_module(self) -> None:
