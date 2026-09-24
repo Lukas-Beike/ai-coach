@@ -6559,3 +6559,28 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   bestehende 23 Server-Ruff-Befunde unverändert, Diff-Check **PASS**.
   `server.py`: 4.302 physische Zeilen; P7-Rest 25 Definitionen,
   P8-Rest 13, P0=0. PR-CI steht noch aus.
+
+## P8 Remote-Konversations-Recovery — integrierter Diff-Stand
+
+- #765 ist am 24.09.2026 um 01:46:56 UTC mit Merge-Commit
+  `b9852960f7ad4828b48ffefeda7e96962e6d69de` gemergt; auf
+  `origin/develop` erreichbar, null Review-Threads und alle Checks,
+  einschließlich Browser, grün. Die Recovery-Änderung wurde zunächst in einem separaten
+  Worktree auf dem geprüften #765-Quellstand vorbereitet.
+- Root-Code-/Diff-Review: **PASS** für die vollständige Verlagerung der
+  einmaligen `conversation_state_invalid`-Recovery in
+  `CoachConversationRecoveryService`. Der Service besitzt Entscheidung,
+  lokale Dialog-/Attachment-Evidenz, KV-Reset mit DB-Lock, JobStore-
+  Checkpoint und redigiertes Ereignis. Kein Rückimport, Server-Callback
+  oder dauerhafter Wrapper. Der Provider-/Turn-Loop bleibt offen.
+- Vier direkte Tests prüfen durable Checkpoints, nur bedingten KV-Reset,
+  einmalige OpenAI-Grenze vor Textdelta und Retry-Budget sowie unveränderte
+  Attachment-Evidenz. 101 kombinierte direkte/Architektur/Dialog-/Attachment-
+  Tests, Ruff, Compileall, Inventar-Check und Diff-Check **PASS**. Frisches
+  Read-only-Docker-Image: 2.533 Tests/11 Skips **PASS**. Die native
+  Vollsuite mit 2.533 Tests/12 Skips ist ebenfalls **PASS**. Quellcommit
+  `8b6aca37` wurde auf dem bestätigten #765-Merge konfliktfrei als
+  `a4ca1c70` integriert; 101 betroffene Tests sowie Ruff, Compileall,
+  Inventar- und Diff-Check sind auf diesem Stand erneut **PASS**.
+  `server.py` 4.259
+  physische Zeilen; P7-Rest 23 Definitionen, P0=0.
