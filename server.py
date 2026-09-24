@@ -151,6 +151,7 @@ from backend.http_api.state_versions import StateVersionService
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.history_get import HistoryGetRoutes
+from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.privacy_get import PrivacyGetRoutes
 from backend.http_api.settings_put import SettingsPutRoutes
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
@@ -2822,6 +2823,10 @@ SYNC_GET_ROUTES = SyncGetRoutes(
     ALL_SYNC_DAYS,
 )
 HISTORY_GET_ROUTES = HistoryGetRoutes(session_auth_service, change_history_service)
+HISTORY_UNDO_POST_ROUTES = HistoryUndoPostRoutes(
+    history_undo_service,
+    coach_proposal_creation_service,
+)
 PRIVACY_GET_ROUTES = PrivacyGetRoutes(
     session_auth_service, export_stream_transport, privacy_delete_service
 )
@@ -3110,24 +3115,15 @@ class RequestHandler(BaseHTTPRequestHandler):
         return True
 
     def _handle_data_post(self, path: str, session: dict[str, Any]) -> bool:
-        if path == "/api/change-history/undo/preview":
-            preview = history_undo_service().preview(self.read_json().get("change_id"))
-            proposal = coach_proposal_creation_service().create(
-                preview.pop("proposal"), session["csrf_hash"]
-            )
-            self.send_json(
-                200,
-                {**preview, "proposed_action": proposal["proposed_action"]},
-            )
-        elif path == "/api/diagnostics/capture":
+        if HISTORY_UNDO_POST_ROUTES.handle(self, path, session):
+            return True
+        if path == "/api/diagnostics/capture":
             self.send_json(200, DIAGNOSTIC_CAPTURE.set_enabled(self.read_json().get("enabled")))
         elif path == "/api/privacy/delete":
             payload = self.read_json()
             if payload.get("confirm") != "LOKALE DATEN LÖSCHEN":
                 raise AppError(400, "Zum Löschen muss LOKALE DATEN LÖSCHEN bestätigt werden.")
             self.send_json(200, privacy_delete_service().delete())
-        elif path == "/api/change-history/undo":
-            self.send_json(200, history_undo_service().apply(self.read_json()))
         else:
             return False
         return True
