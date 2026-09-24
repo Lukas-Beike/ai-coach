@@ -6787,3 +6787,26 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Athletendaten. `server.py`: 3.941 physische Zeilen, P0=0.
   PR-CI und externe Reviews für diesen Stand stehen noch aus;
   Gesamt-Turn-/Worker-Orchestrierung bleibt P8-offen.
+
+## P8 Strukturierte Tool-Rundenschleife — Quellstand
+
+- #772 wurde am 24.09.2026 um 03:22:33 UTC mit Squash-Commit
+  `0a733724ae8aa1c097607be124cd36ffeefb3bf8` gemergt;
+  der Commit ist auf `origin/develop` erreichbar. Alle Checks
+  einschließlich Browser und Codex **PASS**, null offene Threads.
+- Root verlagerte `StructuredCoachRoundState`, Tool-Call-Ausführung,
+  Replay-/Transaktions-/Receipt-Reihenfolge, Round-Journal und
+  Provider-Follow-up vollständig nach `CoachStructuredToolRoundService`.
+  `server.py` komponiert konkrete Dienste und ruft `.run()` auf;
+  kein Backend-Rückimport oder Server-Callback mit Tool-Fachlogik.
+  `DatabaseManager.unit_of_work()` und derselbe DB-Lock erhalten die
+  bisherige lokale Transaktion; `CoachJobStore` bleibt Receipt-Eigentümer.
+- Fünf neue direkte Tests prüfen Transaktion/Receipt, Replay ohne zweite
+  Ausführung, Rollback vor Fehlerprojektion, Round-Limit/Follow-up und
+  Cancellation vor Tool-Ausführung. 92 Dialog-/Journal-/Response-/
+  Architekturtests, Ruff, Compileall und Diff-Check **PASS**.
+  Erster Read-only-Docker-Lauf: **FAIL** nur wegen der neu zuzuordnenden
+  Composition-Root-Factory im P0-Inventar. Nach expliziter P8-Zuordnung
+  und Neugenerierung: 2.576 Tests/11 Skips, Inventar-Check **PASS**.
+  `server.py`: 3.826 physische Zeilen, P0=0. Externe PR-Gates offen;
+  finaler Turn und Background-Worker bleiben P8-offen.
