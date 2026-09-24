@@ -14,6 +14,9 @@ from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.planning import library as planning_library
+from backend.providers import gemini as gemini_provider
+from backend.providers import http as provider_http
+from backend.providers import openai as openai_provider
 from backend.sync.intervals import IntervalsSyncService
 
 
@@ -81,7 +84,12 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         super().setUp()
         self.observed = set()
         self.issued = {}
-        for owner, name in ((server.provider_http_client(), "request"), (server, "urlopen")):
+        for owner, name in (
+            (server.provider_http_client(), "request"),
+            (provider_http, "urlopen"),
+            (gemini_provider, "urlopen"),
+            (openai_provider, "urlopen"),
+        ):
             guard = patch.object(owner, name, side_effect=AssertionError("Unexpected network access in synthetic Coach test"))
             guard.start()
             self.addCleanup(guard.stop)

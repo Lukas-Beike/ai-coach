@@ -1,9 +1,5 @@
 from __future__ import annotations
-from backend.coach.attachments import (
-    MAX_ATTACHMENT_STORAGE_BYTES,
-    MAX_GEMINI_INLINE_IMAGE_BYTES,
-    MAX_REQUEST_BYTES,
-)
+from backend.coach import attachments as coach_attachments
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.profile_update import CoachProfileUpdateService
 from backend.coach.read_tools import CoachReadToolService
@@ -24,7 +20,6 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-from urllib.request import urlopen
 
 from backend.db import row_factory as database_row_factory
 from backend.diagnostics.history import CoachDiagnosticHistoryService
@@ -110,8 +105,9 @@ from backend.providers import http as provider_http
 from backend.providers import openai as openai_provider
 from backend.providers import state as provider_state
 from backend.providers import weather as weather_provider
+from backend.providers import intervals_client as intervals_client_module
 from backend.providers.garmin import GarminClientFactory
-from backend.providers.garmin_morning import fetch_morning_body_battery
+from backend.providers import garmin_morning
 from backend.http_api import server as http_server
 from backend.http_api.bootstrap_state import (
     PublicBootstrapDependencies,
@@ -317,8 +313,8 @@ from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.coach.final_receipt import CoachFinalReceiptService
 from backend.coach.response_transport import CoachResponseTransport
 from backend.coach.structured_response import CoachStructuredResponseService
+from backend.coach import structured_tool_round
 from backend.coach.structured_tool_round import (
-    COACH_TOOL_MAX_ROUNDS,
     CoachStructuredToolRoundLimits,
     CoachStructuredToolRoundService,
 )
@@ -392,7 +388,6 @@ MAX_BACKUP_BYTES = 100_000_000
 MAX_PRIVACY_EXPORT_BYTES = 100_000_000
 MIN_EXPORT_FREE_BYTES = 10_000_000
 EXPORT_TIME_LIMIT_SECONDS = 120
-MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 # The Responses API counts both visible output and reasoning tokens against
 # max_output_tokens. Keep ordinary replies bounded, but leave enough room for
 # an explicitly requested multi-week training plan.
@@ -408,12 +403,6 @@ RATE_LIMITER = RateLimiter()
 
 
 CONFIG = load_config(ROOT, DATA_DIR)
-
-
-from backend.providers.intervals_client import (
-    IntervalsClient,
-)
-
 
 
 LOGGER = logging.getLogger("intervals_coach")
@@ -1046,7 +1035,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
                 client_factory.available()
                 and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())
             ),
-            lambda checkin_date: fetch_morning_body_battery(
+            lambda checkin_date: garmin_morning.fetch_morning_body_battery(
                 client_factory.create(
                     CONFIG.garmin_email or None, CONFIG.garmin_password or None
                 ),
@@ -1678,7 +1667,7 @@ def provider_http_client() -> provider_http.JsonHttpClient:
     if PROVIDER_HTTP_CLIENT is None or PROVIDER_HTTP_CLIENT.provider_state is not state:
         PROVIDER_HTTP_CLIENT = provider_http.JsonHttpClient(
             APP_VERSION,
-            MAX_EXTERNAL_RESPONSE_BYTES,
+            provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
             LOGGER,
             DIAGNOSTIC_CAPTURE,
             state,
@@ -1686,14 +1675,14 @@ def provider_http_client() -> provider_http.JsonHttpClient:
             partial(observability.safe_response_headers, redact=REDACTOR.redact_text),
             utc_now,
             sync_observation.operation_context,
-            opener=urlopen,
+            opener=provider_http.urlopen,
         )
     return PROVIDER_HTTP_CLIENT
 
 
-def intervals_client(config: Config | None = None) -> IntervalsClient:
+def intervals_client(config: Config | None = None) -> intervals_client_module.IntervalsClient:
     """Compose an Intervals client with the active provider transport and clock."""
-    return IntervalsClient(
+    return intervals_client_module.IntervalsClient(
         config or CONFIG,
         request=lambda *args, **kwargs: provider_http_client().request(*args, **kwargs),
         now=lambda: local_now(),
@@ -1732,12 +1721,12 @@ def gemini_stream_client() -> gemini_provider.GeminiStreamClient:
         api_key=CONFIG.gemini_api_key,
         base_url=GEMINI_API_BASE_URL,
         response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-        max_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+        max_bytes=provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
         app_version=APP_VERSION,
         json_media_type=JSON_MEDIA_TYPE,
         provider_state=provider_state_service(),
         logger=LOGGER,
-        opener=urlopen,
+        opener=gemini_provider.urlopen,
         monotonic=time.perf_counter,
         now=utc_now,
     )
@@ -1792,7 +1781,7 @@ def openai_stream_client() -> openai_provider.OpenAIStreamClient:
             default_base_url=DEFAULT_OPENAI_BASE_URL,
             responses_path=OPENAI_RESPONSES_PATH,
             timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-            max_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+        max_bytes=provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
             app_version=APP_VERSION,
             media_type=JSON_MEDIA_TYPE,
         ),
@@ -1804,7 +1793,7 @@ def openai_stream_client() -> openai_provider.OpenAIStreamClient:
             utc_now,
         ),
         SETTINGS.selected_thinking_level,
-        opener=urlopen,
+        opener=openai_provider.urlopen,
         wait=time.sleep,
     )
 
@@ -1880,8 +1869,8 @@ def coach_job_submission_service() -> CoachJobSubmissionService:
         runtime_events.STATE_EVENT_BUFFER, coach_streams.CHAT_STREAM_REGISTRY,
         COACH_JOB_WORKER.wake_event, utc_now,
         background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
-        max_attachment_storage_bytes=MAX_ATTACHMENT_STORAGE_BYTES,
-        max_gemini_inline_image_bytes=MAX_GEMINI_INLINE_IMAGE_BYTES,
+        max_attachment_storage_bytes=coach_attachments.MAX_ATTACHMENT_STORAGE_BYTES,
+        max_gemini_inline_image_bytes=coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES,
     )
 
 
@@ -1941,7 +1930,7 @@ def morning_checkin_state_service() -> MorningCheckinStateService:
 def gemini_local_chat_history_service() -> GeminiLocalChatHistoryService:
     """Compose the read-only local-message projection for Gemini."""
     return GeminiLocalChatHistoryService(
-        database_manager(), CHAT_REPOSITORY, max_inline_bytes=MAX_GEMINI_INLINE_IMAGE_BYTES
+        database_manager(), CHAT_REPOSITORY, max_inline_bytes=coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES
     )
 
 
@@ -2238,7 +2227,7 @@ def coach_structured_tool_round_service() -> CoachStructuredToolRoundService:
         coach_structured_tool_execution_service(), coach_structured_tool_failure_service(),
         coach_structured_tool_round_journal(), coach_job_store(), coach_training_context_service(),
         coach_structured_response_service(), CoachStructuredToolRoundLimits(
-            max_rounds=COACH_TOOL_MAX_ROUNDS,
+            max_rounds=structured_tool_round.COACH_TOOL_MAX_ROUNDS,
             background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
             default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
             long_plan_max_output_tokens=coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
@@ -2644,7 +2633,7 @@ COACH_ACTIONS_POST_ROUTES = CoachActionsPostRoutes(
 CHAT_POST_ROUTES = ChatPostRoutes(
     coach_job_submission_service,
     coach_conversation_reset_service,
-    MAX_REQUEST_BYTES,
+    coach_attachments.MAX_REQUEST_BYTES,
 )
 CHAT_STREAM_TRANSPORT = CoachChatStreamTransport(
     coach_streams.CHAT_STREAM_REGISTRY,
@@ -2652,7 +2641,7 @@ CHAT_STREAM_TRANSPORT = CoachChatStreamTransport(
     coach_command_receipt_service,
     REDACTOR.redact_text,
     LOGGER,
-    max_request_bytes=MAX_REQUEST_BYTES,
+    max_request_bytes=coach_attachments.MAX_REQUEST_BYTES,
     response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
 )
 TRANSCRIBE_POST_ROUTES = TranscribePostRoutes(SETTINGS, audio_transcription_client)

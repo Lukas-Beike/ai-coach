@@ -17,6 +17,7 @@ from backend.coach import streams as coach_streams
 import test_coach_dialogue as dialogue
 from backend.http_api import server as http_server_module
 from backend.providers import calendar as calendar_provider
+from backend.providers import intervals_client as intervals_client_module
 from backend.providers import weather as weather_provider
 from backend.planning import competitions as planning_competitions
 from backend.planning import context as planning_context
@@ -48,7 +49,7 @@ class AuditRemediationTests(unittest.TestCase):
             return [remote]
         client = Mock()
         client.fetch_competition_events.side_effect = fetch
-        with patch.object(server, "IntervalsClient", return_value=client):
+        with patch.object(intervals_client_module, "IntervalsClient", return_value=client):
             server.competition_sync_service().sync()
         current = server.competition_service().list()[0]
         self.assertEqual(current["name"], "New local name")
@@ -59,7 +60,7 @@ class AuditRemediationTests(unittest.TestCase):
         server.competition_service().delete(item["id"])
         client = Mock()
         client.fetch_competition_events.return_value = [remote]
-        with patch.object(server, "IntervalsClient", return_value=client):
+        with patch.object(intervals_client_module, "IntervalsClient", return_value=client):
             server.competition_sync_service().sync()
             self.assertEqual(server.competition_service().list(), [])
             server.competition_sync_service().sync(push_local=True)
@@ -75,7 +76,7 @@ class AuditRemediationTests(unittest.TestCase):
             with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                 db.execute("INSERT INTO competition_sync_tombstones VALUES ('later', '456', 'later-external', ?)", (server.utc_now(),))
         client.bulk_delete_events.side_effect = delete
-        with patch.object(server, "IntervalsClient", return_value=client):
+        with patch.object(intervals_client_module, "IntervalsClient", return_value=client):
             server.competition_sync_service().sync(push_local=True)
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual([row["id"] for row in db.execute("SELECT id FROM competition_sync_tombstones")], ["later"])

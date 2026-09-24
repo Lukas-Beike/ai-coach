@@ -2708,7 +2708,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "CHAT_POST_ROUTES",
             ("/api/chat", "/api/chat/reset", "client_turn_id"),
-            "ChatPostRoutes(coach_job_submission_service, coach_conversation_reset_service, MAX_REQUEST_BYTES)",
+            "ChatPostRoutes(coach_job_submission_service, coach_conversation_reset_service, coach_attachments.MAX_REQUEST_BYTES)",
         )
         route_source = (BACKEND_ROOT / "http_api" / "chat_post.py").read_text(
             encoding="utf-8"
