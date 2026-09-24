@@ -7826,8 +7826,37 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Kompositionspunkt. Sieben betroffene Provider-/Sync-Fälle und die vollständige
   native Suite (**2.748 PASS, 12 SQLCipher-Skips**) bestehen mit dieser
   Korrektur; aktueller PR-CI-Lauf muss den finalen Head bestätigen.
-- Der lokale Stand wurde als PR #802 geöffnet; Squash-Auto-Merge ist aktiviert.
-  P7/P8-Restaudit, übriger HTTP-Transport und P11 bleiben offen.
-- Nächster Schritt: P7/P8-Review-Log-Befunde abgleichen und den konkreten
-  offenen Morning-Receipt-/Restart-Vertrag vor weiterer HTTP-Auslagerung
-  prüfen.
+- PR #802 wurde am 2026-09-24 als Squash-Commit
+  `790225573b0800e4eac70fb0962b72b03c77932b` gemergt. Python-3.14-CI,
+  Container-Tests, Browser-Smoke/Accessibility, Quality-Baseline, SonarCloud,
+  CodeQL und Codex-Gate bestanden; der einzige Review-Thread ist aufgelöst.
+  Der Merge-Commit ist auf `origin/develop` erreichbar. P7-Restaudit,
+  übriger HTTP-Transport und P11 bleiben offen.
+- Nächster Schritt: den verbleibenden `RequestHandler`-Transport nach
+  `backend/http_api/` auslagern; Composition-Root-Abschluss folgt danach.
+
+## P8 Morning-Receipt-/Restart-Audit — bestätigt
+
+- `CoachBackgroundJobRunner` liest vor Fortsetzung das persistierte Cancel-Flag,
+  delegiert den Turn und schreibt Morning-Completion nur nach abgeschlossener
+  Antwort ohne Rückfrage. Terminale Fehler laufen über
+  `CoachTurnFailureService`; Contention wird durch `CoachJobStore` mit
+  Backoff erneut eingereiht.
+- `CoachJobStore.resume_interrupted()` stellt offene OpenAI-Jobs wieder in die
+  Queue, führt unterbrochene Gemini-Jobs nicht erneut aus und überspringt
+  bereits terminale Commands. Cancellation wird vor dem Worker-Aufruf erneut
+  aus dem Receipt gelesen. Maintenance-Generation verhindert veraltete
+  Failure-Writes nach Restore.
+- `MorningCoachJobCompletionService` erhält absichtlich zwei UOW-Grenzen:
+  der Ready-Marker muss vor der QuickActions-Projektion committed sein. Bei
+  einem QuickActions-Fehler bleibt der Marker committed und das Receipt
+  unverändert; der Fehler wird am Worker als terminal behandelt. Die
+  Vertrags-/Restart-Fälle sind durch die bestehenden direkten Service-,
+  Worker-, JobStore- und Cancellation-Tests abgedeckt.
+- Fokussierte Prüfung: `python -m unittest tests.test_coach_background_job
+  tests.test_coach_morning_completion tests.test_coach_job_store
+  tests.test_coach_cancellation -v` — **20 Tests PASS**. Der Inventory-Check
+  blieb bei P0=0.
+- Status: Die offene P8-Teilaufgabe zum Background-Receipt-/Fehlerabgleich und
+  Restart-/Cancellation-Audit ist abgeschlossen. Die übergeordnete manuelle
+  Morning-Check-in-Auslagerung bleibt offen.
