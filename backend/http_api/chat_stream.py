@@ -49,58 +49,24 @@ class CoachChatStreamTransport:
         operation_id, cancel_event = self._registry.register(session_hash)
         client_connected = True
 
-        def send_event(event: str, data: Any) -> None:
+        def disconnect() -> None:
             nonlocal client_connected
+            client_connected = False
+
+        def send_event(event: str, data: Any) -> None:
             if not client_connected:
                 return
             try:
                 handler.send_sse_event(event, data)
             except ClientDisconnected:
                 # A detached browser must not cancel the durable Coach job.
-                client_connected = False
+                disconnect()
 
         try:
-            handler.connection.settimeout(self._response_timeout_seconds + 30)
-            try:
-                handler.send_sse_headers(persistent=False)
-                send_event("started", {"operation_id": operation_id})
-            except ClientDisconnected:
-                client_connected = False
-            job = self._submission_service().enqueue(
-                message,
-                client_turn_id,
-                session_hash,
-                operation_id=operation_id,
-                cancel_event=cancel_event,
-                request_kind=request_kind,
-                attachments=payload.get("attachments"),
+            self._stream_job(
+                handler, payload, message, client_turn_id, request_kind,
+                session_hash, operation_id, cancel_event, send_event, disconnect,
             )
-            persisted_operation_id = str(job.get("operation_id") or "")
-            if persisted_operation_id and persisted_operation_id != operation_id:
-                # Restart replay belongs to the original durable operation.
-                send_event("background", job)
-                return
-            events = self._registry.events(session_hash, operation_id)
-            if events is None:
-                send_event("background", job)
-            else:
-                while True:
-                    try:
-                        event, data = events.get(timeout=15)
-                    except queue.Empty:
-                        active = self._submission_service().active(session_hash, operation_id)
-                        if active:
-                            send_event("heartbeat", {"operation_id": operation_id})
-                            continue
-                        try:
-                            receipt = self._receipt_service().read(client_turn_id, session_hash)
-                            send_event("completed", receipt)
-                        except AppError as exc:
-                            send_event("error", self._app_error(exc))
-                        break
-                    send_event(event, data)
-                    if event in {"completed", "error", "background"}:
-                        break
         except AppError as exc:
             send_event("error", self._app_error(exc))
         except Exception:
@@ -115,6 +81,71 @@ class CoachChatStreamTransport:
         finally:
             self._registry.unregister(session_hash, operation_id)
             handler.close_connection = True
+
+    def _stream_job(
+        self,
+        handler: Any,
+        payload: dict[str, Any],
+        message: str,
+        client_turn_id: str,
+        request_kind: Any,
+        session_hash: str,
+        operation_id: str,
+        cancel_event: Any,
+        send_event: Callable[[str, Any], None],
+        disconnect: Callable[[], None],
+    ) -> None:
+        handler.connection.settimeout(self._response_timeout_seconds + 30)
+        try:
+            handler.send_sse_headers(persistent=False)
+            send_event("started", {"operation_id": operation_id})
+        except ClientDisconnected:
+            # The job remains durable even if headers cannot reach the client.
+            disconnect()
+        job = self._submission_service().enqueue(
+            message,
+            client_turn_id,
+            session_hash,
+            operation_id=operation_id,
+            cancel_event=cancel_event,
+            request_kind=request_kind,
+            attachments=payload.get("attachments"),
+        )
+        persisted_operation_id = str(job.get("operation_id") or "")
+        if persisted_operation_id and persisted_operation_id != operation_id:
+            send_event("background", job)
+            return
+        events = self._registry.events(session_hash, operation_id)
+        if events is None:
+            send_event("background", job)
+            return
+        self._relay_events(events, client_turn_id, session_hash, operation_id, send_event)
+
+    def _relay_events(
+        self,
+        events: queue.Queue,
+        client_turn_id: str,
+        session_hash: str,
+        operation_id: str,
+        send_event: Callable[[str, Any], None],
+    ) -> None:
+        while True:
+            try:
+                event, data = events.get(timeout=15)
+            except queue.Empty:
+                active = self._submission_service().active(session_hash, operation_id)
+                if active:
+                    send_event("heartbeat", {"operation_id": operation_id})
+                    continue
+                try:
+                    receipt = self._receipt_service().read(client_turn_id, session_hash)
+                    send_event("completed", receipt)
+                except AppError as exc:
+                    send_event("error", self._app_error(exc))
+                break
+            send_event(event, data)
+            if event in {"completed", "error", "background"}:
+                break
 
     def _app_error(self, exc: AppError) -> dict[str, str]:
         return {

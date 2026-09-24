@@ -7727,3 +7727,11 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   `server.py`: 3.303 physische Zeilen; lokal 215/232 Punkte, 17 offen.
 - Offen vor Veröffentlichung: PR-Gates. Fachlich bleiben P7/P8-Restaudit,
   übriger Handler-/Body-Transport und P11 offen.
+- PR #798 meldete auf `ee09ae33` einen SonarCloud-**FAIL**: `handle` hatte
+  Cognitive Complexity 30 statt höchstens 15. Root teilte ausschließlich
+  die bestehende SSE-Orchestrierung in `_stream_job` und `_relay_events` auf;
+  der pro Request gekapselte Disconnect-Zustand, Queue-Eigentümer und
+  langlebige Job-Ausführung blieben unverändert. Der tatsächliche
+  Korrekturdiff wurde erneut geprüft: **PASS**; 34 fokussierte Tests,
+  Ruff und die vollständige isolierte Suite mit **2.724 Tests/11 Skips**
+  bestanden erneut. Die neuen PR-Checks müssen diese Korrektur bestätigen.
