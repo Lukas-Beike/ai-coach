@@ -6509,3 +6509,29 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Nicht-AppError-Texte, beide Reason-Fallbacks, begrenzte Validation-
   Daten, unbekannte Toolnamen sowie Append-vor-Log. Die bestehende
   Dialogsuite prüft zusätzlich Recovery, Receipt und Reparaturfolgen.
+
+## P8 strukturiertes Tool-Round-Journal — integrierter Diff-Stand
+
+- #763 ist am 24.09.2026 um 01:23:56 UTC mit Merge-Commit
+  `3c2bf7a175233febee114911202dd851c2b21c48` gemergt; Commit
+  auf `origin/develop` erreichbar, alle erforderlichen Checks und
+  Codex-Reviews grün, null Review-Threads.
+- GPT-6-Luna-Worker-Commit `d9e4aad4bff6360c12159994a368e00be3a6bec7`
+  wurde auf diesem Stand konfliktfrei als `e3c85acc` integriert.
+  Root prüfte Modul und tatsächlichen Server-Diff erneut: **PASS**
+  für die vollständige Verlagerung der durable Round-Journalübergänge.
+  `CoachJobStore` ist alleiniger persistenter Zustandseigentümer;
+  Tool-Loop, Cancellation und Provider-Follow-up bleiben ausdrücklich
+  bis zum zusammenhängenden P8-Turn-Use-Case offen. Kein Backend-Import
+  oder Callback zu `server.py` und kein Kompatibilitäts-Wrapper.
+- Direkte Journal-Tests prüfen Filterung, fehlende IDs/Namen,
+  zweistufige Pending-/Output-Phase, Unicode-JSON, Clarify/Cancel nur
+  bei Erfolg und Finish/Clear-Reihenfolge. Worker meldete 11 direkte/
+  Architektur-, 81 Dialog/JobStore- und 2.523 native Tests/12 Skips
+  **PASS**. Die integrierte Suite hat 92 fokussierte und 2.523 native
+  Tests/12 Skips **PASS**; frisches Read-only-Docker-Image 2.523 Tests/
+  11 Skips **PASS**. Ruff der betroffenen Nicht-Serverdateien,
+  Compileall, Inventar- und Diff-Check **PASS**; die 23 bestehenden
+  Server-Ruff-Befunde sind unverändert. `server.py` hat 4.324
+  physische Zeilen, P7-Rest 26 Definitionen/28 globale Bindungen,
+  P8-Rest 13 Definitionen/8 Bindungen, P0=0. PR-CI steht noch aus.
