@@ -25,6 +25,7 @@ SERVER_PATH = REPOSITORY_ROOT / "server.py"
 # backend-owned implementations, not server callbacks or compatibility
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("backend.coach.conversation_recovery", ("CoachConversationRecoveryService",)),
     ("backend.coach.response_retry", ("CoachResponseRetryPolicy",)),
     ("backend.coach.tool_round_journal", ("CoachStructuredToolRoundJournal",)),
     ("backend.coach.tool_failures", ("CoachStructuredToolFailureService",)),
@@ -1657,6 +1658,8 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
+    "_recover_structured_coach_conversation",
+    "_recover_invalid_structured_conversation",
     "_response_retry_delay",
     "_wait_for_coach_response_retry",
     "OPENAI_MAX_RETRY_DELAY_SECONDS",

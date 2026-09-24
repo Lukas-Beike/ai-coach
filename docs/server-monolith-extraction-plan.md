@@ -600,6 +600,9 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   - [x] Begrenzte OpenAI-Retry-Entscheidung und abbrechbares Warten
     `CoachResponseRetryPolicy` zuordnen; Provider-Follow-up und Gesamtloop
     bleiben für den Turn-Use-Case offen.
+  - [x] Einmalige Recovery bei ungültigem Remote-Konversationszustand samt
+    lokalem Kontext, Attachment-Evidenz und durablem Checkpoint
+    `CoachConversationRecoveryService` zuordnen; Gesamtloop bleibt offen.
   - [x] Provider-Request-Aufbau einschließlich Dialogkontext,
     Attachment-Sicherheitsanweisung, OpenAI-Kontinuität, Gemini-Medien
     und Modell-/Thinking-Auswahl `CoachRequestPayloadService` zuordnen;

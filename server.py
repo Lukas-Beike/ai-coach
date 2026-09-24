@@ -3,7 +3,6 @@ from backend.coach.attachments import (
     MAX_ATTACHMENT_STORAGE_BYTES,
     MAX_GEMINI_INLINE_IMAGE_BYTES,
     MAX_REQUEST_BYTES,
-    model_input,
 )
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.profile_update import CoachProfileUpdateService
@@ -294,6 +293,7 @@ from backend.coach.tool_execution_service import CoachStructuredToolExecutionSer
 from backend.coach.tool_failures import CoachStructuredToolFailureService
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
 from backend.coach.response_retry import CoachResponseRetryPolicy
+from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
@@ -2523,34 +2523,11 @@ def _send_structured_coach_response(
     )
 
 
-def _recover_structured_coach_conversation(
-    payload: dict[str, Any],
-    request_payload: dict[str, Any],
-    *,
-    context: dict[str, Any],
-    message: str,
-    command_receipts: list[dict[str, Any]],
-    attachments: list[dict[str, Any]],
-    client_turn_id: str,
-) -> None:
-    if payload.get("conversation"):
-        set_kv("openai_conversation_id", "")
-    for candidate in (request_payload, payload):
-        candidate.pop("conversation", None)
-        candidate.pop("previous_response_id", None)
-    payload["input"] = model_input(json.dumps({
-        "dialogue": context,
-        "current_message": message,
-        "confirmed_steps": command_receipts,
-    }, ensure_ascii=False), attachments)
-    payload["instructions"] += "\nThe remote conversation was unavailable. Continue only unfinished work using local dialogue and confirmed_steps. Earlier image pixels may be unavailable; ask for missing evidence only if essential. Never invent attachment details."
-    coach_job_store().merge_receipt(client_turn_id, {
-        "openai_response_id": None,
-        "previous_response_id": None,
-        "pending_tool_outputs": [],
-        "response_input": payload["input"],
-    })
-    LOGGER.warning("Coach conversation recovered from local context", extra={"event": "coach_conversation_recovered"})
+def coach_conversation_recovery_service() -> CoachConversationRecoveryService:
+    """Compose the durable recovery owner from concrete storage services."""
+    return CoachConversationRecoveryService(
+        database_manager(), DB_LOCK, KEY_VALUE_REPOSITORY, coach_job_store(), LOGGER,
+    )
 
 
 def _resume_background_coach_response(
@@ -2567,26 +2544,6 @@ def _resume_background_coach_response(
     return responses_background_request(
         payload, response_id=resume_id, on_response_id=checkpoint, cancel_event=cancel_event,
     )
-
-
-def _recover_invalid_structured_conversation(
-    exc: AppError, payload: dict[str, Any], request_payload: dict[str, Any], *,
-    context: dict[str, Any], message: str, command_receipts: list[dict[str, Any]],
-    attachments: list[dict[str, Any]], client_turn_id: str, ai_provider: str,
-    recovery_state: dict[str, bool], request_delta_emitted: bool, attempt: int,
-) -> bool:
-    can_recover = (
-        ai_provider == "openai" and exc.reason == "conversation_state_invalid"
-        and not recovery_state["conversation_recovered"] and not request_delta_emitted and attempt < 2
-    )
-    if not can_recover:
-        return False
-    recovery_state["conversation_recovered"] = True
-    _recover_structured_coach_conversation(
-        payload, request_payload, context=context, message=message,
-        command_receipts=command_receipts, attachments=attachments, client_turn_id=client_turn_id,
-    )
-    return True
 
 
 def coach_response_retry_policy() -> CoachResponseRetryPolicy:
@@ -2636,7 +2593,7 @@ def _structured_coach_response_attempt(
         )
         if resumed is not None:
             return resumed
-        if _recover_invalid_structured_conversation(
+        if coach_conversation_recovery_service().recover_if_invalid(
             exc, payload, attempt_context.request_payload, context=attempt_context.context,
             message=attempt_context.message, command_receipts=attempt_context.command_receipts,
             attachments=attempt_context.attachments, client_turn_id=attempt_context.client_turn_id,
