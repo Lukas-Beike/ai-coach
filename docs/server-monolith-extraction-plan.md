@@ -782,7 +782,7 @@ Ressourcen. Tests laufen ausschließlich mit temporären Datenbanken/Archiven.
 
 Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Cases beginnen.
 
-- [ ] Auth, Session-Cookies, CSRF, Rate-Limits und Readiness in `http_api/` ziehen.
+- [x] Auth, Session-Cookies, CSRF, Rate-Limits und Readiness in `http_api/` ziehen.
   - [x] Den Login-/API-Rate-Limiter einschließlich Lock, Buckets,
     begrenztem Cleanup und Retry-After einem konkreten
     `http_api/`-Zustandseigentümer zuordnen.
@@ -794,7 +794,7 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     konkreten `SessionAuthService` zuordnen. Der Handler löst den
     aktuellen Eigentümer auch auf Keep-Alive-Verbindungen dynamisch
     auf; Rate-Limit-Zustand bleibt bei `RateLimiter`.
-- [ ] Öffentliche Bootstrap-/State-Projektionen und Pagination zuordnen;
+- [x] Öffentliche Bootstrap-/State-Projektionen und Pagination zuordnen;
   Projektionen erhalten Daten über Domänenlesefunktionen.
   - [x] Begrenzte Performance-/Garmin- und lokale Feedback-/Check-in-
     Projektionen konkreten `http_api/`-Services zuordnen.
@@ -821,7 +821,7 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     der Handler authentifiziert und sendet nur die Antwort.
   - [x] Den separaten `/api/weather`-Read mit unveränderter
     Refresh-/Local-Only-Regel in `PublicWeatherStateService` verlagern.
-- [ ] `RequestHandler`, Route-Dispatch, Body-Limits, statische Dateien und SSE
+- [x] `RequestHandler`, Route-Dispatch, Body-Limits, statische Dateien und SSE
   transportseitig auslagern; vorhandene `requests.py`/`responses.py` nutzen.
   - [x] Reihenfolge, 404-Grenze und statischen GET-Fallback sowie die PUT-
     Routenauswahl in `HttpRouteDispatcher` bündeln; Auth-/CSRF-/Maintenance-
@@ -850,7 +850,7 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
   - [x] JSON-, Datei-, Byte- und SSE-Antworten sowie die Ausgabe sicherer
     statischer Assets `HttpResponseTransport` zuordnen; der Handler delegiert
     Socket-Schreibvorgänge und behält Request-ID und äußere Fehlerbehandlung.
-- [ ] Handler mit den konkret benötigten Services verbinden; keine Weitergabe
+- [x] Handler mit den konkret benötigten Services verbinden; keine Weitergabe
   des `server`-Moduls als Pseudo-Servicecontainer.
   - [x] Die GET-Routen `/api/chat/history`, `/api/chat/receipt` und
     `/api/chat/status` einem zustandslosen `CoachGetRoutes` zuordnen;
@@ -938,7 +938,7 @@ Implementierung von Planänderungen, Provider-Sync oder Coach-Tool-Ausführung.
 
 Abhängigkeit: alle vorigen Phasen.
 
-- [ ] `main()` auf konkrete Konstruktion, Startreihenfolge und Shutdown reduzieren.
+- [x] `main()` auf konkrete Konstruktion, Startreihenfolge und Shutdown reduzieren.
 - [ ] Alle Übergangs-Wrapper, alten Imports und verwaisten Konstanten entfernen.
 - [ ] Alle verbleibenden `server.*`-Testpatches migrieren; nur Tests des
   Einstiegspunkts dürfen noch `server` als Testgegenstand benötigen.
@@ -1030,10 +1030,11 @@ es gibt keine Datenmigration und keine Rücknahme durch Löschen von Nutzerdaten
 
 ## 8. Nächster ausführbarer Schritt
 
-Mit den offenen P10-Service-/Transportgrenzen fortfahren, danach die P11-
-Composition-Root-, Patch-Target-, Importgraph- und Gesamtabnahme abschließen.
-Jeder Schritt bleibt an den aktuellen Inventar- und Aufruferbefunden ausgerichtet,
-bis kein fachlicher Rest in `server.py` bleibt.
+Die P10-Service-/Transportgrenzen sind integriert. P11 mit dem Entfernen
+verbliebener Wrapper, der Migration von Test-Patch-Targets, dem Importgraph-
+Audit und der vollständigen integrierten Abnahme abschließen. Jeder Schritt
+bleibt an den aktuellen Inventar- und Aufruferbefunden ausgerichtet, bis kein
+fachlicher Rest in `server.py` bleibt.
 
 Dieser Plan beschreibt die Umsetzung. Er selbst führt weder Refactoring noch
 Tests, Commits, PR-Erstellung oder Veröffentlichung aus.

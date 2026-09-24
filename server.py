@@ -2935,6 +2935,7 @@ def daily_sync_loop_service() -> DailySyncLoop:
         morning_body_battery_service(),
         sleep=time.sleep,
         logger=LOGGER,
+        stop_event=threading.Event(),
     )
 
 
@@ -2987,21 +2988,37 @@ def main() -> None:
         raise SystemExit(configuration_error)
     LOGGER.info(f"{APP_NAME} starting", extra={"event": "server_start", "context": {"version": APP_VERSION, "port": CONFIG.port}})
     initialise_database()
-    sync_job_queue_service().resume_interrupted()
-    coach_job_store().resume_interrupted(coach_turn_failure_service())
     server = http_server.CoachHTTPServer(("0.0.0.0", CONFIG.port), request_handler_class())
     server.allow_reuse_address = True
-    sync_job_worker().start()
-    COACH_JOB_WORKER.start(coach_job_store, coach_background_job_runner, runtime_maintenance.MAINTENANCE_GATE)
-    startup_sync_scheduler().schedule()
-    threading.Thread(target=daily_sync_loop_service().run, daemon=True).start()
-    LOGGER.info(f"{APP_NAME} listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
+    sync_worker: SyncJobWorker | None = None
+    daily_loop: DailySyncLoop | None = None
+    daily_thread: threading.Thread | None = None
     try:
+        sync_job_queue_service().resume_interrupted()
+        coach_job_store().resume_interrupted(coach_turn_failure_service())
+        sync_worker = sync_job_worker()
+        sync_worker.start()
+        COACH_JOB_WORKER.start(coach_job_store, coach_background_job_runner, runtime_maintenance.MAINTENANCE_GATE)
+        startup_sync_scheduler().schedule()
+        daily_loop = daily_sync_loop_service()
+        daily_thread = threading.Thread(target=daily_loop.run, daemon=True)
+        daily_thread.start()
+        LOGGER.info(f"{APP_NAME} listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
         server.serve_forever()  # NOSONAR - HTTP is intentionally LAN-only behind the documented HTTPS proxy.
     except KeyboardInterrupt:
         pass
     finally:
+        if daily_loop is not None:
+            daily_loop.stop()
+        if sync_worker is not None:
+            sync_worker.stop()
+        COACH_JOB_WORKER.stop()
         server.server_close()
+        if daily_thread is not None:
+            daily_thread.join(timeout=5)
+        if sync_worker is not None:
+            sync_worker.join(timeout=5)
+        COACH_JOB_WORKER.join(timeout=5)
 
 
 if __name__ == "__main__":

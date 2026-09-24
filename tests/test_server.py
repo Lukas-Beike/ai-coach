@@ -458,7 +458,11 @@ class CoachTests(unittest.TestCase):
             server.SyncJobWorker, "start", side_effect=lambda _worker: order.append("sync-worker"), autospec=True
         ), patch.object(
             server.COACH_JOB_WORKER, "start", side_effect=lambda *_: order.append("coach-worker")
-        ), patch.object(server, "startup_sync_scheduler") as startup_scheduler, patch.object(
+        ), patch.object(server.COACH_JOB_WORKER, "stop") as coach_stop, patch.object(
+            server.COACH_JOB_WORKER, "join"
+        ) as coach_join, patch.object(server.SyncJobWorker, "stop") as sync_stop, patch.object(
+            server.SyncJobWorker, "join"
+        ) as sync_join, patch.object(server, "startup_sync_scheduler") as startup_scheduler, patch.object(
             server, "daily_sync_loop_service"
         ) as daily_loop_factory, patch.object(server.threading, "Thread") as thread_factory:
             startup_scheduler.return_value.schedule.side_effect = lambda: order.append("startup-sync")
@@ -476,6 +480,13 @@ class CoachTests(unittest.TestCase):
             order,
             ["schema", "sync-recovery", "coach-recovery", "sync-worker", "coach-worker", "startup-sync"],
         )
+        daily_loop.stop.assert_called_once_with()
+        http_server.server_close.assert_called_once_with()
+        thread_factory.return_value.join.assert_called_once_with(timeout=5)
+        sync_stop.assert_called_once_with()
+        sync_join.assert_called_once_with(timeout=5)
+        coach_stop.assert_called_once_with()
+        coach_join.assert_called_once_with(timeout=5)
 
     def test_coach_http_server_retains_threading_contract(self):
         from http.server import ThreadingHTTPServer

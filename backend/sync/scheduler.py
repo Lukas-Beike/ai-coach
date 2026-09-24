@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -151,15 +152,25 @@ class DailySyncLoop:
         *,
         sleep: Callable[[float], None],
         logger: logging.Logger,
+        stop_event: threading.Event | None = None,
     ) -> None:
         self._daily_scheduler = daily_scheduler
         self._morning_battery = morning_battery
         self._sleep = sleep
         self._logger = logger
+        self._stop_event = stop_event
+
+    def stop(self) -> None:
+        if self._stop_event is not None:
+            self._stop_event.set()
 
     def run(self) -> None:
         while True:
-            self._sleep(300)
+            if self._stop_event is not None:
+                if self._stop_event.wait(300):
+                    return
+            else:
+                self._sleep(300)
             try:
                 self._daily_scheduler.schedule()
                 self._morning_battery.refresh()
