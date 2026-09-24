@@ -58,6 +58,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
+    ("backend.coach.conversation", ("CoachConversationHistoryService",)),
     ("backend.http_api.post_dispatch", ("HttpAuthenticatedPostRoutes", "HttpPostDispatcher")),
     ("backend.http_api.response_transport", ("HttpResponseTransport",)),
     ("backend.http_api.sync_commands_post", ("SyncCommandPostRoute",)),
@@ -2191,6 +2192,29 @@ def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
 
 
 class ServerArchitectureTests(unittest.TestCase):
+    def test_chat_history_http_projection_uses_coach_history_owner(self) -> None:
+        source = (BACKEND_ROOT / "http_api" / "chat_page.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        service = next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "ChatHistoryPageService"
+        )
+        self.assertFalse(
+            any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "execute"
+                for node in ast.walk(service)
+            )
+        )
+        self.assertTrue(
+            any(
+                isinstance(node, ast.Call)
+                and ast.unparse(node.func) == "self._conversation_history.page"
+                for node in ast.walk(service)
+            )
+        )
+
     def test_request_handler_response_methods_only_delegate_socket_writes(self) -> None:
         server_tree = _parse(SERVER_PATH)
         handler = next(

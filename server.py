@@ -283,6 +283,7 @@ from backend.coach.request_payload import CoachRequestPayloadService
 from backend.coach.sync_tools import CoachSyncToolService
 from backend.coach.conversation import (
     CoachAttachmentContextService,
+    CoachConversationHistoryService,
     CoachConversationProvisionService,
     CoachConversationResetService,
     CoachMessageService,
@@ -1861,6 +1862,13 @@ def coach_message_service() -> CoachMessageService:
     return CoachMessageService(database_manager(), CHAT_REPOSITORY, runtime_events.STATE_EVENT_BUFFER)
 
 
+def coach_conversation_history_service() -> CoachConversationHistoryService:
+    """Compose local conversation history reads from shared persistence state."""
+    return CoachConversationHistoryService(
+        database_manager(), CHAT_REPOSITORY, KEY_VALUE_REPOSITORY, DB_LOCK
+    )
+
+
 def coach_job_store() -> CoachJobStore:
     """Compose durable Coach background-job persistence."""
     return CoachJobStore(
@@ -1998,10 +2006,8 @@ def library_page_service() -> LibraryPageService:
 def chat_history_page_service() -> ChatHistoryPageService:
     """Compose bounded local chat history and session-bound proposal reads."""
     return ChatHistoryPageService(
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
+        coach_conversation_history_service(),
         coach_proposal_read_service(),
-        DB_LOCK,
         maximum=CHAT_PAGE_MAX,
     )
 

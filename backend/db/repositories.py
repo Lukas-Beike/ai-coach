@@ -305,6 +305,41 @@ class ChatRepository:
         ).fetchall()
         return [{key: value for key, value in row.items() if (key != "client_turn_id" or value is not None) and (key != "attachment_names" or value != "[]")} for row in reversed(rows)]
 
+    def list_page(
+        self,
+        db: Any,
+        *,
+        before_message_id: int | None,
+        search: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = []
+        clauses: list[str] = []
+        if search:
+            clauses.append("content LIKE ? ESCAPE '\\'")
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            params.append(f"%{escaped}%")
+        if before_message_id is not None:
+            clauses.append("id < ?")
+            params.append(before_message_id)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = db.execute(
+            "SELECT id, role, content, client_turn_id, created_at, "
+            "(SELECT json_group_array(json_extract(value, '$.name')) "
+            "FROM json_each(messages.attachments)) AS attachment_names "
+            f"FROM messages{where} ORDER BY id DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+        return [
+            {
+                key: value
+                for key, value in row.items()
+                if (key != "client_turn_id" or value is not None)
+                and (key != "attachment_names" or value != "[]")
+            }
+            for row in rows
+        ]
+
 
 class CheckinRepository:
     """Persist and retrieve athlete check-ins without owning a connection."""

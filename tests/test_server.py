@@ -2401,10 +2401,8 @@ class CoachTests(unittest.TestCase):
         server.set_kv("chat_generation", "synthetic-generation")
         manager = server.database_manager()
         page_service = ChatHistoryPageService(
-            manager,
-            server.KEY_VALUE_REPOSITORY,
+            server.coach_conversation_history_service(),
             Mock(current=Mock(return_value=[])),
-            server.DB_LOCK,
             maximum=server.CHAT_PAGE_MAX,
         )
         statements = []
