@@ -618,6 +618,10 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   - [x] Provider-Routing, OpenAI-/Gemini-Request-/Background-/Stream-
     Transport und beidseitige Gemini-Cancellation-Prüfung
     `CoachResponseTransport` zuordnen; Gesamtloop bleibt offen.
+  - [x] Einen strukturierten Provider-Response-Versuch einschließlich
+    Background-Checkpoint, Resume, einmaliger Recovery, begrenztem
+    Retry und Delta-/Cancel-Grenze `CoachStructuredResponseService`
+    zuordnen; Tool-Rundenschleife und finaler Turn bleiben offen.
   - [x] Provider-Request-Aufbau einschließlich Dialogkontext,
     Attachment-Sicherheitsanweisung, OpenAI-Kontinuität, Gemini-Medien
     und Modell-/Thinking-Auswahl `CoachRequestPayloadService` zuordnen;

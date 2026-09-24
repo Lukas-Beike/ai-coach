@@ -6728,3 +6728,31 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   konkreten Diff erneut: **PASS**. Ruff, Compileall, Diff-Check und
   lokaler `mobile-small`-Rückfragefall (1/1) **PASS**. Finale PR-CI
   auf dem erneut aktualisierten Stand bleibt abzuwarten.
+
+## P8 Strukturierter Provider-Response-Use-Case — integrierter Diff-Stand
+
+- #770 wurde am 24.09.2026 um 03:03:13 UTC mit Merge-Commit
+  `a84b693a337407f1f384dd713954b9ac68c6e4e0` gemergt;
+  der Commit ist auf `origin/develop` erreichbar. Alle Checks
+  einschließlich vollständiger Browser-Matrix und SonarCloud **PASS**;
+  finaler Codex-Code-Review für `4309574` ohne neue Befunde und
+  der ursprüngliche P1-Thread gelöst (0 offen).
+- Root-Quellcommit `cbfd49ec` verlagerte den gesamten einzelnen
+  strukturierten Response-Versuch mit Background-Checkpoint,
+  OpenAI-Resume, einmaliger Recovery, begrenztem Retry sowie Delta-
+  und Cancel-Grenze nach `CoachStructuredResponseService`. Die
+  Provider- und Durable-Dienste sind konkret injiziert; kein
+  Rückimport, Server-Callback mit Fachlogik oder Kompatibilitäts-
+  Wrapper. Die übergreifende Tool-Rundenschleife bleibt P8-offen.
+- Acht direkte Tests prüfen normalen Request, Checkpoint, Resume,
+  Retry, Stream-Delta, Recovery und Cancel vor bzw. während Warten.
+  Quellstand: 101 betroffene, 14 direkte/Architektur-, native
+  Vollsuite 2.565 Tests/12 Skips sowie frisches Read-only-Docker-
+  Image 2.565 Tests/11 Skips **PASS**. Root-Code-/Diff-Review:
+  **PASS**.
+- Der Quellcommit wurde konfliktfrei als `d1363233` auf dem #770-
+  Merge integriert. 33 fokussierte Tests, Ruff der neuen und
+  Architekturdateien, Compileall, Inventar- und Diff-Check **PASS**;
+  frisches Read-only-Docker-Image: 2.566 Tests/11 Skips **PASS**.
+  Root-Review des integrierten Stands: **PASS**. `server.py`:
+  3.959 physische Zeilen, P0=0. Veröffentlichung/PR-CI offen.
