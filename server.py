@@ -292,6 +292,7 @@ from backend.coach.turn_outcome import CoachStructuredOutcomeService
 from backend.coach.tool_call_metadata import structured_tool_call_metadata
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
+from backend.coach.tool_failures import CoachStructuredToolFailureService
 from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
@@ -2422,6 +2423,15 @@ def coach_structured_tool_execution_service() -> CoachStructuredToolExecutionSer
     )
 
 
+def coach_structured_tool_failure_service() -> CoachStructuredToolFailureService:
+    """Compose structured tool failure projection from safe diagnostics."""
+    return CoachStructuredToolFailureService(
+        ROOT,
+        LOGGER,
+        frozenset(tool["name"] for tool in COACH_DIALOGUE_TOOLS),
+    )
+
+
 def coach_planning_command_service() -> CoachPlanningCommandService:
     """Compose the durable, session-bound local planning command owner."""
     return CoachPlanningCommandService(
@@ -2725,35 +2735,6 @@ def _structured_coach_response(
     raise AppError(502, "Der KI-Dienst konnte die Antwort nicht fertigstellen.", reason="response_failed")
 
 
-def _structured_tool_call_failure(
-    exc: BaseException, *, name: str, call_id: str, effect_key: str, step_key: str,
-    repair_key: str | None, scope_repair_key: str | None, request_binding_key: str | None,
-    plan_effect_key: str | None, action: dict[str, Any], command_receipts: list[dict[str, Any]],
-) -> dict[str, Any]:
-    result = {
-        "ok": False,
-        "reason": getattr(exc, "reason", "tool_arguments_invalid"),
-        "error": str(exc) if isinstance(exc, AppError) else "Die Werkzeugargumente sind ungültig. Prüfe das Schema und den aktuellen Zustand und korrigiere den Aufruf.",
-    }
-    validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
-    if validation_reason and re.fullmatch(r"request_[a-z_]{1,72}", validation_reason):
-        result["validation_reason"] = validation_reason
-    if not result["reason"]:
-        result["reason"] = "tool_arguments_invalid" if isinstance(exc, AppError) and exc.status == 400 else "tool_failed"
-    technical_error = coach_error_metadata(exc, ROOT)
-    command_receipts.append({
-        "call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key,
-        "repair_key": repair_key, "scope_repair_key": scope_repair_key,
-        "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key,
-        "request": action.get("request"), "result": result, "diagnostic_error": technical_error,
-    })
-    LOGGER.warning("Coach step failed", extra={
-        "event": "coach_tool_failed",
-        "context": {"tool": name if name in {tool["name"] for tool in COACH_DIALOGUE_TOOLS} else "unknown", **technical_error},
-    })
-    return result
-
-
 @dataclass
 class _StructuredCoachRoundState:
     tools: list[dict[str, Any]]
@@ -2823,7 +2804,7 @@ def _execute_structured_coach_tool_call(
             state.request_payload["max_output_tokens"] = COACH_LONG_PLAN_MAX_OUTPUT_TOKENS if scope["planning"] else COACH_DEFAULT_MAX_OUTPUT_TOKENS
             coach_job_store().merge_receipt(state.client_turn_id, {"plan_scope": scope})
     except (AppError, ValueError, TypeError, KeyError) as exc:
-        result = _structured_tool_call_failure(
+        result = coach_structured_tool_failure_service().project(
             exc, name=name, call_id=call_id, effect_key=effect_key, step_key=step_key,
             repair_key=repair_key, scope_repair_key=scope_repair_key,
             request_binding_key=request_binding_key, plan_effect_key=plan_effect_key,
