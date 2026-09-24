@@ -56,8 +56,6 @@ from backend.errors import (
 from backend import config as app_config
 from backend import change_history
 from backend import observability
-from backend.activities import duplicates as activity_duplicates
-from backend.activities.duplicates import latest_wahoo_garmin_duplicate
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.calendar import external as calendar_external
 from backend.calendar import local as calendar_local
@@ -293,6 +291,7 @@ from backend.coach.clarification import CoachClarificationService
 from backend.coach.turn_outcome import CoachStructuredOutcomeService
 from backend.coach.tool_call_metadata import structured_tool_call_metadata
 from backend.coach.training_patch import CoachTrainingPatchService
+from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
 from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
@@ -2409,6 +2408,20 @@ def coach_tool_dispatch_service() -> CoachToolDispatchService:
     )
 
 
+def coach_structured_tool_execution_service() -> CoachStructuredToolExecutionService:
+    """Compose the concrete owners used for structured Coach tool execution."""
+    return CoachStructuredToolExecutionService(
+        database_manager(),
+        DB_LOCK,
+        KEY_VALUE_REPOSITORY,
+        coach_clarification_service(),
+        coach_training_patch_service(),
+        sync_state_repository(),
+        coach_proposal_creation_service(),
+        coach_tool_dispatch_service(),
+    )
+
+
 def coach_planning_command_service() -> CoachPlanningCommandService:
     """Compose the durable, session-bound local planning command owner."""
     return CoachPlanningCommandService(
@@ -2712,53 +2725,6 @@ def _structured_coach_response(
     raise AppError(502, "Der KI-Dienst konnte die Antwort nicht fertigstellen.", reason="response_failed")
 
 
-def _execute_structured_coach_tool(
-    metadata: dict[str, Any],
-    *,
-    action: dict[str, Any],
-    context: dict[str, Any],
-    conversation_id: str,
-    client_turn_id: str,
-    session_csrf_hash: str,
-    sync_job_ids: list[str],
-    cancel_event: threading.Event | None,
-) -> dict[str, Any]:
-    name = metadata["name"]
-    arguments = metadata["arguments"]
-    local_transaction = name not in {"start_provider_refresh", "apply_adaptive_replan"}
-    with (DB_LOCK if local_transaction else nullcontext()), (database() if local_transaction else nullcontext()):
-        if name == "clarify_coach_request":
-            return coach_clarification_service().save_question(arguments, context)
-        if name == "cancel_coach_request":
-            set_kv("coach_pending_request", "null")
-            return {"ok": True, "status": "cancelled"}
-        if name == "apply_training_patch":
-            return coach_training_patch_service().apply(arguments, action)
-        if name == "inspect_activity_duplicates":
-            duplicate = latest_wahoo_garmin_duplicate(
-                sync_state_repository().latest_snapshot() or {}
-            )
-            result = {"ok": True, "duplicate": duplicate}
-            if duplicate and session_csrf_hash:
-                result.update(
-                    coach_proposal_creation_service().create(
-                        activity_duplicates.duplicate_delete_action(duplicate),
-                        session_csrf_hash,
-                    )
-                )
-            return result
-        return coach_tool_dispatch_service().execute(
-            name,
-            arguments,
-            intent=action,
-            conversation_id=conversation_id,
-            client_turn_id=client_turn_id,
-            session_csrf_hash=session_csrf_hash,
-            sync_job_ids=sync_job_ids,
-            cancel_event=cancel_event,
-        )
-
-
 def _structured_tool_call_failure(
     exc: BaseException, *, name: str, call_id: str, effect_key: str, step_key: str,
     repair_key: str | None, scope_repair_key: str | None, request_binding_key: str | None,
@@ -2838,7 +2804,7 @@ def _execute_structured_coach_tool_call(
             )
             local_transaction = name not in {"start_provider_refresh", "apply_adaptive_replan"}
             with (DB_LOCK if local_transaction else nullcontext()), (database() if local_transaction else nullcontext()):
-                result = _execute_structured_coach_tool(
+                result = coach_structured_tool_execution_service().execute(
                     metadata, action=action, context=state.context, conversation_id=state.conversation_id,
                     client_turn_id=state.client_turn_id, session_csrf_hash=state.session_csrf_hash,
                     sync_job_ids=state.sync_job_ids, cancel_event=state.cancel_event,

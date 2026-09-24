@@ -6422,7 +6422,7 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   ebenfalls **PASS**. Ruff für die neuen/geänderten Nicht-Serverdateien,
   Compileall, Inventar-Check und Diff-Check sind **PASS**; `server.py`
   behält nur die 23 Ruff-Baseline-Befunde. Der erneut geprüfte
-  integrierte Stand erhält **PASS**. PR-CI steht noch aus.
+  integrierte Stand erhält **PASS**. PR-CI war anschließend grün.
 - Code-Review des korrigierten Diffs: fachlich **PASS** für die Verlagerung einschließlich
   Pause/Cancel, Dialogautorisierung, Remote-Write-Abhängigkeit, Sync-Scopes
   und Planungskonflikt. Das Backend importiert `server.py` nicht und erhält
@@ -6435,3 +6435,48 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Varianten ab; Architekturtests verhindern die Rückverlagerung. Die
   integrierten Tool-/Turn-/Replay-Regressionen und die Docker-Vollsuite
   sind zusätzlich erforderlich, bevor dieser Stand veröffentlicht wird.
+
+## P7 nächster Integrationsstand — Werkzeugausführung
+
+- #761 ist am 24.09.2026 um 00:55:18 UTC mit Merge-Commit
+  `c591d38718577c9034d44ce31494a9d8a528f22d` gemergt. Der Commit
+  ist auf `origin/develop` erreichbar; alle Checks einschließlich
+  Browser und Codex sind grün, die PR hat null Review-Threads.
+- Nächster Schritt: Den eng begrenzten GPT-6-Luna-Worker-Patch für
+  `CoachStructuredToolExecutionService` aus dem separaten Worktree
+  sequenziell auf `c591d387` integrieren; dabei innere und äußere
+  Transaktionsgrenze, Rollback, Session-gebundene Duplikatvorschläge
+  und migrierten Backend-Test-Patch selbst am Diff prüfen. Danach
+  fokussierte, native und Read-only-Docker-Regressionen sowie das
+  Inventar ausführen. Bis dahin ist dieser Teil ausdrücklich **offen**.
+
+## P7 strukturierte Spezialwerkzeug-Ausführung — integrierter Diff-Stand
+
+- GPT-6-Luna-Worker-Commit `bec16e299f983bd8e524f984382b9d4ef4cd528a`
+  wurde auf bestätigtem #761-Merge `c591d387` konfliktfrei als
+  `d27ddf93` integriert. Der Worker änderte ausschließlich das neue
+  `CoachStructuredToolExecutionService`-Modul, `server.py`, direkte
+  Tests, Architekturtest und den migrierten Tool-Coverage-Patch.
+- Root-Diff-Review des integrierten Codes: **PASS**. Die
+  innere bedingte DB-UOW/Lock-Grenze liegt im konkreten Service,
+  während der äußere Turn-UOW weiterhin Ausführung, Receipt-Anhang
+  und JobStore-Merge atomar hält. Cancel schreibt `null` über den
+  gemeinsamen KV-Eigentümer; Duplikatvorschläge benötigen weiterhin
+  die Session-CSRF-Bindung. Kein Backend-Rückimport, Server-Callback
+  oder permanenter Kompatibilitäts-Wrapper. Der Testpatch für den
+  Trainings-Patch zielt nun auf `CoachTrainingPatchService.apply`.
+- 39 kombinierte direkte/Tool-Coverage/Architekturtests **PASS**;
+  der Worker meldete 12 direkte/Architektur-, 27 Tool-Coverage- und
+  2.512 native Tests/12 Skips **PASS**. Root ergänzte die neue Factory
+  im Inventargenerator und erzeugte das Inventar neu: `server.py`
+  4.356 physische Zeilen, P7-Rest 29 Definitionen/28 globale
+  Bindungen, P0=0. Ruff der betroffenen Nicht-Serverdateien **PASS**;
+  die 23 bestehenden Server-Ruff-Befunde sind unverändert. Die native
+  Vollsuite mit 2.512 Tests/12 Skips und das frische Read-only-Docker-
+  Image mit 2.512 Tests/11 Skips sind **PASS**; Compileall,
+  Inventar-Check und Diff-Check sind **PASS**. PR-CI steht noch aus.
+- Testangemessenheit: Die direkten Tests verwenden temporäre SQLite-
+  Daten und gemockte Fach-Services. Sie prüfen nicht nur Rückgaben,
+  sondern Lock-Reihenfolge, innere UOW, Rollback, CSRF-Grenze und beide
+  transaktionsfreien Remote-Zweige; die bestehende Dialogfolge prüft
+  zusätzlich Replay ohne zweite Patch-Mutation.

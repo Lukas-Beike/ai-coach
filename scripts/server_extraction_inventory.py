@@ -765,6 +765,7 @@ def _explicit_owner(name: str) -> str | None:
             "coach_structured_tool_replay_service": COMPOSITION_ROOT,
             "coach_structured_outcome_service": COMPOSITION_ROOT,
             "coach_structured_tool_preparation_service": COMPOSITION_ROOT,
+            "coach_structured_tool_execution_service": COMPOSITION_ROOT,
             "coach_command_receipt_service": COMPOSITION_ROOT,
             "coach_request_payload_service": COMPOSITION_ROOT,
             "recent_log_entries_service": COMPOSITION_ROOT,
