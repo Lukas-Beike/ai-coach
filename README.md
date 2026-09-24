@@ -225,7 +225,10 @@ instructions do not delete or convert its data.
   and store the athlete's answer as activity feedback.
 - The coach can explicitly read completed activities, the local workout library,
   planned units, competitions, training plans, and local change-history
-  references. It can schedule selected saved library templates locally after
+  references, and athlete-entered meals with estimated calories and
+  macronutrients. Nutrition entries remain local until the athlete explicitly
+  calls the authenticated `/api/nutrition/sync` action, which sends daily totals
+  to Intervals.icu wellness. It can schedule selected saved library templates locally after
   conflict checks, and remove activity feedback on request. Explicit provider
   refreshes for Intervals.icu, current performance, Garmin, weather, and the
   external calendar run as trackable background jobs; local plans and

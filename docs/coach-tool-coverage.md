@@ -1,6 +1,6 @@
 # Coach tool execution coverage
 
-This matrix covers the 34 tools currently offered to the conversational Coach.
+This matrix covers the 37 tools currently offered to the conversational Coach.
 It builds on the profile/sync fix in `ebbe311`. It measures execution through
 `chat_with_coach`, not the accuracy of a language model's interpretation.
 
@@ -39,6 +39,7 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `list_recent_activities` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_training_plans` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_workout_library` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
+| `read_nutrition` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
 | `manage_training_templates` | `archive`, `create`, `delete`, `restore`, `update` | `test_template_lifecycle_and_scheduling_preserve_the_scheduled_copy` |
 | `preview_adaptive_replan` | `success` | `test_adaptive_preview_requires_later_acceptance_before_changing_workout` |
 | `read_profile` | `success` | `test_permanent_profile_acceptance_reads_and_preserves_existing_facts` |
@@ -49,9 +50,11 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `save_activity_feedback` | `success` | `test_daily_feedback_and_activity_feedback_are_separate_from_profile` |
 | `save_checkin` | `success` | `test_daily_feedback_and_activity_feedback_are_separate_from_profile` |
 | `save_competition` | `create`, `update` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |
+| `save_nutrition_entry` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
 | `stage_training_plan` | `success` | `test_requested_draft_commit_and_metadata_lifecycle` |
 | `start_intervals_plan_sync` | `all_pending`, `created`, `selected` | `test_new_plan_sync_and_later_selected_sync_use_real_ids` |
 | `start_provider_refresh` | `calendar`, `garmin`, `intervals`, `weather` | `test_provider_reads_and_job_status_use_correct_provider` |
+| `delete_nutrition_entry` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
 | `sync_competitions` | `success` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |
 | `undo_training_change` | `success` | `test_undo_is_a_bound_preview_until_explicit_confirmation` |
 | `update_profile` | `success` | `test_permanent_profile_acceptance_reads_and_preserves_existing_facts` |

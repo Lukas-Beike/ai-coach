@@ -12,25 +12,30 @@ from backend.coach.authorization import (
     structured_action_payload,
 )
 from backend.errors import AppError
+from backend.nutrition.service import NutritionService
 from backend.planning.competition_service import CompetitionService
 
 
 class CoachAthleteRecordToolService:
-    """Own local Coach mutations for check-ins, feedback, and competitions."""
+    """Own local Coach mutations for check-ins, feedback, competitions, and nutrition."""
 
     def __init__(
         self,
         checkins: CheckinService,
         activity_feedback: ActivityFeedbackService,
         competitions: CompetitionService,
+        nutrition: NutritionService | None = None,
     ) -> None:
         self._checkins = checkins
         self._activity_feedback = activity_feedback
         self._competitions = competitions
+        self._nutrition = nutrition
 
     def execute(
         self, name: str, arguments: dict[str, Any], intent: dict[str, Any]
     ) -> dict[str, Any] | None:
+        if name in {"save_nutrition_entry", "delete_nutrition_entry"}:
+            return self._execute_nutrition(name, arguments, intent)
         if name == "save_checkin":
             self._authorize(
                 intent,
@@ -99,6 +104,25 @@ class CoachAthleteRecordToolService:
             require_coach_scope(intent, f"competition:{competition_id}")
             return {"ok": True, **self._competitions.delete(competition_id)}
         return None
+
+    def _execute_nutrition(
+        self, name: str, arguments: dict[str, Any], intent: dict[str, Any]
+    ) -> dict[str, Any]:
+        operation = name
+        message = (
+            "Die strukturierte Coach-Autorisierung erlaubt diesen Ernährungseintrag nicht."
+            if name == "save_nutrition_entry"
+            else "Die strukturierte Coach-Autorisierung erlaubt das Löschen dieses Eintrags nicht."
+        )
+        self._authorize(intent, operation, message)
+        require_coach_scope(intent, "local_nutrition")
+        if not self._nutrition:
+            raise AppError(500, "NutritionService ist nicht verfügbar.")
+        if name == "save_nutrition_entry":
+            payload = structured_action_payload(arguments)
+            return {"ok": True, "entry": self._nutrition.log_meal(payload)}
+        entry_id = str(arguments.get("id") or arguments.get("entry_id") or "").strip()
+        return {"ok": True, **self._nutrition.delete_meal(entry_id)}
 
     @staticmethod
     def _authorize(intent: dict[str, Any], operation: str, message: str) -> None:

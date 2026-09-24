@@ -27,6 +27,10 @@ class CoachReadToolServiceTests(unittest.TestCase):
         self.competitions.list.return_value = [{"id": "race-1"}]
         self.training_plans = Mock()
         self.training_plans.list.return_value = [{"id": "plan-1"}]
+        self.nutrition = Mock()
+        self.nutrition.get_day_summary.return_value = {"date": "2026-03-30", "total_kcal": 2100}
+        self.nutrition.get_range_summary.return_value = [{"date": "2026-03-30", "total_kcal": 2100}]
+        self.nutrition_factory = Mock(return_value=self.nutrition)
         self.factories = [
             Mock(return_value=service)
             for service in (
@@ -40,7 +44,11 @@ class CoachReadToolServiceTests(unittest.TestCase):
                 self.training_plans,
             )
         ]
-        self.service = CoachReadToolService(*self.factories, training_change_limit=366)
+        self.service = CoachReadToolService(
+            *self.factories,
+            training_change_limit=366,
+            nutrition_service=self.nutrition_factory,
+        )
 
     def test_dispatches_every_read_tool_and_projects_existing_shapes(self):
         self.assertEqual(
@@ -89,6 +97,15 @@ class CoachReadToolServiceTests(unittest.TestCase):
             self.service.execute("list_training_plans", {}),
             {"ok": True, "training_plans": [{"id": "plan-1"}]},
         )
+
+    def test_read_nutrition_day_and_range(self):
+        day_res = self.service.execute("read_nutrition", {"date": "2026-03-30"})
+        self.assertEqual(day_res, {"ok": True, "date": "2026-03-30", "total_kcal": 2100})
+        self.nutrition.get_day_summary.assert_called_once_with("2026-03-30")
+
+        range_res = self.service.execute("read_nutrition", {"start": "2026-03-01", "end": "2026-03-31"})
+        self.assertEqual(range_res, {"ok": True, "summaries": [{"date": "2026-03-30", "total_kcal": 2100}]})
+        self.nutrition.get_range_summary.assert_called_once_with("2026-03-01", "2026-03-31")
 
     def test_limit_bounds_saturate_and_optional_filters_are_forwarded(self):
         self.service.execute("list_workout_library", {"limit": 900, "include_archived": False})

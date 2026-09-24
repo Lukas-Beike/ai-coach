@@ -29,11 +29,14 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "public_event_sources": {"id", "name", "url", "last_sync_at", "last_error", "created_at", "updated_at"},
     "public_event_candidates": {"id", "source_id", "uid", "name", "event_date", "sport", "distance", "location", "url", "description", "imported_competition_id", "created_at", "updated_at"},
     "external_calendar_events": {"id", "uid", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day", "training_relevant", "no_intensity", "short_only", "updated_at"},
+    "nutrition_logs": {"id", "meal_date", "logged_at", "meal_type", "description", "kcal", "carbs_g", "protein_g", "fat_g", "source", "sync_state", "created_at", "updated_at"},
+    "nutrition_sync_dates": {"meal_date", "revision", "sync_state", "updated_at"},
     "sessions": {"token_hash", "csrf_hash", "expires_at", "created_at", "last_seen"},
 }
 
 CURRENT_DATABASE_INDEXES = {
     "idx_change_history_created_at", "idx_change_history_entity", "idx_coach_plan_artifacts_conversation",
+    "idx_nutrition_logs_date",
     "idx_planned_units_date", "idx_planned_units_external_id", "idx_planned_units_local_id",
     "idx_provider_refresh_area", "idx_provider_refresh_created_at", "idx_sync_job_items_status",
     "idx_sync_jobs_status_available", "idx_workout_library_external_id",
@@ -317,6 +320,28 @@ def initialize_schema(db: Any) -> None:
         short_only INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL,
         UNIQUE(uid, start_local)
+    );
+    CREATE TABLE nutrition_logs (
+        id TEXT PRIMARY KEY,
+        meal_date TEXT NOT NULL,
+        logged_at TEXT NOT NULL,
+        meal_type TEXT NOT NULL CHECK(meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')),
+        description TEXT NOT NULL,
+        kcal INTEGER NOT NULL CHECK(kcal >= 0),
+        carbs_g REAL,
+        protein_g REAL,
+        fat_g REAL,
+        source TEXT NOT NULL DEFAULT 'manual',
+        sync_state TEXT NOT NULL DEFAULT 'local',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_nutrition_logs_date ON nutrition_logs(meal_date, logged_at DESC);
+    CREATE TABLE nutrition_sync_dates (
+        meal_date TEXT PRIMARY KEY,
+        revision INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'pending' CHECK(sync_state IN ('pending', 'synced')),
+        updated_at TEXT NOT NULL
     );
     CREATE TABLE sessions (
         token_hash TEXT PRIMARY KEY,

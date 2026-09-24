@@ -16,6 +16,7 @@ COACH_OPERATION_LABELS = {
     "apply_adaptive_replan": "Freigegebene Plananpassung angewendet", "preview_adaptive_replan": "Plananpassung vorgeschlagen",
     "update_training_plan": "Planinformationen bearbeitet", "apply_workout_library_plan": "Vorlagen eingeplant",
     "resolve_training_sync_conflict": "Synchronisierungskonflikt bearbeitet",
+    "save_nutrition_entry": "Ernährungseintrag gespeichert", "delete_nutrition_entry": "Ernährungseintrag entfernt",
 }
 
 COACH_ACTION_LABELS = {
@@ -32,6 +33,7 @@ COACH_ACTION_LABELS = {
     "apply_adaptive_replan": "Freigegebene Plananpassung anwenden", "preview_adaptive_replan": "Plananpassung vorschlagen",
     "update_training_plan": "Planinformationen bearbeiten", "apply_workout_library_plan": "Vorlagen einplanen",
     "resolve_training_sync_conflict": "Synchronisierungskonflikt bearbeiten",
+    "save_nutrition_entry": "Ernährungseintrag speichern", "delete_nutrition_entry": "Ernährungseintrag entfernen",
 }
 
 

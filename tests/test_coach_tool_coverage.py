@@ -435,6 +435,26 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 documented.update(name.strip().strip("`") + ":" + value.strip().strip("`") for value in variants_text.split(","))
         self.assertEqual(documented, declared)
 
+    @covers("save_nutrition_entry:success", "read_nutrition:success", "delete_nutrition_entry:success")
+    def test_nutrition_entries_can_be_saved_read_and_deleted(self):
+        saved = self.run_tool(
+            "save_nutrition_entry",
+            {"payload": {"meal_date": "2026-09-07", "meal_type": "lunch",
+                         "description": "Synthetic pasta", "kcal": 620, "carbs_g": 80}},
+            ["local_nutrition"],
+            message="Ich habe Pasta gegessen; speichere das lokal.",
+        )
+        entry_id = saved["entry"]["id"]
+        read = self.run_tool("read_nutrition", {"date": "2026-09-07"})
+        self.assertEqual(read["total_kcal"], 620)
+        self.assertEqual(read["entries"][0]["id"], entry_id)
+        deleted = self.run_tool(
+            "delete_nutrition_entry", {"id": entry_id}, ["local_nutrition"],
+            message="Entferne den Ernährungseintrag lokal.",
+        )
+        self.assertEqual(deleted["deleted_id"], entry_id)
+        self.assertEqual(server.nutrition_service().get_day_summary("2026-09-07")["entry_count"], 0)
+
     def test_every_mutating_tool_rejects_missing_user_authorization_without_effect(self):
         exceptions = server.STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}
         for tool in server.COACH_DIALOGUE_TOOLS:

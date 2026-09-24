@@ -389,3 +389,155 @@ class SnapshotRepository:
     def latest_payload(self, db: Any) -> str | None:
         row = db.execute("SELECT payload FROM snapshots ORDER BY id DESC LIMIT 1").fetchone()
         return row["payload"] if row else None
+
+
+class NutritionRepository:
+    """Persist and query logged meals and nutrition totals without owning a connection."""
+
+    def __init__(self, now: Callable[[], str]):
+        self._now = now
+
+    def create(self, db: Any, entry: dict[str, Any]) -> dict[str, Any]:
+        now = self._now()
+        entry_id = str(entry["id"])
+        db.execute(
+            "INSERT INTO nutrition_logs(id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, sync_state, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                entry_id,
+                entry["meal_date"],
+                entry["logged_at"],
+                entry["meal_type"],
+                entry["description"],
+                entry["kcal"],
+                entry.get("carbs_g"),
+                entry.get("protein_g"),
+                entry.get("fat_g"),
+                entry.get("source", "manual"),
+                entry.get("sync_state", "local"),
+                now,
+                now,
+            ),
+        )
+        self._mark_pending(db, entry["meal_date"], now)
+        return self.get(db, entry_id) or entry
+
+    def get(self, db: Any, entry_id: str) -> dict[str, Any] | None:
+        row = db.execute(
+            "SELECT id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, sync_state, created_at, updated_at "
+            "FROM nutrition_logs WHERE id = ?",
+            (entry_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update(self, db: Any, entry_id: str, entry: dict[str, Any]) -> dict[str, Any] | None:
+        now = self._now()
+        existing = self.get(db, entry_id)
+        if not existing:
+            return None
+        cursor = db.execute(
+            "UPDATE nutrition_logs SET meal_date=?, logged_at=?, meal_type=?, description=?, kcal=?, carbs_g=?, protein_g=?, fat_g=?, source=?, sync_state=?, updated_at=? "
+            "WHERE id=?",
+            (
+                entry["meal_date"],
+                entry["logged_at"],
+                entry["meal_type"],
+                entry["description"],
+                entry["kcal"],
+                entry.get("carbs_g"),
+                entry.get("protein_g"),
+                entry.get("fat_g"),
+                entry.get("source", "manual"),
+                entry.get("sync_state", "local"),
+                now,
+                entry_id,
+            ),
+        )
+        if cursor.rowcount == 0:
+            return None
+        self._mark_pending(db, existing["meal_date"], now)
+        self._mark_pending(db, entry["meal_date"], now)
+        return self.get(db, entry_id)
+
+    def delete(self, db: Any, entry_id: str) -> bool:
+        existing = self.get(db, entry_id)
+        if not existing:
+            return False
+        cursor = db.execute("DELETE FROM nutrition_logs WHERE id = ?", (entry_id,))
+        if cursor.rowcount:
+            self._mark_pending(db, existing["meal_date"], self._now())
+        return cursor.rowcount > 0
+
+    def list_by_date(self, db: Any, meal_date: str) -> list[dict[str, Any]]:
+        rows = db.execute(
+            "SELECT id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, sync_state, created_at, updated_at "
+            "FROM nutrition_logs WHERE meal_date = ? ORDER BY logged_at ASC, created_at ASC",
+            (meal_date,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_by_range(self, db: Any, start_date: str, end_date: str) -> list[dict[str, Any]]:
+        rows = db.execute(
+            "SELECT id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, sync_state, created_at, updated_at "
+            "FROM nutrition_logs WHERE meal_date >= ? AND meal_date <= ? ORDER BY meal_date ASC, logged_at ASC",
+            (start_date, end_date),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def day_summary(self, db: Any, meal_date: str) -> dict[str, Any]:
+        entries = self.list_by_date(db, meal_date)
+        total_kcal = sum(int(e["kcal"]) for e in entries)
+        total_carbs = round(sum(float(e["carbs_g"]) for e in entries if e.get("carbs_g") is not None), 1)
+        total_protein = round(sum(float(e["protein_g"]) for e in entries if e.get("protein_g") is not None), 1)
+        total_fat = round(sum(float(e["fat_g"]) for e in entries if e.get("fat_g") is not None), 1)
+        return {
+            "date": meal_date,
+            "total_kcal": total_kcal,
+            "total_carbs_g": total_carbs,
+            "total_protein_g": total_protein,
+            "total_fat_g": total_fat,
+            "entry_count": len(entries),
+            "entries": entries,
+        }
+
+    def list_unsynced_dates(self, db: Any, limit: int = 14) -> list[str]:
+        rows = db.execute(
+            "SELECT meal_date FROM nutrition_sync_dates WHERE sync_state = 'pending' ORDER BY meal_date ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [str(row["meal_date"]) for row in rows]
+
+    def day_sync_snapshot(self, db: Any, meal_date: str) -> dict[str, Any]:
+        db.execute(
+            "INSERT OR IGNORE INTO nutrition_sync_dates(meal_date, revision, sync_state, updated_at) "
+            "VALUES (?, 1, 'pending', ?)",
+            (meal_date, self._now()),
+        )
+        snapshot = self.day_summary(db, meal_date)
+        row = db.execute(
+            "SELECT revision FROM nutrition_sync_dates WHERE meal_date = ?", (meal_date,)
+        ).fetchone()
+        snapshot["sync_revision"] = int(row["revision"]) if row else 0
+        return snapshot
+
+    def mark_date_synced(self, db: Any, meal_date: str, revision: int, updated_at: str) -> bool:
+        cursor = db.execute(
+            "UPDATE nutrition_sync_dates SET sync_state = 'synced', updated_at = ? "
+            "WHERE meal_date = ? AND revision = ?",
+            (updated_at, meal_date, revision),
+        )
+        if cursor.rowcount:
+            db.execute(
+                "UPDATE nutrition_logs SET sync_state = 'synced', updated_at = ? WHERE meal_date = ?",
+                (updated_at, meal_date),
+            )
+        return bool(cursor.rowcount)
+
+    def _mark_pending(self, db: Any, meal_date: str, updated_at: str) -> None:
+        db.execute(
+            "INSERT INTO nutrition_sync_dates(meal_date, revision, sync_state, updated_at) "
+            "VALUES (?, 1, 'pending', ?) "
+            "ON CONFLICT(meal_date) DO UPDATE SET revision=revision+1, "
+            "sync_state='pending', updated_at=excluded.updated_at",
+            (meal_date, updated_at),
+        )
