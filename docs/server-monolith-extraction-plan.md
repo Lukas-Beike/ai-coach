@@ -825,6 +825,10 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     Socket-/Schreibzustand bleibt beim Handler.
   - [x] Sync-POST-Fachentscheidungen in `SyncCommandEndpoint` verlagern;
     Handler behält ausschließlich Transport, Body-Lesen und Antwort.
+    - [x] Body-/Antwort-Dispatch für Sync-Kommandos aus `RequestHandler` nach
+      `SyncCommandPostRoute` in `http_api/` verschieben; der globale Factory-
+      Lookup bleibt dynamisch und die äußere Auth-/CSRF-/Maintenance-Reihenfolge
+      bleibt beim Handler.
   - [x] Statische Asset-Allowlist, Pfadsperre, Cache-/ETag-Projektion und
     Sicherheitsheader `StaticAssetService` zuordnen; Handler sendet nur
     Status, Header und Bytes.

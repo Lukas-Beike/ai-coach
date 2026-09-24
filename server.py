@@ -150,6 +150,7 @@ from backend.http_api.state_prelude import (
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 from backend.http_api.state_versions import StateVersionService
 from backend.http_api.sync_commands import SyncCommandEndpoint
+from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.history_get import HistoryGetRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
@@ -2672,6 +2673,7 @@ HTTP_ROUTE_DISPATCHER = HttpRouteDispatcher(
     ),
     (SETTINGS_PUT_ROUTES, ATHLETE_PUT_ROUTES),
 )
+SYNC_COMMAND_POST_ROUTE = SyncCommandPostRoute(lambda: sync_command_endpoint())
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -2812,14 +2814,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def _handle_sync_post(self, path: str) -> bool:
-        if not SyncCommandEndpoint.handles(path):
-            return False
-        payload = self.read_json() if SyncCommandEndpoint.needs_body(path) else None
-        status, result = sync_command_endpoint().execute(path, payload)
-        self.send_json(status, result)
-        return True
-
     def _handle_data_post(self, path: str, session: dict[str, Any]) -> bool:
         if HISTORY_UNDO_POST_ROUTES.handle(self, path, session):
             return True
@@ -2830,7 +2824,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     def handle_authenticated_post(self, path: str, session: dict[str, Any]) -> None:
         handled = (
             self._handle_coach_post(path, session)
-            or self._handle_sync_post(path)
+            or SYNC_COMMAND_POST_ROUTE.handle(self, path)
             or self._handle_data_post(path, session)
         )
         if not handled:

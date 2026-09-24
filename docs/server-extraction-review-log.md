@@ -7898,3 +7898,18 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Fokussierte Architekturtests: **32 PASS**; Coach-Dialogtests: **72 PASS**.
   Vollständige native Suite: **2.742 PASS, 12 SQLCipher-Skips**.
   `py_compile`, Inventar-`--check` und `git diff --check` **PASS**.
+
+## P10 Sync-POST-Transport — lokaler Prüfstand
+
+- `SyncCommandPostRoute` in `backend/http_api/sync_commands_post.py` besitzt
+  den Sync-POST-Body-/Response-Dispatch; `SyncCommandEndpoint` behält die
+  Validierung und fachliche Ausführung. Der serverseitige `_handle_sync_post`
+  Adapter entfällt.
+- Der Factory-Aufruf bleibt dynamisch. Body-Lesen erfolgt weiterhin vor
+  Endpoint-Konstruktion; bestehende Auth-, CSRF-, Maintenance- und Fehlergrenzen
+  bleiben beim Handler.
+- Neue direkte Route-Tests und erweiterte Architekturprüfung; vollständige
+  Suite: **2.758 Tests PASS, 12 SQLCipher-Skips**. Syntaxprüfung, Inventar-
+  `--check` und `git diff --check` ebenfalls PASS.
+- `server.py` sinkt um sechs Zeilen auf **3.064**. Nächster Auftrag: übrige
+  POST-/SSE-Transportgrenzen und anschließend P11 weiter prüfen.
