@@ -1,676 +1,246 @@
 # Intervals Coach
 
-Intervals Coach is a private, mobile-first PWA for a single athlete. Its
-Python standard-library HTTP server synchronizes training data from
-Intervals.icu and, optionally, Garmin Connect, sends a sanitized coaching
-context to the selected OpenAI or Gemini API, and stores the local application state in
-an encrypted SQLite database.
+Intervals Coach is a private, mobile-first Progressive Web App (PWA) designed for a single athlete. Built on Python's standard-library HTTP server and an encrypted SQLCipher SQLite database, it bridges athlete training history and daily health metrics from Intervals.icu and Garmin Connect with state-of-the-art conversational AI models from OpenAI and Google Gemini.
 
-The application is designed for use on a trusted home network or private VPN.
-It is not intended to be exposed directly to the public internet.
+The application serves as an autonomous, conversational training companion. It understands athlete fatigue, manages a structured workout library, schedules future training sessions, analyzes past workouts, tracks environmental weather constraints, and interprets read-only calendar events—all while keeping sensitive biometric data, credentials, and workout plans strictly local and under the athlete's direct control.
 
-## Fresh installation
+Intervals Coach is intentionally standalone and designed for operation on a trusted local network (LAN) or private VPN (such as WireGuard or Tailscale). It must never be exposed directly to the public internet without a trusted, authenticated reverse proxy.
 
-Use a new empty data directory and a fresh browser profile for this application.
-The application creates its current SQLCipher schema directly. It does not
-convert previous databases, backups, API payloads, or browser storage. Restore
-accepts backups created with the current schema. The service worker supports
-first installation and offline assets; there is no application update dialog
-or upgrade workflow. Normal edits, provider syncs, and same-build restart
-recovery remain supported. Keep the previous installation separate; these
-instructions do not delete or convert its data.
+---
+
+## Core Architecture & Principles
+
+- **Single-Athlete Authority**: Built specifically for one athlete. There are no multi-tenant abstractions, user role hierarchies, or hosted cloud dependencies.
+- **Local Source of Truth**: The local SQLCipher database is the authoritative source for future planned units, training goals, workout templates, and athlete feedback. Intervals.icu remains the authoritative record of completed historical activities.
+- **Explicit Action Gate**: Conversational coaching operates with strict boundaries. While the Coach can analyze, draft, and propose training changes, mutating local workouts or synchronizing changes to Intervals.icu requires explicit athlete confirmation in the dialogue.
+- **Untrusted External Content**: Data received from Intervals.icu, Garmin Connect, Open-Meteo, and external iCalendar feeds is strictly treated as untrusted data, never as system instructions.
+- **Zero Cloud Telemetry**: Biometric data, activity recordings, API keys, database keys, and athlete conversations never leave the host server, except when sending sanitized coaching prompts to the user's selected AI provider.
+- **Standard-Library Foundation**: The backend runs on Python's native `http.server` without heavyweight web frameworks. Application logic is modularized under `backend/`, keeping `server.py` strictly as a composition root.
+
+---
+
+## Fresh Installation Contract
+
+Intervals Coach adheres to a clean-slate installation and maintenance model:
+- **Clean Storage Mount**: Start the application with an empty `/data` directory and a fresh browser profile.
+- **Direct Schema Initialization**: The application initializes the current SQLCipher schema directly upon first startup.
+- **No Migration Shims**: There are no automatic schema migrations, legacy database converters, or backward-compatibility upgrade paths. Deprecated code and schemas are removed rather than shimmed.
+- **Safe State Recovery**: Same-build process restarts, provider resynchronization, and current-schema backup restoration remain fully supported.
+- **Isolated State**: The application will not overwrite, migrate, or delete databases from prior major installations located outside its designated storage directory.
+
+---
 
 ## Features
 
-- Athlete profile, target competitions, performance metrics, training history,
-  chat history, and a growing local workout library stored in SQLite.
-- One Intervals.icu synchronization at startup and once per day, followed by an
-  automatic current-performance refresh, plus user-requested refreshes.
-- Optional Garmin Connect synchronization with deduplication against
-  Intervals.icu. Garmin-sourced FTP (separate from eFTP), running threshold
-  power, running and cycling threshold heart rate, running threshold pace,
-  sleep, resting heart rate, HRV, VO2 max, running predictions, body weight,
-  sport-specific maximum heart rates, and daily steps, floors, and calories are
-  explicitly marked as Garmin Connect data in the performance view. Daily
-  health totals are shown in the planned calendar's date-specific context; the
-  performance view shows their seven-day averages. If a Garmin value is
-  unavailable, the existing Intervals.icu value remains available as a
-  labelled fallback.
-- Activity synchronization for strength training, running, outdoor cycling,
-  and indoor/virtual cycling.
-- Mobile-first profile and system sections can be collapsed; the planned
-  calendar is grouped into collapsible full weeks with compact volume summaries.
-  The More tab controls how many past and future weeks are displayed.
-  Intervals.icu planned workouts are matched to completed activities through
-  their pairing (with a conservative same-day/sport fallback). The training
-  calendar also shows unmatched completed activities for past days and today.
-  Completed cards expose actual duration, distance, training load, RPE, and
-  available sport metrics without inventing missing values. Matched cards show
-  plan-versus-actual volume; the comparison uses training load when available,
-  otherwise moving/elapsed time.
-- If adaptive planning shortens a local workout or reduces its intensity due
-  to a read-only iCalendar appointment, the linked planned workout records
-  that reason and the original versus adjusted duration after approval.
-- Google Calendar has no editable iCalendar category field. The external
-  calendar sync imports only events whose description contains one of
-  `[NO_TRAINING]`, `[NO_INTENSITY]`, or `[SHORT_ONLY]`. Add `[NO_TRAINING]`
-  to informational appointments; the event remains visible as a red marker
-  on its day in the planned calendar, but is excluded from coaching and
-  adaptive planning.
-- Add `[NO_INTENSITY]` to the description when a calendar event should allow
-  training but prevent hard sessions; it is shown as a red marker on its day;
-  `[SHORT_ONLY]` marks an appointment that should only allow a short session.
-  Other description tags have no effect.
-- Optional weather integration via Open-Meteo: a city or postal code in the
-  profile enables a cached 14-day forecast in the planned calendar. For
-  outdoor runs and rides, the app suggests a weather-aware time window for
-  the next five days, including a small weather symbol, wind speed, gusts,
-  and direction. Weekday suggestions account for work from 06:00–15:30
-  (Monday–Thursday), work until 14:00 on Friday, and the usable 12:00–13:00
-  lunch break. In NRW the short range uses DWD ICON-D2 and the longer range
-  uses ECMWF IFS HRES. The free Open-Meteo tier is intended for non-commercial
-  use and requires attribution.
-- Thirty-day trends for FTP, thresholds, VO2 max, running predictions,
-  readiness, and body weight. Garmin performance values are stored locally as
-  compact historical points during synchronization.
-- Push-to-talk voice input in the chat: short recordings are transcribed
-  server-side and inserted into the editable message field; audio is not stored.
-- Coach chat with selectable OpenAI or Gemini models, configurable thinking level,
-  context preview and prioritized steering/FIFO follow-ups. The Coach reads local
-  data and chooses tools in one conversational run; there is no separate intent
-  classifier or trigger-word gate. Short replies, corrections and references to
-  earlier messages can complete a request. Real ambiguities produce one concrete
-  question whose request context is stored locally across reloads and model changes.
-- Explicit requests to remember permanent facts or preferences update the saved
-  profile directly, including acceptance of a concrete proposal in the dialogue.
-  The Coach reads current field values and applies only the requested changes;
-  concurrent edits require rereading the profile. Daily feedback and temporary
-  planning constraints remain separate from permanent profile facts.
-- Every HTTP chat turn is saved in the durable background queue before processing.
-  SSE reports the job identity and the browser polls its durable result. This avoids
-  guessing the complexity of a message from its wording. OpenAI response IDs and
-  tool receipts support recovery after process restarts; interrupted Gemini calls
-  are reported without replaying their completed effects. Cancelling or resetting
-  the chat closes a pending clarification. A disconnected browser does not cancel
-  the work. Model/provider selection is captured for the entire turn. If Coach
-  processing stops after a sync was queued, the receipt distinguishes that
-  interruption from the independent sync job and does not claim the transfer
-  completed or failed without a confirmed result. Failed OpenAI responses retain
-  only recognized error codes in diagnostics, never the provider's error text.
-  An invalid OpenAI conversation is retried once using local dialogue, GPX summaries
-  and confirmed tool results; completed effects are not repeated. Later turns avoid
-  that invalid conversation. Earlier image pixels may be unavailable during recovery;
-  the Coach asks for missing evidence when necessary. A saved clarification remains
-  visible and answerable even if the final AI response fails. Technical failures show
-  an explanation and a next step, together with any already completed actions.
-- Related workout moves, edits and additions use one atomic change set with current
-  revision and object hashes. Replanning until a target date changes only that period;
-  later units remain intact. Constraints such as two strength sessions per week stay
-  attached to that plan, rather than becoming permanent profile preferences.
-  Every write records its source user messages, target and object/period scope.
-  Editing a planned unit's sport preserves its local identity and updates both
-  the canonical sport and the provider projection. The executable
-  [Coach tool coverage matrix](docs/coach-tool-coverage.md) documents tested
-  actions, conversation flows and the limits of simulated model responses.
-  Provider writes require the corresponding synchronization request. Failed steps
-  can be corrected within the bounded tool loop; receipts distinguish saved changes,
-  queued syncs and unresolved failures. A successfully corrected object reference
-  clears that attempt's error from the final answer and status cards; errors for
-  other changes remain visible. See [the dialogue evaluation catalogue](docs/coach-dialogue-evaluation.md)
-  for the supported scenarios and the limits of mocked model tests.
-- The Coach start card contains only contextual quick actions, not provider
-  connection badges. The morning check-in disappears after it completed for
-  the athlete's local day. "Plan anpassen" appears only for an unapplied
-  calendar, illness, injury, or blocking-weather change affecting a planned
-  unit within the next three days. "Letzte Einheit analysieren" refreshes
-  Intervals.icu before coaching and records the successful refresh in the same
-  Coach receipt. A repeated refresh tool call reuses that result so analysis
-  continues without a second sync. When near-identical Wahoo and Garmin cycling
-  recordings are present, Wahoo is canonical; deleting the Garmin cloud copy
-  always requires a separate confirmation in Coach Chat.
-- The Coach is the local source of truth for future planned units, target
-  competitions, and reusable workout templates. An unambiguous plan request
-  stores local planned units immediately. Explicit requests to move, archive,
-  restore, or delete units and templates are executed by Coach tools without a
-  second UI confirmation; questions and hypotheticals remain read-only. Every
-  planning entity has a stable local UUID and sync metadata.
-- Dated workouts are stored in the dedicated local `planned_units` table and
-  never in the reusable template library. Intervals.icu calendar workouts and
-  templates are imported once during initial setup. After that import, the
-  local app is authoritative for future planning; completed Intervals.icu
-  activities remain authoritative for what was actually performed.
-   Beim ersten expliziten Bibliothekssync wird dafür bei Intervals.icu bei
-   Bedarf ein privater Ordner „Intervals Coach“ angelegt.
-- The regular Intervals.icu activity pull is read-only and never uploads
-  pending local library entries or re-imports future remote planning. Only an
-  explicitly named Coach synchronization can create, update, or delete planned
-  units remotely. The current chat request is the authorization for that sync.
-- When the first regular Intervals.icu sync finds an empty local library, it
-  imports the existing remote templates into the local library. This initial
-  import is read-only; later local edits still require the separate explicit
-  library synchronization action for remote writes.
-- The explicit planning synchronization transfers dirty local planned units to
-  the Intervals.icu calendar with stable upsert identities. It does not replace
-  the local plan with later remote edits or deletions.
-- Endurance workouts require structured Intervals.icu steps with a duration or
-  distance and an intensity target (for example `- 15m 50-70%` or `- 6km Z1 HR`).
-  Prose-only descriptions, missing targets and inconsistent timed totals are
-  rejected before saving or exporting. Repeat blocks count every contained
-  step, including recovery; their boundaries need blank lines. Strength
-  descriptions remain free text. Distance-based duration and the resulting
-  training load depend on the athlete's sport/zone settings in Intervals.icu.
-  Synchronization succeeds only when the provider's returned `workout_doc`
-  confirms the individual steps, durations/distances, target types and values,
-  and a calculated training load. An HTTP success alone is insufficient. A
-  failed verification retains the remote identity for correction and retry.
-  Existing invalid units must be corrected through the Coach and explicitly
-  synchronized again; a code update alone does not change the remote calendar.
-- A requested repair synchronization also checks already-synchronized units.
-  The Coach first fixes local text, duration and sport while retaining unit IDs,
-  then selects the affected future units with current hashes, including any
-  superseded inactive entries. Repair updates existing calendar IDs, verifies
-  the provider's sport and workout structure, removes exact-identity duplicates
-  and selected inactive entries, and rereads the calendar before success.
-  Unmapped same-name entries are reported as conflicts instead of being deleted
-  by title. See [workout export examples and repair](docs/workout-export-format.md).
-- If a provider response no longer contains an imported template, it is kept
-  locally and marked as missing remotely. A later library synchronization
-  reconciles it before creating it again; local templates are never removed by
-  a full Intervals.icu resync.
-- Multi-week plans and library templates are managed through the Coach. The
-  Geplant view has read-only Übersicht and Bibliothek segments: the overview
-  shows the combined planned and completed training calendar as a daily agenda
-  grouped by week. Weekday and date sit beside the workout title, sport and
-  duration; today is highlighted and weather stays compact below the date.
-  Expand a workout for its description, metrics and plan/actual comparison.
-  Relevant calendar and health notes remain visible below the day's sessions.
-  Daily recovery values (sleep, HRV, resting heart rate, readiness and morning
-  Body Battery) and saved check-in scores sit in small, muted text lines
-  spanning the day below the date and workout columns. Values, notes and compact
-  rain/wind forecasts stay visible without expanding anything. Weather uses two
-  text lines: conditions and temperatures, then rain probability, wind direction
-  and speed, and gusts. The earliest hour with the highest rain probability is
-  included when hourly data indicates a distinct peak (local forecast time).
-  Metric sources and forecast location/retrieval time remain in hover text. Missing
-  values remain explicit; today's readings are never reused for another date.
-  Successful weather refreshes retain daily forecasts with their location and
-  retrieval time for the calendar history. Past forecasts are identified as saved
-  predictions in hover text, not measured weather. History starts with collected data; older
-  missing forecasts and check-ins cannot be reconstructed. Set the weather
-  location under Mehr > Profil. The calendar reads up to 365 saved check-ins.
-  The library groups active workout templates by sport.
-- Existing training plans can be renamed, have their goal, status, or date range
-  changed, and can be deleted directly through the Coach. Plan deletion removes
-  plan metadata only; scheduled local workout units remain untouched.
-- The coach can explicitly apply saved library entries as local planned units.
-  Existing calendar dates are checked first. Intervals.icu calendar writes stay
-  disabled unless the athlete explicitly requests that synchronization.
-- Bidirectional synchronization of target competitions with Intervals.icu.
-- The coach can explicitly list, create, update, and locally delete target
-  competitions. Linked remote changes remain pending until an explicit
-  competition synchronization is requested.
-- Local athlete check-ins for day form (such as heavy legs and fatigue),
-  subjective soreness, stress, motivation, session RPE, illness, pain, available
-  training time, and day-specific constraints. Reported illness is a high-priority
-  planning constraint and is shown separately in the dated daily context. The
-  coach can propose a conservative sport-pause forecast; after explicit approval
-  in Coach Chat, future local sessions are replaced with illness-pause entries and
-  the corresponding future check-in days filled.
-  Check-ins can be entered or edited through Coach Chat. Check-in dates and daily training
-  boundaries use the saved IANA profile timezone, and future check-ins are
-  rejected. The Geplant overview focuses the current day in the training calendar
-  when opened, while retaining the surrounding planned units, recovery context,
-  weather, and calendar signals.
-- After a completed activity, the coach can ask for a short subjective follow-up
-  and store the athlete's answer as activity feedback.
-- The coach can explicitly read completed activities, the local workout library,
-  planned units, competitions, training plans, and local change-history
-  references, and athlete-entered meals with estimated calories and
-  macronutrients. Nutrition entries remain local until the athlete explicitly
-  calls the authenticated `/api/nutrition/sync` action, which sends daily totals
-  to Intervals.icu wellness. It can schedule selected saved library templates locally after
-  conflict checks, and remove activity feedback on request. Explicit provider
-  refreshes for Intervals.icu, current performance, Garmin, weather, and the
-  external calendar run as trackable background jobs; local plans and
-  competitions are pushed to Intervals.icu only through an explicitly named,
-  trackable synchronization. The local workout library remains authoritative
-  after its initial import and is never overwritten by a Coach refresh.
-  Adaptive planning can be previewed and, after explicit approval, applied to
-  future local workouts; an illness-pause event is sent to Intervals.icu only
-  when that synchronization is explicitly named in the same request.
-- Read-only shared iCalendar integration for the next 8 weeks. Event
-  timing and duration are used as schedule/recovery signals; high-intensity or
-  long local library entries on busy days can be proposed as short easy sessions.
-  Invalid feeds are rejected without replacing the last good local calendar;
-  common Google/RFC 5545 recurring events (`DAILY`, `WEEKLY`, `MONTHLY`, and
-  `YEARLY`, including `BYDAY`, `BYMONTHDAY`, `BYMONTH`, `BYSETPOS`, and `WKST`) are
-  expanded only inside the eight-week window. Google recurrence exceptions and
-  date-only `RDATE` additions are applied; unsupported rule parts are reported
-  clearly. Expansion is capped at 1,000 occurrences.
-- The planned calendar never displays a provider horizon wider than the
-  Intervals.icu window actually loaded by the latest snapshot. The configured
-  display preference may therefore be reduced temporarily after a short sync.
-- Adaptive plan review that checks after a weather or shared-calendar refresh
-  whether future local library entries need adjustment. In the next two days,
-  persistent rain or snow can trigger a shorter easy replacement for a long
-  outdoor ride. A red update notice appears in the planned calendar and as a
-  compact hint on the Coach tab. Changes are shown as a preview and require
-  explicit local approval; remote Intervals.icu calendar events are never
-  changed by this process.
-- Annual event overview with base, build, peak, taper, and completed phases.
-- Optional PWA notifications for upcoming events and synchronization errors.
-  Notifications are opt-in and are delivered by the browser/service worker
-  while the PWA can run; there is no guaranteed background push service, and
-  device workout delivery remains delegated to Intervals.icu.
-- Configurable Intervals.icu activity synchronization period, data export,
-  local cleanup, and retention policy.
-- Encrypted database backup download and validated restore with an automatic
-  pre-restore copy of the previous database.
-- Active-provider usage display for the latest request, remaining request/token quotas,
-  and the classified status of the last API call. Account dollar balances are
-  available through the OpenAI billing dashboard or authorized organization
-  access, not through this application.
-- Chat requests use a bounded queue, retry transient rate limits up to twice
-  (with cancellable waits), and persist tool-call results so retried follow-ups do not repeat
-  local mutations. The application does not impose a local daily request or
-  token budget; requests continue until OpenAI rejects them because the
-  account or project quota is exhausted. An explicitly cancelled stream never
-  executes a partial tool call; a lost browser connection leaves the request
-  running so its completed answer can be recovered after reload. All HTTP turns
-  are persisted as durable jobs before execution. While the originating browser
-  connection remains open, OpenAI and Gemini text is streamed into the current
-  message; after a disconnect, completion is recovered from local state.
-  Each OpenAI command starts with bounded local dialogue and current athlete
-  context. Tool rounds chain Responses only within that command, avoiding an
-  ever-growing remote conversation containing repeated copies of local history.
-  A failed answer reports the provider limit and any confirmed sync status;
-  an already queued sync continues independently.
-  Ordinary effort descriptions are translated by the Coach: easy/recovery runs
-  use the athlete's heart-rate zones, cycling uses power zones and watt targets
-  derived from current FTP. Explicit athlete targets take precedence. Athletes
-  do not need to write Intervals.icu workout syntax.
+### AI Coach & Conversational Intelligence
+- **Natural Language Coaching**: Conversational coaching without rigid trigger words, supporting natural phrasing, corrections, follow-up questions, and pronoun resolution across turns.
+- **Dual AI Provider Support**: Native integration with the OpenAI Responses API (GPT-5.6-luna, GPT-5.6-sol, GPT-5.6-terra) and Google Gemini (Gemini 3.8 Flash) with real-time SSE token streaming.
+- **Durable Turn Queueing**: Every chat request is persisted in a durable SQLite background queue before processing, enabling seamless answer recovery across network drops or browser reloads.
+- **Permanent Fact Memorization**: Conversational profile updates that save athlete preferences, equipment notes, and constraints to the durable profile only upon explicit confirmation.
+- **Bounded Context Projection**: Dynamic context assembly projecting the 5 newest activities per sport, compact planned units, target competitions, and wellness trends within strict token budgets.
+- **Targeted Clarification Protocol**: Ambiguous coaching prompts generate a single, concrete clarification question stored locally across reloads and model switches until answered.
+- **Atomic Training Changesets**: Plan updates, session moves, and workout creations use transactional revision tracking and object hashes to prevent race conditions.
+- **Contextual Quick Actions**: Dynamic start cards presenting context-relevant prompts such as the Morning Check-in or recent workout analysis without permanent UI clutter.
+- **Intelligent Duplicate Resolution**: Automated inspection of dual-recorded workouts (e.g., Wahoo and Garmin cycling files) that designates canonical recordings while protecting against accidental cloud deletions.
+- **Structured Error Recovery**: Robust recovery from provider rate limits and transient network errors with transparent diagnostic reporting and safe rollback of incomplete actions.
 
-## Loading and synchronization
+### Training Calendar & Workout Planning
+- **Collapsible Weekly Calendar**: Mobile-optimized calendar displaying complete training weeks with collapsible volume summaries, planned workouts, and completed sessions.
+- **Configurable Planning Horizon**: User-adjustable calendar display settings controlling past lookback and future planning horizons through the More tab.
+- **Plan vs. Actual Pairing**: Intelligent pairing of planned workouts to completed activities using provider pairing IDs with a conservative same-day sport fallback.
+- **Visual Volume Comparisons**: Accurate plan-versus-actual volume matching evaluated by training load (TSS) when available, falling back to moving or elapsed duration.
+- **Unmatched Activity Display**: Prominent display of completed, unscheduled sessions alongside planned workouts without fabricating missing target metrics.
+- **Full Workout Lifecycle Management**: Direct UI and conversational controls to schedule, move, edit, duplicate, archive, restore, and delete planned workouts.
+- **Target Period Scoping**: Conversational plan adjustments strictly scoped to requested date ranges, leaving surrounding weeks and existing training blocks untouched.
+- **Daily Athlete Check-ins**: Dedicated check-in tracking morning readiness, sleep quality, muscle soreness, perceived stress, and free-form athlete notes.
+- **Post-Activity Feedback**: Dedicated local feedback logging for completed workouts, capturing perceived exertion (RPE), equipment details, and workout execution notes.
+- **Multi-Phase Season Periodization**: Long-term seasonal planning mapping base, build, peak, taper, and recovery phases anchored to primary competition dates.
 
-After login, the chat and all data already stored locally are rendered first.
-The browser then loads the current remote-enriched view in the background. The
-authentication request itself does not force a new Intervals.icu, Garmin, or
-calendar synchronization: those providers are synchronized at server startup,
-hourly in the background, or on demand from the More tab. Automatic Garmin
-refreshes fetch the latest two days. The Garmin period in the More tab remains
-30 days by default, so a manual sync can catch up after an outage or repair
-older records. Selected activity windows (Intervals.icu and Garmin) are
-retained locally and can be changed in that tab.
+### Workout Library & Structured Formats
+- **Local Workout Library**: Searchable, categorised repository of reusable endurance and strength workout templates stored entirely in the local encrypted database.
+- **Template Lifecycle Management**: Comprehensive tools to create, modify, tag, schedule, archive, and delete reusable workout templates from the UI or via Coach dialogue.
+- **Strict Endurance Syntax Enforcement**: Rigorous validation of endurance steps requiring explicit duration or distance alongside defined intensity targets (e.g., `- 15m 50-70%` or `- 6km Z1 HR`).
+- **Relative Target Calculations**: Automatic resolution of percentage-based targets against the athlete's current FTP, threshold heart rate, or threshold pace stored in Intervals.icu.
+- **Native Repeat Block Formatting**: Standardized parsing for interval repeat blocks with mandatory preceding count headers, blank-line delimitation, and step-level recovery tracking.
+- **Prose Support for Non-Endurance Workouts**: Flexible free-form text formatting for strength training, yoga, mobility, and core routines without rigid step constraints.
+- **Provider Upload Verification**: Two-phase upload verification ensuring Intervals.icu parses step instructions, duration, and training load before marking a workout synced.
+- **Rejection of Ambiguous Formats**: Pre-upload validation rejecting prose-only endurance entries, mismatched target types, and conflicting watt conversions.
 
-The browser refreshes the local/remote view every minute while the PWA is
-visible and polls more frequently while a manual synchronization is running.
-Large Intervals.icu responses are fetched in bounded pages and the latest
-sync reports the fetched page/window counts; incomplete required Garmin ranges
-remain visible as partial provider status instead of being presented as complete.
-After a successful regular Intervals.icu refresh, the targeted current-performance
-data is refreshed automatically as a separate background job.
-Garmin Body Battery is a separate targeted read after regular Garmin refreshes
-and before morning coaching, only
-for the completed sleep window (at most the previous and current calendar
-day). The app stores the last level before sleep and the first available level
-within one hour after waking. Missing values are retried at most three times per local day,
-with at least 15 minutes between attempts, including by the background scheduler.
-A successful pair is reused for that day. Historical backfills do not trigger
-this read, and optional recovery failures do not invalidate a successful Garmin
-sync. Stored daily history and original provider records remain intact.
-Metrics expose their observation age separately from retrieval freshness; a
-new fetch of an old measurement does not make that measurement current.
-Open-Meteo uses the profile location, keeps a three-hour server-side forecast
-cache, and refreshes that location in the background every three hours. A
-visible view also refreshes it when the cache has expired. The current forecast
-can be forced manually from the Open-Meteo card in the More tab.
-The Morgen-Check-in remains available as a manual Coach quick action and is not
-generated automatically in the background.
+### Intervals.icu Synchronization & Mapping
+- **Automated Activity Ingestion**: Scheduled and on-demand synchronization pulling completed activities, training loads, and performance metrics from Intervals.icu.
+- **Duplicate-Safe Pagination**: Resilient pagination fetching large activity histories in bounded chunks while verifying page boundaries to prevent duplicate entries.
+- **Initial Template Import**: One-time read-only import of existing remote workout templates into a dedicated, private 'Intervals Coach' folder upon initial setup.
+- **Explicit Plan Synchronization**: Unidirectional push transferring locally approved planned units to the Intervals.icu calendar with stable upsert identifiers.
+- **Automatic Performance Refresh**: Immediate background refresh of current fitness (CTL), fatigue (ATL), and form (TSB) following every successful activity synchronization.
+- **Unidirectional Write Boundary**: Strict boundary preventing standard read syncs from altering, overwriting, or deleting locally maintained planned workouts.
+- **Illness Pause Synchronization**: Explicit synchronization of confirmed illness pauses to Intervals.icu as calendar note entries only upon dedicated athlete request.
+- **Bidirectional Competition Sync**: Coordinated synchronization aligning competition dates, priorities (A/B/C), target sports, and goal times between local and remote calendars.
 
-The four main views use stable hash links: `#coach`, `#plan`, `#analysis`,
-and `#more`. Navigation is implemented with real
-links, so direct links, reload, browser back/forward, keyboard access, and
-screen-reader announcements remain available. An unknown hash falls back to
-`#coach`; a deep link is retained through the login flow. Opening the plan
-overview focuses and scrolls to the current day in the training calendar.
+### Garmin Connect Integration & Health Metrics
+- **Direct Read-Only Health Sync**: Independent synchronization of Garmin Connect wellness metrics, activity recordings, and physiological measurements.
+- **Dedicated Sleep Gating**: Intelligent morning check-in gate that delays morning coaching until the current day's sleep analysis is processed and finalized by Garmin.
+- **Overnight Body Battery Tracking**: Targeted extraction of resting stress metrics capturing the final level before sleep and the initial waking level within one hour of rising.
+- **Bounded Sleep Retry Engine**: Three-tier exponential retry schedule (15-minute intervals, max 3 attempts) handling delayed Garmin cloud sleep processing.
+- **Garmin-Specific Metric Labeling**: Clear source labeling distinguishing Garmin-calculated FTP, running threshold power, threshold HR, threshold pace, and VO2 max from Intervals.icu metrics.
+- **Daily Wellness Summaries**: Calendar-integrated daily summaries tracking total steps, floors climbed, active calories, resting heart rate, and overnight HRV.
+- **Rolling Health Averages**: Automated calculation of 7-day rolling health baselines displayed alongside acute readings on the performance dashboard.
+- **Transparent Metric Fallback**: Resilient metric aggregation preserving Intervals.icu values as labeled fallbacks when Garmin biometric readings are absent.
 
-The PWA provides an installable offline shell only. It does not provide a full
-offline data view or a local mutation queue: authenticated API responses are
-never cached by the service worker, and offline mode clearly limits the user
-to already loaded data until connectivity returns. This is the deliberate
-product decision for the current private single-athlete app; adding an offline
-data cache, queue, or Web Push would require a separate privacy and threat-
-model decision.
+### Weather Intelligence & Outdoor Scheduling
+- **Open-Meteo Integration**: Server-side cached 14-day local weather forecasts powered by the non-commercial Open-Meteo meteorological API.
+- **Dual-Model Forecast Engine**: Intelligent forecast resolution using high-precision DWD ICON-D2 for short-range predictions and ECMWF IFS HRES for long-range outlooks.
+- **Weather Window Recommendations**: Automated calculation of optimal outdoor training windows over the next 5 days based on temperature, precipitation, and wind speeds.
+- **Workday Schedule Awareness**: Outdoor suggestions tailored around athlete working hours (06:00-15:30 Monday-Thursday, until 14:00 Friday, with a 12:00-13:00 lunch window).
+- **Adaptive Weather Alerts**: Proactive notifications and planned calendar warnings when impending heavy rain, extreme heat, or high winds impact scheduled outdoor sessions.
+- **Efficient Server Caching**: 3-hour server-side forecast caching with automatic on-demand cache overrides accessible from the More tab.
 
-Versioned JavaScript, CSS, and image assets with a `?v=...` query are served
-with a one-year immutable cache policy and an ETag. HTML, the manifest, and the
-service worker remain revalidatable with `no-cache`. The service worker uses
-cache-first for versioned assets and network-first for other non-API requests,
-removes older versioned caches on activation, and never caches API responses.
-Enable gzip or Brotli only at the documented trusted HTTPS reverse proxy; the
-application remains LAN/VPN-only.
+### External Calendars & Schedule Constraints
+- **Read-Only iCalendar (ICS) Sync**: Secure polling of private external iCalendar feeds (Google Calendar, Apple iCloud, Microsoft Outlook) without write permissions.
+- **Rolling 8-Week Event Horizon**: Bounded calendar expansion mapping external life events across an 8-week (56-day) forward-looking window.
+- **RFC 5545 Recurrence Engine**: Comprehensive expansion of standard recurring rules (daily, weekly, monthly, yearly) and Google Calendar recurrence exceptions capped at 1,000 instances.
+- **Actionable Calendar Description Tags**: Selective tag parsing recognizing `[NO_TRAINING]`, `[NO_INTENSITY]`, and `[SHORT_ONLY]` within event descriptions to steer adaptive planning.
+- **Visual Schedule Conflict Markers**: Distinctive visual indicators on the planned calendar alerting the athlete to busy days and potential scheduling conflicts.
+- **Adaptive Session Replanning**: Heuristic session adjustments that suggest shorter durations or lower-intensity replacements for scheduled workouts on congested days.
 
-Live status connections pause while the app is hidden or offline and resume
-when it becomes active again. Repeated short disconnects increase the retry
-delay up to 30 seconds; ordinary API requests and status polling remain
-available during that delay. Only a stream that stays open for at least
-30 seconds resets the delay.
+### Performance Analytics, Metrics & Trends
+- **30-Day Historical Trends**: Long-term tracking and trend lines for FTP, running threshold pace, VO2 max, resting heart rate, heart rate variability (HRV), and body weight.
+- **Impulse-Response Fitness Modeling**: Real-time tracking of Chronic Training Load (Fitness), Acute Training Load (Fatigue), and Training Stress Balance (Form).
+- **Race Prediction Engine**: Dynamic race time estimations across standard distances (5K, 10K, Half Marathon, Marathon) based on current aerobic threshold and VO2 max trends.
+- **Sport-Specific Intensity Distributions**: Heart rate and power zone distribution analysis across running, outdoor cycling, and indoor/virtual cycling activities.
+- **Nutritional Intake Logging**: Integrated tracking of daily caloric intake and macronutrient splits (protein, carbohydrates, fats) stored alongside training load.
+- **Explicit Metric Freshness**: Clear differentiation between observation timestamps and synchronization retrieval times to prevent outdated metrics appearing fresh.
 
-## Coach context projection
+### Multimodal Inputs & File Attachments
+- **Push-to-Talk Voice Input**: Low-latency voice recording in chat with real-time server-side transcription and zero persistence of raw audio recordings.
+- **Multi-File Attachment Support**: Seamless file upload supporting up to 4 concurrent GPX tracks, FIT files, or image files (PNG, JPEG, WebP) up to 5 MB each.
+- **Server-Side GPX Processing**: In-memory parsing of GPX tracks calculating total distance, un-smoothed elevation gain, and sampled geographic coordinates for the Coach.
+- **Binary FIT Activity Summaries**: Local extraction of binary FIT files summarizing elapsed time, distance, normalized power, average heart rate, and cadence.
+- **Visual Technique Analysis**: Image forwarding to multimodal AI models enabling visual evaluation of training charts, race routes, or workout screenshots.
+- **Encrypted Attachment Storage**: Durable storage of uploaded attachments within the encrypted SQLite database, included in full backups and privacy exports.
 
-The encrypted provider snapshots and the general local state remain complete.
-Only the projection assembled for a coaching request is bounded: it
-includes the five newest activities per normalized sport, compact planned
-workout fields, and at most 50 local planned units. Long descriptions and
-provider-only payloads are omitted from that projection. Local planned units
-are serialized once, and the context preview reports section sizes and the
-overall character-budget status. Current performance metrics retain their
-source labels; Garmin performance fields are included only when they add
-information not already represented by the Intervals.icu performance context.
+### PWA, Mobile Experience & Offline Capabilities
+- **Installable Progressive Web App**: Responsive PWA optimized for mobile, tablet, and desktop viewports, installable on iOS, Android, macOS, and Windows.
+- **Reliable Hash-Based Navigation**: Accessible URL routing (`#coach`, `#plan`, `#analysis`, `#more`) preserving browser history, deep links, and screen-reader announcements.
+- **Immutable Static Asset Caching**: Versioned static asset serving with one-year immutable cache headers, accompanied by instant service worker cache eviction on updates.
+- **Resilient Offline App Shell**: Pre-cached application shell allowing view navigation and inspection of previously loaded training data during network drops.
+- **Auto-Reconnecting SSE Streaming**: Server-Sent Events stream with exponential backoff (capping at 30 seconds) ensuring smooth recovery after connection drops.
+- **Touch-Friendly Collapsible Views**: Ergonomic mobile interface featuring collapsible profile headers, compact calendar cards, and thumb-friendly bottom navigation.
+- **Accessible Keyboard Shortcuts**: Desktop navigation supporting Enter-to-send, Shift+Enter for line breaks, Esc for modal dismissal, and ARIA live announcements.
 
-New activities become available to the coach after the startup/daily
-Intervals.icu sync, a manual synchronization, or a chat request that
-explicitly asks for current/latest training data. The browser's regular state
-poll only reads the local snapshot; it does not contact Intervals.icu.
+### Privacy, Security & Data Management
+- **SQLCipher AES-256 Encryption**: Complete encryption of all athlete data, metrics, tokens, chat history, and attachments at rest using `APP_PASSWORD`.
+- **Strict Session Security**: High-security session cookies hardened with `HttpOnly`, `SameSite=Strict`, and optional `Secure` flags.
+- **Zero Third-Party Trackers**: Self-hosted architecture containing zero tracking scripts, third-party analytics, external CDNs, or telemetry reporting.
+- **Comprehensive Privacy Export**: Single-click export producing a complete, unencrypted JSON archive of all profile records, workouts, metrics, and chat history.
+- **Confirmed Local Data Purge**: Irreversible deletion of all local athlete data guarded by an explicit typed confirmation phrase (`LOKALE DATEN LÖSCHEN`).
+- **Zero-Downtime Maintenance Mode**: Process-level maintenance gate that prevents concurrent writes and ensures transaction safety during database restoration.
+- **Pre-Restore Rollback Copies**: Automated creation of a safety copy of the existing database before executing any database restore or replacement.
+- **Redacted Operational Logging**: Structured server logs that correlate technical operation IDs while stripping authentication headers, tokens, and athlete text.
+- **Temporary Diagnostic Capture**: Time-limited (1-hour) technical diagnostic logger recording API response shapes and error traces without capturing athlete content.
 
-The browser bootstrap is intentionally independent of chat and activity
-history. Domain data is loaded through bounded endpoints: activities and chat
-history use stable cursors (chat history also supports bounded server-side
-search), while plans, performance, profile, feedback, and the workout library
-are loaded separately. The activity view can request the next page without
-reloading the complete application state.
+---
 
-The `#plan/overview` and `#plan/library` routes form the read-only Geplant view.
-The overview shows dated local units in a weekly calendar and the library shows
-active workout templates grouped by sport. Neither segment contains planning,
-deletion, editing, or synchronization controls. Planning, template management,
-competitions, multi-week plans, and explicit remote synchronization are handled
-through the Coach.
-
-Endurance workout steps start with an explicit duration or distance, for example
-`- 6km Z1 HR`. Conditions, optional extensions and safety advice belong in plain
-paragraphs without a leading dash: Intervals.icu can count quantities inside
-dash bullets as additional workout steps. For a 6-8 km run, the Coach plans the
-lower total (including warmup/cooldown) and describes the optional upper total
-separately. Ambiguous quantity-bearing bullets are rejected on local authoring
-and before workout export with a correction hint. Cue-first steps such as
-`- Recovery 30s 50%` must be written as `- 30s 50% Recovery` in this app.
-
-The More view is organized into the deep-linked segments `#more/profile`,
-`#more/connections`, `#more/coach`, `#more/privacy`, and `#more/operations`.
-Profile fields show when they may be included in requests to the selected KI-Anbieter. Sports and
-time zone use controlled selections, while competition duration and distance are
-entered as `hh:mm` and kilometers and normalized before local storage. Privacy,
-backup/restore, and diagnostics remain available within two navigation levels.
-
-Manual Intervals.icu synchronization starts in the background and exposes only
-the bounded `/api/sync/status` response while it runs. The browser uses one
-status poll at a time, coordinates visible tabs through a short-lived local
-lease, pauses polling while hidden or offline, and reloads only domains whose
-state version changed after completion.
-
-The connections view shows a bounded, sanitized freshness timeline for
-Intervals.icu, Garmin, Open-Meteo, and the read-only shared calendar. It
-separates never-loaded, fresh, partial, stale-but-usable, and failed states,
-records only technical timestamps/phases/error classes, and calculates a
-bounded retry time after transient failures. Retry buttons are limited to the
-corresponding read-only provider path; competition and workout-library writes
-remain separate explicit actions. The same safe freshness metadata is included
-in the diagnostics report. The timeline retains at most 200 attempts for 30
-days and never stores provider responses or calendar URLs during normal use.
-
-While a provider synchronization is running, the connections view shows its
-current phase and, where the provider reports one, a progress indicator. A
-site-wide notice headed **“Anbindung benötigt Aufmerksamkeit”** is displayed
-only for errors that require manual intervention (for example, renewed login
-or invalid configuration). An unavailable optional morning Body Battery value
-is rendered neutrally and does not raise that notice or schedule a retry.
-
-The library has no multi-selection, local marking, manual planning, conflict
-resolution, or synchronization controls. The Coach receives bounded local IDs
-and payload hashes, performs explicitly requested single or bulk changes, and
-queues an explicitly named Intervals.icu synchronization in batches. Provider
-failures are reported in Coach Chat and can be retried there.
-
-## Target competitions and Intervals.icu
-
-Target competitions are managed through the Coach with the Intervals.icu event
-fields: name, local start date/time, sport/type, category, description, duration,
-distance, target, and external ID. They are synchronized in both directions
-with Intervals.icu. Local changes are exported as `RACE_A`,
-`RACE_B`, or `RACE_C` events with a stable `external_id`; matching race events
-from Intervals.icu are imported into the local database.
-
-Startup, daily, and ordinary pull synchronization only reads competition events
-and never exports local changes or deletion tombstones. An explicit named Coach
-request performs the dedicated competition synchronization.
-
-Competition synchronization accepts strength training, running, outdoor
-cycling (`Ride`), and indoor/virtual cycling (`VirtualRide`). Other sports are
-skipped. Remote events that were previously linked but no longer exist are
-kept locally; a later explicit Coach synchronization reconciles them. Local
-deletions are propagated to Intervals.icu during that synchronization.
-The Intervals.icu event ID is stored locally after import or a successful push.
-Before creating a new event, synchronization also checks for an existing race
-with the same name, date, and sport to avoid creating duplicates. A dirty local
-row that matches a remote race by identity only is never silently adopted. The
-Coach reports provider failures and can retry the requested operation; planned
-workouts always use the preserved local version.
-
-## Configuration
-
-Copy `.env.example` to `.env`, or set the variables directly as Docker or
-Unraid environment variables. Values supplied through the container
-environment take precedence over values in `.env`.
-
-Required:
+## System Architecture & Data Flow
 
 ```text
-OPENAI_API_KEY=replace-me
-# Or, instead of OPENAI_API_KEY:
-# GEMINI_API_KEY=replace-me
-INTERVALS_API_KEY=replace-me
-INTERVALS_ATHLETE_ID=0
-APP_PASSWORD=replace-with-at-least-12-random-characters
+               +-------------------------------------------------------------+
+               |                       Trusted Athlete                       |
+               |                (Mobile PWA / Desktop Browser)               |
+               +------------------------------+------------------------------+
+                                              | HTTPS / WSS / SSE
+                                              v
+               +-------------------------------------------------------------+
+               |                  Reverse Proxy (Caddy / Nginx)              |
+               |               Terminates TLS, Sets Secure Headers           |
+               +------------------------------+------------------------------+
+                                              | HTTP (Port 8090)
+                                              v
++-------------------------------------------------------------------------------------------+
+| Intervals Coach Container (/app)                                                          |
+|                                                                                           |
+|  +-------------------------------------------------------------------------------------+  |
+|  | server.py (Composition Root & HTTP Server)                                          |  |
+|  +-------------------------------------------+-----------------------------------------+  |
+|                                              |                                            |
+|                                              v                                            |
+|  +-------------------------------------------------------------------------------------+  |
+|  | backend/ Domain Layer                                                               |  |
+|  |   - backend.http_api  : Request routing, JSON/multipart parsing, session cookies     |  |
+|  |   - backend.coach     : AI turn queue, context builder, 37 tool dispatchers, SSE    |  |
+|  |   - backend.sync      : Background scheduler, Intervals.icu, Garmin, Weather, ICS   |  |
+|  |   - backend.activities: Activity matching, duplicate detection, feedback tracking   |  |
+|  |   - backend.planning  : Workout units, templates, atomic changesets, revision locks |  |
+|  |   - backend.weather   : Open-Meteo client, ICON-D2/ECMWF forecast models, windows   |  |
+|  |   - backend.backup    : Export, validation, pre-restore snapshots, maintenance gate |  |
+|  |   - backend.db        : Repositories, transaction locks, SQLCipher connection pool   |  |
+|  +-------------------------------------------+-----------------------------------------+  |
+|                                              |                                            |
+|                                              v                                            |
+|  +-------------------------------------------------------------------------------------+  |
+|  | Persistent Storage Mount (/data)                                                    |  |
+|  |   - coach.db (SQLCipher AES-256 Encrypted Database)                                 |  |
+|  |   - garmin_tokens (Encrypted Garmin OAuth Session Store)                            |  |
+|  |   - backups/ (Local Database Snapshots and Pre-Restore Copies)                      |  |
+|  +-------------------------------------------------------------------------------------+  |
++-------------------------------------------------------------------------------------------+
+       |                                |                             |
+       | HTTPS REST                     | HTTPS (curl_cffi)           | HTTPS REST
+       v                                v                             v
++------------------+         +--------------------+         +--------------------+
+|  Intervals.icu   |         |   Garmin Connect   |         |  Open-Meteo & ICS  |
+|  - Activities    |         |   - Sleep & Stress |         |  - 14-Day Forecast |
+|  - Fitness/Form  |         |   - Body Battery   |         |  - Rain & Wind     |
+|  - Plan Uploads  |         |   - Health Totals  |         |  - Life Calendars  |
++------------------+         +--------------------+         +--------------------+
 ```
 
-`APP_PASSWORD` protects the web interface and all API endpoints except the
-liveness/readiness probes, login, and authentication-status endpoints. The same password
-is used as the SQLCipher database key. It is never stored by the application
-and cannot be recovered if lost. The password must be at least 12 characters
-long.
+---
 
-The database is created with the current SQLCipher schema on first startup.
-Startup never changes an existing database schema: if its application tables,
-columns, or named indexes differ from the current schema, startup stops. This
-release therefore expects a newly created database instead of an older
-database being reused. Restore accepts only a database with that exact current
-schema and checks its integrity before replacing the active file. The
-public-calendar candidate relation explicitly cascades when its source is
-deleted.
+## Configuration & Environment Variables
 
-`/api/health` is a liveness probe: it only confirms that the HTTP process can
-answer. `/api/readiness` is a separate infrastructure probe and returns HTTP
-503 until a harmless database read, the current schema, a temporary write in
-`/data`, and the maintenance gate are all usable. Its response contains only
-safe booleans and status values, never paths, secrets, or athlete data.
+All configuration is loaded from container environment variables or a local `.env` file mounted in `/data/.env` or the application root.
 
-Local state reads and Coach usage accounting share the database transaction
-lock. Completing a Coach response while the UI reloads its state therefore
-cannot deadlock through a separate usage-statistics lock. Usage counters remain
-atomic when multiple responses finish concurrently.
+### Environment Variable Reference
 
-Backend modularization starts with dependency-light database primitives in the
-`backend.db` package. Its repositories provide explicit
-`KeyValueRepository`, `ProfileRepository`, `CompetitionRepository`,
-`TrainingPlanRepository`, `PlanAdjustmentRepository`,
-`ChatRepository`,
-`CheckinRepository`,
-`ActivityFeedbackRepository`, and `SnapshotRepository` interfaces in
-`backend/db/repositories.py`. The Intervals.icu provider's bounded,
-duplicate-page-safe collection
-pagination is isolated in `backend/providers/intervals.py`; it receives the
-transport and error factory explicitly and has no dependency on application
-state. Further provider operations, synchronization, coaching,
-backup, and HTTP routing are moved in separate cohesive steps. The HTTP
-boundary also isolates bounded request-body, JSON, and audio parsing in
-`backend/http_api/requests.py`; socket I/O, authentication, and application
-error types remain in the handler. These modules are copied into the container
-as application code and do not change the
-SQLCipher, authentication, or persistence contracts.
+| Variable | Default Value | Required? | Description |
+| :--- | :--- | :--- | :--- |
+| `APP_PASSWORD` | *None* | **Yes** | Master password (minimum 12 characters). Secures web UI authentication and acts as the encryption key for the SQLCipher database. |
+| `OPENAI_API_KEY` | *None* | **Conditional** | API key for OpenAI. Required if using OpenAI as the AI provider. |
+| `GEMINI_API_KEY` | *None* | **Conditional** | API key for Google Gemini. Required if using Gemini as the AI provider. |
+| `AI_PROVIDER` | `openai` | No | Active AI provider (`openai` or `gemini`). Determines which model powers Coach Chat. |
+| `OPENAI_MODEL` | `gpt-5.6-luna` | No | OpenAI model deployment name. Supported options: `gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`. |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | No | Google Gemini model name. Default: `gemini-3.8-flash`. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | No | Custom base URL for OpenAI-compatible APIs (e.g., Azure OpenAI / Microsoft Foundry endpoints ending in `/openai/v1`). |
+| `INTERVALS_API_KEY` | *None* | **Yes** | Personal API key obtained from Intervals.icu account settings. |
+| `INTERVALS_ATHLETE_ID` | `0` | No | Athlete ID for Intervals.icu (`0` targets the athlete account associated with the API key). |
+| `GARMIN_EMAIL` | *None* | No | Garmin Connect account email. Used only during initial interactive login. |
+| `GARMIN_PASSWORD` | *None* | No | Garmin Connect account password. Used only during initial interactive login. |
+| `GARMINTOKENS` | `/data/garmin_tokens` | No | File path to the persisted Garmin OAuth token store. |
+| `GARMIN_FIXTURE_PATH` | *None* | No | Local mock JSON fixture path for development and testing without live Garmin credentials. |
+| `CALENDAR_ICAL_URL` | *None* | No | Private read-only iCalendar (ICS) feed URL from Google Calendar, iCloud, or Outlook. |
+| `COOKIE_SECURE` | `false` | No | Set to `true` when running behind an HTTPS reverse proxy to add the `Secure` flag to cookies. |
+| `DATA_RETENTION_DAYS` | `-1` | No | Retention period in days for historical sync logs and data. `-1` retains data indefinitely. |
+| `PORT` | `8090` | No | Internal HTTP port the application listens on. |
+| `DATA_DIR` | `/data` | No | Path to the directory where the encrypted database and tokens are stored. |
+| `TZ` | `UTC` | No | Container timezone (e.g., `Europe/Berlin`). Crucial for accurate daily scheduling and sleep windows. |
 
-The first frontend boundary is `public/api.js`. It owns same-origin JSON and
-audio requests, CSRF headers, and common HTTP error handling; `app.js` supplies
-the login callback. The API
-client has no dependency on application state or views. Future frontend
-boundaries (`state`, `navigation`, `views`, `forms`, and `components`) depend
-on this client through explicit interfaces, with no new framework and no
-duplicate DTO definitions. The route constants and pure hash parsers are
-isolated in `public/navigation.js`, the shared mutable UI state is isolated in
-`public/state.js`, state-free display/formatting helpers are isolated in
-`public/views.js`, and dialog focus components are isolated in
-`public/components.js`.
-DOM- and data-loading coordination remains in `app.js` and the script order is
-explicit.
+---
 
-Optional Garmin Connect configuration:
+## Installation & Deployment
 
-```text
-GARMIN_EMAIL=your-email@example.com
-GARMIN_PASSWORD=replace-me
-GARMINTOKENS=/data/garmin_tokens
-GARMIN_FIXTURE_PATH=garmin-fixture.example.json
-```
+### Docker Run
 
-`GARMIN_FIXTURE_PATH` is intended for local development and tests. A persistent
-Garmin token store is preferred after the first login and MFA setup.
-
-Optional shared calendar configuration:
-
-```text
-CALENDAR_ICAL_URL=https://calendar.example/household.ics
-```
-
-Use the private iCalendar/ICS feed supplied by the calendar provider. Treat a
-private feed URL like a password. The application only fetches this feed,
-stores bounded event metadata locally, and never writes to the calendar. The
-URL stays in the server environment and is excluded from browser state,
-exports, and logs.
-
-The feed is read at startup, hourly, or on demand with **Synchronisieren**
-in the More tab. Automatic synchronization uses the athlete's validated
-IANA timezone and stores a separate last-success time for each provider.
-Successful manual synchronization counts for the current hour. Events
-are supplied to the Coach as read-only scheduling context.
-A successful sync keeps events from today through the next
-8 weeks (56 days). A failed refresh leaves the last successful event set in place and
-shows the error. Calendar text is untrusted data; it cannot change application
-settings or bypass explicit library synchronization or planning approvals.
-
-Other supported operational variables are:
-
-```text
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-5.6-luna
-GEMINI_MODEL=gemini-3.8-flash
-# If both API keys are set, OpenAI remains the default. Use gemini to select it on startup.
-AI_PROVIDER=gemini
-DATA_RETENTION_DAYS=-1
-PORT=8090
-DATA_DIR=/data
-TZ=Europe/Berlin
-```
-
-`OPENAI_BASE_URL` is optional and defaults to `https://api.openai.com/v1`. It
-must be an HTTP(S) base URL without credentials or query parameters. This lets
-you use an OpenAI-compatible Responses API, for example a Microsoft Foundry
-endpoint such as `https://<resource>.openai.azure.com/openai/v1`. Keep
-`OPENAI_API_KEY` for the provider credential and set `OPENAI_MODEL` to the
-provider's deployment/model name. The configured service must support the
-Responses API, SSE streaming, and Conversations API used by the app; voice
-input additionally requires `/audio/transcriptions`.
-Coach tool rounds use `previous_response_id` within one command; no previous
-command's response chain is reused. Stored Responses follow the provider's
-response retention policy, separately from the stored conversation object.
-
-Gemini can be configured as an alternative with `GEMINI_API_KEY`. When both
-providers are configured, select the active provider in **More → Coach & Model**
-or set `AI_PROVIDER=gemini`. `GEMINI_MODEL` defaults to `gemini-3.8-flash`.
-The app sends the same sanitised Coach context only to the selected provider.
-Gemini conversations and tool-call history are stored locally so that Coach
-actions continue to use the same local authorization and validation checks.
-Interactive Gemini text uses the provider's SSE streaming endpoint. Voice input
-uses the selected provider and is never persisted.
-
-`DATA_RETENTION_DAYS=-1` is the default and disables automatic deletion. The
-application does not impose its own OpenAI request or token limits; it displays
-remaining quotas when the API reports them. When the configured provider returns
-a billing or quota error such as `credit_balance_exhausted`, the app shows a
-clear message and points to billing.
-
-## Garmin authentication
-
-For the first Garmin login, run the one-time interactive helper with the
-persistent data directory mounted. The helper prompts for the Garmin MFA code
-when required and stores refresh tokens under `GARMINTOKENS`.
-
-```sh
-docker run --rm -it \
-  --env-file /mnt/user/appdata/ai-coach/.env \
-  -v /mnt/user/appdata/ai-coach/data:/data \
-  ghcr.io/lukas-beike/ai-coach:latest \
-  python /app/garmin-login.py
-```
-
-After the token store has been created, restart the application container with
-the same `/data` mount. The application can then use the stored Garmin tokens
-without asking for the login code on every startup.
-
-## Local planning data and target competitions
-
-The **Activities** tab allows you to add local notes after a completed activity,
-for example about pain, unusual fatigue, conditions, or anything that went
-particularly well. These activity-specific notes are stored separately from
-imported Garmin and Intervals.icu values and included in the AI context as
-local athlete data.
-
-The adaptive planning action is surfaced as a compact hint on the Coach tab when
-a weather or shared calendar refresh finds future local planned units that need
-adjustment. It produces a change preview; asking the Coach to apply the preview
-is the explicit approval and updates eligible local library entries.
-It does not overwrite, delete, or reschedule remote Intervals.icu calendar
-events.
-
-External calendar events are only planning signals. The heuristic uses the event
-date, start/end time, duration, and all-day status to identify library entries
-that are hard or long. It does not infer or diagnose an infection from a family event;
-illness must still be entered in the athlete check-in. Every suggested change
-remains a local preview and requires an explicit Coach request to apply it.
-
-Confirmed illness pauses can optionally be synchronized as explicit `SICK`
-calendar entries to Intervals.icu. This remote calendar write happens only when
-the athlete explicitly names that synchronization in Coach Chat.
-
-
-## Docker and Unraid
-
-The container runs as a non-root user and expects a persistent writable mount
-at `/data`. The Unraid Appdata directory must grant the container write access.
-
-The Unraid application logo is available at
-[`public/logo.png`](public/logo.png).
-
-Pull and run the published image:
+Run the published container image with a persistent data volume and read-only container root:
 
 ```sh
 docker pull ghcr.io/lukas-beike/ai-coach:latest
-docker stop ai-coach || true
-docker rm ai-coach || true
+
 docker run -d \
   --name ai-coach \
   --restart unless-stopped \
   --read-only \
   --security-opt no-new-privileges:true \
+  --cap-drop=ALL \
   -p 8090:8090 \
   -v /mnt/user/appdata/ai-coach/data:/data \
   --env-file /mnt/user/appdata/ai-coach/.env \
@@ -678,433 +248,306 @@ docker run -d \
   ghcr.io/lukas-beike/ai-coach:latest
 ```
 
-Alternatively, build locally from the project root:
+*Note: Never run `docker rm -v`, as the `/data` volume contains your encrypted database and token stores.*
+
+### Docker Compose
+
+Create a `docker-compose.yml` file:
+
+```yaml
+services:
+  ai-coach:
+    image: ghcr.io/lukas-beike/ai-coach:latest
+    container_name: ai-coach
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./data:/data
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Berlin
+```
+
+Start the service:
 
 ```sh
-docker build -t ai-coach:local .
+docker compose up -d
 ```
 
-Do not use `docker rm -v`, because the `/data` volume must be preserved. In
-Unraid, set credentials and the athlete ID under the container's **Environment
-variables**. Recreate the container after changing environment variables. API
-keys and passwords are not entered in the application UI.
+### Unraid Deployment Guide
 
-For access outside the home network, use a private VPN. The project does not
-provide HTTPS proxying; do not expose its HTTP port directly to the public
-internet.
+1. **Prepare Appdata Directory**:
+   Create the storage folder on your cache pool and ensure it is writable by the container user (UID 100 / GID 101 or standard app permissions):
+   ```sh
+   mkdir -p /mnt/user/appdata/ai-coach/data
+   chmod -R 770 /mnt/user/appdata/ai-coach/data
+   ```
+2. **Container Template Setup**:
+   - **Repository**: `ghcr.io/lukas-beike/ai-coach:latest`
+   - **Network Type**: `Bridge`
+   - **Container Port**: `8090` -> **Host Port**: `8090`
+   - **Container Path `/data`**: `/mnt/user/appdata/ai-coach/data` (Read/Write)
+   - **Environment Variables**: Add `APP_PASSWORD`, `OPENAI_API_KEY`, `INTERVALS_API_KEY`, `TZ`, etc.
+   - **Icon URL**: `https://raw.githubusercontent.com/Lukas-Beike/ai-coach/main/public/logo.png`
+3. **Save and Start**: Start the container and check `docker logs -f ai-coach`.
 
-The chat voice-input feature requires the PWA to be opened through a trusted
-HTTPS reverse proxy so the browser can request microphone permission. The
-recording is limited to short voice notes, transcribed server-side, and is not
-persisted locally. The resulting transcript is placed in the message field
-for review before it is sent to the coach.
+### HTTPS Reverse Proxy Setup
 
-## Data, privacy, and logs
+Modern mobile browsers require a **Secure Context (HTTPS)** to register Service Workers, install Progressive Web Apps (PWAs), and enable microphone audio recording for push-to-talk voice. Always terminate TLS using a trusted reverse proxy.
 
-The encrypted database and rotating JSONL logs are written to `/data`. The selected
-KI-Anbieter receives only the structured coaching context required for a request. API keys
-are never sent to the browser or included in the coach context. Text received
-from external services is treated as untrusted data and never as instructions.
-
-Logs record external service, operation, path, duration, result sizes, and safe
-failure classifications, but
-not request/response bodies or credentials. Garmin identity values and private
-calendar URLs are redacted case-insensitively, including URL-encoded forms;
-URL userinfo, known token query parameters, and long credential-like path
-segments are removed while a non-sensitive provider host remains visible for
-diagnostics. Provider failures use short classified error messages rather than
-forwarding SDK exception text. Client disconnects such as a closed browser
-connection are handled as normal aborted requests rather than internal server
-failures.
-
-The **System** tab allows the athlete to export local data as JSON or delete
-local chats, snapshots, active and archived library entries,
-competitions, plans, check-ins, feedback, provider snapshots, calendar imports,
-and profile state. It also shows a bounded local change history for profile,
-library, competition, and plan changes. History entries expose only changed
-field names; the values needed for an explicitly confirmed local Undo remain in
-the encrypted database record and are never sent to a provider. Undo uses a
-preview and one-time confirmation token, checks the current object hash, and
-marks a previously synchronized object as locally changed so any remote sync
-remains a separate action. Session cookies and server credentials are never part of the
-export. The database file itself remains in place. Chat reset and local cleanup
-also attempt to delete the stored OpenAI conversation when it is active; Gemini
-conversation history is held locally and removed with the local data. If remote deletion
-cannot be confirmed, the UI shows an explicit warning. Data held by external
-providers remains subject to their own policies.
-
-For Intervals.icu and Garmin, the System tab also offers a full local
-resynchronization. It removes only the locally cached data for that provider
-and then fetches it again; cloud data, credentials, and Garmin tokens are not
-deleted. While this operation runs, syncs for the affected provider and
-Intervals.icu write operations are blocked.
-The Intervals.icu connection card also reports whether the provider is
-connected, synchronizing, or in error, including the time of the last
-successful update and a safe provider validation message when available.
-
-The **More** tab also provides an encrypted database backup download and a
-validated restore action. Restoring requires the same `APP_PASSWORD` used by
-the backup database. Before replacement, the current database is retained as a
-`*.pre-restore-*` copy in `/data`. Keep both files protected.
-
-Database backups are checkpointed and downloaded in bounded file chunks. The
-privacy export is an incrementally written ZIP archive: large collections are
-JSONL entries and `manifest.json` records the export format, format version,
-categories, and complete status. Temporary export files are removed after the
-download, including after a client disconnect. Export generation enforces a
-100 MB size limit, a 120-second time limit, and a free-space check before it
-starts. The archive is an intentional, athlete-readable export format; it is
-not a database copy.
-
-The export includes every stored check-in, activity-feedback record, library
-entry, training plan, external-calendar event, and public-calendar candidate.
-These collections are streamed without the Coach-context or browser page limits;
-an export that exceeds the archive limits fails instead of claiming completeness.
-Restore requeues interrupted synchronization jobs while retaining their recorded
-item outcomes, and invalidates the sessions captured in the backup.
-
-The Coach keeps an interrupted or incomplete answer visibly recoverable. Unsent
-queued messages trigger the browser's leave-page protection and are never stored
-as athlete text in browser storage. A chat reset is reflected in other open tabs.
-Older chat messages and additional library entries can be loaded one page at a
-time. Profile edits made during a save and active performance-value editors stay
-intact during polling. Microphone capture ends when the login session ends.
-
-The login session has a fixed 30-day lifetime; its cookie `Max-Age` and the
-server-side expiry use the same duration. The cookie is protected with `HttpOnly`
-and `SameSite=Strict` attributes. Activity metadata is written at most once per
-five minutes, while expired sessions and stale in-memory rate-limit buckets are
-cleaned up periodically in bounded batches. Synchronization logs correlate a
-technical operation ID across trigger, provider, phase, duration, counts, and
-safe error codes; they do not log provider payloads or athlete content.
-The normal diagnostic export also includes technical summaries of the 20 most
-recent saved Coach commands: completion state, tool names, classified errors,
-and application file/line locations. These summaries remain available if the
-optional capture was enabled only after a failure. They exclude dialogue,
-tool arguments, result contents, exception messages, session identifiers and
-credentials. Existing commands without captured error locations cannot recover
-those locations retroactively.
-In **Betrieb & Diagnose**, the athlete can explicitly enable a one-hour
-technical capture. It records response shapes and technical metadata only for
-that period so an export can diagnose provider schema failures. It never records
-response content or athlete data. It does not
-capture request bodies, API keys, passwords, tokens, cookies,
-authorization/session/CSRF fields, athlete content, or private calendar URLs;
-the normal logs and diagnostics remain content-free. The capture is never
-enabled by the Coach.
-For HTTPS reverse-proxy deployments, set
-`COOKIE_SECURE=true`; this adds the `Secure` attribute to the session and CSRF
-cookies. Keep it `false` for the documented local HTTP development flow.
-
-During database restore, the process enters a maintenance mode. Running
-provider and coach operations are allowed to finish before the database is
-validated and exchanged; new mutations receive a temporary maintenance error.
-Read-only status endpoints remain available, and the browser displays the
-maintenance state. Restore accepts only a backup with the current schema
-version and valid foreign-key/integrity checks. A failed restore leaves the
-current database in place.
-
-Open-Meteo failures are shown without exposing provider details and are retried
-with an increasing local backoff. A forced manual weather refresh bypasses that
-backoff.
-
-## Development and testing
-
-The backend is a Python standard-library HTTP server. The frontend is served
-from `public/` as a browser PWA. Runtime state belongs in `data/` and is not
-included in Docker builds.
-
-### Local Docker development on Windows
-
-Use the local Docker image as the development runtime. The pinned
-`sqlcipher3-binary` package does not provide the required Windows wheel, and
-the application requires SQLCipher for secure startup. Do not remove the
-dependency or bypass the secure-startup check to run the application natively
-on Windows.
-
-From PowerShell in the repository root, create the ignored local configuration
-and persistent data directory:
-
-```powershell
-Copy-Item .env.example .env
-New-Item -ItemType Directory -Force .\data
+#### Caddy Example
+```caddy
+coach.internal.domain {
+    reverse_proxy ai-coach:8090 {
+        header_up X-Forwarded-Proto https
+    }
+}
 ```
 
-Set the required API values and a stable `APP_PASSWORD` of at least 12
-characters in `.env`. For Docker, use `DATA_DIR=/data` and
-`GARMINTOKENS=/data/garmin_tokens`. Keep `.env`, `data/`, Garmin credentials,
-tokens, encrypted databases, and recovery backups private; never commit or
-print them.
+#### Nginx Example
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name coach.internal.domain;
 
-Build the image after application, frontend, dependency, Dockerfile, or
-startup changes:
+    ssl_certificate /etc/letsencrypt/live/coach.internal.domain/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/coach.internal.domain/privkey.pem;
 
-```powershell
-docker build -t ai-coach:local .
+    location / {
+        proxy_pass http://127.0.0.1:8090;
+        proxy_http_version 1.1;
+
+        # WebSocket and SSE Streaming support
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+
+        # Disable buffering for live SSE token streaming
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+    }
+}
+```
+*When deploying behind HTTPS, remember to set `COOKIE_SECURE=true` in your `.env`.*
+
+### Garmin Authentication & MFA Setup
+
+Garmin Connect enforces Multi-Factor Authentication (MFA). Complete the initial authentication interactively using the bundled `garmin-login.py` script:
+
+1. Ensure `GARMIN_EMAIL` and `GARMIN_PASSWORD` are defined in your `.env` file.
+2. Run the interactive login helper inside a temporary container attached to your persistent data directory:
+   ```sh
+   docker run --rm -it \
+     --env-file /mnt/user/appdata/ai-coach/.env \
+     -v /mnt/user/appdata/ai-coach/data:/data \
+     ghcr.io/lukas-beike/ai-coach:latest \
+     python /app/garmin-login.py
+   ```
+3. Enter the MFA code sent to your email or mobile device when prompted.
+4. The helper generates an encrypted OAuth token store saved to `/data/garmin_tokens`.
+5. Once complete, you may safely remove `GARMIN_PASSWORD` from your `.env`. Restart the `ai-coach` container, and it will authenticate automatically using the persisted tokens.
+
+---
+
+## Loading, Synchronization & Job Architecture
+
+### Background Scheduling Engine
+- **Startup Sync**: On container launch, the backend initializes the database, spins up background worker threads, and triggers an initial synchronization across all configured providers.
+- **Hourly Provider Cycle**: Checks for updated calendar events, refreshed weather forecasts, and new Intervals.icu completed activities.
+- **Daily Synchronization Loop**: Runs daily at 03:00 UTC (or configured local time) to pull comprehensive activity files, update rolling fitness metrics, and schedule the day's training agenda.
+- **On-Demand Refreshes**: Triggered immediately whenever the athlete clicks **Synchronisieren** in the More tab or when requested by the Coach.
+
+### Priority Queue & Durable Job Processing
+Every conversational request, activity sync, and background task is enqueued in the SQLite `background_jobs` table.
+- **Streaming Handshake**: When an HTTP turn starts, Server-Sent Events (SSE) immediately return the durable job UUID.
+- **Decoupled Execution**: If the athlete locks their phone or loses cellular connection, the server continues execution uninterrupted.
+- **Recovery on Reconnect**: Upon reconnection or app reload, the PWA polls the durable job result using its UUID, rendering the completed answer without re-executing actions.
+
+### Provider Data Handling
+- **Intervals.icu Activity Pull**: Ingests new completed workouts with full telemetry (duration, distance, TSS, HR zones, power curves). Large imports are safely fetched in paginated windows.
+- **Garmin Sleep Gate & Body Battery**: Morning synchronization deliberately halts until Garmin's sleep window completes. Body Battery tracking captures the final pre-sleep value and the wake-up value within 60 minutes of rising, retrying up to 3 times with 15-minute intervals.
+- **Open-Meteo Weather**: Forecasts are fetched for the athlete's coordinates and cached for 3 hours. Short-range predictions use Germany's DWD ICON-D2 model, transitioning to ECMWF IFS HRES for 14-day projections.
+- **iCalendar (ICS) Life Constraints**: The external feed is parsed up to 8 weeks out. Events containing `[NO_TRAINING]`, `[NO_INTENSITY]`, or `[SHORT_ONLY]` in their description are tagged as training constraints.
+
+---
+
+## Coach Intelligence & Execution Boundaries
+
+### Prompt Projection & Token Budgeting
+To optimize API token consumption and response latency, Intervals Coach uses a strictly bounded context projection rather than dumping entire databases into prompts:
+- **Activity Projection**: Bounded to the 5 most recent completed activities per normalized sport type.
+- **Planning Projection**: Bounded to at most 50 future planned units.
+- **Metric Sanitization**: Raw JSON payloads from providers are stripped down to core athletic parameters (FTP, TSS, RPE, Heart Rate, Power Zones, Duration, Distance).
+- **Dialogue Pruning**: Multi-turn dialogue history is maintained locally; remote conversation chains are pruned between distinct command sessions.
+
+### Tool Execution & Reversible Changesets
+The Coach interacts with the athlete's data via 37 structured tools covering plan inspection, template management, profile editing, and provider synchronization:
+- **Transaction Locks**: All database updates share SQLite transaction locks to guarantee that conversational actions and background syncs never collide.
+- **Revision Control**: Plan modifications require passing the current planning revision and object hash, preventing overwrite collisions if edits occur concurrently.
+- **Receipt Verification**: Tool invocations produce structured receipts in the chat UI, explicitly delineating saved local modifications, queued sync jobs, and rejected parameters.
+
+### Multimodal Capabilities
+- **Voice Transcription**: Push-to-talk voice recording captures audio directly in the PWA. Audio is streamed to `/audio/transcriptions` (OpenAI Whisper or Gemini) in memory and inserted into the message box. Raw audio is never persisted.
+- **File Attachments**: Athletes can attach up to 4 GPX, FIT, or image files (max 5 MB each) per turn. GPX tracks are summarized locally (distance, elevation, GPS bounds); FIT files are parsed for power and cardiac data; images are sent for vision-based AI coaching.
+
+---
+
+## Workout Export & Syntax Specification
+
+Endurance workouts synchronized to Intervals.icu must comply with the native workout builder syntax. The application validates workout text locally before attempting remote synchronization:
+
+### Format Specification & Examples
+
+#### Cycling Intervals (Power & Cadence Targets)
+```text
+Warmup
+- 15m ramp 50-70%
+- 3m 80%
+- 3m 50-60%
+
+Main Set
+3x
+- 8m 88-92% 85-95rpm
+- 4m 50-60%
+
+Cooldown
+- 10m 50-60%
 ```
 
-For real Garmin data, complete the one-time login interactively. Enter the
-Garmin email, password, and MFA code in the local terminal; they do not need to
-be stored in `.env` after the token store exists:
+#### Running Workout (Pace & Heart Rate Targets)
+```text
+Warmup
+- 15m Z1 HR
 
-```powershell
-docker run --rm -it `
-  --env-file .env `
-  -v "${PWD}\data:/data" `
-  ai-coach:local `
-  python /app/garmin-login.py
+Main Set
+- 6km Z2 Pace
+- 1km 90-95% HR
+
+Cooldown
+- 10m Z1 HR
 ```
 
-Start the local application with the persistent data mount:
+### Strict Validation Rules
+1. **Executable Steps Required**: Endurance workouts (Ride, Run, Swim, Row) require explicit step durations (`m`, `s`) or distances (`km`, `m`) paired with an intensity target.
+2. **Relative Targets Preferred**: Use percentage FTP (`88-92%`) or zones (`Z2 HR`). Do not hardcode absolute wattages into steps, as they conflict with dynamic FTP adjustments.
+3. **Repeat Block Formatting**: Multi-interval blocks must begin with a repeat line (e.g., `3x`) and must be surrounded by blank lines. All steps within the block repeat equally.
+4. **Non-Endurance Activities**: Strength training, yoga, and mobility workouts use free-text prose instructions and bypass step validation.
 
-```powershell
-docker run -d --name ai-coach `
-  --restart unless-stopped `
-  --read-only `
-  --security-opt no-new-privileges:true `
-  -p 8090:8090 `
-  -v "${PWD}\data:/data" `
-  --env-file .env `
-  ai-coach:local
-```
+---
 
-After code changes, rebuild the image, then recreate only the container while
-retaining the same `data` mount:
+## Data Integrity, Privacy, Backups & Maintenance
 
-```powershell
-docker stop ai-coach
-docker rm ai-coach
-```
+### SQLCipher Encryption
+All persistent application state is stored in `/data/coach.db` encrypted with AES-256 via SQLCipher. The database key is derived from `APP_PASSWORD`. The application will refuse to start without SQLCipher libraries present.
 
-Never use `docker rm -v`, and never delete or replace the `data` directory.
-Open [http://localhost:8090](http://localhost:8090) for browser verification.
-Use `docker logs -f ai-coach` and
-`Invoke-WebRequest http://localhost:8090/api/health` for local diagnostics.
-Do not expose port 8090 directly to the public internet.
+### Maintenance Mode & Database Restoration
+When a database restore is initiated:
+1. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
+2. Active background sync jobs and Coach turns are allowed to finish gracefully.
+3. An automated pre-restore safety copy of the active database is saved in `/data/backups/pre_restore_backup.db`.
+4. The replacement database is validated for schema version integrity, table structures, and foreign-key constraints.
+5. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss.
 
-For UI work that does not need a live Garmin account, use the checked-in
-fixture instead. Mount it into the container and set
-`GARMIN_FIXTURE_PATH=/app/garmin-fixture.example.json`; no Garmin email,
-password, or token store is then required. The fixture is test data and must
-not contain credentials.
+### Privacy Export & Data Purge
+- **Full Privacy Export**: Download a single comprehensive JSON archive containing all stored profile fields, workouts, check-ins, activity notes, and chat history.
+- **Local Data Purge**: Completely wipes all local athlete records from the database. To prevent accidental loss, the action requires entering the exact confirmation phrase `LOKALE DATEN LÖSCHEN`. External accounts (Intervals.icu and Garmin) remain untouched.
 
-Run the test suite and syntax checks from the project root:
+### Operational Logging & Diagnostics
+- **Sanitized Logs**: Standard container logs contain only operational timestamps, correlation IDs, status codes, and anonymized error classifications. API tokens, passwords, and athlete metrics are never logged.
+- **1-Hour Diagnostic Capture**: When troubleshooting complex provider schema changes, athletes can activate a temporary 1-hour diagnostic capture in **Betrieb & Diagnose**. This records payload schemas and structural metadata without logging athlete content.
 
+---
+
+## Development, Testing & Contribution
+
+### Local Development on Windows
+
+Because native Windows environments often lack compatible pre-compiled wheels for `sqlcipher3-binary`, the canonical development and testing environment is the local Docker container.
+
+1. **Clone and Prepare**:
+   ```powershell
+   git clone https://github.com/Lukas-Beike/ai-coach.git
+   cd ai-coach
+   Copy-Item .env.example .env
+   New-Item -ItemType Directory -Force .\data
+   ```
+2. **Build Local Image**:
+   ```powershell
+   docker build -t ai-coach:local .
+   ```
+3. **Run Local Container**:
+   ```powershell
+   docker run -d --name ai-coach `
+     --restart unless-stopped `
+     --read-only `
+     --security-opt no-new-privileges:true `
+     -p 8090:8090 `
+     -v "${PWD}\data:/data" `
+     --env-file .env `
+     ai-coach:local
+   ```
+4. Access `http://localhost:8090` in your browser. Inspect logs using `docker logs -f ai-coach`.
+
+### Testing & Quality Assurance
+
+#### Native Python Unit Tests
+Run standard unit tests with temporary in-memory fixtures (mocking external providers):
 ```powershell
 python -m unittest discover -s tests -v
 python -m py_compile server.py tests/test_server.py
 ```
 
-The GitHub Actions test workflow runs the unit tests in four parallel shards
-with `python tests/run_tests.py --shard <number> --total 4`. General tests use
-an isolated fast SQLite fixture; the dedicated encryption checks retain their
-SQLCipher setup.
+#### Parallel Sharded CI Runner
+Run test shards matching the GitHub Actions CI pipeline:
+```powershell
+python tests/run_tests.py --shard 1 --total 4
+```
 
-The canonical Windows SQLCipher/container run builds an isolated image and
-mounts only the test inputs (`tests/` and `public/`) read-only. It never mounts
-the repository root, so `.env`, `data/`, token stores, databases, and backups
-cannot enter the test container:
-
+#### Isolated SQLCipher Integration Tests
+Execute full SQLCipher container tests without exposing local host `.env` or data files:
 ```powershell
 ./tests/run_sqlcipher_tests.ps1
 ```
 
-Native Python syntax checks, container unit tests, and image security are
-separate CI jobs aggregated by the required `test` check. The container job
-uses the same bounded test runner as the four fast native shards.
-The quality job records coverage and runs pinned Ruff formatter/linter and
-MyPy checks. Every test module is discovered before deterministic sharding;
-import failures are fatal and the runner reports executed and skipped counts.
-All checks and container builds use the workflow event's immutable `github.sha`.
-The release tag must identify that same commit and its APP_VERSION; dispatch
-inputs cannot replace the source that is executed.
-
-Pull requests run the unit tests, syntax checks, and image security report. The conventional-commit
-workflow validates pull-request titles and commit subjects. Dependabot manages
-Python, Docker, and GitHub Actions dependencies and can automatically squash
-merge successful update pull requests.
-
-### Codex pull-request review
-
-The required `Codex code review` check on `develop` and `Codex code review
-(main)` on `main` are merge gates for the native, subscription-backed Codex
-GitHub review. Automatic Code Review is disabled for this repository. Request
-the initial review with exactly `@codex review` in the pull request. After that,
-fix the findings, reply to them, and resolve their threads. Ordinary follow-up
-commits do not trigger another review. A second request is allowed only when
-the latest completed Codex review contains a P1 finding; a clean follow-up
-review clears that P1 requirement. The gate requires a completed Codex result
-for the current head, with all Codex review threads resolved. Dependabot and
-trusted release-bot exemptions remain governed by the rules below.
-Same-repository dependency-update PRs from
-the trusted `dependabot[bot]` are exempt on `develop` when all current commits
-are Dependabot-authored and the changed files are limited to dependency
-manifests, lockfiles, `Dockerfile`, or pinned GitHub Action references. This is
-needed because Dependabot PRs do not produce the subscription-backed review
-result. The trusted `ai-coach-release-bot[bot]` is also exempt for an exact
-`develop` version-bump PR whose branch, title, repository, and one-file
-`APP_VERSION` diff match the release contract. Its promotion PR to `main` is
-exempt only when its Git tree exactly matches a commit already integrated into
-`develop`, includes the current `main`, and its branch, title, repository, and
-`APP_VERSION` match the release version. New or changed promotion content fails
-this proof. The workflow records the base-specific required check with the
-exemption reason only for validated Dependabot or release-bot PRs; a manual review request overrides the
-exemption and remains tied to the current head commit across target-branch
-pushes. Retargeting a PR also establishes a fresh review baseline. Release-bot
-title edits establish a fresh baseline, while ordinary title-only edits do
-not. If
-the PR is closed or merged while the gate is waiting, the gate cancels its
-check instead of polling until the timeout.
-
-The workflow runs from the trusted target branch and never checks out or
-executes pull-request code. The release workflow also dispatches promotion
-validation from protected `develop`, so promotions can use the current proof
-even while `main` still contains an older gate. This dispatch accepts only
-release promotions and preserves manual review requests. Dispatch and manual
-comment events also use the current review action from protected `develop`.
-It uses only the GitHub token to read the summary,
-reviews, and reactions and to update the required check; no `OPENAI_API_KEY`
-repository secret is needed.
-Keep `Codex code review` required in the `develop` ruleset and
-`Codex code review (main)` required in the `main` ruleset. Base-specific names
-prevent a successful develop exemption check from satisfying the main gate.
-
-### Image supply chain and runtime boundary
-
-The test-and-publish workflow emits an SPDX image SBOM. An SBOM is a package
-inventory, not a vulnerability scan; assess the current OS and language-package
-inventory with a vulnerability scanner before deployment. Local fixture tests
-do not establish the status of remote CI or a published image.
-
-Published image digests receive a keyless Sigstore/Cosign signature through
-GitHub OIDC. The local runtime remains private: use a trusted LAN or private
-VPN and a trusted HTTPS reverse proxy, never expose `http.server` directly to
-the public internet. Keep the documented read-only root filesystem, and add
-`--cap-drop=ALL`, `--pids-limit`, `--memory`, and `--cpus` only when the
-explicit `/data` mount has been compatibility-tested. A rootless container
-host is recommended.
-
-### Browser smoke and accessibility checks
-
-The Playwright harness runs against a disposable Docker fixture. It receives
-only a fake `APP_PASSWORD`, uses an empty temporary container `/data` filesystem, and
-does not read `.env`, the host `data/` directory, or provider accounts. Install
-the JavaScript dependencies and run the desktop/mobile smoke and WCAG-AA
-checks with:
-
-```powershell
-$env:E2E_APP_PASSWORD = "e2e-fixture-password-1234"
-npm ci
-npx playwright install --with-deps chromium
-docker build -t ai-coach:e2e .
-docker run -d --name ai-coach-e2e -p 127.0.0.1:8090:8090 --read-only `
-  --tmpfs /data:uid=100,gid=101,mode=0700 --tmpfs /tmp `
-  --security-opt no-new-privileges:true `
-  -v "${PWD}/e2e:/app/e2e:ro" `
-  -e APP_PASSWORD=$env:E2E_APP_PASSWORD -e COOKIE_SECURE=false `
-  ai-coach:e2e python /app/e2e/fixture_runtime.py
+#### Playwright Browser E2E Tests
+End-to-end browser testing validates PWA responsiveness, keyboard navigation, and UI flows across 5 device viewports:
+```sh
+npm install
 npm run test:e2e
-docker rm -f ai-coach-e2e
 ```
+Configured viewports in `playwright.config.cjs`:
+- `mobile-small`: 320x568 (Compact mobile)
+- `mobile`: 390x844 (Standard mobile)
+- `tablet`: 768x1024 (Tablet portrait)
+- `tablet-landscape`: 844x390 (Mobile/tablet landscape)
+- `desktop`: 1440x1000 (Desktop workstation)
 
-The CI job uploads Playwright traces, screenshots, videos, and the HTML report
-only when the browser checks fail. These artifacts are generated from the
-empty fixture and are retained for seven days.
+### Continuous Integration & Codex Review Gate
+- **Conventional Commits**: All commit messages and pull request titles must follow the Conventional Commits specification (e.g., `feat(coach): add Gemini 3.8 Flash support` or `fix(sync): resolve Garmin sleep retry backoff`).
+- **Codex PR Review Gate**: Pull requests targeting `develop` or `main` require a subscription-backed Codex review gate. Request review by commenting `@codex review` on the pull request. All review findings must be resolved before merging.
+- **Automated Daily Releases**: At 03:00 UTC, an automated workflow inspects `develop`. If new commits exist, it creates a version-bump PR, integrates it, synchronizes with `main`, and publishes a cryptographically signed GitHub release and container image.
 
-The accessibility baseline covers the core landmarks, headings, labels, modal
-descriptions, live status/error announcements, visible focus, keyboard-only
-navigation, 200% text zoom, reduced motion, and 44 CSS-pixel touch targets.
-Dialogs return focus to the control that opened them; the browser check also
-reviews the login, check-in, navigation, and core coach flows with axe-core.
+---
 
-## Releases and container publishing
+## Security Boundaries & Medical Disclaimer
 
-The container image is published to
-`ghcr.io/lukas-beike/ai-coach` only for a published release or an explicitly
-started manual publish workflow. Ordinary pushes and pull requests run tests
-but do not publish an image.
+Intervals Coach is a personal athletic planning assistant, not a certified medical device. Training recommendations, adaptive replanning suggestions, and performance analytics are generated by artificial intelligence models and heuristic algorithms. 
 
-The repository uses `develop` as its integration branch and keeps `main`
-protected as the release branch. Feature pull requests should target `develop`;
-`main` should only be updated through the release promotion pull request.
+Always listen to your body. Do not follow workout intensity or duration recommendations that cause sharp pain, dizziness, or symptoms of overtraining. Consult a certified medical professional or sports physician before undertaking high-intensity endurance training or if recovering from illness or injury.
 
-The `Daily release` workflow checks every day at 03:00 UTC for commits since
-the latest release tag. If there is at least one commit, it opens a
-version-bump PR that increments `APP_VERSION` in `server.py`. After that PR is
-merged into `develop`, the workflow automatically enables squash auto-merge,
-creates a synchronized promotion branch, and opens a promotion PR to protected
-`main`. The promotion PR also uses squash auto-merge. Once the resulting `main`
-commit passes the test-and-publish workflow, its successful push run triggers
-creation of the release tag matching `APP_VERSION`. The tested commit must
-still be the current `main` commit. The workflow explicitly starts the test
-check for its generated PRs; those pre-merge tests do not wait for the promotion
-to merge or create a release. Pending release runs are queued so that a later
-event cannot replace an earlier release transition. Its release notes
-contain all commits since the previous release. It can also be started
-manually through **Actions -> Daily release -> Run workflow**. Manual runs may
-optionally provide a target `MAJOR.MINOR.PATCH` version such as `1.2.0` or
-`2.0.0`; when omitted, the next patch version is selected automatically. An
-explicit manual version is allowed even when there are no new commits.
-
-The resulting release starts the test and container-publish workflow, which
-rejects any release where the tag and `APP_VERSION` differ. Configure branch
-protection so that `develop` requires the normal CI checks and `main` disallows
-force pushes and direct human pushes while allowing the required pull request
-checks.
-
-Manual container publishing must run from `main`. The selected event commit
-must match the release tag, and the commit must belong to `main` history.
-Non-publishing release PR checks can run before the tag exists. The workflow
-does not share dependency, Buildx binary, or image-layer caches between runs.
-
-The release workflow uses a repository-installed GitHub App so that automated
-branch, pull-request, release, and workflow-dispatch events can start the next
-workflow stage. Configure the App with Actions read/write, Contents read/write,
-Pull requests read/write, and Checks read permission, and install it only on
-this repository. Store its Client ID as the `RELEASE_APP_CLIENT_ID` Actions
-secret and its private key as the `RELEASE_APP_PRIVATE_KEY` Actions secret.
-
-Use Conventional Commits for manual commits and pull-request titles, for
-example:
-
-```text
-fix: handle Garmin configuration errors
-feat(sync): make the Intervals.icu period configurable
-docs: rewrite the README in English
-```
-
-## Security and limitations
-
-Intervals Coach is a private planning assistant, not a medical device. Keep it
-on a trusted LAN or behind a private VPN. Review local library entries before
-synchronizing them to Intervals.icu, and seek professional advice for injuries,
-illness, or warning symptoms.
-
-Before deleting local data, the Privacy section shows the complete local data
-scope and record counts. The action requires entering `LOKALE DATEN LÖSCHEN`.
-It deletes only local application data; Intervals.icu, Garmin, and external
-calendar data remain unchanged. A best-effort OpenAI conversation deletion is
-reported separately when a conversation exists. Create an encrypted backup or
-privacy export first if the data may be needed later.
+---
 
 ## License
 
-Intervals Coach is licensed under the GNU Affero General Public License v3.0.
-See [`LICENSE`](LICENSE) for the full license text.
-
-### Dateien im Coach-Chat
-
-Über den **+**-Button lassen sich bis zu vier GPX- oder FIT-Dateien sowie
-Bilder (PNG, JPEG, WebP) mit jeweils höchstens 5 MB auswählen und vor dem
-Senden entfernen. GPX- und FIT-Rohdateien werden unverändert an den
-ausgewählten Coach übergeben; zusätzlich wird eine begrenzte lokale
-Zusammenfassung für den Dialogverlauf erzeugt.
-Eine zusätzliche Frage ist optional. GPX-Tracks und Routen werden lokal zu
-Distanz, ungeglätteten Höhenmetern und einer Stichprobe der Koordinaten
-aufbereitet; fehlende Höhen und GPS-Ungenauigkeiten begrenzen die Aussagekraft.
-Bilder werden zur Analyse an den ausgewählten KI-Anbieter gesendet.
-Die Anhänge werden in der verschlüsselten Chat-Datenbank gespeichert und sind
-in Datenschutzexport und Backup enthalten. Bei GPX und FIT werden die
-Rohdateien für die Coach-Anfrage sowie die begrenzte Zusammenfassung gespeichert.
-Chat zurücksetzen entfernt auch die lokalen Anhänge. Nicht gesendete Dateien
-bleiben nur im Arbeitsspeicher des Browsers.
+Intervals Coach is open-source software licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. See [`LICENSE`](LICENSE) for the complete license terms.
