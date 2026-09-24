@@ -64,11 +64,31 @@ def fixture_coach_response(payload, **kwargs):
                         "call_id": f"fixture-dialogue-{current_id}", "arguments": json.dumps(arguments)}]}
 
 
-server.responses_request = fixture_coach_response
-server.responses_background_request = fixture_coach_response
-# The application uses the streaming path for browser chat. Reuse the canned
-# response so the fixture remains provider-free while exercising the UI flow.
-server.responses_stream_request = lambda payload, on_text_delta, cancel_event=None, on_response_id=None: fixture_coach_response(payload)
+class FixtureResponseTransport:
+    """Provider-free adapter for the canned browser conversation fixture."""
+
+    def request(self, payload):
+        return fixture_coach_response(payload)
+
+    def background_request(self, payload, *, response_id=None, on_response_id=None, cancel_event=None):
+        return fixture_coach_response(
+            payload,
+            response_id=response_id,
+            on_response_id=on_response_id,
+            cancel_event=cancel_event,
+        )
+
+    def stream_request(self, payload, on_text_delta, cancel_event=None, on_response_id=None):
+        # Preserve the fixture's previous behavior: no synthetic text deltas.
+        return fixture_coach_response(
+            payload,
+            on_text_delta=on_text_delta,
+            cancel_event=cancel_event,
+            on_response_id=on_response_id,
+        )
+
+
+server.coach_response_transport = FixtureResponseTransport
 initialise = server.initialise_database
 artifact = {}
 

@@ -22,6 +22,7 @@ from unittest.mock import Mock, call, patch
 from support import IntervalsRequestRecorder, RecordedIntervalsClient, build_gemini_request_payload, create_test_session, parsed_workout_fixture
 from backend.coach import streams as coach_streams
 from backend.coach import context as coach_context
+from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.context import CoachIntervalsContextService, future_coach_planned_workouts
 from backend.coach.attachments import gemini_history_parts
 from backend.coach.proposals import validated_coach_action_preview_input
@@ -5151,7 +5152,7 @@ class CoachTests(unittest.TestCase):
         deltas = []
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
         with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=fake_urlopen):
-            result = server.responses_stream_request(
+            result = server.coach_response_transport().stream_request(
                 {"_ai_provider": "gemini", "model": "gemini-3.8-flash", "input": "BegrÃ¼ÃŸe mich."},
                 deltas.append,
             )
@@ -5377,7 +5378,7 @@ class CoachTests(unittest.TestCase):
         payload = {"_ai_provider": "gemini", "model": "gemini-3.8-flash", "input": "Prüfe die Form.", "reasoning": {"effort": "low"}}
         with patch.object(server, "CONFIG", config), patch.object(server, "gemini_conversation_response_service") as service_factory, patch.object(server.openai_provider.OpenAIResponsesClient, "responses") as openai:
             service_factory.return_value.request.return_value = {"output_text": "ok"}
-            self.assertEqual(server.responses_request(payload)["output_text"], "ok")
+            self.assertEqual(server.coach_response_transport().request(payload)["output_text"], "ok")
         service_factory.return_value.request.assert_called_once_with(payload)
         openai.assert_not_called()
         request, _, _ = build_gemini_request_payload(server, payload, "gemini-3.8-flash")
@@ -5643,7 +5644,7 @@ class CoachTests(unittest.TestCase):
 
         config = replace(server.CONFIG, openai_api_key="test-key", openai_base_url="https://foundry.example.invalid/openai/v1/")
         with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", return_value=FakeResponse()) as urlopen:
-            server.responses_stream_request({"model": "foundry-deployment"}, lambda _: None)
+            server.coach_response_transport().stream_request({"model": "foundry-deployment"}, lambda _: None)
 
         self.assertEqual(urlopen.call_args.args[0].full_url, "https://foundry.example.invalid/openai/v1/responses")
 
@@ -6303,7 +6304,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "CONFIG", config), patch.object(
             server.provider_http_client(), "request", side_effect=fake_openai
         ):
-            server.responses_request({"model": "gpt-5.6-sol", "input": "test"})
+            server.coach_response_transport().request({"model": "gpt-5.6-sol", "input": "test"})
         self.assertEqual(captured["reasoning"], {"effort": "low"})
 
     def test_openai_background_creation_defers_usage_recording(self):
@@ -6738,7 +6739,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(
             server.openai_provider.OpenAIResponsesClient, "background", return_value=expected
         ) as background:
-            result = server.responses_background_request(
+            result = server.coach_response_transport().background_request(
                 payload, on_response_id=checkpoint
             )
 
@@ -6966,16 +6967,15 @@ class CoachTests(unittest.TestCase):
             on_delta("Heute locker.")
             return {"id": "resp_attached_stream", "status": "completed", "output_text": "Heute locker."}
 
-        with patch.object(server, "responses_stream_request", side_effect=streamed_response) as streamed, patch.object(
-            server, "responses_background_request"
-        ) as background:
+        with patch.object(server, "coach_response_transport") as transport_factory:
+            transport_factory.return_value.stream_request.side_effect = streamed_response
             result = server.chat_with_coach(
                 "Wie soll ich heute trainieren?", client_turn_id="turn-attached-provider-stream",
                 session_csrf_hash=csrf_hash, background_job=True, on_text_delta=deltas.append,
             )
 
-        streamed.assert_called_once()
-        background.assert_not_called()
+        transport_factory.return_value.stream_request.assert_called_once()
+        transport_factory.return_value.background_request.assert_not_called()
         self.assertEqual(deltas, ["Heute locker."])
         self.assertEqual(result["message"]["content"], "Heute locker.")
 
@@ -7173,7 +7173,7 @@ class CoachTests(unittest.TestCase):
         def get_library(*, cancel_event=None):
             seen["cancel_event"] = cancel_event
             cancel_event.set()
-            server._raise_chat_cancelled(cancel_event)
+            raise_if_chat_cancelled(cancel_event)
 
         with patch.object(server, "CONFIG", config), patch.object(
             server.IntervalsClient, "get_workout_library", side_effect=get_library
@@ -9501,7 +9501,7 @@ class CoachTests(unittest.TestCase):
             patch.object(server, "urlopen", side_effect=upstream_error),
             self.assertRaises(server.AppError) as raised,
         ):
-            server.responses_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+            server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "rate_limit_exceeded")
         self.assertEqual(raised.exception.retry_after_seconds, 9)
 
@@ -9512,7 +9512,7 @@ class CoachTests(unittest.TestCase):
             "responses",
             return_value={"output_text": "ok"},
         ) as responses:
-            result = server.responses_request(payload)
+            result = server.coach_response_transport().request(payload)
         self.assertEqual(result["output_text"], "ok")
         responses.assert_called_once_with(payload)
 
@@ -9531,7 +9531,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, openai_api_key="openai-test")
         with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=upstream_error):
             with self.assertRaises(server.AppError) as raised:
-                server.responses_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+                server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "conversation_state_invalid")
         captured = server.DIAGNOSTIC_CAPTURE.entries()
         failed = next(entry for entry in reversed(captured) if entry["event"] == "openai_stream_failed")
@@ -9572,7 +9572,7 @@ class CoachTests(unittest.TestCase):
 
         deltas = []
         with patch.object(server, "urlopen", return_value=FakeResponse()) as urlopen:
-            result = server.responses_stream_request({"model": "gpt-5.6-sol"}, deltas.append)
+            result = server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, deltas.append)
         self.assertEqual("".join(deltas), "Hallo")
         self.assertEqual(result["id"], "resp-test")
         request = urlopen.call_args.args[0]
@@ -9604,7 +9604,7 @@ class CoachTests(unittest.TestCase):
             patch.object(server, "urlopen", return_value=OversizedResponse()),
             self.assertRaises(server.AppError) as raised,
         ):
-            server.responses_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+            server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
 
         self.assertEqual(raised.exception.status, 502)
         self.assertEqual(raised.exception.reason, "response_too_large")
@@ -9620,7 +9620,7 @@ class CoachTests(unittest.TestCase):
         cancel_event.set()
         with patch.object(server, "urlopen") as urlopen:
             with self.assertRaises(server.AppError) as raised:
-                server.responses_stream_request({"model": "gpt-5.6-sol"}, lambda _: None, cancel_event)
+                server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None, cancel_event)
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         urlopen.assert_not_called()
         self.assertEqual(
@@ -9647,7 +9647,7 @@ class CoachTests(unittest.TestCase):
 
         with patch.object(server, "urlopen", return_value=TimeoutResponse()):
             with self.assertRaises(server.AppError) as raised:
-                server.responses_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+                server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "provider_timeout")
         self.assertEqual(raised.exception.status, 504)
         self.assertEqual(
@@ -9684,7 +9684,7 @@ class CoachTests(unittest.TestCase):
 
         with patch.object(server, "urlopen", return_value=DisconnectResponse()):
             with self.assertRaises(server.ClientDisconnected):
-                server.responses_stream_request({"model": "gpt-5.6-sol"}, lambda _: (_ for _ in ()).throw(server.ClientDisconnected()))
+                server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: (_ for _ in ()).throw(server.ClientDisconnected()))
         self.assertEqual(
             server.provider_state_service().summary("openai")["last_operation"],
             "responses_stream_cancelled",
@@ -9701,7 +9701,7 @@ class CoachTests(unittest.TestCase):
             "stream",
             return_value={"status": "completed"},
         ) as stream:
-            result = server.responses_stream_request(payload, on_delta, cancel_event, on_response_id)
+            result = server.coach_response_transport().stream_request(payload, on_delta, cancel_event, on_response_id)
 
         self.assertEqual(result["status"], "completed")
         stream.assert_called_once_with(

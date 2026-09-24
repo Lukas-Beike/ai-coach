@@ -40,7 +40,6 @@ from backend.diagnostics.report import (
     DiagnosticReportService,
 )
 from backend.errors import (
-    COACH_ABORTED_ERROR,
     INTERNAL_SERVER_ERROR,
     INTERVALS_API_KEY_ERROR,
     INVALID_LIBRARY_ID_ERROR,
@@ -298,6 +297,7 @@ from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
 from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.coach.final_receipt import CoachFinalReceiptService
+from backend.coach.response_transport import CoachResponseTransport, raise_if_chat_cancelled
 from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
@@ -2280,60 +2280,11 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
     )
 
 
-def request_ai_provider(payload: dict[str, Any]) -> str:
-    provider = str(payload.get("_ai_provider") or "").casefold()
-    return provider if provider in {"openai", "gemini"} else SETTINGS.selected_ai_provider()
-
-
-def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
-    """Call Responses API and retry transient locks on the persistent conversation."""
-    if request_ai_provider(payload) == "gemini":
-        return gemini_conversation_response_service().request(payload)
-    return openai_responses_client().responses(payload)
-
-
-def responses_background_request(
-    payload: dict[str, Any],
-    *,
-    response_id: str | None = None,
-    on_response_id: Callable[[str], None] | None = None,
-    cancel_event: threading.Event | None = None,
-) -> dict[str, Any]:
-    """Create or resume a bounded OpenAI background response and poll it."""
-    if request_ai_provider(payload) == "gemini":
-        _raise_chat_cancelled(cancel_event)
-        result = gemini_conversation_response_service().request(payload, cancel_event=cancel_event)
-        _raise_chat_cancelled(cancel_event)
-        return result
-    return openai_responses_client().background(
-        payload,
-        response_id=response_id,
-        on_response_id=on_response_id,
-        cancel_event=cancel_event,
-    )
-
-
-def _raise_chat_cancelled(cancel_event: threading.Event | None) -> None:
-    if cancel_event is not None and cancel_event.is_set():
-        raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
-
-
-def responses_stream_request(
-    payload: dict[str, Any],
-    on_text_delta: Any,
-    cancel_event: threading.Event | None = None,
-    on_response_id: Callable[[str], None] | None = None,
-) -> dict[str, Any]:
-    if request_ai_provider(payload) == "gemini":
-        _raise_chat_cancelled(cancel_event)
-        result = gemini_conversation_response_service().stream(payload, on_text_delta, cancel_event)
-        _raise_chat_cancelled(cancel_event)
-        return result
-    return openai_stream_client().stream(
-        payload,
-        on_text_delta,
-        cancel_event=cancel_event,
-        on_response_id=on_response_id,
+def coach_response_transport() -> CoachResponseTransport:
+    """Compose concrete OpenAI and Gemini response adapters."""
+    return CoachResponseTransport(
+        SETTINGS, openai_responses_client, openai_stream_client,
+        gemini_conversation_response_service,
     )
 
 
@@ -2453,15 +2404,15 @@ def _send_structured_coach_response(
     ai_provider: str,
 ) -> dict[str, Any]:
     if background_owned and on_text_delta is None:
-        return responses_background_request(
+        return coach_response_transport().background_request(
             payload,
             response_id=resume_id or None,
             on_response_id=checkpoint,
             cancel_event=cancel_event,
         )
     if on_text_delta is None:
-        return responses_request(payload)
-    return responses_stream_request(
+        return coach_response_transport().request(payload)
+    return coach_response_transport().stream_request(
         payload,
         on_delta,
         cancel_event,
@@ -2487,7 +2438,7 @@ def _resume_background_coach_response(
     )
     if not resumable:
         return None
-    return responses_background_request(
+    return coach_response_transport().background_request(
         payload, response_id=resume_id, on_response_id=checkpoint, cancel_event=cancel_event,
     )
 
@@ -2604,7 +2555,7 @@ def _structured_coach_response(
         })
 
     for attempt in range(3):
-        _raise_chat_cancelled(cancel_event)
+        raise_if_chat_cancelled(cancel_event)
         response = _structured_coach_response_attempt(
             payload,
             attempt_context=attempt_context,
@@ -2729,7 +2680,7 @@ def _run_structured_coach_tool_rounds(
         pending = journal.start_round(state.client_turn_id, calls)
         outputs = []
         for item in calls:
-            _raise_chat_cancelled(state.cancel_event)
+            raise_if_chat_cancelled(state.cancel_event)
             name, call_id, result, _ = _execute_structured_coach_tool_call(
                 item, state=state, question=question, cancelled=cancelled,
             )
@@ -2932,7 +2883,7 @@ def chat_stream_status(session_csrf_hash: str) -> dict[str, Any]:
 
 
 def _validated_chat_request(message: str, client_turn_id: str, cancel_event: threading.Event | None) -> tuple[str, str]:
-    _raise_chat_cancelled(cancel_event)
+    raise_if_chat_cancelled(cancel_event)
     message = message.strip()
     if not message:
         raise AppError(400, "Die Nachricht darf nicht leer sein.")

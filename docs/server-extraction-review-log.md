@@ -6656,8 +6656,8 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - #768 wurde am 24.09.2026 um 02:27:40 UTC mit Merge-Commit
   `6ef739b3f2f87842f8e0176de68e916235cd65a2` gemergt;
   der Commit ist auf `origin/develop` erreichbar und Review-Threads: 0.
-  Der optionale Browser-Check lief beim Merge noch; seine finale
-  Prüfung bleibt offen.
+  Der optionale Browser-Check war beim Merge noch offen und ist
+  inzwischen ebenfalls **PASS**.
 - GPT-6-Luna-Quellcommit `3efe9922b544593811cba16e2bbcd49edaef14d0`
   wurde konfliktfrei als `019fddab` auf diesen Stand integriert.
   Root prüfte den tatsächlichen Code/Diff: **PASS**. Die sieben
@@ -6669,3 +6669,62 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Ruff der geänderten Nicht-Server-Dateien, Compileall, Inventar- und
   Diff-Check **PASS**. `server.py`: 4.168 physische Zeilen; P0=0.
   Veröffentlichung und PR-CI stehen noch aus.
+
+## P8 Coach-Response-Transport — integrierter Diff-Stand
+
+- #769 wurde am 24.09.2026 um 02:35:50 UTC mit Merge-Commit
+  `fbbf0ef5a760fa7f28cfcdbb6c11f2daf419c6b8` gemergt;
+  Commit auf `origin/develop` erreichbar, null Review-Threads.
+  Der optionale Browser-Check war beim Merge noch offen und ist
+  inzwischen ebenfalls **PASS**.
+- Root-Produktpatch und GPT-6-Luna-Testmigration wurden als Quellcommit
+  `9eaa2757` geprüft: **PASS**. Eine zusätzliche volle Suite fand einen
+  alten Patch auf `server.responses_background_request`; derselbe Worker
+  korrigierte ausschließlich dieses freigegebene Testziel. Root prüfte
+  danach erneut Code und vollständigen Test-Diff. `CoachResponseTransport`
+  besitzt Providerwahl sowie OpenAI-/Gemini-Request-, Background- und
+  Stream-Dispatch. Nur der gewählte Adapter wird konstruiert; die
+  Gemini-Cancel-Grenze wird vor und nach dem Aufruf geprüft. Kein
+  Rückimport, Server-Callback oder dauerhafter Kompatibilitäts-Wrapper.
+- Quellstand: 15 direkte/Architektur-/Review-Tests, 600 betroffene
+  Integrationstests/4 Skips, native Vollsuite 2.555 Tests/12 Skips
+  und frisches Read-only-Docker-Image 2.555 Tests/11 Skips **PASS**.
+  Ruff des neuen Moduls, direkten Tests und Architekturtests, Compileall,
+  Diff-Check **PASS**; 194 bestehende Legacy-Test-Ruff-Befunde blieben
+  außerhalb des Umfangs.
+- Quellcommit wurde auf dem #769-Merge als `6ea7dec3` integriert;
+  einzig kollidierende Importzeilen im Test wurden additiv zusammengeführt.
+  Root-Review des integrierten Codes/Diffs: **PASS**. 15 fokussierte
+  Tests, Ruff, Compileall, Inventar- und Diff-Check **PASS**;
+  frisches Read-only-Docker-Image: 2.557 Tests/11 Skips **PASS**.
+  `server.py`: 4.119 physische Zeilen, P0=0. Veröffentlichung und
+  PR-CI stehen noch aus; die Gesamt-Response-/Tool-Schleife bleibt P8-offen.
+
+### #770 Browser-Fixture-Korrektur — erneutes Review-Gate
+
+- PR-Stand `c200da12`: **FAIL**. Codex-Review meldete P1 im offenen
+  Thread `PRRT_kwDOUHv92c6laUxA`: `e2e/fixture_runtime.py` patchte noch
+  drei entfernte `server.responses_*`-Symbole. Browser-CI reproduzierte
+  den Fehler im natürlichen Rückfrage-/Reload-/Follow-up-Fall; die
+  synthetische Antwort wurde umgangen und der Provider bewusst blockiert.
+- Derselbe GPT-6-Luna-Worker änderte ausschließlich die freigegebene
+  Fixture-Datei: ein providerfreier Adapter an der aktiven
+  `server.coach_response_transport`-Lookup-Stelle delegiert alle drei
+  Methoden weiter an dieselbe synthetische Antwortfunktion. Root ergänzte
+  einen Architekturtest, der alte Fixture-Patchziele verbietet und das
+  aktive Transport-Patchziel fordert. Root prüfte beide tatsächlichen
+  Diffs/Code erneut: **PASS**; keine Aufweichung der Browsererwartung.
+- Worker: alter Patch-Ziel-Scan, Compileall, Diff-Check und lokaler
+  `mobile-small`-Playwright-Einzelfall (1/1) **PASS**. Root:
+  Architekturtests 7/7, statische Prüfungen und frisches Read-only-
+  Docker-Image mit 2.558 Tests/11 Skips **PASS**. Keine echten Provider-
+  oder Athletendaten. Aktualisierter PR-Check und Review-Thread-
+  Auflösung stehen noch aus.
+- Nach `9f46a301` meldete SonarCloud sechs neue `python:S1172`-Befunde
+  für ungenutzte Fixture-Transportargumente: erneutes Gate **FAIL**.
+  Derselbe Worker leitete die sechs Argumente an die unveränderte
+  synthetische Antwortfunktion weiter; kein Provideraufruf, keine
+  Delta-Emission und keine Regel-/Testabschwächung. Root prüfte den
+  konkreten Diff erneut: **PASS**. Ruff, Compileall, Diff-Check und
+  lokaler `mobile-small`-Rückfragefall (1/1) **PASS**. Finale PR-CI
+  auf dem erneut aktualisierten Stand bleibt abzuwarten.
