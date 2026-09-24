@@ -6720,3 +6720,11 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Docker-Image mit 2.558 Tests/11 Skips **PASS**. Keine echten Provider-
   oder Athletendaten. Aktualisierter PR-Check und Review-Thread-
   Auflösung stehen noch aus.
+- Nach `9f46a301` meldete SonarCloud sechs neue `python:S1172`-Befunde
+  für ungenutzte Fixture-Transportargumente: erneutes Gate **FAIL**.
+  Derselbe Worker leitete die sechs Argumente an die unveränderte
+  synthetische Antwortfunktion weiter; kein Provideraufruf, keine
+  Delta-Emission und keine Regel-/Testabschwächung. Root prüfte den
+  konkreten Diff erneut: **PASS**. Ruff, Compileall, Diff-Check und
+  lokaler `mobile-small`-Rückfragefall (1/1) **PASS**. Finale PR-CI
+  auf dem erneut aktualisierten Stand bleibt abzuwarten.

@@ -71,11 +71,21 @@ class FixtureResponseTransport:
         return fixture_coach_response(payload)
 
     def background_request(self, payload, *, response_id=None, on_response_id=None, cancel_event=None):
-        return fixture_coach_response(payload)
+        return fixture_coach_response(
+            payload,
+            response_id=response_id,
+            on_response_id=on_response_id,
+            cancel_event=cancel_event,
+        )
 
     def stream_request(self, payload, on_text_delta, cancel_event=None, on_response_id=None):
         # Preserve the fixture's previous behavior: no synthetic text deltas.
-        return fixture_coach_response(payload)
+        return fixture_coach_response(
+            payload,
+            on_text_delta=on_text_delta,
+            cancel_event=cancel_event,
+            on_response_id=on_response_id,
+        )
 
 
 server.coach_response_transport = FixtureResponseTransport
