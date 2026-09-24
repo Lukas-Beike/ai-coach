@@ -59,6 +59,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
     ("backend.http_api.chat_post", ("ChatPostRoutes",)),
+    ("backend.http_api.chat_stream", ("CoachChatStreamTransport",)),
     ("backend.http_api.public_get", ("PublicGetRoutes",)),
     ("backend.http_api.planning_get", ("PlanningGetRoutes",)),
     ("backend.http_api.sync_get", ("SyncGetRoutes", "SYNC_JOB_RE")),
@@ -2504,6 +2505,56 @@ class ServerArchitectureTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertNotIn("server", route_source.casefold())
+
+    def test_chat_stream_lifecycle_is_owned_by_http_api_module(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        handler = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
+        )
+        self.assertFalse(any(
+            isinstance(node, ast.FunctionDef) and node.name == "handle_chat_stream"
+            for node in handler.body
+        ))
+        coach_post = next(
+            node for node in handler.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_handle_coach_post"
+        )
+        self.assertEqual(
+            sum(
+                isinstance(node, ast.Call)
+                and ast.unparse(node.func) == "CHAT_STREAM_TRANSPORT.handle"
+                for node in ast.walk(coach_post)
+            ),
+            1,
+        )
+        assignment = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "CHAT_STREAM_TRANSPORT" for target in node.targets)
+        )
+        self.assertEqual(ast.unparse(assignment.value.func), "CoachChatStreamTransport")
+        self.assertEqual(
+            [ast.unparse(arg) for arg in assignment.value.args],
+            [
+                "coach_streams.CHAT_STREAM_REGISTRY",
+                "coach_job_submission_service",
+                "coach_command_receipt_service",
+                "REDACTOR.redact_text",
+                "LOGGER",
+            ],
+        )
+        route_source = (BACKEND_ROOT / "http_api" / "chat_stream.py").read_text(encoding="utf-8")
+        route_tree = ast.parse(route_source)
+        self.assertFalse(any(
+            isinstance(node, ast.ImportFrom) and node.module == "server"
+            for node in ast.walk(route_tree)
+        ))
+        self.assertFalse(any(
+            isinstance(node, ast.Import)
+            and any(alias.name == "server" for alias in node.names)
+            for node in ast.walk(route_tree)
+        ))
 
     def test_diagnostics_capture_post_route_is_owned_by_http_api_module(self) -> None:
         self._assert_write_route_owned(

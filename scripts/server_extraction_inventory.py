@@ -270,6 +270,7 @@ def _explicit_owner(name: str) -> str | None:
             "PRIVACY_DELETE_POST_ROUTES": HTTP_API_PACKAGE,
             "COACH_ACTIONS_POST_ROUTES": HTTP_API_PACKAGE,
             "CHAT_POST_ROUTES": HTTP_API_PACKAGE,
+            "CHAT_STREAM_TRANSPORT": HTTP_API_PACKAGE,
             "login_user": HTTP_AUTH,
             "logout_user": HTTP_AUTH,
             "bootstrap_provider_states": "http_api/bootstrap.py",
