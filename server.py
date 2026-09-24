@@ -298,6 +298,7 @@ from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.coach.final_receipt import CoachFinalReceiptService
 from backend.coach.response_transport import CoachResponseTransport, raise_if_chat_cancelled
+from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
@@ -2392,54 +2393,10 @@ def coach_structured_tool_preparation_service() -> CoachStructuredToolPreparatio
     )
 
 
-def _send_structured_coach_response(
-    payload: dict[str, Any],
-    *,
-    resume_id: str,
-    checkpoint: Any,
-    on_delta: Any,
-    on_text_delta: Any,
-    cancel_event: threading.Event | None,
-    background_owned: bool,
-    ai_provider: str,
-) -> dict[str, Any]:
-    if background_owned and on_text_delta is None:
-        return coach_response_transport().background_request(
-            payload,
-            response_id=resume_id or None,
-            on_response_id=checkpoint,
-            cancel_event=cancel_event,
-        )
-    if on_text_delta is None:
-        return coach_response_transport().request(payload)
-    return coach_response_transport().stream_request(
-        payload,
-        on_delta,
-        cancel_event,
-        on_response_id=checkpoint if background_owned and ai_provider == "openai" else None,
-    )
-
-
 def coach_conversation_recovery_service() -> CoachConversationRecoveryService:
     """Compose the durable recovery owner from concrete storage services."""
     return CoachConversationRecoveryService(
         database_manager(), DB_LOCK, KEY_VALUE_REPOSITORY, coach_job_store(), LOGGER,
-    )
-
-
-def _resume_background_coach_response(
-    exc: AppError, payload: dict[str, Any], resume_id: str, checkpoint: Callable[[str], None],
-    cancel_event: threading.Event | None, *, background_owned: bool, ai_provider: str,
-) -> dict[str, Any] | None:
-    resumable = (
-        background_owned and ai_provider == "openai" and resume_id
-        and exc.reason in {"provider_unavailable", "provider_timeout", "invalid_response"}
-        and (cancel_event is None or not cancel_event.is_set())
-    )
-    if not resumable:
-        return None
-    return coach_response_transport().background_request(
-        payload, response_id=resume_id, on_response_id=checkpoint, cancel_event=cancel_event,
     )
 
 
@@ -2448,129 +2405,12 @@ def coach_response_retry_policy() -> CoachResponseRetryPolicy:
     return CoachResponseRetryPolicy(LOGGER)
 
 
-@dataclass(frozen=True)
-class _StructuredCoachResponseAttemptContext:
-    request_payload: dict[str, Any]
-    context: dict[str, Any]
-    message: str
-    command_receipts: list[dict[str, Any]]
-    attachments: list[dict[str, Any]]
-    client_turn_id: str
-    recovery_state: dict[str, bool]
-
-
-def _structured_coach_response_attempt(
-    payload: dict[str, Any],
-    *,
-    attempt_context: _StructuredCoachResponseAttemptContext,
-    ai_provider: str,
-    background_owned: bool,
-    on_text_delta: Any,
-    cancel_event: threading.Event | None,
-    state: dict[str, Any],
-    attempt: int,
-    checkpoint: Any,
-    on_delta: Any,
-) -> dict[str, Any] | None:
-    try:
-        return _send_structured_coach_response(
-            payload,
-            resume_id=state["resume_id"],
-            checkpoint=checkpoint,
-            on_delta=on_delta,
-            on_text_delta=on_text_delta,
-            cancel_event=cancel_event,
-            background_owned=background_owned,
-            ai_provider=ai_provider,
-        )
-    except AppError as exc:
-        resumed = _resume_background_coach_response(
-            exc, payload, state["resume_id"], checkpoint, cancel_event,
-            background_owned=background_owned, ai_provider=ai_provider,
-        )
-        if resumed is not None:
-            return resumed
-        if coach_conversation_recovery_service().recover_if_invalid(
-            exc, payload, attempt_context.request_payload, context=attempt_context.context,
-            message=attempt_context.message, command_receipts=attempt_context.command_receipts,
-            attachments=attempt_context.attachments, client_turn_id=attempt_context.client_turn_id,
-            ai_provider=ai_provider, recovery_state=attempt_context.recovery_state,
-            request_delta_emitted=state["request_delta_emitted"], attempt=attempt,
-        ):
-            state["resume_id"] = ""
-            return None
-        retry_policy = coach_response_retry_policy()
-        delay = retry_policy.retry_delay(
-            exc, ai_provider=ai_provider, attempt=attempt,
-            request_delta_emitted=state["request_delta_emitted"],
-        )
-        if delay is None:
-            raise
-        state["resume_id"] = ""
-        retry_policy.wait(delay, cancel_event, attempt)
-        return None
-
-
-def _structured_coach_response(
-    payload: dict[str, Any],
-    *,
-    request_payload: dict[str, Any],
-    context: dict[str, Any],
-    message: str,
-    command_receipts: list[dict[str, Any]],
-    attachments: list[dict[str, Any]],
-    client_turn_id: str,
-    ai_provider: str,
-    background_owned: bool,
-    on_text_delta: Any,
-    cancel_event: threading.Event | None,
-    recovery_state: dict[str, bool],
-    resume_id: str = "",
-) -> dict[str, Any]:
-    state: dict[str, Any] = {"request_delta_emitted": False, "resume_id": resume_id}
-    attempt_context = _StructuredCoachResponseAttemptContext(
-        request_payload=request_payload,
-        context=context,
-        message=message,
-        command_receipts=command_receipts,
-        attachments=attachments,
-        client_turn_id=client_turn_id,
-        recovery_state=recovery_state,
+def coach_structured_response_service() -> CoachStructuredResponseService:
+    """Compose the response loop from concrete transport and durable owners."""
+    return CoachStructuredResponseService(
+        coach_response_transport(), coach_conversation_recovery_service(),
+        coach_response_retry_policy(), coach_job_store(),
     )
-
-    def on_delta(delta: str) -> None:
-        state["request_delta_emitted"] = True
-        if on_text_delta is not None:
-            on_text_delta(delta)
-
-    def checkpoint(response_id: str) -> None:
-        state["resume_id"] = response_id
-        coach_job_store().merge_receipt(client_turn_id, {
-            "status": "running",
-            "phase": "waiting_openai",
-            "openai_response_id": response_id,
-            "pending_tool_outputs": [],
-            "response_input": payload["input"] if isinstance(payload["input"], list) else None,
-            "previous_response_id": payload.get("previous_response_id"),
-        })
-
-    for attempt in range(3):
-        raise_if_chat_cancelled(cancel_event)
-        response = _structured_coach_response_attempt(
-            payload,
-            attempt_context=attempt_context,
-            ai_provider=ai_provider,
-            background_owned=background_owned,
-            on_text_delta=on_text_delta,
-            cancel_event=cancel_event,
-            state=state,
-            attempt=attempt,
-            checkpoint=checkpoint,
-            on_delta=on_delta,
-        )
-        if response is not None:
-            return response
-    raise AppError(502, "Der KI-Dienst konnte die Antwort nicht fertigstellen.", reason="response_failed")
 
 
 @dataclass
@@ -2660,7 +2500,7 @@ def _structured_coach_followup_response(
                 "tool_choice": "none" if question or cancelled or rounds >= COACH_TOOL_MAX_ROUNDS else "auto"}
     if state.ai_provider == "openai" and response.get("id") and not followup.get("conversation"):
         followup["previous_response_id"] = response["id"]
-    return _structured_coach_response(
+    return coach_structured_response_service().respond(
         followup, request_payload=state.request_payload, context=state.context, message=state.message,
         command_receipts=state.command_receipts, attachments=state.attachments, client_turn_id=state.client_turn_id,
         ai_provider=state.ai_provider, background_owned=state.background_owned, on_text_delta=state.on_text_delta,
@@ -2731,7 +2571,7 @@ def _structured_coach_turn_request(
     resume_id = _apply_structured_coach_replay(
         receipt, request_payload, ai_provider=ai_provider, background_owned=background_owned,
     )
-    response = _structured_coach_response(
+    response = coach_structured_response_service().respond(
         request_payload, request_payload=request_payload, context=context, message=message,
         command_receipts=command_receipts, attachments=attachments, client_turn_id=client_turn_id,
         ai_provider=ai_provider, background_owned=background_owned, on_text_delta=on_text_delta,
