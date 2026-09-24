@@ -259,6 +259,7 @@ def _explicit_owner(name: str) -> str | None:
             "CoachHTTPServer": HTTP_API_PACKAGE,
             "ATHLETE_GET_ROUTES": HTTP_API_PACKAGE,
             "SYNC_GET_ROUTES": HTTP_API_PACKAGE,
+            "DIAGNOSTICS_GET_ROUTES": HTTP_API_PACKAGE,
             "login_user": HTTP_AUTH,
             "logout_user": HTTP_AUTH,
             "bootstrap_provider_states": "http_api/bootstrap.py",

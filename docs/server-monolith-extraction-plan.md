@@ -837,6 +837,10 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     `SyncGetRoutes` zuordnen; Queue, Status und Aktivitätsleser bleiben
     Zustandseigentümer. Der SSE-Pfad `/api/state/events` bleibt bis zur
     abschließenden HTTP-Transportauslagerung getrennt.
+  - [x] Die GET-Routen `/api/logs`, `/api/diagnostics` und
+    `/api/diagnostics/capture` einschließlich begrenztem Log-Limit
+    `DiagnosticsGetRoutes` zuordnen; die bestehenden Logs-, Report- und
+    Capture-Dienste bleiben Datenschutz- und Zustandseigentümer.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 
