@@ -21,6 +21,7 @@ from urllib.parse import quote
 from unittest.mock import Mock, call, patch
 from support import IntervalsRequestRecorder, RecordedIntervalsClient, build_gemini_request_payload, create_test_session, parsed_workout_fixture
 from backend.coach import streams as coach_streams
+from backend.coach.job_worker import CoachJobWorker
 from backend.coach import context as coach_context
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.context import CoachIntervalsContextService, future_coach_planned_workouts
@@ -425,7 +426,7 @@ class CoachTests(unittest.TestCase):
         ), patch.object(http_server_module, "CoachHTTPServer", http_server_factory), patch.object(
             server.SyncJobWorker, "start", side_effect=lambda _worker: order.append("sync-worker"), autospec=True
         ), patch.object(
-            server, "start_coach_job_worker", side_effect=lambda: order.append("coach-worker")
+            server.COACH_JOB_WORKER, "start", side_effect=lambda *_: order.append("coach-worker")
         ), patch.object(server, "startup_sync_scheduler") as startup_scheduler, patch.object(
             server, "daily_sync_loop_service"
         ) as daily_loop_factory, patch.object(server.threading, "Thread") as thread_factory:
@@ -457,9 +458,12 @@ class CoachTests(unittest.TestCase):
             "backend.coach.job_store.CoachJobStore.resume_interrupted"
         ) as coach_recovery, patch.object(server.SyncJobWorker, "start") as sync_start, patch.object(server.threading, "Thread") as thread, patch.object(
             server, "SYNC_JOB_WORKER", None
-        ), patch.object(server, "COACH_JOB_WORKER", None):
+        ), patch.object(server, "COACH_JOB_WORKER", CoachJobWorker()):
             server.sync_job_worker().start()
-            server.start_coach_job_worker()
+            server.COACH_JOB_WORKER.start(
+                server.coach_job_store, server.coach_background_job_runner,
+                server.runtime_maintenance.MAINTENANCE_GATE,
+            )
         sync_start.assert_called_once_with()
         self.assertEqual(thread.call_count, 1)
         sync_recovery.assert_not_called()
@@ -6842,7 +6846,7 @@ class CoachTests(unittest.TestCase):
         with (
             patch.object(server.runtime_events.STATE_EVENT_BUFFER, "publish", side_effect=publish_after_commit) as publish,
             patch.object(registry, "set_background_event") as register_event,
-            patch.object(server.COACH_JOB_WAKE, "set") as wake_worker,
+            patch.object(server.COACH_JOB_WORKER.wake_event, "set") as wake_worker,
         ):
             first = server.coach_job_submission_service().enqueue(
                 "Eine lange Planung bitte", "turn-background-idempotent", "csrf-background-idempotent",
@@ -6889,7 +6893,7 @@ class CoachTests(unittest.TestCase):
             patch.object(service, "active", side_effect=synchronized_active),
             patch.object(server.runtime_events.STATE_EVENT_BUFFER, "publish"),
             patch.object(registry, "set_background_event"),
-            patch.object(server.COACH_JOB_WAKE, "set"),
+            patch.object(server.COACH_JOB_WORKER.wake_event, "set"),
         ):
             threads = [
                 threading.Thread(target=submit, args=(turn_id,))
@@ -6936,7 +6940,7 @@ class CoachTests(unittest.TestCase):
         job = server.coach_job_store().claim()
         seen = {}
         with patch("backend.coach.chat_turn.CoachChatTurnService.run", side_effect=lambda *args, **kwargs: seen.update(kwargs) or {}):
-            server._run_background_coach_job(job)
+            server.coach_background_job_runner().run(job)
         self.assertEqual(seen["session_csrf_hash"], csrf_hash)
 
     def test_background_worker_forwards_live_deltas_and_completion_to_attached_stream(self):
@@ -6961,7 +6965,7 @@ class CoachTests(unittest.TestCase):
                 return {"status": "completed", "session_key": "must-not-leave-server", "message": {"id": 42, "role": "assistant", "content": "Erster Teil"}}
 
             with patch("backend.coach.chat_turn.CoachChatTurnService.run", side_effect=complete_chat):
-                server._run_background_coach_job(job)
+                server.coach_background_job_runner().run(job)
 
             events = coach_streams.CHAT_STREAM_REGISTRY.events(csrf_hash, operation_id)
             self.assertEqual(events.get_nowait(), ("delta", {"text": "Erster "}))
@@ -7014,7 +7018,7 @@ class CoachTests(unittest.TestCase):
             "backend.coach.chat_turn.CoachChatTurnService.run",
             side_effect=server.AppError(429, "busy", reason="chat_queue_full"),
         ), patch.object(auth, "restore_coach_session_csrf_hash", return_value="csrf-background-requeue"):
-            server._run_background_coach_job(job)
+            server.coach_background_job_runner().run(job)
         with server.DB_LOCK, server.database() as db:
             command = db.execute(
                 "SELECT status, receipt FROM coach_commands WHERE client_turn_id='turn-background-requeue'"
@@ -7057,7 +7061,7 @@ class CoachTests(unittest.TestCase):
         with patch("backend.coach.chat_turn.CoachChatTurnService.run", side_effect=capture_phase), patch.object(
             server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="csrf-background-recovery-phase"
         ):
-            server._run_background_coach_job(job)
+            server.coach_background_job_runner().run(job)
         self.assertEqual(seen["phase"], "waiting_final_response")
 
     def test_sync_period_supports_all_available_data_marker(self):

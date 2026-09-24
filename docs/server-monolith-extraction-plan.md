@@ -662,6 +662,10 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
     terminale Fehler und SSE-Publikation einem `CoachBackgroundJobRunner`
     zuordnen. Der vorläufige Server-Aufrufer entfällt mit dem folgenden
     Worker-Lifecycle-Umzug.
+  - [x] Worker-Thread, Lock, Wake-/Stop-Events, begrenztes Polling und
+    Maintenance-Claim-Schleife einem `CoachJobWorker` zuordnen; `server.py`
+    registriert beim Start nur die konkreten Backend-Factories. Der
+    temporäre `_run_background_coach_job`-Adapter ist entfernt.
   - [x] Restart-Recovery für unterbrochene synchrone, OpenAI- und Gemini-
     Background-Turns einschließlich persistierter Intents, Queue-Phase und
     Worker-Wake dem `CoachJobStore` zuordnen; Worker-Turn-Orchestrierung

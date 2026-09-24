@@ -153,7 +153,7 @@ class ProviderReviewTests(unittest.TestCase):
         job = {"_maintenance_generation": runtime_maintenance.MAINTENANCE_GATE.current_generation()}
         server.privacy_delete_service().delete()
         with patch("backend.coach.chat_turn.CoachChatTurnService.run") as coach, patch("backend.coach.turn_failures.CoachTurnFailureService.persist") as failure:
-            server._run_background_coach_job(job)
+            server.coach_background_job_runner().run(job)
         coach.assert_not_called()
         failure.assert_not_called()
 

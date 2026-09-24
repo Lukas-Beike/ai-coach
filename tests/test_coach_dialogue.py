@@ -856,7 +856,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
             server.CoachChatTurnService, "run", side_effect=complete_command,
         ):
-            server._run_background_coach_job(job)
+            server.coach_background_job_runner().run(job)
         self.assertEqual(server.get_kv("morning_checkin_date"), "2026-09-07")
         self.assertEqual(server.get_kv("morning_checkin_status"), "ready")
         self.assertFalse(server.coach_quick_actions_service().state()["morning_checkin"])
@@ -879,7 +879,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
             server.CoachChatTurnService, "run", side_effect=complete_with_question,
         ):
-            server._run_background_coach_job(job)
+            server.coach_background_job_runner().run(job)
         self.assertNotEqual(server.get_kv("morning_checkin_status"), "ready")
         self.assertTrue(server.coach_quick_actions_service().state()["morning_checkin"])
 
