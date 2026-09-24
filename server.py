@@ -150,6 +150,7 @@ from backend.http_api.state_versions import StateVersionService
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.history_get import HistoryGetRoutes
+from backend.http_api.privacy_get import PrivacyGetRoutes
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
@@ -2818,6 +2819,9 @@ SYNC_GET_ROUTES = SyncGetRoutes(
     ALL_SYNC_DAYS,
 )
 HISTORY_GET_ROUTES = HistoryGetRoutes(session_auth_service, change_history_service)
+PRIVACY_GET_ROUTES = PrivacyGetRoutes(
+    session_auth_service, export_stream_transport, privacy_delete_service
+)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -2876,20 +2880,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def _handle_diagnostics_get(self, path: str) -> bool:
-        if path == "/api/privacy/export":
-            self.auth_service.require_auth(self)
-            export_stream_transport().stream_privacy_export(self)
-        elif path == "/api/privacy/delete/preview":
-            self.auth_service.require_auth(self)
-            self.send_json(200, privacy_delete_service().preview())
-        elif path == "/api/privacy/backup":
-            self.auth_service.require_auth(self)
-            export_stream_transport().stream_database_backup(self)
-        else:
-            return False
-        return True
-
     def do_GET(self) -> None:
         self.request_id = uuid.uuid4().hex[:12]
         try:
@@ -2903,7 +2893,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 or ATHLETE_GET_ROUTES.handle(self, path)
                 or HISTORY_GET_ROUTES.handle(self, path)
                 or DIAGNOSTICS_GET_ROUTES.handle(self, path)
-                or self._handle_diagnostics_get(path)
+                or PRIVACY_GET_ROUTES.handle(self, path)
             )
             if not handled and path.startswith("/api/"):
                 raise AppError(404, NOT_FOUND_ERROR)

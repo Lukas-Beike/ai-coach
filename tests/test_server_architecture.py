@@ -2412,8 +2412,6 @@ class ServerArchitectureTests(unittest.TestCase):
         server_tree = self._assert_get_route_owned(
             "_handle_diagnostics_get",
             "HISTORY_GET_ROUTES",
-            method_must_be_absent=False,
-            forbidden_paths=("/api/change-history",),
         )
         self._assert_route_factories(
             server_tree,
@@ -2421,13 +2419,15 @@ class ServerArchitectureTests(unittest.TestCase):
             ["session_auth_service", "change_history_service"],
         )
 
-    def test_diagnostics_get_keeps_only_the_three_privacy_paths(self) -> None:
+    def test_diagnostics_and_privacy_get_routes_are_owned_by_http_api_modules(self) -> None:
         server_tree = self._assert_get_route_owned(
-            "_handle_diagnostics_get",
-            "DIAGNOSTICS_GET_ROUTES",
-            method_must_be_absent=False,
-            forbidden_paths=("/api/logs", "/api/diagnostics", "/api/diagnostics/capture"),
+            "_handle_diagnostics_get", "DIAGNOSTICS_GET_ROUTES"
         )
+        self.assertNotIn("_handle_diagnostics_get", {
+            node.name
+            for node in ast.walk(server_tree)
+            if isinstance(node, ast.FunctionDef)
+        })
         self._assert_route_factories(
             server_tree,
             "DIAGNOSTICS_GET_ROUTES",
@@ -2438,21 +2438,15 @@ class ServerArchitectureTests(unittest.TestCase):
                 "DIAGNOSTIC_CAPTURE",
             ],
         )
-        diagnostics_handler = next(
-            node for node in ast.walk(server_tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_handle_diagnostics_get"
-        )
-        self.assertEqual(
-            {
-                node.value for node in ast.walk(diagnostics_handler)
-                if isinstance(node, ast.Constant) and isinstance(node.value, str)
-                and node.value.startswith("/api/")
-            },
-            {
-                "/api/privacy/export",
-                "/api/privacy/delete/preview",
-                "/api/privacy/backup",
-            },
+        self._assert_get_route_owned("_handle_diagnostics_get", "PRIVACY_GET_ROUTES")
+        self._assert_route_factories(
+            server_tree,
+            "PRIVACY_GET_ROUTES",
+            [
+                "session_auth_service",
+                "export_stream_transport",
+                "privacy_delete_service",
+            ],
         )
 
     def test_intervals_client_does_not_retain_snapshot_use_cases(self) -> None:

@@ -1977,6 +1977,8 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(handler.path.exists())
 
     def test_privacy_download_routes_require_auth_before_streaming(self):
+        from backend.http_api.privacy_get import PrivacyGetRoutes
+
         routes = {
             "/api/privacy/export": "stream_privacy_export",
             "/api/privacy/backup": "stream_database_backup",
@@ -1987,25 +1989,24 @@ class CoachTests(unittest.TestCase):
                 handler.path = path
                 auth = Mock()
                 transport = Mock()
-                with patch.object(server, "session_auth_service", return_value=auth), patch.object(
-                    server, "export_stream_transport", return_value=transport
-                ) as transport_factory:
-                    self.assertTrue(handler._handle_diagnostics_get(path))
-                    auth.require_auth.assert_called_once_with(handler)
-                    getattr(transport, stream_method).assert_called_once_with(handler)
-                    transport_factory.assert_called_once_with()
+                transport_factory = Mock(return_value=transport)
+                route = PrivacyGetRoutes(
+                    Mock(return_value=auth), transport_factory, Mock()
+                )
+                self.assertTrue(route.handle(handler, path))
+                auth.require_auth.assert_called_once_with(handler)
+                getattr(transport, stream_method).assert_called_once_with(handler)
+                transport_factory.assert_called_once_with()
 
                 denied = server.AppError(401, "unauthorized")
                 auth.require_auth.side_effect = denied
                 transport.reset_mock()
-                with patch.object(server, "session_auth_service", return_value=auth), patch.object(
-                    server, "export_stream_transport", return_value=transport
-                ) as transport_factory:
-                    with self.assertRaises(server.AppError) as caught:
-                        handler._handle_diagnostics_get(path)
-                    self.assertIs(caught.exception, denied)
-                    transport_factory.assert_not_called()
-                    getattr(transport, stream_method).assert_not_called()
+                transport_factory.reset_mock()
+                with self.assertRaises(server.AppError) as caught:
+                    route.handle(handler, path)
+                self.assertIs(caught.exception, denied)
+                transport_factory.assert_not_called()
+                getattr(transport, stream_method).assert_not_called()
 
     def test_privacy_archive_export_enforces_free_space_size_timeout_and_cleanup(self):
         service = server.privacy_archive_export_service()
