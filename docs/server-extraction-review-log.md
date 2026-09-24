@@ -7333,3 +7333,22 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   wieder eingeführt wird. Externe Gates dieses neuen PR stehen noch aus.
   `server.py` hat hier 3.432 physische Zeilen; weitere Handler-Routen,
   SSE und P11 bleiben offen.
+
+## SQLCipher-Testskript — isolierter Integrationsreview
+
+- Vorgänger-PR #783 wurde am 24.09.2026 um 06:22:51 UTC mit
+  `bc4367b3bc2a9f35ed7e484cbbd93a62d4687283` gemergt; der Commit
+  ist Vorfahr von `origin/develop`, ohne offene Review-Threads.
+- Quellcommit `3d212c40` wurde als `25dd8afe` auf diesen Stand übernommen.
+  Der tatsächliche Diff in `tests/run_sqlcipher_tests.ps1` ergänzt nur
+  den schreibgeschützten `docs/`-Mount, den schreibgeschützten
+  Playwright-Konfigurationspfad unter `/app`, flüchtiges `/data` und
+  deaktiviertes Containernetzwerk. `.env`, Datenbank und Athletendaten
+  werden weiterhin nicht gemountet.
+- **PASS**: Das kanonische Skript selbst baute auf dem integrierten Stand
+  ein frisches SQLCipher-Image und führte die vollständige Suite mit
+  2.630 Tests/11 Skips erfolgreich aus; `git diff --check` ist sauber.
+  Dadurch sind die zuvor wiederholt nötigen manuellen Test-Mounts
+  reproduzierbar im Skript enthalten, ohne einen Testfall abzuschwächen.
+- P10-Handler- und P11-Restaudit bleiben offen; die Skriptänderung
+  verändert keinen Produktivcode und keine Checklistenbewertung.
