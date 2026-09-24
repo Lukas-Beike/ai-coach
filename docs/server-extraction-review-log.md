@@ -7305,3 +7305,31 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   die `F`-Befunde sind gegenüber HEAD unverändert (11 im Server, 2 im alten
   Server-Testmodul).
 - Kein Rebase, Push, Pull Request oder Merge.
+
+## P10 Plan-/Wetter-/Library-GET-Routen — Sol-Integrationsreview
+
+- Vorgänger-PR #782 wurde am 24.09.2026 um 06:03:31 UTC mit
+  `df1a69365ec00d7982e0cbfad5e0255bc016c4af` gemergt; der Commit
+  ist Vorfahr von `origin/develop`. Sonar-Gate, Codex-Review und der
+  nachlaufende Browser-Check waren erfolgreich, ohne offene Review-Threads.
+- Quellcommit `7f8725e95c884d5c5004093c9406916220b3028a` wurde als
+  `8fe87c0ebe6048ac5074a4db2c0c010f3881a01d` übernommen.
+  Tatsächlicher Diff, alle drei Routen, beide migrierten Handler-Verträge,
+  Factory-Lookup, Architekturguard und unbekannter Pfad wurden geprüft.
+- **PASS**: `PlanningGetRoutes` ruft Auth vor Datendiensten und bei jedem
+  Request neu auf; Query-Defaults und erste `local`-/`cursor`-/`limit`-
+  Werte bleiben unverändert. Plan-, Wetter- und Library-Services behalten
+  ihre Zustandseigentümerschaft. Keine Rückimporte, Fachlogik-Callbacks,
+  neuen Locks/Caches oder Änderungen an den anderen GET-/SSE-Pfaden.
+- Integrierte Abnahme: sieben direkte Routen- und elf Architekturtests
+  **PASS**, beide alten Plan-/Wetter-Handler-Verträge samt Assertions
+  **PASS**; frisch gebautes, netzwerkisoliertes Read-only-SQLCipher-Image
+  mit 2.630 Tests/11 Skips **PASS**; Ruff für Route/direkte Tests/
+  Architektur, Compileall, Inventar-`--check` und Diff-Check **PASS**.
+  Diese Testzahl deckt alle drei Zweige und Auth-/Query-/Folgeanfragen
+  angemessen ab.
+- Die Architekturtests verwenden den gemeinsamen Factory-AST-Helfer,
+  damit der zuvor bei #782 aufgetretene Sonar-Duplikationsfehler nicht
+  wieder eingeführt wird. Externe Gates dieses neuen PR stehen noch aus.
+  `server.py` hat hier 3.432 physische Zeilen; weitere Handler-Routen,
+  SSE und P11 bleiben offen.
