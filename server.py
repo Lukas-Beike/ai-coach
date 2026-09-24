@@ -337,6 +337,7 @@ from backend.http_api.static_assets import StaticAssetService
 from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.state_events_transport import StateEventTransport
 from backend.http_api.state_events_get import StateEventsGetRoutes
+from backend.http_api.route_dispatch import HttpRouteDispatcher
 from backend.http_api.requests import (
     read_audio_body as read_request_audio_body,
     read_body as read_request_body,
@@ -2661,6 +2662,20 @@ PRIVACY_RESTORE_POST_ROUTES = PrivacyRestorePostRoutes(
 AUTH_POST_ROUTES = AuthPostRoutes(
     session_auth_service, runtime_maintenance.MAINTENANCE_GATE
 )
+HTTP_ROUTE_DISPATCHER = HttpRouteDispatcher(
+    (
+        PUBLIC_GET_ROUTES,
+        PLANNING_GET_ROUTES,
+        SYNC_GET_ROUTES,
+        STATE_EVENTS_GET_ROUTES,
+        COACH_GET_ROUTES,
+        ATHLETE_GET_ROUTES,
+        HISTORY_GET_ROUTES,
+        DIAGNOSTICS_GET_ROUTES,
+        PRIVACY_GET_ROUTES,
+    ),
+    (SETTINGS_PUT_ROUTES, ATHLETE_PUT_ROUTES),
+)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -2710,21 +2725,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.request_id = uuid.uuid4().hex[:12]
         try:
             path = urlparse(self.path).path
-            handled = (
-                PUBLIC_GET_ROUTES.handle(self, path)
-                or PLANNING_GET_ROUTES.handle(self, path)
-                or SYNC_GET_ROUTES.handle(self, path)
-                or STATE_EVENTS_GET_ROUTES.handle(self, path)
-                or COACH_GET_ROUTES.handle(self, path)
-                or ATHLETE_GET_ROUTES.handle(self, path)
-                or HISTORY_GET_ROUTES.handle(self, path)
-                or DIAGNOSTICS_GET_ROUTES.handle(self, path)
-                or PRIVACY_GET_ROUTES.handle(self, path)
-            )
-            if not handled and path.startswith("/api/"):
-                raise AppError(404, NOT_FOUND_ERROR)
-            if not handled:
-                self.send_static(path)
+            HTTP_ROUTE_DISPATCHER.handle_get(self, path)
         except AppError as exc:
             if exc.status >= 500:
                 LOGGER.exception(
@@ -2852,11 +2853,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             path = urlparse(self.path).path
             session = self.auth_service.require_auth(self)
             self.auth_service.require_csrf(self, session)
-            if SETTINGS_PUT_ROUTES.handle(self, path):
-                return
-            if ATHLETE_PUT_ROUTES.handle(self, path):
-                return
-            raise AppError(404, NOT_FOUND_ERROR)
+            HTTP_ROUTE_DISPATCHER.handle_put(self, path)
         except AppError as exc:
             if exc.status >= 500:
                 LOGGER.exception(
