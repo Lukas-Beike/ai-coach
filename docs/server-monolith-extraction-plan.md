@@ -892,6 +892,12 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     `TranscribePostRoutes` zuordnen; Audio-Validierung, Größenlimit und
     Provider-Aufruf bleiben beim AudioTranscriptionClient, der Handler
     authentifiziert und delegiert nur.
+  - [x] Die POST-Routen für Planungskommandos, Check-in-Feedback und Chat-
+    Abbruch zustandslosen `http_api/`-Adaptern zuordnen; Conversation-Claim,
+    Feedback-Persistenz und Cancellation bleiben bei ihren Coach-Diensten.
+  - [x] Login/Logout und Datenbank-Restore als POST-Routen zuordnen;
+    Session-/CSRF-Prüfung, Maintenance-Gate und Restore-Transaktion bleiben
+    bei den bestehenden Auth-, Runtime- und Backup-Eigentümern.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 

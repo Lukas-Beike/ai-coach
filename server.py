@@ -10,8 +10,6 @@ from backend.coach.read_tools import CoachReadToolService
 from backend.coach.training_template_tools import TrainingTemplateToolService
 from backend.coach import streams as coach_streams
 
-import hashlib
-import hmac
 import json
 import logging
 import os
@@ -20,13 +18,13 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone  # noqa: F401
 from functools import partial
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any, Callable
-from urllib.error import HTTPError
-from urllib.parse import parse_qs, quote, urlparse
+from typing import Any
+from urllib.error import HTTPError  # noqa: F401
+from urllib.parse import urlparse
 from urllib.request import urlopen
 
 from backend.db import row_factory as database_row_factory
@@ -38,13 +36,9 @@ from backend.diagnostics.report import (
 )
 from backend.errors import (
     INTERNAL_SERVER_ERROR,
-    INTERVALS_API_KEY_ERROR,
-    INVALID_LIBRARY_ID_ERROR,
     NOT_FOUND_ERROR,
-    PLANNED_CALENDAR_RECHECK_ERROR,
     AppError,
     ClientDisconnected,
-    provider_error,
     public_app_error_status,
 )
 from backend import config as app_config
@@ -52,7 +46,6 @@ from backend import observability
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.calendar import external as calendar_external
 from backend.calendar import local as calendar_local
-from backend.calendar import public_events as public_event_calendar
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.read_service import ActivityReadService
 from backend.privacy import (
@@ -85,7 +78,6 @@ from backend.sync import garmin as garmin_sync
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
     INTERVALS_RESYNC_GATE,
-    intervals_operation,
 )
 from backend.sync import intervals_state
 from backend.sync import observation as sync_observation
@@ -132,6 +124,11 @@ from backend.http_api.coach_actions_post import CoachActionsPostRoutes
 from backend.http_api.chat_post import ChatPostRoutes
 from backend.http_api.chat_stream import CoachChatStreamTransport
 from backend.http_api.transcribe_post import TranscribePostRoutes
+from backend.http_api.planning_commands_post import PlanningCommandsPostRoutes
+from backend.http_api.feedback_post import FeedbackPostRoutes
+from backend.http_api.chat_cancel_post import ChatCancelPostRoutes
+from backend.http_api.privacy_restore_post import PrivacyRestorePostRoutes
+from backend.http_api.auth_post import AuthPostRoutes
 from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.diagnostics_post import DiagnosticsCapturePostRoutes
@@ -231,7 +228,6 @@ from backend.planning import library as planning_library
 from backend.planning import library_service as planning_library_service
 from backend.planning.library_plan_service import WorkoutLibraryPlanService
 from backend.planning.local_plan_creation_service import LocalTrainingPlanCreationService
-from backend.planning import planned_units as planning_planned_units
 from backend.planning import planned_unit_service as planning_planned_unit_service
 from backend.planning.replacement_service import StructuredTrainingPlanReplacementService
 from backend.planning.revision import PlanningRevisionService
@@ -239,7 +235,6 @@ from backend.planning import season as planning_season
 from backend.planning.state_service import StructuredTrainingStateService
 from backend.planning.training_plan_artifact_service import TrainingPlanArtifactService
 from backend.planning import training_plans as planning_training_plans
-from backend.planning import workouts as planning_workouts
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.public_state import PublicStateDependencies, PublicStateService
 from backend.sync.jobs import (
@@ -292,7 +287,6 @@ from backend.coach.proposals import (
     CoachProposalConfirmationService,
     CoachProposalExecutionService,
     CoachProposalReadService,
-    coach_action_view,
 )
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.turn_opening import CoachTurnOpeningService
@@ -330,9 +324,6 @@ from backend.coach.background_job import CoachBackgroundJobRunner
 from backend.coach.job_worker import COACH_JOB_WORKER
 from backend.coach.tools import build_tool_contracts
 from backend.coach.service import command_receipt
-from backend.coach.authorization import (
-    require_coach_scope,
-)
 from backend.http_api.responses import (
     header_items as response_header_items,
     json_bytes as response_json_bytes,
@@ -417,212 +408,17 @@ RATE_LIMITER = RateLimiter()
 CONFIG = load_config(ROOT, DATA_DIR)
 
 
-class IntervalsClient:
-    def __init__(self, config: Config | None = None, *, request: Callable[..., Any] | None = None):
-        self.config = config or CONFIG
-        request_fn = request or (lambda *args, **kwargs: provider_http_client().request(*args, **kwargs))
-        self._api = IntervalsApiClient(
-            api_key=self.config.intervals_api_key,
-            request=lambda *args, **kwargs: request_fn(*args, **kwargs),
-        )
-        self._workout_folder_id: int | None = None
+from backend.providers.intervals_client import (
+    IntervalsClient,
+    set_default_config_provider,
+    set_default_now_provider,
+    set_default_request_provider,
+)
 
-    @property
-    def pagination(self) -> dict[str, dict[str, Any]]:
-        return {collection: dict(metadata) for collection, metadata in self._api.pagination.items()}
-
-    def get(self, path: str, params: dict[str, Any] | None = None, *, cancel_event: threading.Event | None = None) -> Any:
-        if cancel_event is None:
-            return self._api.get(path, params)
-        return self._api.get(path, params, cancel_event=cancel_event)
-
-    def get_paged_collection(
-        self,
-        path: str,
-        params: dict[str, Any] | None,
-        collection: str,
-        page_size: int = 500,
-        cancel_event: threading.Event | None = None,
-    ) -> list[dict[str, Any]]:
-        return self._api.get_paged_collection(
-            path,
-            params,
-            collection,
-            page_size=page_size,
-            cancel_event=cancel_event,
-        )
-
-    @intervals_operation
-    def post(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
-        return self._api.post(path, payload, params)
-
-    @intervals_operation
-    def put(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
-        return self._api.put(path, payload, params)
-
-    @intervals_operation
-    def delete(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        return self._api.delete(path, params)
-
-    def get_workout_library(self, *, cancel_event: threading.Event | None = None) -> list[dict[str, Any]]:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        result = self.get_paged_collection(
-            f"/athlete/{athlete}/workouts", {}, "workout_library", cancel_event=cancel_event
-        )
-        if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Trainingsbibliothek zurÃ¼ckgegeben.")
-        fields = (
-            "id", "name", "description", "type", "moving_time", "distance",
-            "target", "workout_doc", "icu_training_load", "icu_intensity", "indoor",
-            "tags", "folder_id",
-        )
-        return [planning_context.selected(item, fields) for item in result if isinstance(item, dict)]
-
-    @staticmethod
-    def _folder_id(value: Any) -> int | None:
-        if isinstance(value, bool):
-            return None
-        try:
-            folder_id = int(value)
-        except (TypeError, ValueError):
-            return None
-        return folder_id if folder_id > 0 else None
-
-    def get_or_create_workout_folder(self) -> int:
-        """Return the private library folder used for coach-created templates."""
-        if self._workout_folder_id is not None:
-            return self._workout_folder_id
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        folders = self.get(f"/athlete/{athlete}/folders")
-        if isinstance(folders, dict):
-            folders = folders.get("folders") or folders.get("data") or []
-        if not isinstance(folders, list):
-            raise AppError(502, "Intervals.icu hat keine gültige Ordnerliste zurückgegeben.")
-        matching: list[dict[str, Any]] = []
-        pending = [item for item in folders if isinstance(item, dict)]
-        while pending:
-            folder = pending.pop(0)
-            if str(folder.get("name") or "").strip() == APP_NAME:
-                matching.append(folder)
-            children = folder.get("children")
-            if isinstance(children, list):
-                pending.extend(item for item in children if isinstance(item, dict))
-        for folder in matching:
-            folder_id = self._folder_id(folder.get("id"))
-            if folder_id is not None:
-                self._workout_folder_id = folder_id
-                return folder_id
-        created = self.post(f"/athlete/{athlete}/folders", {"name": APP_NAME})
-        folder_id = self._folder_id(created.get("id") if isinstance(created, dict) else None)
-        if folder_id is None:
-            raise AppError(502, "Intervals.icu hat keinen gültigen Ordner zurückgegeben.")
-        self._workout_folder_id = folder_id
-        return folder_id
-
-    def create_library_workouts(self, workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        for workout in workouts:
-            planning_workouts.validate_workout_description(workout)
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        folder_id = self.get_or_create_workout_folder()
-        created: list[dict[str, Any]] = []
-        for workout in workouts:
-            payload = {
-                "name": str(workout.get("name") or "Coach-Einheit")[:200],
-                "description": str(workout.get("description") or "")[:12000],
-                "type": planning_workouts.intervals_workout_sport(workout.get("type") or workout.get("sport")),
-                "folder_id": folder_id,
-                "target": workout.get("target") or "AUTO",
-            }
-            result = self.post(f"/athlete/{athlete}/workouts", payload)
-            if not isinstance(result, dict):
-                raise AppError(502, "Intervals.icu hat keine Trainingsbibliotheks-Einheit zurÃ¼ckgegeben.")
-            created.append(result)
-        return created
-
-    def update_library_workout(self, workout_id: str, workout: dict[str, Any]) -> dict[str, Any]:
-        planning_workouts.validate_workout_description(workout)
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        remote_id = quote(str(workout_id), safe="")
-        payload = {
-            "name": str(workout.get("name") or "Coach-Einheit")[:200],
-            "description": str(workout.get("description") or "")[:12000],
-            "type": planning_workouts.intervals_workout_sport(workout.get("type") or workout.get("sport")),
-            "target": workout.get("target") or "AUTO",
-        }
-        folder_id = self._folder_id(workout.get("folder_id"))
-        # Intervals.icu requires folder_id for workout updates as well as
-        # creates. Resolve a missing folder through the private Coach folder.
-        payload["folder_id"] = folder_id if folder_id is not None else self.get_or_create_workout_folder()
-        result = self.put(f"/athlete/{athlete}/workouts/{remote_id}", payload)
-        if not isinstance(result, dict):
-            raise AppError(502, "Intervals.icu returned no updated library workout.")
-        return result
-
-    def plan_library_workout(self, workout_id: str, workout: dict[str, Any], plan_date: str) -> dict[str, Any]:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        payload = planning_workouts.workout_event_payload(
-            f"library-{workout_id}-{plan_date}",
-            {
-                "date": plan_date,
-                "sport": workout.get("type") or workout.get("sport") or "Ride",
-                "name": workout.get("name") or "Bibliotheks-Einheit",
-                "description": workout.get("description") or "",
-                "duration_minutes": workout.get("duration_minutes") or max(5, round(float(workout.get("moving_time") or 3600) / 60)),
-                "target": workout.get("target") or "AUTO",
-            },
-            today=local_now().date(),
-        )
-        result = self.post(f"/athlete/{athlete}/events/bulk", [payload], {"upsert": "true"})
-        if not isinstance(result, list) or not result:
-            raise AppError(502, "Intervals.icu hat keine geplante Einheit zurÃ¼ckgegeben.")
-        planning_workouts.validate_intervals_workout_result(workout, result[0])
-        return result[0]
-
-    def fetch_competition_events(self) -> list[dict[str, Any]]:
-        """Fetch a broad calendar range for target-event synchronization."""
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        today = local_now().date()
-        result = self.get_paged_collection(
-            f"/athlete/{athlete}/events",
-            {
-                "oldest": (today - timedelta(days=365)).isoformat(),
-                "newest": (today + timedelta(days=730)).isoformat(),
-            },
-            "competition_events",
-        )
-        if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Kalenderevents zurückgegeben.")
-        return [event for event in result if isinstance(event, dict)]
-
-    def upsert_competition_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if not events:
-            return []
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        result = self.post(f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"})
-        if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Zielwettkämpfe zurückgegeben.")
-        return [event for event in result if isinstance(event, dict)]
-
-    def upsert_calendar_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Upsert explicitly approved non-workout calendar events."""
-        if not events:
-            return []
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        result = self.post(f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"})
-        if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Kalendereinträge zurückgegeben.")
-        return [event for event in result if isinstance(event, dict)]
-
-    def bulk_delete_events(self, identifiers: list[dict[str, str]]) -> Any:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        return self.put(f"/athlete/{athlete}/events/bulk-delete", identifiers)
-
-    def delete_event(self, event_id: str) -> Any:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        return self.delete(f"/athlete/{athlete}/events/{quote(event_id, safe='')}")
-
-    def delete_activity(self, activity_id: str) -> Any:
-        return self.delete(f"/activity/{quote(activity_id, safe='')}")
+set_default_config_provider(lambda: CONFIG)
+set_default_request_provider(
+    lambda: lambda *args, **kwargs: provider_http_client().request(*args, **kwargs)
+)
 
 
 
@@ -2498,6 +2294,9 @@ def local_now() -> datetime:
         return datetime.now().astimezone()
 
 
+set_default_now_provider(lambda: local_now())
+
+
 def public_bootstrap_service() -> PublicBootstrapService:
     """Compose the local bootstrap read from its owning backend services."""
     return PublicBootstrapService(
@@ -2852,6 +2651,18 @@ STATE_EVENTS_GET_ROUTES = StateEventsGetRoutes(
 )
 SETTINGS_PUT_ROUTES = SettingsPutRoutes(SETTINGS)
 ATHLETE_PUT_ROUTES = AthletePutRoutes(athlete_context_service, profile_service)
+PLANNING_COMMANDS_POST_ROUTES = PlanningCommandsPostRoutes(
+    coach_planning_command_service,
+    lambda: coach_conversation_provision_service(),
+)
+FEEDBACK_POST_ROUTES = FeedbackPostRoutes(checkin_service)
+CHAT_CANCEL_POST_ROUTES = ChatCancelPostRoutes(coach_cancellation_service)
+PRIVACY_RESTORE_POST_ROUTES = PrivacyRestorePostRoutes(
+    session_auth_service, database_restore_service, MAX_BACKUP_BYTES
+)
+AUTH_POST_ROUTES = AuthPostRoutes(
+    session_auth_service, runtime_maintenance.MAINTENANCE_GATE
+)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -2936,40 +2747,16 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.request_id = uuid.uuid4().hex[:12]
         try:
             path = urlparse(self.path).path
-            if path == "/api/login":
-                result = self.auth_service.login_user(self, str(self.read_json().get("password") or ""))
-                token = result.pop("session_token")
-                csrf = result["csrf"]
-                self.send_json(200, result, {
-                    "Set-Cookie": self.auth_service.session_cookie_headers(token, csrf),
-                })
-            elif path == "/api/privacy/restore":
-                session = self.auth_service.require_auth(self)
-                self.auth_service.require_csrf(self, session)
-                payload = self.read_body(MAX_BACKUP_BYTES)
-                result = database_restore_service().restore(payload)
-                self.send_json(200, result, {"Set-Cookie": [
-                    self.auth_service.session_cookie_headers(clear=True)[0], self.auth_service.session_cookie_headers(clear=True)[1],
-                ]})
-            elif path == "/api/logout":
-                session = self.auth_service.require_auth(self)
-                self.auth_service.require_csrf(self, session)
-                with runtime_maintenance.MAINTENANCE_GATE.operation():
-                    self.auth_service.logout_user(self)
-                self.send_json(200, {"status": "ok"}, {"Set-Cookie": [
-                    self.auth_service.session_cookie_headers(clear=True)[0], self.auth_service.session_cookie_headers(clear=True)[1],
-                ]})
-            else:
-                session = self.auth_service.require_auth(self)
-                self.auth_service.require_csrf(self, session)
-                if path == "/api/chat/cancel":
-                    # Cancellation must remain reachable while the streaming
-                    # request holds the maintenance gate for its lifetime.
-                    payload = self.read_json()
-                    self.send_json(200, coach_cancellation_service().cancel(session["csrf_hash"], payload.get("operation_id")))
-                else:
-                    with runtime_maintenance.MAINTENANCE_GATE.operation():
-                        self.handle_authenticated_post(path, session)
+            if AUTH_POST_ROUTES.handle(self, path):
+                return
+            if PRIVACY_RESTORE_POST_ROUTES.handle(self, path):
+                return
+            session = self.auth_service.require_auth(self)
+            self.auth_service.require_csrf(self, session)
+            if CHAT_CANCEL_POST_ROUTES.handle(self, path, session):
+                return
+            with runtime_maintenance.MAINTENANCE_GATE.operation():
+                self.handle_authenticated_post(path, session)
         except AppError as exc:
             if exc.status >= 500:
                 LOGGER.exception(
@@ -3020,14 +2807,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             return True
         if TRANSCRIBE_POST_ROUTES.handle(self, path):
             return True
-        elif path == "/api/planning/commands":
-            self.send_json(200, coach_planning_command_service().execute(
-                self.read_json(), conversation_id=coach_conversation_provision_service().ensure(), session_csrf_hash=session["csrf_hash"],
-            ))
+        if PLANNING_COMMANDS_POST_ROUTES.handle(self, path, session):
+            return True
+        if FEEDBACK_POST_ROUTES.handle(self, path):
+            return True
         elif path == "/api/chat/stream":
             CHAT_STREAM_TRANSPORT.handle(self, session)
-        elif path == "/api/feedback":
-            self.send_json(200, checkin_service().save(self.read_json()))
         else:
             return False
         return True
