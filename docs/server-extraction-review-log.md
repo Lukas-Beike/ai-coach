@@ -7272,3 +7272,64 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   und Diff-Check **PASS**. Root-Review des geänderten Testumfangs erneut
   **PASS**. Das externe Sonar-Gate muss auf dem neuen Commit neu laufen;
   bis zu dessen Erfolg bleibt der PR unfreigegeben.
+
+## P10 Plan-/Wetter-/Library-GET-Routen — isolierter Quellstand
+
+- `/api/plan`, `/api/weather` und `/api/library` liegen in
+  `backend/http_api/planning_get.py` unter `PlanningGetRoutes`. `server.py`
+  verdrahtet ausschließlich die konkreten Session-Auth-, Plan-State-,
+  Wetter-State- und Library-Page-Factories. Die Route besitzt keinen Lock
+  oder Cache und greift pro Request dynamisch auf Auth zu.
+- Die drei bisherigen Zweige wurden aus `_handle_training_get` entfernt;
+  Performance, Profile, Feedback und Context-Preview verbleiben unverändert.
+  Auth wird vor jedem Datendienst aufgerufen. `local` nutzt ausschließlich
+  den ersten Querywert `1`; Library reicht jeweils den ersten `cursor`- und
+  `limit`-Wert beziehungsweise `None` weiter. Status und JSON bleiben 200.
+- Die beiden bestehenden Wetter-/Plan-Handler-Vertragstests wurden auf
+  `PLANNING_GET_ROUTES.handle` migriert; ihre Auth-, Factory-, Query- und
+  JSON-Assertions sind erhalten. Sie patchen nun die tatsächlich von der
+  Route injizierten Factory-Callables. Sieben direkte Fake-Handler-/Service-
+  Tests decken alle drei Routen, erste Querywerte und Defaults, Authfehler,
+  unbekannte Pfade ohne Factory-Aufruf sowie erneute Auth-Auflösung bei
+  Folgeanfragen ab. Der Architekturtest nutzt die gemeinsame AST-Prüfung
+  für Dispatch und Composition-Factories.
+- **PASS:** Frisch gebautes SQLCipher-Image
+  `ai-coach:p10-planning-get-routes`, Read-only und netzwerkisoliert, mit
+  schreibgeschützten Test-/Dokumentations-/Public-/Server-/E2E-/Workflow- und
+  Playwright-Konfigurations-Mounts sowie flüchtigem `/tmp`: vollständige
+  Python-Suite mit 2.630 Tests und 11 Skips.
+- Sieben Routentests, elf Architekturtests, beide migrierten Handler-Verträge,
+  Compileall, Inventar-`--check` und `git diff --check` bestanden. Ruff für
+  neue Route, direkte Routentests und Architekturtests bestanden. Der breitere
+  Ruff-Lauf meldet weiter Altverstöße in `server.py`/`tests/test_server.py`;
+  die `F`-Befunde sind gegenüber HEAD unverändert (11 im Server, 2 im alten
+  Server-Testmodul).
+- Kein Rebase, Push, Pull Request oder Merge.
+
+## P10 Plan-/Wetter-/Library-GET-Routen — Sol-Integrationsreview
+
+- Vorgänger-PR #782 wurde am 24.09.2026 um 06:03:31 UTC mit
+  `df1a69365ec00d7982e0cbfad5e0255bc016c4af` gemergt; der Commit
+  ist Vorfahr von `origin/develop`. Sonar-Gate, Codex-Review und der
+  nachlaufende Browser-Check waren erfolgreich, ohne offene Review-Threads.
+- Quellcommit `7f8725e95c884d5c5004093c9406916220b3028a` wurde als
+  `8fe87c0ebe6048ac5074a4db2c0c010f3881a01d` übernommen.
+  Tatsächlicher Diff, alle drei Routen, beide migrierten Handler-Verträge,
+  Factory-Lookup, Architekturguard und unbekannter Pfad wurden geprüft.
+- **PASS**: `PlanningGetRoutes` ruft Auth vor Datendiensten und bei jedem
+  Request neu auf; Query-Defaults und erste `local`-/`cursor`-/`limit`-
+  Werte bleiben unverändert. Plan-, Wetter- und Library-Services behalten
+  ihre Zustandseigentümerschaft. Keine Rückimporte, Fachlogik-Callbacks,
+  neuen Locks/Caches oder Änderungen an den anderen GET-/SSE-Pfaden.
+- Integrierte Abnahme: sieben direkte Routen- und elf Architekturtests
+  **PASS**, beide alten Plan-/Wetter-Handler-Verträge samt Assertions
+  **PASS**; frisch gebautes, netzwerkisoliertes Read-only-SQLCipher-Image
+  mit 2.630 Tests/11 Skips **PASS**; Ruff für Route/direkte Tests/
+  Architektur, Compileall, Inventar-`--check` und Diff-Check **PASS**.
+  Diese Testzahl deckt alle drei Zweige und Auth-/Query-/Folgeanfragen
+  angemessen ab.
+- Die Architekturtests verwenden den gemeinsamen Factory-AST-Helfer,
+  damit der zuvor bei #782 aufgetretene Sonar-Duplikationsfehler nicht
+  wieder eingeführt wird. Externe Gates dieses neuen PR stehen noch aus.
+  `server.py` hat hier 3.432 physische Zeilen; weitere Handler-Routen,
+  SSE und P11 bleiben offen.

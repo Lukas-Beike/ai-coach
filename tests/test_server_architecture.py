@@ -59,6 +59,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
     ("backend.http_api.public_get", ("PublicGetRoutes",)),
+    ("backend.http_api.planning_get", ("PlanningGetRoutes",)),
     ("backend.http_api.export_streams", ("ExportStreamTransport",)),
     ("backend.coach.conversation", ("CoachConversationResetService",)),
     ("backend.coach.prompt", ("COACH_PROMPT",)),
@@ -2252,7 +2253,14 @@ class ServerArchitectureTests(unittest.TestCase):
             {"send_state_event_batch", "handle_state_events"}.isdisjoint(methods)
         )
 
-    def _assert_get_route_owned(self, old_method: str, route_name: str) -> ast.Module:
+    def _assert_get_route_owned(
+        self,
+        old_method: str,
+        route_name: str,
+        *,
+        method_must_be_absent: bool = True,
+        forbidden_paths: tuple[str, ...] = (),
+    ) -> ast.Module:
         server_tree = _parse(SERVER_PATH)
         request_handler = next(
             node
@@ -2279,21 +2287,32 @@ class ServerArchitectureTests(unittest.TestCase):
             and node.func.attr == "handle"
         ]
 
-        self.assertNotIn(old_method, methods)
+        if method_must_be_absent:
+            self.assertNotIn(old_method, methods)
         self.assertEqual(len(route_dispatches), 1)
+        if forbidden_paths:
+            old_method_node = next(
+                node
+                for node in request_handler.body
+                if isinstance(node, ast.FunctionDef) and node.name == old_method
+            )
+            method_paths = {
+                node.value
+                for node in ast.walk(old_method_node)
+                if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            }
+            self.assertTrue(set(forbidden_paths).isdisjoint(method_paths))
         return server_tree
 
-    def test_coach_get_routes_are_owned_by_http_api_module(self) -> None:
-        self._assert_get_route_owned("_handle_coach_get", "COACH_GET_ROUTES")
-
-    def test_public_get_routes_are_owned_by_http_api_module(self) -> None:
-        server_tree = self._assert_get_route_owned("_handle_public_get", "PUBLIC_GET_ROUTES")
+    def _assert_route_factories(
+        self, server_tree: ast.Module, route_name: str, expected_names: list[str]
+    ) -> None:
         route_assignment = next(
             node
             for node in server_tree.body
             if isinstance(node, ast.Assign)
             and any(
-                isinstance(target, ast.Name) and target.id == "PUBLIC_GET_ROUTES"
+                isinstance(target, ast.Name) and target.id == route_name
                 for target in node.targets
             )
         )
@@ -2301,14 +2320,39 @@ class ServerArchitectureTests(unittest.TestCase):
             argument.id if isinstance(argument, ast.Name) else ast.unparse(argument)
             for argument in route_assignment.value.args
         ]
+        self.assertEqual(factory_names, expected_names)
 
-        self.assertEqual(
-            factory_names,
+    def test_coach_get_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_get_route_owned("_handle_coach_get", "COACH_GET_ROUTES")
+
+    def test_public_get_routes_are_owned_by_http_api_module(self) -> None:
+        server_tree = self._assert_get_route_owned("_handle_public_get", "PUBLIC_GET_ROUTES")
+        self._assert_route_factories(
+            server_tree,
+            "PUBLIC_GET_ROUTES",
             [
                 "runtime_maintenance.MAINTENANCE_GATE",
                 "readiness_service",
                 "session_auth_service",
                 "public_bootstrap_service",
+            ],
+        )
+
+    def test_planning_get_routes_are_owned_by_http_api_module(self) -> None:
+        server_tree = self._assert_get_route_owned(
+            "_handle_training_get",
+            "PLANNING_GET_ROUTES",
+            method_must_be_absent=False,
+            forbidden_paths=("/api/plan", "/api/weather", "/api/library"),
+        )
+        self._assert_route_factories(
+            server_tree,
+            "PLANNING_GET_ROUTES",
+            [
+                "session_auth_service",
+                "public_plan_state_service",
+                "public_weather_state_service",
+                "library_page_service",
             ],
         )
 

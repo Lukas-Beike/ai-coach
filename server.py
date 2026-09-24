@@ -131,6 +131,7 @@ from backend.http_api.bootstrap_state import (
 )
 from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.public_get import PublicGetRoutes
+from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.auth import SessionAuthService
@@ -2786,6 +2787,12 @@ PUBLIC_GET_ROUTES = PublicGetRoutes(
     session_auth_service,
     public_bootstrap_service,
 )
+PLANNING_GET_ROUTES = PlanningGetRoutes(
+    session_auth_service,
+    public_plan_state_service,
+    public_weather_state_service,
+    library_page_service,
+)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -2859,21 +2866,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         return True
 
     def _handle_training_get(self, path: str) -> bool:
-        if path == "/api/plan":
-            self.auth_service.require_auth(self)
-            query = parse_qs(urlparse(self.path).query)
-            self.send_json(200, public_plan_state_service().read(
-                local_only=query.get("local", ["0"])[0] == "1"
-            ))
-        elif path == "/api/weather":
-            self.auth_service.require_auth(self)
-            query = parse_qs(urlparse(self.path).query)
-            self.send_json(200, public_weather_state_service().state(local_only=query.get("local", ["0"])[0] == "1"))
-        elif path == "/api/library":
-            self.auth_service.require_auth(self)
-            query = parse_qs(urlparse(self.path).query)
-            self.send_json(200, library_page_service().page(query.get("cursor", [None])[0], query.get("limit", [None])[0]))
-        elif path == "/api/performance":
+        if path == "/api/performance":
             self.auth_service.require_auth(self)
             self.send_json(200, public_performance_state_service().performance_state())
         elif path == "/api/profile":
@@ -2931,6 +2924,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             path = urlparse(self.path).path
             handled = (
                 PUBLIC_GET_ROUTES.handle(self, path)
+                or PLANNING_GET_ROUTES.handle(self, path)
                 or self._handle_sync_get(path)
                 or COACH_GET_ROUTES.handle(self, path)
                 or self._handle_training_get(path)
