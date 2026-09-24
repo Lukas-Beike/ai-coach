@@ -6861,3 +6861,29 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   und die geänderten Aufrufer nochmals: **PASS**. 87 fokussierte Tests,
   Ruff, Compileall, Inventar-/Diff-Check und frisches Read-only-Docker-
   Image mit 2.582 Tests/11 Skips **PASS**. PR-CI/Sonar/Codex stehen aus.
+
+## P8 Sessiongebundene Chat-Turn-Vorprüfung — Quellstand
+
+- PR #774 wurde am 24.09.2026 um 03:57:52 UTC mit Squash-Commit
+  `fb413ae79961b37aecd5153941ebda00544d82dd` gemergt;
+  der Commit ist auf `origin/develop` erreichbar, null offene Threads.
+  SonarCloud, CodeQL, Unit-/Container-, Qualitäts- und Codex-Checks
+  **PASS**; Browser lief unmittelbar nach dem Merge noch nach.
+- Root verlagerte Nachricht-/Turn-ID-Grenzen, frühe Cancellation,
+  Session-Owner-Prüfung, idempotentes Completed-Read,
+  15-Minuten-Stale-Recovery, gespeicherte Provider-/Modellwahl,
+  Conversation-ID und Background-Resume nach `CoachChatTurnService`.
+  DB-UOW, Lock und `CoachCommandReceiptService` bleiben die
+  konkreten Zustandseigentümer; `server.py` enthält nur noch einen
+  dekorierten Aufrufer, der nach direkter HTTP-/Worker-Migration
+  entfernt werden muss. Keine fachlichen Server-Callbacks.
+- Sieben direkte Tests prüfen Validation/Cancel vor DB-Zugriff,
+  Session-Weitergabe, idempotentes Read ohne zweite Ausführung,
+  fremde Sitzung vor Providerzugriff, persistierte Background-Wahl,
+  Stale-Freigabe nach 901 Sekunden und In-Progress nach 899 Sekunden.
+  Quellstand: 109 bestehende betroffene Tests, Ruff, Compileall,
+  Inventar-/Diff-Check sowie frisches Read-only-Docker-Image mit
+  2.589 Tests/11 Skips **PASS**. `server.py`: 3.614 physische
+  Zeilen, P0=0. Root prüfte den tatsächlichen Quell-Diff samt
+  Session-/DB-Grenze, Providerwahl, Stale-Cutoff und allen Aufrufern:
+  **PASS**. Integrationsreview und PR-Gates ausstehend.
