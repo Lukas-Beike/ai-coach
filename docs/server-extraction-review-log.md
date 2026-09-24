@@ -7225,3 +7225,32 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Die Readiness-Vertragstests liefen zusätzlich gezielt unter der lokalen
   Python-Umgebung erfolgreich.
 - Kein Rebase, Push, Pull Request oder Merge.
+
+## P10 öffentliche GET-Routen — Sol-Integrationsreview
+
+- Vorgänger-PR #781 wurde am 24.09.2026 um 05:40:26 UTC mit
+  `08c81c11f868b8b287e93e6caa09b875ea31bff6` gemergt; der Commit
+  ist Vorfahr von `origin/develop`. Auch der nachlaufende Browser-Check
+  endete erfolgreich. Keine offenen Review-Threads oder Sonar-Issues.
+- Quellcommit `22b2e478` wurde als `d728619c70fa619713fe9bd9deb1d7bf5a72aaa9`
+  auf den bestätigten `develop`-Stand übernommen. Tatsächlicher Quell-
+  und Integrations-Diff, alle vier Handler-Pfade, die Factory-Lookups,
+  bestehenden Readiness-Verträge und die neuen Tests wurden geprüft.
+- **FAIL → Korrektur → PASS**: Im ersten Worker-Diff fehlten zwei alte
+  Readiness-Handler-Tests. Nach konkretem Korrekturauftrag wurden beide
+  mit sämtlichen Assertions auf `PUBLIC_GET_ROUTES.handle` migriert;
+  dynamische DB-Manager-Bindung, redigierter 503-Fehler und JSON-Vertrag
+  sind weiterhin getestet. Der korrigierte Diff enthält keine
+  Testabschächung.
+- Route und Zusammensetzung sind zustandslos. Maintenance-, Readiness-,
+  Session- und Bootstrap-Eigentümer bleiben unverändert; unbekannte
+  Pfade lösen nichts auf, Authstatus bleibt optional, Bootstrap verlangt
+  Auth vor dem Read. Kein Backend-Rückimport oder Fachlogik-Callback.
+- Integrierte Abnahme: sieben direkte Routen- und zehn Architekturtests
+  **PASS**; beide migrierten Readiness-Verträge **PASS**; frisch gebautes
+  Read-only-SQLCipher-Image mit vollständiger Suite 2.622 Tests/11 Skips
+  **PASS**; Ruff für neue Route/Tests, Compileall, Inventar-`--check`
+  und `git diff --check` **PASS**. Die sieben direkten Tests plus die
+  erhaltenen Fehlerverträge decken die vier Routen angemessen ab.
+- Restrisiko: Die übrigen Handler-, SSE- und P11-Audit-Arbeiten bleiben
+  offen; `server.py` hat auf diesem Stand 3.438 physische Zeilen.
