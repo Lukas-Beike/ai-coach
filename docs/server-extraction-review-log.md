@@ -7805,26 +7805,29 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   dem Backup-Service. Die Coach-Dienste behalten Idempotenz, Persistenz und
   Cancellation.
 - `IntervalsClient` ist aus `server.py` in `backend/providers/intervals_client.py`
-  verschoben. Die HTTP-Abstraktion erhält weiter dynamische Konfigurations-,
-  Uhr- und Request-Abhängigkeiten. Zwei früh erkannte native Testfehler
-  zeigten, dass die Request- und Uhr-Provider beim Verschieben dynamisch
-  bleiben müssen; die Composition-Callbacks wurden korrigiert.
+  verschoben. Der Provider verlangt Konfiguration und Request-Funktion explizit;
+  der Composition Root baut den Client aus den aktiven HTTP-/Zeitzonen-Diensten.
 - Direkte Routen-/Provider-/Planungstests und Architekturtests: **51 PASS**.
   Die vollständige native Suite: **2.748 Tests PASS, 12 SQLCipher-Skips**.
   `py_compile`, Inventar-`--check`, `git diff --check` und Docker-Build
   (`ai-coach:local`, Python 3.14/SQLCipher) PASS.
 - Quellreview: **PASS**. Keine Provider- oder DB-Aufrufe beim Import;
   Route-Dispatch erhält Body-Limits und Cookie-/CSRF-Verträge. Der erste
-  volle Testlauf hatte zwei Fehler durch eager gebundene Callback-Abhängigkeiten;
-  beide sind behoben und der komplette Wiederholungslauf ist grün.
+  volle lokale Testlauf hatte zwei Fehler durch eager gebundene Callback-Abhängigkeiten;
+  nach Behebung war die native Suite grün.
 - CI-Nachprüfung nach PR-Erstellung: Der `/api/planning/commands`-Browserfall
   reproduzierte eine beim Import erfasste Conversation-Factory. Die Composition
-  löst sie jetzt dynamisch; der betroffene mobile-small SQLCipher-E2E-Test PASS.
-  Der Architekturtest wurde auf den Lazy-Callback angepasst. Diese Korrektur
-  ist auf `43dcee2` und der finale CI-Lauf läuft erneut.
-- `server.py`: 3.297 physische Zeilen. Die Änderungen sind lokal und noch
-  nicht in einem PR. P7/P8-Restaudit, übriger HTTP-Transport und P11 bleiben
-  offen.
+  löst sie dynamisch; der betroffene mobile-small SQLCipher-E2E-Test PASS.
+  Der Architekturtest wurde auf den Lazy-Callback angepasst. Die explizite
+  Codex-Prüfung fand außerdem einen fehlerhaften optionalen IntervalsClient-
+  Konstruktor; der Client verlangt jetzt seine Infrastruktur explizit, und der
+  Composition Root stellt eine konkrete Factory bereit. Die vorherigen Tests,
+  die den Konstruktor als Service-Factory gepatcht hatten, patchen nun den
+  Kompositionspunkt. Sieben betroffene Provider-/Sync-Fälle und die vollständige
+  native Suite (**2.748 PASS, 12 SQLCipher-Skips**) bestehen mit dieser
+  Korrektur; aktueller PR-CI-Lauf muss den finalen Head bestätigen.
+- Der lokale Stand wurde als PR #802 geöffnet; Squash-Auto-Merge ist aktiviert.
+  P7/P8-Restaudit, übriger HTTP-Transport und P11 bleiben offen.
 - Nächster Schritt: P7/P8-Review-Log-Befunde abgleichen und den konkreten
   offenen Morning-Receipt-/Restart-Vertrag vor weiterer HTTP-Auslagerung
   prüfen.

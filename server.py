@@ -410,14 +410,6 @@ CONFIG = load_config(ROOT, DATA_DIR)
 
 from backend.providers.intervals_client import (
     IntervalsClient,
-    set_default_config_provider,
-    set_default_now_provider,
-    set_default_request_provider,
-)
-
-set_default_config_provider(lambda: CONFIG)
-set_default_request_provider(
-    lambda: lambda *args, **kwargs: provider_http_client().request(*args, **kwargs)
 )
 
 
@@ -1182,7 +1174,7 @@ def competition_sync_service() -> CompetitionSyncService:
     """Compose the complete competition synchronization use case."""
     return CompetitionSyncService(
         CONFIG,
-        IntervalsClient,
+        intervals_client,
         competition_sync_reconciler(),
         competition_service(),
         database_manager(),
@@ -1232,7 +1224,7 @@ def planned_calendar_sync_service() -> PlannedCalendarSyncService:
     return PlannedCalendarSyncService(
         CONFIG,
         database_manager(),
-        IntervalsClient,
+        intervals_client,
         planned_unit_sync_state_writer(),
         utc_now,
         lambda: local_now().date(),
@@ -1244,7 +1236,7 @@ def planned_calendar_repair_service() -> PlannedCalendarRepairService:
     return PlannedCalendarRepairService(
         CONFIG,
         database_manager(),
-        IntervalsClient,
+        intervals_client,
         planned_unit_sync_state_writer(),
         utc_now,
         lambda: local_now().date(),
@@ -1290,7 +1282,7 @@ def workout_library_refresh_service() -> WorkoutLibraryRefreshService:
     return WorkoutLibraryRefreshService(
         CONFIG,
         database_manager(),
-        IntervalsClient,
+        intervals_client,
         workout_library_remote_reconciler(),
         workout_library_service(),
         workout_library_sync_state_service(),
@@ -1303,7 +1295,7 @@ def workout_library_refresh_service() -> WorkoutLibraryRefreshService:
 def workout_library_sync_service() -> WorkoutLibrarySyncService:
     """Compose the explicit single-entry workout-library synchronization use case."""
     return WorkoutLibrarySyncService(
-        CONFIG, IntervalsClient, workout_library_sync_state_service()
+        CONFIG, intervals_client, workout_library_sync_state_service()
     )
 
 
@@ -1526,7 +1518,7 @@ def illness_pause_sync_service() -> IllnessPauseSyncService:
     """Compose the explicitly approved illness-pause remote sync use case."""
     return IllnessPauseSyncService(
         CONFIG,
-        IntervalsClient(),
+        intervals_client(),
         adaptive_replan_apply_service=adaptive_replan_apply_service(),
         competition_service=competition_service(),
         adaptive_replan_preview_service=adaptive_replan_preview_service(),
@@ -1682,6 +1674,15 @@ def provider_http_client() -> provider_http.JsonHttpClient:
             opener=urlopen,
         )
     return PROVIDER_HTTP_CLIENT
+
+
+def intervals_client(config: Config | None = None) -> IntervalsClient:
+    """Compose an Intervals client with the active provider transport and clock."""
+    return IntervalsClient(
+        config or CONFIG,
+        request=lambda *args, **kwargs: provider_http_client().request(*args, **kwargs),
+        now=lambda: local_now(),
+    )
 
 
 def gemini_json_client() -> gemini_provider.GeminiJsonClient:
@@ -2008,7 +2009,7 @@ def coach_proposal_execution_service() -> CoachProposalExecutionService:
     """Compose guarded dispatch for confirmed Coach actions."""
     return CoachProposalExecutionService(
         database_manager(), duplicate_activity_service(), history_undo_service(),
-        IntervalsClient, runtime_maintenance.MAINTENANCE_GATE,
+        intervals_client, runtime_maintenance.MAINTENANCE_GATE,
         now=time.time, utc_now=utc_now,
     )
 
@@ -2292,9 +2293,6 @@ def local_now() -> datetime:
         return datetime.now(ZoneInfo(configured_timezone))
     except Exception:
         return datetime.now().astimezone()
-
-
-set_default_now_provider(lambda: local_now())
 
 
 def public_bootstrap_service() -> PublicBootstrapService:

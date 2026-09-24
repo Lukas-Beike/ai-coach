@@ -1,13 +1,14 @@
 """Synthetic workout export regressions; all provider calls are mocked."""
 
-from datetime import date, datetime, timedelta
 import unittest
 from copy import deepcopy
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
-from backend.planning import workouts as planning_workouts
-from test_server import server
 from support import parsed_workout_fixture
+from test_server import server
+
+from backend.planning import workouts as planning_workouts
 
 
 class WorkoutTextTests(unittest.TestCase):
@@ -33,7 +34,7 @@ class WorkoutTextTests(unittest.TestCase):
             "(261–273 W), dazwischen 6 min bei 50–60 % FTP. 10 min Ausrollen.", 65,
         )
         self.assert_invalid(workout, "missing_workout_steps")
-        client = server.IntervalsClient()
+        client = server.intervals_client()
         with patch.object(client, "get_or_create_workout_folder") as folder, \
                 patch.object(client, "post") as post, patch.object(client, "put") as put:
             for operation in (
@@ -198,7 +199,7 @@ class WorkoutTextTests(unittest.TestCase):
 
     def test_library_exports_preserve_target_and_local_duration(self):
         workout = self.workout("- 30m Z2 HR", 30, target="HR", moving_time=3600)
-        client = server.IntervalsClient()
+        client = server.intervals_client()
         with patch.object(client, "get_or_create_workout_folder", return_value=1), \
                 patch.object(client, "post", return_value={"id": "synthetic"}) as post, \
                 patch.object(client, "put", return_value={"id": "synthetic"}) as put:

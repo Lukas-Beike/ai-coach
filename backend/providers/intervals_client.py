@@ -17,70 +17,26 @@ from backend.sync.gates import intervals_operation
 
 APP_NAME = "Intervals Coach"
 
-_DEFAULT_CONFIG_PROVIDER: Callable[[], Config] | None = None
-_DEFAULT_NOW_PROVIDER: Callable[[], datetime] | None = None
-_DEFAULT_REQUEST_PROVIDER: Callable[[], Callable[..., Any]] | None = None
-
-
-def set_default_config_provider(provider: Callable[[], Config] | None) -> None:
-    global _DEFAULT_CONFIG_PROVIDER
-    _DEFAULT_CONFIG_PROVIDER = provider
-
-
-def set_default_now_provider(provider: Callable[[], datetime] | None) -> None:
-    global _DEFAULT_NOW_PROVIDER
-    _DEFAULT_NOW_PROVIDER = provider
-
-
-def set_default_request_provider(provider: Callable[[], Callable[..., Any]] | None) -> None:
-    global _DEFAULT_REQUEST_PROVIDER
-    _DEFAULT_REQUEST_PROVIDER = provider
-
-
-def _current_now() -> datetime:
-    if _DEFAULT_NOW_PROVIDER is not None:
-        return _DEFAULT_NOW_PROVIDER()
-    return datetime.now().astimezone()
-
-
-def _current_request() -> Callable[..., Any]:
-    if _DEFAULT_REQUEST_PROVIDER is not None:
-        return _DEFAULT_REQUEST_PROVIDER()
-    from backend.providers.http import JsonHttpClient
-
-    client = JsonHttpClient()
-    return lambda *args, **kwargs: client.request(*args, **kwargs)
-
-
 class IntervalsClient:
     def __init__(
         self,
-        config: Config | None = None,
+        config: Config,
         *,
-        request: Callable[..., Any] | None = None,
+        request: Callable[..., Any],
         now: Callable[[], datetime] | None = None,
     ):
-        if config is not None:
-            self.config = config
-        elif _DEFAULT_CONFIG_PROVIDER is not None:
-            self.config = _DEFAULT_CONFIG_PROVIDER()
-        else:
-            from backend.config import load_config
-            from backend.domain import DATA_DIR, ROOT
-
-            self.config = load_config(ROOT, DATA_DIR)
+        self.config = config
         self._now = now
-        request_fn = request or _current_request()
         self._api = IntervalsApiClient(
             api_key=self.config.intervals_api_key,
-            request=lambda *args, **kwargs: request_fn(*args, **kwargs),
+            request=lambda *args, **kwargs: request(*args, **kwargs),
         )
         self._workout_folder_id: int | None = None
 
     def _get_now(self) -> datetime:
         if self._now is not None:
             return self._now()
-        return _current_now()
+        return datetime.now().astimezone()
 
     @property
     def pagination(self) -> dict[str, dict[str, Any]]:

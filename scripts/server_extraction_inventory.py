@@ -740,6 +740,7 @@ def _explicit_owner(name: str) -> str | None:
             # intentionally retained in the final composition root and must
             # not inflate the still-open domain phase counts.
             "provider_refresh_tracker": COMPOSITION_ROOT,
+            "intervals_client": COMPOSITION_ROOT,
             "sync_operation_observer": COMPOSITION_ROOT,
             "sync_job_store": COMPOSITION_ROOT,
             "sync_job_queue_service": COMPOSITION_ROOT,
