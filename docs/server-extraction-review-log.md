@@ -7889,3 +7889,12 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Suite: **2.741 PASS, 12 SQLCipher-Skips**. `py_compile`, Inventar-`--check`,
   `git diff --check` und Docker-Build (`ai-coach:local`, Python 3.14/SQLCipher)
   **PASS**.
+
+## P7 Coach-Werkzeugrunden — Limit-Eigentümerschaft
+
+- `COACH_TOOL_MAX_ROUNDS` ist jetzt bei `CoachStructuredToolRoundService`
+  definiert; `server.py` importiert den unveränderten Wert nur zur Komposition.
+  Ein Architekturtest verhindert eine Rückverlagerung der Policy.
+- Fokussierte Architekturtests: **32 PASS**; Coach-Dialogtests: **72 PASS**.
+  Vollständige native Suite: **2.742 PASS, 12 SQLCipher-Skips**.
+  `py_compile`, Inventar-`--check` und `git diff --check` **PASS**.
