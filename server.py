@@ -296,7 +296,11 @@ from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.coach.final_receipt import CoachFinalReceiptService
 from backend.coach.response_transport import CoachResponseTransport, raise_if_chat_cancelled
 from backend.coach.structured_response import CoachStructuredResponseService
-from backend.coach.structured_tool_round import CoachStructuredToolRoundService, StructuredCoachRoundState
+from backend.coach.structured_tool_round import (
+    CoachStructuredToolRoundLimits,
+    CoachStructuredToolRoundService,
+    StructuredCoachRoundState,
+)
 from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
@@ -2417,10 +2421,12 @@ def coach_structured_tool_round_service() -> CoachStructuredToolRoundService:
         coach_structured_tool_replay_service(), coach_structured_tool_preparation_service(),
         coach_structured_tool_execution_service(), coach_structured_tool_failure_service(),
         coach_structured_tool_round_journal(), coach_job_store(), coach_training_context_service(),
-        coach_structured_response_service(), max_rounds=COACH_TOOL_MAX_ROUNDS,
-        background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS,
-        default_max_output_tokens=COACH_DEFAULT_MAX_OUTPUT_TOKENS,
-        long_plan_max_output_tokens=COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
+        coach_structured_response_service(), CoachStructuredToolRoundLimits(
+            max_rounds=COACH_TOOL_MAX_ROUNDS,
+            background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS,
+            default_max_output_tokens=COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+            long_plan_max_output_tokens=COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
+        ),
     )
 
 

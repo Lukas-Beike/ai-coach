@@ -46,6 +46,14 @@ class StructuredCoachRoundState:
     recovery_state: dict[str, bool]
 
 
+@dataclass(frozen=True)
+class CoachStructuredToolRoundLimits:
+    max_rounds: int
+    background_horizon_days: int
+    default_max_output_tokens: int
+    long_plan_max_output_tokens: int
+
+
 class CoachStructuredToolRoundService:
     """Own tool execution, durable round progress, and provider follow-up."""
 
@@ -61,11 +69,7 @@ class CoachStructuredToolRoundService:
         jobs: CoachJobStore,
         training_context: CoachTrainingContextService,
         response: CoachStructuredResponseService,
-        *,
-        max_rounds: int,
-        background_horizon_days: int,
-        default_max_output_tokens: int,
-        long_plan_max_output_tokens: int,
+        limits: CoachStructuredToolRoundLimits,
     ) -> None:
         self._database_manager = database_manager
         self._database_lock = database_lock
@@ -77,10 +81,7 @@ class CoachStructuredToolRoundService:
         self._jobs = jobs
         self._training_context = training_context
         self._response = response
-        self._max_rounds = max_rounds
-        self._background_horizon_days = background_horizon_days
-        self._default_max_output_tokens = default_max_output_tokens
-        self._long_plan_max_output_tokens = long_plan_max_output_tokens
+        self._limits = limits
 
     def _execute_tool_call(
         self, item: dict[str, Any], *, state: StructuredCoachRoundState, question: str, cancelled: bool,
@@ -131,9 +132,10 @@ class CoachStructuredToolRoundService:
             if result.get("synchronous_refresh") or (name == "get_sync_job" and result.get("ok")):
                 model_instructions = self._training_context.build() + "\n\n" + COACH_DIALOGUE_INSTRUCTIONS
             if action.get("period"):
-                scope = coach_execution_scope(action, background_horizon_days=self._background_horizon_days)
+                scope = coach_execution_scope(action, background_horizon_days=self._limits.background_horizon_days)
                 state.request_payload["max_output_tokens"] = (
-                    self._long_plan_max_output_tokens if scope["planning"] else self._default_max_output_tokens
+                    self._limits.long_plan_max_output_tokens if scope["planning"]
+                    else self._limits.default_max_output_tokens
                 )
                 self._jobs.merge_receipt(state.client_turn_id, {"plan_scope": scope})
         except (AppError, ValueError, TypeError, KeyError) as exc:
@@ -152,7 +154,7 @@ class CoachStructuredToolRoundService:
     ) -> dict[str, Any]:
         followup = {
             **state.request_payload, "instructions": state.model_instructions, "input": outputs,
-            "tool_choice": "none" if question or cancelled or rounds >= self._max_rounds else "auto",
+            "tool_choice": "none" if question or cancelled or rounds >= self._limits.max_rounds else "auto",
         }
         if state.ai_provider == "openai" and response.get("id") and not followup.get("conversation"):
             followup["previous_response_id"] = response["id"]
@@ -169,7 +171,7 @@ class CoachStructuredToolRoundService:
         state: StructuredCoachRoundState,
     ) -> tuple[dict[str, Any], int, str, bool, str]:
         """Run bounded tool rounds while preserving durable replay checkpoints."""
-        while rounds < self._max_rounds:
+        while rounds < self._limits.max_rounds:
             calls = self._journal.function_calls(response)
             if not calls:
                 break

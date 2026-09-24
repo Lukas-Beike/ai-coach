@@ -6816,3 +6816,12 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   erneut: **PASS**. 97 fokussierte Tests, Ruff, Compileall,
   Inventar-/Diff-Check und frisches Read-only-Docker-Image mit
   2.576 Tests/11 Skips **PASS**. PR-CI/Sonar/Codex stehen aus.
+- PR #773 auf Head `20123e64`: SonarCloud-Code-Analysis **FAIL** wegen
+  genau eines `python:S107`-Befunds (14 statt erlaubter 13 Parameter im
+  `CoachStructuredToolRoundService`-Konstruktor). Root bündelte die
+  vier unveränderten Grenzwerte in `CoachStructuredToolRoundLimits`;
+  kein Budget oder Rundencap wurde verändert. Der tatsächliche
+  Korrektur-Diff/Code, die 84 gezielten Tests, Ruff, Compileall,
+  Inventar-/Diff-Check und ein frisch gebautes Read-only-Docker-Image
+  mit 2.576 Tests/11 Skips: **PASS**. Erneute externe Sonar-/Codex-/
+  Browser-Prüfung des neuen Heads vor Merge ausstehend.

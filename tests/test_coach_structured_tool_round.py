@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import MagicMock, Mock, patch
 
 from backend.coach.structured_tool_round import (
+    CoachStructuredToolRoundLimits,
     CoachStructuredToolRoundService,
     StructuredCoachRoundState,
 )
@@ -32,9 +33,10 @@ class StructuredToolRoundTests(unittest.TestCase):
         self.service = CoachStructuredToolRoundService(
             lambda: self.manager, self.lock, self.replay, self.preparation,
             self.execution, self.failure, CoachStructuredToolRoundJournal(self.jobs),
-            self.jobs, Mock(), self.response, max_rounds=1,
-            background_horizon_days=7, default_max_output_tokens=6000,
-            long_plan_max_output_tokens=32000,
+            self.jobs, Mock(), self.response, CoachStructuredToolRoundLimits(
+                max_rounds=1, background_horizon_days=7,
+                default_max_output_tokens=6000, long_plan_max_output_tokens=32000,
+            ),
         )
 
     @staticmethod
