@@ -99,7 +99,7 @@ from backend.weather.service import (
 )
 from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
-from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, PlanningStateRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
+from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, NutritionRepository, PlanAdjustmentRepository, PlanningStateRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db.manager import DatabaseManager
 from backend.db.schema import configure_cipher, database_schema_is_current
 from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config
@@ -156,6 +156,13 @@ from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.privacy_get import PrivacyGetRoutes
 from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
 from backend.http_api.settings_put import SettingsPutRoutes
+from backend.http_api.nutrition import (
+    NutritionGetRoutes,
+    NutritionPostRoutes,
+    NutritionPutRoutes,
+)
+from backend.nutrition.service import NutritionService
+from backend.nutrition.sync import IntervalsNutritionSyncService
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
@@ -637,10 +644,37 @@ def coach_sync_tool_service() -> CoachSyncToolService:
     )
 
 
+def nutrition_service() -> NutritionService:
+    """Compose nutrition and calorie tracking for the active database manager."""
+    return NutritionService(
+        database_manager=database_manager(),
+        db_lock=DB_LOCK,
+        nutrition_repository=NutritionRepository(utc_now),
+        utc_now=utc_now,
+        local_now=local_now,
+    )
+
+
+def intervals_nutrition_sync_service() -> IntervalsNutritionSyncService:
+    """Compose nutrition sync to Intervals.icu wellness."""
+    api_client = IntervalsApiClient(
+        api_key=CONFIG.intervals_api_key,
+        request=provider_http_client().request,
+    )
+    return IntervalsNutritionSyncService(
+        config=CONFIG,
+        api_client=api_client,
+        nutrition_service=nutrition_service(),
+    )
+
+
 def coach_athlete_record_tool_service() -> CoachAthleteRecordToolService:
     """Compose concrete local services for Coach athlete-record mutations."""
     return CoachAthleteRecordToolService(
-        checkin_service(), activity_feedback_service(), competition_service()
+        checkin_service(),
+        activity_feedback_service(),
+        competition_service(),
+        nutrition_service(),
     )
 
 
@@ -666,6 +700,7 @@ def coach_read_tool_service() -> CoachReadToolService:
         competition_service,
         training_plan_service,
         COACH_TRAINING_CHANGE_LIMIT,
+        nutrition_service,
     )
 
 
@@ -2658,6 +2693,13 @@ PRIVACY_RESTORE_POST_ROUTES = PrivacyRestorePostRoutes(
 AUTH_POST_ROUTES = AuthPostRoutes(
     session_auth_service, runtime_maintenance.MAINTENANCE_GATE
 )
+NUTRITION_GET_ROUTES = NutritionGetRoutes(
+    session_auth_service, nutrition_service, local_now
+)
+NUTRITION_POST_ROUTES = NutritionPostRoutes(
+    nutrition_service, intervals_nutrition_sync_service
+)
+NUTRITION_PUT_ROUTES = NutritionPutRoutes(nutrition_service)
 HTTP_ROUTE_DISPATCHER = HttpRouteDispatcher(
     (
         PUBLIC_GET_ROUTES,
@@ -2669,8 +2711,9 @@ HTTP_ROUTE_DISPATCHER = HttpRouteDispatcher(
         HISTORY_GET_ROUTES,
         DIAGNOSTICS_GET_ROUTES,
         PRIVACY_GET_ROUTES,
+        NUTRITION_GET_ROUTES,
     ),
-    (SETTINGS_PUT_ROUTES, ATHLETE_PUT_ROUTES),
+    (SETTINGS_PUT_ROUTES, ATHLETE_PUT_ROUTES, NUTRITION_PUT_ROUTES),
 )
 
 
@@ -2832,6 +2875,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_coach_post(path, session)
             or self._handle_sync_post(path)
             or self._handle_data_post(path, session)
+            or NUTRITION_POST_ROUTES.handle(self, path, session)
         )
         if not handled:
             raise AppError(404, NOT_FOUND_ERROR)

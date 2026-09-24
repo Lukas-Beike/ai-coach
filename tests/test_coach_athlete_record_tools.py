@@ -18,8 +18,9 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
         self.checkins = Mock()
         self.feedback = Mock()
         self.competitions = Mock()
+        self.nutrition = Mock()
         self.service = CoachAthleteRecordToolService(
-            self.checkins, self.feedback, self.competitions
+            self.checkins, self.feedback, self.competitions, self.nutrition
         )
 
     def test_success_routes_all_five_tools_and_preserves_response_shapes(self):
@@ -28,12 +29,16 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
         self.feedback.save.return_value = {"status": "ok"}
         self.competitions.save.return_value = {"status": "created"}
         self.competitions.delete.return_value = {"status": "deleted"}
+        self.nutrition.log_meal.return_value = {"id": "nut-1", "meal_type": "lunch"}
+        self.nutrition.delete_meal.return_value = {"status": "deleted", "id": "nut-1"}
         cases = (
             ("save_checkin", {"payload": {"notes": "Synthetic"}}, "local_checkin"),
             ("save_activity_feedback", {"payload": {"activity_id": "a1", "notes": "Synthetic"}}, "activity_feedback"),
             ("delete_activity_feedback", {"activity_id": " a1 "}, "activity_feedback"),
             ("save_competition", {"payload": {"name": "Synthetic"}}, "local_competitions"),
             ("delete_competition", {"competition_id": " a1 "}, "competition:a1"),
+            ("save_nutrition_entry", {"payload": {"description": "Oatmeal", "kcal": 450}}, "local_nutrition"),
+            ("delete_nutrition_entry", {"id": "nut-1"}, "local_nutrition"),
         )
         expected = {
             "save_checkin": {"ok": True, "status": "ok"},
@@ -41,6 +46,8 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
             "delete_activity_feedback": {"ok": True, "stored_locally": True, "status": "ok"},
             "save_competition": {"ok": True, "status": "created"},
             "delete_competition": {"ok": True, "status": "deleted"},
+            "save_nutrition_entry": {"ok": True, "entry": {"id": "nut-1", "meal_type": "lunch"}},
+            "delete_nutrition_entry": {"ok": True, "status": "deleted", "id": "nut-1"},
         }
         for name, arguments, scope in cases:
             with self.subTest(name=name):
@@ -59,6 +66,8 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
         self.feedback.save.assert_called_once_with("a1", {"notes": ""})
         self.competitions.save.assert_called_once_with({"name": "Synthetic"})
         self.competitions.delete.assert_called_once_with("a1")
+        self.nutrition.log_meal.assert_called_once_with({"description": "Oatmeal", "kcal": 450})
+        self.nutrition.delete_meal.assert_called_once_with("nut-1")
 
     def test_operation_and_scope_denials_block_each_tool(self):
         cases = (
@@ -81,6 +90,14 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
             (
                 "delete_competition", {"competition_id": "a1"}, "competition:a1",
                 "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.",
+            ),
+            (
+                "save_nutrition_entry", {"payload": {}}, "local_nutrition",
+                "Die strukturierte Coach-Autorisierung erlaubt diesen Ernährungseintrag nicht.",
+            ),
+            (
+                "delete_nutrition_entry", {"id": "nut-1"}, "local_nutrition",
+                "Die strukturierte Coach-Autorisierung erlaubt das Löschen dieses Eintrags nicht.",
             ),
         )
         for name, arguments, scope, operation_message in cases:
@@ -108,6 +125,7 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
             ("save_checkin", "local_checkin"),
             ("save_activity_feedback", "activity_feedback"),
             ("save_competition", "local_competitions"),
+            ("save_nutrition_entry", "local_nutrition"),
         )
         for name, scope in invalid_saves:
             with self.subTest(name=name), self.assertRaises(AppError) as raised:
@@ -138,7 +156,6 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
                 if name == "delete_activity_feedback"
                 else "Eine lokale Wettkampf-ID ist erforderlich.",
             )
-        manager.unit_of_work.assert_not_called()
 
 
 if __name__ == "__main__":

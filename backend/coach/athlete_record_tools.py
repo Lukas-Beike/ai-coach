@@ -12,21 +12,24 @@ from backend.coach.authorization import (
     structured_action_payload,
 )
 from backend.errors import AppError
+from backend.nutrition.service import NutritionService
 from backend.planning.competition_service import CompetitionService
 
 
 class CoachAthleteRecordToolService:
-    """Own local Coach mutations for check-ins, feedback, and competitions."""
+    """Own local Coach mutations for check-ins, feedback, competitions, and nutrition."""
 
     def __init__(
         self,
         checkins: CheckinService,
         activity_feedback: ActivityFeedbackService,
         competitions: CompetitionService,
+        nutrition: NutritionService | None = None,
     ) -> None:
         self._checkins = checkins
         self._activity_feedback = activity_feedback
         self._competitions = competitions
+        self._nutrition = nutrition
 
     def execute(
         self, name: str, arguments: dict[str, Any], intent: dict[str, Any]
@@ -98,6 +101,34 @@ class CoachAthleteRecordToolService:
             competition_id = str(arguments.get("competition_id") or "").strip()
             require_coach_scope(intent, f"competition:{competition_id}")
             return {"ok": True, **self._competitions.delete(competition_id)}
+        if name == "save_nutrition_entry":
+            self._authorize(
+                intent,
+                name,
+                "Die strukturierte Coach-Autorisierung erlaubt diesen Ernährungseintrag nicht.",
+            )
+            require_coach_scope(intent, "local_nutrition")
+            if not self._nutrition:
+                raise AppError(500, "NutritionService ist nicht verfügbar.")
+            payload = structured_action_payload(arguments)
+            return {
+                "ok": True,
+                "entry": self._nutrition.log_meal(payload),
+            }
+        if name == "delete_nutrition_entry":
+            self._authorize(
+                intent,
+                name,
+                "Die strukturierte Coach-Autorisierung erlaubt das Löschen dieses Eintrags nicht.",
+            )
+            require_coach_scope(intent, "local_nutrition")
+            if not self._nutrition:
+                raise AppError(500, "NutritionService ist nicht verfügbar.")
+            entry_id = str(arguments.get("id") or arguments.get("entry_id") or "").strip()
+            return {
+                "ok": True,
+                **self._nutrition.delete_meal(entry_id),
+            }
         return None
 
     @staticmethod

@@ -55,6 +55,9 @@ def build_tool_contracts(
         "update_training_plan",
         "undo_training_change",
         "apply_workout_library_plan",
+        "save_nutrition_entry",
+        "delete_nutrition_entry",
+        "read_nutrition",
     )
     
     
@@ -166,10 +169,9 @@ def build_tool_contracts(
         _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete undated local templates. Resolve local_id with list_workout_library for edits; creation requires name and workout description. Scheduling is a separate local action.", {"templates": {"type": "array", "minItems": 1, "maxItems": 28, "items": {
             "type": "object", "additionalProperties": False, "required": ["action"], "properties": {
                 "action": {"type": "string", "enum": ["create", "update", "archive", "restore", "delete"]},
-                "local_id": {"type": "string", "format": "uuid"}, "name": {"type": "string"},
-                "description": {"type": "string"}, "sport": {"type": "string", "enum": ["Ride", "VirtualRide", "Run", "Swim", "WeightTraining"]},
-                "duration_minutes": {"type": "integer", "minimum": 5, "maximum": 1440},
-                "target": {"type": "string", "enum": ["AUTO", "POWER", "HR", "PACE"]},
+                "local_id": {"type": "string"}, "name": {"type": "string"},
+                "description": {"type": "string"}, "duration_minutes": {"type": "integer"},
+                "target": {"type": "string"}, "sport": {"type": "string"}, "type": {"type": "string"},
             },
         }}}),
         _canonical_coach_tool("apply_workout_library_plan", "Schedule saved templates locally after conflict checks. Resolve the template ID from list_workout_library. Never writes remotely.", {"entries": {"type": "array", "minItems": 1, "maxItems": 14, "items": {
@@ -224,6 +226,41 @@ def build_tool_contracts(
             },
         }}),
         _canonical_coach_tool("undo_training_change", "Return an undo preview for a local change; do not apply it silently.", {"change_id": {"type": "string"}}),
+        _canonical_coach_tool(
+            "save_nutrition_entry",
+            "Save a meal, snack, or nutritional intake with calories and macronutrients (carbs, protein, fat). Use when the athlete describes what they ate via speech/text or shares a food photo.",
+            {
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "meal_date": {"type": "string", "description": "Date of the meal YYYY-MM-DD (defaults to athlete-local today)"},
+                        "meal_time": {"type": "string", "description": "Time of the meal HH:MM"},
+                        "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"]},
+                        "description": {"type": "string", "description": "Description of the consumed meal/food/drink"},
+                        "kcal": {"type": "integer", "minimum": 0, "maximum": 10000, "description": "Total estimated energy in kilocalories"},
+                        "carbs_g": {"type": "number", "minimum": 0, "maximum": 1000, "description": "Total carbohydrates in grams"},
+                        "protein_g": {"type": "number", "minimum": 0, "maximum": 1000, "description": "Total protein in grams"},
+                        "fat_g": {"type": "number", "minimum": 0, "maximum": 1000, "description": "Total fat in grams"},
+                        "source": {"type": "string", "enum": ["voice", "photo", "manual", "coach"]},
+                    },
+                }
+            },
+        ),
+        _canonical_coach_tool(
+            "delete_nutrition_entry",
+            "Delete a single nutrition log entry by its ID.",
+            {"id": {"type": "string", "description": "Exact ID of the nutrition entry to delete"}},
+        ),
+        _canonical_coach_tool(
+            "read_nutrition",
+            "Read nutrition entries and day summaries for a date or date range.",
+            {
+                "date": {"type": "string", "description": "Optional specific date YYYY-MM-DD"},
+                "start": {"type": "string", "description": "Optional start date YYYY-MM-DD for range"},
+                "end": {"type": "string", "description": "Optional end date YYYY-MM-DD for range"},
+            },
+        ),
     ]
     
     
@@ -231,6 +268,7 @@ def build_tool_contracts(
         "read_profile",
         "read_training_state", "list_recent_activities", "get_activity_details", "list_workout_library", "list_planned_workouts",
         "list_change_history", "list_competitions", "list_training_plans", "get_sync_job",
+        "read_nutrition",
     }
     
     
@@ -260,4 +298,3 @@ def build_tool_contracts(
     
 
     return COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, COACH_DIALOGUE_TOOLS
-
