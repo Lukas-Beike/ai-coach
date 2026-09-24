@@ -103,6 +103,7 @@ from backend.providers import gemini as gemini_provider
 from backend.providers import http as provider_http
 from backend.providers import intervals_client as intervals_client_module
 from backend.providers import weather as weather_provider
+from backend.errors import ClientDisconnected
 from backend.performance import activity_validation
 from backend.performance import planning_recovery as performance_planning_recovery
 from backend.performance import context as performance_context
@@ -4898,12 +4899,12 @@ class CoachTests(unittest.TestCase):
     def test_garmin_capability_breaker_pauses_repeated_same_error(self):
         error = server.AppError(503, "provider unavailable", reason="network_error")
         service = server.garmin_sync_state_service()
-        for _ in range(server.garmin_sync.GARMIN_CAPABILITY_FAILURE_LIMIT):
+        for _ in range(garmin_sync.GARMIN_CAPABILITY_FAILURE_LIMIT):
             service.record_capability_failure("body_battery", error)
         self.assertFalse(service.capability_allowed("body_battery"))
         state = service.capability_state("body_battery")
         self.assertEqual(
-            state["count"], server.garmin_sync.GARMIN_CAPABILITY_FAILURE_LIMIT
+            state["count"], garmin_sync.GARMIN_CAPABILITY_FAILURE_LIMIT
         )
         self.assertEqual(state["error_class"], "network_error")
         service.record_capability_success("body_battery")
@@ -9776,8 +9777,8 @@ class CoachTests(unittest.TestCase):
                 yield b'\n'
 
         with patch.object(openai_provider, "urlopen", return_value=DisconnectResponse()):
-            with self.assertRaises(server.ClientDisconnected):
-                server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: (_ for _ in ()).throw(server.ClientDisconnected()))
+            with self.assertRaises(ClientDisconnected):
+                server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: (_ for _ in ()).throw(ClientDisconnected()))
         self.assertEqual(
             server.provider_state_service().summary("openai")["last_operation"],
             "responses_stream_cancelled",
@@ -9898,7 +9899,7 @@ class CoachTests(unittest.TestCase):
         handler.read_json = Mock(return_value={"message": "Bleibt bestehen", "client_turn_id": "turn-disconnect-test"})
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
-        handler.send_sse_event = Mock(side_effect=[None, server.ClientDisconnected()])
+        handler.send_sse_event = Mock(side_effect=[None, ClientDisconnected()])
         events = queue.Queue()
         events.put(("delta", {"text": "Antwort bleibt gespeichert"}))
         events.put(("completed", {"message": {"id": 2}}))

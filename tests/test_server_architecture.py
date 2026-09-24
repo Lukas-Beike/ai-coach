@@ -8,6 +8,7 @@ runtime state, which is outside the scope of an architecture check.
 from __future__ import annotations
 
 import ast
+import tempfile
 import unittest
 from collections.abc import Iterable
 from pathlib import Path
@@ -2041,6 +2042,80 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_handle_openai_stream_network_error",
 )
 
+# Functions in server.py are fixed composition helpers, local clock utilities,
+# the HTTP adapter, and process lifecycle. New orchestration belongs in backend.
+ALLOWED_SERVER_FUNCTIONS = frozenset("""
+    utc_now database_manager session_auth_service provider_state_service
+    provider_refresh_tracker sync_operation_observer provider_freshness_service
+    sync_job_store sync_job_queue_service sync_command_endpoint
+    provider_refresh_command_service sync_conflict_command_service
+    plan_push_command_service structured_plan_sync_service
+    plan_repair_manifest_service coach_sync_tool_service nutrition_service
+    intervals_nutrition_sync_service coach_athlete_record_tool_service
+    coach_activity_read_tool_service coach_read_tool_service state_version_service
+    public_performance_state_service public_feedback_state_service
+    sync_public_state_service sync_state_repository performance_refresh_service
+    intervals_snapshot_reader performance_refresh_followup_service
+    sync_job_outcome_service daily_sync_marker_service intervals_snapshot_service
+    intervals_sync_service garmin_fixture_loader garmin_client_factory
+    garmin_payload_service garmin_sync_state_service garmin_remote_reader
+    garmin_sync_service garmin_projection_service full_provider_resync_service
+    weather_service weather_sync_service public_weather_state_service
+    morning_body_battery_service external_calendar_reader
+    external_calendar_sync_service calendar_conflict_service
+    activity_feedback_service activity_read_service duplicate_activity_service
+    checkin_service profile_service coach_profile_update_service
+    change_history_service history_undo_service competition_service
+    competition_sync_reconciler competition_sync_service training_plan_service
+    planned_unit_service planned_unit_sync_state_writer planned_calendar_sync_service
+    planned_calendar_repair_service remote_planned_unit_reconciler
+    workout_library_sync_state_service planning_authority_service
+    workout_library_remote_reconciler workout_library_refresh_service
+    workout_library_sync_service selected_workout_sync_service sync_job_executor
+    sync_job_worker workout_library_service workout_library_plan_service
+    coach_library_plan_tool_service local_plan_creation_service
+    training_plan_artifact_service daily_planning_context_service
+    structured_training_state_service structured_training_change_validator
+    structured_training_change_service coach_training_patch_service
+    structured_training_plan_replacement_service adaptive_replan_apply_service
+    illness_pause_sync_service coach_adaptive_apply_service
+    adaptive_preview_followup_service adaptive_replan_preview_service
+    privacy_data_export_service privacy_delete_service athlete_context_service
+    initialise_database key_value_service provider_http_client intervals_client
+    gemini_json_client audio_transcription_client gemini_stream_client
+    openai_responses_client coach_conversation_provision_service
+    coach_conversation_reset_service openai_stream_client coach_quick_actions_service
+    gemini_conversation_history_service coach_message_service
+    coach_conversation_history_service coach_job_store coach_turn_failure_service
+    coach_job_submission_service coach_cancellation_service coach_dialogue_read_service
+    coach_dialogue_action_service coach_clarification_service
+    coach_attachment_context_service manual_morning_checkin_service
+    morning_checkin_state_service gemini_local_chat_history_service
+    gemini_request_payload_service gemini_response_normalization_service
+    gemini_conversation_response_service library_page_service
+    chat_history_page_service coach_proposal_read_service coach_command_receipt_service
+    coach_turn_opening_service coach_proposal_creation_service
+    coach_proposal_confirmation_service coach_proposal_execution_service
+    coach_structured_context_service coach_training_context_service
+    coach_request_payload_service coach_context_preview_service coach_response_transport
+    coach_tool_dispatch_service coach_structured_tool_execution_service
+    coach_structured_tool_failure_service coach_structured_tool_round_journal
+    coach_planning_command_service coach_structured_tool_replay_service
+    coach_structured_outcome_service coach_structured_tool_preparation_service
+    coach_conversation_recovery_service coach_response_retry_policy
+    coach_structured_response_service coach_structured_tool_round_service
+    coach_final_receipt_service coach_structured_turn_service coach_chat_turn_service
+    morning_coach_job_completion_service coach_background_job_runner local_now
+    public_bootstrap_service public_plan_state_service
+    public_state_local_prelude_service public_state_weather_prelude_service
+    public_state_calendar_projection_service public_state_service
+    recent_log_entries_service coach_diagnostic_history_service diagnostic_report_service
+    privacy_archive_export_service database_backup_service export_stream_transport
+    database_restore_validation_service database_restore_service readiness_service
+    request_handler_class daily_sync_loop_service daily_sync_scheduler
+    startup_sync_scheduler main
+""".split())
+
 
 def _python_files(root: Path) -> Iterable[Path]:
     return sorted(path for path in root.rglob("*.py") if path.is_file())
@@ -2180,6 +2255,83 @@ def _server_import_violations(path: Path, tree: ast.AST) -> list[str]:
                 f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: entry-point attribute access"
             )
     return violations
+
+
+def _runtime_import_cycles(backend_root: Path) -> list[tuple[str, ...]]:
+    """Find eager backend import cycles, excluding type-only and local imports."""
+    modules: dict[str, Path] = {}
+    for path in _python_files(backend_root):
+        relative = path.relative_to(backend_root).with_suffix("")
+        parts = relative.parts[:-1] if relative.name == "__init__" else relative.parts
+        modules["backend" + ("." + ".".join(parts) if parts else "")] = path
+
+    graph: dict[str, set[str]] = {name: set() for name in modules}
+
+    def eager_nodes(nodes: list[ast.stmt]) -> Iterable[ast.AST]:
+        for node in nodes:
+            yield node
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if isinstance(node, ast.If):
+                test = ast.unparse(node.test)
+                if test in {"TYPE_CHECKING", "typing.TYPE_CHECKING"}:
+                    continue
+                yield from eager_nodes(node.body)
+                yield from eager_nodes(node.orelse)
+            elif isinstance(node, (ast.Try, ast.TryStar)):
+                yield from eager_nodes(node.body)
+                for handler in node.handlers:
+                    yield from eager_nodes(handler.body)
+                yield from eager_nodes(node.orelse)
+                yield from eager_nodes(node.finalbody)
+
+    for name, path in modules.items():
+        tree = _parse(path)
+        for node in eager_nodes(tree.body):
+            targets: set[str] = set()
+            if isinstance(node, ast.Import):
+                targets.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    current = name.split(".")
+                    package = current if path.name == "__init__.py" else current[:-1]
+                    base = package[: len(package) - node.level + 1]
+                    imported = node.module.split(".") if node.module else []
+                    target = ".".join(base + imported)
+                else:
+                    target = node.module or ""
+                if target:
+                    targets.add(target)
+                for alias in node.names:
+                    child = f"{target}.{alias.name}" if target else alias.name
+                    if child in modules:
+                        targets.add(child)
+            graph[name].update(target for target in targets if target in modules)
+
+    cycles: set[tuple[str, ...]] = set()
+    active: list[str] = []
+    active_set: set[str] = set()
+    complete: set[str] = set()
+
+    def visit(name: str) -> None:
+        if name in active_set:
+            cycle = active[active.index(name):]
+            rotations = [tuple(cycle[index:] + cycle[:index]) for index in range(len(cycle))]
+            cycles.add(min(rotations))
+            return
+        if name in complete:
+            return
+        active.append(name)
+        active_set.add(name)
+        for target in sorted(graph[name]):
+            visit(target)
+        active.pop()
+        active_set.remove(name)
+        complete.add(name)
+
+    for name in sorted(graph):
+        visit(name)
+    return sorted(cycles)
 
 
 def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
@@ -2331,6 +2483,35 @@ class ServerArchitectureTests(unittest.TestCase):
             + "\n".join(violations),
         )
 
+    def test_backend_has_no_eager_runtime_import_cycles(self) -> None:
+        self.assertEqual([], _runtime_import_cycles(BACKEND_ROOT))
+
+    def test_import_cycle_guard_ignores_type_only_and_function_local_imports(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend_root = Path(temporary) / "backend"
+            backend_root.mkdir()
+            (backend_root / "__init__.py").write_text("", encoding="utf-8")
+            (backend_root / "first.py").write_text(
+                "from typing import TYPE_CHECKING\n"
+                "if TYPE_CHECKING:\n    from . import second\n"
+                "def later():\n    from . import second\n",
+                encoding="utf-8",
+            )
+            (backend_root / "second.py").write_text(
+                "from . import first\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([], _runtime_import_cycles(backend_root))
+
+            (backend_root / "first.py").write_text(
+                "from . import second\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                [("backend.first", "backend.second")],
+                _runtime_import_cycles(backend_root),
+            )
+
     def test_server_does_not_redefine_extracted_public_symbols(self) -> None:
         implementations = _top_level_implementations(_parse(SERVER_PATH))
         violations = [
@@ -2350,6 +2531,23 @@ class ServerArchitectureTests(unittest.TestCase):
             "server.py must remain a composition root for extracted symbols:\n"
             + "\n".join(violations),
         )
+
+    def test_server_top_level_functions_are_limited_to_composition_root(self) -> None:
+        tree = _parse(SERVER_PATH)
+        functions = {
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        classes = {
+            node.name for node in tree.body if isinstance(node, ast.ClassDef)
+        }
+        self.assertEqual(
+            set(),
+            functions - ALLOWED_SERVER_FUNCTIONS,
+            "New server.py functions belong in a backend owner module.",
+        )
+        self.assertEqual({"RequestHandler"}, classes)
 
     def test_browser_fixture_does_not_patch_removed_response_functions(self) -> None:
         fixture = REPOSITORY_ROOT / "e2e" / "fixture_runtime.py"
