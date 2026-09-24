@@ -6825,3 +6825,39 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Inventar-/Diff-Check und ein frisch gebautes Read-only-Docker-Image
   mit 2.576 Tests/11 Skips: **PASS**. Erneute externe Sonar-/Codex-/
   Browser-Prüfung des neuen Heads vor Merge ausstehend.
+
+## P8 Vollständiger strukturierter Coach-Turn — Quellstand
+
+- PR #773 wurde am 24.09.2026 um 03:40:02 UTC mit Squash-Commit
+  `d85f9d1195b90a6a626183d4f82150325045f51c` gemergt;
+  der Commit ist auf `origin/develop` erreichbar, null offene Threads.
+  SonarCloud, CodeQL, Browser, Codex und übrige Pflichtchecks **PASS**.
+- Root verlagerte Eröffnung, Attachment-/Dialogkontext, Restart-
+  Checkpoint-Replay, Provider-Response, Tool-Runden, Outcome,
+  finalen Receipt-Commit und sichere Fehlerbehandlung in
+  `CoachStructuredTurnService`. `server.py` komponiert die konkreten
+  Zustandseigentümer und ruft `.run()` auf; keine Rückimporte oder
+  fachlichen Server-Callbacks. `chat_with_coach`-Vorprüfung und
+  Background-Worker-Lifecycle bleiben P8-offen.
+- Direkte Tests prüfen Read-only-Toolfilter, privaten Session-Key,
+  OpenAI-Checkpoint, Pending-Outputs nach Restart, sicheres
+  Fehler-Receipt und Scope-Denial. Der erste Read-only-Docker-Lauf:
+  **FAIL** wegen eines alten Testaufrufs auf den entfernten Server-
+  Helper und fehlender Diagnose-Frames bei getrennten `/review`-
+  Server- und `/app`-Backend-Quellpfaden. Root migrierte den Test auf
+  den Backend-Service und begrenzte `coach_error_metadata` auf die
+  installierten Backend-Dateien oder die explizite `server.py`;
+  fremde Pfade/Inhalte bleiben ausgeschlossen. Ein zusätzlicher
+  direkter Split-Root-/Privacy-Test sichert diese Grenze.
+- Nach Korrektur: 84 fokussierte Tests und frisches Read-only-Docker-
+  Image mit 2.582 Tests/11 Skips **PASS**; Ruff neuer/geänderter
+  Backenddateien und neuer Tests, Compileall, Inventar-/Diff-Check
+  **PASS**. `server.py`: 3.699 physische Zeilen, P0=0.
+  Root prüfte den tatsächlichen Code-/Diff-Stand einschließlich
+  Transaktionseigentümer, Restart-Replay, Session-/Scope-Grenze,
+  Diagnosedaten und aller Aufrufer: **PASS**. PR-CI folgt.
+- Quellcommit `aeeabaa9` wurde auf dem #773-Merge konfliktfrei als
+  `f2075f4f` integriert. Root prüfte den tatsächlichen Integrationsdiff
+  und die geänderten Aufrufer nochmals: **PASS**. 87 fokussierte Tests,
+  Ruff, Compileall, Inventar-/Diff-Check und frisches Read-only-Docker-
+  Image mit 2.582 Tests/11 Skips **PASS**. PR-CI/Sonar/Codex stehen aus.
