@@ -7513,3 +7513,34 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   POST-/PUT-Transport, P7/P8-Restzuordnungen und P11 bleiben offen.
   Nächster kleiner Auftrag: den verbleibenden State-Event-GET-Dispatch
   ohne Änderung der bestehenden Stream-Semantik auslagern.
+
+## P10 State-Event-GET-Dispatch — Integrationsreview
+
+- Vorgänger-PR #789 wurde am 24.09.2026 um 07:36:53 UTC mit
+  `e8bd847f4d6225a1baea0a72f9c6cc56065edd06` gemergt; der Commit ist
+  Vorfahr von `origin/develop`. Browser, Codex und Sonar bestanden, ohne
+  offene Review-Threads.
+- GPT-6-Luna-Quellcommit `a1c042b6e3f6765165a9bc4995838b19697553e9`
+  wurde nach Root-Prüfung des tatsächlichen Code-Diffs als `f49868e0`
+  sequenziell integriert.
+- **PASS:** `StateEventsGetRoutes` besitzt genau `/api/state/events` und
+  authentisiert dynamisch vor jedem Verbindungs- oder Transportzugriff.
+  `_handle_sync_get` entfällt. Der vorhandene `StateEventTransport` behält
+  denselben Event-Puffer und die unveränderte Cursor-, Gap-Reset-, Ready-,
+  Heartbeat- und Disconnect-Schleife; Handler-Callbacks schreiben nur SSE-
+  Header/Events beziehungsweise setzen Socket-Timeout. Kein neuer Lock,
+  Cache, Rückimport, Server-Fachcallback oder Remote-Schreibpfad.
+- Die vier direkten Routentests prüfen den exakten Request-Target-/Callback-
+  Vertrag, Auth-Denial vor Streamstart, unbekannte Pfade und erneute Auth-
+  Auflösung. Der alte Server-Routentest und die Quelltextassertion wurden auf
+  den tatsächlichen neuen Lookup-Ort migriert; bestehende Batch-/SSE-Tests
+  bleiben aktiv. Die Testzahl ist für diesen begrenzten Dispatch angemessen.
+- Integrierte Abnahme: frisch gebautes Read-only-/netzwerkisoliertes
+  SQLCipher-Image mit **2.665 Tests/11 Skips PASS**; Ruff für Route,
+  Direkttests, Architektur und Inventarskript, Compileall, Inventar-
+  `--check` (P0=0) und Diff-Check **PASS**. Der Worker korrigierte vor
+  Übergabe eine nur im Container sichtbare Quellpfad-Assertion; der finale
+  Quell- und integrierte Volltest bestanden.
+- `server.py` hat 3.389 physische Zeilen. POST-/PUT-Transport, P7/P8-
+  Restzuordnungen und P11 bleiben offen. Nächster P10-Teilauftrag: die
+  vier Settings-PUT-Routen mit unveränderter Auth-/CSRF-/Maintenance-Grenze.

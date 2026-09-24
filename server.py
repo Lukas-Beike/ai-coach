@@ -337,6 +337,7 @@ from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.static_assets import StaticAssetService
 from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.state_events_transport import StateEventTransport
+from backend.http_api.state_events_get import StateEventsGetRoutes
 from backend.http_api.requests import (
     read_audio_body as read_request_audio_body,
     read_body as read_request_body,
@@ -2822,6 +2823,10 @@ HISTORY_GET_ROUTES = HistoryGetRoutes(session_auth_service, change_history_servi
 PRIVACY_GET_ROUTES = PrivacyGetRoutes(
     session_auth_service, export_stream_transport, privacy_delete_service
 )
+STATE_EVENTS_GET_ROUTES = StateEventsGetRoutes(
+    session_auth_service,
+    StateEventTransport(runtime_events.STATE_EVENT_BUFFER),
+)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -2867,19 +2872,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             },
         )
 
-    def _handle_sync_get(self, path: str) -> bool:
-        if path == "/api/state/events":
-            self.auth_service.require_auth(self)
-            StateEventTransport(runtime_events.STATE_EVENT_BUFFER).handle(
-                self.path,
-                send_headers=self.send_sse_headers,
-                send_event=self.send_sse_event,
-                set_connection_timeout=self.connection.settimeout,
-            )
-        else:
-            return False
-        return True
-
     def do_GET(self) -> None:
         self.request_id = uuid.uuid4().hex[:12]
         try:
@@ -2888,7 +2880,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 PUBLIC_GET_ROUTES.handle(self, path)
                 or PLANNING_GET_ROUTES.handle(self, path)
                 or SYNC_GET_ROUTES.handle(self, path)
-                or self._handle_sync_get(path)
+                or STATE_EVENTS_GET_ROUTES.handle(self, path)
                 or COACH_GET_ROUTES.handle(self, path)
                 or ATHLETE_GET_ROUTES.handle(self, path)
                 or HISTORY_GET_ROUTES.handle(self, path)

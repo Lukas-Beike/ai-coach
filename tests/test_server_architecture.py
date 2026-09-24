@@ -61,6 +61,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.http_api.public_get", ("PublicGetRoutes",)),
     ("backend.http_api.planning_get", ("PlanningGetRoutes",)),
     ("backend.http_api.sync_get", ("SyncGetRoutes", "SYNC_JOB_RE")),
+    ("backend.http_api.state_events_get", ("StateEventsGetRoutes",)),
     ("backend.http_api.export_streams", ("ExportStreamTransport",)),
     ("backend.coach.conversation", ("CoachConversationResetService",)),
     ("backend.coach.prompt", ("COACH_PROMPT",)),
@@ -2374,11 +2375,10 @@ class ServerArchitectureTests(unittest.TestCase):
             ],
         )
 
-    def test_sync_get_routes_are_owned_by_http_api_module_and_sse_stays_in_handler(self) -> None:
+    def test_sync_get_routes_are_owned_by_http_api_module(self) -> None:
         server_tree = self._assert_get_route_owned(
             "_handle_sync_get",
             "SYNC_GET_ROUTES",
-            method_must_be_absent=False,
         )
         self._assert_route_factories(
             server_tree,
@@ -2392,21 +2392,28 @@ class ServerArchitectureTests(unittest.TestCase):
                 "ALL_SYNC_DAYS",
             ],
         )
-        sync_handler = next(
-            node
-            for node in ast.walk(server_tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_handle_sync_get"
-        )
-        self.assertEqual(
-            {
-                node.value for node in ast.walk(sync_handler)
-                if isinstance(node, ast.Constant) and isinstance(node.value, str)
-            },
-            {"/api/state/events"},
-        )
         self.assertNotIn("SYNC_JOB_RE", {
             node.id for node in ast.walk(server_tree) if isinstance(node, ast.Name)
         })
+
+    def test_state_events_get_route_owns_authenticated_sse_dispatch(self) -> None:
+        server_tree = self._assert_get_route_owned(
+            "_handle_sync_get", "STATE_EVENTS_GET_ROUTES"
+        )
+        self._assert_route_factories(
+            server_tree,
+            "STATE_EVENTS_GET_ROUTES",
+            [
+                "session_auth_service",
+                "StateEventTransport(runtime_events.STATE_EVENT_BUFFER)",
+            ],
+        )
+        route_source = (BACKEND_ROOT / "http_api" / "state_events_get.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("server", route_source.casefold())
+        self.assertIn("require_auth(handler)", route_source)
+        self.assertIn("_state_event_transport.handle(", route_source)
 
     def test_history_get_route_is_owned_by_http_api_module(self) -> None:
         server_tree = self._assert_get_route_owned(

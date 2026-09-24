@@ -848,6 +848,10 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     zustandslosen `PrivacyGetRoutes` zuordnen; Authentisierung erfolgt vor
     jeder Service-Konstruktion, die bestehenden Stream- und Delete-Dienste
     behalten Datenschutz-, Cleanup- und Zustandseigentümerschaft.
+  - [x] Den authentifizierten GET-Dispatch für `/api/state/events` einem
+    `StateEventsGetRoutes` zuordnen; Event-Puffer und die unveränderte
+    Cursor-/Gap-/Heartbeat-/Disconnect-Schleife bleiben beim bestehenden
+    `StateEventTransport`, Socket und SSE-Schreibmethoden beim Handler.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 
