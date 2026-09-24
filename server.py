@@ -283,6 +283,7 @@ from backend.coach.proposals import (
     coach_action_view,
 )
 from backend.coach.receipt_reads import CoachCommandReceiptService
+from backend.coach.turn_opening import CoachTurnOpeningService
 from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
@@ -295,6 +296,7 @@ from backend.coach.tool_failures import CoachStructuredToolFailureService
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
 from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.conversation_recovery import CoachConversationRecoveryService
+from backend.coach.final_receipt import CoachFinalReceiptService
 from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
@@ -309,7 +311,6 @@ from backend.coach.tools import build_tool_contracts
 from backend.coach.service import command_receipt
 from backend.coach.authorization import (
     coach_execution_scope,
-    coach_session_key,
     require_coach_scope,
 )
 from backend.http_api.responses import (
@@ -363,7 +364,6 @@ PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 AUTO_UPDATE_LABEL = "stündliche automatische Aktualisierung"
 APP_NAME = "Intervals Coach"
 SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
-UPDATE_COMMAND_RECEIPT_SQL = "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?"
 SELECT_COMMAND_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
 APP_VERSION = "1.11.11"
 MAX_BODY_BYTES = 1_000_000
@@ -2191,6 +2191,14 @@ def coach_command_receipt_service() -> CoachCommandReceiptService:
     )
 
 
+def coach_turn_opening_service() -> CoachTurnOpeningService:
+    """Compose atomic creation and session binding for a new Coach turn."""
+    return CoachTurnOpeningService(
+        database_manager(), DB_LOCK, CHAT_REPOSITORY,
+        coach_command_receipt_service(), utc_now, uuid.uuid4,
+    )
+
+
 def coach_proposal_creation_service() -> CoachProposalCreationService:
     """Compose session-bound Coach proposal creation."""
     return CoachProposalCreationService(
@@ -2449,31 +2457,6 @@ def coach_structured_tool_preparation_service() -> CoachStructuredToolPreparatio
         SYNC_PERIOD_DEFAULTS,
         ALL_SYNC_DAYS,
     )
-
-
-def _structured_coach_receipt(
-    message: str,
-    *,
-    intent: dict[str, Any],
-    conversation_id: str,
-    client_turn_id: str,
-    session_csrf_hash: str,
-    ai_provider: str,
-    model: str | None,
-) -> dict[str, Any]:
-    with DB_LOCK, database() as db:
-        existing = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
-        receipt = command_receipt(existing["receipt"]) if existing else {}
-        if existing:
-            coach_command_receipt_service().require_owner(receipt, session_csrf_hash)
-        else:
-            user = CHAT_REPOSITORY.add(db, "user", message, client_turn_id=client_turn_id)
-            receipt = {"client_turn_id": client_turn_id, "session_key": coach_session_key(session_csrf_hash),
-                       "user_message_id": user["id"], "status": "running", "command_receipts": [],
-                       "ai_provider": ai_provider, "model": model}
-            db.execute("INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, 'none', 'running', ?, ?, ?)",
-                       (uuid.uuid4().hex, client_turn_id, conversation_id, json.dumps(intent), json.dumps(receipt), utc_now(), utc_now()))
-    return receipt
 
 
 def _send_structured_coach_response(
@@ -2790,7 +2773,7 @@ def _structured_coach_turn_request(
     session_csrf_hash: str, background_job: bool, ai_provider: str, model: str | None,
     thinking_level: str | None, on_text_delta: Any, cancel_event: threading.Event | None,
 ) -> dict[str, Any]:
-    receipt = _structured_coach_receipt(
+    receipt = coach_turn_opening_service().open(
         message, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id,
         session_csrf_hash=session_csrf_hash, ai_provider=ai_provider, model=model,
     )
@@ -2846,49 +2829,12 @@ def _apply_structured_coach_replay(
     return resume_id
 
 
-def _structured_coach_final_receipt(
-    receipt: dict[str, Any], *, status: str, response: dict[str, Any], client_turn_id: str,
-    command_receipts: list[dict[str, Any]], sync_job_ids: list[str], intent: dict[str, Any],
-    rounds: int, failures: list[dict[str, Any]], awaiting_clarification: bool,
-) -> dict[str, Any]:
-    final_receipt = {
-        **receipt,
-        "status": status,
-        "awaiting_clarification": awaiting_clarification,
-        "response_status": response.get("status") if response.get("status") in {"completed", "incomplete", "failed", "cancelled"} else None,
-        "client_turn_id": client_turn_id, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids,
-        "intent": intent, "tool_rounds": rounds, "pending_operations": sorted({entry["tool"] for entry in failures}),
-        "proposed_actions": [entry["result"]["proposed_action"] for entry in command_receipts if entry.get("result", {}).get("proposed_action")],
-    }
-    for key in ("openai_response_id", "pending_tool_outputs", "pending_tool_calls", "response_input", "previous_response_id"):
-        final_receipt.pop(key, None)
-    return final_receipt
-
-
-def _persist_structured_coach_final_receipt(
-    final_receipt: dict[str, Any], *, client_turn_id: str, command_receipts: list[dict[str, Any]],
-    ai_provider: str,
-) -> dict[str, Any]:
-    with DB_LOCK, database() as db:
-        current_command = db.execute(
-            "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,),
-        ).fetchone()
-        if current_command and current_command["status"] == "completed":
-            return command_receipt(current_command["receipt"])
-        final_receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", final_receipt["text"], client_turn_id=client_turn_id)
-        for step in command_receipts:
-            if step["tool"] == "preview_adaptive_replan" and step.get("result", {}).get("ok"):
-                preview_id = step["result"].get("id")
-                preview_row = db.execute("SELECT payload FROM plan_adjustments WHERE id=? AND status='preview'", (preview_id,)).fetchone()
-                if preview_row:
-                    preview_payload = json.loads(preview_row["payload"])
-                    preview_payload["published_message_id"] = final_receipt["message"]["id"]
-                    db.execute("UPDATE plan_adjustments SET payload=? WHERE id=?", (json.dumps(preview_payload, ensure_ascii=False), preview_id))
-        set_kv("last_coach_ai_provider", ai_provider, db)
-        db.execute(UPDATE_COMMAND_RECEIPT_SQL, (json.dumps({key: value for key, value in final_receipt.items() if key != "text"}, ensure_ascii=False), utc_now(), client_turn_id))
-    final_receipt.pop("text", None)
-    runtime_events.STATE_EVENT_BUFFER.publish("coach", {"message_id": final_receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
-    return final_receipt
+def coach_final_receipt_service() -> CoachFinalReceiptService:
+    """Compose the atomic final Coach receipt owner."""
+    return CoachFinalReceiptService(
+        database_manager(), DB_LOCK, CHAT_REPOSITORY, KEY_VALUE_REPOSITORY,
+        runtime_events.STATE_EVENT_BUFFER, utc_now,
+    )
 
 
 def _chat_with_structured_coach_impl(
@@ -2947,7 +2893,7 @@ def _chat_with_structured_coach_impl(
         context=context,
         message=message,
     )
-    final_receipt = _structured_coach_final_receipt(
+    final_receipt = coach_final_receipt_service().build(
         receipt,
         status=status,
         response=response,
@@ -2960,7 +2906,7 @@ def _chat_with_structured_coach_impl(
         awaiting_clarification=bool(question),
     )
     final_receipt["text"] = text
-    return _persist_structured_coach_final_receipt(
+    return coach_final_receipt_service().persist(
         final_receipt,
         client_turn_id=client_turn_id,
         command_receipts=command_receipts,

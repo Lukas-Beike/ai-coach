@@ -6609,3 +6609,44 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   bestehende 23 Server-Ruff-Befunde unverändert. PR-CI steht noch aus.
   `server.py`: 4.240 physische Zeilen;
   P7-Rest 22 Definitionen/24 globale Bindungen, P0=0.
+
+## P8 Turn-Eröffnung und finales Receipt — integrierter Diff-Stand
+
+- #767 ist am 24.09.2026 um 02:11:40 UTC mit Merge-Commit
+  `da0216ce5695f78ddf594b8a34625c8d10720b4c` gemergt;
+  Commit auf `origin/develop` erreichbar, alle Checks einschließlich
+  Browser grün und null Review-Threads.
+- GPT-6-Luna-Worker-Commit `7b0c09d984d6e065f8faec795b98ed28dfa1d0b0`
+  wurde auf diesem Stand mit ausschließlich additiver Architekturtest-
+  Konfliktauflösung als `c5c74eab` integriert. Root prüfte Code und Diff:
+  **PASS** für atomare User-Nachricht/Command-Erstellung, Session-Owner-
+  Prüfung, idempotente bestehende Receipts und Rollback. Vier direkte
+  Tests verwenden temporäres SQLite und prüfen gerade die 403-Grenze
+  ohne Mutation sowie den Trigger-induzierten Insertfehler mit Rollback.
+  Worker: 10 direkte/Architektur-, 81 Dialog/JobStore- und 2.533 native
+  Tests/12 Skips **PASS**; Root: 91 betroffene und Read-only-Docker
+  2.533 Tests/11 Skips am Quellstand **PASS**.
+- Root hat auf dem geprüften #766-Quellstand den konkreten
+  `CoachFinalReceiptService` implementiert und am tatsächlichen Code/Diff
+  geprüft: **PASS** für finale Projektion, atomare Assistant-Nachricht,
+  Preview-Publikationsbindung, Provider-Marker, bereinigtes Receipt und
+  Event erst nach Commit. Der alte Server-Code und die verwaiste SQL-
+  Konstante sind entfernt; kein Rückimport, Server-Callback oder Wrapper.
+- Fünf direkte Fälle decken Status-/Checkpoint-Projektion,
+  Idempotenz, Preview-/Event-Reihenfolge und Fehler ab. Ein Test verwendet
+  eine temporäre echte SQLite-UOW und beweist, dass ein KV-Fehler die bereits
+  eingefügte Assistant-Nachricht zurückrollt und kein Event veröffentlicht.
+  Betroffene Dialog-/Fehler-/Architekturtests, Ruff, Compileall, Inventar-
+  und Diff-Check **PASS**. Native Vollsuite vor dem zusätzlichen SQLite-
+  Test: 2.537 Tests/12 Skips **PASS**; danach direkter SQLite-Test **PASS**
+  und Read-only-Docker-Vollsuite 2.538 Tests/11 Skips **PASS**. Quellcommit
+  `ea42932c` wurde mit additiver Inventarzuordnung und zusammengeführtem
+  Reviewlog nach Turn-Eröffnung als `203472d5` integriert. Beiderseits keine Backend-
+  Rückimporte, Server-Callbacks oder dauerhaften Wrapper.
+- Der kombinierte integrierte Stand hat `server.py` mit 4.186 physischen
+  Zeilen, P7-Rest 19 Definitionen/24 globale Bindungen und P0=0.
+  99 betroffene Tests, Ruff der Nicht-Serverdateien, Compileall,
+  Inventar- und Diff-Check **PASS**. Frisches Read-only-Docker-Image:
+  2.547 Tests/11 Skips und native Vollsuite 2.547 Tests/12 Skips
+  **PASS**. Die 23 bestehenden Server-Ruff-Befunde sind unverändert.
+  Root-Review des integrierten Stands: **PASS**; PR-CI steht noch aus.
