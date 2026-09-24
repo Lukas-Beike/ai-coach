@@ -2426,6 +2426,52 @@ class ServerArchitectureTests(unittest.TestCase):
             ["session_auth_service", "change_history_service"],
         )
 
+    def test_settings_put_routes_are_owned_by_http_api_module(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        request_handler = next(
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
+        )
+        put_handler = next(
+            node
+            for node in request_handler.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_do_PUT"
+        )
+        route_dispatches = [
+            node
+            for node in ast.walk(put_handler)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "SETTINGS_PUT_ROUTES"
+            and node.func.attr == "handle"
+        ]
+        self.assertEqual(len(route_dispatches), 1)
+        route_paths = {
+            node.value
+            for node in ast.walk(put_handler)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        self.assertTrue(
+            {
+                "/api/settings/model",
+                "/api/settings/ai-provider",
+                "/api/settings/thinking-level",
+                "/api/settings/calendar-display",
+            }.isdisjoint(route_paths)
+        )
+        route_assignment = next(
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "SETTINGS_PUT_ROUTES"
+                for target in node.targets
+            )
+        )
+        self.assertEqual(ast.unparse(route_assignment.value), "SettingsPutRoutes(SETTINGS)")
+
     def test_diagnostics_and_privacy_get_routes_are_owned_by_http_api_modules(self) -> None:
         server_tree = self._assert_get_route_owned(
             "_handle_diagnostics_get", "DIAGNOSTICS_GET_ROUTES"
