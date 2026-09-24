@@ -17,6 +17,7 @@ from support import isolated_server, reset_application_state
 from backend.coach.dialogue import validate_request
 from backend.coach.outcomes import unresolved_coach_steps
 from backend.coach import service as coach_service
+from backend.coach import structured_tool_round
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.sync.intervals import IntervalsSyncService
 
@@ -948,7 +949,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertIsNone(model.call_args.kwargs["response_id"])
 
     def test_tool_round_limit_submits_outputs_and_keeps_provider_selection(self):
-        with patch.object(server, "COACH_TOOL_MAX_ROUNDS", 1):
+        with patch.object(structured_tool_round, "COACH_TOOL_MAX_ROUNDS", 1):
             result, model = self.turn("Plan ansehen", [lambda _: self.call("read_training_state"), {"output_text": "Plan gelesen."}])
         self.assertEqual(result["status"], "completed")
         self.assertEqual(model.call_args_list[1].args[0]["tool_choice"], "none")

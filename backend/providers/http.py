@@ -54,6 +54,7 @@ class JsonResponse:
 
 
 _INVALID_JSON_MESSAGE = "provider response is not valid UTF-8 JSON"
+MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 
 
 def _close_response(response: Any) -> None:

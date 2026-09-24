@@ -20,6 +20,7 @@ from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
 from backend.sync.intervals import IntervalsSnapshotReader
 from backend.sync.library import WorkoutLibraryRefreshService
 from backend.sync.performance import PerformanceRefreshFollowupService
+from backend.providers import intervals_client as intervals_client_module
 from test_coach_dialogue import DialogueHarness, server
 from support import parsed_workout_fixture
 
@@ -34,10 +35,10 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.enterContext(patch.object(
             server.provider_http_client(), "request", side_effect=AssertionError("Unexpected live network")
         ))
-        self.enterContext(patch.object(server.IntervalsClient, "get_paged_collection", side_effect=lambda *a, **k: deepcopy(list(self.remote.values()))))
-        self.enterContext(patch.object(server.IntervalsClient, "get", side_effect=self.get))
-        self.enterContext(patch.object(server.IntervalsClient, "upsert_calendar_events", side_effect=self.upsert))
-        self.enterContext(patch.object(server.IntervalsClient, "delete_event", side_effect=self.delete))
+        self.enterContext(patch.object(intervals_client_module.IntervalsClient, "get_paged_collection", side_effect=lambda *a, **k: deepcopy(list(self.remote.values()))))
+        self.enterContext(patch.object(intervals_client_module.IntervalsClient, "get", side_effect=self.get))
+        self.enterContext(patch.object(intervals_client_module.IntervalsClient, "upsert_calendar_events", side_effect=self.upsert))
+        self.enterContext(patch.object(intervals_client_module.IntervalsClient, "delete_event", side_effect=self.delete))
 
     def get(self, path):
         identity = path.rsplit("/", 1)[-1]
@@ -193,7 +194,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             )
             return deepcopy(list(self.remote.values()))
 
-        with patch.object(server.IntervalsClient, "get_paged_collection", side_effect=read), patch.object(
+        with patch.object(intervals_client_module.IntervalsClient, "get_paged_collection", side_effect=read), patch.object(
             RemotePlannedUnitReconciler, "reconcile"
         ) as imported:
             self.assertTrue(self.repair(local_id)["ok"])
@@ -290,7 +291,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                         self.remote["unexpected-copy"] = {**self.remote["event-0"], "id": "unexpected-copy"}
                 return deepcopy(list(self.remote.values()))
 
-            with patch.object(server.IntervalsClient, "get_paged_collection", side_effect=read):
+            with patch.object(intervals_client_module.IntervalsClient, "get_paged_collection", side_effect=read):
                 result = server.selected_workout_sync_service().sync({"repair": True, "entries": [self.selection(identity) for identity in ids]})
             self.assertEqual(len(calls), 2)
             self.assertEqual(result["ok"], not corrupt)
@@ -322,7 +323,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             self.remote[result[0]["id"]]["icu_intensity"] = 55
             return result
 
-        with patch.object(server.IntervalsClient, "upsert_calendar_events", side_effect=upsert_with_intensity):
+        with patch.object(intervals_client_module.IntervalsClient, "upsert_calendar_events", side_effect=upsert_with_intensity):
             self.assertTrue(self.repair(local_id)["ok"])
         current = server.planned_unit_service().list()[0]
         self.assertEqual(current["moving_time"], 4500)
@@ -353,7 +354,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         for key in ("workout_doc", "icu_training_load", "icu_intensity"):
             self.assertNotIn(key, current)
         parsed = parsed_workout_fixture(1800, sport="Swim", kind="pace", units="pace_zone", value=1)
-        with patch.object(server.IntervalsClient, "upsert_calendar_events", return_value=[{"id": "swim-event", **parsed}]):
+        with patch.object(intervals_client_module.IntervalsClient, "upsert_calendar_events", return_value=[{"id": "swim-event", **parsed}]):
             self.assertTrue(server.selected_workout_sync_service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})["ok"])
         self.assertEqual(server.planned_unit_service().list()[0]["icu_training_load"], 20)
 
@@ -377,7 +378,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             return self.upsert(payloads)
 
         try:
-            with patch.object(server.IntervalsClient, "upsert_calendar_events", side_effect=slow_upsert):
+            with patch.object(intervals_client_module.IntervalsClient, "upsert_calendar_events", side_effect=slow_upsert):
                 self.assertTrue(self.repair(local_id)["ok"])
         finally:
             for thread in threads:
@@ -394,7 +395,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             server.planned_unit_service().update(local_id, {"name": "Edited during sync"})
             return self.upsert(payloads)
 
-        with patch.object(server.IntervalsClient, "upsert_calendar_events", side_effect=edit_during_upsert):
+        with patch.object(intervals_client_module.IntervalsClient, "upsert_calendar_events", side_effect=edit_during_upsert):
             self.assertFalse(self.repair(local_id)["ok"])
         current = server.planned_unit_service().list()[0]
         self.assertEqual(current["name"], "Edited during sync")
@@ -415,7 +416,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 server.planned_unit_service().update(local_id, {"action": "archive"})
             return deepcopy(list(self.remote.values()))
 
-        with patch.object(server.IntervalsClient, "get_paged_collection", side_effect=read):
+        with patch.object(intervals_client_module.IntervalsClient, "get_paged_collection", side_effect=read):
             self.assertFalse(self.repair(local_id)["ok"])
         self.assertTrue(self.repair(local_id)["ok"])
         self.assertEqual(set(self.remote), {"race"})
@@ -485,7 +486,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             server.planned_unit_service().update(local_id, {"action": "restore"})
             return self.get(path)
 
-        with patch.object(server.IntervalsClient, "get", side_effect=restore_during_read):
+        with patch.object(intervals_client_module.IntervalsClient, "get", side_effect=restore_during_read):
             self.assertFalse(server.selected_workout_sync_service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})["ok"])
         self.assertEqual(self.mutations, [])
         self.assertFalse(server.planned_unit_service().list()[0]["archived"])
@@ -521,7 +522,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             result = original(payloads)
             self.remote[result[0]["id"]]["start_date_local"] = "2026-09-10T00:00:00"
             return result
-        with patch.object(server.IntervalsClient, "upsert_calendar_events", side_effect=wrong_date):
+        with patch.object(intervals_client_module.IntervalsClient, "upsert_calendar_events", side_effect=wrong_date):
             self.assertFalse(self.repair(local_id)["ok"])
         self.assertEqual(server.planned_unit_service().list()[0]["sync_status"], "sync_error")
 

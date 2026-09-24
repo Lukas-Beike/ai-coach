@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
+from backend.providers import garmin_morning, intervals_client as intervals_client_module
 
 from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import morning_battery as performance_morning_battery
@@ -113,7 +114,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             return {}, []
 
         with patch.object(server.GarminClientFactory, "create", return_value=object()), \
-                patch.object(server, "fetch_morning_body_battery", side_effect=fetch), \
+                patch.object(garmin_morning, "fetch_morning_body_battery", side_effect=fetch), \
                 patch.object(server.provider_http, "external_call", return_value=None) as external_call:
             token = sync_observation.OPERATION_CONTEXT.set(context)
             try:
@@ -204,7 +205,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
                        "start_date_local": "2026-09-06T10:01:00", "moving_time": 3610, "distance": 30100}]
         server.sync_state_repository().save_snapshot({"synced_at": server.utc_now(), "recent_activities": activities})
         before = server.sync_state_repository().latest_snapshot()
-        with patch.object(server, "IntervalsClient") as provider:
+        with patch.object(intervals_client_module, "IntervalsClient") as provider:
             result, model = self.turn("Analysiere die letzte Fahrt.", [
                 lambda _: self.call("inspect_activity_duplicates"),
                 {"output_text": "Die Fahrt wurde doppelt aufgezeichnet. Die Wahoo-Aufzeichnung bleibt maßgeblich."},

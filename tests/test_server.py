@@ -100,6 +100,8 @@ from backend.calendar import canonical as calendar_canonical
 from backend.calendar import local as calendar_local
 from backend.providers import calendar as calendar_provider
 from backend.providers import gemini as gemini_provider
+from backend.providers import http as provider_http
+from backend.providers import intervals_client as intervals_client_module
 from backend.providers import weather as weather_provider
 from backend.performance import activity_validation
 from backend.performance import planning_recovery as performance_planning_recovery
@@ -4666,9 +4668,9 @@ class CoachTests(unittest.TestCase):
         entry = server.workout_library_service().create_local_entry({
             "sport": "Ride", "name": "Synthetic", "description": "- 30m 85%", "duration_minutes": 30,
         })
-        with patch.object(server.IntervalsClient, "get_workout_library", return_value=[]), \
-                patch.object(server.IntervalsClient, "create_library_workouts", return_value=[{"id": "synthetic-remote", "type": "Ride"}]) as create, \
-                patch.object(server.IntervalsClient, "update_library_workout", return_value={"id": "synthetic-remote", **parsed_workout_fixture()}) as update:
+        with patch.object(intervals_client_module.IntervalsClient, "get_workout_library", return_value=[]), \
+                patch.object(intervals_client_module.IntervalsClient, "create_library_workouts", return_value=[{"id": "synthetic-remote", "type": "Ride"}]) as create, \
+                patch.object(intervals_client_module.IntervalsClient, "update_library_workout", return_value={"id": "synthetic-remote", **parsed_workout_fixture()}) as update:
             with self.assertRaises(server.AppError) as raised:
                 server.workout_library_sync_service().sync_entry(entry["id"])
             self.assertEqual(raised.exception.reason, "intervals_workout_verification_failed")
@@ -4686,7 +4688,7 @@ class CoachTests(unittest.TestCase):
             "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
             "name": "Synthetic", "description": "- 30m 85%", "duration_minutes": 30,
         }])[0]
-        with patch.object(server.IntervalsClient, "upsert_calendar_events", side_effect=[
+        with patch.object(intervals_client_module.IntervalsClient, "upsert_calendar_events", side_effect=[
             [{"id": "synthetic-event", "workout_doc": {"steps": []}}],
             [{"id": "synthetic-event", **parsed_workout_fixture()}],
         ]) as upsert:
@@ -4730,8 +4732,8 @@ class CoachTests(unittest.TestCase):
         })
         remote = {"id": "remote-recovered", "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%", **parsed_workout_fixture()}
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server.IntervalsClient, "get_workout_library", return_value=[remote]
-        ), patch.object(server.IntervalsClient, "create_library_workouts") as create:
+            intervals_client_module.IntervalsClient, "get_workout_library", return_value=[remote]
+        ), patch.object(intervals_client_module.IntervalsClient, "create_library_workouts") as create:
             synced = server.workout_library_sync_service().sync_entry(entry["id"])
         self.assertEqual(synced["external_id"], "remote-recovered")
         create.assert_not_called()
@@ -5238,7 +5240,7 @@ class CoachTests(unittest.TestCase):
 
         deltas = []
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
-        with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=fake_urlopen):
+        with patch.object(server, "CONFIG", config), patch.object(gemini_provider, "urlopen", side_effect=fake_urlopen):
             result = server.coach_response_transport().stream_request(
                 {"_ai_provider": "gemini", "model": "gemini-3.8-flash", "input": "BegrÃ¼ÃŸe mich."},
                 deltas.append,
@@ -5264,8 +5266,8 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, gemini_api_key="test-gemini-key")
         with (
             patch.object(server, "CONFIG", config),
-            patch.object(server, "MAX_EXTERNAL_RESPONSE_BYTES", 1),
-            patch.object(server, "urlopen", return_value=StreamResponse()),
+            patch.object(provider_http, "MAX_EXTERNAL_RESPONSE_BYTES", 1),
+            patch.object(gemini_provider, "urlopen", return_value=StreamResponse()),
             self.assertRaises(server.AppError) as raised,
         ):
             server.gemini_conversation_response_service().stream({"model": "gemini-3.8-flash", "input": "test"}, lambda _: None)
@@ -5730,7 +5732,7 @@ class CoachTests(unittest.TestCase):
                 yield from (line.encode() for line in stream.splitlines(keepends=True))
 
         config = replace(server.CONFIG, openai_api_key="test-key", openai_base_url="https://foundry.example.invalid/openai/v1/")
-        with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", return_value=FakeResponse()) as urlopen:
+        with patch.object(server, "CONFIG", config), patch.object(openai_provider, "urlopen", return_value=FakeResponse()) as urlopen:
             server.coach_response_transport().stream_request({"model": "foundry-deployment"}, lambda _: None)
 
         self.assertEqual(urlopen.call_args.args[0].full_url, "https://foundry.example.invalid/openai/v1/responses")
@@ -7265,7 +7267,7 @@ class CoachTests(unittest.TestCase):
             raise_if_chat_cancelled(cancel_event)
 
         with patch.object(server, "CONFIG", config), patch.object(
-            server.IntervalsClient, "get_workout_library", side_effect=get_library
+            intervals_client_module.IntervalsClient, "get_workout_library", side_effect=get_library
         ) as get_workout_library:
             with self.assertRaises(server.AppError) as raised:
                 server.workout_library_refresh_service().refresh(
@@ -7317,7 +7319,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-        ), patch.object(server.IntervalsClient, "get_workout_library", return_value=remote) as get_library:
+        ), patch.object(intervals_client_module.IntervalsClient, "get_workout_library", return_value=remote) as get_library:
             result = server.intervals_sync_service().sync("initial", activity_days=42)
 
         get_library.assert_called_once_with()
@@ -7405,7 +7407,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-        ), patch.object(server.IntervalsClient, "get_workout_library", return_value=[{
+        ), patch.object(intervals_client_module.IntervalsClient, "get_workout_library", return_value=[{
             "id": "remote-template-2", "name": "Remote Vorlage", "type": "Ride",
             "description": "- 30m Z2", "moving_time": 1800,
         }]) as get_library:
@@ -8977,7 +8979,7 @@ class CoachTests(unittest.TestCase):
         pair = latest_wahoo_garmin_duplicate(
             server.sync_state_repository().latest_snapshot() or {}
         )
-        with patch.object(server.IntervalsClient, "delete_activity", return_value=None) as delete:
+        with patch.object(intervals_client_module.IntervalsClient, "delete_activity", return_value=None) as delete:
             result = server.duplicate_activity_service().delete(
                 {
                     "canonical_id": pair["canonical_id"],
@@ -9458,7 +9460,7 @@ class CoachTests(unittest.TestCase):
         server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-        ), patch.object(server.IntervalsClient, "get_workout_library", return_value=[]):
+        ), patch.object(intervals_client_module.IntervalsClient, "get_workout_library", return_value=[]):
             server.intervals_sync_service().sync(
                 "manual", activity_days=1, operation_id=operation_id
             )
@@ -9589,7 +9591,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, openai_api_key="openai-test")
         with (
             patch.object(server, "CONFIG", config),
-            patch.object(server, "urlopen", side_effect=upstream_error),
+            patch.object(openai_provider, "urlopen", side_effect=upstream_error),
             self.assertRaises(server.AppError) as raised,
         ):
             server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
@@ -9620,7 +9622,7 @@ class CoachTests(unittest.TestCase):
         )
         server.DIAGNOSTIC_CAPTURE.set_enabled(True)
         config = replace(server.CONFIG, openai_api_key="openai-test")
-        with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=upstream_error):
+        with patch.object(server, "CONFIG", config), patch.object(openai_provider, "urlopen", side_effect=upstream_error):
             with self.assertRaises(server.AppError) as raised:
                 server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "conversation_state_invalid")
@@ -9662,7 +9664,7 @@ class CoachTests(unittest.TestCase):
                 yield from (line.encode() for line in stream.splitlines(keepends=True))
 
         deltas = []
-        with patch.object(server, "urlopen", return_value=FakeResponse()) as urlopen:
+        with patch.object(openai_provider, "urlopen", return_value=FakeResponse()) as urlopen:
             result = server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, deltas.append)
         self.assertEqual("".join(deltas), "Hallo")
         self.assertEqual(result["id"], "resp-test")
@@ -9691,8 +9693,8 @@ class CoachTests(unittest.TestCase):
 
         server.DIAGNOSTIC_CAPTURE.set_enabled(True)
         with (
-            patch.object(server, "MAX_EXTERNAL_RESPONSE_BYTES", 1),
-            patch.object(server, "urlopen", return_value=OversizedResponse()),
+            patch.object(provider_http, "MAX_EXTERNAL_RESPONSE_BYTES", 1),
+            patch.object(openai_provider, "urlopen", return_value=OversizedResponse()),
             self.assertRaises(server.AppError) as raised,
         ):
             server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
@@ -9709,7 +9711,7 @@ class CoachTests(unittest.TestCase):
     def test_responses_stream_request_cancel_before_provider_call_records_cancelled_usage(self):
         cancel_event = threading.Event()
         cancel_event.set()
-        with patch.object(server, "urlopen") as urlopen:
+        with patch.object(openai_provider, "urlopen") as urlopen:
             with self.assertRaises(server.AppError) as raised:
                 server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None, cancel_event)
         self.assertEqual(raised.exception.reason, "chat_cancelled")
@@ -9736,7 +9738,7 @@ class CoachTests(unittest.TestCase):
                 raise TimeoutError("test timeout")
                 yield b""
 
-        with patch.object(server, "urlopen", return_value=TimeoutResponse()):
+        with patch.object(openai_provider, "urlopen", return_value=TimeoutResponse()):
             with self.assertRaises(server.AppError) as raised:
                 server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "provider_timeout")
@@ -9754,8 +9756,8 @@ class CoachTests(unittest.TestCase):
         self.assertIs(client.telemetry.provider_state, server.provider_state_service())
         self.assertIs(client.telemetry.diagnostic_capture, server.DIAGNOSTIC_CAPTURE)
         self.assertIs(client.telemetry.logger, server.LOGGER)
-        self.assertEqual(client.config.max_bytes, server.MAX_EXTERNAL_RESPONSE_BYTES)
-        self.assertIs(client.opener, server.urlopen)
+        self.assertEqual(client.config.max_bytes, provider_http.MAX_EXTERNAL_RESPONSE_BYTES)
+        self.assertIs(client.opener, openai_provider.urlopen)
 
     def test_responses_stream_request_client_disconnect_records_cancelled_usage(self):
         class DisconnectResponse:
@@ -9773,7 +9775,7 @@ class CoachTests(unittest.TestCase):
                 yield b'data: {"delta":"partial"}\n'
                 yield b'\n'
 
-        with patch.object(server, "urlopen", return_value=DisconnectResponse()):
+        with patch.object(openai_provider, "urlopen", return_value=DisconnectResponse()):
             with self.assertRaises(server.ClientDisconnected):
                 server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: (_ for _ in ()).throw(server.ClientDisconnected()))
         self.assertEqual(
@@ -10044,7 +10046,7 @@ class CoachTests(unittest.TestCase):
                     with patch.object(server, "DB_LOCK", database_lock), patch.object(
                         server, "PROVIDER_STATE_SERVICE", None
                     ), patch.object(
-                        server, "urlopen", side_effect=AssertionError("State must stay local")
+                        provider_http, "urlopen", side_effect=AssertionError("State must stay local")
                     ):
                         state = server.provider_state_service()
 
