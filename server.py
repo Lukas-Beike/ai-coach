@@ -299,15 +299,14 @@ from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
     CoachStructuredToolRoundService,
-    StructuredCoachRoundState,
 )
+from backend.coach.structured_turn import CoachStructuredTurnDependencies, CoachStructuredTurnService
 from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
 from backend.coach.turn_failures import (
     CoachTurnFailureDependencies,
     CoachTurnFailureService,
-    coach_error_metadata,
 )
 from backend.coach.job_submission import CoachJobSubmissionService
 from backend.coach.morning import ManualMorningCheckinService, MorningCheckinStateService
@@ -2432,65 +2431,6 @@ def coach_structured_tool_round_service() -> CoachStructuredToolRoundService:
 
 
 
-def _structured_coach_turn_request(
-    message: str, *, intent: dict[str, Any], conversation_id: str, client_turn_id: str,
-    session_csrf_hash: str, background_job: bool, ai_provider: str, model: str | None,
-    thinking_level: str | None, on_text_delta: Any, cancel_event: threading.Event | None,
-) -> dict[str, Any]:
-    receipt = coach_turn_opening_service().open(
-        message, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id,
-        session_csrf_hash=session_csrf_hash, ai_provider=ai_provider, model=model,
-    )
-    attachment_context = coach_attachment_context_service()
-    attachments, has_prior_openai_attachments = attachment_context.load_for_receipt(receipt)
-    retain_openai_attachment_context = ai_provider == "openai" and bool(attachments or has_prior_openai_attachments)
-    background_owned = background_job and receipt.get("mode") == "background"
-    context = coach_dialogue_read_service().context(client_turn_id)
-    attachment_context.add_evidence(context)
-    allow_mutations = intent.get("allow_mutations", True)
-    command_receipts = list(receipt.get("command_receipts") or [])
-    sync_job_ids = list(receipt.get("sync_job_ids") or [])
-    tools = COACH_DIALOGUE_TOOLS if allow_mutations else [tool for tool in COACH_DIALOGUE_TOOLS if tool["name"] in STRUCTURED_READ_ONLY_TOOLS]
-    model_instructions, request_payload = coach_request_payload_service().build(
-        message=message, context=context, command_receipts=command_receipts, tools=tools,
-        allow_mutations=allow_mutations, ai_provider=ai_provider, model=model,
-        thinking_level=thinking_level, conversation_id=conversation_id, attachments=attachments,
-        retain_openai_attachment_context=retain_openai_attachment_context,
-        has_prior_openai_attachments=has_prior_openai_attachments,
-    )
-    recovery_state = {"conversation_recovered": False}
-    resume_id = _apply_structured_coach_replay(
-        receipt, request_payload, ai_provider=ai_provider, background_owned=background_owned,
-    )
-    response = coach_structured_response_service().respond(
-        request_payload, request_payload=request_payload, context=context, message=message,
-        command_receipts=command_receipts, attachments=attachments, client_turn_id=client_turn_id,
-        ai_provider=ai_provider, background_owned=background_owned, on_text_delta=on_text_delta,
-        cancel_event=cancel_event, recovery_state=recovery_state, resume_id=resume_id,
-    )
-    return {
-        "receipt": receipt, "context": context, "command_receipts": command_receipts,
-        "sync_job_ids": sync_job_ids, "allow_mutations": allow_mutations, "tools": tools,
-        "model_instructions": model_instructions, "request_payload": request_payload,
-        "recovery_state": recovery_state, "attachments": attachments,
-        "background_owned": background_owned, "response": response,
-    }
-
-
-def _apply_structured_coach_replay(
-    receipt: dict[str, Any], request_payload: dict[str, Any], *, ai_provider: str, background_owned: bool,
-) -> str:
-    resume_id = str(receipt.get("openai_response_id") or "") if background_owned and ai_provider == "openai" else ""
-    if resume_id and receipt.get("response_input"):
-        request_payload["input"] = receipt["response_input"]
-        if receipt.get("previous_response_id") and not request_payload.get("conversation"):
-            request_payload["previous_response_id"] = receipt["previous_response_id"]
-    if background_owned and receipt.get("pending_tool_outputs"):
-        request_payload["input"] = receipt["pending_tool_outputs"]
-        if ai_provider == "openai" and resume_id and not request_payload.get("conversation"):
-            request_payload["previous_response_id"] = resume_id
-        resume_id = ""
-    return resume_id
 
 
 def coach_final_receipt_service() -> CoachFinalReceiptService:
@@ -2501,98 +2441,25 @@ def coach_final_receipt_service() -> CoachFinalReceiptService:
     )
 
 
-def _chat_with_structured_coach_impl(
-    message: str, *, intent: dict[str, Any], conversation_id: str, client_turn_id: str,
-    on_text_delta: Any = None, cancel_event: threading.Event | None = None,
-    session_csrf_hash: str = "", background_job: bool = False,
-    ai_provider: str | None = None, model: str | None = None, thinking_level: str | None = None,
-) -> dict[str, Any]:
-    ai_provider = ai_provider or SETTINGS.selected_ai_provider()
-    state = _structured_coach_turn_request(
-        message,
-        intent=intent,
-        conversation_id=conversation_id,
-        client_turn_id=client_turn_id,
-        session_csrf_hash=session_csrf_hash,
-        background_job=background_job,
-        ai_provider=ai_provider,
-        model=model,
-        thinking_level=thinking_level,
-        on_text_delta=on_text_delta,
-        cancel_event=cancel_event,
-    )
-    receipt = state["receipt"]
-    context = state["context"]
-    command_receipts = state["command_receipts"]
-    sync_job_ids = state["sync_job_ids"]
-    allow_mutations = state["allow_mutations"]
-    tools = state["tools"]
-    request_payload = state["request_payload"]
-    model_instructions = state["model_instructions"]
-    attachments = state["attachments"]
-    background_owned = state["background_owned"]
-    recovery_state = state["recovery_state"]
-    response = state["response"]
-    round_state = StructuredCoachRoundState(
-        tools=tools, command_receipts=command_receipts, sync_job_ids=sync_job_ids,
-        context=context, allow_mutations=allow_mutations, conversation_id=conversation_id,
-        client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash,
-        cancel_event=cancel_event, ai_provider=ai_provider, request_payload=request_payload,
-        model_instructions=model_instructions, message=message, attachments=attachments,
-        background_owned=background_owned, on_text_delta=on_text_delta, recovery_state=recovery_state,
-    )
-    response, rounds, question, cancelled, model_instructions = coach_structured_tool_round_service().run(
-        response,
-        rounds=int(receipt.get("tool_rounds") or 0),
-        question="",
-        cancelled=False,
-        state=round_state,
-    )
-    status, text, failures = coach_structured_outcome_service().finalize(
-        response,
-        command_receipts,
-        question=question,
-        cancelled=cancelled,
-        allow_mutations=allow_mutations,
-        context=context,
-        message=message,
-    )
-    final_receipt = coach_final_receipt_service().build(
-        receipt,
-        status=status,
-        response=response,
-        client_turn_id=client_turn_id,
-        command_receipts=command_receipts,
-        sync_job_ids=sync_job_ids,
-        intent=intent,
-        rounds=rounds,
-        failures=failures,
-        awaiting_clarification=bool(question),
-    )
-    final_receipt["text"] = text
-    return coach_final_receipt_service().persist(
-        final_receipt,
-        client_turn_id=client_turn_id,
-        command_receipts=command_receipts,
-        ai_provider=ai_provider,
-    )
+def coach_structured_turn_service() -> CoachStructuredTurnService:
+    """Compose the complete structured turn from concrete Coach owners."""
+    return CoachStructuredTurnService(CoachStructuredTurnDependencies(
+        opening=coach_turn_opening_service(),
+        attachments=coach_attachment_context_service(),
+        dialogue=coach_dialogue_read_service(),
+        payload=coach_request_payload_service(),
+        response=coach_structured_response_service(),
+        rounds=coach_structured_tool_round_service(),
+        outcome=coach_structured_outcome_service(),
+        final_receipt=coach_final_receipt_service(),
+        failure=coach_turn_failure_service(),
+        tools=COACH_DIALOGUE_TOOLS,
+        read_only_tools=frozenset(STRUCTURED_READ_ONLY_TOOLS),
+        logger=LOGGER,
+        root=ROOT,
+    ))
 
 
-
-
-def _chat_with_structured_coach(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    intent = kwargs.get("intent") if isinstance(kwargs.get("intent"), dict) else {}
-    client_turn_id = str(kwargs.get("client_turn_id") or "")
-    try:
-        receipt = _chat_with_structured_coach_impl(*args, **kwargs)
-    except Exception as exc:
-        if isinstance(exc, AppError) and exc.reason in {"command_scope_denied", "client_turn_in_progress"}:
-            raise
-        LOGGER.warning("Coach command failed", extra={"event": "coach_command_failed", "context": coach_error_metadata(exc, ROOT)})
-        receipt = coach_turn_failure_service().persist(client_turn_id, intent, exc)
-        if not receipt:
-            raise
-    return {key: value for key, value in receipt.items() if key != "session_key"}
 
 
 def _validated_chat_request(message: str, client_turn_id: str, cancel_event: threading.Event | None) -> tuple[str, str]:
@@ -2691,7 +2558,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     conversation_id = existing_conversation_id or coach_conversation_provision_service().ensure(ai_provider)
     structured_intent = {"allow_mutations": allow_mutations}
     _resume_background_chat_command(background_owned, conversation_id, structured_intent, client_turn_id)
-    return _chat_with_structured_coach(
+    return coach_structured_turn_service().run(
         message, intent=structured_intent, conversation_id=conversation_id, client_turn_id=client_turn_id,
         session_csrf_hash=session_csrf_hash, on_text_delta=on_text_delta, cancel_event=cancel_event,
         background_job=background_job, ai_provider=ai_provider, model=model, thinking_level=thinking_level,

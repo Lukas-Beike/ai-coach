@@ -597,7 +597,7 @@ Abgelaufene oder fremde Vorschläge dürfen keine Mutation auslösen.
 
 Abhängigkeit: P7 und Sync-Worker aus P6.
 
-- [ ] Die gesamte strukturierte Response-/Tool-Rundenschleife einschließlich
+- [x] Die gesamte strukturierte Response-/Tool-Rundenschleife einschließlich
   Retry, Fehler-Recovery, Receipts und finaler Persistenz nach `coach/` ziehen.
   - [x] Durable Phase-/Pending-/Output-Übergänge eines strukturierten
     Werkzeug-Rounds `CoachStructuredToolRoundJournal` zuordnen;
@@ -627,6 +627,11 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
     Background-Checkpoint, Resume, einmaliger Recovery, begrenztem
     Retry und Delta-/Cancel-Grenze `CoachStructuredResponseService`
     zuordnen; Tool-Rundenschleife und finaler Turn bleiben offen.
+  - [x] Den vollständigen strukturierten Turn mit atomarer Eröffnung,
+    Restart-Replay, Response, Tool-Runden, Ergebnis-/Fehlerprojektion
+    und finaler Persistenz `CoachStructuredTurnService` zuordnen.
+    Session-/Provider-Vorprüfung, Background-Worker und Stream-Lifecycle
+    verbleiben im folgenden P8-Teilauftrag.
   - [x] Provider-Request-Aufbau einschließlich Dialogkontext,
     Attachment-Sicherheitsanweisung, OpenAI-Kontinuität, Gemini-Medien
     und Modell-/Thinking-Auswahl `CoachRequestPayloadService` zuordnen;

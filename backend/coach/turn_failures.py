@@ -23,6 +23,8 @@ from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
 
+BACKEND_SOURCE_ROOT = Path(__file__).resolve().parents[1]
+
 
 def coach_error_metadata(exc: BaseException, repository_root: Path) -> dict[str, Any]:
     """Keep technical call sites, never exception text, source lines or locals."""
@@ -31,12 +33,16 @@ def coach_error_metadata(exc: BaseException, repository_root: Path) -> dict[str,
     trace = exc.__traceback__
     while trace is not None:
         filename = Path(trace.tb_frame.f_code.co_filename).resolve()
-        if filename == repository_root / "server.py" or filename.is_relative_to(
-            repository_root / "backend"
-        ):
+        if filename == repository_root / "server.py":
+            safe_file = "server.py"
+        elif filename.is_relative_to(BACKEND_SOURCE_ROOT):
+            safe_file = filename.relative_to(BACKEND_SOURCE_ROOT.parent).as_posix()
+        else:
+            safe_file = None
+        if safe_file is not None:
             frames.append(
                 {
-                    "file": filename.relative_to(repository_root).as_posix(),
+                    "file": safe_file,
                     "function": trace.tb_frame.f_code.co_name,
                     "line": trace.tb_lineno,
                 }

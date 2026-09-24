@@ -255,7 +255,7 @@ class CoachReviewTests(unittest.TestCase):
         with server.database() as db:
             db.execute("INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES ('foreign', 'foreign', 'review-conversation', '{}', 'local', 'running', ?, ?, ?)", (json.dumps(identity), server.utc_now(), server.utc_now()))
         with self.assertRaises(server.AppError) as error:
-            server._chat_with_structured_coach("Edit", intent=self.intent("save_checkin", ["local_checkin"]), conversation_id="review-conversation", client_turn_id="foreign", session_csrf_hash="intruder")
+            server.coach_structured_turn_service().run("Edit", intent=self.intent("save_checkin", ["local_checkin"]), conversation_id="review-conversation", client_turn_id="foreign", session_csrf_hash="intruder", ai_provider=server.SETTINGS.selected_ai_provider())
         self.assertEqual(error.exception.status, 403)
         with server.database() as db:
             self.assertEqual(db.execute("SELECT status FROM coach_commands WHERE client_turn_id='foreign'").fetchone()["status"], "running")
