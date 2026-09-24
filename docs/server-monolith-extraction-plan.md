@@ -844,6 +844,10 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
   - [x] Die GET-Route `/api/change-history` einschließlich der bestehenden
     Limit-Grenzen `HistoryGetRoutes` zuordnen; der Change-History-Dienst
     bleibt Eigentümer des Datenbanklesens.
+  - [x] Die Privacy-GET-Routen für Export, Löschvorschau und Backup einem
+    zustandslosen `PrivacyGetRoutes` zuordnen; Authentisierung erfolgt vor
+    jeder Service-Konstruktion, die bestehenden Stream- und Delete-Dienste
+    behalten Datenschutz-, Cleanup- und Zustandseigentümerschaft.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 
