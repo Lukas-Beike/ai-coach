@@ -16,7 +16,6 @@ import json
 import logging
 import os
 import queue
-import re
 import sqlite3
 import threading
 import time
@@ -149,6 +148,7 @@ from backend.http_api.state_prelude import (
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 from backend.http_api.state_versions import StateVersionService
 from backend.http_api.sync_commands import SyncCommandEndpoint
+from backend.http_api.sync_get import SyncGetRoutes
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
@@ -401,7 +401,6 @@ DB_LOCK = threading.RLock()
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: SyncJobWorker | None = None
 RATE_LIMITER = RateLimiter()
-SYNC_JOB_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)$")
 
 
 CONFIG = load_config(ROOT, DATA_DIR)
@@ -2803,6 +2802,14 @@ ATHLETE_GET_ROUTES = AthleteGetRoutes(
     coach_context_preview_service,
     SETTINGS,
 )
+SYNC_GET_ROUTES = SyncGetRoutes(
+    session_auth_service,
+    sync_job_queue_service,
+    sync_public_state_service,
+    activity_read_service,
+    lambda: local_now().date(),
+    ALL_SYNC_DAYS,
+)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -2857,20 +2864,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 send_event=self.send_sse_event,
                 set_connection_timeout=self.connection.settimeout,
             )
-        elif match := SYNC_JOB_RE.match(path):
-            self.auth_service.require_auth(self)
-            self.send_json(200, sync_job_queue_service().state(match.group(1)))
-        elif path == "/api/sync/status":
-            self.auth_service.require_auth(self)
-            self.send_json(200, sync_public_state_service().state())
-        elif path == "/api/activities":
-            self.auth_service.require_auth(self)
-            query = parse_qs(urlparse(self.path).query)
-            self.send_json(200, activity_read_service().page(
-                query.get("cursor", [None])[0], query.get("limit", [None])[0],
-                query.get("days", [ALL_SYNC_DAYS])[0],
-                today=local_now().date(),
-            ))
         else:
             return False
         return True
@@ -2918,6 +2911,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             handled = (
                 PUBLIC_GET_ROUTES.handle(self, path)
                 or PLANNING_GET_ROUTES.handle(self, path)
+                or SYNC_GET_ROUTES.handle(self, path)
                 or self._handle_sync_get(path)
                 or COACH_GET_ROUTES.handle(self, path)
                 or ATHLETE_GET_ROUTES.handle(self, path)

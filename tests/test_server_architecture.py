@@ -60,6 +60,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.http_api.auth", ("SessionAuthService",)),
     ("backend.http_api.public_get", ("PublicGetRoutes",)),
     ("backend.http_api.planning_get", ("PlanningGetRoutes",)),
+    ("backend.http_api.sync_get", ("SyncGetRoutes", "SYNC_JOB_RE")),
     ("backend.http_api.export_streams", ("ExportStreamTransport",)),
     ("backend.coach.conversation", ("CoachConversationResetService",)),
     ("backend.coach.prompt", ("COACH_PROMPT",)),
@@ -2372,6 +2373,40 @@ class ServerArchitectureTests(unittest.TestCase):
                 "SETTINGS",
             ],
         )
+
+    def test_sync_get_routes_are_owned_by_http_api_module_and_sse_stays_in_handler(self) -> None:
+        server_tree = self._assert_get_route_owned(
+            "_handle_sync_get",
+            "SYNC_GET_ROUTES",
+            method_must_be_absent=False,
+        )
+        self._assert_route_factories(
+            server_tree,
+            "SYNC_GET_ROUTES",
+            [
+                "session_auth_service",
+                "sync_job_queue_service",
+                "sync_public_state_service",
+                "activity_read_service",
+                "lambda: local_now().date()",
+                "ALL_SYNC_DAYS",
+            ],
+        )
+        sync_handler = next(
+            node
+            for node in ast.walk(server_tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_handle_sync_get"
+        )
+        self.assertEqual(
+            {
+                node.value for node in ast.walk(sync_handler)
+                if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            },
+            {"/api/state/events"},
+        )
+        self.assertNotIn("SYNC_JOB_RE", {
+            node.id for node in ast.walk(server_tree) if isinstance(node, ast.Name)
+        })
 
     def test_intervals_client_does_not_retain_snapshot_use_cases(self) -> None:
         intervals_client = next(

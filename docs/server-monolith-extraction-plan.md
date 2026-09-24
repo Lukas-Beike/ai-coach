@@ -832,6 +832,11 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     zuordnen; Auth- und Datendienste werden pro Request aufgelöst, die
     Providerwahl bei jeder Vorschau aus dem bestehenden Settings-Eigentümer
     gelesen.
+  - [x] Die GET-Routen `/api/sync/jobs/<id>`, `/api/sync/status` und
+    `/api/activities` einschließlich Job-ID-Muster und Query-Defaults
+    `SyncGetRoutes` zuordnen; Queue, Status und Aktivitätsleser bleiben
+    Zustandseigentümer. Der SSE-Pfad `/api/state/events` bleibt bis zur
+    abschließenden HTTP-Transportauslagerung getrennt.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 
