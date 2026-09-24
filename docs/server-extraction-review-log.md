@@ -7421,3 +7421,36 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Offen bleiben Diagnostik-/Datenschutz-GET, POST-/PUT-/SSE-Transport,
   P7/P8-Restzuordnungen und der P11-Endaudit. Nächster P10-Teilauftrag:
   nicht-streamende Diagnostik- und History-GET-Routen mit begrenzten Limits.
+
+## P10 Diagnostik-GET-Routen — Integrationsreview
+
+- Vorgänger-PR #786 wurde am 24.09.2026 um 07:01:12 UTC mit
+  `e0e684ab752c61abc1db58812d5092cc4e05661c` gemergt; der Commit
+  ist Vorfahr von `origin/develop`. Browser, Codex und Sonar bestanden,
+  ohne offene Review-Threads.
+- GPT-6-Luna-Quellcommit `9dbf6cb6cfc5f466b40608f9779cfce5188856c3`
+  wurde nach Prüfung des tatsächlichen Diffs als `a6c7b87f` sequenziell
+  integriert. Die drei Pfade `/api/logs`, `/api/diagnostics` und
+  `/api/diagnostics/capture` gehören nun `DiagnosticsGetRoutes`;
+  `_handle_diagnostics_get` enthält nur noch die unveränderten Privacy-
+  Streams, Delete-Preview und Change-History.
+- **PASS:** Auth wird je Request vor Log-, Report- oder Capture-Zugriff
+  aufgelöst. Das Log-Limit bewahrt Default 200, Clamp 1..500, den ersten
+  Querywert und ungültig->200. Redaction, Berichtszustand und Capture-Lock
+  verbleiben bei ihren bestehenden Diensten. Keine Backend-Rückimporte,
+  Server-Fachcallbacks, neuen Locks/Caches oder Remote-Schreibpfade.
+- Ein erster Quell-Volltest scheiterte ausschließlich an einer neuen
+  Architekturtest-Dateilesung unter `/review/backend`, das im isolierten
+  Container absichtlich nicht gemountet ist. Der Worker entfernte die
+  redundante Prüfung; der vorhandene generische Backend-Importguard bleibt
+  aktiv. Der folgende Quell- und der integrierte Volltest bestanden.
+- Integrierte Abnahme: frisch gebautes Read-only-/netzwerkisoliertes
+  SQLCipher-Image mit **2.649 Tests/11 Skips PASS**; fünf direkte
+  Routentests, 14 Architekturtests und der bestehende Privacy-Download-
+  Auth-Test **PASS**; Ruff für neue Route/Tests/Inventarskript,
+  Compileall, Inventar-`--check` (P0=0) und Diff-Check **PASS**. Die
+  Direktfälle decken drei Payloads, Log-Limit-Grenzen, Auth-Fehler,
+  unbekannte Pfade und Keep-Alive-Auth angemessen ab.
+- `server.py` hat 3.413 physische Zeilen. P10-History-/Privacy-GET,
+  POST-/PUT-/SSE-Transport, P7/P8-Restzuordnungen und P11 bleiben offen.
+  Nächster Teilauftrag: History-GET mit unveränderter MAX_ROWS-Grenze.
