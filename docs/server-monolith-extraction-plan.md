@@ -565,6 +565,10 @@ Abhängigkeit: P2–P6.
   - [x] Call-ID-/Effekt-Replay einschließlich Read-only-Ausnahme und
     Draft-Artifact-Revisionsprüfung `CoachStructuredToolReplayService`
     zuordnen; `DatabaseManager` und DB-Lock bleiben Zustandseigentümer.
+  - [x] Strukturierte Turn-Ergebnisprojektion einschließlich reparierter
+    Fehler, bestätigter Effekte, Antwort-/Status-Fallback und atomarer
+    Pending-Request-Persistenz `CoachStructuredOutcomeService` zuordnen;
+    Provider- und Tool-Rundenschleife bleiben bis P8 offen.
 
 Abnahme: Natürliche Dialogfortsetzungen, Klärungen, Korrekturen und Tool-Scopes
 bleiben erhalten. Keine neuen Triggerwörter oder reduzierten Kontext-/Planlimits.

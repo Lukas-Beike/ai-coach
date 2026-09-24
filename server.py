@@ -289,6 +289,7 @@ from backend.coach.dialogue import CoachDialogueReadService, INSTRUCTIONS as COA
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.coach.clarification import CoachClarificationService
+from backend.coach.turn_outcome import CoachStructuredOutcomeService
 from backend.coach.tool_call_metadata import structured_tool_call_metadata
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.planning_commands import CoachPlanningCommandService
@@ -302,16 +303,13 @@ from backend.coach.turn_failures import (
 from backend.coach.job_submission import CoachJobSubmissionService
 from backend.coach.morning import ManualMorningCheckinService, MorningCheckinStateService
 from backend.coach.tools import build_tool_contracts
-from backend.coach.service import (
-    command_receipt, effects_from_receipts, mark_resolved_receipts,
-    outcome_status,
-)
+from backend.coach.service import command_receipt
 from backend.coach.authorization import (
     coach_execution_scope,
     coach_session_key,
     require_coach_scope,
 )
-from backend.coach.outcomes import coach_effect_label, coach_failure_lines, unresolved_coach_steps
+from backend.coach.outcomes import unresolved_coach_steps
 from backend.http_api.responses import (
     header_items as response_header_items,
     json_bytes as response_json_bytes,
@@ -2370,10 +2368,6 @@ def responses_stream_request(
     )
 
 
-def output_text(response: dict[str, Any]) -> str:
-    return openai_provider.response_text(response)
-
-
 COACH_TOOL_MAX_ROUNDS = 12
 COACH_COMMAND_STALE_SECONDS = 15 * 60
 COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, COACH_DIALOGUE_TOOLS = build_tool_contracts(
@@ -2427,6 +2421,14 @@ def coach_structured_tool_replay_service() -> CoachStructuredToolReplayService:
     """Compose structured tool replay lookup with the active DB and allowlist."""
     return CoachStructuredToolReplayService(
         database_manager(), DB_LOCK, frozenset(STRUCTURED_READ_ONLY_TOOLS)
+    )
+
+
+def coach_structured_outcome_service() -> CoachStructuredOutcomeService:
+    """Compose final Coach outcome projection and pending-request storage."""
+    return CoachStructuredOutcomeService(
+        database_manager(), DB_LOCK, KEY_VALUE_REPOSITORY,
+        frozenset(STRUCTURED_READ_ONLY_TOOLS),
     )
 
 
@@ -2696,88 +2698,6 @@ def _structured_coach_response(
         if response is not None:
             return response
     raise AppError(502, "Der KI-Dienst konnte die Antwort nicht fertigstellen.", reason="response_failed")
-
-
-def _mark_resolved_coach_receipts(command_receipts: list[dict[str, Any]], failures: list[dict[str, Any]]) -> None:
-    mark_resolved_receipts(command_receipts, failures)
-
-
-def _coach_effects(command_receipts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    internal_tools = STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}
-    return effects_from_receipts(command_receipts, internal_tools)
-
-
-def _structured_coach_outcome_text(
-    response: dict[str, Any], question: str, failures: list[dict[str, Any]], effects: list[dict[str, Any]],
-) -> tuple[str, bool, bool]:
-    text = question or output_text(response)
-    incomplete_answer = response.get("status") == "incomplete"
-    missing_answer = not text or incomplete_answer
-    if incomplete_answer:
-        text += "\nDie Antwort wurde nicht abgeschlossen. Bitte den Coach um Fortsetzung bitten."
-    if failures and not question:
-        text = "Ein Teil des Auftrags konnte noch nicht ausgeführt werden." if effects else "Der Auftrag konnte noch nicht ausgeführt werden."
-        text += "\n" + coach_failure_lines(failures, {entry["tool"] for entry in failures})
-        if effects:
-            text += "\nGespeichert beziehungsweise beauftragt: " + "; ".join(coach_effect_label(entry) for entry in effects) + "."
-    if not text:
-        text = "Ergebnis: " + "; ".join(coach_effect_label(entry) for entry in effects) if effects else "Die Antwort konnte nicht abgeschlossen werden. Bitte versuche es erneut."
-    return text, incomplete_answer, missing_answer
-
-
-def _persist_structured_coach_pending_request(
-    command_receipts: list[dict[str, Any]], effects: list[dict[str, Any]], *, failures: list[dict[str, Any]],
-    incomplete_answer: bool, question: str, cancelled: bool, allow_mutations: bool,
-    context: dict[str, Any], message: str,
-) -> None:
-    if (failures or incomplete_answer) and allow_mutations and not cancelled and not question:
-        last_request = next((entry.get("request") for entry in reversed(command_receipts) if entry.get("request")), None)
-        pending_request = context.get("pending_request") or {}
-        set_kv("coach_pending_request", json.dumps({
-            "summary": (last_request or pending_request).get("summary") or message,
-            "source_message_ids": (last_request or {}).get("source_message_ids") or [context["current_user_message_id"]],
-            "status": "failed",
-            "question": None,
-            "completed_steps": [{"tool": entry["tool"], "status": entry["result"].get("status")} for entry in effects],
-        }, ensure_ascii=False))
-    if effects and not question and not failures and not incomplete_answer and allow_mutations:
-        set_kv("coach_pending_request", "null")
-
-
-def _structured_coach_outcome_status(
-    *, question: str, incomplete_answer: bool, failures: list[dict[str, Any]],
-    missing_answer: bool, effects: list[dict[str, Any]], cancelled: bool,
-) -> str:
-    return outcome_status(
-        question=question, incomplete_answer=incomplete_answer, failures=failures,
-        missing_answer=missing_answer, effects=effects, cancelled=cancelled,
-    )
-
-
-def _structured_coach_outcome(
-    response: dict[str, Any],
-    command_receipts: list[dict[str, Any]],
-    *,
-    question: str,
-    cancelled: bool,
-    allow_mutations: bool,
-    context: dict[str, Any],
-    message: str,
-) -> tuple[str, str, list[dict[str, Any]]]:
-    failures = unresolved_coach_steps(command_receipts)
-    _mark_resolved_coach_receipts(command_receipts, failures)
-    effects = _coach_effects(command_receipts)
-    text, incomplete_answer, missing_answer = _structured_coach_outcome_text(response, question, failures, effects)
-    _persist_structured_coach_pending_request(
-        command_receipts, effects, failures=failures, incomplete_answer=incomplete_answer,
-        question=question, cancelled=cancelled, allow_mutations=allow_mutations,
-        context=context, message=message,
-    )
-    status = _structured_coach_outcome_status(
-        question=question, incomplete_answer=incomplete_answer, failures=failures,
-        missing_answer=missing_answer, effects=effects, cancelled=cancelled,
-    )
-    return status, text, failures
 
 
 def _prepare_structured_plan_sync(
@@ -3219,7 +3139,7 @@ def _chat_with_structured_coach_impl(
         cancelled=False,
         state=round_state,
     )
-    status, text, failures = _structured_coach_outcome(
+    status, text, failures = coach_structured_outcome_service().finalize(
         response,
         command_receipts,
         question=question,

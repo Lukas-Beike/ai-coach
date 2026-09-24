@@ -5,6 +5,8 @@ import unittest
 from unittest.mock import patch
 
 from test_coach_dialogue import DialogueHarness, server
+
+from backend.coach.outcomes import coach_failure_lines
 from backend.planning import workouts as planning_workouts
 from backend.providers.workout_text import canonical_workout_zones, structured_steps
 
@@ -175,7 +177,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(canonical_workout_zones(strength, endurance=False), strength)
 
     def test_exhausted_workout_repair_does_not_ask_athlete_for_syntax(self):
-        result = server.coach_failure_lines([{"tool": "apply_training_patch", "result": {
+        result = coach_failure_lines([{"tool": "apply_training_patch", "result": {
             "ok": False, "reason": "missing_workout_target", "error": "Use Z1 HR; locker is not valid"}}], {"apply_training_patch"})
         self.assertNotIn("Use Z1 HR", result)
         self.assertIn("Coach", result)

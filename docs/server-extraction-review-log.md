@@ -6311,7 +6311,7 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Der integrierte Worker-Dateibaum `d91ff6f2` bestand das Root-Diff-
   Review **PASS**; 111 kombinierte, 2.478 native/12 Skips und 2.478
   Read-only-Docker-Tests/11 Skips sowie Ruff/Compile/Inventar **PASS**.
-  Einmalig angeforderte Codex-Code-/Security-Review, CI-Testshards,
+  Die einmalig angeforderte Codex-Code-/Security-Review, CI-Testshards,
   Container, Qualität, Sonar, CodeQL und optionaler Browser-/Accessibility-
   Check (5m55s) waren **PASS**, null offene Review-Threads.
 - Squash-Merge `9d84c8cb3d3129155e1cfc7c9c2f16b842259a60` am
@@ -6339,4 +6339,62 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   P7-Rest 38 Definitionen/28 globale Bindungen, P0=0. Native
   Integrations-Vollsuite 2.486/12 Skips **PASS** (342,167 s).
   Root prüfte den integrierten Code und alle betroffenen Aufrufer
-  erneut: **PASS**. PR-CI steht noch aus. P7 bleibt offen.
+  erneut: **PASS**. CI-Testshards, Container, Qualität, Sonar, CodeQL und Codex-Code-/Security-Review **PASS**, null offene Threads. P7 bleibt offen.
+
+## P7 strukturiertes Tool-Replay — bestätigter #759-Merge
+
+- Squash-Merge `52acbe45e51ed8599e2145daa690cc3d116f0804` am
+  `2026-09-24T00:23:16Z` mit `state=MERGED`, `mergedAt` und
+  Erreichbarkeit auf `origin/develop` bestätigt. Optionaler
+  Browser-Smoke-/Accessibility-Check anschließend **PASS** (5m37s).
+- Nächster Schritt: Ein einzelner GPT-6-Luna-Worker besitzt separat
+  nur die strukturierte Replay-Entscheidung; Root bearbeitet im
+  unabhängigen Worktree die Turn-Ergebnisprojektion. Beide
+  `server.py`-Patches werden sequenziell integriert und erneut geprüft.
+
+## P7 strukturierte Turn-Ergebnisse — Root-Ausgangsstand
+
+- Auf bestätigtem #758-Merge `9d84c8cb` hat Root die komplette
+  Ergebnisprojektion einschließlich reparierter Fehler, Effekte,
+  Text-/Status-Fallback und Pending-Request-KV-Persistenz in
+  `CoachStructuredOutcomeService.finalize` verlagert. Der Turn-Aufrufer
+  delegiert direkt; `DatabaseManager`/`DB_LOCK` und
+  `KeyValueRepository` sind die injizierten Zustandseigentümer.
+  Auch der reine `output_text`-Kompatibilitäts-Wrapper ist entfernt;
+  drei Provider-Tests zielen direkt auf die Backend-Funktion.
+- Sieben neue direkte Tests prüfen Erfolg/Clearing, partielle Fehler
+  mit Provenienz und bestätigten Schritten, Rückfrage ohne KV-Effekt,
+  unvollständige Antwort, Read-only-Grenze, reparierte Fehler und
+  fehlende Antwort. Direkte Tests plus Architekturtest 13 **PASS**;
+  Der erste Read-only-Docker-Gesamtlauf **FAIL** (2.485 Tests,
+  1 Importziel-Fehler): Ein bestehender Sprach-Recovery-Test rief
+  `server.coach_failure_lines` statt des Backend-Eigentümers auf.
+  Root migrierte den Test auf `backend.coach.outcomes.coach_failure_lines`;
+  25 betroffene direkte/Architektur-/Recovery-Tests **PASS**. Die
+  finale native Vollsuite 2.485/12 Skips und erneute frische
+  Read-only-Docker-Vollsuite 2.485/11 Skips **PASS**; kombinierte
+  85 Coach-/Architekturtests **PASS**, Ruff/Compile/Inventar **PASS**.
+  Root prüfte den korrigierten Stand erneut: **PASS** für den
+  isolierten Ausgangsstand. `server.py` 4.460 physische Zeilen,
+  P7-Rest 33 Definitionen/28 globale Bindungen, P0=0. Die
+  sequenzielle Integration nach dem Tool-Replay-Merge und deren
+  erneute Tests/Review stehen noch aus.
+
+## P7 strukturierte Turn-Ergebnisse — integrierter Diff-Stand
+
+- Ausgangscommit `183544c0` wurde auf bestätigtem #759-Merge
+  `52acbe45` sequenziell integriert. Die Konflikte betrafen
+  benachbarte, aber unabhängige Server-Funktionen sowie gemeinsam
+  generierte Inventar-/Plan-/Review-Dateien; Root behielt beide
+  konkreten Services und die beiden Architekturverbote, entfernte
+  beide alten Fachfunktionen und generierte das Inventar neu.
+- Code-/Integrationsreview vorläufig **PASS**: direkte Aufrufer für
+  Tool-Replay und Ergebnisfinalisierung, kein Server-Callback oder
+  Backend-Rückimport, KV-Transaktion und Replay-Revision bleiben bei
+  ihren Besitzern. `server.py` 4.441 physische Zeilen; P7-Rest 32
+  Definitionen/28 globale Bindungen, P0=0. Nach der Konfliktauflösung
+  132 kombinierte Coach-/Architekturtests, native Vollsuite 2.493/
+  12 Skips (239,210 s) und frisches Read-only-Docker-Image 2.493/
+  11 Skips (23,106 s) **PASS**; Ruff/Compile/Inventar/Diff-Check
+  **PASS**. Root prüfte den tatsächlichen integrierten Diff und die
+  beiden Aufrufer erneut: **PASS**. PR-CI steht noch aus.
