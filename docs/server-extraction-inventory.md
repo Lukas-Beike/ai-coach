@@ -5,11 +5,11 @@
 ## Ausgangsstand
 
 - Geprüfter P0-Basiscommit: `362d6caa4c27951af86b82b11b3a43d48dadceee`
-- Inventarisierter `server.py`-Quelltext (SHA-256): `72d67c1e9427eccfd39a79fb9e659f577429070f13a23ebe3205ae5e2d50b8ca`; dieser Fingerprint ist unabhängig von HEAD und Arbeitsbaum stabil.
-- `server.py`: 3.413 physische Zeilen
-- Inventareinträge: 589
+- Inventarisierter `server.py`-Quelltext (SHA-256): `3832beb4e84ffab2f54819536da890168e96311eb34a21ea29ef041eedde91fc`; dieser Fingerprint ist unabhängig von HEAD und Arbeitsbaum stabil.
+- `server.py`: 3.407 physische Zeilen
+- Inventareinträge: 590
 - Definitionen (Funktionen/Klassen): 174
-- Globale Bindungen einschließlich Imports: 94 Zuweisungen. 321 Imports
+- Globale Bindungen einschließlich Imports: 95 Zuweisungen. 321 Imports
 - Planbereich: bis Zeile 21.702; Einträge dahinter: 0 (zielbestimmt über Symbol-/Verantwortungsanalyse)
 - Status dieses Stands: P0 ist integriert; bereits ausgelagerte Namen erscheinen als Importbindungen. `offen` bedeutet, dass die fachliche Eigentümerschaft noch migriert werden muss.
 
@@ -40,7 +40,7 @@ Der Generator führt selbst keine Tests und keine Laufzeitinitialisierung aus. S
 | P7 | 0 | 17 | 0 |
 | P8 | 1 | 4 | 0 |
 | P9 | 0 | 4 | 0 |
-| P10 | 4 | 7 | 0 |
+| P10 | 4 | 8 | 0 |
 | P11 | 150 | 16 | 26 |
 
 ## Referenzanalyse außerhalb von server.py
@@ -507,7 +507,7 @@ Die folgende Tabelle ist die statische Grundlage für P1. Reads/Writes sind nur 
 | `database_restore_validation_service` | 2739 | – | `CONFIG`, `DATA_DIR`, `DatabaseRestoreValidationConfig`, `DatabaseRestoreValidationService`, `MAX_BACKUP_BYTES`, `SQLCIPHER_AVAILABLE`, `configure_cipher`, `database_row_factory`, `database_schema_is_current`, `sqlite_backend` | – | – |
 | `database_restore_service` | 2754 | `coach_job_store`, `coach_turn_failure_service`, `database_backup_service`, `database_restore_validation_service`, `sync_job_queue_service` | `COACH_JOB_WORKER`, `DATA_DIR`, `DB_LOCK`, `DB_PATH`, `DatabaseRestoreConfig`, `DatabaseRestoreService`, `REDACTOR`, `coach_job_store`, `coach_turn_failure_service`, `database_backup_service`, `database_manager`, `database_restore_validation_service`, … (+3) | – | – |
 | `readiness_service` | 2772 | – | `DATA_DIR`, `DB_LOCK`, `ReadinessService`, `database_manager`, `runtime_maintenance` | – | – |
-| `RequestHandler` | 2822 | `athlete_context_service`, `change_history_service`, `checkin_service`, `coach_cancellation_service`, `coach_command_receipt_service`, `coach_conversation_provision_service`, `coach_conversation_reset_service`, `coach_job_submission_service`, `coach_planning_command_service`, `coach_proposal_confirmation_service`, `coach_proposal_creation_service`, `coach_proposal_execution_service`, … (+8) | `APP_VERSION`, `ATHLETE_GET_ROUTES`, `Any`, `AppError`, `BaseHTTPRequestHandler`, `COACH_GET_ROUTES`, `ClientDisconnected`, `DIAGNOSTICS_GET_ROUTES`, `DIAGNOSTIC_CAPTURE`, `INTERNAL_SERVER_ERROR`, `LOGGER`, `MAX_AUDIO_BODY_BYTES`, … (+54) | – | – |
+| `RequestHandler` | 2823 | `athlete_context_service`, `checkin_service`, `coach_cancellation_service`, `coach_command_receipt_service`, `coach_conversation_provision_service`, `coach_conversation_reset_service`, `coach_job_submission_service`, `coach_planning_command_service`, `coach_proposal_confirmation_service`, `coach_proposal_creation_service`, `coach_proposal_execution_service`, `database_restore_service`, … (+7) | `APP_VERSION`, `ATHLETE_GET_ROUTES`, `Any`, `AppError`, `BaseHTTPRequestHandler`, `COACH_GET_ROUTES`, `ClientDisconnected`, `DIAGNOSTICS_GET_ROUTES`, `DIAGNOSTIC_CAPTURE`, `HISTORY_GET_ROUTES`, `INTERNAL_SERVER_ERROR`, `LOGGER`, … (+52) | – | – |
 
 ### Zyklische Gruppen
 
@@ -571,106 +571,106 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | Importbindung | `provider_error` | 40 | `backend/errors` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `public_app_error_status` | 40 | `backend/errors` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:5458 (direkt/dynamisch unklar); tests/test_server.py:5459 (direkt/dynamisch unklar) |
 | Importbindung | `app_config` | 51 | `backend` | P1 | bereits ausgelagert (Importbindung) | tests/test_audit_remediation.py:232 (direkt/dynamisch unklar); tests/test_provider_review.py:200 (direkt/dynamisch unklar); tests/test_provider_review.py:363 (direkt/dynamisch unklar); tests/test_server.py:1708 (direkt/dynamisch unklar); tests/test_server.py:434 (direkt/dynamisch unklar); tests/test_server.py:7815 (direkt/dynamisch unklar); tests/test_server.py:7822 (direkt/dynamisch unklar); tests/test_server.py:7831 (direkt/dynamisch unklar); tests/test_server.py:7847 (direkt/dynamisch unklar); tests/test_server.py:9370 (direkt/dynamisch unklar) |
-| Importbindung | `change_history` | 52 | `backend` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `observability` | 53 | `backend` | P1 | bereits ausgelagert (Importbindung) | tests/test_coach_response_failure.py:119 (direkt/dynamisch unklar); tests/test_provider_review.py:44 (direkt/dynamisch unklar); tests/test_server.py:10031 (direkt/dynamisch unklar); tests/test_server.py:10036 (direkt/dynamisch unklar); tests/test_server.py:10039 (direkt/dynamisch unklar); tests/test_server.py:433 (direkt/dynamisch unklar); tests/test_server.py:9008 (direkt/dynamisch unklar); tests/test_server.py:9080 (direkt/dynamisch unklar); tests/test_server.py:9164 (direkt/dynamisch unklar); tests/test_server.py:9406 (direkt/dynamisch unklar); tests/test_server.py:9437 (direkt/dynamisch unklar); tests/test_server.py:9671 (direkt/dynamisch unklar) |
-| Importbindung | `DuplicateActivityService` | 54 | `backend/activities/duplicate_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `calendar_external` | 55 | `backend/calendar` | P1 | bereits ausgelagert (Importbindung) | tests/test_workout_repair.py:345 (direkt/dynamisch unklar); tests/test_workout_repair.py:445 (direkt/dynamisch unklar) |
-| Importbindung | `calendar_local` | 56 | `backend/calendar` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `public_event_calendar` | 57 | `backend/calendar` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `ActivityFeedbackService` | 58 | `backend/activities/feedback` | P1 | bereits ausgelagert (Importbindung) | tests/test_diagnostic_followups.py:225 (direkt/dynamisch unklar) |
-| Importbindung | `ActivityReadService` | 59 | `backend/activities/read_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PrivacyDataExportDependencies` | 60 | `backend/privacy` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PrivacyDataExportService` | 60 | `backend/privacy` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PrivacyDeleteDependencies` | 60 | `backend/privacy` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PrivacyDeleteService` | 60 | `backend/privacy` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `CHECKIN_SCORE_FIELDS` | 66 | `backend/athlete/checkins` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `CHECKIN_TEXT_LIMITS` | 66 | `backend/athlete/checkins` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `CheckinService` | 66 | `backend/athlete/checkins` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `AthleteContextService` | 71 | `backend/athlete/context` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `DEFAULT_PROFILE` | 72 | `backend/athlete/profile` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `ProfileService` | 72 | `backend/athlete/profile` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `normalize_profile` | 72 | `backend/athlete/profile` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1435 (direkt/dynamisch unklar); tests/test_server.py:2228 (direkt/dynamisch unklar) |
-| Importbindung | `timezone_name` | 72 | `backend/athlete/profile` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `performance_morning_battery` | 73 | `backend/performance` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `MorningBatteryClock` | 74 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `MorningBatteryEvents` | 74 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `MorningBatteryExecutionGate` | 74 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `MorningBatteryRetryPolicy` | 74 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `MorningBatterySource` | 74 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `MorningBatteryStore` | 74 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `MorningBodyBatteryService` | 74 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `runtime_events` | 83 | `backend/runtime` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:6862 (direkt/dynamisch unklar); tests/test_server.py:6909 (direkt/dynamisch unklar) |
-| Importbindung | `runtime_maintenance` | 84 | `backend/runtime` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:480 (direkt/dynamisch unklar) |
-| Importbindung | `sync_freshness` | 85 | `backend/sync` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:10180 (direkt/dynamisch unklar); tests/test_server.py:10189 (direkt/dynamisch unklar) |
-| Importbindung | `garmin_sync` | 86 | `backend/sync` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:4850 (direkt/dynamisch unklar); tests/test_server.py:4855 (direkt/dynamisch unklar) |
-| Importbindung | `GARMIN_RESYNC_GATE` | 87 | `backend/sync/gates` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `INTERVALS_RESYNC_GATE` | 87 | `backend/sync/gates` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:7771 (direkt/dynamisch unklar); tests/test_server.py:7792 (direkt/dynamisch unklar) |
-| Importbindung | `intervals_operation` | 87 | `backend/sync/gates` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `intervals_state` | 92 | `backend/sync` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `sync_observation` | 93 | `backend/sync` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `INTERVALS_SYNC_LOCK` | 94 | `backend/sync/intervals_lock` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `IntervalsSnapshotReader` | 95 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `IntervalsSnapshotService` | 95 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `IntervalsSyncJournal` | 95 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `IntervalsSyncRuntime` | 95 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `IntervalsSyncService` | 95 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `IntervalsSyncStatus` | 95 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `IntervalsSyncWorkflow` | 95 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `CompetitionSyncReconciler` | 104 | `backend/sync/competitions` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `CompetitionSyncService` | 104 | `backend/sync/competitions` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `WeatherCacheStore` | 105 | `backend/weather/service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `WeatherRefreshJournal` | 105 | `backend/weather/service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `WeatherService` | 105 | `backend/weather/service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `SettingsService` | 110 | `backend/settings` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `initialize_application_database` | 111 | `backend/db/bootstrap` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `ActivityFeedbackRepository` | 112 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1412 (direkt/dynamisch unklar) |
-| Importbindung | `ChatRepository` | 112 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1338 (direkt/dynamisch unklar) |
-| Importbindung | `CheckinRepository` | 112 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1346 (direkt/dynamisch unklar) |
-| Importbindung | `CompetitionRepository` | 112 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1378 (direkt/dynamisch unklar) |
-| Importbindung | `KeyValueRepository` | 112 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1329 (direkt/dynamisch unklar); tests/test_server.py:1363 (direkt/dynamisch unklar) |
-| Importbindung | `PlanAdjustmentRepository` | 112 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1402 (direkt/dynamisch unklar) |
-| Importbindung | `PlanningStateRepository` | 112 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `ProfileRepository` | 112 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1363 (direkt/dynamisch unklar) |
-| Importbindung | `SnapshotRepository` | 112 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1425 (direkt/dynamisch unklar) |
-| Importbindung | `TrainingPlanRepository` | 112 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1387 (direkt/dynamisch unklar) |
-| Importbindung | `DatabaseManager` | 113 | `backend/db/manager` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `configure_cipher` | 114 | `backend/db/schema` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `database_schema_is_current` | 114 | `backend/db/schema` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `Config` | 115 | `backend/config` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `DEFAULT_OPENAI_BASE_URL` | 115 | `backend/config` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `load_config` | 115 | `backend/config` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `IntervalsApiClient` | 116 | `backend/providers/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `audio_provider` | 117 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `calendar_provider` | 118 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `gemini_provider` | 119 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `provider_http` | 120 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | e2e/fixture_runtime.py:28 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:117 (direkt/dynamisch unklar); tests/test_server.py:10040 (direkt/dynamisch unklar); tests/test_server.py:2485 (direkt/dynamisch unklar); tests/test_server.py:9048 (direkt/dynamisch unklar); tests/test_server.py:9131 (direkt/dynamisch unklar); tests/test_server.py:9153 (direkt/dynamisch unklar) |
-| Importbindung | `openai_provider` | 121 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | tests/test_coach_response_failure.py:38 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:79 (direkt/dynamisch unklar); tests/test_server.py:10114 (direkt/dynamisch unklar); tests/test_server.py:2087 (direkt/dynamisch unklar); tests/test_server.py:2103 (direkt/dynamisch unklar); tests/test_server.py:5417 (direkt/dynamisch unklar); tests/test_server.py:5451 (direkt/dynamisch unklar); tests/test_server.py:6369 (direkt/dynamisch unklar); tests/test_server.py:6399 (direkt/dynamisch unklar); tests/test_server.py:6778 (direkt/dynamisch unklar); tests/test_server.py:9550 (direkt/dynamisch unklar); tests/test_server.py:9739 (direkt/dynamisch unklar) |
-| Importbindung | `provider_state` | 122 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `weather_provider` | 123 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `GarminClientFactory` | 124 | `backend/providers/garmin` | P1 | bereits ausgelagert (Importbindung) | tests/test_diagnostic_followups.py:115 (direkt/dynamisch unklar); tests/test_provider_review.py:233 (direkt/dynamisch unklar); tests/test_provider_review.py:235 (direkt/dynamisch unklar); tests/test_provider_review.py:264 (direkt/dynamisch unklar); tests/test_provider_review.py:265 (direkt/dynamisch unklar); tests/test_server.py:4963 (direkt/dynamisch unklar); tests/test_server.py:4964 (direkt/dynamisch unklar) |
-| Importbindung | `fetch_morning_body_battery` | 125 | `backend/providers/garmin_morning` | P1 | bereits ausgelagert (Importbindung) | tests/test_diagnostic_followups.py:116 (Monkeypatch/getattr/sys.modules) |
-| Importbindung | `http_server` | 126 | `backend/http_api` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PublicBootstrapDependencies` | 127 | `backend/http_api/bootstrap_state` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PublicBootstrapService` | 127 | `backend/http_api/bootstrap_state` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `AthleteGetRoutes` | 131 | `backend/http_api/athlete_get` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `CoachGetRoutes` | 132 | `backend/http_api/coach_get` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `DiagnosticsGetRoutes` | 133 | `backend/http_api/diagnostics_get` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PublicGetRoutes` | 134 | `backend/http_api/public_get` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PlanningGetRoutes` | 135 | `backend/http_api/planning_get` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `RateLimiter` | 136 | `backend/http_api/rate_limit` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `ReadinessService` | 137 | `backend/http_api/readiness` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `SessionAuthService` | 138 | `backend/http_api/auth` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PublicFeedbackStateService` | 139 | `backend/http_api/public_performance` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PublicPerformanceStateService` | 139 | `backend/http_api/public_performance` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PublicWeatherStateService` | 143 | `backend/http_api/public_weather` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `CalendarWindowRange` | 144 | `backend/http_api/state_prelude` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PublicStateLocalPrelude` | 144 | `backend/http_api/state_prelude` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PublicStateWeatherPrelude` | 144 | `backend/http_api/state_prelude` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PublicPlanDependencies` | 149 | `backend/http_api/public_plan` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `PublicPlanStateService` | 149 | `backend/http_api/public_plan` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `StateVersionService` | 150 | `backend/http_api/state_versions` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `SyncCommandEndpoint` | 151 | `backend/http_api/sync_commands` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
-| Importbindung | `SyncGetRoutes` | 152 | `backend/http_api/sync_get` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `observability` | 52 | `backend` | P1 | bereits ausgelagert (Importbindung) | tests/test_coach_response_failure.py:119 (direkt/dynamisch unklar); tests/test_provider_review.py:44 (direkt/dynamisch unklar); tests/test_server.py:10031 (direkt/dynamisch unklar); tests/test_server.py:10036 (direkt/dynamisch unklar); tests/test_server.py:10039 (direkt/dynamisch unklar); tests/test_server.py:433 (direkt/dynamisch unklar); tests/test_server.py:9008 (direkt/dynamisch unklar); tests/test_server.py:9080 (direkt/dynamisch unklar); tests/test_server.py:9164 (direkt/dynamisch unklar); tests/test_server.py:9406 (direkt/dynamisch unklar); tests/test_server.py:9437 (direkt/dynamisch unklar); tests/test_server.py:9671 (direkt/dynamisch unklar) |
+| Importbindung | `DuplicateActivityService` | 53 | `backend/activities/duplicate_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `calendar_external` | 54 | `backend/calendar` | P1 | bereits ausgelagert (Importbindung) | tests/test_workout_repair.py:345 (direkt/dynamisch unklar); tests/test_workout_repair.py:445 (direkt/dynamisch unklar) |
+| Importbindung | `calendar_local` | 55 | `backend/calendar` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `public_event_calendar` | 56 | `backend/calendar` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `ActivityFeedbackService` | 57 | `backend/activities/feedback` | P1 | bereits ausgelagert (Importbindung) | tests/test_diagnostic_followups.py:225 (direkt/dynamisch unklar) |
+| Importbindung | `ActivityReadService` | 58 | `backend/activities/read_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PrivacyDataExportDependencies` | 59 | `backend/privacy` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PrivacyDataExportService` | 59 | `backend/privacy` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PrivacyDeleteDependencies` | 59 | `backend/privacy` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PrivacyDeleteService` | 59 | `backend/privacy` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `CHECKIN_SCORE_FIELDS` | 65 | `backend/athlete/checkins` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `CHECKIN_TEXT_LIMITS` | 65 | `backend/athlete/checkins` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `CheckinService` | 65 | `backend/athlete/checkins` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `AthleteContextService` | 70 | `backend/athlete/context` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `DEFAULT_PROFILE` | 71 | `backend/athlete/profile` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `ProfileService` | 71 | `backend/athlete/profile` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `normalize_profile` | 71 | `backend/athlete/profile` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1435 (direkt/dynamisch unklar); tests/test_server.py:2228 (direkt/dynamisch unklar) |
+| Importbindung | `timezone_name` | 71 | `backend/athlete/profile` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `performance_morning_battery` | 72 | `backend/performance` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `MorningBatteryClock` | 73 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `MorningBatteryEvents` | 73 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `MorningBatteryExecutionGate` | 73 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `MorningBatteryRetryPolicy` | 73 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `MorningBatterySource` | 73 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `MorningBatteryStore` | 73 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `MorningBodyBatteryService` | 73 | `backend/performance/morning_battery_service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `runtime_events` | 82 | `backend/runtime` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:6862 (direkt/dynamisch unklar); tests/test_server.py:6909 (direkt/dynamisch unklar) |
+| Importbindung | `runtime_maintenance` | 83 | `backend/runtime` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:480 (direkt/dynamisch unklar) |
+| Importbindung | `sync_freshness` | 84 | `backend/sync` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:10180 (direkt/dynamisch unklar); tests/test_server.py:10189 (direkt/dynamisch unklar) |
+| Importbindung | `garmin_sync` | 85 | `backend/sync` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:4850 (direkt/dynamisch unklar); tests/test_server.py:4855 (direkt/dynamisch unklar) |
+| Importbindung | `GARMIN_RESYNC_GATE` | 86 | `backend/sync/gates` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `INTERVALS_RESYNC_GATE` | 86 | `backend/sync/gates` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:7771 (direkt/dynamisch unklar); tests/test_server.py:7792 (direkt/dynamisch unklar) |
+| Importbindung | `intervals_operation` | 86 | `backend/sync/gates` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `intervals_state` | 91 | `backend/sync` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `sync_observation` | 92 | `backend/sync` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `INTERVALS_SYNC_LOCK` | 93 | `backend/sync/intervals_lock` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `IntervalsSnapshotReader` | 94 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `IntervalsSnapshotService` | 94 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `IntervalsSyncJournal` | 94 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `IntervalsSyncRuntime` | 94 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `IntervalsSyncService` | 94 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `IntervalsSyncStatus` | 94 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `IntervalsSyncWorkflow` | 94 | `backend/sync/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `CompetitionSyncReconciler` | 103 | `backend/sync/competitions` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `CompetitionSyncService` | 103 | `backend/sync/competitions` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `WeatherCacheStore` | 104 | `backend/weather/service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `WeatherRefreshJournal` | 104 | `backend/weather/service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `WeatherService` | 104 | `backend/weather/service` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `SettingsService` | 109 | `backend/settings` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `initialize_application_database` | 110 | `backend/db/bootstrap` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `ActivityFeedbackRepository` | 111 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1412 (direkt/dynamisch unklar) |
+| Importbindung | `ChatRepository` | 111 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1338 (direkt/dynamisch unklar) |
+| Importbindung | `CheckinRepository` | 111 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1346 (direkt/dynamisch unklar) |
+| Importbindung | `CompetitionRepository` | 111 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1378 (direkt/dynamisch unklar) |
+| Importbindung | `KeyValueRepository` | 111 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1329 (direkt/dynamisch unklar); tests/test_server.py:1363 (direkt/dynamisch unklar) |
+| Importbindung | `PlanAdjustmentRepository` | 111 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1402 (direkt/dynamisch unklar) |
+| Importbindung | `PlanningStateRepository` | 111 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `ProfileRepository` | 111 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1363 (direkt/dynamisch unklar) |
+| Importbindung | `SnapshotRepository` | 111 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1425 (direkt/dynamisch unklar) |
+| Importbindung | `TrainingPlanRepository` | 111 | `backend/db/repositories` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:1387 (direkt/dynamisch unklar) |
+| Importbindung | `DatabaseManager` | 112 | `backend/db/manager` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `configure_cipher` | 113 | `backend/db/schema` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `database_schema_is_current` | 113 | `backend/db/schema` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `Config` | 114 | `backend/config` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `DEFAULT_OPENAI_BASE_URL` | 114 | `backend/config` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `load_config` | 114 | `backend/config` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `IntervalsApiClient` | 115 | `backend/providers/intervals` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `audio_provider` | 116 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `calendar_provider` | 117 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `gemini_provider` | 118 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `provider_http` | 119 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | e2e/fixture_runtime.py:28 (direkt/dynamisch unklar); tests/test_diagnostic_followups.py:117 (direkt/dynamisch unklar); tests/test_server.py:10040 (direkt/dynamisch unklar); tests/test_server.py:2485 (direkt/dynamisch unklar); tests/test_server.py:9048 (direkt/dynamisch unklar); tests/test_server.py:9131 (direkt/dynamisch unklar); tests/test_server.py:9153 (direkt/dynamisch unklar) |
+| Importbindung | `openai_provider` | 120 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | tests/test_coach_response_failure.py:38 (direkt/dynamisch unklar); tests/test_coach_response_failure.py:79 (direkt/dynamisch unklar); tests/test_server.py:10114 (direkt/dynamisch unklar); tests/test_server.py:2087 (direkt/dynamisch unklar); tests/test_server.py:2103 (direkt/dynamisch unklar); tests/test_server.py:5417 (direkt/dynamisch unklar); tests/test_server.py:5451 (direkt/dynamisch unklar); tests/test_server.py:6369 (direkt/dynamisch unklar); tests/test_server.py:6399 (direkt/dynamisch unklar); tests/test_server.py:6778 (direkt/dynamisch unklar); tests/test_server.py:9550 (direkt/dynamisch unklar); tests/test_server.py:9739 (direkt/dynamisch unklar) |
+| Importbindung | `provider_state` | 121 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `weather_provider` | 122 | `backend/providers` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `GarminClientFactory` | 123 | `backend/providers/garmin` | P1 | bereits ausgelagert (Importbindung) | tests/test_diagnostic_followups.py:115 (direkt/dynamisch unklar); tests/test_provider_review.py:233 (direkt/dynamisch unklar); tests/test_provider_review.py:235 (direkt/dynamisch unklar); tests/test_provider_review.py:264 (direkt/dynamisch unklar); tests/test_provider_review.py:265 (direkt/dynamisch unklar); tests/test_server.py:4963 (direkt/dynamisch unklar); tests/test_server.py:4964 (direkt/dynamisch unklar) |
+| Importbindung | `fetch_morning_body_battery` | 124 | `backend/providers/garmin_morning` | P1 | bereits ausgelagert (Importbindung) | tests/test_diagnostic_followups.py:116 (Monkeypatch/getattr/sys.modules) |
+| Importbindung | `http_server` | 125 | `backend/http_api` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PublicBootstrapDependencies` | 126 | `backend/http_api/bootstrap_state` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PublicBootstrapService` | 126 | `backend/http_api/bootstrap_state` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `AthleteGetRoutes` | 130 | `backend/http_api/athlete_get` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `CoachGetRoutes` | 131 | `backend/http_api/coach_get` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `DiagnosticsGetRoutes` | 132 | `backend/http_api/diagnostics_get` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PublicGetRoutes` | 133 | `backend/http_api/public_get` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PlanningGetRoutes` | 134 | `backend/http_api/planning_get` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `RateLimiter` | 135 | `backend/http_api/rate_limit` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `ReadinessService` | 136 | `backend/http_api/readiness` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `SessionAuthService` | 137 | `backend/http_api/auth` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PublicFeedbackStateService` | 138 | `backend/http_api/public_performance` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PublicPerformanceStateService` | 138 | `backend/http_api/public_performance` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PublicWeatherStateService` | 142 | `backend/http_api/public_weather` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `CalendarWindowRange` | 143 | `backend/http_api/state_prelude` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PublicStateLocalPrelude` | 143 | `backend/http_api/state_prelude` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PublicStateWeatherPrelude` | 143 | `backend/http_api/state_prelude` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PublicPlanDependencies` | 148 | `backend/http_api/public_plan` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `PublicPlanStateService` | 148 | `backend/http_api/public_plan` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `StateVersionService` | 149 | `backend/http_api/state_versions` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `SyncCommandEndpoint` | 150 | `backend/http_api/sync_commands` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `SyncGetRoutes` | 151 | `backend/http_api/sync_get` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
+| Importbindung | `HistoryGetRoutes` | 152 | `backend/http_api/history_get` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `SyncOperationStateWriter` | 153 | `backend/sync/status` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `SyncPublicStateService` | 153 | `backend/sync/status` | P1 | bereits ausgelagert (Importbindung) | keine statisch gefunden |
 | Importbindung | `PlanningAuthorityService` | 154 | `backend/sync/authority` | P1 | bereits ausgelagert (Importbindung) | tests/test_server.py:657 (direkt/dynamisch unklar) |
@@ -1105,18 +1105,19 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | Globale Bindung | `ATHLETE_GET_ROUTES` | 2797 | `http_api/` | P10 | offen | keine statisch gefunden |
 | Globale Bindung | `DIAGNOSTICS_GET_ROUTES` | 2806 | `http_api/` | P10 | offen | keine statisch gefunden |
 | Globale Bindung | `SYNC_GET_ROUTES` | 2812 | `http_api/` | P10 | offen | keine statisch gefunden |
-| Klasse | `RequestHandler` | 2822 | `http_api/` | P10 | offen | e2e/fixture_runtime.py:112 (direkt/dynamisch unklar); e2e/fixture_runtime.py:129 (direkt/dynamisch unklar); tests/test_coach_planning_commands.py:24 (direkt/dynamisch unklar); tests/test_server.py:1986 (direkt/dynamisch unklar); tests/test_server.py:2067 (direkt/dynamisch unklar); tests/test_server.py:220 (direkt/dynamisch unklar); tests/test_server.py:245 (direkt/dynamisch unklar); tests/test_server.py:2532 (direkt/dynamisch unklar); tests/test_server.py:261 (direkt/dynamisch unklar); tests/test_server.py:455 (direkt/dynamisch unklar); tests/test_server.py:8691 (direkt/dynamisch unklar); tests/test_server.py:8701 (direkt/dynamisch unklar); tests/test_server.py:8707 (direkt/dynamisch unklar); tests/test_server.py:8717 (direkt/dynamisch unklar); tests/test_server.py:8741 (direkt/dynamisch unklar); tests/test_server.py:8773 (direkt/dynamisch unklar); tests/test_server.py:8800 (direkt/dynamisch unklar); tests/test_server.py:8810 (direkt/dynamisch unklar); tests/test_server.py:9843 (direkt/dynamisch unklar); tests/test_server.py:9867 (direkt/dynamisch unklar) |
-| Funktion | `request_handler_class` | 3328 | `server.py / Composition Root` | P11 | offen | tests/test_audit_remediation.py:235 (direkt/dynamisch unklar); tests/test_server.py:1692 (direkt/dynamisch unklar); tests/test_server.py:8738 (direkt/dynamisch unklar); tests/test_server.py:8765 (direkt/dynamisch unklar); tests/test_server.py:9246 (direkt/dynamisch unklar); tests/test_server.py:9281 (direkt/dynamisch unklar) |
-| Funktion | `daily_sync_loop_service` | 3337 | `server.py / Composition Root` | P11 | offen | keine statisch gefunden |
-| Funktion | `daily_sync_scheduler` | 3346 | `server.py / Composition Root` | P11 | offen | tests/test_audit_remediation.py:167 (direkt/dynamisch unklar) |
-| Funktion | `startup_sync_scheduler` | 3369 | `server.py / Composition Root` | P11 | offen | tests/test_server.py:445 (Monkeypatch/getattr/sys.modules) |
-| Funktion | `main` | 3387 | `server.py / Composition Root` | P11 | offen | e2e/fixture_runtime.py:130 (direkt/dynamisch unklar); tests/test_server.py:451 (direkt/dynamisch unklar) |
+| Globale Bindung | `HISTORY_GET_ROUTES` | 2820 | `http_api/` | P10 | offen | keine statisch gefunden |
+| Klasse | `RequestHandler` | 2823 | `http_api/` | P10 | offen | e2e/fixture_runtime.py:112 (direkt/dynamisch unklar); e2e/fixture_runtime.py:129 (direkt/dynamisch unklar); tests/test_coach_planning_commands.py:24 (direkt/dynamisch unklar); tests/test_server.py:1986 (direkt/dynamisch unklar); tests/test_server.py:2067 (direkt/dynamisch unklar); tests/test_server.py:220 (direkt/dynamisch unklar); tests/test_server.py:245 (direkt/dynamisch unklar); tests/test_server.py:2532 (direkt/dynamisch unklar); tests/test_server.py:261 (direkt/dynamisch unklar); tests/test_server.py:455 (direkt/dynamisch unklar); tests/test_server.py:8691 (direkt/dynamisch unklar); tests/test_server.py:8701 (direkt/dynamisch unklar); tests/test_server.py:8707 (direkt/dynamisch unklar); tests/test_server.py:8717 (direkt/dynamisch unklar); tests/test_server.py:8741 (direkt/dynamisch unklar); tests/test_server.py:8773 (direkt/dynamisch unklar); tests/test_server.py:8800 (direkt/dynamisch unklar); tests/test_server.py:8810 (direkt/dynamisch unklar); tests/test_server.py:9843 (direkt/dynamisch unklar); tests/test_server.py:9867 (direkt/dynamisch unklar) |
+| Funktion | `request_handler_class` | 3322 | `server.py / Composition Root` | P11 | offen | tests/test_audit_remediation.py:235 (direkt/dynamisch unklar); tests/test_server.py:1692 (direkt/dynamisch unklar); tests/test_server.py:8738 (direkt/dynamisch unklar); tests/test_server.py:8765 (direkt/dynamisch unklar); tests/test_server.py:9246 (direkt/dynamisch unklar); tests/test_server.py:9281 (direkt/dynamisch unklar) |
+| Funktion | `daily_sync_loop_service` | 3331 | `server.py / Composition Root` | P11 | offen | keine statisch gefunden |
+| Funktion | `daily_sync_scheduler` | 3340 | `server.py / Composition Root` | P11 | offen | tests/test_audit_remediation.py:167 (direkt/dynamisch unklar) |
+| Funktion | `startup_sync_scheduler` | 3363 | `server.py / Composition Root` | P11 | offen | tests/test_server.py:445 (Monkeypatch/getattr/sys.modules) |
+| Funktion | `main` | 3381 | `server.py / Composition Root` | P11 | offen | e2e/fixture_runtime.py:130 (direkt/dynamisch unklar); tests/test_server.py:451 (direkt/dynamisch unklar) |
 
 ## Zielverteilung
 
 | Zielmodul | Einträge |
 | --- | ---: |
-| `backend` | 3 |
+| `backend` | 2 |
 | `backend/activities/duplicate_service` | 1 |
 | `backend/activities/feedback` | 1 |
 | `backend/activities/read_service` | 1 |
@@ -1201,6 +1202,7 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | `backend/http_api/coach_get` | 1 |
 | `backend/http_api/diagnostics_get` | 1 |
 | `backend/http_api/export_streams` | 1 |
+| `backend/http_api/history_get` | 1 |
 | `backend/http_api/library_page` | 1 |
 | `backend/http_api/planning_get` | 1 |
 | `backend/http_api/public_get` | 1 |
@@ -1283,7 +1285,7 @@ Statisch erkannte SCCs im direkten lokalen Aufrufgraphen: 2. Jede Gruppe ist als
 | `db/` | 10 |
 | `db/bootstrap.py` | 1 |
 | `db/manager.py` | 5 |
-| `http_api/` | 11 |
+| `http_api/` | 12 |
 | `observability.py` | 6 |
 | `planning/` | 1 |
 | `privacy.py` | 1 |
