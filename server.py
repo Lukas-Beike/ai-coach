@@ -2704,24 +2704,6 @@ def _chat_with_structured_coach(*args: Any, **kwargs: Any) -> dict[str, Any]:
     return {key: value for key, value in receipt.items() if key != "session_key"}
 
 
-def chat_stream_status(session_csrf_hash: str) -> dict[str, Any]:
-    """Return the status of the chat operation belonging to this session."""
-    attached = coach_streams.CHAT_STREAM_REGISTRY.attached_status(session_csrf_hash)
-    if attached:
-        return attached
-    job = coach_job_submission_service().active(session_csrf_hash)
-    if not job:
-        return {"status": "idle", "operation_id": None}
-    receipt = job["receipt"]
-    return {
-        "status": "running",
-        "operation_id": receipt.get("operation_id"),
-        "mode": "background",
-        "phase": receipt.get("phase") or job.get("status"),
-        "plan_scope": receipt.get("plan_scope") or {},
-    }
-
-
 def _validated_chat_request(message: str, client_turn_id: str, cancel_event: threading.Event | None) -> tuple[str, str]:
     raise_if_chat_cancelled(cancel_event)
     message = message.strip()
@@ -3374,7 +3356,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             ))
         elif path == "/api/chat/status":
             session = self.auth_service.require_auth(self)
-            self.send_json(200, chat_stream_status(session["csrf_hash"]))
+            self.send_json(200, coach_job_submission_service().stream_status(session["csrf_hash"]))
         else:
             return False
         return True

@@ -6767,10 +6767,13 @@ class CoachTests(unittest.TestCase):
             operation_id="operation-background-persisted",
         )
         self.assertEqual(job["status"], "queued")
-        status = server.chat_stream_status("csrf-background-owner")
+        status = server.coach_job_submission_service().stream_status("csrf-background-owner")
         self.assertEqual(status["mode"], "background")
         self.assertEqual(status["operation_id"], "operation-background-persisted")
-        self.assertEqual(server.chat_stream_status("csrf-other"), {"status": "idle", "operation_id": None})
+        self.assertEqual(
+            server.coach_job_submission_service().stream_status("csrf-other"),
+            {"status": "idle", "operation_id": None},
+        )
         with server.DB_LOCK, server.database() as db:
             command = db.execute(
                 "SELECT status, receipt FROM coach_commands WHERE client_turn_id='turn-background-persisted'"
@@ -9730,11 +9733,12 @@ class CoachTests(unittest.TestCase):
 
     def test_chat_stream_status_is_scoped_to_the_session(self):
         session_key = "session-stream-status-test"
-        self.assertEqual(server.chat_stream_status(session_key), {"status": "idle", "operation_id": None})
+        service = server.coach_job_submission_service()
+        self.assertEqual(service.stream_status(session_key), {"status": "idle", "operation_id": None})
         operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
         try:
-            self.assertEqual(server.chat_stream_status(session_key), {"status": "running", "operation_id": operation_id})
-            self.assertEqual(server.chat_stream_status("other-session"), {"status": "idle", "operation_id": None})
+            self.assertEqual(service.stream_status(session_key), {"status": "running", "operation_id": operation_id})
+            self.assertEqual(service.stream_status("other-session"), {"status": "idle", "operation_id": None})
             self.assertFalse(cancel_event.is_set())
         finally:
             coach_streams.CHAT_STREAM_REGISTRY.unregister(session_key, operation_id)
