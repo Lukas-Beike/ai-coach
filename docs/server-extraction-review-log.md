@@ -8102,3 +8102,10 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Independent review found no actionable correctness, privacy, security, or ownership findings. The generated server inventory assigns the reader to `backend/sync/garmin_service.py`; `server.py` is 10 lines smaller.
 - Validation before rebase: full suite passed (2,806 tests, 12 skipped); focused Garmin/provider/performance/diagnostic/architecture suites, `compileall`, inventory `--check`, and `git diff --check` passed. Docker build could not run because the local Docker engine pipe is unavailable.
 - Rebased on the current `develop`; its database-manager cache extraction remains intact. The rebase required combining that cache owner with the new Garmin composition tracking.
+
+## P13 Athlete clock profile dependency — local review
+
+- Removed the clock's callback into `server.py`. `AthleteLocalClock` now receives a typed profile reader, composed from `ProfileService` and `DatabaseManagerCache`; the cache keeps manager replacement from closing an active profile read.
+- Independent review found and fixed the manager replacement race with a regression test. It also found that the generated inventory treated `ATHLETE_PROFILE_SERVICE` as unassigned; the explicit composition-root owner mapping is now recorded and the generated document is current. No remaining actionable correctness, security, privacy, or ownership findings.
+- Validation: split full suite **2,811 tests passed, 12 skipped**; focused clock, manager, and architecture suites **53 passed**; `compileall`, `py_compile`, inventory `--check`, and `git diff --check` passed. Docker was not run; this change does not alter dependencies, deployment, or startup behavior.
+- The task branch is based directly on `develop` `6dec5f3`, the current target. The test-suite split from commit `5a0ab70` is in that base; validation uses unittest discovery and does not reference the removed `test_server.py`.
