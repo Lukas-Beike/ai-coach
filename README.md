@@ -34,7 +34,7 @@ Intervals Coach adheres to a clean-slate installation and maintenance model:
 
 ### AI Coach & Conversational Intelligence
 - **Natural Language Coaching**: Conversational coaching without rigid trigger words, supporting natural phrasing, corrections, follow-up questions, and pronoun resolution across turns.
-- **Dual AI Provider Support**: Native integration with the OpenAI Responses API (GPT-5.6-luna, GPT-5.6-sol, GPT-5.6-terra) and Google Gemini (Gemini 3.8 Flash) with real-time SSE token streaming.
+- **Dual AI Provider Support**: Native integration with the OpenAI Responses API (GPT-6 Luna) and Google Gemini (Gemini 3.8 Flash) with real-time SSE token streaming.
 - **Durable Turn Queueing**: Every chat request is persisted in a durable SQLite background queue before processing, enabling seamless answer recovery across network drops or browser reloads.
 - **Permanent Fact Memorization**: Conversational profile updates that save athlete preferences, equipment notes, and constraints to the durable profile only upon explicit confirmation.
 - **Bounded Context Projection**: Dynamic context assembly projecting the 5 newest activities per sport, compact planned units, target competitions, and wellness trends within strict token budgets.
@@ -208,7 +208,7 @@ All configuration is loaded from container environment variables or a local `.en
 | `OPENAI_API_KEY` | *None* | **Conditional** | API key for OpenAI. Required if using OpenAI as the AI provider. |
 | `GEMINI_API_KEY` | *None* | **Conditional** | API key for Google Gemini. Required if using Gemini as the AI provider. |
 | `AI_PROVIDER` | `openai` | No | Active AI provider (`openai` or `gemini`). Determines which model powers Coach Chat. |
-| `OPENAI_MODEL` | `gpt-5.6-luna` | No | OpenAI model deployment name. Supported options: `gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`. |
+| `OPENAI_MODEL` | `gpt-6-luna` | No | OpenAI model deployment name (GPT-6 Luna). |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | No | Google Gemini model name. Default: `gemini-3.8-flash`. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | No | Custom base URL for OpenAI-compatible APIs (e.g., Azure OpenAI / Microsoft Foundry endpoints ending in `/openai/v1`). |
 | `INTERVALS_API_KEY` | *None* | **Yes** | Personal API key obtained from Intervals.icu account settings. |

@@ -18,7 +18,7 @@ def make_config(**changes):
         port=8090,
         openai_api_key="openai-test-key",
         openai_base_url="https://openai.example.invalid/v1",
-        openai_model="gpt-5.6-luna",
+        openai_model="gpt-6-luna",
         gemini_api_key="",
         gemini_model="gemini-3.8-flash",
         ai_provider="openai",
@@ -73,7 +73,7 @@ class SettingsServiceTests(unittest.TestCase):
         options[0]["label"] = "changed"
         options.append({"id": "extra"})
         self.assertEqual(self.service.available_model_options("openai")[0]["label"], "custom-openai-model (konfiguriert)")
-        self.assertEqual(MODEL_OPTIONS[0]["label"], "GPT-5.6 Luna")
+        self.assertEqual(MODEL_OPTIONS[0]["label"], "GPT-6 Luna")
 
         self.current_config[0] = replace(self.current_config[0], gemini_api_key="gemini-test-key", gemini_model="custom-gemini-model")
         self.assertEqual(self.service.available_model_options("gemini")[0]["id"], "custom-gemini-model")
@@ -81,8 +81,8 @@ class SettingsServiceTests(unittest.TestCase):
 
     def test_models_are_persisted_per_provider_and_save_returns_state(self):
         self.current_config[0] = replace(self.current_config[0], gemini_api_key="gemini-test-key")
-        self.assertEqual(self.service.save_model("gpt-5.6-terra"), {"model": "gpt-5.6-terra"})
-        self.assertEqual(self.writes[-1], ("selected_model_openai", "gpt-5.6-terra"))
+        self.assertEqual(self.service.save_model("gpt-6-luna"), {"model": "gpt-6-luna"})
+        self.assertEqual(self.writes[-1], ("selected_model_openai", "gpt-6-luna"))
         provider_state = self.service.save_ai_provider("gemini")
         self.assertEqual(provider_state["provider"], "gemini")
         self.assertEqual(provider_state["model"], "gemini-3.8-flash")
@@ -90,7 +90,7 @@ class SettingsServiceTests(unittest.TestCase):
         self.service.save_model("gemini-2.5-pro")
         self.assertEqual(self.writes[-1], ("selected_model_gemini", "gemini-2.5-pro"))
         self.service.save_ai_provider("openai")
-        self.assertEqual(self.service.selected_model(), "gpt-5.6-terra")
+        self.assertEqual(self.service.selected_model(), "gpt-6-luna")
 
     def test_invalid_provider_and_model_are_rejected_without_writes(self):
         with self.assertRaisesRegex(AppError, "Der ausgewählte KI-Anbieter ist nicht konfiguriert") as error:
@@ -98,6 +98,9 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertEqual(error.exception.status, 400)
         with self.assertRaisesRegex(AppError, "Nicht unterstützte Modellauswahl") as error:
             self.service.save_model("not-supported")
+        self.assertEqual(error.exception.status, 400)
+        with self.assertRaisesRegex(AppError, "Nicht unterstützte Modellauswahl") as error:
+            self.service.save_model("gpt-5.6-sol")
         self.assertEqual(error.exception.status, 400)
         self.assertEqual(self.writes, [])
 

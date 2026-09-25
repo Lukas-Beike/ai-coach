@@ -63,7 +63,7 @@ os.environ.update({
     "GEMINI_MODEL": "gemini-3.8-flash",
     "OPENAI_API_KEY": "test-openai-key",
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
-    "OPENAI_MODEL": "gpt-5.6-luna",
+    "OPENAI_MODEL": "gpt-6-luna",
     "INTERVALS_API_KEY": "test-intervals-key",
     "INTERVALS_ATHLETE_ID": "0",
     "GARMIN_EMAIL": "test-garmin@example.invalid",
@@ -5448,7 +5448,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
         with patch.object(server, "CONFIG", config):
             self.assertEqual(server.SETTINGS.selected_ai_provider(), "openai")
-            server.SETTINGS.save_model("gpt-5.6-luna")
+            server.SETTINGS.save_model("gpt-6-luna")
             provider_state = server.SETTINGS.save_ai_provider("gemini")
             self.assertEqual(provider_state["provider"], "gemini")
             self.assertEqual(provider_state["model"], "gemini-3.8-flash")
@@ -5456,7 +5456,7 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(server.SETTINGS.selected_model(), "gemini-3.8-flash")
             server.SETTINGS.save_model("gemini-2.5-pro")
             server.SETTINGS.save_ai_provider("openai")
-            self.assertEqual(server.SETTINGS.selected_model(), "gpt-5.6-luna")
+            self.assertEqual(server.SETTINGS.selected_model(), "gpt-6-luna")
 
     def test_gemini_key_is_redacted_from_diagnostics_text(self):
         key = "AIza" + "a" * 35
@@ -6355,11 +6355,13 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("vendor_payload", context)
 
     def test_model_selection_is_persisted_and_validated(self):
-        self.assertEqual(server.SETTINGS.selected_model(), "gpt-5.6-luna")
-        self.assertEqual(server.SETTINGS.save_model("gpt-5.6-terra"), {"model": "gpt-5.6-terra"})
-        self.assertEqual(server.SETTINGS.selected_model(), "gpt-5.6-terra")
+        self.assertEqual(server.SETTINGS.selected_model(), "gpt-6-luna")
+        self.assertEqual(server.SETTINGS.save_model("gpt-6-luna"), {"model": "gpt-6-luna"})
+        self.assertEqual(server.SETTINGS.selected_model(), "gpt-6-luna")
         with self.assertRaises(server.AppError):
             server.SETTINGS.save_model("not-a-model")
+        with self.assertRaises(server.AppError):
+            server.SETTINGS.save_model("gpt-5.6-sol")
 
     def test_thinking_level_is_persisted_and_validated(self):
         self.assertEqual(server.SETTINGS.selected_thinking_level(), "medium")
@@ -6394,7 +6396,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "CONFIG", config), patch.object(
             server.provider_http_client(), "request", side_effect=fake_openai
         ):
-            server.coach_response_transport().request({"model": "gpt-5.6-sol", "input": "test"})
+            server.coach_response_transport().request({"model": "gpt-6-luna", "input": "test"})
         self.assertEqual(captured["reasoning"], {"effort": "low"})
 
     def test_openai_background_creation_defers_usage_recording(self):
@@ -6404,7 +6406,7 @@ class CoachTests(unittest.TestCase):
         ) as record_usage:
             server.openai_responses_client().request(
                 "/responses",
-                {"model": "gpt-5.6-sol", "background": True, "store": True, "input": "test"},
+                {"model": "gpt-6-luna", "background": True, "store": True, "input": "test"},
             )
         record_usage.assert_not_called()
 
@@ -6825,7 +6827,7 @@ class CoachTests(unittest.TestCase):
         checkpoints = []
         checkpoint = checkpoints.append
         expected = {"id": "resp_background_1", "status": "completed", "output_text": "fertig", "usage": {}}
-        payload = {"model": "gpt-5.6-sol", "input": "fake"}
+        payload = {"model": "gpt-6-luna", "input": "fake"}
         with patch.object(
             server.openai_provider.OpenAIResponsesClient, "background", return_value=expected
         ) as background:
@@ -9595,12 +9597,12 @@ class CoachTests(unittest.TestCase):
             patch.object(openai_provider, "urlopen", side_effect=upstream_error),
             self.assertRaises(server.AppError) as raised,
         ):
-            server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+            server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "rate_limit_exceeded")
         self.assertEqual(raised.exception.retry_after_seconds, 9)
 
     def test_responses_request_routes_openai_to_provider_client(self):
-        payload = {"model": "gpt-5.6-sol"}
+        payload = {"model": "gpt-6-luna"}
         with patch.object(
             server.openai_provider.OpenAIResponsesClient,
             "responses",
@@ -9625,7 +9627,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, openai_api_key="openai-test")
         with patch.object(server, "CONFIG", config), patch.object(openai_provider, "urlopen", side_effect=upstream_error):
             with self.assertRaises(server.AppError) as raised:
-                server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+                server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "conversation_state_invalid")
         captured = server.DIAGNOSTIC_CAPTURE.entries()
         failed = next(entry for entry in reversed(captured) if entry["event"] == "openai_stream_failed")
@@ -9666,7 +9668,7 @@ class CoachTests(unittest.TestCase):
 
         deltas = []
         with patch.object(openai_provider, "urlopen", return_value=FakeResponse()) as urlopen:
-            result = server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, deltas.append)
+            result = server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, deltas.append)
         self.assertEqual("".join(deltas), "Hallo")
         self.assertEqual(result["id"], "resp-test")
         request = urlopen.call_args.args[0]
@@ -9698,7 +9700,7 @@ class CoachTests(unittest.TestCase):
             patch.object(openai_provider, "urlopen", return_value=OversizedResponse()),
             self.assertRaises(server.AppError) as raised,
         ):
-            server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+            server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None)
 
         self.assertEqual(raised.exception.status, 502)
         self.assertEqual(raised.exception.reason, "response_too_large")
@@ -9714,7 +9716,7 @@ class CoachTests(unittest.TestCase):
         cancel_event.set()
         with patch.object(openai_provider, "urlopen") as urlopen:
             with self.assertRaises(server.AppError) as raised:
-                server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None, cancel_event)
+                server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None, cancel_event)
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         urlopen.assert_not_called()
         self.assertEqual(
@@ -9741,7 +9743,7 @@ class CoachTests(unittest.TestCase):
 
         with patch.object(openai_provider, "urlopen", return_value=TimeoutResponse()):
             with self.assertRaises(server.AppError) as raised:
-                server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+                server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "provider_timeout")
         self.assertEqual(raised.exception.status, 504)
         self.assertEqual(
@@ -9778,14 +9780,14 @@ class CoachTests(unittest.TestCase):
 
         with patch.object(openai_provider, "urlopen", return_value=DisconnectResponse()):
             with self.assertRaises(ClientDisconnected):
-                server.coach_response_transport().stream_request({"model": "gpt-5.6-sol"}, lambda _: (_ for _ in ()).throw(ClientDisconnected()))
+                server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: (_ for _ in ()).throw(ClientDisconnected()))
         self.assertEqual(
             server.provider_state_service().summary("openai")["last_operation"],
             "responses_stream_cancelled",
         )
 
     def test_responses_stream_request_routes_openai_to_provider_client(self):
-        payload = {"model": "gpt-5.6-sol"}
+        payload = {"model": "gpt-6-luna"}
         cancel_event = threading.Event()
         on_delta = Mock()
         on_response_id = Mock()
@@ -9993,7 +9995,7 @@ class CoachTests(unittest.TestCase):
         server.key_value_service().set("openai_usage", json.dumps({"date": server.ATHLETE_CLOCK.now().date().isoformat(), "total_tokens": 10}))
         config = replace(server.CONFIG, openai_api_key="test-key")
         with patch.object(server, "CONFIG", config), patch.object(server.provider_http_client(), "request", return_value={"status": "completed"}) as request:
-            result = server.openai_responses_client().request("/responses", {"model": "gpt-5.6-sol"})
+            result = server.openai_responses_client().request("/responses", {"model": "gpt-6-luna"})
         self.assertEqual(result["status"], "completed")
         request.assert_called_once()
 
