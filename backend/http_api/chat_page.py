@@ -2,29 +2,23 @@
 
 from __future__ import annotations
 
-import threading
 from typing import Any
 
+from backend.coach.conversation import CoachConversationHistoryService
 from backend.coach.proposals import CoachProposalReadService
-from backend.db.manager import DatabaseManager
-from backend.db.repositories import KeyValueRepository
 from backend.http_api import pagination
 
 
 class ChatHistoryPageService:
     def __init__(
         self,
-        database_manager: DatabaseManager,
-        key_value_repository: KeyValueRepository,
+        conversation_history: CoachConversationHistoryService,
         proposal_read_service: CoachProposalReadService,
-        database_lock: threading.RLock,
         *,
         maximum: int = 100,
     ) -> None:
-        self._database_manager = database_manager
-        self._key_value_repository = key_value_repository
+        self._conversation_history = conversation_history
         self._proposal_read_service = proposal_read_service
-        self._database_lock = database_lock
         self._maximum = maximum
 
     def page(
@@ -39,31 +33,18 @@ class ChatHistoryPageService:
             limit, pagination.API_PAGE_DEFAULT, self._maximum
         )
         term = str(search or "").strip()[:200]
-        params: list[Any] = []
-        clauses: list[str] = []
-        if term:
-            clauses.append("content LIKE ? ESCAPE '\\'")
-            escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            params.append(f"%{escaped}%")
         decoded = pagination.decode_page_cursor(cursor)
+        before_message_id = None
         if isinstance(decoded, int) or (
             isinstance(decoded, str) and decoded.isdigit()
         ):
-            clauses.append("id < ?")
-            params.append(int(decoded))
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+            before_message_id = int(decoded)
 
-        with self._database_lock, self._database_manager.unit_of_work() as db:
-            rows = db.execute(
-                "SELECT id, role, content, client_turn_id, created_at, "
-                "(SELECT json_group_array(json_extract(value, '$.name')) "
-                "FROM json_each(messages.attachments)) AS attachment_names "
-                f"FROM messages{where} ORDER BY id DESC LIMIT ?",
-                (*params, page_size + 1),
-            ).fetchall()
-            generation = (
-                self._key_value_repository.get(db, "chat_generation") or "initial"
-            )
+        generation, rows = self._conversation_history.page(
+            before_message_id=before_message_id,
+            search=term,
+            limit=page_size + 1,
+        )
 
         has_more = len(rows) > page_size
         rows = rows[:page_size]

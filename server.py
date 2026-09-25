@@ -1,34 +1,25 @@
 from __future__ import annotations
-from backend.coach.attachments import (
-    MAX_ATTACHMENT_STORAGE_BYTES,
-    MAX_GEMINI_INLINE_IMAGE_BYTES,
-    MAX_REQUEST_BYTES,
-)
+from backend.coach import attachments as coach_attachments
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.profile_update import CoachProfileUpdateService
 from backend.coach.read_tools import CoachReadToolService
 from backend.coach.training_template_tools import TrainingTemplateToolService
+from backend.coach import limits as coach_limits
 from backend.coach import streams as coach_streams
 
-import hashlib
-import hmac
 import json
 import logging
 import os
-import queue
 import sqlite3
 import threading
 import time
 import uuid
-from contextlib import contextmanager
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from functools import partial
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any, Callable
-from urllib.error import HTTPError
-from urllib.parse import parse_qs, quote, urlparse
-from urllib.request import urlopen
+from typing import Any
+from urllib.parse import urlparse
 
 from backend.db import row_factory as database_row_factory
 from backend.diagnostics.history import CoachDiagnosticHistoryService
@@ -39,13 +30,7 @@ from backend.diagnostics.report import (
 )
 from backend.errors import (
     INTERNAL_SERVER_ERROR,
-    INTERVALS_API_KEY_ERROR,
-    INVALID_LIBRARY_ID_ERROR,
-    NOT_FOUND_ERROR,
-    PLANNED_CALENDAR_RECHECK_ERROR,
     AppError,
-    ClientDisconnected,
-    provider_error,
     public_app_error_status,
 )
 from backend import config as app_config
@@ -53,7 +38,6 @@ from backend import observability
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.calendar import external as calendar_external
 from backend.calendar import local as calendar_local
-from backend.calendar import public_events as public_event_calendar
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.read_service import ActivityReadService
 from backend.privacy import (
@@ -68,6 +52,7 @@ from backend.athlete.checkins import (
     CheckinService,
 )
 from backend.athlete.context import AthleteContextService
+from backend.athlete.clock import AthleteLocalClock
 from backend.athlete.profile import DEFAULT_PROFILE, ProfileService, normalize_profile, timezone_name
 from backend.performance import morning_battery as performance_morning_battery
 from backend.performance.morning_battery_service import (
@@ -86,7 +71,6 @@ from backend.sync import garmin as garmin_sync
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
     INTERVALS_RESYNC_GATE,
-    intervals_operation,
 )
 from backend.sync import intervals_state
 from backend.sync import observation as sync_observation
@@ -108,7 +92,8 @@ from backend.weather.service import (
 )
 from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
-from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, PlanningStateRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
+from backend.db.key_value import KeyValueService
+from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, NutritionRepository, PlanAdjustmentRepository, PlanningStateRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db.manager import DatabaseManager
 from backend.db.schema import configure_cipher, database_schema_is_current
 from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config
@@ -120,17 +105,29 @@ from backend.providers import http as provider_http
 from backend.providers import openai as openai_provider
 from backend.providers import state as provider_state
 from backend.providers import weather as weather_provider
+from backend.providers import intervals_client as intervals_client_module
 from backend.providers.garmin import GarminClientFactory
-from backend.providers.garmin_morning import fetch_morning_body_battery
+from backend.providers import garmin_morning
 from backend.http_api import server as http_server
+from backend.http_api.handler import HttpRequestHandlerDependencies, create_request_handler
 from backend.http_api.bootstrap_state import (
     PublicBootstrapDependencies,
     PublicBootstrapService,
 )
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
+from backend.http_api.coach_actions_post import CoachActionsPostRoutes
+from backend.http_api.chat_post import ChatPostRoutes
+from backend.http_api.chat_stream import CoachChatStreamTransport
+from backend.http_api.transcribe_post import TranscribePostRoutes
+from backend.http_api.planning_commands_post import PlanningCommandsPostRoutes
+from backend.http_api.feedback_post import FeedbackPostRoutes
+from backend.http_api.chat_cancel_post import ChatCancelPostRoutes
+from backend.http_api.privacy_restore_post import PrivacyRestorePostRoutes
+from backend.http_api.auth_post import AuthPostRoutes
 from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
+from backend.http_api.diagnostics_post import DiagnosticsCapturePostRoutes
 from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.rate_limit import RateLimiter
@@ -149,10 +146,24 @@ from backend.http_api.state_prelude import (
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 from backend.http_api.state_versions import StateVersionService
 from backend.http_api.sync_commands import SyncCommandEndpoint
+from backend.http_api.sync_commands_post import SyncCommandPostRoute
+from backend.http_api.post_dispatch import (
+    HttpAuthenticatedPostRoutes,
+    HttpPostDispatcher,
+)
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.history_get import HistoryGetRoutes
+from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.privacy_get import PrivacyGetRoutes
+from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
 from backend.http_api.settings_put import SettingsPutRoutes
+from backend.http_api.nutrition import (
+    NutritionGetRoutes,
+    NutritionPostRoutes,
+    NutritionPutRoutes,
+)
+from backend.nutrition.service import NutritionService
+from backend.nutrition.sync import IntervalsNutritionSyncService
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
@@ -217,7 +228,6 @@ from backend.planning import adaptive as planning_adaptive
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.calendar_service import CalendarConflictService
 from backend.planning import changes as planning_changes
-from backend.planning import context as planning_context
 from backend.planning.daily_context_service import DailyPlanningContextService
 from backend.planning import competitions as planning_competitions
 from backend.planning.competition_service import CompetitionService
@@ -225,7 +235,6 @@ from backend.planning import library as planning_library
 from backend.planning import library_service as planning_library_service
 from backend.planning.library_plan_service import WorkoutLibraryPlanService
 from backend.planning.local_plan_creation_service import LocalTrainingPlanCreationService
-from backend.planning import planned_units as planning_planned_units
 from backend.planning import planned_unit_service as planning_planned_unit_service
 from backend.planning.replacement_service import StructuredTrainingPlanReplacementService
 from backend.planning.revision import PlanningRevisionService
@@ -233,7 +242,6 @@ from backend.planning import season as planning_season
 from backend.planning.state_service import StructuredTrainingStateService
 from backend.planning.training_plan_artifact_service import TrainingPlanArtifactService
 from backend.planning import training_plans as planning_training_plans
-from backend.planning import workouts as planning_workouts
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.public_state import PublicStateDependencies, PublicStateService
 from backend.sync.jobs import (
@@ -242,6 +250,7 @@ from backend.sync.jobs import (
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.scheduler import (
+    AUTO_UPDATE_LABEL,
     DailySyncScheduler,
     DailySyncSchedulerConfig,
     DailySyncLoop,
@@ -271,6 +280,7 @@ from backend.coach.request_payload import CoachRequestPayloadService
 from backend.coach.sync_tools import CoachSyncToolService
 from backend.coach.conversation import (
     CoachAttachmentContextService,
+    CoachConversationHistoryService,
     CoachConversationProvisionService,
     CoachConversationResetService,
     CoachMessageService,
@@ -286,7 +296,6 @@ from backend.coach.proposals import (
     CoachProposalConfirmationService,
     CoachProposalExecutionService,
     CoachProposalReadService,
-    coach_action_view,
 )
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.turn_opening import CoachTurnOpeningService
@@ -304,6 +313,7 @@ from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.coach.final_receipt import CoachFinalReceiptService
 from backend.coach.response_transport import CoachResponseTransport
 from backend.coach.structured_response import CoachStructuredResponseService
+from backend.coach import structured_tool_round
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
     CoachStructuredToolRoundService,
@@ -324,14 +334,6 @@ from backend.coach.background_job import CoachBackgroundJobRunner
 from backend.coach.job_worker import COACH_JOB_WORKER
 from backend.coach.tools import build_tool_contracts
 from backend.coach.service import command_receipt
-from backend.coach.authorization import (
-    require_coach_scope,
-)
-from backend.http_api.responses import (
-    header_items as response_header_items,
-    json_bytes as response_json_bytes,
-    response_headers,
-)
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
 from backend.http_api.library_page import LibraryPageService
@@ -340,6 +342,8 @@ from backend.http_api.static_assets import StaticAssetService
 from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.state_events_transport import StateEventTransport
 from backend.http_api.state_events_get import StateEventsGetRoutes
+from backend.http_api.route_dispatch import HttpRouteDispatcher
+from backend.http_api.response_transport import HttpResponseTransport
 from backend.http_api.requests import (
     read_audio_body as read_request_audio_body,
     read_body as read_request_body,
@@ -370,37 +374,26 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
 PROVIDER_INTERVALS_NAME = "Intervals.icu"
-PROVIDER_GARMIN_NAME = "Garmin Connect"
 PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
 JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
-TRAINING_PLAN_SCOPE_PREFIX = "training_plan:"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
-AUTO_UPDATE_LABEL = "stündliche automatische Aktualisierung"
 APP_NAME = "Intervals Coach"
 SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
-APP_VERSION = "1.11.12"
+APP_VERSION = "1.11.13"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
 MAX_PRIVACY_EXPORT_BYTES = 100_000_000
 MIN_EXPORT_FREE_BYTES = 10_000_000
 EXPORT_TIME_LIMIT_SECONDS = 120
-STREAM_CHUNK_BYTES = 64 * 1024
-MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 # The Responses API counts both visible output and reasoning tokens against
 # max_output_tokens. Keep ordinary replies bounded, but leave enough room for
 # an explicitly requested multi-week training plan.
-COACH_DEFAULT_MAX_OUTPUT_TOKENS = 6_000
-COACH_LONG_PLAN_MAX_OUTPUT_TOKENS = 32_000
-COACH_FOLLOWUP_MAX_OUTPUT_TOKENS = 2_500
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
-COACH_BACKGROUND_HORIZON_DAYS = 7
-COACH_BACKGROUND_UNIT_LIMIT = 7
-COACH_TRAINING_CHANGE_LIMIT = 366
 INTERVALS_SYNC_WAIT_SECONDS = 120
 DB_LOCK = threading.RLock()
 COACH_CONVERSATION_GATE = CoachConversationGate()
@@ -409,215 +402,6 @@ RATE_LIMITER = RateLimiter()
 
 
 CONFIG = load_config(ROOT, DATA_DIR)
-
-
-class IntervalsClient:
-    def __init__(self, config: Config | None = None, *, request: Callable[..., Any] | None = None):
-        self.config = config or CONFIG
-        request_fn = request or (lambda *args, **kwargs: provider_http_client().request(*args, **kwargs))
-        self._api = IntervalsApiClient(
-            api_key=self.config.intervals_api_key,
-            request=lambda *args, **kwargs: request_fn(*args, **kwargs),
-        )
-        self._workout_folder_id: int | None = None
-
-    @property
-    def pagination(self) -> dict[str, dict[str, Any]]:
-        return {collection: dict(metadata) for collection, metadata in self._api.pagination.items()}
-
-    def get(self, path: str, params: dict[str, Any] | None = None, *, cancel_event: threading.Event | None = None) -> Any:
-        if cancel_event is None:
-            return self._api.get(path, params)
-        return self._api.get(path, params, cancel_event=cancel_event)
-
-    def get_paged_collection(
-        self,
-        path: str,
-        params: dict[str, Any] | None,
-        collection: str,
-        page_size: int = 500,
-        cancel_event: threading.Event | None = None,
-    ) -> list[dict[str, Any]]:
-        return self._api.get_paged_collection(
-            path,
-            params,
-            collection,
-            page_size=page_size,
-            cancel_event=cancel_event,
-        )
-
-    @intervals_operation
-    def post(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
-        return self._api.post(path, payload, params)
-
-    @intervals_operation
-    def put(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
-        return self._api.put(path, payload, params)
-
-    @intervals_operation
-    def delete(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        return self._api.delete(path, params)
-
-    def get_workout_library(self, *, cancel_event: threading.Event | None = None) -> list[dict[str, Any]]:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        result = self.get_paged_collection(
-            f"/athlete/{athlete}/workouts", {}, "workout_library", cancel_event=cancel_event
-        )
-        if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Trainingsbibliothek zurÃ¼ckgegeben.")
-        fields = (
-            "id", "name", "description", "type", "moving_time", "distance",
-            "target", "workout_doc", "icu_training_load", "icu_intensity", "indoor",
-            "tags", "folder_id",
-        )
-        return [planning_context.selected(item, fields) for item in result if isinstance(item, dict)]
-
-    @staticmethod
-    def _folder_id(value: Any) -> int | None:
-        if isinstance(value, bool):
-            return None
-        try:
-            folder_id = int(value)
-        except (TypeError, ValueError):
-            return None
-        return folder_id if folder_id > 0 else None
-
-    def get_or_create_workout_folder(self) -> int:
-        """Return the private library folder used for coach-created templates."""
-        if self._workout_folder_id is not None:
-            return self._workout_folder_id
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        folders = self.get(f"/athlete/{athlete}/folders")
-        if isinstance(folders, dict):
-            folders = folders.get("folders") or folders.get("data") or []
-        if not isinstance(folders, list):
-            raise AppError(502, "Intervals.icu hat keine gültige Ordnerliste zurückgegeben.")
-        matching: list[dict[str, Any]] = []
-        pending = [item for item in folders if isinstance(item, dict)]
-        while pending:
-            folder = pending.pop(0)
-            if str(folder.get("name") or "").strip() == APP_NAME:
-                matching.append(folder)
-            children = folder.get("children")
-            if isinstance(children, list):
-                pending.extend(item for item in children if isinstance(item, dict))
-        for folder in matching:
-            folder_id = self._folder_id(folder.get("id"))
-            if folder_id is not None:
-                self._workout_folder_id = folder_id
-                return folder_id
-        created = self.post(f"/athlete/{athlete}/folders", {"name": APP_NAME})
-        folder_id = self._folder_id(created.get("id") if isinstance(created, dict) else None)
-        if folder_id is None:
-            raise AppError(502, "Intervals.icu hat keinen gültigen Ordner zurückgegeben.")
-        self._workout_folder_id = folder_id
-        return folder_id
-
-    def create_library_workouts(self, workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        for workout in workouts:
-            planning_workouts.validate_workout_description(workout)
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        folder_id = self.get_or_create_workout_folder()
-        created: list[dict[str, Any]] = []
-        for workout in workouts:
-            payload = {
-                "name": str(workout.get("name") or "Coach-Einheit")[:200],
-                "description": str(workout.get("description") or "")[:12000],
-                "type": planning_workouts.intervals_workout_sport(workout.get("type") or workout.get("sport")),
-                "folder_id": folder_id,
-                "target": workout.get("target") or "AUTO",
-            }
-            result = self.post(f"/athlete/{athlete}/workouts", payload)
-            if not isinstance(result, dict):
-                raise AppError(502, "Intervals.icu hat keine Trainingsbibliotheks-Einheit zurÃ¼ckgegeben.")
-            created.append(result)
-        return created
-
-    def update_library_workout(self, workout_id: str, workout: dict[str, Any]) -> dict[str, Any]:
-        planning_workouts.validate_workout_description(workout)
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        remote_id = quote(str(workout_id), safe="")
-        payload = {
-            "name": str(workout.get("name") or "Coach-Einheit")[:200],
-            "description": str(workout.get("description") or "")[:12000],
-            "type": planning_workouts.intervals_workout_sport(workout.get("type") or workout.get("sport")),
-            "target": workout.get("target") or "AUTO",
-        }
-        folder_id = self._folder_id(workout.get("folder_id"))
-        # Intervals.icu requires folder_id for workout updates as well as
-        # creates. Resolve a missing folder through the private Coach folder.
-        payload["folder_id"] = folder_id if folder_id is not None else self.get_or_create_workout_folder()
-        result = self.put(f"/athlete/{athlete}/workouts/{remote_id}", payload)
-        if not isinstance(result, dict):
-            raise AppError(502, "Intervals.icu returned no updated library workout.")
-        return result
-
-    def plan_library_workout(self, workout_id: str, workout: dict[str, Any], plan_date: str) -> dict[str, Any]:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        payload = planning_workouts.workout_event_payload(
-            f"library-{workout_id}-{plan_date}",
-            {
-                "date": plan_date,
-                "sport": workout.get("type") or workout.get("sport") or "Ride",
-                "name": workout.get("name") or "Bibliotheks-Einheit",
-                "description": workout.get("description") or "",
-                "duration_minutes": workout.get("duration_minutes") or max(5, round(float(workout.get("moving_time") or 3600) / 60)),
-                "target": workout.get("target") or "AUTO",
-            },
-            today=local_now().date(),
-        )
-        result = self.post(f"/athlete/{athlete}/events/bulk", [payload], {"upsert": "true"})
-        if not isinstance(result, list) or not result:
-            raise AppError(502, "Intervals.icu hat keine geplante Einheit zurÃ¼ckgegeben.")
-        planning_workouts.validate_intervals_workout_result(workout, result[0])
-        return result[0]
-
-    def fetch_competition_events(self) -> list[dict[str, Any]]:
-        """Fetch a broad calendar range for target-event synchronization."""
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        today = local_now().date()
-        result = self.get_paged_collection(
-            f"/athlete/{athlete}/events",
-            {
-                "oldest": (today - timedelta(days=365)).isoformat(),
-                "newest": (today + timedelta(days=730)).isoformat(),
-            },
-            "competition_events",
-        )
-        if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Kalenderevents zurückgegeben.")
-        return [event for event in result if isinstance(event, dict)]
-
-    def upsert_competition_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if not events:
-            return []
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        result = self.post(f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"})
-        if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Zielwettkämpfe zurückgegeben.")
-        return [event for event in result if isinstance(event, dict)]
-
-    def upsert_calendar_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Upsert explicitly approved non-workout calendar events."""
-        if not events:
-            return []
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        result = self.post(f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"})
-        if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Kalendereinträge zurückgegeben.")
-        return [event for event in result if isinstance(event, dict)]
-
-    def bulk_delete_events(self, identifiers: list[dict[str, str]]) -> Any:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        return self.put(f"/athlete/{athlete}/events/bulk-delete", identifiers)
-
-    def delete_event(self, event_id: str) -> Any:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        return self.delete(f"/athlete/{athlete}/events/{quote(event_id, safe='')}")
-
-    def delete_activity(self, activity_id: str) -> Any:
-        return self.delete(f"/activity/{quote(activity_id, safe='')}")
-
 
 
 LOGGER = logging.getLogger("intervals_coach")
@@ -661,12 +445,6 @@ SYNC_JOB_RETRY_BASE_SECONDS = 15 * 60
 SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
 SYNC_JOB_POLL_SECONDS = 1.0
 GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
-MORNING_RETRY_SECONDS = 15 * 60
-MORNING_MAX_ATTEMPTS = 3
-
-LIBRARY_BULK_PREVIEW_TTL_SECONDS = 10 * 60
-
-
 def database_manager() -> DatabaseManager:
     """Return the manager for the active path and secure configuration."""
     global DATABASE_MANAGER, DATABASE_MANAGER_SIGNATURE, PROVIDER_HTTP_CLIENT, PROVIDER_REFRESH_TRACKER, PROVIDER_STATE_SERVICE, WEATHER_SERVICE, MORNING_BODY_BATTERY_SERVICE
@@ -727,7 +505,7 @@ def provider_state_service() -> provider_state.ProviderStateService:
             KEY_VALUE_REPOSITORY,
             DB_LOCK,
             utc_now,
-            lambda: local_now().date(),
+            lambda: ATHLETE_CLOCK.now().date(),
             LOGGER,
         )
     return PROVIDER_STATE_SERVICE
@@ -824,7 +602,7 @@ def structured_plan_sync_service() -> StructuredPlanSyncService:
         database_manager(),
         planning_authority_service(),
         plan_push_command_service(),
-        COACH_TRAINING_CHANGE_LIMIT,
+        coach_limits.COACH_TRAINING_CHANGE_LIMIT,
     )
 
 
@@ -843,10 +621,37 @@ def coach_sync_tool_service() -> CoachSyncToolService:
     )
 
 
+def nutrition_service() -> NutritionService:
+    """Compose nutrition and calorie tracking for the active database manager."""
+    return NutritionService(
+        database_manager=database_manager(),
+        db_lock=DB_LOCK,
+        nutrition_repository=NutritionRepository(utc_now),
+        utc_now=utc_now,
+        local_now=ATHLETE_CLOCK.now,
+    )
+
+
+def intervals_nutrition_sync_service() -> IntervalsNutritionSyncService:
+    """Compose nutrition sync to Intervals.icu wellness."""
+    api_client = IntervalsApiClient(
+        api_key=CONFIG.intervals_api_key,
+        request=provider_http_client().request,
+    )
+    return IntervalsNutritionSyncService(
+        config=CONFIG,
+        api_client=api_client,
+        nutrition_service=nutrition_service(),
+    )
+
+
 def coach_athlete_record_tool_service() -> CoachAthleteRecordToolService:
     """Compose concrete local services for Coach athlete-record mutations."""
     return CoachAthleteRecordToolService(
-        checkin_service(), activity_feedback_service(), competition_service()
+        checkin_service(),
+        activity_feedback_service(),
+        competition_service(),
+        nutrition_service(),
     )
 
 
@@ -856,7 +661,7 @@ def coach_activity_read_tool_service() -> CoachActivityReadToolService:
         activity_read_service(),
         garmin_payload_service(),
         profile_service(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -871,7 +676,8 @@ def coach_read_tool_service() -> CoachReadToolService:
         change_history_service,
         competition_service,
         training_plan_service,
-        COACH_TRAINING_CHANGE_LIMIT,
+        coach_limits.COACH_TRAINING_CHANGE_LIMIT,
+        nutrition_service,
     )
 
 
@@ -892,7 +698,7 @@ def public_performance_state_service() -> PublicPerformanceStateService:
         garmin_payload_service(),
         profile_service(),
         garmin_projection_service(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -950,7 +756,7 @@ def intervals_snapshot_reader() -> IntervalsSnapshotReader:
         CONFIG,
         api_client,
         sync_state_repository(),
-        local_now,
+        ATHLETE_CLOCK.now,
         utc_now,
         SYNC_EARLIEST_DATE,
         SYNC_CHUNK_DAYS,
@@ -991,7 +797,7 @@ def sync_job_outcome_service() -> SyncJobOutcomeService:
 def daily_sync_marker_service() -> DailySyncMarkerService:
     """Compose transactional provider daily-marker persistence."""
     return DailySyncMarkerService(
-        database_manager(), KEY_VALUE_REPOSITORY, local_now
+        database_manager(), KEY_VALUE_REPOSITORY, ATHLETE_CLOCK.now
     )
 
 
@@ -1005,7 +811,7 @@ def intervals_snapshot_service() -> IntervalsSnapshotService:
         workout_library_refresh_service(),
         workout_library_service(),
         REDACTOR.redact_text,
-        local_now,
+        ATHLETE_CLOCK.now,
         SYNC_EARLIEST_DATE,
         SYNC_CHUNK_DAYS,
         ALL_SYNC_DAYS,
@@ -1053,7 +859,7 @@ def garmin_fixture_loader() -> garmin_sync.GarminFixtureLoader:
     return garmin_sync.GarminFixtureLoader(
         CONFIG,
         ROOT,
-        local_now,
+        ATHLETE_CLOCK.now,
         utc_now,
         SYNC_EARLIEST_DATE,
         ALL_SYNC_DAYS,
@@ -1071,7 +877,7 @@ def garmin_payload_service() -> garmin_sync.GarminPayloadService:
         database_manager(),
         KEY_VALUE_REPOSITORY,
         sync_state_repository(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -1098,7 +904,7 @@ def garmin_remote_reader() -> GarminRemoteReader:
         REDACTOR.redact_text,
         LOGGER,
         utc_now,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         SYNC_EARLIEST_DATE,
         SYNC_CHUNK_DAYS,
         ALL_SYNC_DAYS,
@@ -1113,7 +919,7 @@ def garmin_sync_service() -> GarminSyncService:
             garmin_fixture_loader(),
             garmin_remote_reader(),
             SYNC_EARLIEST_DATE,
-            lambda: local_now().date(),
+            lambda: ATHLETE_CLOCK.now().date(),
         ),
         garmin_payload_service(),
         state_service,
@@ -1148,7 +954,7 @@ def garmin_projection_service() -> GarminProjectionService:
         database_manager(),
         KEY_VALUE_REPOSITORY,
         REDACTOR,
-        local_now,
+        ATHLETE_CLOCK.now,
     )
 
 
@@ -1195,7 +1001,7 @@ def weather_service() -> WeatherService:
             ),
             runtime_maintenance.MAINTENANCE_GATE,
             lambda: datetime.now(timezone.utc),
-            lambda: local_now().date(),
+            lambda: ATHLETE_CLOCK.now().date(),
         )
     return WEATHER_SERVICE
 
@@ -1228,7 +1034,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
                 client_factory.available()
                 and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())
             ),
-            lambda checkin_date: fetch_morning_body_battery(
+            lambda checkin_date: garmin_morning.fetch_morning_body_battery(
                 client_factory.create(
                     CONFIG.garmin_email or None, CONFIG.garmin_password or None
                 ),
@@ -1237,7 +1043,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
                 email_configured=bool(CONFIG.garmin_email),
                 tokenstore_exists=Path(CONFIG.garmin_tokenstore).exists(),
                 profile_timezone=timezone_name(profile_service().get().get("timezone")),
-                fallback_zone=local_now().tzinfo or timezone.utc,
+                fallback_zone=ATHLETE_CLOCK.now().tzinfo or timezone.utc,
                 external_call=lambda service, operation, callback, details: provider_http.external_call(
                     service,
                     operation,
@@ -1260,9 +1066,9 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
                 GARMIN_RESYNC_GATE,
                 GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
             ),
-            MorningBatteryClock(lambda: datetime.now(timezone.utc), local_now),
+            MorningBatteryClock(lambda: datetime.now(timezone.utc), ATHLETE_CLOCK.now),
             MorningBatteryEvents(runtime_events.STATE_EVENT_BUFFER.publish, LOGGER),
-            MorningBatteryRetryPolicy(MORNING_MAX_ATTEMPTS, MORNING_RETRY_SECONDS),
+            MorningBatteryRetryPolicy(),
         )
     return MORNING_BODY_BATTERY_SERVICE
 
@@ -1270,7 +1076,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
 def external_calendar_reader() -> calendar_external.ExternalCalendarReader:
     """Compose external-calendar reads for the active database manager."""
     return calendar_external.ExternalCalendarReader(
-        database_manager(), lambda: local_now().date()
+        database_manager(), lambda: ATHLETE_CLOCK.now().date()
     )
 
 
@@ -1286,7 +1092,7 @@ def external_calendar_sync_service() -> ExternalCalendarSyncService:
         runtime_events.STATE_EVENT_BUFFER,
         LOGGER,
         REDACTOR.redact_text,
-        local_now,
+        ATHLETE_CLOCK.now,
         utc_now,
         APP_VERSION,
         lock=shared_external_calendar_sync_lock(),
@@ -1331,7 +1137,7 @@ def checkin_service() -> CheckinService:
     return CheckinService(
         database_manager(),
         CHECKIN_REPOSITORY,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -1340,6 +1146,9 @@ def profile_service() -> ProfileService:
     return ProfileService(
         database_manager(), PROFILE_REPOSITORY, KEY_VALUE_REPOSITORY
     )
+
+
+ATHLETE_CLOCK = AthleteLocalClock(lambda: profile_service().get().get("timezone"))
 
 
 def coach_profile_update_service() -> CoachProfileUpdateService:
@@ -1380,7 +1189,7 @@ def competition_sync_service() -> CompetitionSyncService:
     """Compose the complete competition synchronization use case."""
     return CompetitionSyncService(
         CONFIG,
-        IntervalsClient,
+        intervals_client,
         competition_sync_reconciler(),
         competition_service(),
         database_manager(),
@@ -1410,7 +1219,7 @@ def planned_unit_service() -> planning_planned_unit_service.PlannedUnitService:
         database_manager(),
         PLANNING_REVISION_SERVICE,
         utc_now,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         uuid.uuid4,
         REDACTOR.redact_text,
         calendar_conflict_service(),
@@ -1430,10 +1239,10 @@ def planned_calendar_sync_service() -> PlannedCalendarSyncService:
     return PlannedCalendarSyncService(
         CONFIG,
         database_manager(),
-        IntervalsClient,
+        intervals_client,
         planned_unit_sync_state_writer(),
         utc_now,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -1442,10 +1251,10 @@ def planned_calendar_repair_service() -> PlannedCalendarRepairService:
     return PlannedCalendarRepairService(
         CONFIG,
         database_manager(),
-        IntervalsClient,
+        intervals_client,
         planned_unit_sync_state_writer(),
         utc_now,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         PLANNED_CALENDAR_FUTURE_DAYS,
     )
 
@@ -1457,7 +1266,7 @@ def remote_planned_unit_reconciler() -> RemotePlannedUnitReconciler:
         planned_unit_service(),
         PLANNING_REVISION_SERVICE,
         utc_now,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -1488,7 +1297,7 @@ def workout_library_refresh_service() -> WorkoutLibraryRefreshService:
     return WorkoutLibraryRefreshService(
         CONFIG,
         database_manager(),
-        IntervalsClient,
+        intervals_client,
         workout_library_remote_reconciler(),
         workout_library_service(),
         workout_library_sync_state_service(),
@@ -1501,7 +1310,7 @@ def workout_library_refresh_service() -> WorkoutLibraryRefreshService:
 def workout_library_sync_service() -> WorkoutLibrarySyncService:
     """Compose the explicit single-entry workout-library synchronization use case."""
     return WorkoutLibrarySyncService(
-        CONFIG, IntervalsClient, workout_library_sync_state_service()
+        CONFIG, intervals_client, workout_library_sync_state_service()
     )
 
 
@@ -1525,7 +1334,7 @@ def sync_job_executor() -> SyncJobExecutor:
     historical_sync = HistoricalSyncJobOwner(
         sync_state_repository=sync_state_repository(),
         queue_service=sync_job_queue_service(),
-        local_now=local_now,
+        local_now=ATHLETE_CLOCK.now,
         sync_period_defaults=SYNC_PERIOD_DEFAULTS,
         all_sync_days=ALL_SYNC_DAYS,
         sync_chunk_days=SYNC_CHUNK_DAYS,
@@ -1613,7 +1422,7 @@ def local_plan_creation_service() -> LocalTrainingPlanCreationService:
         workout_library_service(),
         calendar_conflict_service(),
         PLANNING_REVISION_SERVICE,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         utc_now,
         uuid.uuid4,
         LOGGER,
@@ -1625,7 +1434,7 @@ def training_plan_artifact_service() -> TrainingPlanArtifactService:
     return TrainingPlanArtifactService(
         database_manager(),
         local_plan_creation_service(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         utc_now,
         uuid.uuid4,
     )
@@ -1640,7 +1449,7 @@ def daily_planning_context_service() -> DailyPlanningContextService:
         external_calendar_reader(),
         morning_body_battery_service(),
         activity_feedback_service(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
     )
 
@@ -1654,7 +1463,7 @@ def structured_training_state_service() -> StructuredTrainingStateService:
         training_plan_service(),
         coach_dialogue_read_service().artifact_refs,
         sync_job_queue_service().list,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -1674,8 +1483,8 @@ def structured_training_change_service() -> planning_changes.StructuredTrainingC
         planned_unit_service(),
         PLANNING_REVISION_SERVICE,
         training_plan_service(),
-        lambda: local_now().date(),
-        COACH_TRAINING_CHANGE_LIMIT,
+        lambda: ATHLETE_CLOCK.now().date(),
+        coach_limits.COACH_TRAINING_CHANGE_LIMIT,
         lambda: runtime_events.STATE_EVENT_BUFFER.publish(
             "planning", {"status": "changed"}
         ),
@@ -1688,8 +1497,8 @@ def coach_training_patch_service() -> CoachTrainingPatchService:
         database_manager(), DB_LOCK, structured_training_change_validator(),
         structured_training_change_service(), local_plan_creation_service(),
         calendar_conflict_service(), KEY_VALUE_REPOSITORY,
-        runtime_events.STATE_EVENT_BUFFER, lambda: local_now().date(),
-        COACH_TRAINING_CHANGE_LIMIT,
+        runtime_events.STATE_EVENT_BUFFER, lambda: ATHLETE_CLOCK.now().date(),
+        coach_limits.COACH_TRAINING_CHANGE_LIMIT,
     )
 
 
@@ -1703,7 +1512,7 @@ def structured_training_plan_replacement_service() -> StructuredTrainingPlanRepl
         KEY_VALUE_REPOSITORY,
         calendar_conflict_service(),
         planned_unit_service(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         utc_now,
         uuid.uuid4,
     )
@@ -1715,7 +1524,7 @@ def adaptive_replan_apply_service() -> planning_adaptive.AdaptiveReplanApplyServ
         database_manager(),
         PLAN_ADJUSTMENT_REPOSITORY,
         PLANNING_REVISION_SERVICE,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         utc_now,
     )
 
@@ -1724,12 +1533,12 @@ def illness_pause_sync_service() -> IllnessPauseSyncService:
     """Compose the explicitly approved illness-pause remote sync use case."""
     return IllnessPauseSyncService(
         CONFIG,
-        IntervalsClient(),
+        intervals_client(),
         adaptive_replan_apply_service=adaptive_replan_apply_service(),
         competition_service=competition_service(),
         adaptive_replan_preview_service=adaptive_replan_preview_service(),
         redactor=REDACTOR,
-        today=lambda: local_now().date(),
+        today=lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -1755,7 +1564,7 @@ def adaptive_replan_preview_service() -> AdaptiveReplanPreviewService:
         planned_unit_service(),
         external_calendar_reader(),
         weather_service(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         utc_now,
         uuid.uuid4,
         calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
@@ -1780,7 +1589,7 @@ def privacy_data_export_service() -> PrivacyDataExportService:
             activity_feedback_service=activity_feedback_service(),
             adaptive_preview_service=adaptive_replan_preview_service(),
             external_calendar_reader=external_calendar_reader(),
-            local_now=local_now,
+            local_now=ATHLETE_CLOCK.now,
             utc_now=utc_now,
         )
     )
@@ -1814,15 +1623,8 @@ def athlete_context_service() -> AthleteContextService:
     )
 
 
-@contextmanager
-def database():
-    """Use the database manager as the sole nested transaction owner."""
-    with database_manager().unit_of_work() as db:
-        yield db
-
-
 def initialise_database() -> None:
-    with DB_LOCK, database() as db:
+    with DB_LOCK, database_manager().unit_of_work() as db:
         initialize_application_database(
             db,
             key_values=KEY_VALUE_REPOSITORY,
@@ -1835,11 +1637,8 @@ def initialise_database() -> None:
         )
 
 
-def get_kv(key: str, db: sqlite3.Connection | None = None) -> str | None:
-    if db is not None:
-        return KEY_VALUE_REPOSITORY.get(db, key)
-    with DB_LOCK, database() as owned:
-        return get_kv(key, owned)
+def key_value_service() -> KeyValueService:
+    return KeyValueService(database_manager(), KEY_VALUE_REPOSITORY)
 
 
 SYNC_PERIOD_DEFAULTS = {"intervals": 90, "garmin": 30}
@@ -1850,16 +1649,17 @@ SYNC_EARLIEST_DATE = date(2000, 1, 1)
 # completed, while retaining the existing five-week forward planning horizon.
 PLANNED_CALENDAR_HISTORY_DAYS = 35
 PLANNED_CALENDAR_FUTURE_DAYS = 35
-def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:
-    if db is not None:
-        KEY_VALUE_REPOSITORY.set(db, key, value)
-        return
-    with DB_LOCK, database() as owned:
-        set_kv(key, value, owned)
-
-
-SETTINGS = SettingsService(lambda: CONFIG, get_kv, set_kv)
-DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(get_kv, set_kv, REDACTOR, utc_now)
+SETTINGS = SettingsService(
+    lambda: CONFIG,
+    lambda key: key_value_service().get(key),
+    lambda key, value: key_value_service().set(key, value),
+)
+DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
+    lambda key: key_value_service().get(key),
+    lambda key, value: key_value_service().set(key, value),
+    REDACTOR,
+    utc_now,
+)
 
 
 def provider_http_client() -> provider_http.JsonHttpClient:
@@ -1869,7 +1669,7 @@ def provider_http_client() -> provider_http.JsonHttpClient:
     if PROVIDER_HTTP_CLIENT is None or PROVIDER_HTTP_CLIENT.provider_state is not state:
         PROVIDER_HTTP_CLIENT = provider_http.JsonHttpClient(
             APP_VERSION,
-            MAX_EXTERNAL_RESPONSE_BYTES,
+            provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
             LOGGER,
             DIAGNOSTIC_CAPTURE,
             state,
@@ -1877,9 +1677,18 @@ def provider_http_client() -> provider_http.JsonHttpClient:
             partial(observability.safe_response_headers, redact=REDACTOR.redact_text),
             utc_now,
             sync_observation.operation_context,
-            opener=urlopen,
+            opener=provider_http.urlopen,
         )
     return PROVIDER_HTTP_CLIENT
+
+
+def intervals_client(config: Config | None = None) -> intervals_client_module.IntervalsClient:
+    """Compose an Intervals client with the active provider transport and clock."""
+    return intervals_client_module.IntervalsClient(
+        config or CONFIG,
+        request=provider_http_client().request,
+        now=lambda: ATHLETE_CLOCK.now(),
+    )
 
 
 def gemini_json_client() -> gemini_provider.GeminiJsonClient:
@@ -1914,12 +1723,12 @@ def gemini_stream_client() -> gemini_provider.GeminiStreamClient:
         api_key=CONFIG.gemini_api_key,
         base_url=GEMINI_API_BASE_URL,
         response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-        max_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+        max_bytes=provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
         app_version=APP_VERSION,
         json_media_type=JSON_MEDIA_TYPE,
         provider_state=provider_state_service(),
         logger=LOGGER,
-        opener=urlopen,
+        opener=gemini_provider.urlopen,
         monotonic=time.perf_counter,
         now=utc_now,
     )
@@ -1974,7 +1783,7 @@ def openai_stream_client() -> openai_provider.OpenAIStreamClient:
             default_base_url=DEFAULT_OPENAI_BASE_URL,
             responses_path=OPENAI_RESPONSES_PATH,
             timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-            max_bytes=MAX_EXTERNAL_RESPONSE_BYTES,
+        max_bytes=provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
             app_version=APP_VERSION,
             media_type=JSON_MEDIA_TYPE,
         ),
@@ -1986,30 +1795,16 @@ def openai_stream_client() -> openai_provider.OpenAIStreamClient:
             utc_now,
         ),
         SETTINGS.selected_thinking_level,
-        opener=urlopen,
+        opener=openai_provider.urlopen,
         wait=time.sleep,
     )
-
-
-def external_calendar_events_for_date(target_date: str) -> list[dict[str, Any]]:
-    today = local_now().date()
-    return [
-        event
-        for event in external_calendar_reader().list_events(1000)
-        if target_date
-        in planning_context.external_calendar_event_dates(
-            event,
-            today=today,
-            window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
-        )
-    ]
 
 
 def coach_quick_actions_service() -> CoachQuickActionsService:
     """Compose local quick-action reads and their public Coach projection."""
     return CoachQuickActionsService(
         database_manager(), KEY_VALUE_REPOSITORY, adaptive_replan_preview_service(),
-        lambda: local_now().date(), PLANNED_WORKOUT_LABEL,
+        lambda: ATHLETE_CLOCK.now().date(), PLANNED_WORKOUT_LABEL,
     )
 
 
@@ -2021,6 +1816,13 @@ def gemini_conversation_history_service() -> GeminiConversationHistoryService:
 def coach_message_service() -> CoachMessageService:
     """Compose local chat persistence and committed state-event publication."""
     return CoachMessageService(database_manager(), CHAT_REPOSITORY, runtime_events.STATE_EVENT_BUFFER)
+
+
+def coach_conversation_history_service() -> CoachConversationHistoryService:
+    """Compose local conversation history reads from shared persistence state."""
+    return CoachConversationHistoryService(
+        database_manager(), CHAT_REPOSITORY, KEY_VALUE_REPOSITORY, DB_LOCK
+    )
 
 
 def coach_job_store() -> CoachJobStore:
@@ -2053,9 +1855,10 @@ def coach_job_submission_service() -> CoachJobSubmissionService:
     return CoachJobSubmissionService(
         database_manager, CHAT_REPOSITORY, DB_LOCK, SETTINGS,
         runtime_events.STATE_EVENT_BUFFER, coach_streams.CHAT_STREAM_REGISTRY,
-        COACH_JOB_WORKER.wake_event, utc_now, background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS,
-        max_attachment_storage_bytes=MAX_ATTACHMENT_STORAGE_BYTES,
-        max_gemini_inline_image_bytes=MAX_GEMINI_INLINE_IMAGE_BYTES,
+        COACH_JOB_WORKER.wake_event, utc_now,
+        background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
+        max_attachment_storage_bytes=coach_attachments.MAX_ATTACHMENT_STORAGE_BYTES,
+        max_gemini_inline_image_bytes=coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES,
     )
 
 
@@ -2083,8 +1886,7 @@ def coach_dialogue_action_service() -> CoachDialogueActionService:
         DB_LOCK,
         sync_job_queue_service,
         CoachDialoguePlanScopeService(manager, DB_LOCK),
-        lambda: local_now().date(),
-        TRAINING_PLAN_SCOPE_PREFIX,
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -2102,21 +1904,21 @@ def manual_morning_checkin_service() -> ManualMorningCheckinService:
     """Compose the fresh-sleep gate for explicit morning Coach requests."""
     return ManualMorningCheckinService(
         garmin_sync_service(), garmin_payload_service(), morning_body_battery_service(),
-        lambda: local_now().date(), LOGGER,
+        lambda: ATHLETE_CLOCK.now().date(), LOGGER,
     )
 
 
 def morning_checkin_state_service() -> MorningCheckinStateService:
     """Compose the local morning check-in state projection."""
     return MorningCheckinStateService(
-        database_manager(), KEY_VALUE_REPOSITORY, lambda: local_now().date()
+        database_manager(), KEY_VALUE_REPOSITORY, lambda: ATHLETE_CLOCK.now().date()
     )
 
 
 def gemini_local_chat_history_service() -> GeminiLocalChatHistoryService:
     """Compose the read-only local-message projection for Gemini."""
     return GeminiLocalChatHistoryService(
-        database_manager(), CHAT_REPOSITORY, max_inline_bytes=MAX_GEMINI_INLINE_IMAGE_BYTES
+        database_manager(), CHAT_REPOSITORY, max_inline_bytes=coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES
     )
 
 
@@ -2145,7 +1947,7 @@ def gemini_conversation_response_service() -> GeminiConversationResponseService:
         gemini_stream_client(),
         settings_service=SETTINGS,
         default_thinking_level=SETTINGS.selected_thinking_level(),
-        default_max_output_tokens=COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+        default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
         json_media_type=JSON_MEDIA_TYPE,
     )
 
@@ -2161,10 +1963,8 @@ def library_page_service() -> LibraryPageService:
 def chat_history_page_service() -> ChatHistoryPageService:
     """Compose bounded local chat history and session-bound proposal reads."""
     return ChatHistoryPageService(
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
+        coach_conversation_history_service(),
         coach_proposal_read_service(),
-        DB_LOCK,
         maximum=CHAT_PAGE_MAX,
     )
 
@@ -2206,12 +2006,9 @@ def coach_proposal_execution_service() -> CoachProposalExecutionService:
     """Compose guarded dispatch for confirmed Coach actions."""
     return CoachProposalExecutionService(
         database_manager(), duplicate_activity_service(), history_undo_service(),
-        IntervalsClient, runtime_maintenance.MAINTENANCE_GATE,
+        intervals_client, runtime_maintenance.MAINTENANCE_GATE,
         now=time.time, utc_now=utc_now,
     )
-
-
-LIBRARY_SYNC_PREVIEW_TTL_SECONDS = 10 * 60
 
 
 def coach_structured_context_service() -> CoachStructuredContextService:
@@ -2228,13 +2025,13 @@ def coach_structured_context_service() -> CoachStructuredContextService:
             competition_service(),
             training_plan_service(),
             adaptive_replan_preview_service(),
-            lambda: local_now().date(),
+            lambda: ATHLETE_CLOCK.now().date(),
         ),
         CoachPerformanceContextReader(
             profile_service(),
             garmin_payload_service(),
             garmin_projection_service(),
-            lambda: local_now().date(),
+            lambda: ATHLETE_CLOCK.now().date(),
         ),
     )
 
@@ -2256,7 +2053,8 @@ def coach_training_context_service() -> CoachTrainingContextService:
 def coach_request_payload_service() -> CoachRequestPayloadService:
     """Compose the stateless structured Coach request builder."""
     return CoachRequestPayloadService(
-        coach_training_context_service(), SETTINGS, COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
+        coach_training_context_service(), SETTINGS,
+        coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
     )
 
 
@@ -2278,16 +2076,6 @@ def coach_context_preview_service() -> CoachContextPreviewService:
     )
 
 
-def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
-    """Transcribe one short voice note; audio is intentionally never persisted."""
-    return audio_transcription_client().transcribe(
-        audio,
-        content_type,
-        provider=SETTINGS.selected_ai_provider(),
-        model=SETTINGS.selected_model(),
-    )
-
-
 def coach_response_transport() -> CoachResponseTransport:
     """Compose concrete OpenAI and Gemini response adapters."""
     return CoachResponseTransport(
@@ -2296,12 +2084,11 @@ def coach_response_transport() -> CoachResponseTransport:
     )
 
 
-COACH_TOOL_MAX_ROUNDS = 12
 COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, COACH_DIALOGUE_TOOLS = build_tool_contracts(
     default_profile=DEFAULT_PROFILE,
     checkin_text_limits=CHECKIN_TEXT_LIMITS,
     checkin_score_fields=CHECKIN_SCORE_FIELDS,
-    training_change_limit=COACH_TRAINING_CHANGE_LIMIT,
+    training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
     library_bulk_max_entries=planning_library.LIBRARY_BULK_MAX_ENTRIES,
     training_plan_statuses=planning_training_plans.TRAINING_PLAN_STATUSES,
     dialogue_tools=dialogue_tools,
@@ -2318,7 +2105,6 @@ def coach_tool_dispatch_service() -> CoachToolDispatchService:
         lambda: CoachPlanningChangeToolService(
             structured_training_plan_replacement_service,
             structured_training_change_service,
-            TRAINING_PLAN_SCOPE_PREFIX,
         ),
         lambda: TrainingTemplateToolService(
             database_manager, DB_LOCK, workout_library_service
@@ -2331,7 +2117,6 @@ def coach_tool_dispatch_service() -> CoachToolDispatchService:
             training_plan_service,
             history_undo_service,
             coach_proposal_creation_service,
-            TRAINING_PLAN_SCOPE_PREFIX,
         ),
     )
 
@@ -2427,10 +2212,10 @@ def coach_structured_tool_round_service() -> CoachStructuredToolRoundService:
         coach_structured_tool_execution_service(), coach_structured_tool_failure_service(),
         coach_structured_tool_round_journal(), coach_job_store(), coach_training_context_service(),
         coach_structured_response_service(), CoachStructuredToolRoundLimits(
-            max_rounds=COACH_TOOL_MAX_ROUNDS,
-            background_horizon_days=COACH_BACKGROUND_HORIZON_DAYS,
-            default_max_output_tokens=COACH_DEFAULT_MAX_OUTPUT_TOKENS,
-            long_plan_max_output_tokens=COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
+            max_rounds=structured_tool_round.COACH_TOOL_MAX_ROUNDS,
+            background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
+            default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+            long_plan_max_output_tokens=coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
         ),
     )
 
@@ -2480,7 +2265,7 @@ def coach_chat_turn_service() -> CoachChatTurnService:
 def morning_coach_job_completion_service() -> MorningCoachJobCompletionService:
     return MorningCoachJobCompletionService(
         database_manager(), DB_LOCK, KEY_VALUE_REPOSITORY,
-        coach_quick_actions_service, local_now, utc_now,
+        coach_quick_actions_service, ATHLETE_CLOCK.now, utc_now,
     )
 
 
@@ -2491,15 +2276,6 @@ def coach_background_job_runner() -> CoachBackgroundJobRunner:
         morning_coach_job_completion_service, coach_turn_failure_service,
         runtime_maintenance.MAINTENANCE_GATE, REDACTOR, LOGGER,
     )
-
-
-def local_now() -> datetime:
-    configured_timezone = timezone_name(profile_service().get().get("timezone"))
-    try:
-        from zoneinfo import ZoneInfo
-        return datetime.now(ZoneInfo(configured_timezone))
-    except Exception:
-        return datetime.now().astimezone()
 
 
 def public_bootstrap_service() -> PublicBootstrapService:
@@ -2542,7 +2318,7 @@ def public_bootstrap_service() -> PublicBootstrapService:
             sync_period_defaults=SYNC_PERIOD_DEFAULTS,
             all_sync_days=ALL_SYNC_DAYS,
             settings=SETTINGS,
-            local_date=lambda: local_now().date(),
+            local_date=lambda: ATHLETE_CLOCK.now().date(),
             morning_checkin_state_service=morning_checkin_state_service,
             coach_quick_actions_service=coach_quick_actions_service,
             provider_state_service=provider_state_service,
@@ -2569,7 +2345,7 @@ def public_plan_state_service() -> PublicPlanStateService:
         competitions=competition_service(),
         adaptive_preview=adaptive_replan_preview_service(),
         coach_quick_actions=coach_quick_actions_service(),
-        today=lambda: local_now().date(),
+        today=lambda: ATHLETE_CLOCK.now().date(),
         external_calendar_configured=bool(CONFIG.calendar_ical_url),
         external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
         default_workout_name=PLANNED_WORKOUT_LABEL,
@@ -2581,7 +2357,7 @@ def public_state_local_prelude_service() -> PublicStateLocalPrelude:
     return PublicStateLocalPrelude(
         sync_state_repository(), activity_feedback_service(),
         planned_unit_service(), weather_service(), database_manager(),
-        DB_LOCK, lambda: local_now().date(),
+        DB_LOCK, lambda: ATHLETE_CLOCK.now().date(),
         CalendarWindowRange(PLANNED_CALENDAR_HISTORY_DAYS, PLANNED_CALENDAR_FUTURE_DAYS),
     )
 
@@ -2602,7 +2378,7 @@ def public_state_calendar_projection_service() -> PublicStateCalendarProjection:
         external_calendar_configured=bool(CONFIG.calendar_ical_url),
         external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
         default_workout_name=PLANNED_WORKOUT_LABEL,
-        today=lambda: local_now().date(),
+        today=lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -2644,7 +2420,7 @@ def public_state_service() -> PublicStateService:
                 all_sync_days=ALL_SYNC_DAYS,
                 calendar_history_days=PLANNED_CALENDAR_HISTORY_DAYS,
                 calendar_future_days=PLANNED_CALENDAR_FUTURE_DAYS,
-                local_now=local_now,
+                local_now=ATHLETE_CLOCK.now,
             )
         )
 
@@ -2655,7 +2431,7 @@ def recent_log_entries_service() -> RecentLogEntriesService:
 
 def coach_diagnostic_history_service() -> CoachDiagnosticHistoryService:
     return CoachDiagnosticHistoryService(
-        database=database,
+        database=database_manager().unit_of_work,
         db_lock=DB_LOCK,
         redact=REDACTOR.sanitize_log_value,
         receipt_parser=command_receipt,
@@ -2705,7 +2481,7 @@ def privacy_archive_export_service() -> PrivacyArchiveExportService:
         PrivacyArchiveExportConfig(
             DATA_DIR,
             DB_PATH,
-            lambda: local_now().date(),
+            lambda: ATHLETE_CLOCK.now().date(),
             utc_now,
             maximum_bytes=MAX_PRIVACY_EXPORT_BYTES,
             minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
@@ -2818,10 +2594,35 @@ SYNC_GET_ROUTES = SyncGetRoutes(
     sync_job_queue_service,
     sync_public_state_service,
     activity_read_service,
-    lambda: local_now().date(),
+    lambda: ATHLETE_CLOCK.now().date(),
     ALL_SYNC_DAYS,
 )
 HISTORY_GET_ROUTES = HistoryGetRoutes(session_auth_service, change_history_service)
+HISTORY_UNDO_POST_ROUTES = HistoryUndoPostRoutes(
+    history_undo_service,
+    coach_proposal_creation_service,
+)
+COACH_ACTIONS_POST_ROUTES = CoachActionsPostRoutes(
+    coach_proposal_confirmation_service,
+    coach_proposal_execution_service,
+)
+CHAT_POST_ROUTES = ChatPostRoutes(
+    coach_job_submission_service,
+    coach_conversation_reset_service,
+    coach_attachments.MAX_REQUEST_BYTES,
+)
+CHAT_STREAM_TRANSPORT = CoachChatStreamTransport(
+    coach_streams.CHAT_STREAM_REGISTRY,
+    coach_job_submission_service,
+    coach_command_receipt_service,
+    REDACTOR.redact_text,
+    LOGGER,
+    max_request_bytes=coach_attachments.MAX_REQUEST_BYTES,
+    response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+)
+TRANSCRIBE_POST_ROUTES = TranscribePostRoutes(SETTINGS, audio_transcription_client)
+DIAGNOSTICS_CAPTURE_POST_ROUTES = DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)
+PRIVACY_DELETE_POST_ROUTES = PrivacyDeletePostRoutes(privacy_delete_service)
 PRIVACY_GET_ROUTES = PrivacyGetRoutes(
     session_auth_service, export_stream_transport, privacy_delete_service
 )
@@ -2831,473 +2632,85 @@ STATE_EVENTS_GET_ROUTES = StateEventsGetRoutes(
 )
 SETTINGS_PUT_ROUTES = SettingsPutRoutes(SETTINGS)
 ATHLETE_PUT_ROUTES = AthletePutRoutes(athlete_context_service, profile_service)
+PLANNING_COMMANDS_POST_ROUTES = PlanningCommandsPostRoutes(
+    coach_planning_command_service,
+    lambda: coach_conversation_provision_service(),
+)
+FEEDBACK_POST_ROUTES = FeedbackPostRoutes(checkin_service)
+CHAT_CANCEL_POST_ROUTES = ChatCancelPostRoutes(coach_cancellation_service)
+PRIVACY_RESTORE_POST_ROUTES = PrivacyRestorePostRoutes(
+    session_auth_service, database_restore_service, MAX_BACKUP_BYTES
+)
+AUTH_POST_ROUTES = AuthPostRoutes(
+    session_auth_service, runtime_maintenance.MAINTENANCE_GATE
+)
+NUTRITION_GET_ROUTES = NutritionGetRoutes(
+    session_auth_service, nutrition_service, ATHLETE_CLOCK.now
+)
+NUTRITION_POST_ROUTES = NutritionPostRoutes(
+    nutrition_service, intervals_nutrition_sync_service
+)
+NUTRITION_PUT_ROUTES = NutritionPutRoutes(nutrition_service)
+HTTP_ROUTE_DISPATCHER = HttpRouteDispatcher(
+    (
+        PUBLIC_GET_ROUTES,
+        PLANNING_GET_ROUTES,
+        SYNC_GET_ROUTES,
+        STATE_EVENTS_GET_ROUTES,
+        COACH_GET_ROUTES,
+        ATHLETE_GET_ROUTES,
+        HISTORY_GET_ROUTES,
+        DIAGNOSTICS_GET_ROUTES,
+        PRIVACY_GET_ROUTES,
+        NUTRITION_GET_ROUTES,
+    ),
+    (SETTINGS_PUT_ROUTES, ATHLETE_PUT_ROUTES, NUTRITION_PUT_ROUTES),
+)
+SYNC_COMMAND_POST_ROUTE = SyncCommandPostRoute(lambda: sync_command_endpoint())
+AUTHENTICATED_POST_ROUTES = HttpAuthenticatedPostRoutes(
+    COACH_ACTIONS_POST_ROUTES,
+    CHAT_POST_ROUTES,
+    TRANSCRIBE_POST_ROUTES,
+    PLANNING_COMMANDS_POST_ROUTES,
+    FEEDBACK_POST_ROUTES,
+    CHAT_STREAM_TRANSPORT,
+    SYNC_COMMAND_POST_ROUTE,
+    HISTORY_UNDO_POST_ROUTES,
+    DIAGNOSTICS_CAPTURE_POST_ROUTES,
+    PRIVACY_DELETE_POST_ROUTES,
+    NUTRITION_POST_ROUTES,
+)
+HTTP_POST_DISPATCHER = HttpPostDispatcher(
+    AUTH_POST_ROUTES,
+    PRIVACY_RESTORE_POST_ROUTES,
+    CHAT_CANCEL_POST_ROUTES,
+    AUTHENTICATED_POST_ROUTES,
+)
+HTTP_RESPONSE_TRANSPORT = HttpResponseTransport()
 
 
-class RequestHandler(BaseHTTPRequestHandler):
-    server_version = f"IntervalsCoach/{APP_VERSION}"
-    client_disconnect_errors = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
-    static_asset_service: StaticAssetService
 
-    @property
-    def auth_service(self) -> SessionAuthService:
-        return session_auth_service()
 
-    def log_message(self, fmt: str, *args: Any) -> None:
-        LOGGER.info(
-            fmt % args,
-            extra={
-                "event": "http_access",
-                "context": {"method": self.command, "path": urlparse(self.path).path, "request_id": getattr(self, "request_id", None)},
-            },
+def request_handler_class() -> type[BaseHTTPRequestHandler]:
+    return create_request_handler(
+        HttpRequestHandlerDependencies(
+            app_version=APP_VERSION,
+            logger=LOGGER,
+            session_auth_service=session_auth_service,
+            route_dispatcher=HTTP_ROUTE_DISPATCHER,
+            post_dispatcher=HTTP_POST_DISPATCHER,
+            response_transport=HTTP_RESPONSE_TRANSPORT,
+            maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+            redact_text=REDACTOR.redact_text,
+            public_app_error_status=public_app_error_status,
+            internal_server_error=INTERNAL_SERVER_ERROR,
+            max_body_bytes=MAX_BODY_BYTES,
+            max_audio_body_bytes=MAX_AUDIO_BODY_BYTES,
+            voice_audio_types=audio_provider.VOICE_AUDIO_TYPES,
+            normalize_audio_type=audio_provider.normalized_audio_type,
+            static_asset_service=StaticAssetService(PUBLIC_DIR),
         )
-
-    def setup(self) -> None:
-        super().setup()
-        self.connection.settimeout(20)
-
-    def log_client_disconnect(self) -> None:
-        context = {
-            "method": self.command,
-            "path": urlparse(self.path).path,
-            "request_id": getattr(self, "request_id", None),
-        }
-        for attribute, key in (("_response_status", "response_status"), ("_response_bytes", "response_bytes"), ("_response_error_type", "error_type")):
-            value = getattr(self, attribute, None)
-            if value is not None:
-                context[key] = value
-        started = getattr(self, "_response_started_at", None)
-        if started is not None:
-            context["response_duration_ms"] = round((time.perf_counter() - started) * 1000, 1)
-        LOGGER.info(
-            "HTTP client disconnected before response completed",
-            extra={
-                "event": "http_client_disconnected",
-                "context": context,
-            },
-        )
-
-    def do_GET(self) -> None:
-        self.request_id = uuid.uuid4().hex[:12]
-        try:
-            path = urlparse(self.path).path
-            handled = (
-                PUBLIC_GET_ROUTES.handle(self, path)
-                or PLANNING_GET_ROUTES.handle(self, path)
-                or SYNC_GET_ROUTES.handle(self, path)
-                or STATE_EVENTS_GET_ROUTES.handle(self, path)
-                or COACH_GET_ROUTES.handle(self, path)
-                or ATHLETE_GET_ROUTES.handle(self, path)
-                or HISTORY_GET_ROUTES.handle(self, path)
-                or DIAGNOSTICS_GET_ROUTES.handle(self, path)
-                or PRIVACY_GET_ROUTES.handle(self, path)
-            )
-            if not handled and path.startswith("/api/"):
-                raise AppError(404, NOT_FOUND_ERROR)
-            if not handled:
-                self.send_static(path)
-        except AppError as exc:
-            if exc.status >= 500:
-                LOGGER.exception(
-                    exc.message,
-                    extra={"event": "http_app_error", "context": {"method": "GET", "path": self.path, "status": exc.status, "request_id": self.request_id}},
-                    exc_info=True,
-                )
-            self.send_json(public_app_error_status(exc), {"error": REDACTOR.redact_text(exc.message)[:1000]})
-        except Exception:
-            LOGGER.exception(
-                "Unhandled GET error",
-                extra={"event": "http_unhandled_error", "context": {"method": "GET", "path": self.path, "request_id": self.request_id}},
-                exc_info=True,
-            )
-            self.send_json(500, {"error": INTERNAL_SERVER_ERROR})
-
-    def do_POST(self) -> None:
-        self.request_id = uuid.uuid4().hex[:12]
-        try:
-            path = urlparse(self.path).path
-            if path == "/api/login":
-                result = self.auth_service.login_user(self, str(self.read_json().get("password") or ""))
-                token = result.pop("session_token")
-                csrf = result["csrf"]
-                self.send_json(200, result, {
-                    "Set-Cookie": self.auth_service.session_cookie_headers(token, csrf),
-                })
-            elif path == "/api/privacy/restore":
-                session = self.auth_service.require_auth(self)
-                self.auth_service.require_csrf(self, session)
-                payload = self.read_body(MAX_BACKUP_BYTES)
-                result = database_restore_service().restore(payload)
-                self.send_json(200, result, {"Set-Cookie": [
-                    self.auth_service.session_cookie_headers(clear=True)[0], self.auth_service.session_cookie_headers(clear=True)[1],
-                ]})
-            elif path == "/api/logout":
-                session = self.auth_service.require_auth(self)
-                self.auth_service.require_csrf(self, session)
-                with runtime_maintenance.MAINTENANCE_GATE.operation():
-                    self.auth_service.logout_user(self)
-                self.send_json(200, {"status": "ok"}, {"Set-Cookie": [
-                    self.auth_service.session_cookie_headers(clear=True)[0], self.auth_service.session_cookie_headers(clear=True)[1],
-                ]})
-            else:
-                session = self.auth_service.require_auth(self)
-                self.auth_service.require_csrf(self, session)
-                if path == "/api/chat/cancel":
-                    # Cancellation must remain reachable while the streaming
-                    # request holds the maintenance gate for its lifetime.
-                    payload = self.read_json()
-                    self.send_json(200, coach_cancellation_service().cancel(session["csrf_hash"], payload.get("operation_id")))
-                else:
-                    with runtime_maintenance.MAINTENANCE_GATE.operation():
-                        self.handle_authenticated_post(path, session)
-        except AppError as exc:
-            if exc.status >= 500:
-                LOGGER.exception(
-                    exc.message,
-                    extra={"event": "http_app_error", "context": {"method": "POST", "path": self.path, "status": exc.status, "request_id": self.request_id}},
-                    exc_info=True,
-                )
-            status = public_app_error_status(exc)
-            headers = {"WWW-Authenticate": "Session"} if status == 401 else None
-            self.send_json(status, {"error": REDACTOR.redact_text(exc.message)[:1000]}, headers)
-        except Exception:
-            LOGGER.exception(
-                "Unhandled POST error",
-                extra={"event": "http_unhandled_error", "context": {"method": "POST", "path": self.path, "request_id": self.request_id}},
-                exc_info=True,
-            )
-            self.send_json(500, {"error": INTERNAL_SERVER_ERROR})
-
-    def send_sse_headers(self, *, persistent: bool = True) -> None:
-        try:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Connection", "keep-alive" if persistent else "close")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("X-Frame-Options", "DENY")
-            self.send_header("X-Accel-Buffering", "no")
-            self.end_headers()
-            self.wfile.flush()
-        except self.client_disconnect_errors as exc:
-            self.log_client_disconnect()
-            raise ClientDisconnected() from exc
-
-    def send_sse_event(self, event: str, payload: Any, event_id: int | None = None) -> None:
-        data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-        try:
-            prefix = f"id: {event_id}\n" if event_id is not None else ""
-            self.wfile.write(f"{prefix}event: {event}\ndata: {data}\n\n".encode("utf-8"))
-            self.wfile.flush()
-        except self.client_disconnect_errors as exc:
-            self.log_client_disconnect()
-            raise ClientDisconnected() from exc
-
-    def handle_chat_stream(self, session: dict[str, Any]) -> None:  # NOSONAR - SSE lifecycle must remain atomic around durable job ownership
-        payload = self.read_json(MAX_REQUEST_BYTES)
-        message = str(payload.get("message", ""))
-        client_turn_id = str(payload.get("client_turn_id") or "").strip()
-        request_kind = payload.get("request_kind")
-        if not client_turn_id:
-            raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
-        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(session["csrf_hash"])
-        client_connected = True
-
-        def send_event(event: str, data: Any) -> None:
-            nonlocal client_connected
-            if not client_connected:
-                return
-            try:
-                self.send_sse_event(event, data)
-            except ClientDisconnected:
-                # The browser may be reloaded or moved to another tab while
-                # the provider request is still running. The chat operation
-                # must finish and persist its answer independently of SSE.
-                client_connected = False
-
-        try:
-            self.connection.settimeout(OPENAI_RESPONSE_TIMEOUT_SECONDS + 30)
-            try:
-                self.send_sse_headers(persistent=False)
-                send_event("started", {"operation_id": operation_id})
-            except ClientDisconnected:
-                client_connected = False
-            job = coach_job_submission_service().enqueue(
-                message, client_turn_id, session["csrf_hash"],
-                operation_id=operation_id, cancel_event=cancel_event, request_kind=request_kind, attachments=payload.get("attachments"),
-            )
-            persisted_operation_id = str(job.get("operation_id") or "")
-            if persisted_operation_id and persisted_operation_id != operation_id:
-                # A retry after restart may resolve to the original durable
-                # operation. The new finite stream cannot own that queue, so
-                # return its receipt and let the client resume via polling.
-                send_event("background", job)
-                return
-            events = coach_streams.CHAT_STREAM_REGISTRY.events(session["csrf_hash"], operation_id)
-            if events is None:
-                send_event("background", job)
-            else:
-                while True:
-                    try:
-                        event, data = events.get(timeout=15)
-                    except queue.Empty:
-                        active = coach_job_submission_service().active(session["csrf_hash"], operation_id)
-                        if active:
-                            send_event("heartbeat", {"operation_id": operation_id})
-                            continue
-                        try:
-                            send_event("completed", coach_command_receipt_service().read(client_turn_id, session["csrf_hash"]))
-                        except AppError as exc:
-                            send_event("error", {"reason": exc.reason or "request_failed", "message": REDACTOR.redact_text(exc.message)[:1000]})
-                        break
-                    send_event(event, data)
-                    if event in {"completed", "error", "background"}:
-                        break
-        except AppError as exc:
-            send_event("error", {"reason": exc.reason or "request_failed", "message": REDACTOR.redact_text(exc.message)[:1000]})
-        except Exception:
-            LOGGER.exception(
-                "Unhandled coach stream error",
-                extra={"event": "chat_stream_error", "context": {"request_id": self.request_id}},
-                exc_info=True,
-            )
-            send_event("error", {"reason": "internal_error", "message": INTERNAL_SERVER_ERROR})
-        finally:
-            coach_streams.CHAT_STREAM_REGISTRY.unregister(session["csrf_hash"], operation_id)
-            self.close_connection = True
-
-    def _handle_coach_post(self, path: str, session: dict[str, Any]) -> bool:
-        if path == "/api/transcribe":
-            content_type = self.headers.get("Content-Type", "")
-            self.send_json(200, transcribe_audio(self.read_audio_body(), content_type))
-        elif path == "/api/planning/commands":
-            self.send_json(200, coach_planning_command_service().execute(
-                self.read_json(), conversation_id=coach_conversation_provision_service().ensure(), session_csrf_hash=session["csrf_hash"],
-            ))
-        elif path == "/api/coach/actions/confirm":
-            self.send_json(200, coach_proposal_confirmation_service().confirm(
-                self.read_json().get("proposal_id"), session["csrf_hash"],
-            ))
-        elif path == "/api/coach/actions/execute":
-            payload = self.read_json()
-            self.send_json(200, coach_proposal_execution_service().execute(
-                payload.get("action_token"), session["csrf_hash"], payload.get("payload_hash"),
-            ))
-        elif path == "/api/chat/stream":
-            self.handle_chat_stream(session)
-        elif path == "/api/chat":
-            payload = self.read_json(MAX_REQUEST_BYTES)
-            client_turn_id = str(payload.get("client_turn_id") or "").strip()
-            if not client_turn_id:
-                raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
-            self.send_json(202, coach_job_submission_service().enqueue(
-                str(payload.get("message", "")), client_turn_id, session["csrf_hash"],
-                request_kind=payload.get("request_kind"), attachments=payload.get("attachments"),
-            ))
-        elif path == "/api/chat/reset":
-            self.send_json(200, coach_conversation_reset_service().reset())
-        elif path == "/api/feedback":
-            self.send_json(200, checkin_service().save(self.read_json()))
-        else:
-            return False
-        return True
-
-    def _handle_sync_post(self, path: str) -> bool:
-        if not SyncCommandEndpoint.handles(path):
-            return False
-        payload = self.read_json() if SyncCommandEndpoint.needs_body(path) else None
-        status, result = sync_command_endpoint().execute(path, payload)
-        self.send_json(status, result)
-        return True
-
-    def _handle_data_post(self, path: str, session: dict[str, Any]) -> bool:
-        if path == "/api/change-history/undo/preview":
-            preview = history_undo_service().preview(self.read_json().get("change_id"))
-            proposal = coach_proposal_creation_service().create(
-                preview.pop("proposal"), session["csrf_hash"]
-            )
-            self.send_json(
-                200,
-                {**preview, "proposed_action": proposal["proposed_action"]},
-            )
-        elif path == "/api/diagnostics/capture":
-            self.send_json(200, DIAGNOSTIC_CAPTURE.set_enabled(self.read_json().get("enabled")))
-        elif path == "/api/privacy/delete":
-            payload = self.read_json()
-            if payload.get("confirm") != "LOKALE DATEN LÖSCHEN":
-                raise AppError(400, "Zum Löschen muss LOKALE DATEN LÖSCHEN bestätigt werden.")
-            self.send_json(200, privacy_delete_service().delete())
-        elif path == "/api/change-history/undo":
-            self.send_json(200, history_undo_service().apply(self.read_json()))
-        else:
-            return False
-        return True
-
-    def handle_authenticated_post(self, path: str, session: dict[str, Any]) -> None:
-        handled = (
-            self._handle_coach_post(path, session)
-            or self._handle_sync_post(path)
-            or self._handle_data_post(path, session)
-        )
-        if not handled:
-            raise AppError(404, NOT_FOUND_ERROR)
-
-    def do_PUT(self) -> None:
-        try:
-            with runtime_maintenance.MAINTENANCE_GATE.operation():
-                self._do_PUT()
-        except AppError as exc:
-            self.send_json(public_app_error_status(exc), {"error": REDACTOR.redact_text(exc.message)[:1000]})
-
-    def _do_PUT(self) -> None:
-        self.request_id = uuid.uuid4().hex[:12]
-        try:
-            path = urlparse(self.path).path
-            session = self.auth_service.require_auth(self)
-            self.auth_service.require_csrf(self, session)
-            if SETTINGS_PUT_ROUTES.handle(self, path):
-                return
-            if ATHLETE_PUT_ROUTES.handle(self, path):
-                return
-            raise AppError(404, NOT_FOUND_ERROR)
-        except AppError as exc:
-            if exc.status >= 500:
-                LOGGER.exception(
-                    exc.message,
-                    extra={"event": "http_app_error", "context": {"method": "PUT", "path": self.path, "status": exc.status, "request_id": self.request_id}},
-                    exc_info=True,
-                )
-            self.send_json(public_app_error_status(exc), {"error": REDACTOR.redact_text(exc.message)[:1000]})
-        except Exception:
-            LOGGER.exception(
-                "Unhandled PUT error",
-                extra={"event": "http_unhandled_error", "context": {"method": "PUT", "path": self.path, "request_id": self.request_id}},
-                exc_info=True,
-            )
-            self.send_json(500, {"error": INTERNAL_SERVER_ERROR})
-
-    def read_body(self, max_bytes: int = MAX_BODY_BYTES) -> bytes:
-        return read_request_body(
-            self.headers,
-            self.rfile.read,
-            max_bytes,
-            error=AppError,
-            too_large_status_threshold=MAX_BODY_BYTES,
-        )
-
-    def read_audio_body(self) -> bytes:
-        return read_request_audio_body(
-            self.headers,
-            self.rfile.read,
-            allowed_types=audio_provider.VOICE_AUDIO_TYPES,
-            normalize_type=audio_provider.normalized_audio_type,
-            max_bytes=MAX_AUDIO_BODY_BYTES,
-            error=AppError,
-        )
-
-    def read_json(self, max_bytes: int = MAX_BODY_BYTES) -> dict[str, Any]:
-        return read_request_json(
-            self.headers,
-            self.rfile.read,
-            max_bytes,
-            error=AppError,
-            too_large_status_threshold=MAX_BODY_BYTES,
-        )
-
-    def send_json(self, status: int, payload: Any, headers: dict[str, str | list[str]] | None = None) -> None:
-        data = response_json_bytes(payload)
-        self.send_response(status)
-        for key, value in response_headers("application/json; charset=utf-8", len(data)):
-            self.send_header(key, value)
-        for key, value in response_header_items(headers):
-            self.send_header(key, value)
-        self._response_status = status
-        self._response_bytes = len(data)
-        self._response_started_at = time.perf_counter()
-        try:
-            self.end_headers()
-            self.wfile.write(data)
-        except self.client_disconnect_errors as exc:
-            self._response_error_type = type(exc).__name__
-            self.log_client_disconnect()
-        finally:
-            for attribute in ("_response_status", "_response_bytes", "_response_started_at", "_response_error_type"):
-                self.__dict__.pop(attribute, None)
-
-    def send_file_stream(
-        self,
-        path: Path,
-        content_type: str,
-        filename: str,
-        *,
-        deadline: float | None = None,
-        cleanup: bool = False,
-    ) -> None:
-        try:
-            size = path.stat().st_size
-            self.send_response(200)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(size))
-            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("X-Frame-Options", "DENY")
-            self.end_headers()
-            with path.open("rb") as source:
-                while True:
-                    if deadline is not None and time.monotonic() > deadline:
-                        LOGGER.warning("File stream exceeded time limit", extra={"event": "file_stream_timeout"})
-                        break
-                    chunk = source.read(STREAM_CHUNK_BYTES)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-        except self.client_disconnect_errors:
-            self.log_client_disconnect()
-        except OSError:
-            LOGGER.warning("File stream failed", extra={"event": "file_stream_failed"}, exc_info=True)
-        finally:
-            if cleanup:
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError:
-                    LOGGER.warning("Temporary export cleanup failed", extra={"event": "export_cleanup_failed"})
-
-    def send_bytes(self, status: int, data: bytes, content_type: str, headers: dict[str, str | list[str]] | None = None) -> None:
-        self.send_response(status)
-        for key, value in response_headers(content_type, len(data)):
-            self.send_header(key, value)
-        for key, value in response_header_items(headers):
-            self.send_header(key, value)
-        try:
-            self.end_headers()
-            self.wfile.write(data)
-        except self.client_disconnect_errors:
-            self.log_client_disconnect()
-
-    def send_static(self, path: str) -> None:
-        response = self.static_asset_service.render(
-            path,
-            getattr(self, "path", ""),
-            getattr(self, "headers", {}).get("If-None-Match"),
-        )
-        self.send_response(response.status)
-        for name, value in response.headers:
-            self.send_header(name, value)
-        try:
-            self.end_headers()
-            if response.body:
-                self.wfile.write(response.body)
-        except self.client_disconnect_errors:
-            self.log_client_disconnect()
-
-
-def request_handler_class() -> type[RequestHandler]:
-    static_assets = StaticAssetService(PUBLIC_DIR)
-
-    class ComposedRequestHandler(RequestHandler):
-        static_asset_service = static_assets
-
-    return ComposedRequestHandler
+    )
 
 
 def daily_sync_loop_service() -> DailySyncLoop:
@@ -3306,6 +2719,7 @@ def daily_sync_loop_service() -> DailySyncLoop:
         morning_body_battery_service(),
         sleep=time.sleep,
         logger=LOGGER,
+        stop_event=threading.Event(),
     )
 
 
@@ -3358,21 +2772,37 @@ def main() -> None:
         raise SystemExit(configuration_error)
     LOGGER.info(f"{APP_NAME} starting", extra={"event": "server_start", "context": {"version": APP_VERSION, "port": CONFIG.port}})
     initialise_database()
-    sync_job_queue_service().resume_interrupted()
-    coach_job_store().resume_interrupted(coach_turn_failure_service())
     server = http_server.CoachHTTPServer(("0.0.0.0", CONFIG.port), request_handler_class())
     server.allow_reuse_address = True
-    sync_job_worker().start()
-    COACH_JOB_WORKER.start(coach_job_store, coach_background_job_runner, runtime_maintenance.MAINTENANCE_GATE)
-    startup_sync_scheduler().schedule()
-    threading.Thread(target=daily_sync_loop_service().run, daemon=True).start()
-    LOGGER.info(f"{APP_NAME} listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
+    sync_worker: SyncJobWorker | None = None
+    daily_loop: DailySyncLoop | None = None
+    daily_thread: threading.Thread | None = None
     try:
+        sync_job_queue_service().resume_interrupted()
+        coach_job_store().resume_interrupted(coach_turn_failure_service())
+        sync_worker = sync_job_worker()
+        sync_worker.start()
+        COACH_JOB_WORKER.start(coach_job_store, coach_background_job_runner, runtime_maintenance.MAINTENANCE_GATE)
+        startup_sync_scheduler().schedule()
+        daily_loop = daily_sync_loop_service()
+        daily_thread = threading.Thread(target=daily_loop.run, daemon=True)
+        daily_thread.start()
+        LOGGER.info(f"{APP_NAME} listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
         server.serve_forever()  # NOSONAR - HTTP is intentionally LAN-only behind the documented HTTPS proxy.
     except KeyboardInterrupt:
         pass
     finally:
+        if daily_loop is not None:
+            daily_loop.stop()
+        if sync_worker is not None:
+            sync_worker.stop()
+        COACH_JOB_WORKER.stop()
         server.server_close()
+        if daily_thread is not None:
+            daily_thread.join(timeout=5)
+        if sync_worker is not None:
+            sync_worker.join(timeout=5)
+        COACH_JOB_WORKER.join(timeout=5)
 
 
 if __name__ == "__main__":

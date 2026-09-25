@@ -9,7 +9,7 @@ from pathlib import Path
 from dataclasses import replace
 from datetime import date, timedelta
 from unittest.mock import Mock, patch
-import test_server as fixtures
+import server_test_support as fixtures
 from backend.planning import workouts as planning_workouts
 from backend.coach.proposals import COACH_ACTION_TTL_SECONDS, prune_expired_coach_proposals
 from backend.coach.authorization import coach_session_key
@@ -49,8 +49,8 @@ class CoachReviewTests(unittest.TestCase):
 
 
     def test_waited_full_refresh_preserves_all_time_window(self):
-        server.set_kv("last_sync_at", "old-sync")
-        server.set_kv("last_sync_activity_days", str(server.ALL_SYNC_DAYS))
+        server.key_value_service().set("last_sync_at", "old-sync")
+        server.key_value_service().set("last_sync_activity_days", str(server.ALL_SYNC_DAYS))
         previous_sync_read = threading.Event()
         service = server.intervals_sync_service()
         original_get_value = service._status.get
@@ -65,7 +65,7 @@ class CoachReviewTests(unittest.TestCase):
         def finish_active_sync():
             try:
                 previous_sync_read.wait(timeout=2)
-                server.set_kv("last_sync_at", "new-sync")
+                server.key_value_service().set("last_sync_at", "new-sync")
             finally:
                 INTERVALS_SYNC_LOCK.release()
 
@@ -142,7 +142,7 @@ class CoachReviewTests(unittest.TestCase):
                 "result": {"ok": True, "status": "completed"},
             }],
         }
-        with server.DB_LOCK, server.database() as db:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE coach_commands SET intent=?, receipt=? WHERE client_turn_id=?",
                 (json.dumps(intent), json.dumps(persisted_receipt), client_turn_id),
@@ -173,7 +173,7 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(
             [
                 planning_workouts.workout_event_payload(
-                    entry["id"], entry, today=server.local_now().date()
+                    entry["id"], entry, today=server.ATHLETE_CLOCK.now().date()
                 )["type"]
                 for entry in entries
             ],
@@ -204,7 +204,7 @@ class CoachReviewTests(unittest.TestCase):
             "stage",
         )
         workouts[-1]["date"] = workouts[0]["date"]
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE coach_plan_artifacts SET payload=? WHERE id=?",
                 (json.dumps({"workouts": workouts, "plan_name": "Atomic"}), artifact["artifact_id"]),
@@ -214,7 +214,7 @@ class CoachReviewTests(unittest.TestCase):
             server.coach_tool_dispatch_service().execute("commit_training_plan",{"artifact_id":artifact["artifact_id"]},intent=intent,conversation_id="review-conversation",client_turn_id="commit",session_csrf_hash="review-session",sync_job_ids=[])
         self.assertEqual(server.planned_unit_service().list(),[])
         self.assertEqual(server.training_plan_service().list(),[])
-        with server.database() as db:self.assertEqual(db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?",(artifact["artifact_id"],)).fetchone()["status"],"draft")
+        with server.database_manager().unit_of_work() as db:self.assertEqual(db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?",(artifact["artifact_id"],)).fetchone()["status"],"draft")
 
     def test_plan_draft_rejects_an_occupied_date_before_storing_artifact(self):
         workout = self.workout()
@@ -227,7 +227,7 @@ class CoachReviewTests(unittest.TestCase):
                 session_csrf_hash="review-session", sync_job_ids=[],
             )
         self.assertEqual(error.exception.reason, "plan_date_conflict")
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) AS n FROM coach_plan_artifacts").fetchone()["n"], 0)
 
 
@@ -252,12 +252,12 @@ class CoachReviewTests(unittest.TestCase):
 
     def test_running_foreign_command_is_neither_executed_nor_closed(self):
         identity = {"session_key": coach_session_key("owner"), "status": "running"}
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute("INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES ('foreign', 'foreign', 'review-conversation', '{}', 'local', 'running', ?, ?, ?)", (json.dumps(identity), server.utc_now(), server.utc_now()))
         with self.assertRaises(server.AppError) as error:
             server.coach_structured_turn_service().run("Edit", intent=self.intent("save_checkin", ["local_checkin"]), conversation_id="review-conversation", client_turn_id="foreign", session_csrf_hash="intruder", ai_provider=server.SETTINGS.selected_ai_provider())
         self.assertEqual(error.exception.status, 403)
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT status FROM coach_commands WHERE client_turn_id='foreign'").fetchone()["status"], "running")
 
 
@@ -322,8 +322,8 @@ class CoachReviewTests(unittest.TestCase):
         server.checkin_service().save({"soreness": 8})
         preview = server.adaptive_replan_preview_service().preview()
         self.assertTrue(preview["changes"])
-        advanced = server.local_now() + timedelta(days=2)
-        with patch.object(server, "local_now", return_value=advanced):
+        advanced = server.ATHLETE_CLOCK.now() + timedelta(days=2)
+        with patch.object(server.ATHLETE_CLOCK, "now", return_value=advanced):
             applied = server.illness_pause_sync_service().apply(preview["id"])
         self.assertEqual(applied["status"], "stale")
         self.assertEqual(applied["updated"], 0)
@@ -340,13 +340,13 @@ class CoachReviewTests(unittest.TestCase):
             "review-conversation",
             "draft",
         )
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute("UPDATE coach_action_proposals SET expires_at=? WHERE id=?", (time.time() - 1, expired["id"]))
         barrier = threading.Barrier(2)
 
         def collect():
             barrier.wait(timeout=5)
-            with server.DB_LOCK, server.database() as db:
+            with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                 return prune_expired_coach_proposals(db, time.time())
 
         def confirm():
@@ -362,7 +362,7 @@ class CoachReviewTests(unittest.TestCase):
             self.assertEqual(gc_result.result(), 1)
             self.assertEqual(confirmation.result(), "rejected")
         self.assertEqual([item["id"] for item in server.coach_proposal_read_service().current("review-session")], [active["id"]])
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (draft["artifact_id"],)).fetchone()["status"], "draft")
 
 

@@ -112,9 +112,9 @@ status. Treat all of it as durable athlete data.
 - When a prompt explicitly requests current data, refresh through the existing
   sync path before coaching where supported. Do not add unconditional provider
   refreshes to every chat request.
-- The selector contains the GPT-5.6 options `gpt-5.6-sol`, `gpt-5.6-terra`, and
-  `gpt-5.6-luna`. A configured `OPENAI_MODEL` is also surfaced by the current
-  implementation; do not silently change or hardcode a different model policy.
+- The selector contains the GPT-6 option `gpt-6-luna`. A configured
+  `OPENAI_MODEL` is also surfaced by the current implementation; do not
+  silently change or hardcode a different model policy.
 - `APP_VERSION` in `server.py` must match the GitHub release tag. If a release
   needs a version update, the weekly release workflow opens a PR; it must not
   push directly to protected `main`. The container publishing workflow must
@@ -132,7 +132,7 @@ Run from the repository root:
 
 ```powershell
 python -m unittest discover -s tests -v
-python -m py_compile server.py tests/test_server.py
+python -m compileall -q server.py backend tests
 ```
 
 Tests must use temporary data directories and mocked external services. Never
@@ -227,7 +227,7 @@ available.
 
   ```powershell
   python -m unittest discover -s tests -v
-  python -m py_compile server.py tests/test_server.py
+  python -m compileall -q server.py backend tests
   docker build -t ai-coach:local .
   ```
 

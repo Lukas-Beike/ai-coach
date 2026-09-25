@@ -170,7 +170,7 @@ def load_config(root: Path, data_dir: Path, environ: MutableMapping[str, str] | 
         port=_env_int(target, "PORT", 8090),
         openai_api_key=value("OPENAI_API_KEY", ""),
         openai_base_url=value("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL),
-        openai_model=value("OPENAI_MODEL", "gpt-5.6-luna"),
+        openai_model=value("OPENAI_MODEL", "gpt-6-luna"),
         gemini_api_key=value("GEMINI_API_KEY", ""),
         gemini_model=value("GEMINI_MODEL", "gemini-3.8-flash"),
         ai_provider=value("AI_PROVIDER", "").strip().casefold(),

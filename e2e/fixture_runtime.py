@@ -94,7 +94,7 @@ artifact = {}
 
 
 def stage_fixture_artifact():
-    today = server.local_now().date()
+    today = server.ATHLETE_CLOCK.now().date()
     artifact.update(server.training_plan_artifact_service().stage({"payload": {
         "plan_name": "Fixture sport contract",
         "workouts": [{"date": (today + timedelta(days=index)).isoformat(), "name": f"HTTP fixture {sport}", "sport": sport, "duration_minutes": 30,
@@ -109,12 +109,12 @@ def initialise_fixture():
     stage_fixture_artifact()
 
 
-class FixtureHandler(server.RequestHandler):
+class FixtureHandler(server.request_handler_class()):
     def do_GET(self):
         if self.path == "/api/fixture/plan":
             try:
                 self.auth_service.require_auth(self)
-                with server.DB_LOCK, server.database() as db:
+                with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                     current = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact.get("artifact_id"),)).fetchone()
                 if not current or current["status"] != "draft":
                     stage_fixture_artifact()
@@ -126,5 +126,5 @@ class FixtureHandler(server.RequestHandler):
 
 
 server.initialise_database = initialise_fixture
-server.RequestHandler = FixtureHandler
+server.request_handler_class = lambda: FixtureHandler
 server.main()

@@ -8,6 +8,7 @@ runtime state, which is outside the scope of an architecture check.
 from __future__ import annotations
 
 import ast
+import tempfile
 import unittest
 from collections.abc import Iterable
 from pathlib import Path
@@ -19,12 +20,15 @@ BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 if not BACKEND_ROOT.is_dir():
     BACKEND_ROOT = Path.cwd() / "backend"
 SERVER_PATH = REPOSITORY_ROOT / "server.py"
+HANDLER_PATH = BACKEND_ROOT / "http_api" / "handler.py"
 
 
 # This is deliberately explicit.  These small, dependency-light helpers are
 # backend-owned implementations, not server callbacks or compatibility
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("backend.athlete.clock", ("AthleteLocalClock",)),
+    ("backend.http_api.handler", ("HttpRequestHandlerDependencies", "RequestHandler", "create_request_handler")),
     ("backend.coach.final_receipt", ("CoachFinalReceiptService",)),
     ("backend.coach.conversation_recovery", ("CoachConversationRecoveryService",)),
     ("backend.coach.response_retry", ("CoachResponseRetryPolicy",)),
@@ -58,6 +62,18 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
+    ("backend.coach.conversation", ("CoachConversationHistoryService",)),
+    ("backend.http_api.post_dispatch", ("HttpAuthenticatedPostRoutes", "HttpPostDispatcher")),
+    ("backend.http_api.response_transport", ("HttpResponseTransport",)),
+    ("backend.http_api.sync_commands_post", ("SyncCommandPostRoute",)),
+    ("backend.http_api.chat_post", ("ChatPostRoutes",)),
+    ("backend.http_api.chat_stream", ("CoachChatStreamTransport",)),
+    ("backend.http_api.transcribe_post", ("TranscribePostRoutes",)),
+    ("backend.http_api.planning_commands_post", ("PlanningCommandsPostRoutes",)),
+    ("backend.http_api.feedback_post", ("FeedbackPostRoutes",)),
+    ("backend.http_api.chat_cancel_post", ("ChatCancelPostRoutes",)),
+    ("backend.http_api.privacy_restore_post", ("PrivacyRestorePostRoutes",)),
+    ("backend.http_api.auth_post", ("AuthPostRoutes",)),
     ("backend.http_api.public_get", ("PublicGetRoutes",)),
     ("backend.http_api.planning_get", ("PlanningGetRoutes",)),
     ("backend.http_api.sync_get", ("SyncGetRoutes", "SYNC_JOB_RE")),
@@ -65,6 +81,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.http_api.export_streams", ("ExportStreamTransport",)),
     ("backend.coach.conversation", ("CoachConversationResetService",)),
     ("backend.coach.prompt", ("COACH_PROMPT",)),
+    ("backend.providers.intervals_client", ("IntervalsClient",)),
     ("backend.http_api.readiness", ("ReadinessService",)),
     (
         "backend.http_api.public_performance",
@@ -1672,10 +1689,14 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.http_api.bootstrap_state", ("PublicBootstrapService", "bootstrap_provider_states")),
     ("backend.http_api.state_events_transport", ("StateEventTransport",)),
     ("backend.backup.restore", ("DatabaseRestoreService",)),
+    ("backend.db.key_value", ("KeyValueService",)),
     ("backend.coach.structured_response", ("CoachStructuredResponseService",)),
 )
 
 FORBIDDEN_SERVER_SYMBOLS = (
+    "database",
+    "get_kv",
+    "set_kv",
     "_send_structured_coach_response",
     "_resume_background_coach_response",
     "_StructuredCoachResponseAttemptContext",
@@ -2024,6 +2045,99 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_handle_openai_stream_network_error",
 )
 
+# Functions in server.py are fixed composition helpers, local clock utilities,
+# the HTTP adapter, and process lifecycle. New orchestration belongs in backend.
+ALLOWED_SERVER_FUNCTIONS = frozenset("""
+    utc_now database_manager session_auth_service provider_state_service
+    provider_refresh_tracker sync_operation_observer provider_freshness_service
+    sync_job_store sync_job_queue_service sync_command_endpoint
+    provider_refresh_command_service sync_conflict_command_service
+    plan_push_command_service structured_plan_sync_service
+    plan_repair_manifest_service coach_sync_tool_service nutrition_service
+    intervals_nutrition_sync_service coach_athlete_record_tool_service
+    coach_activity_read_tool_service coach_read_tool_service state_version_service
+    public_performance_state_service public_feedback_state_service
+    sync_public_state_service sync_state_repository performance_refresh_service
+    intervals_snapshot_reader performance_refresh_followup_service
+    sync_job_outcome_service daily_sync_marker_service intervals_snapshot_service
+    intervals_sync_service garmin_fixture_loader garmin_client_factory
+    garmin_payload_service garmin_sync_state_service garmin_remote_reader
+    garmin_sync_service garmin_projection_service full_provider_resync_service
+    weather_service weather_sync_service public_weather_state_service
+    morning_body_battery_service external_calendar_reader
+    external_calendar_sync_service calendar_conflict_service
+    activity_feedback_service activity_read_service duplicate_activity_service
+    checkin_service profile_service coach_profile_update_service
+    change_history_service history_undo_service competition_service
+    competition_sync_reconciler competition_sync_service training_plan_service
+    planned_unit_service planned_unit_sync_state_writer planned_calendar_sync_service
+    planned_calendar_repair_service remote_planned_unit_reconciler
+    workout_library_sync_state_service planning_authority_service
+    workout_library_remote_reconciler workout_library_refresh_service
+    workout_library_sync_service selected_workout_sync_service sync_job_executor
+    sync_job_worker workout_library_service workout_library_plan_service
+    coach_library_plan_tool_service local_plan_creation_service
+    training_plan_artifact_service daily_planning_context_service
+    structured_training_state_service structured_training_change_validator
+    structured_training_change_service coach_training_patch_service
+    structured_training_plan_replacement_service adaptive_replan_apply_service
+    illness_pause_sync_service coach_adaptive_apply_service
+    adaptive_preview_followup_service adaptive_replan_preview_service
+    privacy_data_export_service privacy_delete_service athlete_context_service
+    initialise_database key_value_service provider_http_client intervals_client
+    gemini_json_client audio_transcription_client gemini_stream_client
+    openai_responses_client coach_conversation_provision_service
+    coach_conversation_reset_service openai_stream_client coach_quick_actions_service
+    gemini_conversation_history_service coach_message_service
+    coach_conversation_history_service coach_job_store coach_turn_failure_service
+    coach_job_submission_service coach_cancellation_service coach_dialogue_read_service
+    coach_dialogue_action_service coach_clarification_service
+    coach_attachment_context_service manual_morning_checkin_service
+    morning_checkin_state_service gemini_local_chat_history_service
+    gemini_request_payload_service gemini_response_normalization_service
+    gemini_conversation_response_service library_page_service
+    chat_history_page_service coach_proposal_read_service coach_command_receipt_service
+    coach_turn_opening_service coach_proposal_creation_service
+    coach_proposal_confirmation_service coach_proposal_execution_service
+    coach_structured_context_service coach_training_context_service
+    coach_request_payload_service coach_context_preview_service coach_response_transport
+    coach_tool_dispatch_service coach_structured_tool_execution_service
+    coach_structured_tool_failure_service coach_structured_tool_round_journal
+    coach_planning_command_service coach_structured_tool_replay_service
+    coach_structured_outcome_service coach_structured_tool_preparation_service
+    coach_conversation_recovery_service coach_response_retry_policy
+    coach_structured_response_service coach_structured_tool_round_service
+    coach_final_receipt_service coach_structured_turn_service coach_chat_turn_service
+    morning_coach_job_completion_service coach_background_job_runner
+    public_bootstrap_service public_plan_state_service
+    public_state_local_prelude_service public_state_weather_prelude_service
+    public_state_calendar_projection_service public_state_service
+    recent_log_entries_service coach_diagnostic_history_service diagnostic_report_service
+    privacy_archive_export_service database_backup_service export_stream_transport
+    database_restore_validation_service database_restore_service readiness_service
+    request_handler_class daily_sync_loop_service daily_sync_scheduler
+    startup_sync_scheduler main
+""".split())
+
+# These functions intentionally contain control flow for resource caching,
+# schema initialization, and process lifecycle. All other root functions are
+# direct dependency construction or stateless time/configuration helpers.
+SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
+    {
+        "database_manager",
+        "session_auth_service",
+        "provider_state_service",
+        "provider_refresh_tracker",
+        "weather_service",
+        "morning_body_battery_service",
+        "sync_job_worker",
+        "initialise_database",
+        "provider_http_client",
+        "public_state_service",
+        "main",
+    }
+)
+
 
 def _python_files(root: Path) -> Iterable[Path]:
     return sorted(path for path in root.rglob("*.py") if path.is_file())
@@ -2031,6 +2145,13 @@ def _python_files(root: Path) -> Iterable[Path]:
 
 def _parse(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def _request_handler_definition() -> ast.ClassDef:
+    return next(
+        node for node in _parse(HANDLER_PATH).body
+        if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
+    )
 
 
 def _dotted_name(node: ast.AST) -> str | None:
@@ -2165,6 +2286,83 @@ def _server_import_violations(path: Path, tree: ast.AST) -> list[str]:
     return violations
 
 
+def _runtime_import_cycles(backend_root: Path) -> list[tuple[str, ...]]:
+    """Find eager backend import cycles, excluding type-only and local imports."""
+    modules: dict[str, Path] = {}
+    for path in _python_files(backend_root):
+        relative = path.relative_to(backend_root).with_suffix("")
+        parts = relative.parts[:-1] if relative.name == "__init__" else relative.parts
+        modules["backend" + ("." + ".".join(parts) if parts else "")] = path
+
+    graph: dict[str, set[str]] = {name: set() for name in modules}
+
+    def eager_nodes(nodes: list[ast.stmt]) -> Iterable[ast.AST]:
+        for node in nodes:
+            yield node
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if isinstance(node, ast.If):
+                test = ast.unparse(node.test)
+                if test in {"TYPE_CHECKING", "typing.TYPE_CHECKING"}:
+                    continue
+                yield from eager_nodes(node.body)
+                yield from eager_nodes(node.orelse)
+            elif isinstance(node, (ast.Try, ast.TryStar)):
+                yield from eager_nodes(node.body)
+                for handler in node.handlers:
+                    yield from eager_nodes(handler.body)
+                yield from eager_nodes(node.orelse)
+                yield from eager_nodes(node.finalbody)
+
+    for name, path in modules.items():
+        tree = _parse(path)
+        for node in eager_nodes(tree.body):
+            targets: set[str] = set()
+            if isinstance(node, ast.Import):
+                targets.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    current = name.split(".")
+                    package = current if path.name == "__init__.py" else current[:-1]
+                    base = package[: len(package) - node.level + 1]
+                    imported = node.module.split(".") if node.module else []
+                    target = ".".join(base + imported)
+                else:
+                    target = node.module or ""
+                if target:
+                    targets.add(target)
+                for alias in node.names:
+                    child = f"{target}.{alias.name}" if target else alias.name
+                    if child in modules:
+                        targets.add(child)
+            graph[name].update(target for target in targets if target in modules)
+
+    cycles: set[tuple[str, ...]] = set()
+    active: list[str] = []
+    active_set: set[str] = set()
+    complete: set[str] = set()
+
+    def visit(name: str) -> None:
+        if name in active_set:
+            cycle = active[active.index(name):]
+            rotations = [tuple(cycle[index:] + cycle[:index]) for index in range(len(cycle))]
+            cycles.add(min(rotations))
+            return
+        if name in complete:
+            return
+        active.append(name)
+        active_set.add(name)
+        for target in sorted(graph[name]):
+            visit(target)
+        active.pop()
+        active_set.remove(name)
+        complete.add(name)
+
+    for name in sorted(graph):
+        visit(name)
+    return sorted(cycles)
+
+
 def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
     implementations: dict[str, int] = {}
     for node in tree.body:
@@ -2179,6 +2377,73 @@ def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
 
 
 class ServerArchitectureTests(unittest.TestCase):
+    def test_chat_history_http_projection_uses_coach_history_owner(self) -> None:
+        source = (BACKEND_ROOT / "http_api" / "chat_page.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        service = next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "ChatHistoryPageService"
+        )
+        self.assertFalse(
+            any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "execute"
+                for node in ast.walk(service)
+            )
+        )
+        self.assertTrue(
+            any(
+                isinstance(node, ast.Call)
+                and ast.unparse(node.func) == "self._conversation_history.page"
+                for node in ast.walk(service)
+            )
+        )
+
+    def test_request_handler_response_methods_only_delegate_socket_writes(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        handler = _request_handler_definition()
+        delegated_methods = {
+            "send_sse_headers": "send_sse_headers",
+            "send_sse_event": "send_sse_event",
+            "send_json": "send_json",
+            "send_file_stream": "send_file_stream",
+            "send_bytes": "send_bytes",
+            "send_static": "send_static",
+        }
+        for method_name, transport_method in delegated_methods.items():
+            with self.subTest(method=method_name):
+                method = next(
+                    node for node in handler.body
+                    if isinstance(node, ast.FunctionDef) and node.name == method_name
+                )
+                calls = [
+                    node for node in ast.walk(method)
+                    if isinstance(node, ast.Call)
+                    and ast.unparse(node.func)
+                    == f"self.dependencies.response_transport.{transport_method}"
+                ]
+                self.assertEqual(len(calls), 1)
+
+    def test_post_handler_preserves_authentication_csrf_and_maintenance_order(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        handler = _request_handler_definition()
+        post = next(
+            node for node in handler.body
+            if isinstance(node, ast.FunctionDef) and node.name == "do_POST"
+        )
+        source = ast.unparse(post)
+        ordered_calls = (
+            "dependencies.post_dispatcher.handle_before_auth",
+            "self.auth_service.require_auth",
+            "self.auth_service.require_csrf",
+            "dependencies.post_dispatcher.handle_before_maintenance",
+            "dependencies.maintenance_gate.operation",
+            "dependencies.post_dispatcher.handle_authenticated",
+        )
+        positions = [source.index(call) for call in ordered_calls]
+        self.assertEqual(positions, sorted(positions))
+
     def test_chat_turn_has_no_server_adapter(self) -> None:
         implementations = _top_level_implementations(_parse(SERVER_PATH))
         self.assertNotIn("chat_with_coach", implementations)
@@ -2188,6 +2453,46 @@ class ServerArchitectureTests(unittest.TestCase):
         inventory = (REPOSITORY_ROOT / "docs" / "server-extraction-inventory.md").read_text(encoding="utf-8")
         self.assertIn("| P0 (Zuordnung offen) | 0 | 0 | 0 |", inventory)
         self.assertNotIn("| P0 (Zuordnung offen) | offen |", inventory)
+
+    def test_training_plan_scope_prefix_is_owned_by_coach_authorization(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        self.assertFalse(
+            any(
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name)
+                    and target.id == "TRAINING_PLAN_SCOPE_PREFIX"
+                    for target in node.targets
+                )
+                for node in server_tree.body
+            )
+        )
+        authorization = (
+            BACKEND_ROOT / "coach" / "authorization.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('TRAINING_PLAN_SCOPE_PREFIX = "training_plan:"', authorization)
+        for module_name in ("dialogue_action.py", "planning_change_tools.py", "planning_action_tools.py"):
+            source = (BACKEND_ROOT / "coach" / module_name).read_text(encoding="utf-8")
+            self.assertIn("TRAINING_PLAN_SCOPE_PREFIX", source)
+            self.assertNotIn("training_plan_scope_prefix", source)
+
+    def test_coach_tool_round_limit_is_owned_by_its_execution_service(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        self.assertFalse(
+            any(
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name)
+                    and target.id == "COACH_TOOL_MAX_ROUNDS"
+                    for target in node.targets
+                )
+                for node in server_tree.body
+            )
+        )
+        round_service = (
+            BACKEND_ROOT / "coach" / "structured_tool_round.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("COACH_TOOL_MAX_ROUNDS = 12", round_service)
 
     def test_backend_does_not_import_or_reach_server_namespace(self) -> None:
         self.assertTrue(BACKEND_ROOT.is_dir(), "Backend source must be available")
@@ -2200,6 +2505,35 @@ class ServerArchitectureTests(unittest.TestCase):
             "Backend modules must not import or dynamically access server.py:\n"
             + "\n".join(violations),
         )
+
+    def test_backend_has_no_eager_runtime_import_cycles(self) -> None:
+        self.assertEqual([], _runtime_import_cycles(BACKEND_ROOT))
+
+    def test_import_cycle_guard_ignores_type_only_and_function_local_imports(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend_root = Path(temporary) / "backend"
+            backend_root.mkdir()
+            (backend_root / "__init__.py").write_text("", encoding="utf-8")
+            (backend_root / "first.py").write_text(
+                "from typing import TYPE_CHECKING\n"
+                "if TYPE_CHECKING:\n    from . import second\n"
+                "def later():\n    from . import second\n",
+                encoding="utf-8",
+            )
+            (backend_root / "second.py").write_text(
+                "from . import first\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([], _runtime_import_cycles(backend_root))
+
+            (backend_root / "first.py").write_text(
+                "from . import second\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                [("backend.first", "backend.second")],
+                _runtime_import_cycles(backend_root),
+            )
 
     def test_server_does_not_redefine_extracted_public_symbols(self) -> None:
         implementations = _top_level_implementations(_parse(SERVER_PATH))
@@ -2221,6 +2555,70 @@ class ServerArchitectureTests(unittest.TestCase):
             + "\n".join(violations),
         )
 
+    def test_server_top_level_functions_are_limited_to_composition_root(self) -> None:
+        tree = _parse(SERVER_PATH)
+        functions = {
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        classes = {
+            node.name for node in tree.body if isinstance(node, ast.ClassDef)
+        }
+        self.assertEqual(
+            set(),
+            functions - ALLOWED_SERVER_FUNCTIONS,
+            "New server.py functions belong in a backend owner module.",
+        )
+        self.assertEqual(set(), classes)
+
+    def test_server_composition_bodies_do_not_own_domain_or_io_logic(self) -> None:
+        tree = _parse(SERVER_PATH)
+        functions = {
+            node.name: node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        control_flow = {
+            name
+            for name, function in functions.items()
+            if any(
+                isinstance(node, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With, ast.AsyncWith, ast.Match))
+                for node in ast.walk(function)
+            )
+        }
+        self.assertEqual(SERVER_COMPOSITION_CONTROL_FLOW, control_flow)
+
+        forbidden_calls = {
+            "execute",
+            "executemany",
+            "fetchone",
+            "fetchall",
+            "urlopen",
+            "send_request",
+            "request",
+            "post",
+            "put",
+            "delete",
+            "open",
+            "read",
+            "write",
+            "read_bytes",
+            "write_bytes",
+            "read_text",
+            "write_text",
+            "connect",
+        }
+        violations = [
+            f"{function.name}:{node.lineno}:{ast.unparse(node.func)}"
+            for function in functions.values()
+            for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in forbidden_calls
+        ]
+        self.assertEqual([], violations)
+
     def test_browser_fixture_does_not_patch_removed_response_functions(self) -> None:
         fixture = REPOSITORY_ROOT / "e2e" / "fixture_runtime.py"
         removed = {
@@ -2241,11 +2639,7 @@ class ServerArchitectureTests(unittest.TestCase):
         self.assertIn("coach_response_transport", patched)
 
     def test_request_handler_does_not_reintroduce_state_event_orchestration(self) -> None:
-        request_handler = next(
-            node
-            for node in _parse(SERVER_PATH).body
-            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
-        )
+        request_handler = _request_handler_definition()
         methods = {
             node.name
             for node in request_handler.body
@@ -2264,11 +2658,7 @@ class ServerArchitectureTests(unittest.TestCase):
         forbidden_paths: tuple[str, ...] = (),
     ) -> ast.Module:
         server_tree = _parse(SERVER_PATH)
-        request_handler = next(
-            node
-            for node in server_tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
-        )
+        request_handler = _request_handler_definition()
         methods = {
             node.name
             for node in request_handler.body
@@ -2279,19 +2669,21 @@ class ServerArchitectureTests(unittest.TestCase):
             for node in request_handler.body
             if isinstance(node, ast.FunctionDef) and node.name == "do_GET"
         )
-        route_dispatches = [
+        dispatcher = next(
             node
-            for node in ast.walk(get_handler)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == route_name
-            and node.func.attr == "handle"
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "HTTP_ROUTE_DISPATCHER" for target in node.targets)
+        )
+        route_dispatches = [
+            node for node in ast.walk(dispatcher.value)
+            if isinstance(node, ast.Name) and node.id == route_name
         ]
 
         if method_must_be_absent:
             self.assertNotIn(old_method, methods)
         self.assertEqual(len(route_dispatches), 1)
+        self.assertIn("dependencies.route_dispatcher.handle_get", ast.unparse(get_handler))
         if forbidden_paths:
             old_method_node = next(
                 node
@@ -2324,31 +2716,114 @@ class ServerArchitectureTests(unittest.TestCase):
         ]
         self.assertEqual(factory_names, expected_names)
 
-    def _assert_put_route_owned(
-        self, route_name: str, forbidden_paths: tuple[str, ...], factory: str
+    def _assert_write_route_owned(
+        self,
+        handler_method: str,
+        route_name: str,
+        forbidden_paths: tuple[str, ...],
+        factory: str,
     ) -> ast.Module:
         server_tree = _parse(SERVER_PATH)
-        put_handler = next(
-            node
-            for node in ast.walk(server_tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_do_PUT"
-        )
-        nodes = list(ast.walk(put_handler))
-        dispatches = [
-            node
-            for node in nodes
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == route_name
-            and node.func.attr == "handle"
-        ]
-        self.assertEqual(len(dispatches), 1)
-        paths = {
-            node.value
-            for node in nodes
-            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        post_routes = {
+            "AUTH_POST_ROUTES",
+            "PRIVACY_RESTORE_POST_ROUTES",
+            "CHAT_CANCEL_POST_ROUTES",
+            "COACH_ACTIONS_POST_ROUTES",
+            "CHAT_POST_ROUTES",
+            "TRANSCRIBE_POST_ROUTES",
+            "PLANNING_COMMANDS_POST_ROUTES",
+            "FEEDBACK_POST_ROUTES",
+            "CHAT_STREAM_TRANSPORT",
+            "SYNC_COMMAND_POST_ROUTE",
+            "HISTORY_UNDO_POST_ROUTES",
+            "DIAGNOSTICS_CAPTURE_POST_ROUTES",
+            "PRIVACY_DELETE_POST_ROUTES",
+            "NUTRITION_POST_ROUTES",
         }
+        is_post_dispatch = route_name in post_routes
+        is_put_dispatch = route_name in {"SETTINGS_PUT_ROUTES", "ATHLETE_PUT_ROUTES"}
+        if is_post_dispatch:
+            route_owner = (
+                "HTTP_POST_DISPATCHER"
+                if route_name in {
+                    "AUTH_POST_ROUTES",
+                    "PRIVACY_RESTORE_POST_ROUTES",
+                    "CHAT_CANCEL_POST_ROUTES",
+                }
+                else "AUTHENTICATED_POST_ROUTES"
+            )
+            dispatcher = next(
+                node for node in server_tree.body
+                if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == route_owner for target in node.targets)
+            )
+            route_nodes = [node for node in ast.walk(dispatcher.value) if isinstance(node, ast.Name) and node.id == route_name]
+            stage = {
+                "AUTH_POST_ROUTES": "handle_before_auth",
+                "PRIVACY_RESTORE_POST_ROUTES": "handle_before_auth",
+                "CHAT_CANCEL_POST_ROUTES": "handle_before_maintenance",
+            }.get(route_name, "handle_authenticated")
+            dispatcher_fields = {
+                "AUTH_POST_ROUTES": "_auth_routes",
+                "PRIVACY_RESTORE_POST_ROUTES": "_restore_route",
+                "CHAT_CANCEL_POST_ROUTES": "_cancel_route",
+                "CHAT_STREAM_TRANSPORT": "_chat_stream",
+                "SYNC_COMMAND_POST_ROUTE": "_sync_commands",
+                "HISTORY_UNDO_POST_ROUTES": "_history_undo",
+                "DIAGNOSTICS_CAPTURE_POST_ROUTES": "_diagnostics_capture",
+                "PRIVACY_DELETE_POST_ROUTES": "_privacy_delete",
+                "NUTRITION_POST_ROUTES": "_nutrition",
+            }
+            field = dispatcher_fields.get(
+                route_name, "_" + route_name.removesuffix("_POST_ROUTES").lower()
+            )
+            dispatcher_source = (
+                BACKEND_ROOT / "http_api" / "post_dispatch.py"
+            ).read_text(encoding="utf-8")
+            dispatcher_tree = ast.parse(dispatcher_source)
+            stage_method = next(
+                node for node in ast.walk(dispatcher_tree)
+                if isinstance(node, ast.FunctionDef) and node.name == stage
+            )
+            dispatches = [
+                node for node in ast.walk(stage_method)
+                if isinstance(node, ast.Attribute)
+                and node.attr == field
+            ]
+            self.assertTrue(route_nodes)
+            self.assertTrue(dispatches)
+            handler = next(
+                node for node in _request_handler_definition().body
+                if isinstance(node, ast.FunctionDef) and node.name == "do_POST"
+            )
+            nodes = list(ast.walk(handler))
+            self.assertTrue(any(
+                isinstance(node, ast.Call)
+                and "dependencies.post_dispatcher" in ast.unparse(node.func)
+                for node in nodes
+            ))
+        elif is_put_dispatch:
+            handler = next(node for node in _request_handler_definition().body if isinstance(node, ast.FunctionDef) and node.name == handler_method)
+            nodes = list(ast.walk(handler))
+            dispatcher = next(
+                node for node in server_tree.body
+                if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "HTTP_ROUTE_DISPATCHER" for target in node.targets)
+            )
+            route_nodes = [node for node in ast.walk(dispatcher.value) if isinstance(node, ast.Name) and node.id == route_name]
+            dispatches = [node for node in nodes if isinstance(node, ast.Call) and "dependencies.route_dispatcher.handle_put" in ast.unparse(node)]
+        else:
+            handler = next(node for node in _request_handler_definition().body if isinstance(node, ast.FunctionDef) and node.name == handler_method)
+            nodes = list(ast.walk(handler))
+            route_nodes = [node for node in nodes if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == route_name and node.func.attr == "handle"]
+            dispatches = route_nodes
+        if is_put_dispatch:
+            self.assertEqual(len(route_nodes), 1)
+            self.assertEqual(len(dispatches), 1)
+        else:
+            self.assertEqual(len(dispatches), 1)
+        self.assertEqual(len(dispatches), 1)
+        paths = {node.value for node in nodes if isinstance(node, ast.Constant) and isinstance(node.value, str)}
         self.assertTrue(set(forbidden_paths).isdisjoint(paths))
         assignment = next(
             node
@@ -2426,7 +2901,7 @@ class ServerArchitectureTests(unittest.TestCase):
                 "sync_job_queue_service",
                 "sync_public_state_service",
                 "activity_read_service",
-                "lambda: local_now().date()",
+                "lambda: ATHLETE_CLOCK.now().date()",
                 "ALL_SYNC_DAYS",
             ],
         )
@@ -2464,8 +2939,225 @@ class ServerArchitectureTests(unittest.TestCase):
             ["session_auth_service", "change_history_service"],
         )
 
+    def test_history_undo_post_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_data_post",
+            "HISTORY_UNDO_POST_ROUTES",
+            ("/api/change-history/undo/preview", "/api/change-history/undo"),
+            "HistoryUndoPostRoutes(history_undo_service, coach_proposal_creation_service)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "history_undo_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_coach_actions_post_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_coach_post",
+            "COACH_ACTIONS_POST_ROUTES",
+            ("/api/coach/actions/confirm", "/api/coach/actions/execute"),
+            "CoachActionsPostRoutes(coach_proposal_confirmation_service, coach_proposal_execution_service)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "coach_actions_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_chat_post_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_coach_post",
+            "CHAT_POST_ROUTES",
+            ("/api/chat", "/api/chat/reset", "client_turn_id"),
+            "ChatPostRoutes(coach_job_submission_service, coach_conversation_reset_service, coach_attachments.MAX_REQUEST_BYTES)",
+        )
+        route_source = (BACKEND_ROOT / "http_api" / "chat_post.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_chat_stream_lifecycle_is_owned_by_http_api_module(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        handler = _request_handler_definition()
+        self.assertFalse(any(
+            isinstance(node, ast.FunctionDef) and node.name == "handle_chat_stream"
+            for node in handler.body
+        ))
+        dispatcher_source = (
+            BACKEND_ROOT / "http_api" / "post_dispatch.py"
+        ).read_text(encoding="utf-8")
+        dispatcher_tree = ast.parse(dispatcher_source)
+        coach_post = next(
+            node for node in ast.walk(dispatcher_tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "handle_authenticated"
+        )
+        self.assertEqual(
+            sum(
+                isinstance(node, ast.Call)
+                and ast.unparse(node.func) == "self._chat_stream.handle"
+                for node in ast.walk(coach_post)
+            ),
+            1,
+        )
+        assignment = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "CHAT_STREAM_TRANSPORT" for target in node.targets)
+        )
+        self.assertEqual(ast.unparse(assignment.value.func), "CoachChatStreamTransport")
+        self.assertEqual(
+            [ast.unparse(arg) for arg in assignment.value.args],
+            [
+                "coach_streams.CHAT_STREAM_REGISTRY",
+                "coach_job_submission_service",
+                "coach_command_receipt_service",
+                "REDACTOR.redact_text",
+                "LOGGER",
+            ],
+        )
+        route_source = (BACKEND_ROOT / "http_api" / "chat_stream.py").read_text(encoding="utf-8")
+        route_tree = ast.parse(route_source)
+        self.assertFalse(any(
+            isinstance(node, ast.ImportFrom) and node.module == "server"
+            for node in ast.walk(route_tree)
+        ))
+        self.assertFalse(any(
+            isinstance(node, ast.Import)
+            and any(alias.name == "server" for alias in node.names)
+            for node in ast.walk(route_tree)
+        ))
+
+    def test_transcribe_post_route_is_owned_by_http_api_module(self) -> None:
+        server_tree = self._assert_write_route_owned(
+            "_handle_coach_post",
+            "TRANSCRIBE_POST_ROUTES",
+            ("/api/transcribe",),
+            "TranscribePostRoutes(SETTINGS, audio_transcription_client)",
+        )
+        route_source = (BACKEND_ROOT / "http_api" / "transcribe_post.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("server", route_source.casefold())
+        self.assertIn("handler.read_audio_body()", route_source)
+        self.assertIn("selected_ai_provider()", route_source)
+        self.assertIn("selected_model()", route_source)
+        self.assertNotIn(
+            "transcribe_audio",
+            {
+                node.name
+                for node in ast.walk(server_tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            },
+        )
+
+    def test_sync_command_post_transport_is_owned_by_http_api_module(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        handler = _request_handler_definition()
+        self.assertFalse(any(
+            isinstance(node, ast.FunctionDef) and node.name == "_handle_sync_post"
+            for node in handler.body
+        ))
+        route_source = (
+            BACKEND_ROOT / "http_api" / "sync_commands_post.py"
+        ).read_text(encoding="utf-8")
+        route_tree = ast.parse(route_source)
+        self.assertFalse(any(
+            isinstance(node, ast.ImportFrom) and node.module == "server"
+            for node in ast.walk(route_tree)
+        ))
+        self.assertFalse(any(
+            isinstance(node, ast.Import)
+            and any(alias.name == "server" for alias in node.names)
+            for node in ast.walk(route_tree)
+        ))
+
+    def test_planning_commands_post_route_is_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_coach_post",
+            "PLANNING_COMMANDS_POST_ROUTES",
+            ("/api/planning/commands",),
+            "PlanningCommandsPostRoutes(coach_planning_command_service, lambda: coach_conversation_provision_service())",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "planning_commands_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_feedback_post_route_is_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_coach_post",
+            "FEEDBACK_POST_ROUTES",
+            ("/api/feedback",),
+            "FeedbackPostRoutes(checkin_service)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "feedback_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_chat_cancel_post_route_is_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "do_POST",
+            "CHAT_CANCEL_POST_ROUTES",
+            ("/api/chat/cancel",),
+            "ChatCancelPostRoutes(coach_cancellation_service)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "chat_cancel_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_privacy_restore_post_route_is_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "do_POST",
+            "PRIVACY_RESTORE_POST_ROUTES",
+            ("/api/privacy/restore",),
+            "PrivacyRestorePostRoutes(session_auth_service, database_restore_service, MAX_BACKUP_BYTES)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "privacy_restore_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_auth_post_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "do_POST",
+            "AUTH_POST_ROUTES",
+            ("/api/login", "/api/logout"),
+            "AuthPostRoutes(session_auth_service, runtime_maintenance.MAINTENANCE_GATE)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "auth_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_diagnostics_capture_post_route_is_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "_handle_data_post",
+            "DIAGNOSTICS_CAPTURE_POST_ROUTES",
+            ("/api/diagnostics/capture",),
+            "DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "diagnostics_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+
+    def test_privacy_delete_post_route_is_owned_by_http_api_module(self) -> None:
+        server_tree = self._assert_write_route_owned(
+            "_handle_data_post",
+            "PRIVACY_DELETE_POST_ROUTES",
+            ("/api/privacy/delete", "LOKALE DATEN LÖSCHEN"),
+            "PrivacyDeletePostRoutes(privacy_delete_service)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "privacy_delete_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
+        self.assertNotIn("privacy_delete_service().delete()", ast.unparse(server_tree))
+
     def test_settings_put_routes_are_owned_by_http_api_module(self) -> None:
-        self._assert_put_route_owned(
+        self._assert_write_route_owned(
+            "_do_PUT",
             "SETTINGS_PUT_ROUTES",
             (
                 "/api/settings/model",
@@ -2477,7 +3169,8 @@ class ServerArchitectureTests(unittest.TestCase):
         )
 
     def test_athlete_put_routes_are_owned_by_http_api_module(self) -> None:
-        self._assert_put_route_owned(
+        self._assert_write_route_owned(
+            "_do_PUT",
             "ATHLETE_PUT_ROUTES",
             ("/api/athlete-context", "/api/profile"),
             "AthletePutRoutes(athlete_context_service, profile_service)",
@@ -2520,7 +3213,7 @@ class ServerArchitectureTests(unittest.TestCase):
     def test_intervals_client_does_not_retain_snapshot_use_cases(self) -> None:
         intervals_client = next(
             node
-            for node in _parse(SERVER_PATH).body
+            for node in _parse(BACKEND_ROOT / "providers" / "intervals_client.py").body
             if isinstance(node, ast.ClassDef) and node.name == "IntervalsClient"
         )
         methods = {

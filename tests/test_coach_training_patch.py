@@ -7,6 +7,7 @@ import unittest
 
 from test_coach_dialogue import DialogueHarness, server
 
+from backend.coach import limits as coach_limits
 from backend.planning.training_plans import COACH_PLAN_CONSTRAINTS_PREFIX
 
 
@@ -48,7 +49,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
             )
         self.assertEqual(error.exception.reason, "plan_date_conflict")
         self.assertEqual(self.state()["planning_revision"], before)
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM training_plans").fetchone()["count"], 0)
 
     def test_approved_constraints_are_attached_to_created_plan(self):
@@ -59,10 +60,10 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
              "changes": [], "workouts": [self.workout()]},
             action,
         )
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             plan_id = db.execute("SELECT id FROM training_plans").fetchone()["id"]
         self.assertEqual(
-            json.loads(server.get_kv(COACH_PLAN_CONSTRAINTS_PREFIX + plan_id)),
+            json.loads(server.key_value_service().get(COACH_PLAN_CONSTRAINTS_PREFIX + plan_id)),
             action["request"]["constraints"],
         )
 
@@ -80,7 +81,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
         service = server.coach_training_patch_service()
         for arguments in (
             {"changes": [], "workouts": []},
-            {"changes": [], "workouts": [self.workout()] * (server.COACH_TRAINING_CHANGE_LIMIT + 1)},
+            {"changes": [], "workouts": [self.workout()] * (coach_limits.COACH_TRAINING_CHANGE_LIMIT + 1)},
         ):
             with self.subTest(size=len(arguments["workouts"])), self.assertRaises(server.AppError) as error:
                 service.apply(arguments, self.action("local_plan"))

@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import test_server as fixtures
+import server_test_support as fixtures
 from backend.http_api.rate_limit import RateLimiter
 from backend.performance import context as performance_context
 from backend.performance import garmin_metrics as performance_garmin_metrics
@@ -125,7 +125,7 @@ class ProviderReviewTests(unittest.TestCase):
 
         def erase():
             with runtime_maintenance.MAINTENANCE_GATE.operation():
-                server.privacy_delete_service().delete()
+                server.privacy_delete_service().delete("LOKALE DATEN LÖSCHEN")
             deleted.set()
 
         worker = threading.Thread(target=writer)
@@ -145,13 +145,13 @@ class ProviderReviewTests(unittest.TestCase):
     def test_privacy_delete_discards_queued_provider_payloads(self):
         server.sync_job_queue_service().enqueue("intervals", "refresh", {"days": 7})
         server.sync_job_queue_service().enqueue("garmin", "refresh", {"days": 7})
-        server.privacy_delete_service().delete()
+        server.privacy_delete_service().delete("LOKALE DATEN LÖSCHEN")
         self.assertIsNone(server.sync_job_store().claim())
         self.assertEqual(server.sync_job_queue_service().list(), [])
 
     def test_privacy_delete_discards_claimed_coach_payload_without_failure_write(self):
         job = {"_maintenance_generation": runtime_maintenance.MAINTENANCE_GATE.current_generation()}
-        server.privacy_delete_service().delete()
+        server.privacy_delete_service().delete("LOKALE DATEN LÖSCHEN")
         with patch("backend.coach.chat_turn.CoachChatTurnService.run") as coach, patch("backend.coach.turn_failures.CoachTurnFailureService.persist") as failure:
             server.coach_background_job_runner().run(job)
         coach.assert_not_called()
@@ -164,11 +164,11 @@ class ProviderReviewTests(unittest.TestCase):
         def execute(_job):
             entered.set()
             release.wait(5)
-            server.set_kv("private_after_fetch", "synthetic")
+            server.key_value_service().set("private_after_fetch", "synthetic")
             raise server.AppError(400, "Synthetic provider failure")
 
         def erase():
-            server.privacy_delete_service().delete()
+            server.privacy_delete_service().delete("LOKALE DATEN LÖSCHEN")
             deleted.set()
 
         executor = server.sync_job_executor()
@@ -191,7 +191,7 @@ class ProviderReviewTests(unittest.TestCase):
             deletion.join(5)
         self.assertFalse(worker.is_alive())
         self.assertTrue(deleted.is_set())
-        self.assertFalse(server.get_kv("private_after_fetch"))
+        self.assertFalse(server.key_value_service().get("private_after_fetch"))
         self.assertEqual(server.sync_job_queue_service().list(), [])
 
     def test_utf8_login_does_not_normalize_password_or_expose_it(self):
@@ -223,7 +223,7 @@ class ProviderReviewTests(unittest.TestCase):
         for source in sources:
             for historical in (False, True):
                 with self.subTest(source=source, historical=historical):
-                    server.set_kv("garmin_snapshot", json.dumps(previous))
+                    server.key_value_service().set("garmin_snapshot", json.dumps(previous))
                     server.sync_state_repository().update_cursor("garmin", "data", "2026-09-01", "synthetic")
                     server.sync_state_repository().update_cursor("garmin", "historical", "2026-08-01", "synthetic")
                     payload = {"synced_at": "2026-09-05T00:00:00+00:00", "start": "2026-08-01", "end": "2026-09-05",
@@ -283,7 +283,7 @@ class ProviderReviewTests(unittest.TestCase):
                  "weight": {"calendarDate": "2026-08-31", "weight": 72}}
         garmin_sync.merge_sources(first, {})
         performance_history.append_garmin_performance_history(
-            first, {}, server.local_now().date()
+            first, {}, server.ATHLETE_CLOCK.now().date()
         )
         history = first["performance_history"]
         self.assertEqual([row["date"] for row in history], ["2026-08-30", "2026-08-31", "2026-09-01"])
@@ -293,15 +293,15 @@ class ProviderReviewTests(unittest.TestCase):
             ] if failed else [], "activities": [{"activityId": 8, "startTimeLocal": "2025-02-01T12:00:00"}]}
             garmin_sync.merge_sources(second, first)
             performance_history.append_garmin_performance_history(
-                second, first, server.local_now().date()
+                second, first, server.ATHLETE_CLOCK.now().date()
             )
-            server.set_kv("garmin_snapshot", json.dumps(second))
+            server.key_value_service().set("garmin_snapshot", json.dumps(second))
             server.sync_state_repository().save_snapshot({"synced_at": second["synced_at"], "athlete": {}, "recent_wellness": [], "recent_activities": []})
             public = performance_context.current_performance_context(
                 server.sync_state_repository().latest_snapshot(),
                 server.garmin_payload_service().snapshot(),
                 server.profile_service().get(),
-                server.local_now().date(),
+                server.ATHLETE_CLOCK.now().date(),
             )
             for key in ("cycling_ftp_watts", "weight_kg"):
                 data = public["metrics"][key]
@@ -325,10 +325,10 @@ class ProviderReviewTests(unittest.TestCase):
                    "cycling_ftp": {"functionalThresholdPower": 300}}
         garmin_sync.merge_sources(payload, {})
         performance_history.append_garmin_performance_history(
-            payload, {}, server.local_now().date()
+            payload, {}, server.ATHLETE_CLOCK.now().date()
         )
         metric = performance_garmin_metrics.garmin_performance_metrics(
-            payload, server.local_now().date()
+            payload, server.ATHLETE_CLOCK.now().date()
         )["cycling_ftp_watts"]
         self.assertEqual(metric["freshness"], "current")
         self.assertIsNone(metric["observed_at"])
@@ -340,16 +340,16 @@ class ProviderReviewTests(unittest.TestCase):
                  "activities": [{"activityId": 1, "startTimeLocal": "2026-08-31T12:00:00", "activityType": "cycling", "maxHR": 180}]}
         garmin_sync.merge_sources(first, {})
         performance_history.append_garmin_performance_history(
-            first, {}, server.local_now().date()
+            first, {}, server.ATHLETE_CLOCK.now().date()
         )
         second = {"synced_at": "2026-09-05T09:00:00+00:00", "errors": [],
                   "activities": [{"activityId": 2, "startTimeLocal": "2025-02-01T12:00:00", "activityType": "cycling", "maxHR": 150}]}
         garmin_sync.merge_sources(second, first)
         performance_history.append_garmin_performance_history(
-            second, first, server.local_now().date()
+            second, first, server.ATHLETE_CLOCK.now().date()
         )
         metric = performance_garmin_metrics.garmin_performance_metrics(
-            second, server.local_now().date()
+            second, server.ATHLETE_CLOCK.now().date()
         )["cycling_max_hr_bpm"]
         self.assertEqual(metric["value"], 180)
         self.assertEqual(metric["observed_at"], "2026-08-31")
@@ -374,14 +374,14 @@ class ProviderReviewTests(unittest.TestCase):
         with patch.object(server, "DB_PATH", encrypted_path), patch.object(server, "CONFIG", configured), \
                 patch.object(RateLimiter, "allow", autospec=True, return_value=(True, 0)) as rate_limit:
             server.initialise_database()
-            server.set_kv("marker", "fresh")
+            server.key_value_service().set("marker", "fresh")
             result = server.session_auth_service().login_user(Mock(client_address=("127.0.0.1", 0)), configured.app_password)
             self.assertTrue(result["authenticated"])
             rate_limit.assert_called_with(server.RATE_LIMITER, "login:127.0.0.1", 5, 900)
             server.database_manager().close()
             server.DATABASE_MANAGER = None
             server.DATABASE_MANAGER_SIGNATURE = None
-            self.assertEqual(server.get_kv("marker"), "fresh")
+            self.assertEqual(server.key_value_service().get("marker"), "fresh")
 
 
 class GarminRangeContractTests(unittest.TestCase):

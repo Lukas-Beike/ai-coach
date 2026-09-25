@@ -1,5 +1,25 @@
 # Review-Log der server.py-Auslagerung
 
+## P11-Abschluss — Composition Root und Gesamtprüfung
+
+- Basis: PR #816 ist als `2e16f9a781c437bcc3a7129941a4c9fd8ce3bd2d`
+  auf `origin/develop` gemergt. Der einzige fehlgeschlagene Check war die
+  erschöpfte Codex-Review-Usage; der abgeschlossene Sicherheitsreview war
+  sauber und es gab keine Review-Threads. Der Merge erfolgte mit dem vom
+  Nutzer ausdrücklich autorisierten Admin-Bypass.
+- P11 entfernte die unreferenzierte Kalenderprojektion, den nicht mehr
+  benötigten `ClientDisconnected`-Server-Re-Export und zwei tote Konstanten.
+  Die verbliebenen Server-Funktionen sind geprüfte Composition-Root-, HTTP-
+  oder Prozessadapter und werden durch eine explizite Architektur-Allowlist
+  begrenzt. Testpatches richten sich nach den tatsächlichen Lookup-Orten.
+- Das aktualisierte Inventar hat 1.297 Zeilen und besteht `--check`; kein
+  P0-Ziel oder Server-Funktionsaufrufer blieb offen. Eager Backend-Importgraph
+  ohne Zyklen; dynamische Rückgriffe auf `server` werden ebenfalls geprüft.
+- Validierung: lokale volle Suite 2.797 Tests, 12 Skips, PASS; finaler
+  isolierter Python-3.14-Containerlauf 2.798 Tests, 11 Skips, PASS; Docker-Build,
+  39 Architekturtests, `ruff` F401/F841, Syntaxprüfung und `git diff --check`
+  PASS. Keine Frontend- oder PWA-Dateien geändert.
+
 Dieses Log hält nur tatsächlich vom Orchestrator geprüfte integrierte Stände
 fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 
@@ -7608,3 +7628,419 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - POST-Transport, vollständiger Handler-/Body-Umzug, P7/P8-Restzuordnungen
   und P11 bleiben offen. Nächster kleiner Auftrag: History-Undo-POST-
   Dispatch einschließlich Vorschlagsprojektion und Revisions-/Hash-Vertrag.
+
+## P10 History-Undo-POST-Routen — Integrationsreview
+
+- Vorgänger-PR #792 wurde am 24.09.2026 um 08:02:47 UTC mit
+  `129612433f762ba8c0550b1a057c47e4bd35b427` gemergt; der Commit ist
+  Vorfahr von `origin/develop`. Browser, Codex und Sonar bestanden, ohne
+  offene Review-Threads.
+- GPT-6-Luna-Quellcommit `cd2d56ea` erhielt **FAIL** wegen eines langen
+  duplizierenden AST-Architekturtests. Der Worker änderte ihn in
+  `88430350a631b6933d817badf1cde6ad82b5061e` auf einen POST-Helper;
+  Root erkannte im erneuten Diff noch die Duplizierung zum bestehenden PUT-
+  Helper und führte beide in der Integration zu einem gemeinsamen
+  `_assert_write_route_owned` zusammen. Der Quellpatch wurde auf dem aktuellen
+  Release-Stand `5634b947` als `f32be481` sequenziell integriert; der finale
+  Integrationsstand wurde erneut geprüft.
+- **PASS:** `HistoryUndoPostRoutes` besitzt genau Undo-Vorschau und Undo-
+  Anwendung. Die Vorschau liest einmal `change_id`, erhält das bestehende
+  `proposal`-Pop-/Antwortformat und bindet den Vorschlag an den Session-
+  CSRF-Hash. Apply übergibt den vollständigen Payload an den bestehenden
+  `HistoryUndoService`; dieser behält Revisions-/Hash-Prüfung, DB-UOW und
+  Rollback. Unbekannte Pfade lösen keine Body-/Service-Aktion aus. Äußere
+  Auth-/CSRF-/Maintenance-/404-Grenzen und Remote-Schreibgrenze bleiben
+  unverändert. Keine Backend-Rückimporte, neuen Locks/Caches oder Server-
+  Fachcallbacks.
+- Sechs direkte Routentests prüfen Preview-Projektion/Session-Bindung,
+  Apply-Payload, unbekannte Pfade, unterschiedliche Factories je Request
+  und Fehler vor Proposal-Erstellung beziehungsweise Antwort. Bestehende
+  History-Service-Tests sichern Revision/Hash und Transaktion; 25 fokussierte
+  Architektur-/Routentests bestanden. Diese Testverteilung ist angemessen.
+- Integrierte Abnahme: frisch gebautes Read-only-/netzwerkisoliertes
+  SQLCipher-Image mit **2.685 Tests/11 Skips PASS**; Ruff für Route,
+  Direkttests, Architektur und Inventarskript, Compileall, Inventar-
+  `--check` (P0=0) und Diff-Check **PASS**. `server.py` hat 3.375
+  physische Zeilen.
+- Der erste Veröffentlichungsstand von PR #795 enthielt durch den
+  nachträglichen `develop`-Abgleich einen nicht-konventionell benannten
+  Merge-Commit und scheiterte ausschließlich am Commit-Subject-Validator.
+  Root baute den identischen Fachpatch direkt auf `5634b947` neu auf,
+  ohne Merge-Commit in der PR-Historie; Review und Vollsuite werden für
+  diesen korrigierten PR-Stand erneut bestätigt.
+- Diagnostik-/Privacy-/Coach-POST, RequestHandler-/Body-Grenze,
+  P7/P8-Restzuordnungen und P11 bleiben offen. Nächster kleiner Auftrag:
+  Diagnostik-Capture-POST mit unverändertem Capture-Lock.
+
+## P10 POST-Routen — bestätigter #796-Merge und sauberer Integrationsstand
+
+- PR #796 ist am 24.09.2026 um 09:04:00 UTC mit
+  `76c5f6feb914d697944d38aeefb2dc67743f215a` gemergt; dieser Commit
+  ist Vorfahr von `origin/develop`. Alle PR-Head-Checks waren grün und
+  Review-Threads null. **Ausnahme:** GitHubs Regelsuite `4207013481`
+  protokolliert den vom Nutzer ausgelösten Merge als `bypass`: die
+  Required-Status-Check-Regel scheiterte mit „Required status check
+  Codex code review is expected“, obwohl der gleichnamige Check am
+  PR-Head erfolgreich war. Dieser Merge wird nicht als regulärer
+  Branch-Gate-PASS dargestellt. Vor weiteren Merges ist die Check-SHA-
+  Zuordnung des Review-Gates zu prüfen; kein erneuter Bypass durch Root.
+- Auf dem bestätigten `develop`-Merge wurden vier zuvor einzeln von Root
+  am tatsächlichen Diff geprüfte GPT-6-Luna-Quellpatches sequenziell und
+  ohne Rebase-/Merge-Commit integriert: Diagnostik-Capture-POST
+  `0f7a0f5e` → `d02c5a40`, Privacy-Delete-POST `1f7ce307` →
+  `ceee237f`, Coach-Aktions-POST `0d116088` → `0594f77b` und Chat-
+  Submission-/Reset-POST `386ef8a5` → `1ed33023`. Die ersten Coach-
+  Aktions- und Chat-Quellstände erhielten **FAIL** wegen fehlender
+  Execute- beziehungsweise Reset-Fehlerprobe; dieselben Worker
+  ergänzten die Tests, Root prüfte die tatsächlichen Korrekturen und
+  gab erst die amendierten Quellstände frei.
+- **PASS für den lokalen kombinierten Diff-Stand `1ed33023` plus
+  Inventar-/Plan-Nachtrag:** Die vier HTTP-Adapter besitzen nur Dispatch,
+  Body-Limits/Lesen und Status-/JSON-Projektion. Die bestehenden Dienste
+  behalten Capture-Lock, lokale Privacy-Löschtransaktion samt exakter
+  Bestätigung, Coach-Proposal-Session-/Token-/Payload-Hash samt expliziter
+  Remote-Freigabe sowie Job-Persistenz und Reset-Cancellation. Die äußere
+  Auth-/CSRF-/Maintenance-/Fehlergrenze bleibt im Handler. Keine Backend-
+  Rückimporte, neuen Zustandseigentümer, Server-Fachcallbacks oder
+  dauerhaften Wrapper. Direkte Tests decken alle Mappings, unbekannte
+  Pfade, Factory-Auflösung, Grenzwerte und Fehler ohne Antwort ab;
+  bestehende Service-/Rollback-Regressionen bleiben aktiv. Die Testzahl
+  ist für diesen HTTP-Transportumfang angemessen.
+- Frisch gebautes read-only-/netzwerkisoliertes SQLCipher-Image auf dem
+  finalen Integrationsbranch: **2.713 Tests/11 Skips PASS**. Gezielter
+  Ruff-Check für Routen, Domainänderung, Tests und Inventarskript;
+  Compileall, Inventar `--check` (P0=0) und Diff-Check PASS. `server.py`
+  hat 3.367 physische Zeilen; lokal 214/231 Planpunkte, 17 offen.
+  Noch kein PR für diesen POST-Block. Verbleibendes Veröffentlichungs-
+  risiko: Der für #796 beobachtete Review-Check war nur am Head sichtbar,
+  nicht am GitHub-Test-Merge-Commit; vor Auto-Merge jedes neuen PR sind
+  Test-Merge-SHA und Regelsuite zu kontrollieren.
+
+## P10 Chat-SSE-Transport — integrierter Prüfstand
+
+- PR #797 wurde am 24.09.2026 um 09:17:56 UTC regulär per Squash-Auto-Merge
+  mit `6e3a6be7aea9626033c4b1cad8a024cb35618cc4` gemergt; der Commit
+  ist Vorfahr von `origin/develop`. Erforderliche Checks am PR-Head bestanden,
+  es gab keine offenen Review-Threads. Regelsuite `4207195625` meldet
+  **PASS**, einschließlich `required_status_checks`; damit unterscheidet
+  sich #797 vom Bypass bei #796. Der GitHub-Test-Merge-Commit hatte keine
+  eigenen Check-Runs; die Gate-Zuordnung bleibt dennoch zu beobachten.
+- Root-Integrationsdiff `0822dab0`, nach Squash-Merge ohne Replay der vier
+  bereits integrierten POST-Commits als `99977483` auf `origin/develop`
+  übertragen und erneut geprüft:
+  `RequestHandler.handle_chat_stream` wurde vollständig in
+  `CoachChatStreamTransport.handle` verlagert. Der Handler bindet nur noch
+  die konkrete Instanz ein und delegiert den authentifizierten Pfad. Registry,
+  persistierter Job und Receipt-Dienst bleiben eigenständige Eigentümer;
+  der Transport hält nur den endlichen SSE-Verbindungszustand. Keine
+  Backend-Rückimporte, Server-Fachcallbacks oder Kompatibilitäts-Wrapper.
+- **PASS** für diesen lokalen Diff: unverändertes Body-Limit, Turn-ID-Gate,
+  Timeout, Start-/Delta-/Terminalereignisse, 15-Sekunden-Heartbeat,
+  Restart- und Background-Fallback, redaktierte Fehler, Disconnect ohne
+  Job-Abbruch und Unregister/Socket-Close. Zehn direkte Tests und zwei
+  bestehende Integrations-Streamtests sichern den Vertrag; ein AST-Guard
+  verbietet die Rückkehr der Handler-Implementierung. Die Testzahl ist für
+  den begrenzten Transport ausreichend. Vollständige frisch gebaute,
+  read-only-/netzwerkisolierte SQLCipher-Suite auf `99977483`:
+  **2.724 Tests/11 Skips PASS**;
+  34 fokussierte Tests, Ruff, Inventar `--check` und Diff-Check PASS.
+  `server.py`: 3.303 physische Zeilen; lokal 215/232 Punkte, 17 offen.
+- Offen vor Veröffentlichung: PR-Gates. Fachlich bleiben P7/P8-Restaudit,
+  übriger Handler-/Body-Transport und P11 offen.
+- PR #798 meldete auf `ee09ae33` einen SonarCloud-**FAIL**: `handle` hatte
+  Cognitive Complexity 30 statt höchstens 15. Root teilte ausschließlich
+  die bestehende SSE-Orchestrierung in `_stream_job` und `_relay_events` auf;
+  der pro Request gekapselte Disconnect-Zustand, Queue-Eigentümer und
+  langlebige Job-Ausführung blieben unverändert. Der tatsächliche
+  Korrekturdiff wurde erneut geprüft: **PASS**; 34 fokussierte Tests,
+  Ruff und die vollständige isolierte Suite mit **2.724 Tests/11 Skips**
+  bestanden erneut. Die neuen PR-Checks müssen diese Korrektur bestätigen.
+
+## Fortschrittsabgleich nach PR #799 — pausierter Stand
+
+- PR #798 wurde ohne Merge geschlossen und durch #799 mit korrigiertem
+  Stand ersetzt; damit blieb es bei einer expliziten Codex-Review-Anforderung
+  je PR. PR #799 wurde am 24.09.2026 um 09:36:29 UTC mit
+  `ae619f8cde4ab74abf586946548f46f22ad44c3b` gemergt. Der Commit ist
+  Vorfahr von `origin/develop`, und sein Tree ist identisch mit dem von Root
+  geprüften PR-Head `df565d4ff1a3f4c936e45e64a465f8a030e2f550`.
+  Codex-, Sonar-, Container-, Test-Shard-, Quality- und Browser-Checks am
+  Head bestanden; offene Review-Threads: null. **Gate-Ausnahme:** GitHub-
+  Regelsuite `4207443565` meldet `bypass`, weil `required_status_checks`
+  beim manuellen Merge „Required status check Codex code review is expected“
+  bewertete. Dieser Merge ist bestätigt, aber **kein** regulärer Branch-
+  Gate-PASS; ein weiterer Bypass ist nicht Teil des Arbeitsplans.
+- Bestätigter `develop`-Stand: **215/232** markierte Planpunkte (92,7 %),
+  **17 offen**, `server.py` **3.303 physische Zeilen**. Das generierte
+  Inventar ist aktuell (`--check` PASS, P0=0). Der letzte integrierte
+  Root-Code-Review-PASS gilt für `df565d4f` mit **2.724 Tests/11 Skips**
+  in der isolierten SQLCipher-Suite; der identische Tree ist auf `develop`.
+  Diese Kennzahlen sind keine fachliche Fertigmeldung: P7/P8-Restaudit,
+  P10-Handler-/Body-Rest und P11 bleiben offen.
+- GPT-6-Luna/high-Quellpatch `48a60f0f1544634ab7e64378d7680141a2b1b3cc`
+  lagert allein `/api/transcribe` aus. Root prüfte den tatsächlichen Diff,
+  dynamische Provider-/Modellwahl, Body-Grenze und bestehende äußere
+  Auth-/CSRF-/Maintenance-Grenze: **Quellpatch-PASS**. Vier direkte Route-
+  Tests plus bestehende Provider-/Grenzwerttests sind für den begrenzten
+  Dispatch angemessen; isolierte Suite **2.718 Tests/11 Skips PASS**.
+  Dieser Patch ist weder auf `develop` noch in einem PR integriert und
+  erfordert nach Integration einen erneuten Root-Diff- und Gesamttest-PASS.
+- **Pausiert auf Nutzerwunsch.** Nächster Schritt bei Wiederaufnahme:
+  den Pflichtcheck-/Merge-SHA-Bypass als offenen GitHub-Gate-Befund
+  berücksichtigen, den Transkriptions-Patch auf dem aktuellen `develop`
+  sequenziell integrieren und erneut prüfen; danach die P7/P8-Restverträge,
+  P10-HTTP-Grenzen und P11-Composition-Root abarbeiten.
+
+
+## P10 Audio-Transkription POST-Route — integrierter Prüfstand
+
+- Basis: `a406d6d02279338647e1772bc7dddbffd08023ab` (`origin/develop`, PR #800 Statusabgleich).
+- Integrierter Quellpatch: `48a60f0f1544634ab7e64378d7680141a2b1b3cc` (P10 transcribe POST route).
+- Auslagerungsumfang:
+  - `backend/http_api/transcribe_post.py` mit `TranscribePostRoutes` besitzt das Routing von `POST /api/transcribe`.
+  - Delegation an `AudioTranscriptionClient` mit unveränderter Validierung, Fehlerweiterleitung und Payload-Grenze.
+  - In `server.py` wurde `transcribe_audio` entfernt; der RequestHandler delegiert via `TRANSCRIBE_POST_ROUTES.handle(self, path)`.
+  - 4 dedizierte Unit-Tests in `tests/test_http_transcribe_post.py` sowie Migration der Server-Tests auf `_transcribe_via_http_route`.
+  - Architekturtest `test_transcribe_post_route_is_owned_by_http_api_module` sichert Modulbesitz und Server-Unabhängigkeit.
+- Prüfungen:
+  - Unit-Testsuite: 396 Tests PASS.
+  - Architekturtest: 25 Tests PASS (`tests/test_server_architecture.py`).
+  - Inventar: `python scripts/server_extraction_inventory.py --check` PASS (P0 = 0).
+  - Code-Qualität: `ruff check` auf neuen Modulen PASS (0 Fehler), `mypy` PASS (0 Fehler).
+- `server.py`: 3.294 physische Zeilen (Reduktion um 9 Zeilen); 216 von 233 markierten Planpunkten (92,7 %), 17 offen.
+- Pull Request & Integration: PR #801 auf `develop` gemergt als `c8ed971fdc15f571666efeabd529934a81e43d22`.
+  - Codex Code & Security Review: PASS (ohne Befunde).
+  - SonarCloud Quality Gate: PASS (0 neue/akzeptierte Issues, 0 Hotspots).
+  - CI-Test-Shards & Browser Smoke / Accessibility Checks: PASS.
+  - MCP `link_pull_request` registriert.
+- Nächster Schritt: P7/P8-Restaudit, verbleibende P10-HTTP-Endpunkte (`/api/planning/commands`, `/api/feedback`, Session/Auth-Wiring) und P11-Composition-Root angehen.
+
+## P10 übrige POST-Routen und Intervals-Client — lokaler Prüfstand
+
+- Basis: integrierter `develop`-Stand nach PR #801 (`c8ed971`).
+- `PlanningCommandsPostRoutes`, `FeedbackPostRoutes`,
+  `ChatCancelPostRoutes`, `PrivacyRestorePostRoutes` und `AuthPostRoutes`
+  besitzen jetzt die jeweiligen POST-Dispatches. Der Handler behält die
+  äußere Auth-/CSRF-/Maintenance-/Fehlergrenze; Restore authentifiziert vor
+  dem Backup-Service. Die Coach-Dienste behalten Idempotenz, Persistenz und
+  Cancellation.
+- `IntervalsClient` ist aus `server.py` in `backend/providers/intervals_client.py`
+  verschoben. Der Provider verlangt Konfiguration und Request-Funktion explizit;
+  der Composition Root baut den Client aus den aktiven HTTP-/Zeitzonen-Diensten.
+- Direkte Routen-/Provider-/Planungstests und Architekturtests: **51 PASS**.
+  Die vollständige native Suite: **2.748 Tests PASS, 12 SQLCipher-Skips**.
+  `py_compile`, Inventar-`--check`, `git diff --check` und Docker-Build
+  (`ai-coach:local`, Python 3.14/SQLCipher) PASS.
+- Quellreview: **PASS**. Keine Provider- oder DB-Aufrufe beim Import;
+  Route-Dispatch erhält Body-Limits und Cookie-/CSRF-Verträge. Der erste
+  volle lokale Testlauf hatte zwei Fehler durch eager gebundene Callback-Abhängigkeiten;
+  nach Behebung war die native Suite grün.
+- CI-Nachprüfung nach PR-Erstellung: Der `/api/planning/commands`-Browserfall
+  reproduzierte eine beim Import erfasste Conversation-Factory. Die Composition
+  löst sie dynamisch; der betroffene mobile-small SQLCipher-E2E-Test PASS.
+  Der Architekturtest wurde auf den Lazy-Callback angepasst. Die explizite
+  Codex-Prüfung fand außerdem einen fehlerhaften optionalen IntervalsClient-
+  Konstruktor; der Client verlangt jetzt seine Infrastruktur explizit, und der
+  Composition Root stellt eine konkrete Factory bereit. Die vorherigen Tests,
+  die den Konstruktor als Service-Factory gepatcht hatten, patchen nun den
+  Kompositionspunkt. Sieben betroffene Provider-/Sync-Fälle und die vollständige
+  native Suite (**2.748 PASS, 12 SQLCipher-Skips**) bestehen mit dieser
+  Korrektur; aktueller PR-CI-Lauf muss den finalen Head bestätigen.
+- PR #802 wurde am 2026-09-24 als Squash-Commit
+  `790225573b0800e4eac70fb0962b72b03c77932b` gemergt. Python-3.14-CI,
+  Container-Tests, Browser-Smoke/Accessibility, Quality-Baseline, SonarCloud,
+  CodeQL und Codex-Gate bestanden; der einzige Review-Thread ist aufgelöst.
+  Der Merge-Commit ist auf `origin/develop` erreichbar. P7-Restaudit,
+  übriger HTTP-Transport und P11 bleiben offen.
+- Nächster Schritt: den verbleibenden `RequestHandler`-Transport nach
+  `backend/http_api/` auslagern; Composition-Root-Abschluss folgt danach.
+
+## P8 Morning-Receipt-/Restart-Audit — bestätigt
+
+- `CoachBackgroundJobRunner` liest vor Fortsetzung das persistierte Cancel-Flag,
+  delegiert den Turn und schreibt Morning-Completion nur nach abgeschlossener
+  Antwort ohne Rückfrage. Terminale Fehler laufen über
+  `CoachTurnFailureService`; Contention wird durch `CoachJobStore` mit
+  Backoff erneut eingereiht.
+- `CoachJobStore.resume_interrupted()` stellt offene OpenAI-Jobs wieder in die
+  Queue, führt unterbrochene Gemini-Jobs nicht erneut aus und überspringt
+  bereits terminale Commands. Cancellation wird vor dem Worker-Aufruf erneut
+  aus dem Receipt gelesen. Maintenance-Generation verhindert veraltete
+  Failure-Writes nach Restore.
+- `MorningCoachJobCompletionService` erhält absichtlich zwei UOW-Grenzen:
+  der Ready-Marker muss vor der QuickActions-Projektion committed sein. Bei
+  einem QuickActions-Fehler bleibt der Marker committed und das Receipt
+  unverändert; der Fehler wird am Worker als terminal behandelt. Die
+  Vertrags-/Restart-Fälle sind durch die bestehenden direkten Service-,
+  Worker-, JobStore- und Cancellation-Tests abgedeckt.
+- Fokussierte Prüfung: `python -m unittest tests.test_coach_background_job
+  tests.test_coach_morning_completion tests.test_coach_job_store
+  tests.test_coach_cancellation -v` — **20 Tests PASS**. Der Inventory-Check
+  blieb bei P0=0.
+- Status: Die offene P8-Teilaufgabe zum Background-Receipt-/Fehlerabgleich und
+  Restart-/Cancellation-Audit ist abgeschlossen. Die übergeordnete manuelle
+  Morning-Check-in-Auslagerung bleibt offen.
+
+## P10 HTTP-Route-Dispatch — integrierter Diff-Stand
+
+- Der neue `HttpRouteDispatcher` besitzt die geordnete GET-Routenauswahl,
+  API-404-Grenze, statische Fallback-Übergabe und PUT-Routenauswahl. Die
+  `RequestHandler`-Fehlergrenzen sowie Auth-, CSRF- und Maintenance-Reihenfolge
+  bleiben unverändert beim HTTP-Einstieg.
+- Die Routen werden als konkrete Abhängigkeiten im bestehenden Composition
+  Root zusammengestellt; das neue Modul importiert `server.py` nicht. Der
+  symbolbasierte Generator ordnet Dispatcher und Instanz `http_api/` zu.
+- Direkte Dispatch- und Architekturtests: **34 PASS**. Vollständige native
+  Suite: **2.752 PASS, 12 SQLCipher-Skips**. `py_compile`, Inventar-`--check`,
+  `git diff --check` und Docker-Build (`ai-coach:local`, Python 3.14/SQLCipher)
+  **PASS**.
+- Dieser Schritt ist ein erster Transport-Teilumzug; POST-/SSE-Dispatch,
+  Body-/Response-Schreibtransport und die Handler-Klasse bleiben P10-offen.
+
+## P7 Coach-Autorisierung — Scope-Präfix
+
+- `TRAINING_PLAN_SCOPE_PREFIX` liegt jetzt in `backend/coach/authorization.py`.
+  Dialog-, Planänderungs- und Planaktionsdienste beziehen die Scope-Policy von
+  dort; `server.py` reicht sie nicht mehr als Composition-Abhängigkeit durch.
+  Ein Architekturtest sichert die Eigentümerschaft ab. Das aktualisierte
+  Inventar weist vier entfernte Zeilen und eine weniger globale Bindung aus.
+- Fokussierte Scope-, Planning-Tool- und Architekturtests: **67 PASS**;
+  `test_coach_dialogue.py` per Discovery: **72 PASS**. Vollständige native
+  Suite: **2.741 PASS, 12 SQLCipher-Skips**. `py_compile`, Inventar-`--check`,
+  `git diff --check` und Docker-Build (`ai-coach:local`, Python 3.14/SQLCipher)
+  **PASS**.
+
+## P7 Coach-Werkzeugrunden — Limit-Eigentümerschaft
+
+- `COACH_TOOL_MAX_ROUNDS` ist jetzt bei `CoachStructuredToolRoundService`
+  definiert; `server.py` importiert den unveränderten Wert nur zur Komposition.
+  Ein Architekturtest verhindert eine Rückverlagerung der Policy.
+- Fokussierte Architekturtests: **32 PASS**; Coach-Dialogtests: **72 PASS**.
+  Vollständige native Suite: **2.742 PASS, 12 SQLCipher-Skips**.
+  `py_compile`, Inventar-`--check` und `git diff --check` **PASS**.
+
+## P10 Sync-POST-Transport — lokaler Prüfstand
+
+- `SyncCommandPostRoute` in `backend/http_api/sync_commands_post.py` besitzt
+  den Sync-POST-Body-/Response-Dispatch; `SyncCommandEndpoint` behält die
+  Validierung und fachliche Ausführung. Der serverseitige `_handle_sync_post`
+  Adapter entfällt.
+- Der Factory-Aufruf bleibt dynamisch. Body-Lesen erfolgt weiterhin vor
+  Endpoint-Konstruktion; bestehende Auth-, CSRF-, Maintenance- und Fehlergrenzen
+  bleiben beim Handler.
+- Neue direkte Route-Tests und erweiterte Architekturprüfung; vollständige
+  Suite: **2.758 Tests PASS, 12 SQLCipher-Skips**. Syntaxprüfung, Inventar-
+  `--check` und `git diff --check` ebenfalls PASS.
+- `server.py` sinkt um sechs Zeilen auf **3.064**. Nächster Auftrag: übrige
+  POST-/SSE-Transportgrenzen und anschließend P11 weiter prüfen.
+
+## P10 POST-Routenauswahl — lokaler Prüfstand
+
+- `HttpPostDispatcher` in `backend/http_api/post_dispatch.py` besitzt jetzt die
+  Reihenfolge aller öffentlichen, vor dem Maintenance-Gate und authentifizierten
+  POST-Routen, einschließlich Nutrition und Coach-Stream-Dispatch.
+- `RequestHandler.do_POST` behält die Sicherheitsreihenfolge: öffentliche
+  Auth-/Restore-Routen, Authentisierung, CSRF, Chat-Cancel, Maintenance-Gate,
+  authentifizierte Auswahl. Die drei serverseitigen Dispatch-Methoden wurden
+  entfernt; Testaufrufer verwenden konkrete Route- oder Dispatcher-Eigentümer.
+- Direkte Dispatcher-, Architektur-, Coach-Planning-Command- und Servertests
+  bestehen. Die vollständige Suite besteht mit 2.789 Tests und 12 Skips;
+  Python-Syntaxprüfung, Inventar-`--check` und `git diff --check` bestehen.
+- Die aktuelle Nutrition-Erweiterung in `develop` hat drei zuvor unzugeordnete
+  globale Route-Bindings und den Service-Factory-Namen sichtbar gemacht. Der
+  Inventar-Eigentümer ist jetzt konkret (`http_api/` bzw. `nutrition/service.py`);
+  der P0-Zuordnungstest und das regenerierte Inventar sind grün.
+- Die neue Sonar-Prüfung beanstandete 14 Konstruktorparameter. Authentifizierte
+  Routen sind jetzt in `HttpAuthenticatedPostRoutes` explizit typisiert;
+  Dispatcher-, Architektur-, Coach-Planning-Command- und 495 Servertests bestehen.
+- `server.py` enthält keine route-spezifische POST-Auswahl mehr. GET-/PUT-
+  Fehlergrenzen, SSE-Schreibtransport und Datei-/JSON-Antworttransport bleiben
+  offene P10-Arbeit.
+
+## P10 HTTP-Antworttransport — lokaler Prüfstand
+
+- Socket-Ausgabe für JSON, Bytes, Datei-Downloads, SSE-Header/Ereignisse und
+  sichere statische Antworten liegt jetzt bei `HttpResponseTransport`.
+- `RequestHandler` behält dünne Socket-Adapter, Disconnect-Logging und die
+  äußeren Request-Fehlergrenzen; Response-Header, Status, Body-Limits,
+  Dateistream-Timeout/Cleanup und SSE-Abbruchverhalten bleiben erhalten.
+- Die unveränderten Request-Adapter verwenden weiter `requests.py` und
+  `responses.py`; die Stream-Chunkgröße hat einen Eigentümer in diesem
+  Transportmodul.
+- Validierung: 2.790 Unit-Tests bestanden, 12 übersprungen; Docker-Build,
+  496 Server-/Response-Tests, 35 Architekturtests, Syntaxprüfung,
+  Inventar-`--check` und `git diff --check` bestanden.
+
+## P7 Conversation history and usage ownership — local review
+
+- Moved the bounded local chat-history query and its message-ID/search/attachment
+  projection from `ChatHistoryPageService` to `CoachConversationHistoryService`
+  and `ChatRepository`; the Coach service now owns the shared database unit of
+  work for messages and chat generation.
+- Message writes/reset and provider-specific Gemini history remain owned by
+  Coach conversation services. Token usage normalization and durable daily
+  accounting remain owned by `ProviderStateService` under `backend/providers/`.
+- Existing pagination, escaped search, attachment-name projection, generation
+  consistency, and provider-usage tests cover these contracts; validation
+  passes: 2,792 unit tests (12 skipped), 496 server tests (3 skipped), 36
+  architecture tests, Docker build, syntax, inventory `--check`, and
+  `git diff --check`.
+
+## P7/P8 policy ownership and closeout — local review
+
+- Coach response-token budgets, background horizon, and training-change limit
+  now live in `backend/coach/limits.py`; server construction consumes those
+  unchanged values. Unused follow-up/unit limits and the obsolete library
+  preview TTL constant were removed.
+- Morning Body Battery retry defaults now live with
+  `MorningBodyBatteryService`; the daily provider-update label lives with the
+  sync scheduler. Their values and scheduling order are unchanged.
+- Audited proposal creation, session/scope binding, explicit confirmation,
+  expiry, single-use execution, tool-result projection, and repair/replay keys:
+  their implementations are in Coach services. The remaining server references
+  are composition and route wiring.
+- Audited the manual Morning Check-in path: Garmin sync is followed by a
+  current-local-day sleep check before Body Battery refresh or Coach analysis.
+  The removed automatic reservation/retry scheduler remains absent.
+- Focused validation: proposal/review 16 tests, architecture 36 tests, manual
+  Morning Check-in 10 tests, Body Battery 10 tests, daily scheduler 5 tests,
+  Gemini payload 5 tests, and training-patch 6 tests passed. Full Python suite:
+  2,792 passed, 12 skipped. Docker build, Python compilation, inventory check,
+  and `git diff --check` passed.
+
+
+## P10 RequestHandler implementation owner -- local review
+
+- Moved the 184-line `RequestHandler` implementation from `server.py` to
+  `backend/http_api/handler.py`. Its HTTP-specific dependencies are explicit in
+  `HttpRequestHandlerDependencies`; authentication/CSRF/maintenance order,
+  body limits, redaction, disconnect handling, route dispatch, and response
+  transport behavior are preserved.
+- Updated server tests and the disposable browser fixture to get the composed
+  handler from the application factory; no `server.RequestHandler` compatibility
+  export remains. Architecture tests inspect the backend-owned implementation.
+- `server.py` decreased from 2,984 to 2,814 physical lines and from 2,589 to
+  2,438 nonblank lines. The extraction plan now records that P11 remains open:
+  the former closeout checked allowed names but did not audit factory bodies or
+  the size of the construction graph.
+- Validation: full Python suite **2,798 passed, 12 skipped**; focused server suite
+  **496 passed, 3 skipped**; architecture tests **39 passed**; all five Playwright
+  viewport projects **255 passed** in the isolated fixture container;
+  `py_compile`, inventory `--check`, `git diff --check`, and Python 3.14 Docker
+  build passed.
+
+## P11 composition-root audit and athlete-local clock — local review
+
+- Moved profile-timezone resolution and wall-clock calculation into `backend/athlete/clock.py`; the composition root injects `AthleteLocalClock.now` into consumers and no longer exposes `local_now` as a server wrapper.
+- Added an AST guard for composition-root function bodies. It permits control flow only in the explicit cache, resource, startup, and lifecycle allowlist, and rejects direct SQL, provider-request, and file-read/write calls.
+- Migrated tests and the browser fixture to patch/use the clock at its owner. The generated inventory now assigns `ATHLETE_CLOCK` to `backend/athlete/clock.py`; no P0 symbols remain.
+- Validation on this P11 tree: Python 3.14 container suite 2,802 tests, 11 skipped; architecture tests 40 passed; desktop Playwright 51 passed in an isolated fixture container; Docker build, syntax compilation, inventory `--check`, and `git diff --check` passed. The native Windows suite ran 2,802 tests but two SQLCipher-dependent cases could not start because the Windows wheel is intentionally unavailable; both passed in the container suite.
+- PR #819 was squash-merged into `develop` at `578695e69a1480169f74395b67edb64038d638f6` on 2026-09-25. All CI checks except the explicit Codex review gate passed; the gate was bypassed as user-authorized without posting `@codex`, and the PR has no review threads.
+
+## Server extraction P0-P11 — merged closeout
+
+- PR #818 moved `RequestHandler` into `backend/http_api/handler.py` and was squash-merged on 2026-09-25 as `04b877c46e1a58bff1e003c827c9d976cb24305a`.
+- PR #819 moved athlete-local time ownership into `backend/athlete/clock.py`, audited composition-root bodies, and was squash-merged on 2026-09-25 as `578695e69a1480169f74395b67edb64038d638f6`. Both merge commits are in `develop` ancestry; review-thread lists are empty.
+- Required test, CodeQL, Sonar, quality, syntax, SBOM, and five-project browser checks passed for PR #819. The only failure was the explicit Codex review gate; it was bypassed as user-authorized without posting an `@codex` request.
+- Final `server.py`: 2,809 physical lines and 2,433 nonblank lines, down from the previously recorded 2,589 nonblank lines. Remaining code is audited configuration, dependency construction, shared process resources, and startup/shutdown wiring; no LOC target was imposed.
+- Final validation: Python 3.14 full suite 2,802 tests (11 skipped), 40 architecture tests, 51 local desktop browser tests, five CI viewport projects, Docker build, syntax compilation, inventory `--check`, and `git diff --check` passed.

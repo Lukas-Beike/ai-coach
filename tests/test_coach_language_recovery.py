@@ -122,7 +122,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
             "plan_push",
             {"entries": server.planning_authority_service().pending_plan_push_entries()},
         )
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute("UPDATE sync_jobs SET status='completed' WHERE id=?", (job["id"],))
         with patch("backend.coach.response_retry.time.sleep"):
             result, _ = self.turn("Ist der Plan übertragen?", [lambda _: self.call("get_sync_job", {"job_id": job["id"]}), limited, limited, limited])
@@ -152,7 +152,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         saved = self.state()["planned_units"][0]
         self.assertEqual(saved["local_id"], unit["id"])
         self.assertEqual(saved["name"], original["name"])
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             payload = json.loads(db.execute("SELECT payload FROM planned_units WHERE local_id=?", (unit["id"],)).fetchone()["payload"])
         self.assertEqual(sum(step["distance"] for step in structured_steps(payload["description"])), 8000)
         self.assertEqual(result["sync_job_ids"], [])
@@ -162,7 +162,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
             with self.subTest(spelling=spelling):
                 workout = planning_workouts.normalize_workout(
                     {**self.workout(), "sport": "Run", "target": "HR", "description": "- 8km " + spelling},
-                    today=server.local_now().date(),
+                    today=server.ATHLETE_CLOCK.now().date(),
                 )
                 planning_workouts.validate_workout_description(workout)
                 self.assertEqual(workout["description"], "- 8km Z1-Z2 HR")

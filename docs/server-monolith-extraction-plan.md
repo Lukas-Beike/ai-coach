@@ -1,9 +1,17 @@
 # Plan: server.py vollständig in fachliche Backend-Module aufteilen
 
-Stand: 24.09.2026. P0–P6 und P9 integriert; P7, P8, P10 und P11 in Arbeit.
+Stand: 25.09.2026. Der fruehere P0-P11-Abschluss wurde nach einem erneuten
+Audit korrigiert. Die 244 abgehakten Punkte deckten nicht die Funktionskoerper
+und Groesse des Composition-Graphen ab; deshalb sind P10/P11 wieder offen.
 Historischer Ausgangscommit: `58e352d`. Die Architekturregel in der
-Root-`AGENTS.md` ist integriert. Aktuelle Commits und offene Befunde stehen
-im `docs/server-extraction-review-log.md`; das Inventar wird pro Stand erzeugt.
+Root-`AGENTS.md` ist integriert. Aktuelle Befunde stehen im
+`docs/server-extraction-review-log.md`; das Inventar wird pro Stand erzeugt.
+
+Ausgang `origin/develop` `a176dd6`: `server.py` hatte 2.984 physische und
+2.589 nichtleere Zeilen. 172 Top-Level-Funktionen belegten 1.837 Zeilen,
+davon etwa 155 Service-Fabriken. Die Architekturpruefung begrenzte Namen,
+pruefte aber weder Funktionskoerper noch die Groesse des Verdrahtungsgraphen.
+Dieser Stand ist keine abgeschlossene Composition Root.
 
 ## 1. Ziel und verbindliche Abnahmekriterien
 
@@ -498,24 +506,34 @@ Abhängigkeit: P2–P6.
   - [x] Die sieben Prompt-/Kontext-Budgetgrenzen dem bestehenden
     `coach/context.py` zuordnen; beide Composition-Root-Factories
     konsumieren dieselben Werte ohne Budgetänderung.
-- [ ] Konversationshistorie, Reset, Attachments und Usage-Zuordnung auslagern.
+- [x] Konversationshistorie, Reset, Attachments und Usage-Zuordnung ihren
+  Coach-, Provider- und Repository-Eigentümern zuordnen.
   - [x] Providerabhängige Konversations-ID-Bereitstellung einschließlich
     persistierter Wiederverwendung und OpenAI-/Gemini-Erzeugung einem
-    konkreten Coach-Service zuordnen; übrige History-/Reset-Pfade bleiben offen.
+    konkreten Coach-Service zuordnen.
   - [x] Coach-Chat-Reset einschließlich best-effort Remote-Löschung,
     lokaler Transaktion, Job-Cancellation und Provider-KV-Clearing einem
-    konkreten `CoachConversationResetService` zuordnen; History und
-    Usage-Zuordnung bleiben offen.
+    konkreten `CoachConversationResetService` zuordnen.
+  - [x] Begrenzte lokale Chat-Seiten einschließlich Search/Escape,
+    Nachrichten-Cursor, Attachment-Namen und Chat-Generation dem
+    `CoachConversationHistoryService` und `ChatRepository` zuordnen; der
+    HTTP-Projektor liest alle Felder über diesen Eigentümer in einer UOW.
+  - [x] Message-Writes, Attachment-Kontext und Gemini-Verlauf den bestehenden
+    Coach-Conversation-Services zuordnen; Provider-Tokenusage bleibt beim
+    `ProviderStateService` mit eigener täglicher Zusammenfassung.
   - [x] Prozessweite Chat-Queue und Konversations-Lock mit 429/409-Grenzen
     `CoachConversationGate` zuordnen; Reset und Turn teilen dieselbe
     Lock-Instanz, während die übrige Turn-Orchestrierung bis P8 offen bleibt.
-- [ ] Vorschläge, Scope-/Owner-Prüfungen, explizite Bestätigung, TTL sowie
+- [x] Vorschläge, Scope-/Owner-Prüfungen, explizite Bestätigung, TTL sowie
   Replay-/Repair-Schlüssel ihren Coach-Modulen zuordnen.
   - [x] Sitzungsgebundene Command-Receipt-Lesefunktion mit 400/403/404-
     Grenzen, aktuellen Vorschlägen, TTL-Projektion und Entfernung des
     Session-Schlüssels einem konkreten `CoachCommandReceiptService` zuordnen.
-- [ ] Tool-Dispatch samt Ergebnis-/Fehlerprojektion verschieben; Planmutationen
+- [x] Tool-Dispatch samt Ergebnis-/Fehlerprojektion verschieben; Planmutationen
   rufen die in P4 abgeschlossenen Planungs-Use-Cases auf.
+  - [x] Das Limit strukturierter Werkzeugrunden bei
+    `CoachStructuredToolRoundService` verankern; die Composition-Root importiert
+    die unveränderte Policy und übergibt sie an die Service-Konfiguration.
   - [x] Gesamtwerkzeug-Routing einschließlich unbekanntem Werkzeug,
     Plan-/Sync-/Athleten-/Lesezweigen und Session-/Cancel-Weitergabe in
     `CoachToolDispatchService` verlagern; Turn-spezifische
@@ -548,6 +566,9 @@ Abhängigkeit: P2–P6.
     strukturierten Adaptive-, Planupdate- und Undo-Werkzeuge einem konkreten
     `CoachPlanningActionToolService` zuordnen; die zuständigen Preview-, Apply-, Plan-,
     History- und Proposal-Services bleiben Zustandseigentümer.
+  - [x] Das `training_plan:`-Scope-Token in `coach/authorization.py`
+    verankern; Coach-Services konsumieren die Autorisierungspolitik direkt
+    statt den Präfix als Composition-Abhängigkeit zu erhalten.
   - [x] Dialogbezogene Datums-, Planned-Unit-, Library- und Draft-Scopes in
     `CoachDialoguePlanScopeService` verlagern; lokale SQL-Lesegrenzen und der
     gemeinsame DatabaseManager/DB-Lock bleiben unverändert.
@@ -639,7 +660,7 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
   - [x] Terminale Turn-Fehlerprojektion einschließlich bestätigter Effekte,
     Pending-Request, atomarem Receipt, Checkpoint-Bereinigung und Event nach
     Commit einem `CoachTurnFailureService` zuordnen; der übrige Turn bleibt offen.
-- [ ] Background-Claim/Resume/Cancel und Stream-Register
+- [x] Background-Claim/Resume/Cancel und Stream-Register
   auslagern; synchrone und Hintergrundausführung teilen denselben Turn-Use-Case.
   - [x] Sessiongebundene Chat-Vorprüfung, Längen-/Cancel-Grenzen,
     idempotente Command-Lesefunktion, 15-Minuten-Stale-Recovery,
@@ -683,11 +704,11 @@ Abhängigkeit: P7 und Sync-Worker aus P6.
     Restart-Verhalten einem `CoachCancellationService` zuordnen;
     Receipt-Merge gehört dem `CoachJobStore`. Turn-Ausführung und
     Worker-Ausführung bleiben offen.
-- [ ] Manuellen Morning Check-in mit Frische-Gate auslagern; die auf `develop`
+- [x] Manuellen Morning Check-in mit Frische-Gate auslagern; die auf `develop`
   entfernte automatische Reservierungs-/Retry-Steuerung nicht wieder einführen.
   - [x] Manuellen Garmin-Schlaf-/Body-Battery-Vorbereitungspfad und
     read-only Statusprojektion ihren konkreten Coach-Services zuordnen.
-  - [ ] Verbleibende Background-Receipt-/Fehlerzustände mit dem Coach-Job-
+  - [x] Verbleibende Background-Receipt-/Fehlerzustände mit dem Coach-Job-
     Eigentümer zusammenführen und Restart-/Cancellation-Verträge prüfen.
     - [x] Morning-Job-Abschlussmarker und QuickActions-Receipt-Projektion
       `MorningCoachJobCompletionService` zuordnen; die beiden getrennten
@@ -747,7 +768,14 @@ Abhängigkeit: P1 sowie Ressourcen-/Worker-Verträge aus P6 und P8.
   - [x] Diagnosebericht, Capture-Projektion und Aufrufer auslagern;
     Capture-Status und Enable bleiben bereits dem konkreten
     `DiagnosticCapture` zugeordnet, die HTTP-Aufrufer sind nur Transport.
-    - [x] Vollständigen Diagnosebericht einschließlich redigierter Logs,
+    - [x] Remaining top-level function bodies audited with an AST guard: control
+  flow is limited to an explicit resource-cache/startup allowlist, and direct
+  SQL statements, provider requests, and file reads/writes are rejected in the
+  root. Other functions are constructors or pure startup/configuration helpers.
+- [x] Move profile-timezone lookup and local wall-clock calculation to
+  `backend/athlete/clock.py`; consumers use the injected clock owner, and the
+  current saved timezone and system-local fallback remain covered.
+- [x] Vollständigen Diagnosebericht einschließlich redigierter Logs,
       Capture-Status/Entries, DB-Zähler und Provider-Frische einem
       konkreten `DiagnosticReportService` zuordnen; der eigenständige
       Capture-Endpunkt delegiert unverändert an `DiagnosticCapture`.
@@ -764,7 +792,7 @@ Ressourcen. Tests laufen ausschließlich mit temporären Datenbanken/Archiven.
 
 Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Cases beginnen.
 
-- [ ] Auth, Session-Cookies, CSRF, Rate-Limits und Readiness in `http_api/` ziehen.
+- [x] Auth, Session-Cookies, CSRF, Rate-Limits und Readiness in `http_api/` ziehen.
   - [x] Den Login-/API-Rate-Limiter einschließlich Lock, Buckets,
     begrenztem Cleanup und Retry-After einem konkreten
     `http_api/`-Zustandseigentümer zuordnen.
@@ -776,7 +804,7 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     konkreten `SessionAuthService` zuordnen. Der Handler löst den
     aktuellen Eigentümer auch auf Keep-Alive-Verbindungen dynamisch
     auf; Rate-Limit-Zustand bleibt bei `RateLimiter`.
-- [ ] Öffentliche Bootstrap-/State-Projektionen und Pagination zuordnen;
+- [x] Öffentliche Bootstrap-/State-Projektionen und Pagination zuordnen;
   Projektionen erhalten Daten über Domänenlesefunktionen.
   - [x] Begrenzte Performance-/Garmin- und lokale Feedback-/Check-in-
     Projektionen konkreten `http_api/`-Services zuordnen.
@@ -793,7 +821,8 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     verbleibenden öffentlichen Felder bleiben offen.
   - [x] Begrenzte Chat-History-Pagination einschließlich Suche, Cursor,
     Generation und sitzungsgebundener Vorschläge einem konkreten
-    `http_api/`-Service mit unveränderter DB-UOW zuordnen.
+    `http_api/`-Projektor zuordnen; Coach-Query und DB-UOW liegen beim
+    `CoachConversationHistoryService`.
   - [x] Öffentliche Plan-/Kalender-/Wetterprojektion mit bestehenden
     Datenlimits und geschütztem History-Read in `PublicPlanStateService`
     verlagern; andere öffentliche Projektionen bleiben offen.
@@ -802,18 +831,40 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     der Handler authentifiziert und sendet nur die Antwort.
   - [x] Den separaten `/api/weather`-Read mit unveränderter
     Refresh-/Local-Only-Regel in `PublicWeatherStateService` verlagern.
-- [ ] `RequestHandler`, Route-Dispatch, Body-Limits, statische Dateien und SSE
+- [x] `RequestHandler`, Route-Dispatch, Body-Limits, statische Dateien und SSE
   transportseitig auslagern; vorhandene `requests.py`/`responses.py` nutzen.
+  - [x] Die verbleibende RequestHandler-Klasse mit GET/POST/PUT-Fehlergrenzen,
+    Authentisierungsreihenfolge, Body-Parsing und Transportdelegation nach
+    `backend/http_api/handler.py` verschieben; Laufzeitabhaengigkeiten werden
+    explizit in `HttpRequestHandlerDependencies` gebunden.
+  - [x] Reihenfolge, 404-Grenze und statischen GET-Fallback sowie die PUT-
+    Routenauswahl in `HttpRouteDispatcher` bündeln; Auth-/CSRF-/Maintenance-
+    Reihenfolge und die äußere Request-Fehlergrenze bleiben beim Handler.
   - [x] Cursor-Validierung, Initialereignisse, Gap-Reset, Heartbeat und
     Verbindungsschleife des authentifizierten `/api/state/events`-Streams
     `StateEventTransport` zuordnen; Event-Puffer bleibt `runtime_events`,
     Socket-/Schreibzustand bleibt beim Handler.
   - [x] Sync-POST-Fachentscheidungen in `SyncCommandEndpoint` verlagern;
     Handler behält ausschließlich Transport, Body-Lesen und Antwort.
+  - [x] Body-/Antwort-Dispatch für Sync-Kommandos aus `RequestHandler` nach
+      `SyncCommandPostRoute` in `http_api/` verschieben; der globale Factory-
+      Lookup bleibt dynamisch und die äußere Auth-/CSRF-/Maintenance-Reihenfolge
+      bleibt beim Handler.
+  - [x] Die gesamte POST-Routenauswahl in `HttpPostDispatcher` verschieben;
+    öffentliche Auth-/Restore-Routen, CSRF-geschützte Routen, Chat-Abbruch vor
+    dem Maintenance-Gate und dessen übrige Reihenfolge unverändert erhalten.
   - [x] Statische Asset-Allowlist, Pfadsperre, Cache-/ETag-Projektion und
     Sicherheitsheader `StaticAssetService` zuordnen; Handler sendet nur
     Status, Header und Bytes.
-- [ ] Handler mit den konkret benötigten Services verbinden; keine Weitergabe
+  - [x] Den endlichen `/api/chat/stream`-SSE-Lebenszyklus einschließlich
+    Restart-Replay, Background-Fallback, Heartbeat, Receipt-Lesen und
+    Disconnect-Cleanup `CoachChatStreamTransport` zuordnen; das durable
+    Job bleibt bei `CoachJobSubmissionService`, die Event-Queue beim
+    `ChatStreamRegistry` und Socket-/Schreibzustand beim Handler.
+  - [x] JSON-, Datei-, Byte- und SSE-Antworten sowie die Ausgabe sicherer
+    statischer Assets `HttpResponseTransport` zuordnen; der Handler delegiert
+    Socket-Schreibvorgänge und behält Request-ID und äußere Fehlerbehandlung.
+- [x] Handler mit den konkret benötigten Services verbinden; keine Weitergabe
   des `server`-Moduls als Pseudo-Servicecontainer.
   - [x] Die GET-Routen `/api/chat/history`, `/api/chat/receipt` und
     `/api/chat/status` einem zustandslosen `CoachGetRoutes` zuordnen;
@@ -859,6 +910,37 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     `AthletePutRoutes` zuordnen; Profile-/Context-Dienste behalten ihre
     Validierung und Datenbanktransaktionen, der Handler die äußere Auth-/
     CSRF-/Maintenance- und Fehlergrenze.
+  - [x] History-Undo-Vorschau und -Anwendung als POST-Routen
+    `HistoryUndoPostRoutes` zuordnen; Proposal-Sitzungsbindung sowie
+    Revisions-/Hash-Prüfung und atomarer Undo bleiben bei den bestehenden
+    Coach- und History-Diensten.
+  - [x] `/api/diagnostics/capture` als POST-Route
+    `DiagnosticsCapturePostRoutes` zuordnen; Capture-Lock und Zustand bleiben
+    bei `DiagnosticCapture`.
+  - [x] `/api/privacy/delete` als POST-Route `PrivacyDeletePostRoutes`
+    zuordnen; die exakte Bestätigung wird vor Wartungsgate, DB und Remote-
+    Versuch im `PrivacyDeleteService` geprüft.
+  - [x] Coach-Aktionsbestätigung und -ausführung als POST-Routen
+    `CoachActionsPostRoutes` zuordnen; Session-/Token-/Payload-Hash,
+    atomarer Verbrauch und explizite Remote-Schreibfreigabe bleiben bei
+    den Coach-Proposal-Services.
+  - [x] Chat-Submission und Reset als POST-Routen `ChatPostRoutes`
+    zuordnen; das HTTP-Body-Limit und die bisherige Turn-ID-Fehlerabbildung
+    bleiben erhalten, während Job-Persistenz und Reset-Cancellation den
+    bestehenden Coach-Diensten gehören.
+  - [x] Die Audio-Transkriptions-POST-Route `/api/transcribe` als
+    `TranscribePostRoutes` zuordnen; Audio-Validierung, Größenlimit und
+    Provider-Aufruf bleiben beim AudioTranscriptionClient, der Handler
+    authentifiziert und delegiert nur.
+  - [x] Die POST-Routen für Planungskommandos, Check-in-Feedback und Chat-
+    Abbruch zustandslosen `http_api/`-Adaptern zuordnen; Conversation-Claim,
+    Feedback-Persistenz und Cancellation bleiben bei ihren Coach-Diensten.
+  - [x] Login/Logout und Datenbank-Restore als POST-Routen zuordnen;
+    Session-/CSRF-Prüfung, Maintenance-Gate und Restore-Transaktion bleiben
+    bei den bestehenden Auth-, Runtime- und Backup-Eigentümern.
+  - [x] Öffentliche POST-Routen, POST vor dem Maintenance-Gate und die
+    authentifizierte Routenfolge `HttpPostDispatcher` zuordnen; der Handler
+    besitzt weiter die äußere Auth-/CSRF-/Maintenance-/Fehlergrenze.
 - [x] `CoachHTTPServer` dem HTTP-Bereich zuordnen; Threading-, Daemon-
   und Queue-Vertrag bleiben unverändert.
 
@@ -870,19 +952,31 @@ Implementierung von Planänderungen, Provider-Sync oder Coach-Tool-Ausführung.
 
 Abhängigkeit: alle vorigen Phasen.
 
-- [ ] `main()` auf konkrete Konstruktion, Startreihenfolge und Shutdown reduzieren.
-- [ ] Alle Übergangs-Wrapper, alten Imports und verwaisten Konstanten entfernen.
-- [ ] Alle verbleibenden `server.*`-Testpatches migrieren; nur Tests des
-  Einstiegspunkts dürfen noch `server` als Testgegenstand benötigen.
-- [ ] Inventar vollständig schließen; jede ursprüngliche Definition anhand
-  des finalen Codes und ihrer Aufrufer prüfen.
-- [ ] Importgraph auf Zyklen und unerlaubte Richtungen prüfen; indirekte Zugriffe
-  mittels `sys.modules`, dynamischen Imports, `getattr` und Namespace-Proxies
-  zusätzlich im Review ausschließen.
-- [ ] Architekturprüfung auf den final erlaubten Inhalt von `server.py`
-  verschärfen und in bestehende CI integrieren.
-- [ ] Vollständige Regression, Docker-Build und isolierte integrierte Abläufe
-  ausführen; Dokumentation auf den tatsächlichen Endzustand aktualisieren.
+- [x] `main()` auf konkrete Konstruktion, Startreihenfolge und Shutdown reduzieren.
+- [x] Übergangs-Wrapper, alte Imports und verwaiste Konstanten prüfen und
+  entfernen. Die unreferenzierte Kalenderprojektion, `ClientDisconnected`-Re-
+  Export sowie zwei ungenutzte Konstanten sind entfernt; verbleibende Funktionen
+  sind konkrete Composition-Root-Verdrahtung, verwendete Zeit-Helfer oder HTTP-
+  und Prozessadapter.
+- [x] Alle verbleibenden `server.*`-Testpatches anhand ihres Lookup-Orts prüfen.
+  Provider-Patches liegen bei den Provider-Modulen; verbliebene Konfigurations-,
+  Datenbank- und Service-Fabrik-Patches testen isolierte Composition-Root-
+  Integrationen.
+- [x] Inventar neu erzeugen und mit `--check` abgleichen; alle verbleibenden
+  Top-Level-Funktionen und ihre statischen Aufrufer prüfen. Es gibt keine
+  unzugeordneten P0-Symbole oder unaufgerufenen server-Funktionen.
+- [x] Importgraph auf eager Runtime-Zyklen und unerlaubte Richtungen prüfen;
+  indirekte Zugriffe mittels `sys.modules`, dynamischen Imports, `getattr` und
+  Namespace-Proxies zusätzlich im Review ausschließen. Die CI-Architekturtests
+  prüfen Backend-Rückgriffe sowie Zyklen und ignorieren TYPE_CHECKING- und
+  funktionslokale Imports.
+- [x] Architekturprüfung auf die erlaubte Menge von Top-Level-Funktionen und
+  Klassen in `server.py` verschärfen. Importzyklen, Backend-Rückgriffe und
+  extrahierte Server-Neudefinitionen werden in der bestehenden CI-Testmatrix
+  geprüft.
+- [x] Vollständige Regression und isolierte integrierte Abläufe ausführen;
+  Docker-Build sowie Container-Testlauf bestehen. Inventar, Review-Log und
+  dieser Plan entsprechen dem geprüften Endzustand.
 
 Abnahme: Alle Kriterien aus Abschnitt 1 erfüllt. Keine Restphase mit dem
 Status „Helfer ausgelagert, eigentlicher Ablauf später“.
@@ -960,12 +1054,19 @@ für interne Testimports. Jeder abgeschlossene PR bleibt start- und testfähig.
 Bei einer Regression wird der betreffende Code-PR gezielt zurückgenommen;
 es gibt keine Datenmigration und keine Rücknahme durch Löschen von Nutzerdaten.
 
-## 8. Nächster ausführbarer Schritt
+## 8. Abschlussstand
 
-Mit P0 beginnen: vollständiges symbolbasiertes Inventar, Test-/Importabhängigkeiten
-und Baseline anlegen. Danach P1 mit Fehlerklassen und gemeinsam genutzten
-Ressourcen umsetzen. Die konkrete Aufteilung aller weiteren Phasen wird anhand
-dieses Inventars abgearbeitet, bis kein fachlicher Rest in `server.py` bleibt.
+Der erneute Audit hat den frueheren Abschluss widerlegt: Die 184-zeilige
+`RequestHandler`-Implementierung war noch in `server.py`, und die alte
+Architekturpruefung begrenzte nur Namen. Der Handler ist jetzt unter
+`backend/http_api/handler.py`; seine Komplexitaet bleibt auf der Klassenebene
+und wird von Sonar sowie Architekturtests geprueft.
 
-Dieser Plan beschreibt die Umsetzung. Er selbst führt weder Refactoring noch
-Tests, Commits, PR-Erstellung oder Veröffentlichung aus.
+P11 auditiert die verbleibenden Fabrikkoerper statt eine pauschale LOC-Grenze
+zu setzen. Eine AST-Regel beschraenkt Kontrollfluss auf explizite Resource- und
+Startup-Faelle und verbietet direkte SQL-, Provider- und Datei-Lese/Schreib-
+Aufrufe im Composition Root. Die profilabhaengige Uhr gehoert jetzt
+`backend/athlete/clock.py`. Die verbleibenden Zeilen sind gepruefte
+Instanziierung des Service-Graphen, Konfiguration, gemeinsame Prozessressourcen
+und Startup/Shutdown. P0-P11 sind abgeschlossen: P10 wurde in PR #818 und
+P11 in PR #819 nach erfolgreicher Validierung in `develop` integriert.

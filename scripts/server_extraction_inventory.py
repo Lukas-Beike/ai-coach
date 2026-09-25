@@ -31,6 +31,7 @@ SYNC_RECONCILE = "sync/reconcile.py"
 SYNC_SCHEDULER = "sync/scheduler.py"
 SYNC_SNAPSHOTS = "sync/snapshots.py"
 COACH_PACKAGE = "coach/"
+COACH_LIMITS = "coach/limits.py"
 COACH_CONVERSATION = "coach/conversation.py"
 COACH_CONTEXT = "coach/context.py"
 COACH_JOBS = "coach/jobs.py"
@@ -60,6 +61,7 @@ SETTINGS_MODULE = "settings.py"
 ACTIVITIES_PACKAGE = "activities/"
 ATHLETE_PACKAGE = "athlete/"
 PERFORMANCE_PACKAGE = "performance/"
+PERFORMANCE_MORNING_BATTERY = "performance/morning_battery_service.py"
 PERFORMANCE_ACTIVITY_VALIDATION = "performance/activity_validation.py"
 WEATHER_PACKAGE = "weather/"
 HISTORY_PACKAGE = "history/"
@@ -195,18 +197,20 @@ def _explicit_owner(name: str) -> str | None:
             "intervals_operation": SYNC_PACKAGE,
             "garmin_operation": SYNC_GARMIN,
             "IntervalsClient": "providers/intervals_client.py",
+            "TranscribePostRoutes": HTTP_API_PACKAGE,
             "serialise_conversation": COACH_CONVERSATION,
             "_gemini_request_history": COACH_CONVERSATION,
             "_gemini_request_payload": COACH_CONVERSATION,
             "_gemini_last_user_text": COACH_CONVERSATION,
             "_gemini_call_names": COACH_CONVERSATION,
             "utc_now": RUNTIME_PACKAGE,
+            "ATHLETE_CLOCK": "backend/athlete/clock.py",
             "AppError": ERRORS_MODULE,
             "public_app_error_status": ERRORS_MODULE,
             "ClientDisconnected": ERRORS_MODULE,
             "security_configuration_error": CONFIG_MODULE,
             "database_manager": DB_MANAGER,
-            "database": DB_MANAGER,
+            "key_value_service": COMPOSITION_ROOT,
             "initialise_database": "db/bootstrap.py",
             "checkin_service": COMPOSITION_ROOT,
             "profile_service": COMPOSITION_ROOT,
@@ -265,6 +269,32 @@ def _explicit_owner(name: str) -> str | None:
             "STATE_EVENTS_GET_ROUTES": HTTP_API_PACKAGE,
             "SETTINGS_PUT_ROUTES": HTTP_API_PACKAGE,
             "ATHLETE_PUT_ROUTES": HTTP_API_PACKAGE,
+            "HISTORY_UNDO_POST_ROUTES": HTTP_API_PACKAGE,
+            "DIAGNOSTICS_CAPTURE_POST_ROUTES": HTTP_API_PACKAGE,
+            "PRIVACY_DELETE_POST_ROUTES": HTTP_API_PACKAGE,
+            "COACH_ACTIONS_POST_ROUTES": HTTP_API_PACKAGE,
+            "CHAT_POST_ROUTES": HTTP_API_PACKAGE,
+            "CHAT_STREAM_TRANSPORT": HTTP_API_PACKAGE,
+            "TRANSCRIBE_POST_ROUTES": HTTP_API_PACKAGE,
+            "PlanningCommandsPostRoutes": HTTP_API_PACKAGE,
+            "FeedbackPostRoutes": HTTP_API_PACKAGE,
+            "ChatCancelPostRoutes": HTTP_API_PACKAGE,
+            "PrivacyRestorePostRoutes": HTTP_API_PACKAGE,
+            "AuthPostRoutes": HTTP_API_PACKAGE,
+            "PLANNING_COMMANDS_POST_ROUTES": HTTP_API_PACKAGE,
+            "FEEDBACK_POST_ROUTES": HTTP_API_PACKAGE,
+            "CHAT_CANCEL_POST_ROUTES": HTTP_API_PACKAGE,
+            "PRIVACY_RESTORE_POST_ROUTES": HTTP_API_PACKAGE,
+            "AUTH_POST_ROUTES": HTTP_API_PACKAGE,
+            "NUTRITION_GET_ROUTES": HTTP_API_PACKAGE,
+            "NUTRITION_POST_ROUTES": HTTP_API_PACKAGE,
+            "NUTRITION_PUT_ROUTES": HTTP_API_PACKAGE,
+            "HTTP_ROUTE_DISPATCHER": HTTP_API_PACKAGE,
+            "HttpRouteDispatcher": HTTP_API_PACKAGE,
+            "HTTP_POST_DISPATCHER": HTTP_API_PACKAGE,
+            "AUTHENTICATED_POST_ROUTES": HTTP_API_PACKAGE,
+            "HTTP_RESPONSE_TRANSPORT": HTTP_API_PACKAGE,
+            "nutrition_service": "nutrition/service.py",
             "login_user": HTTP_AUTH,
             "logout_user": HTTP_AUTH,
             "bootstrap_provider_states": "http_api/bootstrap.py",
@@ -286,7 +316,7 @@ def _explicit_owner(name: str) -> str | None:
             "MAX_PRIVACY_EXPORT_BYTES": PRIVACY_MODULE,
             "MIN_EXPORT_FREE_BYTES": BACKUP_PACKAGE,
             "EXPORT_TIME_LIMIT_SECONDS": BACKUP_PACKAGE,
-            "STREAM_CHUNK_BYTES": COACH_STREAMS,
+            "STREAM_CHUNK_BYTES": "http_api/response_transport.py",
             "MAX_EXTERNAL_CALENDAR_BYTES": PROVIDER_CALENDAR,
             "CALENDAR_FETCH_TIMEOUT_SECONDS": PROVIDER_CALENDAR,
             "CALENDAR_CONNECTION_TIMEOUT_SECONDS": PROVIDER_CALENDAR,
@@ -311,8 +341,8 @@ def _explicit_owner(name: str) -> str | None:
             "DEFAULT_PROFILE": ATHLETE_PACKAGE,
             "NRW_LATITUDE_BOUNDS": WEATHER_PACKAGE,
             "NRW_LONGITUDE_BOUNDS": WEATHER_PACKAGE,
-            "MORNING_RETRY_SECONDS": COACH_MORNING,
-            "MORNING_MAX_ATTEMPTS": COACH_MORNING,
+            "MORNING_RETRY_SECONDS": PERFORMANCE_MORNING_BATTERY,
+            "MORNING_MAX_ATTEMPTS": PERFORMANCE_MORNING_BATTERY,
             "morning_checkin_date": COACH_MORNING,
             "morning_checkin_state": COACH_MORNING,
             "MORNING_CHECKIN_PROMPT": COACH_MORNING,
@@ -327,7 +357,10 @@ def _explicit_owner(name: str) -> str | None:
             "_morning_checkin_garmin_ready": COACH_MORNING,
             "_wait_for_morning_intervals_sync": COACH_MORNING,
             "LIBRARY_BULK_MAX_ENTRIES": PLANNING_PACKAGE,
-            "LIBRARY_BULK_PREVIEW_TTL_SECONDS": COACH_PROPOSALS,
+            "COACH_DEFAULT_MAX_OUTPUT_TOKENS": COACH_LIMITS,
+            "COACH_LONG_PLAN_MAX_OUTPUT_TOKENS": COACH_LIMITS,
+            "COACH_BACKGROUND_HORIZON_DAYS": COACH_LIMITS,
+            "COACH_TRAINING_CHANGE_LIMIT": COACH_LIMITS,
             "DEFAULT_TIMEZONE": CONFIG_MODULE,
             "ATHLETE_RECORD_HANDLERS": COACH_TOOL_EXECUTION,
             "DB_LOCK": DB_MANAGER,
@@ -615,7 +648,6 @@ def _explicit_owner(name: str) -> str | None:
             "_handle_openai_stream_timeout": PROVIDER_OPENAI,
             "_handle_openai_stream_network_error": PROVIDER_OPENAI,
             "openai_stream_request": PROVIDER_OPENAI,
-            "transcribe_audio": PROVIDERS_PACKAGE,
             "gemini_usage_summary": PROVIDERS_PACKAGE,
             "_record_gemini_status": PROVIDERS_PACKAGE,
             "_record_gemini_usage": PROVIDERS_PACKAGE,
@@ -723,6 +755,7 @@ def _explicit_owner(name: str) -> str | None:
             # intentionally retained in the final composition root and must
             # not inflate the still-open domain phase counts.
             "provider_refresh_tracker": COMPOSITION_ROOT,
+            "intervals_client": COMPOSITION_ROOT,
             "sync_operation_observer": COMPOSITION_ROOT,
             "sync_job_store": COMPOSITION_ROOT,
             "sync_job_queue_service": COMPOSITION_ROOT,
@@ -737,6 +770,7 @@ def _explicit_owner(name: str) -> str | None:
             "coach_quick_actions_service": COMPOSITION_ROOT,
             "gemini_conversation_history_service": COMPOSITION_ROOT,
             "coach_message_service": COMPOSITION_ROOT,
+            "coach_conversation_history_service": COMPOSITION_ROOT,
             "coach_job_store": COMPOSITION_ROOT,
             "gemini_local_chat_history_service": COMPOSITION_ROOT,
             "gemini_request_payload_service": COMPOSITION_ROOT,

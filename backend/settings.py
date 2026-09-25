@@ -13,9 +13,7 @@ from backend.config import Config
 from backend.errors import AppError
 
 MODEL_OPTIONS = (
-    {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "description": "Effizient für kostenbewusste Nutzung"},
-    {"id": "gpt-5.6-sol", "label": "GPT-5.6 Sol", "description": "Maximale Qualität für komplexes Coaching"},
-    {"id": "gpt-5.6-terra", "label": "GPT-5.6 Terra", "description": "Ausgewogen bei Qualität, Tempo und Kosten"},
+    {"id": "gpt-6-luna", "label": "GPT-6 Luna", "description": "Effizient für kostenbewusste Nutzung"},
 )
 GEMINI_MODEL_OPTIONS = (
     {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash", "description": "Schnelle, leistungsstarke Gemini-Antworten"},
@@ -51,7 +49,7 @@ class SettingsService:
     def _available_ai_providers(config: Config) -> list[dict[str, str]]:
         providers: list[dict[str, str]] = []
         if config.openai_api_key:
-            providers.append({"id": "openai", "label": "OpenAI", "description": "GPT-5.6 über die OpenAI Responses API"})
+            providers.append({"id": "openai", "label": "OpenAI", "description": "GPT-6 Luna über die OpenAI Responses API"})
         if config.gemini_api_key:
             providers.append({"id": "gemini", "label": "Gemini", "description": "Google Gemini API"})
         return providers

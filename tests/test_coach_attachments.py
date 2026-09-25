@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 from test_coach_dialogue import DialogueHarness, server
 from support import build_gemini_request_payload
+from backend.coach import attachments as coach_attachments
 from backend.coach.attachments import (_FIT_SPORTS, _fit_crc16, _fit_data_record, _fit_session_summary,
                                        fit_summary, gpx_summary, validate_attachments, model_input, provider_attachment_data)
 
@@ -146,7 +147,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         server.coach_job_submission_service().enqueue("", "attachments-turn", "synthetic-csrf", attachments=[self.upload(), {"name": "chart.png", "data": PNG}])
         job = server.coach_job_store().claim()
         self.assertTrue(server.coach_job_store().message(job))
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             row = db.execute("SELECT attachments FROM messages WHERE role='user'").fetchone()
         saved = json.loads(row["attachments"])
         self.assertEqual(saved[0]["summary"]["point_count"], 2)
@@ -167,14 +168,14 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(server.coach_message_service().list(), [])
 
     def test_attachment_storage_quota_prevents_backup_growth(self):
-        with patch.object(server, "MAX_ATTACHMENT_STORAGE_BYTES", 10):
+        with patch.object(coach_attachments, "MAX_ATTACHMENT_STORAGE_BYTES", 10):
             with self.assertRaises(server.AppError) as error:
                 server.coach_job_submission_service().enqueue("Analyze", "quota-turn", "synthetic-csrf", attachments=[{"name": "chart.png", "data": PNG}])
         self.assertEqual(error.exception.reason, "attachment_storage_quota")
         self.assertEqual(server.coach_message_service().list(), [])
 
     def test_gemini_rejects_images_that_exceed_its_inline_request_budget(self):
-        with patch.object(server.SETTINGS, "selected_ai_provider", return_value="gemini"), patch.object(server, "MAX_GEMINI_INLINE_IMAGE_BYTES", 1):
+        with patch.object(server.SETTINGS, "selected_ai_provider", return_value="gemini"), patch.object(coach_attachments, "MAX_GEMINI_INLINE_IMAGE_BYTES", 1):
             with self.assertRaises(server.AppError) as error:
                 server.coach_job_submission_service().enqueue("Analyze", "gemini-size-turn", "synthetic-csrf", attachments=[self.upload(FIT, "ride.fit")])
         self.assertEqual(error.exception.reason, "gemini_attachment_request_too_large")
@@ -212,7 +213,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         server.coach_job_submission_service().enqueue("First", "history-first", "synthetic-csrf", attachments=[self.upload(FIT, "first.fit")])
         server.coach_job_submission_service().enqueue("Second", "history-second", "synthetic-csrf-2", attachments=[self.upload(FIT, "second.fit")])
         encoded_size = len(provider_attachment_data(validate_attachments([self.upload(FIT, "first.fit")])[0])[0])
-        with patch.object(server, "MAX_GEMINI_INLINE_IMAGE_BYTES", encoded_size + 1):
+        with patch.object(coach_attachments, "MAX_GEMINI_INLINE_IMAGE_BYTES", encoded_size + 1):
             history = server.gemini_local_chat_history_service().build()
         raw_parts = [part for entry in history for part in entry["parts"] if "inlineData" in part and part["inlineData"].get("mimeType") == "application/json"]
         self.assertEqual(len(raw_parts), 1)

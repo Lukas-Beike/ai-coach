@@ -9,6 +9,7 @@ from backend.athlete.profile import ProfileService
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
+from backend.nutrition.service import NutritionService
 from backend.planning.competition_service import CompetitionService
 from backend.planning.library_service import WorkoutLibraryService
 from backend.planning.planned_unit_service import PlannedUnitService
@@ -30,6 +31,7 @@ class CoachReadToolService:
         competition_service: Callable[[], CompetitionService],
         training_plan_service: Callable[[], TrainingPlanService],
         training_change_limit: int,
+        nutrition_service: Callable[[], NutritionService] | None = None,
     ) -> None:
         self._profile_service = profile_service
         self._structured_training_state_service = structured_training_state_service
@@ -40,6 +42,7 @@ class CoachReadToolService:
         self._competition_service = competition_service
         self._training_plan_service = training_plan_service
         self._training_change_limit = training_change_limit
+        self._nutrition_service = nutrition_service
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
         if name == "read_profile":
@@ -83,7 +86,24 @@ class CoachReadToolService:
             return {"ok": True, "competitions": self._competition_service().list()}
         if name == "list_training_plans":
             return {"ok": True, "training_plans": self._training_plan_service().list(100)}
+        if name == "read_nutrition":
+            return self._read_nutrition(arguments)
         return None
+
+    def _read_nutrition(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        if not self._nutrition_service:
+            return {"ok": False, "error": "NutritionService ist nicht verfügbar."}
+        service = self._nutrition_service()
+        if arguments.get("date"):
+            return {"ok": True, **service.get_day_summary(str(arguments["date"]))}
+        if arguments.get("start") and arguments.get("end"):
+            return {
+                "ok": True,
+                "summaries": service.get_range_summary(
+                    str(arguments["start"]), str(arguments["end"])
+                ),
+            }
+        return {"ok": True, **service.get_today_summary()}
 
     @staticmethod
     def _bounded_integer(

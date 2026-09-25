@@ -1,18 +1,20 @@
 """Synthetic workout export regressions; all provider calls are mocked."""
 
-from datetime import date, datetime, timedelta
 import unittest
 from copy import deepcopy
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
-from backend.planning import workouts as planning_workouts
-from test_server import server
 from support import parsed_workout_fixture
+from server_test_support import ServerTestCase, server
+
+from backend.planning import workouts as planning_workouts
 
 
-class WorkoutTextTests(unittest.TestCase):
+class WorkoutTextTests(ServerTestCase):
     def setUp(self):
-        self.enterContext(patch.object(server, "local_now", return_value=datetime.now()))
+        super().setUp()
+        self.enterContext(patch.object(server.ATHLETE_CLOCK, "now", return_value=datetime.now()))
 
     def workout(self, description, minutes=61, **extra):
         return {
@@ -33,7 +35,7 @@ class WorkoutTextTests(unittest.TestCase):
             "(261–273 W), dazwischen 6 min bei 50–60 % FTP. 10 min Ausrollen.", 65,
         )
         self.assert_invalid(workout, "missing_workout_steps")
-        client = server.IntervalsClient()
+        client = server.intervals_client()
         with patch.object(client, "get_or_create_workout_folder") as folder, \
                 patch.object(client, "post") as post, patch.object(client, "put") as put:
             for operation in (
@@ -41,7 +43,7 @@ class WorkoutTextTests(unittest.TestCase):
                 lambda: client.update_library_workout("synthetic", workout),
                 lambda: client.plan_library_workout("synthetic", workout, workout["date"]),
                 lambda: planning_workouts.workout_event_payload(
-                    "synthetic", workout, today=server.local_now().date()
+                    "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
                 ),
             ):
                 with self.assertRaises(server.AppError):
@@ -54,7 +56,7 @@ class WorkoutTextTests(unittest.TestCase):
         description = "- 15m 50-70%\n- 15m 88-92%\n- 6m 50-60%\n- 15m 88-92%\n- 10m 50-60%"
         self.assert_invalid(self.workout(description, 65), "workout_duration_mismatch")
         payload = planning_workouts.workout_event_payload(
-            "synthetic", self.workout(description), today=server.local_now().date()
+            "synthetic", self.workout(description), today=server.ATHLETE_CLOCK.now().date()
         )
         self.assertEqual(payload["moving_time"], 3660)
         self.assertEqual(payload["description"], description)
@@ -83,7 +85,7 @@ class WorkoutTextTests(unittest.TestCase):
         workout = self.workout(description, 63)
         self.assertEqual(
             planning_workouts.workout_event_payload(
-                "synthetic", workout, today=server.local_now().date()
+                "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
             )["moving_time"],
             3780,
         )
@@ -119,7 +121,7 @@ class WorkoutTextTests(unittest.TestCase):
         workout = self.workout("- 1h2m30s Z2\n- 30s Z1\n- 5' Z1\n- 20\" Z1", 68)
         self.assertEqual(
             planning_workouts.workout_event_payload(
-                "synthetic", workout, today=server.local_now().date()
+                "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
             )["moving_time"],
             4100,
         )
@@ -129,7 +131,7 @@ class WorkoutTextTests(unittest.TestCase):
         self.assertIsNone(planning_workouts.validate_workout_description(workout))
         self.assertEqual(
             planning_workouts.workout_event_payload(
-                "synthetic", workout, today=server.local_now().date()
+                "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
             )["moving_time"],
             2400,
         )
@@ -141,7 +143,7 @@ class WorkoutTextTests(unittest.TestCase):
         self.assertIsNone(planning_workouts.validate_workout_description(workout))
         self.assertEqual(
             planning_workouts.workout_event_payload(
-                "synthetic", workout, today=server.local_now().date()
+                "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
             )["moving_time"],
             1800,
         )
@@ -173,11 +175,11 @@ class WorkoutTextTests(unittest.TestCase):
             with self.subTest(sport=sport):
                 workout = self.workout("Technik und Beweglichkeit nach Bedarf", 30, sport=sport)
                 normalized = planning_workouts.normalize_workout(
-                    workout, today=server.local_now().date()
+                    workout, today=server.ATHLETE_CLOCK.now().date()
                 )
                 self.assertEqual(normalized["description"], workout["description"])
                 payload = planning_workouts.workout_event_payload(
-                    "synthetic", normalized, today=server.local_now().date()
+                    "synthetic", normalized, today=server.ATHLETE_CLOCK.now().date()
                 )
                 self.assertEqual(payload["type"], sport)
                 self.assertEqual(payload["moving_time"], 1800)
@@ -198,7 +200,7 @@ class WorkoutTextTests(unittest.TestCase):
 
     def test_library_exports_preserve_target_and_local_duration(self):
         workout = self.workout("- 30m Z2 HR", 30, target="HR", moving_time=3600)
-        client = server.IntervalsClient()
+        client = server.intervals_client()
         with patch.object(client, "get_or_create_workout_folder", return_value=1), \
                 patch.object(client, "post", return_value={"id": "synthetic"}) as post, \
                 patch.object(client, "put", return_value={"id": "synthetic"}) as put:

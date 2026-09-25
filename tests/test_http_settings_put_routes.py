@@ -14,14 +14,14 @@ class SettingsPutRoutesTests(unittest.TestCase):
         self.routes = SettingsPutRoutes(self.settings)
 
     def test_model_route_passes_model_field(self) -> None:
-        self.handler.read_json.return_value = {"model": "gpt-5.6-sol"}
-        self.settings.save_model.return_value = {"model": "gpt-5.6-sol"}
+        self.handler.read_json.return_value = {"model": "gpt-6-luna"}
+        self.settings.save_model.return_value = {"model": "gpt-6-luna"}
 
         self.assertTrue(self.routes.handle(self.handler, "/api/settings/model"))
 
-        self.settings.save_model.assert_called_once_with("gpt-5.6-sol")
+        self.settings.save_model.assert_called_once_with("gpt-6-luna")
         self.handler.read_json.assert_called_once_with()
-        self.handler.send_json.assert_called_once_with(200, {"model": "gpt-5.6-sol"})
+        self.handler.send_json.assert_called_once_with(200, {"model": "gpt-6-luna"})
 
     def test_ai_provider_route_passes_provider_field(self) -> None:
         self.handler.read_json.return_value = {"provider": "gemini"}

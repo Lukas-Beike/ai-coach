@@ -14,6 +14,9 @@ from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.planning import library as planning_library
+from backend.providers import gemini as gemini_provider
+from backend.providers import http as provider_http
+from backend.providers import openai as openai_provider
 from backend.sync.intervals import IntervalsSyncService
 
 
@@ -81,7 +84,12 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         super().setUp()
         self.observed = set()
         self.issued = {}
-        for owner, name in ((server.provider_http_client(), "request"), (server, "urlopen")):
+        for owner, name in (
+            (server.provider_http_client(), "request"),
+            (provider_http, "urlopen"),
+            (gemini_provider, "urlopen"),
+            (openai_provider, "urlopen"),
+        ):
             guard = patch.object(owner, name, side_effect=AssertionError("Unexpected network access in synthetic Coach test"))
             guard.start()
             self.addCleanup(guard.stop)
@@ -113,7 +121,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         tables = ("planned_units", "workout_library", "training_plans", "competitions", "competition_sync_tombstones",
                   "athlete_checkins", "activity_feedback", "plan_adjustments", "change_history", "sync_jobs",
                   "sync_job_items", "coach_plan_artifacts", "coach_action_proposals", "planning_state", "snapshots")
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             return {"profile": server.profile_service().get(), **{table: [dict(row) for row in db.execute("SELECT * FROM " + table)] for table in tables}}
 
     def seed_activity(self):
@@ -193,7 +201,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.run_tool("apply_training_patch", {"workouts": [self.workout()], "expected_revision": self.state()["planning_revision"]}, ["local_plan"], period=period)
         local_id = self.state()["planned_units"][0]["local_id"]
         for action, extra in (("update", {"name": "Synthetic renamed", "date": "2026-09-11"}), ("archive", {}), ("restore", {}), ("delete", {})):
-            with server.database() as db:
+            with server.database_manager().unit_of_work() as db:
                 row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
             self.run_tool("apply_training_patch", {"changes": [{"local_id": local_id, "action": action, **extra,
                 "expected_payload_hash": planning_library.library_payload_hash(row["payload"])}], "expected_revision": self.state()["planning_revision"]},
@@ -317,7 +325,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         selected = self.run_tool("start_intervals_plan_sync", {"entries": [entry]}, ["planned_unit:" + local_id, "intervals_sync"],
                                  target="intervals", remote_write=True, sync_scope="selected", message="Nur diese Einheit erneut übertragen.")
         self.assertEqual(selected["entries"], 1)
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             job = db.execute("SELECT payload FROM sync_jobs WHERE id=?", (selected["sync_job_ids"][0],)).fetchone()
         self.assertEqual([e["library_workout_id"] for e in json.loads(job["payload"])["entries"]], [local_id])
         all_pending = self.run_tool("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"], target="intervals", remote_write=True,
@@ -329,7 +337,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
     def test_conflict_choices_and_failed_job_retries(self):
         local_id = server.local_plan_creation_service().save([self.workout()])[0]["id"]
         for strategy in ("keep_local", "adopt_remote"):
-            with server.database() as db:
+            with server.database_manager().unit_of_work() as db:
                 db.execute("UPDATE planned_units SET sync_state='conflict', sync_conflict=? WHERE local_id=?",
                            (json.dumps({"type": "remote_missing", "remote": None}), local_id))
             self.run_tool("resolve_training_sync_conflict", {"local_id": local_id, "strategy": strategy}, ["planned_unit:" + local_id])
@@ -341,7 +349,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 {"reason": "Synthetic", **({} if remote else {"days": 7})},
                 requested_by="coach",
             )
-            with server.database() as db:
+            with server.database_manager().unit_of_work() as db:
                 db.execute("UPDATE sync_jobs SET status='failed' WHERE id=?", (job["id"],))
             self.run_tool("resolve_training_sync_conflict", {"job_id": job["id"]}, ["sync_job:" + job["id"], "intervals_sync" if remote else "garmin_refresh"], target=provider, remote_write=remote)
             self.assertEqual(
@@ -415,10 +423,10 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 "summary": "Eine der beiden Einheiten verschieben", "question": "Die Einheit am Mittwoch oder Freitag?"})
         result, _ = self.turn("Diese Einheit bitte verschieben.", [ask, {"output_text": "Welche Einheit?"}])
         self.assertTrue(result["awaiting_clarification"])
-        self.assertIsNotNone(json.loads(server.get_kv("coach_pending_request")))
+        self.assertIsNotNone(json.loads(server.key_value_service().get("coach_pending_request")))
         result, _ = self.turn("Lass es unverändert.", [lambda _: self.call("cancel_coach_request"), {"output_text": "Abgebrochen."}])
         self.assertEqual(result["status"], "cancelled")
-        self.assertIsNone(json.loads(server.get_kv("coach_pending_request")))
+        self.assertIsNone(json.loads(server.key_value_service().get("coach_pending_request")))
         self.assertEqual(self.athlete_state(), before)
 
     def test_matrix_has_observed_success_case_for_every_available_tool_and_variant(self):
@@ -434,6 +442,26 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 name, variants_text, _ = line.split("|")[1:4]
                 documented.update(name.strip().strip("`") + ":" + value.strip().strip("`") for value in variants_text.split(","))
         self.assertEqual(documented, declared)
+
+    @covers("save_nutrition_entry:success", "read_nutrition:success", "delete_nutrition_entry:success")
+    def test_nutrition_entries_can_be_saved_read_and_deleted(self):
+        saved = self.run_tool(
+            "save_nutrition_entry",
+            {"payload": {"meal_date": "2026-09-07", "meal_type": "lunch",
+                         "description": "Synthetic pasta", "kcal": 620, "carbs_g": 80}},
+            ["local_nutrition"],
+            message="Ich habe Pasta gegessen; speichere das lokal.",
+        )
+        entry_id = saved["entry"]["id"]
+        read = self.run_tool("read_nutrition", {"date": "2026-09-07"})
+        self.assertEqual(read["total_kcal"], 620)
+        self.assertEqual(read["entries"][0]["id"], entry_id)
+        deleted = self.run_tool(
+            "delete_nutrition_entry", {"id": entry_id}, ["local_nutrition"],
+            message="Entferne den Ernährungseintrag lokal.",
+        )
+        self.assertEqual(deleted["deleted_id"], entry_id)
+        self.assertEqual(server.nutrition_service().get_day_summary("2026-09-07")["entry_count"], 0)
 
     def test_every_mutating_tool_rejects_missing_user_authorization_without_effect(self):
         exceptions = server.STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}
@@ -498,7 +526,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         synced, _ = self.turn("Bitte diese geänderte Einheit zu Intervals synchronisieren.", [lambda _: self.call("read_training_state"), sync_read_selection,
                                                                                              {"output_text": "Synchronisierung beauftragt."}])
         self.assertEqual(synced["status"], "completed")
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             job = db.execute("SELECT payload FROM sync_jobs WHERE id=?", (synced["sync_job_ids"][0],)).fetchone()
         self.assertEqual([e["library_workout_id"] for e in json.loads(job["payload"])["entries"]], [friday])
         self.assertEqual(next(u for u in self.state()["planned_units"] if u["local_id"] == sunday), sunday_before)
@@ -510,9 +538,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             return self.call("clarify_coach_request", {"source_message_ids": self.request([])["source_message_ids"],
                 "summary": "Eine Oberkörpereinheit auf Samstag verschieben; die andere erhalten.", "question": "Die erste am Mittwoch oder die zweite am Freitag?"})
         self.turn("Verschiebe eine der Oberkörpereinheiten auf Samstag.", [ask, {"output_text": "Welche Einheit?"}])
-        pending = json.loads(server.get_kv("coach_pending_request"))
+        pending = json.loads(server.key_value_service().get("coach_pending_request"))
         self.run_tool("list_planned_workouts", message="Zeig mir die Woche nochmal.")
-        self.assertEqual(json.loads(server.get_kv("coach_pending_request")), pending)
+        self.assertEqual(json.loads(server.key_value_service().get("coach_pending_request")), pending)
         def choose(payload):
             context = json.loads(payload["input"])["dialogue"]
             self.assertEqual(context["pending_request"], pending)
@@ -527,7 +555,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         result, _ = self.turn("Die zweite.", [choose, {"output_text": "Die Freitagseinheit liegt jetzt am Samstag."}])
         self.assertEqual(result["status"], "completed")
         self.assertEqual([(u["local_id"], u["date"]) for u in self.state()["planned_units"]], [(units[0]["id"], "2026-09-09"), (units[1]["id"], "2026-09-12")])
-        self.assertIsNone(json.loads(server.get_kv("coach_pending_request")))
+        self.assertIsNone(json.loads(server.key_value_service().get("coach_pending_request")))
 
     def test_invalid_arguments_and_missing_objects_do_not_partially_write(self):
         unit = server.local_plan_creation_service().save([self.workout()], plan_name="Synthetic validation plan")[0]

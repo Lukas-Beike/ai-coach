@@ -63,5 +63,10 @@ class CoachJobWorker:
         self.stop_event.set()
         self.wake_event.set()
 
+    def join(self, timeout: float | None = None) -> None:
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout)
+
 
 COACH_JOB_WORKER = CoachJobWorker()

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
-from backend.coach.authorization import require_coach_scope
+from backend.coach.authorization import TRAINING_PLAN_SCOPE_PREFIX, require_coach_scope
 from backend.coach.dialogue import validate_request
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.db.manager import DatabaseManager
@@ -30,6 +30,7 @@ BROAD_SCOPES = frozenset({
     "local_profile", "local_plan", "local_template", "local_competitions",
     "local_checkin", "activity_feedback", "adaptive_replan", "intervals_sync",
     "intervals_refresh", "garmin_refresh", "calendar_refresh", "weather_refresh",
+    "local_nutrition",
 })
 
 
@@ -43,14 +44,12 @@ class CoachDialogueActionService:
         sync_jobs: Callable[[], SyncJobQueueService],
         plan_scope: CoachDialoguePlanScopeService,
         today: Callable[[], date],
-        training_plan_scope_prefix: str,
     ) -> None:
         self._database_manager = database_manager
         self._db_lock = db_lock
         self._sync_jobs = sync_jobs
         self._plan_scope = plan_scope
         self._today = today
-        self._training_plan_scope_prefix = training_plan_scope_prefix
 
     def classify(
         self,
@@ -118,8 +117,10 @@ class CoachDialogueActionService:
                     reason="request_target",
                 )
         retry_push = bool(retry_job and retry_job["type"] in {"plan_push", "competition_push"})
-        remote_write = retry_push or name in {"start_intervals_plan_sync", "sync_competitions"} or (
-            name == "apply_adaptive_replan" and arguments.get("sync_illness_to_intervals")
+        remote_write = (
+            name in {"start_intervals_plan_sync", "sync_competitions"}
+            or (name == "apply_adaptive_replan" and bool(arguments.get("sync_illness_to_intervals")))
+            or retry_push
         )
         refresh = bool(retry_job and not retry_push) or name in {
             "start_provider_refresh", "refresh_current_performance",
@@ -164,7 +165,10 @@ class CoachDialogueActionService:
                     raise AppError(400, "Der Auftrag enthält einen ungültigen Objektbezug.", reason="request_scope")
 
     def _validate_repair_scope(
-        self, arguments: dict[str, Any], request: dict[str, Any], action: dict[str, Any]
+        self,
+        arguments: dict[str, Any],
+        request: dict[str, Any],
+        action: dict[str, Any],
     ) -> None:
         if not arguments.get("repair"):
             return
@@ -186,7 +190,10 @@ class CoachDialogueActionService:
                     )
 
     def _apply_operation_scope(
-        self, name: str, arguments: dict[str, Any], action: dict[str, Any]
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        action: dict[str, Any],
     ) -> None:
         if name in {
             "apply_training_patch", "apply_training_changes", "replace_training_plan",
@@ -205,7 +212,9 @@ class CoachDialogueActionService:
         if name == "update_training_plan":
             require_coach_scope(
                 action,
-                self._training_plan_scope_prefix + str((arguments.get("payload") or {}).get("plan_id") or ""),
+                TRAINING_PLAN_SCOPE_PREFIX + str((arguments.get("payload") or {}).get("plan_id") or ""),
             )
         if name == "apply_adaptive_replan":
             require_coach_scope(action, "adaptive_replan:" + str(arguments.get("adjustment_id") or ""))
+        if name in {"save_nutrition_entry", "delete_nutrition_entry"}:
+            require_coach_scope(action, "local_nutrition")

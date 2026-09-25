@@ -24,6 +24,8 @@ from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
+COACH_TOOL_MAX_ROUNDS = 12
+
 
 @dataclass
 class StructuredCoachRoundState:

@@ -21,17 +21,17 @@ class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
         }
 
     def test_http_route_only_reads_body_and_delegates_with_session(self):
-        handler = object.__new__(server.RequestHandler)
+        handler = object.__new__(server.request_handler_class())
         handler.read_json = Mock(return_value=self.payload())
         handler.send_json = Mock()
         service = Mock()
         service.execute.return_value = {"status": "completed"}
         provision = Mock()
         provision.ensure.return_value = "synthetic-conversation"
-        with patch.object(server, "coach_planning_command_service", return_value=service), patch.object(
-            server, "coach_conversation_provision_service", return_value=provision
-        ):
-            handled = handler._handle_coach_post("/api/planning/commands", {"csrf_hash": "synthetic-session"})
+        routes = server.PlanningCommandsPostRoutes(lambda: service, lambda: provision)
+        handled = routes.handle(
+            handler, "/api/planning/commands", {"csrf_hash": "synthetic-session"}
+        )
         self.assertTrue(handled)
         service.execute.assert_called_once_with(
             self.payload(), conversation_id="synthetic-conversation",
@@ -73,7 +73,7 @@ class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
         for payload in invalid:
             with self.subTest(payload=payload), self.assertRaises(server.AppError):
                 service.execute(payload, conversation_id="synthetic-conversation")
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM coach_commands").fetchone()["count"], 0)
 
     def test_existing_running_claim_does_not_execute_again(self):
@@ -86,7 +86,7 @@ class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
                 "operation": payload["operation"], "arguments": payload["arguments"],
             }),
         }
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, "
                 "target_system, status, receipt, created_at, updated_at) "
@@ -111,14 +111,14 @@ class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
         with self.assertRaises(server.AppError) as stale:
             service.execute(payload, conversation_id="synthetic-conversation")
         self.assertEqual(stale.exception.reason, "planning_revision_conflict")
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM coach_commands").fetchone()["count"], 0)
 
     def test_tool_failure_rolls_back_effect_and_persists_failure_receipt(self):
         service = server.coach_planning_command_service()
 
         def fail(*_args, **_kwargs):
-            with server.database() as db:
+            with server.database_manager().unit_of_work() as db:
                 db.execute("INSERT INTO kv(key, value, updated_at) VALUES ('synthetic-command-effect', 'bad', 'now')")
             raise RuntimeError("synthetic tool failure")
 
@@ -129,7 +129,7 @@ class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
             )
         execute.assert_called_once()
         self.assertNotEqual(receipt["status"], "completed")
-        with server.database() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertIsNone(db.execute("SELECT value FROM kv WHERE key='synthetic-command-effect'").fetchone())
             row = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id='failed-command'").fetchone()
         self.assertIsNotNone(row)
