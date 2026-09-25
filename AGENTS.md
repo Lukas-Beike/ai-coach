@@ -132,7 +132,7 @@ Run from the repository root:
 
 ```powershell
 python -m unittest discover -s tests -v
-python -m py_compile server.py tests/test_server.py
+python -m compileall -q server.py backend tests
 ```
 
 Tests must use temporary data directories and mocked external services. Never
@@ -227,7 +227,7 @@ available.
 
   ```powershell
   python -m unittest discover -s tests -v
-  python -m py_compile server.py tests/test_server.py
+  python -m compileall -q server.py backend tests
   docker build -t ai-coach:local .
   ```
 

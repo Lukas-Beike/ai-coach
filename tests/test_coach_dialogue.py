@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from backend.coach import streams as coach_streams
-import test_server as fixtures
+import server_test_support as fixtures
 from support import isolated_server, reset_application_state
 from backend.coach.dialogue import validate_request
 from backend.coach.outcomes import unresolved_coach_steps

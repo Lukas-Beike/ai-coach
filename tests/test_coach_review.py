@@ -9,7 +9,7 @@ from pathlib import Path
 from dataclasses import replace
 from datetime import date, timedelta
 from unittest.mock import Mock, patch
-import test_server as fixtures
+import server_test_support as fixtures
 from backend.planning import workouts as planning_workouts
 from backend.coach.proposals import COACH_ACTION_TTL_SECONDS, prune_expired_coach_proposals
 from backend.coach.authorization import coach_session_key

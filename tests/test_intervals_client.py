@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock, patch
 
-import server
+from server_test_support import server
 from backend.providers.intervals_client import IntervalsClient
 
 

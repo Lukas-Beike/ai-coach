@@ -4,7 +4,7 @@
 
   ```powershell
   python -m unittest discover -s tests -v
-  python -m py_compile server.py tests/test_server.py
+  python -m compileall -q server.py backend tests
   ```
 
 - Every test must use temporary `DATA_DIR`/database state or isolated patches.

@@ -84,7 +84,7 @@ jobs:
         with:
           python-version: '3.14'
       - name: Run syntax checks
-        run: python -m py_compile server.py tests/test_server.py tests/run_tests.py
+        run: python -m compileall -q server.py backend tests
 
   container_tests:
     needs: source
