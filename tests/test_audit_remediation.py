@@ -1,4 +1,5 @@
 """Regression cases from the full audit; providers and athlete data are synthetic."""
+from backend.runtime import clock as runtime_clock
 import json
 import http.client
 import threading
@@ -14,6 +15,7 @@ from urllib.parse import urlencode
 from unittest.mock import Mock, patch
 
 from backend.coach import streams as coach_streams
+from backend.db.manager import DATABASE_MANAGER_CACHE
 import test_coach_dialogue as dialogue
 from backend.http_api import server as http_server_module
 from backend.providers import calendar as calendar_provider
@@ -74,7 +76,7 @@ class AuditRemediationTests(unittest.TestCase):
         client.fetch_competition_events.return_value = [remote]
         def delete(_):
             with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-                db.execute("INSERT INTO competition_sync_tombstones VALUES ('later', '456', 'later-external', ?)", (server.utc_now(),))
+                db.execute("INSERT INTO competition_sync_tombstones VALUES ('later', '456', 'later-external', ?)", (runtime_clock.utc_now(),))
         client.bulk_delete_events.side_effect = delete
         with patch.object(intervals_client_module, "IntervalsClient", return_value=client):
             server.competition_sync_service().sync(push_local=True)
@@ -86,7 +88,7 @@ class AuditRemediationTests(unittest.TestCase):
         def fetch(query):
             self.assertGreater(runtime_maintenance.MAINTENANCE_GATE.state()["running_operations"], 0)
             server.profile_service().save({"weather_location": ""})
-            return {"query": query, "forecast": {}, "fetched_at": server.utc_now()}
+            return {"query": query, "forecast": {}, "fetched_at": runtime_clock.utc_now()}
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=fetch):
             self.assertEqual(server.weather_service().state()["state"], "not_configured")
         self.assertFalse(server.key_value_service().get(weather_cache.CACHE_KEY))
@@ -100,7 +102,7 @@ class AuditRemediationTests(unittest.TestCase):
             entered.set()
             if not release.wait(5):
                 raise AssertionError("Synthetic weather barrier timed out")
-            return {"query": query, "forecast": {}, "fetched_at": server.utc_now()}
+            return {"query": query, "forecast": {}, "fetched_at": runtime_clock.utc_now()}
         def read():
             try:
                 server.public_weather_state_service().state()
@@ -210,7 +212,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
                 }
             )
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            db.executemany("INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)", [(str(i), str(i), json.dumps({"id": str(i), "name": "Synthetic"}), server.utc_now()) for i in range(1001)])
+            db.executemany("INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)", [(str(i), str(i), json.dumps({"id": str(i), "name": "Synthetic"}), runtime_clock.utc_now()) for i in range(1001)])
         temporary = server.privacy_archive_export_service().create_file()
         try:
             with zipfile.ZipFile(temporary) as archive:
@@ -225,7 +227,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
         records += [{"id": "archived", "name": "Archived", "archived": True}, {"id": "dated", "name": "Dated", "date": "2026-09-09"}]
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.executemany("INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)",
-                           [(item["id"], item["id"], json.dumps(item), server.utc_now()) for item in records])
+                           [(item["id"], item["id"], json.dumps(item), runtime_clock.utc_now()) for item in records])
         from support import create_test_session
         token = create_test_session(server)
         # This temporary SQLite fixture exercises pagination and real session
@@ -335,7 +337,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
                     )
                     self.assertEqual(server.sync_job_store().claim()["id"], job["id"])
                 finally:
-                    server.DATABASE_MANAGER_CACHE.reset()
+                    DATABASE_MANAGER_CACHE.reset()
 
     def test_chat_reset_changes_history_generation(self):
         before = server.chat_history_page_service().page()["generation"]

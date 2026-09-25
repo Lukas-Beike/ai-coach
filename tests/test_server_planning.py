@@ -1,4 +1,5 @@
 """Server integration tests for planning."""
+from backend.runtime import clock as runtime_clock
 
 import json
 import threading
@@ -977,7 +978,7 @@ class ServerPlanningTests(ServerTestCase):
         plan_name = "Mixed Create Plan"
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
-                db, plan_id, plan_name, "Build", "2099-01-01", "2099-01-31", "planned", server.utc_now(),
+                db, plan_id, plan_name, "Build", "2099-01-01", "2099-01-31", "planned", runtime_clock.utc_now(),
             )
         existing = server.planned_unit_service().create({
             "date": "2099-01-01", "sport": "Run", "name": "Existing plan unit",
@@ -1000,7 +1001,7 @@ class ServerPlanningTests(ServerTestCase):
         plan_id = "explicit-standalone-plan"
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
-                db, plan_id, "Explicit standalone", "Build", "2099-03-01", "2099-03-31", "planned", server.utc_now(),
+                db, plan_id, "Explicit standalone", "Build", "2099-03-01", "2099-03-31", "planned", runtime_clock.utc_now(),
             )
         existing = server.planned_unit_service().create({
             "date": "2099-03-01", "sport": "Run", "name": "Plan reference",
@@ -1023,7 +1024,7 @@ class ServerPlanningTests(ServerTestCase):
         plan_id = "named-create-plan"
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
-                db, plan_id, "Named create", "Build", "2099-04-01", "2099-04-30", "planned", server.utc_now(),
+                db, plan_id, "Named create", "Build", "2099-04-01", "2099-04-30", "planned", runtime_clock.utc_now(),
             )
         intent = {
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
@@ -1045,7 +1046,7 @@ class ServerPlanningTests(ServerTestCase):
         plan_id = "standalone-bounds-plan"
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
-                db, plan_id, "Standalone bounds", "Build", "2099-05-01", "2099-05-31", "planned", server.utc_now(),
+                db, plan_id, "Standalone bounds", "Build", "2099-05-01", "2099-05-31", "planned", runtime_clock.utc_now(),
             )
         existing = server.planned_unit_service().create({
             "date": "2099-05-10", "sport": "Run", "name": "Plan unit", "description": "- 30m 60% easy",
@@ -1066,7 +1067,7 @@ class ServerPlanningTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             for index, plan_id in enumerate(plan_ids):
                 server.TRAINING_PLAN_REPOSITORY.create(
-                    db, plan_id, f"Mixed {index}", "Build", "2099-06-01", "2099-06-30", "planned", server.utc_now(),
+                    db, plan_id, f"Mixed {index}", "Build", "2099-06-01", "2099-06-30", "planned", runtime_clock.utc_now(),
                 )
         units = [
             server.planned_unit_service().create({
@@ -1090,7 +1091,7 @@ class ServerPlanningTests(ServerTestCase):
         plan_id = "membership-boundary-plan"
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
-                db, plan_id, "Membership Boundary", "Build", "2099-02-01", "2099-02-28", "planned", server.utc_now(),
+                db, plan_id, "Membership Boundary", "Build", "2099-02-01", "2099-02-28", "planned", runtime_clock.utc_now(),
             )
         planned = server.planned_unit_service().create({
             "date": "2099-02-01", "sport": "Run", "name": "Planned reference",
@@ -1274,7 +1275,7 @@ class ServerPlanningTests(ServerTestCase):
         past_plan_id = str(uuid.uuid4())
         past = (date.today() - timedelta(days=10)).isoformat()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            server.TRAINING_PLAN_REPOSITORY.create(db, past_plan_id, "Past Plan", "", past, past, "planned", server.utc_now())
+            server.TRAINING_PLAN_REPOSITORY.create(db, past_plan_id, "Past Plan", "", past, past, "planned", runtime_clock.utc_now())
         state = server.structured_training_state_service().read()
         intent = {
             "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
@@ -1298,7 +1299,7 @@ class ServerPlanningTests(ServerTestCase):
         ends = (date.today() + timedelta(days=7)).isoformat()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
-                db, empty_plan_id, "Empty Future Plan", "", starts, ends, "planned", server.utc_now(),
+                db, empty_plan_id, "Empty Future Plan", "", starts, ends, "planned", runtime_clock.utc_now(),
             )
         state = server.structured_training_state_service().read()
 

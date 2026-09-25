@@ -1,4 +1,5 @@
 """Real Coach/job execution with synthetic model and provider responses."""
+from backend.runtime import clock as runtime_clock
 
 from copy import deepcopy
 from datetime import date, timedelta
@@ -73,7 +74,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 state,
                 None,
                 remote_event,
-                now=server.utc_now(),
+                now=runtime_clock.utc_now(),
             )
 
     def seed(self, wrong_sport=False):

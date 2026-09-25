@@ -67,6 +67,7 @@ from backend.performance.morning_battery_service import (
 )
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
+from backend.runtime import clock as runtime_clock
 from backend.sync import freshness as sync_freshness
 from backend.sync import garmin as garmin_sync
 from backend.sync.gates import (
@@ -96,7 +97,11 @@ from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
 from backend.db.key_value import KeyValueService
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, NutritionRepository, PlanAdjustmentRepository, PlanningStateRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
-from backend.db.manager import DatabaseManager, DatabaseManagerCache
+from backend.db import manager as database_manager_runtime
+from backend.db.manager import (
+    DATABASE_LOCK as DB_LOCK,
+    DatabaseManager,
+)
 from backend.db.schema import configure_cipher, database_schema_is_current
 from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config
 from backend.providers.intervals import IntervalsApiClient
@@ -132,9 +137,8 @@ from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.auth import (
-    RATE_LIMITER,
-    SESSION_AUTH_SERVICE_CACHE,
     SessionAuthService,
+    get_session_auth_service,
 )
 from backend.http_api.public_performance import (
     PublicFeedbackStateService,
@@ -400,7 +404,6 @@ GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
 INTERVALS_SYNC_WAIT_SECONDS = 120
-DB_LOCK = threading.RLock()
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: SyncJobWorker | None = None
 
@@ -414,26 +417,20 @@ REDACTOR = observability.Redactor(lambda: CONFIG)
 
 
 
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-KEY_VALUE_REPOSITORY = KeyValueRepository(utc_now)
+KEY_VALUE_REPOSITORY = KeyValueRepository(runtime_clock.utc_now)
 PROFILE_REPOSITORY = ProfileRepository(KEY_VALUE_REPOSITORY)
 COMPETITION_REPOSITORY = CompetitionRepository()
 TRAINING_PLAN_REPOSITORY = TrainingPlanRepository()
 PLANNING_STATE_REPOSITORY = PlanningStateRepository()
 PLANNING_REVISION_SERVICE = PlanningRevisionService(
-    PLANNING_STATE_REPOSITORY, utc_now
+    PLANNING_STATE_REPOSITORY, runtime_clock.utc_now
 )
 PLAN_ADJUSTMENT_REPOSITORY = PlanAdjustmentRepository()
-CHAT_REPOSITORY = ChatRepository(utc_now)
-CHECKIN_REPOSITORY = CheckinRepository(utc_now)
-ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(utc_now)
+CHAT_REPOSITORY = ChatRepository(runtime_clock.utc_now)
+CHECKIN_REPOSITORY = CheckinRepository(runtime_clock.utc_now)
+ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(runtime_clock.utc_now)
 SNAPSHOT_REPOSITORY = SnapshotRepository()
 
-
-DATABASE_MANAGER_CACHE = DatabaseManagerCache()
 
 PROVIDER_REFRESH_RETRY_BASE_SECONDS = 15 * 60
 PROVIDER_REFRESH_RETRY_MAX_SECONDS = 6 * 60 * 60
@@ -448,9 +445,9 @@ def database_manager() -> DatabaseManager:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     signature = (str(DB_PATH.resolve()), CONFIG.app_password, SQLCIPHER_AVAILABLE)
     if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
-        DATABASE_MANAGER_CACHE.reset()
+        database_manager_runtime.DATABASE_MANAGER_CACHE.reset()
         raise RuntimeError("SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich.")
-    return DATABASE_MANAGER_CACHE.get(
+    return database_manager_runtime.DATABASE_MANAGER_CACHE.get(
         signature,
         DB_PATH,
         sqlite_backend if CONFIG.app_password else sqlite3,
@@ -465,19 +462,18 @@ def database_manager() -> DatabaseManager:
 
 def session_auth_service() -> SessionAuthService:
     """Compose the HTTP session owner from the active persistence and security configuration."""
-    with DB_LOCK:
-        return SESSION_AUTH_SERVICE_CACHE.get(
-            database_manager(), DB_LOCK, CONFIG, SQLCIPHER_AVAILABLE, RATE_LIMITER
-        )
+    return get_session_auth_service(
+        database_manager(), DB_LOCK, CONFIG, SQLCIPHER_AVAILABLE
+    )
 
 
 def provider_state_service() -> provider_state.ProviderStateService:
     """Return provider observability state bound to the active database manager."""
-    return provider_state.PROVIDER_STATE_SERVICE_CACHE.get(
+    return provider_state.get_provider_state_service(
         database_manager(),
         KEY_VALUE_REPOSITORY,
         DB_LOCK,
-        utc_now,
+        runtime_clock.utc_now,
         lambda: ATHLETE_CLOCK.now().date(),
         LOGGER,
     )
@@ -518,7 +514,7 @@ def provider_freshness_service() -> sync_freshness.ProviderFreshnessService:
 
 def sync_job_store() -> SyncJobStore:
     """Compose durable synchronization-job persistence."""
-    return SyncJobStore(database_manager(), utc_now, lambda: uuid.uuid4().hex)
+    return SyncJobStore(database_manager(), runtime_clock.utc_now, lambda: uuid.uuid4().hex)
 
 
 def sync_job_queue_service() -> SyncJobQueueService:
@@ -596,8 +592,8 @@ def nutrition_service() -> NutritionService:
     return NutritionService(
         database_manager=database_manager(),
         db_lock=DB_LOCK,
-        nutrition_repository=NutritionRepository(utc_now),
-        utc_now=utc_now,
+        nutrition_repository=NutritionRepository(runtime_clock.utc_now),
+        utc_now=runtime_clock.utc_now,
         local_now=ATHLETE_CLOCK.now,
     )
 
@@ -696,7 +692,7 @@ def sync_public_state_service() -> SyncPublicStateService:
 def sync_state_repository() -> SyncStateRepository:
     """Compose transactional provider synchronization state."""
     return SyncStateRepository(
-        database_manager(), KEY_VALUE_REPOSITORY, SNAPSHOT_REPOSITORY, utc_now
+        database_manager(), KEY_VALUE_REPOSITORY, SNAPSHOT_REPOSITORY, runtime_clock.utc_now
     )
 
 
@@ -727,7 +723,7 @@ def intervals_snapshot_reader() -> IntervalsSnapshotReader:
         api_client,
         sync_state_repository(),
         ATHLETE_CLOCK.now,
-        utc_now,
+        runtime_clock.utc_now,
         SYNC_EARLIEST_DATE,
         SYNC_CHUNK_DAYS,
         ALL_SYNC_DAYS,
@@ -813,7 +809,7 @@ def intervals_sync_service() -> IntervalsSyncService:
             ),
             REDACTOR.redact_text,
             LOGGER,
-            utc_now,
+            runtime_clock.utc_now,
         ),
         IntervalsSyncRuntime(
             INTERVALS_SYNC_LOCK,
@@ -830,7 +826,7 @@ def garmin_fixture_loader() -> garmin_sync.GarminFixtureLoader:
         CONFIG,
         ROOT,
         ATHLETE_CLOCK.now,
-        utc_now,
+        runtime_clock.utc_now,
         SYNC_EARLIEST_DATE,
         ALL_SYNC_DAYS,
     )
@@ -859,7 +855,7 @@ def garmin_sync_state_service() -> garmin_sync.GarminSyncStateService:
         sync_state_repository(),
         daily_sync_marker_service(),
         REDACTOR,
-        utc_now,
+        runtime_clock.utc_now,
         lambda: datetime.now(timezone.utc),
     )
 
@@ -873,7 +869,7 @@ def garmin_remote_reader() -> GarminRemoteReader:
         DIAGNOSTIC_CAPTURE,
         REDACTOR.redact_text,
         LOGGER,
-        utc_now,
+        runtime_clock.utc_now,
         lambda: ATHLETE_CLOCK.now().date(),
         SYNC_EARLIEST_DATE,
         SYNC_CHUNK_DAYS,
@@ -906,7 +902,7 @@ def garmin_sync_service() -> GarminSyncService:
             wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
         ),
         GarminSyncLifecycleState(
-            database_manager(), KEY_VALUE_REPOSITORY, utc_now, LOGGER
+            database_manager(), KEY_VALUE_REPOSITORY, runtime_clock.utc_now, LOGGER
         ),
     )
 
@@ -946,7 +942,7 @@ def full_provider_resync_service() -> FullProviderResyncService:
             observer,
             LOGGER,
             REDACTOR.redact_text,
-            utc_now,
+            runtime_clock.utc_now,
             time.perf_counter,
             lambda: uuid.uuid4().hex,
         ),
@@ -960,7 +956,7 @@ def weather_service() -> WeatherService:
         manager,
         WeatherCacheStore(manager, KEY_VALUE_REPOSITORY, profile_service()),
         lambda: weather_provider.WeatherClient(
-            provider_http_client().request, utc_now, LOGGER
+            provider_http_client().request, runtime_clock.utc_now, LOGGER
         ),
         WeatherRefreshJournal(
             provider_refresh_tracker(),
@@ -1042,7 +1038,7 @@ def external_calendar_sync_service() -> ExternalCalendarSyncService:
         LOGGER,
         REDACTOR.redact_text,
         ATHLETE_CLOCK.now,
-        utc_now,
+        runtime_clock.utc_now,
         APP_VERSION,
         lock=shared_external_calendar_sync_lock(),
     )
@@ -1076,7 +1072,7 @@ def duplicate_activity_service() -> DuplicateActivityService:
     return DuplicateActivityService(
         database_manager(),
         SNAPSHOT_REPOSITORY,
-        utc_now,
+        runtime_clock.utc_now,
         runtime_events.STATE_EVENT_BUFFER,
     )
 
@@ -1098,7 +1094,9 @@ def profile_service() -> ProfileService:
 
 
 ATHLETE_PROFILE_SERVICE = ProfileService(
-    DATABASE_MANAGER_CACHE, PROFILE_REPOSITORY, KEY_VALUE_REPOSITORY
+    database_manager_runtime.DATABASE_MANAGER_CACHE,
+    PROFILE_REPOSITORY,
+    KEY_VALUE_REPOSITORY,
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
@@ -1129,7 +1127,7 @@ def history_undo_service() -> HistoryUndoService:
 
 def competition_service() -> CompetitionService:
     """Compose transactional local competition use cases."""
-    return CompetitionService(database_manager(), COMPETITION_REPOSITORY, utc_now)
+    return CompetitionService(database_manager(), COMPETITION_REPOSITORY, runtime_clock.utc_now)
 
 
 def competition_sync_reconciler() -> CompetitionSyncReconciler:
@@ -1149,7 +1147,7 @@ def competition_sync_service() -> CompetitionSyncService:
         runtime_events.STATE_EVENT_BUFFER,
         REDACTOR,
         LOGGER,
-        utc_now,
+        runtime_clock.utc_now,
     )
 
 
@@ -1161,7 +1159,7 @@ def training_plan_service() -> planning_training_plans.TrainingPlanService:
         KEY_VALUE_REPOSITORY,
         PLANNING_REVISION_SERVICE,
         runtime_events.STATE_EVENT_BUFFER,
-        utc_now,
+        runtime_clock.utc_now,
     )
 
 
@@ -1170,7 +1168,7 @@ def planned_unit_service() -> planning_planned_unit_service.PlannedUnitService:
     return planning_planned_unit_service.PlannedUnitService(
         database_manager(),
         PLANNING_REVISION_SERVICE,
-        utc_now,
+        runtime_clock.utc_now,
         lambda: ATHLETE_CLOCK.now().date(),
         uuid.uuid4,
         REDACTOR.redact_text,
@@ -1193,7 +1191,7 @@ def planned_calendar_sync_service() -> PlannedCalendarSyncService:
         database_manager(),
         intervals_client,
         planned_unit_sync_state_writer(),
-        utc_now,
+        runtime_clock.utc_now,
         lambda: ATHLETE_CLOCK.now().date(),
     )
 
@@ -1205,7 +1203,7 @@ def planned_calendar_repair_service() -> PlannedCalendarRepairService:
         database_manager(),
         intervals_client,
         planned_unit_sync_state_writer(),
-        utc_now,
+        runtime_clock.utc_now,
         lambda: ATHLETE_CLOCK.now().date(),
         PLANNED_CALENDAR_FUTURE_DAYS,
     )
@@ -1217,7 +1215,7 @@ def remote_planned_unit_reconciler() -> RemotePlannedUnitReconciler:
         database_manager(),
         planned_unit_service(),
         PLANNING_REVISION_SERVICE,
-        utc_now,
+        runtime_clock.utc_now,
         lambda: ATHLETE_CLOCK.now().date(),
     )
 
@@ -1225,7 +1223,7 @@ def remote_planned_unit_reconciler() -> RemotePlannedUnitReconciler:
 def workout_library_sync_state_service() -> WorkoutLibrarySyncStateService:
     """Compose workout-library synchronization persistence and projections."""
     return WorkoutLibrarySyncStateService(
-        database_manager(), REDACTOR, KEY_VALUE_REPOSITORY, utc_now
+        database_manager(), REDACTOR, KEY_VALUE_REPOSITORY, runtime_clock.utc_now
     )
 
 
@@ -1235,13 +1233,13 @@ def planning_authority_service() -> PlanningAuthorityService:
         database_manager(),
         workout_library_sync_state_service(),
         PLANNING_REVISION_SERVICE,
-        utc_now,
+        runtime_clock.utc_now,
     )
 
 
 def workout_library_remote_reconciler() -> WorkoutLibraryRemoteReconciler:
     """Compose local reconciliation for already-read remote templates."""
-    return WorkoutLibraryRemoteReconciler(database_manager(), utc_now, uuid.uuid4)
+    return WorkoutLibraryRemoteReconciler(database_manager(), runtime_clock.utc_now, uuid.uuid4)
 
 
 def workout_library_refresh_service() -> WorkoutLibraryRefreshService:
@@ -1255,7 +1253,7 @@ def workout_library_refresh_service() -> WorkoutLibraryRefreshService:
         workout_library_sync_state_service(),
         KEY_VALUE_REPOSITORY,
         runtime_events.STATE_EVENT_BUFFER,
-        utc_now,
+        runtime_clock.utc_now,
     )
 
 
@@ -1340,7 +1338,7 @@ def workout_library_service() -> planning_library_service.WorkoutLibraryService:
     """Compose local workout-library persistence use cases."""
     return planning_library_service.WorkoutLibraryService(
         database_manager(),
-        utc_now,
+        runtime_clock.utc_now,
         uuid.uuid4,
         lambda: runtime_events.STATE_EVENT_BUFFER.publish(
             "coach", {"status": "changed"}
@@ -1375,7 +1373,7 @@ def local_plan_creation_service() -> LocalTrainingPlanCreationService:
         calendar_conflict_service(),
         PLANNING_REVISION_SERVICE,
         lambda: ATHLETE_CLOCK.now().date(),
-        utc_now,
+        runtime_clock.utc_now,
         uuid.uuid4,
         LOGGER,
     )
@@ -1387,7 +1385,7 @@ def training_plan_artifact_service() -> TrainingPlanArtifactService:
         database_manager(),
         local_plan_creation_service(),
         lambda: ATHLETE_CLOCK.now().date(),
-        utc_now,
+        runtime_clock.utc_now,
         uuid.uuid4,
     )
 
@@ -1465,7 +1463,7 @@ def structured_training_plan_replacement_service() -> StructuredTrainingPlanRepl
         calendar_conflict_service(),
         planned_unit_service(),
         lambda: ATHLETE_CLOCK.now().date(),
-        utc_now,
+        runtime_clock.utc_now,
         uuid.uuid4,
     )
 
@@ -1477,7 +1475,7 @@ def adaptive_replan_apply_service() -> planning_adaptive.AdaptiveReplanApplyServ
         PLAN_ADJUSTMENT_REPOSITORY,
         PLANNING_REVISION_SERVICE,
         lambda: ATHLETE_CLOCK.now().date(),
-        utc_now,
+        runtime_clock.utc_now,
     )
 
 
@@ -1517,7 +1515,7 @@ def adaptive_replan_preview_service() -> AdaptiveReplanPreviewService:
         external_calendar_reader(),
         weather_service(),
         lambda: ATHLETE_CLOCK.now().date(),
-        utc_now,
+        runtime_clock.utc_now,
         uuid.uuid4,
         calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
         CHECKIN_TEXT_LIMITS["illness"],
@@ -1542,7 +1540,7 @@ def privacy_data_export_service() -> PrivacyDataExportService:
             adaptive_preview_service=adaptive_replan_preview_service(),
             external_calendar_reader=external_calendar_reader(),
             local_now=ATHLETE_CLOCK.now,
-            utc_now=utc_now,
+            utc_now=runtime_clock.utc_now,
         )
     )
 
@@ -1570,7 +1568,7 @@ def athlete_context_service() -> AthleteContextService:
         COMPETITION_REPOSITORY,
         normalize_profile,
         planning_competitions.normalize_competition,
-        utc_now,
+        runtime_clock.utc_now,
         uuid.uuid4,
     )
 
@@ -1580,7 +1578,7 @@ def initialise_database() -> None:
         initialize_application_database(
             db,
             key_values=KEY_VALUE_REPOSITORY,
-            now=utc_now(),
+            now=runtime_clock.utc_now(),
             current_time=datetime.now(timezone.utc),
             default_profile_json=json.dumps(DEFAULT_PROFILE),
             provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
@@ -1610,6 +1608,7 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     lambda key: key_value_service().get(key),
     lambda key, value: key_value_service().set(key, value),
     REDACTOR,
+    runtime_clock.utc_now,
 )
 
 
@@ -1623,7 +1622,7 @@ def provider_http_client() -> provider_http.JsonHttpClient:
         provider_state_service(),
         REDACTOR.redact_text,
         partial(observability.safe_response_headers, redact=REDACTOR.redact_text),
-        utc_now,
+        runtime_clock.utc_now,
         sync_observation.operation_context,
         opener=provider_http.urlopen,
     )
@@ -1677,7 +1676,7 @@ def gemini_stream_client() -> gemini_provider.GeminiStreamClient:
         logger=LOGGER,
         opener=gemini_provider.urlopen,
         monotonic=time.perf_counter,
-        now=utc_now,
+        now=runtime_clock.utc_now,
     )
 
 
@@ -1717,7 +1716,7 @@ def coach_conversation_reset_service() -> CoachConversationResetService:
     return CoachConversationResetService(
         database_manager(), KEY_VALUE_REPOSITORY, openai_responses_client(),
         coach_streams.CHAT_STREAM_REGISTRY, DB_LOCK, COACH_CONVERSATION_GATE.lock,
-        utc_now, uuid.uuid4, LOGGER,
+        runtime_clock.utc_now, uuid.uuid4, LOGGER,
     )
 
 
@@ -1739,7 +1738,7 @@ def openai_stream_client() -> openai_provider.OpenAIStreamClient:
             DIAGNOSTIC_CAPTURE,
             LOGGER,
             time.perf_counter,
-            utc_now,
+            runtime_clock.utc_now,
         ),
         SETTINGS.selected_thinking_level,
         opener=openai_provider.urlopen,
@@ -1776,7 +1775,7 @@ def coach_job_store() -> CoachJobStore:
     """Compose durable Coach background-job persistence."""
     return CoachJobStore(
         database_manager, DB_LOCK, COACH_JOB_WORKER.wake_event,
-        runtime_maintenance.MAINTENANCE_GATE, utc_now,
+        runtime_maintenance.MAINTENANCE_GATE, runtime_clock.utc_now,
     )
 
 
@@ -1790,7 +1789,7 @@ def coach_turn_failure_service() -> CoachTurnFailureService:
             key_values=KEY_VALUE_REPOSITORY,
             event_buffer=runtime_events.STATE_EVENT_BUFFER,
             redactor=REDACTOR,
-            utc_now=utc_now,
+            utc_now=runtime_clock.utc_now,
             repository_root=ROOT,
             read_only_tools=frozenset(STRUCTURED_READ_ONLY_TOOLS),
         )
@@ -1802,7 +1801,7 @@ def coach_job_submission_service() -> CoachJobSubmissionService:
     return CoachJobSubmissionService(
         database_manager, CHAT_REPOSITORY, DB_LOCK, SETTINGS,
         runtime_events.STATE_EVENT_BUFFER, coach_streams.CHAT_STREAM_REGISTRY,
-        COACH_JOB_WORKER.wake_event, utc_now,
+        COACH_JOB_WORKER.wake_event, runtime_clock.utc_now,
         background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
         max_attachment_storage_bytes=coach_attachments.MAX_ATTACHMENT_STORAGE_BYTES,
         max_gemini_inline_image_bytes=coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES,
@@ -1932,14 +1931,14 @@ def coach_turn_opening_service() -> CoachTurnOpeningService:
     """Compose atomic creation and session binding for a new Coach turn."""
     return CoachTurnOpeningService(
         database_manager(), DB_LOCK, CHAT_REPOSITORY,
-        coach_command_receipt_service(), utc_now, uuid.uuid4,
+        coach_command_receipt_service(), runtime_clock.utc_now, uuid.uuid4,
     )
 
 
 def coach_proposal_creation_service() -> CoachProposalCreationService:
     """Compose session-bound Coach proposal creation."""
     return CoachProposalCreationService(
-        database_manager(), sync_state_repository(), now=time.time, utc_now=utc_now,
+        database_manager(), sync_state_repository(), now=time.time, utc_now=runtime_clock.utc_now,
         uuid_factory=uuid.uuid4,
     )
 
@@ -1954,7 +1953,7 @@ def coach_proposal_execution_service() -> CoachProposalExecutionService:
     return CoachProposalExecutionService(
         database_manager(), duplicate_activity_service(), history_undo_service(),
         intervals_client, runtime_maintenance.MAINTENANCE_GATE,
-        now=time.time, utc_now=utc_now,
+        now=time.time, utc_now=runtime_clock.utc_now,
     )
 
 
@@ -2100,7 +2099,7 @@ def coach_planning_command_service() -> CoachPlanningCommandService:
     """Compose the durable, session-bound local planning command owner."""
     return CoachPlanningCommandService(
         database_manager(), DB_LOCK, coach_command_receipt_service(),
-        coach_tool_dispatch_service(), coach_turn_failure_service(), utc_now,
+        coach_tool_dispatch_service(), coach_turn_failure_service(), runtime_clock.utc_now,
     )
 
 
@@ -2175,7 +2174,7 @@ def coach_final_receipt_service() -> CoachFinalReceiptService:
     """Compose the atomic final Coach receipt owner."""
     return CoachFinalReceiptService(
         database_manager(), DB_LOCK, CHAT_REPOSITORY, KEY_VALUE_REPOSITORY,
-        runtime_events.STATE_EVENT_BUFFER, utc_now,
+        runtime_events.STATE_EVENT_BUFFER, runtime_clock.utc_now,
     )
 
 
@@ -2204,7 +2203,7 @@ def coach_chat_turn_service() -> CoachChatTurnService:
     """Compose the session-bound chat turn owner."""
     return CoachChatTurnService(
         database_manager, DB_LOCK, coach_command_receipt_service(), SETTINGS,
-        coach_conversation_provision_service, coach_structured_turn_service, utc_now,
+        coach_conversation_provision_service, coach_structured_turn_service, runtime_clock.utc_now,
         COACH_CONVERSATION_GATE, runtime_maintenance.MAINTENANCE_GATE,
     )
 
@@ -2212,7 +2211,7 @@ def coach_chat_turn_service() -> CoachChatTurnService:
 def morning_coach_job_completion_service() -> MorningCoachJobCompletionService:
     return MorningCoachJobCompletionService(
         database_manager(), DB_LOCK, KEY_VALUE_REPOSITORY,
-        coach_quick_actions_service, ATHLETE_CLOCK.now, utc_now,
+        coach_quick_actions_service, ATHLETE_CLOCK.now, runtime_clock.utc_now,
     )
 
 
@@ -2373,7 +2372,7 @@ def public_state_service() -> PublicStateService:
 
 
 def recent_log_entries_service() -> RecentLogEntriesService:
-    return RecentLogEntriesService(LOG_PATH, REDACTOR, utc_now)
+    return RecentLogEntriesService(LOG_PATH, REDACTOR, runtime_clock.utc_now)
 
 
 def coach_diagnostic_history_service() -> CoachDiagnosticHistoryService:
@@ -2396,7 +2395,7 @@ def diagnostic_report_service() -> DiagnosticReportService:
         settings=SETTINGS,
         app_name=APP_NAME,
         app_version=APP_VERSION,
-        utc_now=utc_now,
+        utc_now=runtime_clock.utc_now,
         sync_state=sync_state_repository(),
         garmin_projection=garmin_projection_service(),
         garmin_client_factory=garmin_client_factory(),
@@ -2429,7 +2428,7 @@ def privacy_archive_export_service() -> PrivacyArchiveExportService:
             DATA_DIR,
             DB_PATH,
             lambda: ATHLETE_CLOCK.now().date(),
-            utc_now,
+            runtime_clock.utc_now,
             maximum_bytes=MAX_PRIVACY_EXPORT_BYTES,
             minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
             time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,

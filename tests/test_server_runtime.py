@@ -1,4 +1,5 @@
 """Server integration tests for runtime."""
+from backend.runtime import clock as runtime_clock
 
 import json
 import os
@@ -132,7 +133,7 @@ class ServerRuntimeTests(ServerTestCase):
         with auth.session_lock, server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-                (auth.session_token_hash("session-background-streamed"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
+                (auth.session_token_hash("session-background-streamed"), csrf_hash, time.time() + 3600, runtime_clock.utc_now(), runtime_clock.utc_now()),
             )
         operation_id, _cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(csrf_hash)
         try:

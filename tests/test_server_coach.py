@@ -1,4 +1,5 @@
 """Server integration tests for coach."""
+from backend.runtime import clock as runtime_clock
 
 import json
 import threading
@@ -932,7 +933,7 @@ class ServerCoachTests(ServerTestCase):
             ]
         }
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            server.PLAN_ADJUSTMENT_REPOSITORY.create_preview(db, str(uuid.uuid4()), json.dumps(preview), server.utc_now())
+            server.PLAN_ADJUSTMENT_REPOSITORY.create_preview(db, str(uuid.uuid4()), json.dumps(preview), runtime_clock.utc_now())
         actions = server.coach_quick_actions_service().state()
         self.assertFalse(actions["morning_checkin"])
         self.assertTrue(actions["adjust_plan"])

@@ -1,4 +1,5 @@
 """Server integration tests for performance."""
+from backend.runtime import clock as runtime_clock
 
 import json
 import unittest
@@ -291,7 +292,7 @@ class ServerPerformanceTests(ServerTestCase):
             [{"id": today, "sportInfo": [{"types": ["Ride"], "eFTP": 290}]}],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
 
         performance = _current_performance_context(snapshot)
@@ -399,7 +400,7 @@ class ServerPerformanceTests(ServerTestCase):
             [],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
 
         validation = _current_performance_context(snapshot)["activity_validation"]
@@ -428,7 +429,7 @@ class ServerPerformanceTests(ServerTestCase):
             [],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
 
         validation = _current_performance_context(snapshot)["activity_validation"]
@@ -534,7 +535,7 @@ class ServerPerformanceTests(ServerTestCase):
             [{"id": today, "ctLoad": 68, "atlLoad": 74, "form": -6, "readiness": 82}],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
         performance = _current_performance_context(snapshot)
         metrics = performance["metrics"]
@@ -557,7 +558,7 @@ class ServerPerformanceTests(ServerTestCase):
             ],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
 
         comparison = _current_performance_context(snapshot)["comparisons"]["cycling_eftp_30d"]
@@ -579,7 +580,7 @@ class ServerPerformanceTests(ServerTestCase):
             [{"id": today}],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
 
         metrics = _current_performance_context(snapshot)["metrics"]

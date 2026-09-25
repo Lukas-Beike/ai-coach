@@ -1,4 +1,5 @@
 """Server integration tests for weather calendar."""
+from backend.runtime import clock as runtime_clock
 
 import json
 import unittest
@@ -72,7 +73,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(merged["synced_at"], "current")
 
     def test_public_calendar_source_delete_cascades_to_candidates(self):
-        now = server.utc_now()
+        now = runtime_clock.utc_now()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO public_event_sources(id, name, url, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -114,10 +115,10 @@ class ServerWeatherCalendarTests(ServerTestCase):
         yesterday = (today - timedelta(days=1)).isoformat()
         tomorrow = (today + timedelta(days=1)).isoformat()
         server.profile_service().save({"weather_location": "Berlin"})
-        old = {"query": "Berlin", "location": {"name": "Berlin"}, "fetched_at": server.utc_now(),
+        old = {"query": "Berlin", "location": {"name": "Berlin"}, "fetched_at": runtime_clock.utc_now(),
                "forecast": {"daily": {"time": [yesterday, tomorrow], "temperature_2m_max": [12, 18]},
                             "hourly": {"time": [f"{yesterday}T09:00", f"{yesterday}T15:00"], "precipitation_probability": [5, 80]}}}
-        new = {"query": "Berlin", "location": {"name": "Berlin"}, "fetched_at": server.utc_now(),
+        new = {"query": "Berlin", "location": {"name": "Berlin"}, "fetched_at": runtime_clock.utc_now(),
                "forecast": {"daily": {"time": [today.isoformat(), tomorrow], "temperature_2m_max": [15, 19]}}}
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=[old, new]) as fetch:
             server.weather_service().state([], force=True)
@@ -171,7 +172,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "location": {"name": "Berlin", "country": "Deutschland"},
             "model": "ECMWF",
             "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
-            "fetched_at": server.utc_now(),
+            "fetched_at": runtime_clock.utc_now(),
         }
         with patch.object(weather_provider.WeatherClient, "fetch", return_value=forecast) as fetch:
             first = server.weather_sync_service().sync("test")
@@ -190,7 +191,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "location": {"name": "Berlin", "country": "Deutschland"},
             "model": "ECMWF",
             "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
-            "fetched_at": server.utc_now(),
+            "fetched_at": runtime_clock.utc_now(),
         }
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=[server.AppError(503, "upstream"), forecast]) as fetch:
             first = server.weather_service().state(refresh=True)
@@ -209,7 +210,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "location": {"name": "Berlin", "country": "Deutschland"},
             "model": "ECMWF",
             "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
-            "fetched_at": server.utc_now(),
+            "fetched_at": runtime_clock.utc_now(),
         }
         with patch.object(weather_provider.WeatherClient, "fetch", return_value=forecast), patch.object(
             server.AdaptiveReplanPreviewService,
@@ -261,7 +262,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ("appointment-1", "uid-1", "Familientermin", today, f"{today}T18:00:00", f"{today}T20:00:00", 120, 0, 1, 0, server.utc_now()),
+                ("appointment-1", "uid-1", "Familientermin", today, f"{today}T18:00:00", f"{today}T20:00:00", 120, 0, 1, 0, runtime_clock.utc_now()),
             )
         context = server.daily_planning_context_service().build(
             server.sync_state_repository().latest_snapshot(),
@@ -295,7 +296,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ("good-event", "good-event", "Good event", today, today + "T10:00:00+02:00", today + "T11:00:00+02:00", 60, 0, 1, server.utc_now()),
+                ("good-event", "good-event", "Good event", today, today + "T10:00:00+02:00", today + "T11:00:00+02:00", 60, 0, 1, runtime_clock.utc_now()),
             )
         with patch.object(server, "CONFIG", replace(server.CONFIG, calendar_ical_url="https://calendar.example/feed.ics")), patch.object(
             calendar_provider, "external_calendar_url", return_value="https://calendar.example/feed.ics"
@@ -312,7 +313,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ("info-only", "info-only", "Informational event", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, 0, server.utc_now()),
+                ("info-only", "info-only", "Informational event", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, 0, runtime_clock.utc_now()),
             )
         self.assertEqual(
             server.external_calendar_reader().list_events(
@@ -330,7 +331,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ("no-intensity", "family-no-intensity", "Evening event", tomorrow, tomorrow + "T18:00:00+02:00", tomorrow + "T18:30:00+02:00", 30, 0, 1, 1, server.utc_now()),
+                ("no-intensity", "family-no-intensity", "Evening event", tomorrow, tomorrow + "T18:00:00+02:00", tomorrow + "T18:30:00+02:00", 30, 0, 1, 1, runtime_clock.utc_now()),
             )
         preview = server.adaptive_replan_preview_service().preview()
         self.assertEqual(preview["changes"][0]["library_workout_id"], draft["id"])
@@ -405,7 +406,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ("event-old", "family-old", "Existing appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T11:00:00+02:00", 60, 0, server.utc_now()),
+                ("event-old", "family-old", "Existing appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T11:00:00+02:00", 60, 0, runtime_clock.utc_now()),
             )
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
         with patch.object(server, "CONFIG", config), patch.object(calendar_provider, "fetch_calendar_feed", side_effect=server.AppError(502, "upstream unavailable")):
@@ -424,7 +425,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ("event-1", "family-3", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, server.utc_now()),
+                ("event-1", "family-3", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, runtime_clock.utc_now()),
             )
         preview = server.adaptive_replan_preview_service().preview()
         self.assertEqual(preview["changes"][0]["library_workout_id"], draft["id"])
@@ -462,7 +463,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ("event-2", "family-4", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, server.utc_now()),
+                ("event-2", "family-4", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, runtime_clock.utc_now()),
             )
         preview = server.adaptive_replan_preview_service().preview()
         server.illness_pause_sync_service().apply(preview["id"])
@@ -584,11 +585,11 @@ class ServerWeatherCalendarTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ("external-relevant", "relevant", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T11:00:00+02:00", 60, 0, 1, server.utc_now()),
+                ("external-relevant", "relevant", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T11:00:00+02:00", 60, 0, 1, runtime_clock.utc_now()),
             )
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ("external-irrelevant", "irrelevant", "Private note", tomorrow, tomorrow + "T12:00:00+02:00", tomorrow + "T13:00:00+02:00", 60, 0, 0, server.utc_now()),
+                ("external-irrelevant", "irrelevant", "Private note", tomorrow, tomorrow + "T12:00:00+02:00", tomorrow + "T13:00:00+02:00", 60, 0, 0, runtime_clock.utc_now()),
             )
         calendar = calendar_local.local_calendar_events(
             [], [], server.external_calendar_reader().list_events()

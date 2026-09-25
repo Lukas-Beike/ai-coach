@@ -1,4 +1,5 @@
 """Synthetic regressions for the September diagnostic findings."""
+from backend.runtime import clock as runtime_clock
 import json
 import tempfile
 import unittest
@@ -70,7 +71,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             snapshot = server.garmin_payload_service().snapshot()
             snapshot["morning_body_battery"]["attempted_at"] = (datetime.now(timezone.utc) - timedelta(minutes=16)).isoformat()
             server.key_value_service().set("garmin_snapshot", json.dumps(snapshot))
-            ready = {"sleep_date": day.isoformat(), "status": "ready", "attempted_at": server.utc_now(), "morning": {"value": 78}, "before_sleep": {"value": 30}}
+            ready = {"sleep_date": day.isoformat(), "status": "ready", "attempted_at": runtime_clock.utc_now(), "morning": {"value": 78}, "before_sleep": {"value": 30}}
             with patch.object(performance_morning_battery, "morning_body_battery_record", return_value=ready):
                 self.assertEqual(service.sync(day)["status"], "ready")
             self.assertEqual(server.garmin_payload_service().snapshot()["morning_body_battery"]["attempts"], 2)
@@ -143,7 +144,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             recovery.assert_not_called()
 
     def test_new_fetch_of_old_weight_exposes_observation_age_without_altering_raw_data(self):
-        snapshot = {"synced_at": server.utc_now(), "weight": {"calendarDate": "2026-08-12", "weight": 72}, "errors": []}
+        snapshot = {"synced_at": runtime_clock.utc_now(), "weight": {"calendarDate": "2026-08-12", "weight": 72}, "errors": []}
         garmin_sync.merge_sources(snapshot, {})
         original = json.dumps(snapshot, sort_keys=True)
         server.key_value_service().set("garmin_snapshot", original)
@@ -160,7 +161,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertEqual(server.key_value_service().get("garmin_snapshot"), original)
 
     def test_feedback_answer_after_plain_text_morning_question_is_saved_once(self):
-        server.sync_state_repository().save_snapshot({"synced_at": server.utc_now(), "recent_activities": [{"id": "synthetic-ride", "name": "Synthetic recovery ride", "type": "Ride", "start_date_local": "2026-09-06T10:00:00"}]})
+        server.sync_state_repository().save_snapshot({"synced_at": runtime_clock.utc_now(), "recent_activities": [{"id": "synthetic-ride", "name": "Synthetic recovery ride", "type": "Ride", "start_date_local": "2026-09-06T10:00:00"}]})
         self.turn("Morgen-Check-in", [{"output_text": "Wie haben sich deine Beine bei der gestrigen Fahrt angefühlt?"}])
         result, _ = self.turn("Beine fühlten sich gut an, die geringe Leistung war aber zäh und langweilig.", [
             lambda _: self.call("inspect_activity_duplicates"),
@@ -203,7 +204,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
                        "start_date_local": "2026-09-06T10:00:00", "moving_time": 3600, "distance": 30000},
                       {"id": "synthetic-garmin", "source": "Garmin", "type": "Ride",
                        "start_date_local": "2026-09-06T10:01:00", "moving_time": 3610, "distance": 30100}]
-        server.sync_state_repository().save_snapshot({"synced_at": server.utc_now(), "recent_activities": activities})
+        server.sync_state_repository().save_snapshot({"synced_at": runtime_clock.utc_now(), "recent_activities": activities})
         before = server.sync_state_repository().latest_snapshot()
         with patch.object(intervals_client_module, "IntervalsClient") as provider:
             result, model = self.turn("Analysiere die letzte Fahrt.", [

@@ -1,4 +1,5 @@
 """Server integration tests for sync."""
+from backend.runtime import clock as runtime_clock
 
 import json
 import sys
@@ -479,7 +480,7 @@ class ServerSyncTests(ServerTestCase):
             [{"id": "2026-01-01", "ctl": 42, "unknown": 99}],
             [{"id": 1, "name": "Tempo", "category": "WORKOUT", "raw": "nope"}],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
         self.assertEqual(result["athlete"]["name"], "Ada")
         self.assertNotIn("secret", result["athlete"])
@@ -1387,7 +1388,7 @@ class ServerSyncTests(ServerTestCase):
             {}, [{"id": str(index), "name": f"Ride {index}"} for index in range(600)],
             [{"id": f"2026-01-{index:02d}", "ctl": index} for index in range(1, 4)], [], history_days=-1,
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
         self.assertEqual(len(snapshot["recent_activities"]), 600)
         self.assertEqual(len(snapshot["recent_wellness"]), 3)
@@ -1577,7 +1578,7 @@ class ServerSyncTests(ServerTestCase):
             [{"id": today, "sportInfo": [{"types": ["Ride"], "eFTP": 274}]}],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
 
         performance = _current_performance_context(snapshot)

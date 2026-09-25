@@ -2131,7 +2131,6 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
 SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
     {
         "database_manager",
-        "session_auth_service",
         "sync_job_worker",
         "initialise_database",
         "public_state_service",
@@ -2625,6 +2624,11 @@ class ServerArchitectureTests(unittest.TestCase):
             for node in auth_tree.body
         ))
         self.assertTrue(any(
+            isinstance(node, ast.FunctionDef)
+            and node.name == "get_session_auth_service"
+            for node in auth_tree.body
+        ))
+        self.assertTrue(any(
             isinstance(node, ast.Assign)
             and any(
                 isinstance(target, ast.Name) and target.id == "RATE_LIMITER"
@@ -2650,17 +2654,26 @@ class ServerArchitectureTests(unittest.TestCase):
                 "RATE_LIMITER",
             }.isdisjoint(server_assignments)
         )
-        self.assertTrue(any(
-            isinstance(node, ast.ImportFrom)
-            and node.module == "backend.http_api.auth"
-            and any(alias.name == "RATE_LIMITER" for alias in node.names)
+        auth_imports = [
+            alias.name
             for node in server_tree.body
-        ))
+            if isinstance(node, ast.ImportFrom)
+            and node.module == "backend.http_api.auth"
+            for alias in node.names
+        ]
+        self.assertIn("get_session_auth_service", auth_imports)
+        self.assertNotIn("RATE_LIMITER", auth_imports)
+        self.assertNotIn("SESSION_AUTH_SERVICE_CACHE", auth_imports)
 
     def test_provider_state_service_cache_is_owned_by_provider_state(self) -> None:
         state_tree = _parse(BACKEND_ROOT / "providers" / "state.py")
         self.assertTrue(any(
             isinstance(node, ast.ClassDef) and node.name == "ProviderStateServiceCache"
+            for node in state_tree.body
+        ))
+        self.assertTrue(any(
+            isinstance(node, ast.FunctionDef)
+            and node.name == "get_provider_state_service"
             for node in state_tree.body
         ))
         server_tree = _parse(SERVER_PATH)
@@ -2679,7 +2692,7 @@ class ServerArchitectureTests(unittest.TestCase):
             if isinstance(node, ast.FunctionDef) and node.name == "provider_state_service"
         )
         self.assertIn(
-            "provider_state.PROVIDER_STATE_SERVICE_CACHE.get",
+            "provider_state.get_provider_state_service",
             ast.unparse(service_factory),
         )
 

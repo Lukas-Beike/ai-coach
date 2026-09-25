@@ -17,6 +17,10 @@ from typing import Any, Callable, Iterator
 
 DATABASE_MANAGER_CLOSED_MESSAGE = "database manager is closed"
 
+# The application lock coordinates larger transactions and restore work that
+# span multiple repositories. DatabaseManager keeps its own connection locks.
+DATABASE_LOCK = threading.RLock()
+
 
 class DatabaseManager:
     """One serialized writer plus a bounded pool of read connections."""
@@ -231,3 +235,6 @@ class DatabaseManagerCache:
                     raise RuntimeError("database manager is not initialized")
                 db = stack.enter_context(manager.unit_of_work())
             yield db
+
+
+DATABASE_MANAGER_CACHE = DatabaseManagerCache()

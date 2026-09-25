@@ -1,6 +1,7 @@
 """Reusable test setup; deliberately independent of any test case class."""
 
 from __future__ import annotations
+from backend.runtime import clock as runtime_clock
 
 from contextlib import contextmanager
 from dataclasses import replace
@@ -9,6 +10,7 @@ from unittest.mock import patch
 
 from backend.coach import limits as coach_limits
 from backend.coach import streams as coach_streams
+from backend.db.manager import DATABASE_MANAGER_CACHE
 
 
 def build_gemini_request_payload(server, payload, model):
@@ -128,7 +130,7 @@ def isolated_server(server, root: Path, *, app_password: str = ""):
         server.initialise_database()
         yield
     finally:
-        server.DATABASE_MANAGER_CACHE.reset()
+        DATABASE_MANAGER_CACHE.reset()
         for item in reversed(patches):
             item.stop()
 
@@ -144,7 +146,7 @@ def create_test_session(server) -> str:
     with server.DB_LOCK, server.database_manager().unit_of_work() as db:
         db.execute(
             "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-            (auth.session_token_hash(token), auth.session_token_hash("csrf"), now + SESSION_TTL_SECONDS, server.utc_now(), server.utc_now()),
+            (auth.session_token_hash(token), auth.session_token_hash("csrf"), now + SESSION_TTL_SECONDS, runtime_clock.utc_now(), runtime_clock.utc_now()),
         )
     return token
 

@@ -1,4 +1,5 @@
 """Server integration tests for database."""
+from backend.runtime import clock as runtime_clock
 
 import http.client
 import json
@@ -17,6 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from backend.db.manager import DATABASE_LOCK, DATABASE_MANAGER_CACHE
 from backend import privacy as privacy_module
 from backend.coach import limits as coach_limits
 from backend.db.schema import configure_cipher, CURRENT_DATABASE_INDEXES, CURRENT_DATABASE_SCHEMA, database_index_names, database_schema_is_current, database_table_names
@@ -32,6 +34,11 @@ from server_test_support import create_test_session, server, ServerTestCase
 
 
 class ServerDatabaseTests(ServerTestCase):
+
+    def test_shared_database_resources_have_one_backend_owner(self):
+        self.assertIs(server.DB_LOCK, DATABASE_LOCK)
+        self.assertFalse(hasattr(server, "DATABASE_MANAGER_CACHE"))
+        self.assertIs(server.database_manager(), DATABASE_MANAGER_CACHE.manager)
 
     def test_unavailable_sqlcipher_closes_manager_for_changed_secure_configuration(self):
         manager = server.database_manager()
@@ -62,7 +69,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertIs(server.weather_service(), first_weather_service)
         first_morning_service = server.morning_body_battery_service()
         self.assertIs(server.morning_body_battery_service(), first_morning_service)
-        server.DATABASE_MANAGER_CACHE.reset()
+        DATABASE_MANAGER_CACHE.reset()
 
         second = server.provider_state_service()
         second_http_client = server.provider_http_client()
@@ -99,7 +106,7 @@ class ServerDatabaseTests(ServerTestCase):
                     with self.assertRaises(RuntimeError):
                         server.initialise_database()
             finally:
-                server.DATABASE_MANAGER_CACHE.reset()
+                DATABASE_MANAGER_CACHE.reset()
 
             connection = sqlite3.connect(database_path)
             try:
@@ -410,7 +417,7 @@ class ServerDatabaseTests(ServerTestCase):
                             self.assertIn("workouts", payload)
                             self.assertIs(connection.sock, keep_alive_socket)
                         finally:
-                            server.DATABASE_MANAGER_CACHE.reset()
+                            DATABASE_MANAGER_CACHE.reset()
         finally:
             connection.close()
             httpd.shutdown()
@@ -430,11 +437,11 @@ class ServerDatabaseTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO competition_sync_tombstones(intervals_event_id, external_id, created_at) VALUES (?, ?, ?)",
-                ("event-1", "external-1", server.utc_now()),
+                ("event-1", "external-1", runtime_clock.utc_now()),
             )
             db.execute(
                 "INSERT INTO plan_adjustments(id, payload, status, created_at, applied_at) VALUES (?, ?, ?, ?, ?)",
-                ("adjustment-1", json.dumps({"reason": "test"}), "preview", server.utc_now(), None),
+                ("adjustment-1", json.dumps({"reason": "test"}), "preview", runtime_clock.utc_now(), None),
             )
         exported = server.privacy_data_export_service().export()
         self.assertTrue(any(item.get("name") == "Archived template" for item in exported["workout_library"]))
@@ -855,7 +862,7 @@ class ServerDatabaseTests(ServerTestCase):
             operation_id="operation-background-manager-refresh",
         )
 
-        server.DATABASE_MANAGER_CACHE.reset()
+        DATABASE_MANAGER_CACHE.reset()
         second_manager = server.database_manager()
 
         self.assertIsNot(first_manager, second_manager)
@@ -875,7 +882,7 @@ class ServerDatabaseTests(ServerTestCase):
         with auth.session_lock, server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-                (auth.session_token_hash("session-background-bound"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
+                (auth.session_token_hash("session-background-bound"), csrf_hash, time.time() + 3600, runtime_clock.utc_now(), runtime_clock.utc_now()),
             )
         server.coach_job_submission_service().enqueue(
             "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",

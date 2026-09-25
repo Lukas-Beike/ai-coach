@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import server_test_support as fixtures
+from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.http_api.rate_limit import RateLimiter
 from backend.performance import context as performance_context
 from backend.performance import garmin_metrics as performance_garmin_metrics
@@ -55,7 +56,7 @@ class ProviderReviewTests(unittest.TestCase):
                 handler.close()
         server.LOGGER.setLevel(self.log_level)
         server.LOGGER.propagate = self.log_propagate
-        server.DATABASE_MANAGER_CACHE.reset()
+        DATABASE_MANAGER_CACHE.reset()
         for item in reversed(self.patches):
             item.stop()
         self.directory.cleanup()
@@ -365,7 +366,7 @@ class ProviderReviewTests(unittest.TestCase):
 
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher requires the isolated application container")
     def test_fresh_sqlcipher_unicode_key_login_and_reopen(self):
-        server.DATABASE_MANAGER_CACHE.reset()
+        DATABASE_MANAGER_CACHE.reset()
         encrypted_path = Path(self.directory.name) / "encrypted.db"
         configured = replace(server.CONFIG, app_password="synthetic-\u00e4-\U0001f6b4-123")
         with patch.object(server, "DB_PATH", encrypted_path), patch.object(server, "CONFIG", configured), \
@@ -375,7 +376,7 @@ class ProviderReviewTests(unittest.TestCase):
             result = server.session_auth_service().login_user(Mock(client_address=("127.0.0.1", 0)), configured.app_password)
             self.assertTrue(result["authenticated"])
             rate_limit.assert_called_with(server.RATE_LIMITER, "login:127.0.0.1", 5, 900)
-            server.DATABASE_MANAGER_CACHE.reset()
+            DATABASE_MANAGER_CACHE.reset()
             self.assertEqual(server.key_value_service().get("marker"), "fresh")
 
 

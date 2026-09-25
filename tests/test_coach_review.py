@@ -1,4 +1,5 @@
 """Fresh-state regressions for Coach actions and recoverable outcomes."""
+from backend.runtime import clock as runtime_clock
 import json
 import unittest
 import tempfile
@@ -253,7 +254,7 @@ class CoachReviewTests(unittest.TestCase):
     def test_running_foreign_command_is_neither_executed_nor_closed(self):
         identity = {"session_key": coach_session_key("owner"), "status": "running"}
         with server.database_manager().unit_of_work() as db:
-            db.execute("INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES ('foreign', 'foreign', 'review-conversation', '{}', 'local', 'running', ?, ?, ?)", (json.dumps(identity), server.utc_now(), server.utc_now()))
+            db.execute("INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES ('foreign', 'foreign', 'review-conversation', '{}', 'local', 'running', ?, ?, ?)", (json.dumps(identity), runtime_clock.utc_now(), runtime_clock.utc_now()))
         with self.assertRaises(server.AppError) as error:
             server.coach_structured_turn_service().run("Edit", intent=self.intent("save_checkin", ["local_checkin"]), conversation_id="review-conversation", client_turn_id="foreign", session_csrf_hash="intruder", ai_provider=server.SETTINGS.selected_ai_provider())
         self.assertEqual(error.exception.status, 403)

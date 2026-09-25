@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
+from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.performance import context as performance_context
 from backend.performance import garmin_metrics as performance_garmin_metrics
 from support import create_test_session, reset_application_state
@@ -115,7 +116,7 @@ class ServerTestCase(unittest.TestCase):
 
     @classmethod
     def _restore_test_config(cls):
-        server.DATABASE_MANAGER_CACHE.reset()
+        DATABASE_MANAGER_CACHE.reset()
         server.CONFIG = cls._original_config
         server.DATA_DIR = cls._original_data_dir
         server.DB_PATH = cls._original_db_path
