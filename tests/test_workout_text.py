@@ -6,13 +6,14 @@ from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 from support import parsed_workout_fixture
-from test_server import server
+from server_test_support import ServerTestCase, server
 
 from backend.planning import workouts as planning_workouts
 
 
-class WorkoutTextTests(unittest.TestCase):
+class WorkoutTextTests(ServerTestCase):
     def setUp(self):
+        super().setUp()
         self.enterContext(patch.object(server.ATHLETE_CLOCK, "now", return_value=datetime.now()))
 
     def workout(self, description, minutes=61, **extra):

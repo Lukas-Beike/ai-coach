@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import test_server as fixtures
+import server_test_support as fixtures
 from backend.http_api.rate_limit import RateLimiter
 from backend.performance import context as performance_context
 from backend.performance import garmin_metrics as performance_garmin_metrics

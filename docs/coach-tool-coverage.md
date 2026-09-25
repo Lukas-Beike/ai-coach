@@ -98,7 +98,7 @@ future work. Ordinary tests must continue to mock external services.
 ```powershell
 python -m unittest discover -s tests -p test_coach_tool_coverage.py -v
 python -m unittest discover -s tests -v
-python -m py_compile server.py tests/test_server.py tests/test_coach_dialogue.py tests/test_coach_tool_coverage.py
+python -m compileall -q server.py backend tests
 ```
 
 The repository's standard discovery and CI sharding include the new module. The

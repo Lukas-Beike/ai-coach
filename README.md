@@ -505,7 +505,7 @@ Because native Windows environments often lack compatible pre-compiled wheels fo
 Run standard unit tests with temporary in-memory fixtures (mocking external providers):
 ```powershell
 python -m unittest discover -s tests -v
-python -m py_compile server.py tests/test_server.py
+python -m compileall -q server.py backend tests
 ```
 
 #### Parallel Sharded CI Runner

@@ -311,3 +311,26 @@ class ReleaseSourceTests(unittest.TestCase):
         release_source.git(clone, "fetch", "--unshallow", "--tags", "origin")
         release_source.git(clone, "fetch", "origin", "main:refs/remotes/origin/main")
         release_source.verify(clone, self.sha, "1.7.2")
+
+
+class ReleaseWorkflowTests(unittest.TestCase):
+    def test_daily_release_uses_release_tree_to_count_new_commits(self):
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github"
+            / "workflows"
+            / "weekly-release.yml"
+        ).read_text(encoding="utf-8")
+        release_counting = workflow.split(
+            'if [[ -n "$latest_tag" ]]', 1
+        )[1].split('echo "Commits since latest release:', 1)[0]
+
+        self.assertIn('release_tree="$(git show -s --format=\'%T\' "$latest_tag")"', release_counting)
+        self.assertIn("git log HEAD --format='%H %T'", release_counting)
+        self.assertNotIn('git merge-base "$latest_tag" HEAD', release_counting)
+        self.assertIn("count_releaseable_commits()", workflow)
+        self.assertIn(
+            r"!/^chore\(release\): set application version to [0-9]+\.[0-9]+\.[0-9]+( \(#[0-9]+\))?$/",
+            workflow,
+        )
+        self.assertEqual(workflow.count('commit_count="$(count_releaseable_commits '), 2)

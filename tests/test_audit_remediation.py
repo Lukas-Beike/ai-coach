@@ -142,9 +142,9 @@ def deny(path, *args, **kwargs):
         raise AssertionError('Environment file access forbidden')
     return read(path, *args, **kwargs)
 with patch.object(Path, 'read_text', deny):
-    import test_server
-assert test_server.server.CONFIG.gemini_api_key == ''
-assert test_server.server.CONFIG.ai_provider == 'openai'
+    import server_test_support
+assert server_test_support.server.CONFIG.gemini_api_key == ''
+assert server_test_support.server.CONFIG.ai_provider == 'openai'
 """
         result = subprocess.run([sys.executable, "-c", script, str(Path(__file__).parent)], capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
