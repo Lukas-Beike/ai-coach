@@ -204,6 +204,7 @@ def _explicit_owner(name: str) -> str | None:
             "_gemini_last_user_text": COACH_CONVERSATION,
             "_gemini_call_names": COACH_CONVERSATION,
             "utc_now": RUNTIME_PACKAGE,
+            "ATHLETE_CLOCK": "backend/athlete/clock.py",
             "AppError": ERRORS_MODULE,
             "public_app_error_status": ERRORS_MODULE,
             "ClientDisconnected": ERRORS_MODULE,

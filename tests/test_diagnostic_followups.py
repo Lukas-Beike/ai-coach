@@ -40,7 +40,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             config = replace(server.CONFIG, garmin_fixture_path=str(fixture))
             with patch.object(server, "CONFIG", config):
                 payload = server.garmin_fixture_loader().load(2)
-        self.assertEqual(payload["sleep"][0]["calendarDate"], server.local_now().date().isoformat())
+        self.assertEqual(payload["sleep"][0]["calendarDate"], server.ATHLETE_CLOCK.now().date().isoformat())
 
     def test_static_garmin_fixture_preserves_relative_sleep_dates(self):
         with tempfile.TemporaryDirectory() as temp_root:
@@ -52,14 +52,14 @@ class DiagnosticFollowupTests(unittest.TestCase):
             config = replace(server.CONFIG, garmin_fixture_path=str(fixture))
             with patch.object(server, "CONFIG", config):
                 payload = server.garmin_fixture_loader().load(2)
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         self.assertEqual([record["calendarDate"] for record in payload["sleep"]], [
             (today - timedelta(days=1)).isoformat(),
             today.isoformat(),
         ])
 
     def test_missing_body_battery_can_recover_after_cooldown_and_success_is_cached(self):
-        day = server.local_now().date()
+        day = server.ATHLETE_CLOCK.now().date()
         with patch.object(garmin_sync.GarminFixtureLoader, "path", return_value=Path("synthetic.json")), \
                 patch.object(garmin_sync.GarminFixtureLoader, "load", return_value={}) as fetch:
             service = server.morning_body_battery_service()
@@ -78,7 +78,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             self.assertEqual(fetch.call_count, 2)
 
     def test_late_checkin_uses_wake_up_body_battery_and_rejects_afternoon_only_values(self):
-        day = server.local_now().date()
+        day = server.ATHLETE_CLOCK.now().date()
         sleep = {"dailySleepDTO": {"sleepStartTimestampGMT": "2026-09-06T21:30:00Z",
                                    "sleepEndTimestampGMT": "2026-09-07T05:45:00Z"}}
         before = ["2026-09-06T21:25:00Z", 30]
@@ -102,11 +102,11 @@ class DiagnosticFollowupTests(unittest.TestCase):
             "_lock",
             Mock(acquire=Mock(return_value=False)),
         ):
-            self.assertEqual(service.sync(server.local_now().date())["status"], "already_running")
+            self.assertEqual(service.sync(server.ATHLETE_CLOCK.now().date())["status"], "already_running")
         self.assertEqual(server.garmin_payload_service().snapshot(), snapshot)
 
     def test_morning_remote_calls_use_the_current_operation_context(self):
-        day = server.local_now().date()
+        day = server.ATHLETE_CLOCK.now().date()
         context = {"operation_id": "morning-context", "trigger": "checkin"}
 
         def fetch(_client, _checkin_date, **kwargs):
@@ -148,7 +148,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         original = json.dumps(snapshot, sort_keys=True)
         server.key_value_service().set("garmin_snapshot", original)
         metric = performance_garmin_metrics.garmin_performance_metrics(
-            snapshot, server.local_now().date()
+            snapshot, server.ATHLETE_CLOCK.now().date()
         )["weight_kg"]
         self.assertEqual(metric["freshness"], "current")
         self.assertEqual(metric["measurement_status"], "earlier")
@@ -186,7 +186,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
                     snapshot["sport_max_hr"] = {"cycling": stored_maximum}
                 original = json.dumps(snapshot, sort_keys=True)
                 metric = performance_garmin_metrics.garmin_performance_metrics(
-                    snapshot, server.local_now().date()
+                    snapshot, server.ATHLETE_CLOCK.now().date()
                 )["cycling_max_hr_bpm"]
                 self.assertEqual(metric["value"], stored_maximum or 190)
                 self.assertEqual(metric["observed_at"], None if stored_maximum else "2026-09-01")

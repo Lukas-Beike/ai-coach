@@ -8028,3 +8028,11 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   viewport projects **255 passed** in the isolated fixture container;
   `py_compile`, inventory `--check`, `git diff --check`, and Python 3.14 Docker
   build passed.
+
+## P11 composition-root audit and athlete-local clock — local review
+
+- Moved profile-timezone resolution and wall-clock calculation into `backend/athlete/clock.py`; the composition root injects `AthleteLocalClock.now` into consumers and no longer exposes `local_now` as a server wrapper.
+- Added an AST guard for composition-root function bodies. It permits control flow only in the explicit cache, resource, startup, and lifecycle allowlist, and rejects direct SQL, provider-request, and file-read/write calls.
+- Migrated tests and the browser fixture to patch/use the clock at its owner. The generated inventory now assigns `ATHLETE_CLOCK` to `backend/athlete/clock.py`; no P0 symbols remain.
+- Validation on this P11 tree: Python 3.14 container suite 2,802 tests, 11 skipped; architecture tests 40 passed; desktop Playwright 51 passed in an isolated fixture container; Docker build, syntax compilation, inventory `--check`, and `git diff --check` passed. The native Windows suite ran 2,802 tests but two SQLCipher-dependent cases could not start because the Windows wheel is intentionally unavailable; both passed in the container suite.
+- P11 is validated locally. Its integration follows the merged P10 RequestHandler PR.

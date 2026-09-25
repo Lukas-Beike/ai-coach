@@ -180,7 +180,7 @@ def create_test_session(server_module):
 
 def _garmin_metrics(snapshot):
     return performance_garmin_metrics.garmin_performance_metrics(
-        snapshot, server.local_now().date()
+        snapshot, server.ATHLETE_CLOCK.now().date()
     )
 
 
@@ -194,7 +194,7 @@ def _current_performance_context(snapshot=None):
         effective_snapshot,
         server.garmin_payload_service().snapshot(),
         server.profile_service().get(),
-        server.local_now().date(),
+        server.ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -802,7 +802,7 @@ class CoachTests(unittest.TestCase):
                 "activity-3",
                 garmin_snapshot=server.garmin_payload_service().snapshot(),
                 profile=server.profile_service().get(),
-                today=server.local_now().date(),
+                today=server.ATHLETE_CLOCK.now().date(),
             )
         self.assertEqual(missing.exception.reason, "activity_details_not_found")
 
@@ -810,7 +810,7 @@ class CoachTests(unittest.TestCase):
         template = server.workout_library_service().create_template({
             "sport": "Ride", "name": "Local tempo", "description": "- 60m 85%", "duration_minutes": 60,
         })
-        tomorrow = (server.local_now().date() + timedelta(days=1)).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         intent = {
             "intent": "local_action", "operation": "apply_workout_library_plan", "target_system": "local",
             "artifact_id": None, "ambiguities": [], "authorization_scope": [f"library_workout:{template['id']}"],
@@ -1484,7 +1484,7 @@ class CoachTests(unittest.TestCase):
         )
 
     def test_calendar_weather_history_survives_refresh_location_change_and_restart(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         yesterday = (today - timedelta(days=1)).isoformat()
         tomorrow = (today + timedelta(days=1)).isoformat()
         server.profile_service().save({"weather_location": "Berlin"})
@@ -1954,7 +1954,7 @@ class CoachTests(unittest.TestCase):
 
     def test_privacy_json_projection_uses_composed_local_clock(self):
         fixed_local_time = datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc)
-        with patch.object(server, "local_now", return_value=fixed_local_time) as local_clock:
+        with patch.object(server.ATHLETE_CLOCK, "now", return_value=fixed_local_time) as local_clock:
             exported = server.privacy_data_export_service().export()
 
         self.assertEqual(exported["planning"]["season"]["as_of"], "2026-01-02")
@@ -2192,7 +2192,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(context["weather"]["fetched_at"], "2000-01-01T00:00:00+00:00")
 
     def test_adaptive_replan_shortens_long_ride_on_near_term_all_day_rain(self):
-        tomorrow = (server.local_now().date() + timedelta(days=1)).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         draft = server.local_plan_creation_service().save([{
             "date": tomorrow, "sport": "Ride", "name": "Lange Ausfahrt",
             "description": "- 240m 60% Easy endurance ride", "duration_minutes": 240, "target": "POWER",
@@ -2208,8 +2208,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn("Wetterprognose", preview["changes"][0]["after"]["rationale"])
 
     def test_adaptive_replan_ignores_near_term_rain_for_indoor_or_later_rides(self):
-        tomorrow = server.local_now().date() + timedelta(days=1)
-        day_three = server.local_now().date() + timedelta(days=3)
+        tomorrow = server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
+        day_three = server.ATHLETE_CLOCK.now().date() + timedelta(days=3)
         drafts = server.local_plan_creation_service().save([
             {"date": tomorrow.isoformat(), "sport": "VirtualRide", "name": "Indoor lang", "description": "- 240m 60% Indoor endurance ride", "duration_minutes": 240},
             {"date": day_three.isoformat(), "sport": "Ride", "name": "Spätere Ausfahrt", "description": "- 240m 60% Outdoor endurance ride", "duration_minutes": 240},
@@ -2227,7 +2227,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(server.AdaptiveReplanPreviewService, "latest_preview", return_value={"status": "preview", "changes": [{"date": "2026-09-01"}]}):
             planning = planning_season.planning_state(
                 server.competition_service().list(),
-                server.local_now().date(),
+                server.ATHLETE_CLOCK.now().date(),
                 server.adaptive_replan_preview_service().latest_preview(),
                 server.adaptive_replan_preview_service().status(),
             )
@@ -2235,7 +2235,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(planning["replan_changes"], 1)
 
     def test_local_feedback_is_persisted_without_provider_values(self):
-        local_today = server.local_now().date().isoformat()
+        local_today = server.ATHLETE_CLOCK.now().date().isoformat()
         result = server.checkin_service().save({
             "checkin_date": local_today, "soreness": "7", "stress": "4", "motivation": "8",
             "available_minutes": "45", "day_form": "Schwere Beine und müde", "illness": "",
@@ -2253,7 +2253,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 400)
         profile = server.profile_service().save({"timezone": "UTC"})
         self.assertEqual(profile["timezone"], "UTC")
-        self.assertEqual(getattr(server.local_now().tzinfo, "key", None), "UTC")
+        self.assertEqual(getattr(server.ATHLETE_CLOCK.now().tzinfo, "key", None), "UTC")
 
     def test_structured_weekly_availability_is_not_part_of_profile(self):
         profile = server.normalize_profile({
@@ -2272,7 +2272,7 @@ class CoachTests(unittest.TestCase):
 
     def test_checkin_uses_local_date_and_rejects_future_dates(self):
         fixed_now = datetime(2026, 8, 31, 23, 30)
-        with patch.object(server, "local_now", return_value=fixed_now):
+        with patch.object(server.ATHLETE_CLOCK, "now", return_value=fixed_now):
             self.assertEqual(
                 normalize_checkin({}, today=fixed_now.date())["checkin_date"],
                 "2026-08-31",
@@ -2303,7 +2303,7 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(result["usage"]["rate_limits"], {})
 
     def test_daily_planning_context_combines_checkin_recovery_weather_and_appointments(self):
-        today = server.local_now().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         server.sync_state_repository().save_snapshot({
             "synced_at": "2026-08-31T08:00:00+00:00",
             "athlete": {},
@@ -2349,7 +2349,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(day["appointments"][0]["name"], "Familientermin")
 
     def test_public_state_exposes_daily_planning_context(self):
-        today = server.local_now().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         server.sync_state_repository().save_snapshot({"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [{"name": "Locker", "start_date_local": f"{today}T08:00:00"}]})
         server.checkin_service().save({"checkin_date": today, "motivation": 8})
         state = server.public_state_service().read(local_only=True)
@@ -2357,7 +2357,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["daily_planning_context"][0]["checkin"]["motivation"], 8)
 
     def test_activity_pagination_has_stable_cursor_without_duplicates(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         server.sync_state_repository().save_snapshot({
             "synced_at": "now", "athlete": {}, "recent_wellness": [], "upcoming_calendar": [],
             "recent_activities": [
@@ -2471,7 +2471,7 @@ class CoachTests(unittest.TestCase):
         self.assertIsNone(second["next_cursor"])
 
     def test_bootstrap_is_bounded_and_excludes_history_collections(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         server.sync_state_repository().save_snapshot({
             "synced_at": "now", "athlete": {}, "recent_wellness": [], "upcoming_calendar": [],
             "recent_activities": [
@@ -2747,7 +2747,7 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(markers.is_due("intervals", local_day + timedelta(hours=1)))
         self.assertTrue(markers.is_due("garmin", local_day))
         self.assertTrue(markers.is_due("calendar", local_day))
-        with patch.object(server, "local_now", return_value=local_day):
+        with patch.object(server.ATHLETE_CLOCK, "now", return_value=local_day):
             server.sync_job_queue_service().enqueue(
                 "calendar", "refresh", {}, requested_by="scheduler"
             )
@@ -3269,7 +3269,7 @@ class CoachTests(unittest.TestCase):
 
 
     def test_external_calendar_keeps_last_good_events_on_invalid_feed(self):
-        today = server.local_now().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -3328,7 +3328,7 @@ class CoachTests(unittest.TestCase):
             "changes": [{"id": "change-1"}, {"id": "change-2"}]
         }
         with patch.object(server, "CONFIG", config), patch.object(calendar_provider, "fetch_calendar_feed", return_value=payload) as fetch, patch.object(
-            server, "local_now", return_value=datetime(2026, 9, 2, tzinfo=timezone.utc)
+            server.ATHLETE_CLOCK, "now", return_value=datetime(2026, 9, 2, tzinfo=timezone.utc)
         ), patch.object(
             server, "adaptive_replan_preview_service", return_value=preview_service
         ):
@@ -3359,7 +3359,7 @@ class CoachTests(unittest.TestCase):
             fetch.assert_called_once_with(config.calendar_ical_url, app_version=server.APP_VERSION)
 
     def test_external_calendar_sync_limits_events_to_eight_weeks(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         in_window = today + timedelta(days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS)
         outside_window = in_window + timedelta(days=1)
         payload = (
@@ -3422,7 +3422,7 @@ class CoachTests(unittest.TestCase):
         server.checkin_service().save({"illness": "Fever", "soreness": 8})
         preview = server.adaptive_replan_preview_service().preview()
         self.assertEqual(preview["illness_pause"]["recommended_pause_days"], planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS)
-        self.assertEqual(preview["illness_pause"]["start_date"], server.local_now().date().isoformat())
+        self.assertEqual(preview["illness_pause"]["start_date"], server.ATHLETE_CLOCK.now().date().isoformat())
         self.assertEqual(len(preview["changes"]), 1)
         self.assertEqual(server.planned_unit_service().list()[0]["description"], "- 5m 115%\n- 40m 55%")
         result = server.illness_pause_sync_service().apply(preview["id"])
@@ -3434,7 +3434,7 @@ class CoachTests(unittest.TestCase):
             row["checkin_date"]: row for row in server.checkin_service().list(30)
         }
         for offset in range(planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS):
-            pause_date = (server.local_now().date() + timedelta(days=offset)).isoformat()
+            pause_date = (server.ATHLETE_CLOCK.now().date() + timedelta(days=offset)).isoformat()
             self.assertEqual(checkins[pause_date]["illness"], "Fever")
         repeated_preview = server.adaptive_replan_preview_service().preview()
         self.assertTrue(repeated_preview["illness_pause"]["approved"])
@@ -3614,7 +3614,7 @@ class CoachTests(unittest.TestCase):
             "private_note": "must stay out of calendar",
         }]
 
-        with patch.object(server, "local_now", return_value=datetime(2026, 8, 26, 12, 0)):
+        with patch.object(server.ATHLETE_CLOCK, "now", return_value=datetime(2026, 8, 26, 12, 0)):
             enriched, weekly = activity_calendar_projection.planning_compliance_state(
                 events, activities, today
             )
@@ -3680,7 +3680,7 @@ class CoachTests(unittest.TestCase):
             },
         ]
 
-        with patch.object(server, "local_now", return_value=datetime(2026, 8, 26, 20, 0)):
+        with patch.object(server.ATHLETE_CLOCK, "now", return_value=datetime(2026, 8, 26, 20, 0)):
             enriched, _ = activity_calendar_projection.planning_compliance_state(
                 planned, activities, today
             )
@@ -3722,7 +3722,7 @@ class CoachTests(unittest.TestCase):
                 return_value=planned,
             ),
             patch.object(server.weather_service(), "state", return_value={"days": []}),
-            patch.object(server, "local_now", return_value=datetime(2026, 8, 26, 12, 0)),
+            patch.object(server.ATHLETE_CLOCK, "now", return_value=datetime(2026, 8, 26, 12, 0)),
         ):
             result = server.public_plan_state_service().read(local_only=True)
 
@@ -3731,7 +3731,7 @@ class CoachTests(unittest.TestCase):
         self.assertIsInstance(result["planning_compliance"], list)
 
     def test_planned_workout_fallback_matches_unpaired_same_day_sport(self):
-        today = server.local_now().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         enriched, _ = activity_calendar_projection.planning_compliance_state(
             [{"id": "event-1", "category": "WORKOUT", "type": "Run", "start_date_local": f"{today}T00:00:00", "moving_time": 1800}],
             [{"id": "activity-1", "type": "Run", "start_date_local": f"{today}T08:00:00", "moving_time": 1500}],
@@ -3829,7 +3829,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(imported["sport"], "Run")
         payload = planning_workouts.workout_event_payload("local-run", {
             "date": tomorrow, "type": "Run", "name": "Lauf", "description": "- 30m 60% Easy", "duration_minutes": 30,
-        }, today=server.local_now().date())
+        }, today=server.ATHLETE_CLOCK.now().date())
         self.assertEqual(payload["type"], "Run")
 
     def test_planned_conflict_can_keep_local_or_adopt_remote(self):
@@ -3942,7 +3942,7 @@ class CoachTests(unittest.TestCase):
             "description": "- 10m 55%\n- 20m 85%\n- 10m 55%",
             "duration_minutes": 40,
             "target": "POWER",
-        }, today=server.local_now().date())
+        }, today=server.ATHLETE_CLOCK.now().date())
         self.assertEqual(payload["category"], "WORKOUT")
         self.assertEqual(payload["moving_time"], 2400)
         self.assertEqual(payload["external_id"], "intervals-coach-abc")
@@ -4015,7 +4015,7 @@ class CoachTests(unittest.TestCase):
             planning_workouts.workout_event_payload(
                 "abc",
                 {"date": old, "duration_minutes": 60},
-                today=server.local_now().date(),
+                today=server.ATHLETE_CLOCK.now().date(),
             )
 
     def test_garmin_context_discards_untrusted_fields(self):
@@ -4260,7 +4260,7 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["source"], "Garmin Connect")
 
     def test_garmin_recovery_values_take_precedence_and_keep_provenance(self):
-        today = server.local_now().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         server.key_value_service().set("garmin_snapshot", json.dumps({
             "sleep": [{"id": "sleep-wrapper", "dailySleepDTO": {"calendarDate": today, "sleepTimeSeconds": 28800, "sleepScore": 91}}],
             "resting_hr": [{"calendarDate": today, "restingHeartRate": 49}],
@@ -4279,7 +4279,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(recovery["hrv_source"], "Garmin Connect")
 
     def test_garmin_daily_health_is_averaged_over_the_last_seven_days(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         server.key_value_service().set("garmin_snapshot", json.dumps({
             "daily_stats": [
                 {
@@ -4311,7 +4311,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(performance["metrics"]["calories_7d"]["value"], 2030)
 
     def test_performance_exposes_thirty_day_trends_for_api_and_garmin_values(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         snapshot = {
             "synced_at": "now", "athlete": {}, "recent_activities": [],
             "recent_wellness": [
@@ -4336,7 +4336,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(comparisons["run_5k_seconds_30d"]["color"], "good")
 
     def test_performance_does_not_compare_garmin_metrics_to_intervals_history(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         snapshot = {
             "synced_at": "now", "athlete": {}, "recent_activities": [],
             "recent_wellness": [{"id": today.isoformat(), "sport_info": [{"types": ["Ride"], "ftp": 280}]}],
@@ -4431,8 +4431,8 @@ class CoachTests(unittest.TestCase):
         activity_call = next(params for path, params in calls if path.endswith("/activities"))
         self.assertEqual((date.fromisoformat(activity_call["newest"]) - date.fromisoformat(activity_call["oldest"])).days, 89)
         event_call = next(params for path, params in calls if path.endswith("/events"))
-        self.assertEqual(date.fromisoformat(event_call["oldest"]), server.local_now().date() - timedelta(days=server.PLANNED_CALENDAR_HISTORY_DAYS))
-        self.assertEqual(date.fromisoformat(event_call["newest"]), server.local_now().date() + timedelta(days=server.PLANNED_CALENDAR_FUTURE_DAYS))
+        self.assertEqual(date.fromisoformat(event_call["oldest"]), server.ATHLETE_CLOCK.now().date() - timedelta(days=server.PLANNED_CALENDAR_HISTORY_DAYS))
+        self.assertEqual(date.fromisoformat(event_call["newest"]), server.ATHLETE_CLOCK.now().date() + timedelta(days=server.PLANNED_CALENDAR_FUTURE_DAYS))
         self.assertEqual(snapshot["provider_sync"]["calendar_window"]["start"], event_call["oldest"])
         self.assertEqual(snapshot["provider_sync"]["calendar_window"]["end"], event_call["newest"])
         self.assertEqual({item["id"] for item in snapshot["recent_activities"]}, {"old", "new"})
@@ -4476,7 +4476,7 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(archived["library_entry"]["archived"])
 
     def test_public_state_exposes_provider_calendar_window(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         server.sync_state_repository().save_snapshot({
             "synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [],
             "provider_sync": {"calendar_window": {"start": (today - timedelta(days=10)).isoformat(), "end": (today + timedelta(days=20)).isoformat()}},
@@ -4554,7 +4554,7 @@ class CoachTests(unittest.TestCase):
             "name": "Easy run",
             "description": "- 30m Z2",
             "duration_minutes": 30,
-        }, today=server.local_now().date())
+        }, today=server.ATHLETE_CLOCK.now().date())
         self.assertEqual(normalized["sport"], "Run")
 
     def test_recovery_extension_bullet_is_rejected_before_plan_storage(self):
@@ -4601,7 +4601,7 @@ class CoachTests(unittest.TestCase):
                 workout = planning_workouts.normalize_workout({
                     "date": (date.today() + timedelta(days=1)).isoformat(),
                     "sport": "Run", "description": description, "duration_minutes": minutes,
-                }, today=server.local_now().date())
+                }, today=server.ATHLETE_CLOCK.now().date())
                 self.assertEqual(workout["description"], description)
         planning_workouts.validate_workout_description({
             "sport": "WeightTraining", "description": "- Squats 3x8, pause 60s",
@@ -4623,7 +4623,7 @@ class CoachTests(unittest.TestCase):
                 lambda: client.update_library_workout("synthetic", workout),
                 lambda: client.plan_library_workout("synthetic", workout, workout["date"]),
                 lambda: planning_workouts.workout_event_payload(
-                    "synthetic", workout, today=server.local_now().date()
+                    "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
                 ),
             ):
                 with self.assertRaises(server.AppError):
@@ -6129,7 +6129,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("instructions", preview["chat_prompt"]["note"])
 
     def test_coach_intervals_context_limits_activities_and_excludes_past_calendar(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         activities = [
             {"id": f"ride-{index}", "type": "Ride", "name": f"Ride {index}", "start_date_local": (today - timedelta(days=index)).isoformat(), "moving_time": 3600, "icu_training_load": 50}
             for index in range(7)
@@ -6160,7 +6160,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["activity_rollups_by_sport"]["Radfahren"]["last_7_days"]["sessions"], 7)
 
     def test_coach_intervals_context_keeps_planned_event_limit(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         events = [
             {"id": f"event-{index}", "name": f"Workout {index}",
              "start_date_local": (today + timedelta(days=1)).isoformat()}
@@ -6217,7 +6217,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(rollup, {"days": 2, "sessions": 2, "duration_hours": 1.0, "training_load": 42.5})
 
     def test_coach_intervals_context_is_deterministic_for_same_timestamps_and_missing_sports(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         snapshot = {
             "synced_at": "now",
             "recent_activities": [
@@ -6237,7 +6237,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("Unclassified", first["recent_activities_by_sport"]["Unclassified"][0]["name"])
 
     def test_coach_planned_projection_omits_long_description_and_keeps_relevant_fields(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         event = {
             "id": "planned-1",
             "start_date_local": (today + timedelta(days=1)).isoformat(),
@@ -6261,7 +6261,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("athlete_detail", projected)
 
     def test_build_training_context_serializes_local_plans_once_and_reports_projection_budget(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         server.planned_unit_service().create({
             "date": (today + timedelta(days=1)).isoformat(),
             "sport": "Ride",
@@ -6288,7 +6288,7 @@ class CoachTests(unittest.TestCase):
         self.assertLessEqual(len(first), coach_context.COACH_CONTEXT_TOTAL_CHAR_LIMIT)
 
     def test_build_training_context_uses_compact_intervals_projection(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         snapshot = {
             "synced_at": "now",
             "athlete": {},
@@ -6320,7 +6320,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("do not claim a reliable trend", context)
 
     def test_coach_projection_does_not_change_provider_snapshots(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         intervals_snapshot = {
             "synced_at": "now",
             "athlete": {"provider_detail": "kept in the full snapshot"},
@@ -7204,7 +7204,7 @@ class CoachTests(unittest.TestCase):
         fetch_snapshot.assert_called_once_with(activity_days=65)
         openai_client.assert_not_called()
         self.assertEqual(result["activity_days"], 65)
-        self.assertEqual(result["window_end"], server.local_now().date().isoformat())
+        self.assertEqual(result["window_end"], server.ATHLETE_CLOCK.now().date().isoformat())
 
     def test_sync_intervals_passes_cancellation_to_snapshot_fetch(self):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
@@ -8628,7 +8628,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("globalThis.visualViewport", app_source)
 
     def test_weather_shows_fourteen_days_and_recommends_outdoor_time_for_five_days(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         daily_dates = [(today + timedelta(days=offset)).isoformat() for offset in range(14)]
         hourly_times = []
         hourly_precipitation = []
@@ -9002,7 +9002,7 @@ class CoachTests(unittest.TestCase):
         )
 
     def test_coach_quick_actions_hide_completed_morning_and_limit_plan_blockers_to_three_days(self):
-        today = server.local_now().date()
+        today = server.ATHLETE_CLOCK.now().date()
         server.key_value_service().set("morning_checkin_status", "ready")
         server.key_value_service().set("morning_checkin_date", today.isoformat())
         preview = {
@@ -9990,7 +9990,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(error.exception.reason, "response_error")
 
     def test_openai_request_is_not_blocked_by_local_usage_total(self):
-        server.key_value_service().set("openai_usage", json.dumps({"date": server.local_now().date().isoformat(), "total_tokens": 10}))
+        server.key_value_service().set("openai_usage", json.dumps({"date": server.ATHLETE_CLOCK.now().date().isoformat(), "total_tokens": 10}))
         config = replace(server.CONFIG, openai_api_key="test-key")
         with patch.object(server, "CONFIG", config), patch.object(server.provider_http_client(), "request", return_value={"status": "completed"}) as request:
             result = server.openai_responses_client().request("/responses", {"model": "gpt-5.6-sol"})

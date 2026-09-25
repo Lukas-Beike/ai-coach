@@ -162,7 +162,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
             with self.subTest(spelling=spelling):
                 workout = planning_workouts.normalize_workout(
                     {**self.workout(), "sport": "Run", "target": "HR", "description": "- 8km " + spelling},
-                    today=server.local_now().date(),
+                    today=server.ATHLETE_CLOCK.now().date(),
                 )
                 planning_workouts.validate_workout_description(workout)
                 self.assertEqual(workout["description"], "- 8km Z1-Z2 HR")

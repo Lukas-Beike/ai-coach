@@ -31,13 +31,13 @@ class DialogueHarness:
         root = Path(temporary.name)
         self.enterContext(isolated_server(server, root))
         reset_application_state(server)
-        fixed = patch.object(server, "local_now", return_value=datetime(2026, 9, 7, 12, tzinfo=timezone.utc))
+        fixed = patch.object(server.ATHLETE_CLOCK, "now", return_value=datetime(2026, 9, 7, 12, tzinfo=timezone.utc))
         fixed.start()
         self.addCleanup(fixed.stop)
         original_dialogue_service = server.coach_dialogue_read_service
         def fixed_dialogue_service():
             service = original_dialogue_service()
-            service._local_clock = lambda _timezone: server.local_now()
+            service._local_clock = lambda _timezone: server.ATHLETE_CLOCK.now()
             return service
         dialogue_clock = patch.object(server, "coach_dialogue_read_service", side_effect=fixed_dialogue_service)
         dialogue_clock.start()
