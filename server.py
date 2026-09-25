@@ -2088,17 +2088,17 @@ def coach_tool_dispatch_service() -> CoachToolDispatchService:
         coach_read_tool_service,
         coach_profile_update_service,
         coach_athlete_record_tool_service,
-        lambda: CoachPlanArtifactToolService(training_plan_artifact_service),
-        lambda: CoachPlanningChangeToolService(
+        CoachPlanArtifactToolService(training_plan_artifact_service),
+        CoachPlanningChangeToolService(
             structured_training_plan_replacement_service,
             structured_training_change_service,
         ),
-        lambda: TrainingTemplateToolService(
+        TrainingTemplateToolService(
             database_manager, DB_LOCK, workout_library_service
         ),
         coach_library_plan_tool_service,
         coach_sync_tool_service,
-        lambda: CoachPlanningActionToolService(
+        CoachPlanningActionToolService(
             adaptive_replan_preview_service,
             coach_adaptive_apply_service,
             training_plan_service,

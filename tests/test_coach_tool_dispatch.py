@@ -14,10 +14,23 @@ class CoachToolDispatchServiceTests(unittest.TestCase):
             "read", "profile", "athlete", "artifact", "changes", "templates",
             "library", "sync", "actions",
         )}
-        self.factories = {name: Mock(return_value=owner) for name, owner in self.owners.items()}
+        self.factories = {
+            name: Mock(return_value=self.owners[name])
+            for name in ("read", "profile", "athlete", "library", "sync")
+        }
         for name in ("read", "athlete", "artifact", "changes", "sync", "actions"):
             self.owners[name].execute.return_value = None
-        self.service = CoachToolDispatchService(*self.factories.values())
+        self.service = CoachToolDispatchService(
+            self.factories["read"],
+            self.factories["profile"],
+            self.factories["athlete"],
+            self.owners["artifact"],
+            self.owners["changes"],
+            self.owners["templates"],
+            self.factories["library"],
+            self.factories["sync"],
+            self.owners["actions"],
+        )
         self.intent = {"operation": "synthetic"}
         self.job_ids: list[str] = []
 
@@ -101,8 +114,11 @@ class CoachToolDispatchServiceTests(unittest.TestCase):
             self.execute("not_a_tool")
 
         self.assertEqual((raised.exception.status, raised.exception.reason), (400, "unknown_coach_tool"))
-        for name in self.factories.keys() - {"read", "athlete", "actions"}:
+        for name in self.factories.keys() - {"read", "athlete"}:
             self.factories[name].assert_not_called()
+        for name in ("artifact", "changes", "templates"):
+            self.owners[name].execute.assert_not_called()
+        self.owners["actions"].execute.assert_called_once()
 
 
 if __name__ == "__main__":

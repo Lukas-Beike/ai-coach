@@ -1054,7 +1054,7 @@ für interne Testimports. Jeder abgeschlossene PR bleibt start- und testfähig.
 Bei einer Regression wird der betreffende Code-PR gezielt zurückgenommen;
 es gibt keine Datenmigration und keine Rücknahme durch Löschen von Nutzerdaten.
 
-## 8. Abschlussstand
+## 8. Historischer Abschluss und aktueller Auditstatus
 
 Der erneute Audit hat den frueheren Abschluss widerlegt: Die 184-zeilige
 `RequestHandler`-Implementierung war noch in `server.py`, und die alte
@@ -1062,11 +1062,11 @@ Architekturpruefung begrenzte nur Namen. Der Handler ist jetzt unter
 `backend/http_api/handler.py`; seine Komplexitaet bleibt auf der Klassenebene
 und wird von Sonar sowie Architekturtests geprueft.
 
-P11 auditiert die verbleibenden Fabrikkoerper statt eine pauschale LOC-Grenze
-zu setzen. Eine AST-Regel beschraenkt Kontrollfluss auf explizite Resource- und
-Startup-Faelle und verbietet direkte SQL-, Provider- und Datei-Lese/Schreib-
-Aufrufe im Composition Root. Die profilabhaengige Uhr gehoert jetzt
-`backend/athlete/clock.py`. Die verbleibenden Zeilen sind gepruefte
-Instanziierung des Service-Graphen, Konfiguration, gemeinsame Prozessressourcen
-und Startup/Shutdown. P0-P11 sind abgeschlossen: P10 wurde in PR #818 und
-P11 in PR #819 nach erfolgreicher Validierung in `develop` integriert.
+PRs #818 and #819 completed the RequestHandler and athlete-clock migrations
+against their then-current acceptance checks. Their closeout is historical:
+the later audit described at the start of this document reopened P10/P11 after
+finding that the earlier checklist did not account for function bodies and the
+size of the composition graph. Do not treat the completed boxes below as the
+current final acceptance. Section 1 and the current inventory remain the
+completion criteria; P10/P11 close only after the reopened audit and remaining
+ownership work are reviewed and validated.

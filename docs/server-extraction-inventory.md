@@ -5,7 +5,7 @@
 ## Ausgangsstand
 
 - Geprüfter P0-Basiscommit: `362d6caa4c27951af86b82b11b3a43d48dadceee`
-- Inventarisierter `server.py`-Quelltext (SHA-256): `0431fc87e47cb8391fe9a91e75bec1f54e65913a0115a7a43a8c809b1052fc8b`; dieser Fingerprint ist unabhängig von HEAD und Arbeitsbaum stabil.
+- Inventarisierter `server.py`-Quelltext (SHA-256): `b2bbf2afdbb541a701660ec183f70bc0c49ab94a7f13406257224cd0554932c2`; dieser Fingerprint ist unabhängig von HEAD und Arbeitsbaum stabil.
 - `server.py`: 2.796 physische Zeilen
 - Inventareinträge: 606
 - Definitionen (Funktionen/Klassen): 172
