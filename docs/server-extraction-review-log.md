@@ -8076,6 +8076,25 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - This is a focused P11 ownership follow-up; it does not claim completion of
   any remaining composition-graph audit work.
 
+## P11 Coach tool-dispatch composition -- local review
+
+- Replaced four callbacks that existed only to construct backend Coach tool
+  adapters with concrete adapter instances in coach_tool_dispatch_service().
+  CoachToolDispatchService now stores those instances directly. The underlying
+  database-backed use-case factories remain lazy and are still invoked only
+  after their adapter authorizes and routes a matching tool, preserving the
+  current resource and authorization order.
+- Independently reviewed dispatcher routing, adapter state, and service-factory
+  call sites. The adapters only store their dependencies; no database, provider,
+  or other I/O runs during construction. No actionable findings remained.
+- The server composition function count and physical line count are unchanged;
+  this removes deferred server callbacks from the tool-dispatch graph, not a
+  business definition. P11 remains open pending the broader audit.
+- Validation before rebase: full suite **2,802 passed, 12 skipped**; architecture
+  tests **40 passed**; focused Coach dispatch/adapter tests **43 passed**;
+  Python compilation, inventory check, and git diff check passed. The local
+  environment did not have ruff.
+
 ## P12 Garmin morning recovery composition — local review
 
 - Moved Garmin morning recovery configuration, profile-timezone lookup, provider fetch, and redacted operation transport out of `server.py` into `GarminMorningRemoteReader` under `backend/sync/garmin_service.py`.

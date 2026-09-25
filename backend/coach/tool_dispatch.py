@@ -26,12 +26,12 @@ class CoachToolDispatchService:
         read_tools: Callable[[], CoachReadToolService],
         profile_update: Callable[[], CoachProfileUpdateService],
         athlete_records: Callable[[], CoachAthleteRecordToolService],
-        plan_artifacts: Callable[[], CoachPlanArtifactToolService],
-        planning_changes: Callable[[], CoachPlanningChangeToolService],
-        training_templates: Callable[[], TrainingTemplateToolService],
+        plan_artifacts: CoachPlanArtifactToolService,
+        planning_changes: CoachPlanningChangeToolService,
+        training_templates: TrainingTemplateToolService,
         library_plans: Callable[[], CoachLibraryPlanToolService],
         sync_tools: Callable[[], CoachSyncToolService],
-        planning_actions: Callable[[], CoachPlanningActionToolService],
+        planning_actions: CoachPlanningActionToolService,
     ) -> None:
         self._read_tools = read_tools
         self._profile_update = profile_update
@@ -64,17 +64,17 @@ class CoachToolDispatchService:
         if athlete_result is not None:
             return athlete_result
         if name in {"stage_training_plan", "commit_training_plan"}:
-            result = self._plan_artifacts().execute(
+            result = self._plan_artifacts.execute(
                 name, arguments, intent, conversation_id, client_turn_id
             )
             if result is not None:
                 return result
         if name in {"replace_training_plan", "apply_training_changes"}:
-            result = self._planning_changes().execute(name, arguments, intent)
+            result = self._planning_changes.execute(name, arguments, intent)
             if result is not None:
                 return result
         if name == "manage_training_templates":
-            return self._training_templates().execute(arguments, intent)
+            return self._training_templates.execute(arguments, intent)
         if name == "apply_workout_library_plan":
             return self._library_plans().execute(arguments, intent)
         if name in COACH_SYNC_TOOL_NAMES:
@@ -87,7 +87,7 @@ class CoachToolDispatchService:
             )
             if sync_result is not None:
                 return sync_result
-        planning_result = self._planning_actions().execute(
+        planning_result = self._planning_actions.execute(
             name, arguments, intent, client_turn_id, session_csrf_hash
         )
         if planning_result is not None:
