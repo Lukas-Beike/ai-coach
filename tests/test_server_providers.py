@@ -17,6 +17,7 @@ from backend.http_api import responses
 from backend.providers import calendar as calendar_provider, gemini as gemini_provider, http as provider_http, openai as openai_provider
 from backend.providers.transport_assembly import ProviderTransportAssembly
 from backend.sync import garmin as garmin_sync, observation as sync_observation
+from backend.sync import freshness as sync_freshness
 from server_test_support import _transcribe_via_http_route, server, ServerTestCase
 from support import build_gemini_request_payload
 
@@ -939,25 +940,25 @@ class ServerProvidersTests(ServerTestCase):
         )
         with patch.object(server, "CONFIG", config):
             server.profile_service().save({"weather_location": "Berlin"})
-            initial = {(item["provider"], item["area"]): item for item in server.provider_freshness_service().current(
+            initial = {(item["provider"], item["area"]): item for item in server.PROVIDER_SYNC.freshness_service().current(
                 profile=server.profile_service().get(), garmin_has_core_error=bool(server.garmin_sync_state_service().core_error_entries()),
                 garmin_tokenstore_exists=Path(server.CONFIG.garmin_tokenstore).exists())}
             self.assertEqual(initial[("intervals", "activities")]["state"], "never_loaded")
             self.assertEqual(initial[("weather", "forecast")]["state"], "never_loaded")
-            refresh_id = server.provider_refresh_tracker().start(
+            refresh_id = server.PROVIDER_SYNC.refresh_tracker().start(
                 "intervals", "activities", "operation-test", "manual"
             )
-            server.provider_refresh_tracker().finish(
+            server.PROVIDER_SYNC.refresh_tracker().finish(
                 refresh_id, "error", "failed", error_code="network_error"
             )
-            failed = {(item["provider"], item["area"]): item for item in server.provider_freshness_service().current(
+            failed = {(item["provider"], item["area"]): item for item in server.PROVIDER_SYNC.freshness_service().current(
                 profile=server.profile_service().get(), garmin_has_core_error=bool(server.garmin_sync_state_service().core_error_entries()),
                 garmin_tokenstore_exists=Path(server.CONFIG.garmin_tokenstore).exists())}
             self.assertEqual(failed[("intervals", "activities")]["state"], "error")
             self.assertEqual(failed[("intervals", "activities")]["error_code"], "network_error")
             self.assertIsNone(failed[("intervals", "activities")]["next_retry_at"])
             with patch.object(server, "CONFIG", replace(config, intervals_api_key="")):
-                unconfigured = {(item["provider"], item["area"]): item for item in server.provider_freshness_service().current(
+                unconfigured = {(item["provider"], item["area"]): item for item in server.PROVIDER_SYNC.freshness_service().current(
                     profile=server.profile_service().get(), garmin_has_core_error=bool(server.garmin_sync_state_service().core_error_entries()),
                     garmin_tokenstore_exists=Path(server.CONFIG.garmin_tokenstore).exists())}
             self.assertEqual(unconfigured[("intervals", "activities")]["state"], "not_configured")
@@ -966,14 +967,14 @@ class ServerProvidersTests(ServerTestCase):
                 "intervals", "refresh", {"days": 1},
                 requested_by="test", available_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
             )
-            scheduled = {(item["provider"], item["area"]): item for item in server.provider_freshness_service().current(
+            scheduled = {(item["provider"], item["area"]): item for item in server.PROVIDER_SYNC.freshness_service().current(
                 profile=server.profile_service().get(), garmin_has_core_error=bool(server.garmin_sync_state_service().core_error_entries()),
                 garmin_tokenstore_exists=Path(server.CONFIG.garmin_tokenstore).exists())}
             self.assertTrue(scheduled[("intervals", "activities")]["next_retry_at"])
-            refresh_id = server.provider_refresh_tracker().start(
+            refresh_id = server.PROVIDER_SYNC.refresh_tracker().start(
                 "intervals", "activities", "operation-test-2", "manual"
             )
-            server.provider_refresh_tracker().finish(
+            server.PROVIDER_SYNC.refresh_tracker().finish(
                 refresh_id, "success", "complete"
             )
             with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -982,23 +983,23 @@ class ServerProvidersTests(ServerTestCase):
                     "UPDATE provider_refresh_history SET started_at=?, finished_at=? WHERE id=?",
                     (stale_at, stale_at, refresh_id),
                 )
-            stale = {(item["provider"], item["area"]): item for item in server.provider_freshness_service().current(
+            stale = {(item["provider"], item["area"]): item for item in server.PROVIDER_SYNC.freshness_service().current(
                 profile=server.profile_service().get(), garmin_has_core_error=bool(server.garmin_sync_state_service().core_error_entries()),
                 garmin_tokenstore_exists=Path(server.CONFIG.garmin_tokenstore).exists())}
             self.assertEqual(stale[("intervals", "activities")]["state"], "stale")
             self.assertTrue(stale[("intervals", "activities")]["has_last_good"])
 
     def test_provider_refresh_history_is_bounded_and_diagnostic_safe(self):
-        for index in range(server.sync_freshness.PROVIDER_REFRESH_MAX_ROWS + 5):
-            refresh_id = server.provider_refresh_tracker().start(
+        for index in range(sync_freshness.PROVIDER_REFRESH_MAX_ROWS + 5):
+            refresh_id = server.PROVIDER_SYNC.refresh_tracker().start(
                 "garmin", "data", f"operation-{index}", "manual"
             )
-            server.provider_refresh_tracker().finish(
+            server.PROVIDER_SYNC.refresh_tracker().finish(
                 refresh_id, "success", "complete"
             )
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             count = db.execute("SELECT COUNT(*) AS count FROM provider_refresh_history").fetchone()["count"]
-        self.assertEqual(count, server.sync_freshness.PROVIDER_REFRESH_MAX_ROWS)
+        self.assertEqual(count, sync_freshness.PROVIDER_REFRESH_MAX_ROWS)
         report = server.diagnostic_report_service().report()
         self.assertIn("provider_freshness", report)
         self.assertNotIn("operation-", json.dumps(report))

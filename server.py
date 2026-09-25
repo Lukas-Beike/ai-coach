@@ -68,7 +68,7 @@ from backend.performance.morning_battery_service import (
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 from backend.runtime import clock as runtime_clock
-from backend.sync import freshness as sync_freshness
+from backend.sync.assembly import ProviderSyncAssembly
 from backend.sync import garmin as garmin_sync
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
@@ -180,8 +180,6 @@ from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_selection import StructuredPlanSyncService
 from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.daily import DailySyncMarkerService
-from backend.sync import refresh as sync_refresh
-from backend.sync.refresh import ProviderRefreshTracker
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
 from backend.sync.planned_units import RemotePlannedUnitReconciler
 from backend.sync.planned_calendar import (
@@ -479,37 +477,18 @@ def provider_state_service() -> provider_state.ProviderStateService:
     )
 
 
-def provider_refresh_tracker() -> ProviderRefreshTracker:
-    """Return refresh history orchestration bound to the active database manager."""
-    return sync_refresh.PROVIDER_REFRESH_TRACKER_CACHE.get(
-        database_manager(),
-        runtime_events.STATE_EVENT_BUFFER,
-        lambda: datetime.now(timezone.utc),
-        lambda: uuid.uuid4().hex,
-        retention_days=sync_freshness.PROVIDER_REFRESH_RETENTION_DAYS,
-        max_rows=sync_freshness.PROVIDER_REFRESH_MAX_ROWS,
-        retry_base_seconds=PROVIDER_REFRESH_RETRY_BASE_SECONDS,
-        retry_max_seconds=PROVIDER_REFRESH_RETRY_MAX_SECONDS,
-    )
-
-
-def sync_operation_observer() -> sync_observation.SyncOperationObserver:
-    """Compose the shared provider-operation lifecycle owner."""
-    return sync_observation.SyncOperationObserver(
-        provider_refresh_tracker(),
-        runtime_maintenance.MAINTENANCE_GATE,
-        LOGGER,
-    )
-
-
-def provider_freshness_service() -> sync_freshness.ProviderFreshnessService:
-    """Compose provider freshness persistence and projection."""
-    return sync_freshness.ProviderFreshnessService(
-        CONFIG,
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        lambda: datetime.now(timezone.utc),
-    )
+PROVIDER_SYNC = ProviderSyncAssembly(
+    database_manager=database_manager,
+    config=lambda: CONFIG,
+    key_values=KEY_VALUE_REPOSITORY,
+    event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    logger=LOGGER,
+    now=lambda: datetime.now(timezone.utc),
+    uuid_factory=lambda: uuid.uuid4().hex,
+    retry_base_seconds=PROVIDER_REFRESH_RETRY_BASE_SECONDS,
+    retry_max_seconds=PROVIDER_REFRESH_RETRY_MAX_SECONDS,
+)
 
 
 def sync_job_store() -> SyncJobStore:
@@ -679,7 +658,7 @@ def sync_public_state_service() -> SyncPublicStateService:
         CONFIG,
         database_manager(),
         KEY_VALUE_REPOSITORY,
-        provider_freshness_service(),
+        PROVIDER_SYNC.freshness_service(),
         profile_service(),
         garmin_sync_state_service(),
         runtime_maintenance.MAINTENANCE_GATE,
@@ -707,7 +686,7 @@ def performance_refresh_service() -> PerformanceRefreshService:
         runtime_events.STATE_EVENT_BUFFER,
         REDACTOR.redact_text,
         LOGGER,
-        sync_operation_observer(),
+        PROVIDER_SYNC.operation_observer(),
         INTERVALS_RESYNC_GATE,
     )
 
@@ -813,7 +792,7 @@ def intervals_sync_service() -> IntervalsSyncService:
         ),
         IntervalsSyncRuntime(
             INTERVALS_SYNC_LOCK,
-            sync_operation_observer(),
+            PROVIDER_SYNC.operation_observer(),
             INTERVALS_RESYNC_GATE,
             wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
         ),
@@ -895,7 +874,7 @@ def garmin_sync_service() -> GarminSyncService:
             runtime_events.STATE_EVENT_BUFFER,
             REDACTOR.redact_text,
         ),
-        sync_operation_observer(),
+        PROVIDER_SYNC.operation_observer(),
         GarminSyncCoordination(
             shared_garmin_sync_lock(),
             GARMIN_RESYNC_GATE,
@@ -926,7 +905,7 @@ def garmin_projection_service() -> GarminProjectionService:
 
 def full_provider_resync_service() -> FullProviderResyncService:
     """Compose complete provider reset orchestration."""
-    observer = sync_operation_observer()
+    observer = PROVIDER_SYNC.operation_observer()
     return FullProviderResyncService(
         FullResyncProviderExecution(
             CONFIG,
@@ -959,7 +938,7 @@ def weather_service() -> WeatherService:
             PROVIDER_TRANSPORT.json_http_client().request, runtime_clock.utc_now, LOGGER
         ),
         WeatherRefreshJournal(
-            provider_refresh_tracker(),
+            PROVIDER_SYNC.refresh_tracker(),
             sync_observation.OPERATION_CONTEXT,
             lambda: uuid.uuid4().hex,
             LOGGER,
@@ -976,7 +955,7 @@ def weather_sync_service() -> WeatherSyncService:
         profile_service(),
         weather_service(),
         adaptive_replan_preview_service(),
-        sync_operation_observer(),
+        PROVIDER_SYNC.operation_observer(),
         LOGGER,
     )
 
@@ -1032,7 +1011,7 @@ def external_calendar_sync_service() -> ExternalCalendarSyncService:
         database_manager(),
         KEY_VALUE_REPOSITORY,
         daily_sync_marker_service(),
-        sync_operation_observer(),
+        PROVIDER_SYNC.operation_observer(),
         adaptive_replan_preview_service(),
         runtime_events.STATE_EVENT_BUFFER,
         LOGGER,
@@ -1297,7 +1276,7 @@ def sync_job_executor() -> SyncJobExecutor:
             performance_refresh_service=performance_refresh_service(),
             selected_workout_sync_service=selected_workout_sync_service(),
             competition_sync_service=competition_sync_service(),
-            sync_operation_observer=sync_operation_observer(),
+            sync_operation_observer=PROVIDER_SYNC.operation_observer(),
             intervals_resync_gate=INTERVALS_RESYNC_GATE,
         ),
         garmin_jobs=GarminSyncJobOwner(
@@ -2238,7 +2217,7 @@ def public_bootstrap_service() -> PublicBootstrapService:
             competition_service=competition_service,
             external_calendar_reader=external_calendar_reader,
             profile_service=profile_service,
-            provider_freshness_service=provider_freshness_service,
+            provider_freshness_service=PROVIDER_SYNC.freshness_service,
             garmin_sync_state_service=garmin_sync_state_service,
             garmin_sync_service=garmin_sync_service,
             sync_job_queue_service=sync_job_queue_service,
@@ -2349,7 +2328,7 @@ def public_state_service() -> PublicStateService:
                 public_feedback=public_feedback_state_service(),
                 public_performance=public_performance_state_service(),
                 sync_state=sync_state_repository(),
-                provider_freshness=provider_freshness_service(),
+                provider_freshness=PROVIDER_SYNC.freshness_service(),
                 garmin_sync_state=garmin_sync_state_service(),
                 sync_public_state=sync_public_state_service(),
                 intervals_sync_lock=INTERVALS_SYNC_LOCK,
@@ -2402,7 +2381,7 @@ def diagnostic_report_service() -> DiagnosticReportService:
         provider_state=provider_state_service(),
         coach_history=coach_diagnostic_history_service(),
         redactor=REDACTOR,
-        provider_freshness=provider_freshness_service(),
+        provider_freshness=PROVIDER_SYNC.freshness_service(),
         profile=profile_service(),
         garmin_sync_state=garmin_sync_state_service(),
         external_calendar_sync=external_calendar_sync_service(),

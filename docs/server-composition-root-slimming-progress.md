@@ -114,3 +114,42 @@ mocked providers; no live account or runtime data was used.
   statements, 168 top-level functions.
 - Docker image build remains unavailable because the local Docker engine pipe
   is absent. No live provider was contacted.
+
+## S2a2a boundary before implementation: provider refresh state
+
+- The refresh tracker cache already lives in `backend/sync/refresh.py` and is
+  keyed by the active manager, shared event buffer, and retry/retention
+  settings. Its root callers are the provider observer and weather refresh
+  journal; tests also read it for persistence assertions.
+- The operation observer is intentionally a fresh lightweight adapter per
+  call, but every instance must receive that exact cached tracker, the shared
+  maintenance gate, and the same logger. Provider freshness is an uncached
+  service whose manager/config are resolved at each call.
+- Proposed interface: `ProviderSyncAssembly` in `backend/sync/assembly.py`,
+  with `refresh_tracker()`, `operation_observer()`, and
+  `freshness_service()`. Its constructor stores late manager/config providers
+  and the existing shared resources only; methods call backend-owned caches
+  and service constructors. Root and test callers will use this single,
+  domain-specific assembly lookup.
+- External patch targets: no tests patch these root factories; tests consume
+  the returned instances. No e2e fixture directly references these factories.
+
+## S2a2a: provider refresh state assembly
+
+- Completed in `backend/sync/assembly.py` as `ProviderSyncAssembly`. It owns
+  the retrieval of the cached refresh tracker, construction of operation
+  observers over the shared tracker/gate, and construction of provider
+  freshness projections. Manager/config resolution is late; the existing
+  tracker cache, event buffer, maintenance gate, and logger identities are
+  passed through unchanged.
+- Removed the three root factories and migrated their root/test consumers to
+  `server.PROVIDER_SYNC`. Updated the architecture test to enforce the
+  assembly boundary and retained tracker-cache ownership in
+  `backend/sync/refresh.py`.
+- Focused checks passed: architecture (48), providers (49), database (45 run,
+  3 skipped), runtime (13), and sync (80). Inventory, compileall, and diff
+  checks passed.
+- Measured `server.py`: 2,732 physical / 2,364 nonblank lines, 218 import
+  statements, 165 top-level functions.
+- Docker image build remains unavailable because the local Docker engine pipe
+  is absent. No live provider was contacted.

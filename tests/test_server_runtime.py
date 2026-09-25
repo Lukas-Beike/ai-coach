@@ -271,7 +271,7 @@ class ServerRuntimeTests(ServerTestCase):
         operation_ids = []
 
         def worker():
-            with server.sync_operation_observer().observe(
+            with server.PROVIDER_SYNC.operation_observer().observe(
                 "test", "default", "manual"
             ) as scope:
                 operation_ids.append(scope.operation_id)

@@ -1017,7 +1017,7 @@ class ServerSyncTests(ServerTestCase):
                 )
             freshness = {
                 (item["provider"], item["area"]): item
-                for item in server.provider_freshness_service().current(
+                for item in server.PROVIDER_SYNC.freshness_service().current(
                     profile=server.profile_service().get(),
                     garmin_has_core_error=bool(
                         server.garmin_sync_state_service().core_error_entries()
