@@ -1135,7 +1135,10 @@ def profile_service() -> ProfileService:
     )
 
 
-ATHLETE_CLOCK = AthleteLocalClock(lambda: profile_service().get().get("timezone"))
+ATHLETE_PROFILE_SERVICE = ProfileService(
+    DATABASE_MANAGER_CACHE, PROFILE_REPOSITORY, KEY_VALUE_REPOSITORY
+)
+ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
 
 def coach_profile_update_service() -> CoachProfileUpdateService:

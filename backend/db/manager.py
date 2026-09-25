@@ -7,7 +7,7 @@ remains usable with both SQLite test doubles and SQLCipher in production.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 import queue
@@ -220,3 +220,14 @@ class DatabaseManagerCache:
                 self.manager.close()
             self.manager = None
             self.signature = None
+
+    @contextmanager
+    def unit_of_work(self) -> Iterator[Any]:
+        """Use the current manager without forcing its construction."""
+        with ExitStack() as stack:
+            with self._lock:
+                manager = self.manager
+                if manager is None:
+                    raise RuntimeError("database manager is not initialized")
+                db = stack.enter_context(manager.unit_of_work())
+            yield db

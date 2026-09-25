@@ -36,6 +36,62 @@ class DatabaseManagerTests(unittest.TestCase):
                 with second.unit_of_work():
                     pass
 
+    def test_cache_unit_of_work_uses_the_current_manager_lazily(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = DatabaseManagerCache()
+            with self.assertRaisesRegex(RuntimeError, "not initialized"):
+                with cache.unit_of_work():
+                    pass
+
+            first_signature = (str(Path(root) / "first.db"), "", False)
+            second_signature = (str(Path(root) / "second.db"), "", False)
+            cache.get(first_signature, first_signature[0], sqlite3)
+            with cache.unit_of_work() as db:
+                db.execute("CREATE TABLE records (value TEXT NOT NULL)")
+
+            cache.get(second_signature, second_signature[0], sqlite3)
+            with cache.unit_of_work() as db:
+                db.execute("CREATE TABLE records (value TEXT NOT NULL)")
+                db.execute("INSERT INTO records(value) VALUES ('current')")
+                self.assertEqual(
+                    db.execute("SELECT value FROM records").fetchone()[0],
+                    "current",
+                )
+            cache.reset()
+
+    def test_cache_replacement_waits_for_leased_unit_of_work(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = DatabaseManagerCache()
+            first_signature = (str(Path(root) / "first.db"), "", False)
+            second_signature = (str(Path(root) / "second.db"), "", False)
+            cache.get(first_signature, first_signature[0], sqlite3)
+            entered = threading.Event()
+            release = threading.Event()
+            replaced = threading.Event()
+
+            def use_manager():
+                with cache.unit_of_work():
+                    entered.set()
+                    release.wait(2)
+
+            def replace_manager():
+                cache.get(second_signature, second_signature[0], sqlite3)
+                replaced.set()
+
+            user = threading.Thread(target=use_manager)
+            user.start()
+            self.assertTrue(entered.wait(1))
+            replacement = threading.Thread(target=replace_manager)
+            replacement.start()
+            self.assertFalse(replaced.wait(0.05))
+            release.set()
+            user.join(2)
+            replacement.join(2)
+            self.assertFalse(user.is_alive())
+            self.assertFalse(replacement.is_alive())
+            self.assertTrue(replaced.is_set())
+            cache.reset()
+
     def test_unit_of_work_rolls_back_and_reader_pool_reuses_connections(self):
         with tempfile.TemporaryDirectory() as root:
             manager = self.make_manager(root)

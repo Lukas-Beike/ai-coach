@@ -2599,6 +2599,25 @@ class ServerArchitectureTests(unittest.TestCase):
         )
         self.assertIn("class GarminMorningRemoteReader:", reader)
 
+    def test_athlete_clock_receives_profile_service_without_server_callback(self) -> None:
+        tree = _parse(SERVER_PATH)
+        assignment = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "ATHLETE_CLOCK"
+                for target in node.targets
+            )
+        )
+
+        self.assertIsInstance(assignment.value, ast.Call)
+        self.assertEqual(ast.unparse(assignment.value.func), "AthleteLocalClock")
+        self.assertEqual(
+            [ast.unparse(argument) for argument in assignment.value.args],
+            ["ATHLETE_PROFILE_SERVICE"],
+        )
+
     def test_server_composition_bodies_do_not_own_domain_or_io_logic(self) -> None:
         tree = _parse(SERVER_PATH)
         functions = {
