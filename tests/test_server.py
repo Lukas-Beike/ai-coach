@@ -236,7 +236,7 @@ class CoachTests(unittest.TestCase):
         weather.state.assert_called_once_with(refresh=True)
 
     def test_weather_handler_calls_public_weather_service_after_auth(self):
-        handler = object.__new__(server.RequestHandler)
+        handler = object.__new__(server.request_handler_class())
         handler.path = "/api/weather?local=1"
         handler.send_json = Mock()
         endpoint = Mock()
@@ -261,7 +261,7 @@ class CoachTests(unittest.TestCase):
         )
 
     def test_sync_post_handler_keeps_bodyless_routes_and_unknown_posts_transport_only(self):
-        handler = object.__new__(server.RequestHandler)
+        handler = object.__new__(server.request_handler_class())
         handler.read_json = Mock(return_value={"ignored": True})
         handler.send_json = Mock()
         endpoint = Mock()
@@ -277,7 +277,7 @@ class CoachTests(unittest.TestCase):
     def test_plan_handler_delegates_local_and_refresh_reads_to_service(self):
         for local_only in (True, False):
             with self.subTest(local_only=local_only):
-                handler = object.__new__(server.RequestHandler)
+                handler = object.__new__(server.request_handler_class())
                 handler.path = "/api/plan?local=1" if local_only else "/api/plan"
                 handler.send_json = Mock()
                 service = Mock()
@@ -475,7 +475,7 @@ class CoachTests(unittest.TestCase):
         http_server_factory.assert_called_once()
         address, handler_class = http_server_factory.call_args.args
         self.assertEqual(address, ("0.0.0.0", server.CONFIG.port))
-        self.assertTrue(issubclass(handler_class, server.RequestHandler))
+        self.assertTrue(issubclass(handler_class, server.BaseHTTPRequestHandler))
         self.assertIsInstance(handler_class.static_asset_service, server.StaticAssetService)
         self.assertEqual(handler_class.static_asset_service._targets["index.html"], server.PUBLIC_DIR / "index.html")
         thread_factory.assert_called_once_with(target=daily_loop.run, daemon=True)
@@ -2015,7 +2015,7 @@ class CoachTests(unittest.TestCase):
         }
         for path, stream_method in routes.items():
             with self.subTest(path=path):
-                handler = object.__new__(server.RequestHandler)
+                handler = object.__new__(server.request_handler_class())
                 handler.path = path
                 auth = Mock()
                 transport = Mock()
@@ -2095,7 +2095,7 @@ class CoachTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             path = Path(temp_root) / "export.zip"
             path.write_bytes(b"x" * (STREAM_CHUNK_BYTES * 2 + 1))
-            handler = object.__new__(server.RequestHandler)
+            handler = object.__new__(server.request_handler_class())
             handler.send_response = Mock()
             handler.send_header = Mock()
             handler.end_headers = Mock()
@@ -2558,7 +2558,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(sent[-1], ("reset", {"reason": "gap", "latest_event_id": 9}, 9))
 
     def test_state_events_route_requires_auth_before_starting_transport(self):
-        handler = object.__new__(server.RequestHandler)
+        handler = object.__new__(server.request_handler_class())
         handler.path = "/api/state/events?since=0"
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
@@ -8740,7 +8740,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(friday_result["availability"], "nach der Arbeit")
 
     def test_json_response_ignores_client_disconnect(self):
-        handler = object.__new__(server.RequestHandler)
+        handler = object.__new__(server.request_handler_class())
         handler.request_id = "request-1"
         handler.command = "GET"
         handler.path = "/api/state"
@@ -8750,7 +8750,7 @@ class CoachTests(unittest.TestCase):
         handler.wfile = Mock()
         handler.log_client_disconnect = Mock()
 
-        server.RequestHandler.send_json(handler, 200, {"status": "ok"})
+        server.request_handler_class().send_json(handler, 200, {"status": "ok"})
 
         handler.log_client_disconnect.assert_called_once_with()
         handler.wfile.write.assert_not_called()
@@ -8759,7 +8759,7 @@ class CoachTests(unittest.TestCase):
         self.assertIs(response_transport.LOGGER, server.LOGGER)
 
     def test_json_response_disconnect_logs_response_metadata(self):
-        handler = object.__new__(server.RequestHandler)
+        handler = object.__new__(server.request_handler_class())
         handler.request_id = "request-2"
         handler.command = "GET"
         handler.path = "/api/activities"
@@ -8769,7 +8769,7 @@ class CoachTests(unittest.TestCase):
         handler.wfile = Mock()
 
         with patch.object(server.LOGGER, "info") as logger:
-            server.RequestHandler.send_json(handler, 200, {"activities": []})
+            server.request_handler_class().send_json(handler, 200, {"activities": []})
 
         context = logger.call_args.kwargs["extra"]["context"]
         self.assertEqual(context["method"], "GET")
@@ -8793,7 +8793,7 @@ class CoachTests(unittest.TestCase):
         handler = object.__new__(server.request_handler_class())
 
         with self.assertRaises(server.AppError) as error:
-            server.RequestHandler.send_static(handler, "/../server.py")
+            server.request_handler_class().send_static(handler, "/../server.py")
 
         self.assertEqual(error.exception.status, 403)
 
@@ -8825,7 +8825,7 @@ class CoachTests(unittest.TestCase):
         handler.end_headers = Mock()
         handler.wfile = Mock()
 
-        server.RequestHandler.send_static(handler, "/views.js")
+        server.request_handler_class().send_static(handler, "/views.js")
 
         handler.send_response.assert_called_once_with(304)
         response_headers = {call.args[0]: call.args[1] for call in handler.send_header.call_args_list}
@@ -8852,7 +8852,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("frame-ancestors 'none'", headers["Content-Security-Policy"])
 
     def test_static_response_disconnect_is_logged_by_handler_transport(self):
-        handler = object.__new__(server.RequestHandler)
+        handler = object.__new__(server.request_handler_class())
         handler.path = "/"
         handler.headers = {}
         handler.static_asset_service = server.StaticAssetService(server.PUBLIC_DIR)
@@ -8862,7 +8862,7 @@ class CoachTests(unittest.TestCase):
         handler.wfile = Mock()
         handler.log_client_disconnect = Mock()
 
-        server.RequestHandler.send_static(handler, "/")
+        server.request_handler_class().send_static(handler, "/")
 
         handler.log_client_disconnect.assert_called_once_with()
         handler.wfile.write.assert_not_called()
@@ -9895,7 +9895,8 @@ class CoachTests(unittest.TestCase):
         session_key = "session-stream-disconnect-test"
         operation_id = "operation-disconnect-test"
         cancel_event = threading.Event()
-        handler = server.RequestHandler.__new__(server.RequestHandler)
+        handler_class = server.request_handler_class()
+        handler = handler_class.__new__(handler_class)
         handler.read_json = Mock(return_value={"message": "Bleibt bestehen", "client_turn_id": "turn-disconnect-test"})
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
@@ -9919,7 +9920,8 @@ class CoachTests(unittest.TestCase):
         session_key = "session-background-stream-test"
         operation_id = "operation-background-stream-test"
         cancel_event = threading.Event()
-        handler = server.RequestHandler.__new__(server.RequestHandler)
+        handler_class = server.request_handler_class()
+        handler = handler_class.__new__(handler_class)
         handler.read_json = Mock(return_value={
             "message": "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
             "client_turn_id": "turn-background-stream-test",
