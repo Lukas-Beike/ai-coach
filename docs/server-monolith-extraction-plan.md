@@ -1081,11 +1081,22 @@ Architekturpruefung begrenzte nur Namen. Der Handler ist jetzt unter
 `backend/http_api/handler.py`; seine Komplexitaet bleibt auf der Klassenebene
 und wird von Sonar sowie Architekturtests geprueft.
 
-PRs #818 and #819 completed the RequestHandler and athlete-clock migrations
-against their then-current acceptance checks. Their closeout is historical:
-the later audit described at the start of this document reopened P10/P11 after
-finding that the earlier checklist did not account for function bodies and the
-size of the composition graph. Do not treat the completed boxes below as the
-current final acceptance. Section 1 and the current inventory remain the
-completion criteria; P10/P11 close only after the reopened audit and remaining
-ownership work are reviewed and validated.
+PRs #818 and #819 completed the RequestHandler and athlete-clock migrations.
+The later audit reopened P10/P11 because the earlier checklist did not account
+for function bodies and the size of the composition graph. That audit and its
+remaining ownership work are now complete through PRs #830–#836.
+
+At the closeout revision, `server.py` has 2,756 physical lines and 171
+top-level definitions. The generated inventory has no unassigned P0 symbols;
+all remaining definitions are in the composition-root allowlist, with a
+maximum function size of 46 lines. The architecture suite verifies that
+composition bodies do not perform domain or provider I/O, the backend does not
+reach into `server.py`, import cycles are absent, and extracted symbols are not
+redefined in the root. Runtime service caches now live with their owning
+backend modules. The remaining root code is configuration, concrete dependency
+wiring, shared process resources, and startup/shutdown lifecycle.
+
+P10/P11 are closed against Section 1 and the regenerated inventory. The
+2,756-line count is recorded as context, not used as a separate size gate;
+composition code remains in the composition root where it expresses real
+dependency wiring.
