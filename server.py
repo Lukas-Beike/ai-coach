@@ -94,7 +94,7 @@ from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
 from backend.db.key_value import KeyValueService
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, NutritionRepository, PlanAdjustmentRepository, PlanningStateRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
-from backend.db.manager import DatabaseManager
+from backend.db.manager import DatabaseManager, DatabaseManagerCache
 from backend.db.schema import configure_cipher, database_schema_is_current
 from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config
 from backend.providers.intervals import IntervalsApiClient
@@ -429,8 +429,7 @@ ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(utc_now)
 SNAPSHOT_REPOSITORY = SnapshotRepository()
 
 
-DATABASE_MANAGER: DatabaseManager | None = None
-DATABASE_MANAGER_SIGNATURE: tuple[str, str, bool] | None = None
+DATABASE_MANAGER_CACHE = DatabaseManagerCache()
 SESSION_AUTH_SERVICE: SessionAuthService | None = None
 SESSION_AUTH_SIGNATURE: tuple[Any, Config, bool] | None = None
 PROVIDER_STATE_SERVICE: provider_state.ProviderStateService | None = None
@@ -445,40 +444,39 @@ SYNC_JOB_RETRY_BASE_SECONDS = 15 * 60
 SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
 SYNC_JOB_POLL_SECONDS = 1.0
 GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
+
+
+def reset_provider_runtime() -> None:
+    global PROVIDER_HTTP_CLIENT, PROVIDER_REFRESH_TRACKER, PROVIDER_STATE_SERVICE
+    global WEATHER_SERVICE, MORNING_BODY_BATTERY_SERVICE
+    PROVIDER_HTTP_CLIENT = None
+    PROVIDER_REFRESH_TRACKER = None
+    PROVIDER_STATE_SERVICE = None
+    WEATHER_SERVICE = None
+    MORNING_BODY_BATTERY_SERVICE = None
+
+
 def database_manager() -> DatabaseManager:
     """Return the manager for the active path and secure configuration."""
-    global DATABASE_MANAGER, DATABASE_MANAGER_SIGNATURE, PROVIDER_HTTP_CLIENT, PROVIDER_REFRESH_TRACKER, PROVIDER_STATE_SERVICE, WEATHER_SERVICE, MORNING_BODY_BATTERY_SERVICE
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     signature = (str(DB_PATH.resolve()), CONFIG.app_password, SQLCIPHER_AVAILABLE)
-    if DATABASE_MANAGER is not None and DATABASE_MANAGER_SIGNATURE != signature:
-        DATABASE_MANAGER.close()
-        DATABASE_MANAGER = None
-        DATABASE_MANAGER_SIGNATURE = None
-        PROVIDER_HTTP_CLIENT = None
-        PROVIDER_REFRESH_TRACKER = None
-        PROVIDER_STATE_SERVICE = None
-        WEATHER_SERVICE = None
-        MORNING_BODY_BATTERY_SERVICE = None
-    if DATABASE_MANAGER is None:
-        PROVIDER_HTTP_CLIENT = None
-        PROVIDER_REFRESH_TRACKER = None
-        PROVIDER_STATE_SERVICE = None
-        WEATHER_SERVICE = None
-        MORNING_BODY_BATTERY_SERVICE = None
-        if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
-            raise RuntimeError("SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich.")
-        DATABASE_MANAGER = DatabaseManager(
-            DB_PATH,
-            sqlite_backend if CONFIG.app_password else sqlite3,
-            password=CONFIG.app_password,
-            configure=configure_cipher,
-            row_factory=database_row_factory,
-            reader_count=4,
-            timeout=20,
-            persist_connections=bool(CONFIG.app_password),
-        )
-        DATABASE_MANAGER_SIGNATURE = signature
-    return DATABASE_MANAGER
+    if not DATABASE_MANAGER_CACHE.matches(signature):
+        reset_provider_runtime()
+
+    if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
+        DATABASE_MANAGER_CACHE.reset()
+        raise RuntimeError("SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich.")
+    return DATABASE_MANAGER_CACHE.get(
+        signature,
+        DB_PATH,
+        sqlite_backend if CONFIG.app_password else sqlite3,
+        password=CONFIG.app_password,
+        configure=configure_cipher,
+        row_factory=database_row_factory,
+        reader_count=4,
+        timeout=20,
+        persist_connections=bool(CONFIG.app_password),
+    )
 
 
 def session_auth_service() -> SessionAuthService:

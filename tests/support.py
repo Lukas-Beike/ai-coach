@@ -128,10 +128,7 @@ def isolated_server(server, root: Path, *, app_password: str = ""):
         server.initialise_database()
         yield
     finally:
-        if server.DATABASE_MANAGER:
-            server.DATABASE_MANAGER.close()
-        server.DATABASE_MANAGER = None
-        server.DATABASE_MANAGER_SIGNATURE = None
+        server.DATABASE_MANAGER_CACHE.reset()
         for item in reversed(patches):
             item.stop()
 

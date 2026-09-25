@@ -15,6 +15,9 @@ import threading
 from typing import Any, Callable, Iterator
 
 
+DATABASE_MANAGER_CLOSED_MESSAGE = "database manager is closed"
+
+
 class DatabaseManager:
     """One serialized writer plus a bounded pool of read connections."""
 
@@ -65,10 +68,12 @@ class DatabaseManager:
     @contextmanager
     def _lease(self) -> Iterator[None]:
         with self._state:
+            if self._closed:
+                raise RuntimeError(DATABASE_MANAGER_CLOSED_MESSAGE)
             while self._draining:
                 self._state.wait()
-            if self._closed:
-                raise RuntimeError("database manager is closed")
+                if self._closed:
+                    raise RuntimeError(DATABASE_MANAGER_CLOSED_MESSAGE)
             self._active += 1
         try:
             yield
@@ -143,7 +148,7 @@ class DatabaseManager:
         """Stop new leases, wait for active work, and close every connection."""
         with self._state:
             if self._closed:
-                raise RuntimeError("database manager is closed")
+                raise RuntimeError(DATABASE_MANAGER_CLOSED_MESSAGE)
             self._draining = True
             while self._active:
                 self._state.wait()
@@ -163,3 +168,55 @@ class DatabaseManager:
             self._closed = True
             self._close_connections()
             self._state.notify_all()
+
+
+class DatabaseManagerCache:
+    """Reuse the active manager until its path or encryption key changes."""
+
+    def __init__(self) -> None:
+        self.manager: DatabaseManager | None = None
+        self.signature: tuple[str, str, bool] | None = None
+        self._lock = threading.RLock()
+
+    def get(
+        self,
+        signature: tuple[str, str, bool],
+        path: str | Path,
+        backend: Any,
+        *,
+        password: str = "",
+        configure: Callable[[Any, str], None] | None = None,
+        row_factory: Callable[[Any, tuple[Any, ...]], Any] | None = None,
+        reader_count: int = 4,
+        timeout: float = 20.0,
+        persist_connections: bool = True,
+    ) -> DatabaseManager:
+        with self._lock:
+            if self.manager is not None and self.signature != signature:
+                self.manager.close()
+                self.manager = None
+                self.signature = None
+            if self.manager is None:
+                self.manager = DatabaseManager(
+                    path,
+                    backend,
+                    password=password,
+                    configure=configure,
+                    row_factory=row_factory,
+                    reader_count=reader_count,
+                    timeout=timeout,
+                    persist_connections=persist_connections,
+                )
+                self.signature = signature
+            return self.manager
+
+    def matches(self, signature: tuple[str, str, bool]) -> bool:
+        with self._lock:
+            return self.manager is not None and self.signature == signature
+
+    def reset(self) -> None:
+        with self._lock:
+            if self.manager is not None:
+                self.manager.close()
+            self.manager = None
+            self.signature = None
