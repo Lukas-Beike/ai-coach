@@ -89,6 +89,7 @@ from backend.weather.service import (
     WeatherCacheStore,
     WeatherRefreshJournal,
     WeatherService,
+    WEATHER_SERVICE_CACHE,
 )
 from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
@@ -433,7 +434,6 @@ SNAPSHOT_REPOSITORY = SnapshotRepository()
 
 
 DATABASE_MANAGER_CACHE = DatabaseManagerCache()
-WEATHER_SERVICE: WeatherService | None = None
 MORNING_BODY_BATTERY_SERVICE: MorningBodyBatteryService | None = None
 MORNING_BODY_BATTERY_CONFIG_ID: int | None = None
 
@@ -446,8 +446,7 @@ GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
 
 
 def reset_provider_runtime() -> None:
-    global WEATHER_SERVICE, MORNING_BODY_BATTERY_SERVICE, MORNING_BODY_BATTERY_CONFIG_ID
-    WEATHER_SERVICE = None
+    global MORNING_BODY_BATTERY_SERVICE, MORNING_BODY_BATTERY_CONFIG_ID
     MORNING_BODY_BATTERY_SERVICE = None
     MORNING_BODY_BATTERY_CONFIG_ID = None
 
@@ -965,25 +964,23 @@ def full_provider_resync_service() -> FullProviderResyncService:
 
 def weather_service() -> WeatherService:
     """Return weather orchestration bound to the active runtime resources."""
-    global WEATHER_SERVICE
     manager = database_manager()
-    if WEATHER_SERVICE is None:
-        WEATHER_SERVICE = WeatherService(
-            WeatherCacheStore(manager, KEY_VALUE_REPOSITORY, profile_service()),
-            lambda: weather_provider.WeatherClient(
-                provider_http_client().request, utc_now, LOGGER
-            ),
-            WeatherRefreshJournal(
-                provider_refresh_tracker(),
-                sync_observation.OPERATION_CONTEXT,
-                lambda: uuid.uuid4().hex,
-                LOGGER,
-            ),
-            runtime_maintenance.MAINTENANCE_GATE,
-            lambda: datetime.now(timezone.utc),
-            lambda: ATHLETE_CLOCK.now().date(),
-        )
-    return WEATHER_SERVICE
+    return WEATHER_SERVICE_CACHE.get(
+        manager,
+        WeatherCacheStore(manager, KEY_VALUE_REPOSITORY, profile_service()),
+        lambda: weather_provider.WeatherClient(
+            provider_http_client().request, utc_now, LOGGER
+        ),
+        WeatherRefreshJournal(
+            provider_refresh_tracker(),
+            sync_observation.OPERATION_CONTEXT,
+            lambda: uuid.uuid4().hex,
+            LOGGER,
+        ),
+        runtime_maintenance.MAINTENANCE_GATE,
+        lambda: datetime.now(timezone.utc),
+        lambda: ATHLETE_CLOCK.now().date(),
+    )
 
 
 def weather_sync_service() -> WeatherSyncService:

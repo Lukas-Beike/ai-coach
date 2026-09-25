@@ -66,6 +66,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.providers.state", ("ProviderStateServiceCache",)),
     ("backend.sync.refresh", ("ProviderRefreshTrackerCache",)),
     ("backend.providers.http", ("JsonHttpClientCache",)),
+    ("backend.weather.service", ("WeatherServiceCache",)),
     ("backend.coach.conversation", ("CoachConversationHistoryService",)),
     ("backend.http_api.post_dispatch", ("HttpAuthenticatedPostRoutes", "HttpPostDispatcher")),
     ("backend.http_api.response_transport", ("HttpResponseTransport",)),
@@ -2131,7 +2132,6 @@ SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
     {
         "database_manager",
         "session_auth_service",
-        "weather_service",
         "morning_body_battery_service",
         "sync_job_worker",
         "initialise_database",
@@ -2734,6 +2734,32 @@ class ServerArchitectureTests(unittest.TestCase):
         )
         self.assertIn(
             "provider_http.JSON_HTTP_CLIENT_CACHE.get",
+            ast.unparse(service_factory),
+        )
+
+    def test_weather_service_cache_is_owned_by_weather_service_module(self) -> None:
+        weather_tree = _parse(BACKEND_ROOT / "weather" / "service.py")
+        self.assertTrue(any(
+            isinstance(node, ast.ClassDef) and node.name == "WeatherServiceCache"
+            for node in weather_tree.body
+        ))
+        server_tree = _parse(SERVER_PATH)
+        server_assignments = {
+            target.id
+            for node in server_tree.body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            if isinstance(target, ast.Name)
+        }
+        self.assertNotIn("WEATHER_SERVICE", server_assignments)
+        service_factory = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "weather_service"
+        )
+        self.assertIn(
+            "WEATHER_SERVICE_CACHE.get",
             ast.unparse(service_factory),
         )
 

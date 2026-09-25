@@ -59,6 +59,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertIs(server.provider_http_client(), first_http_client)
         first_refresh_tracker = server.provider_refresh_tracker()
         first_weather_service = server.weather_service()
+        self.assertIs(server.weather_service(), first_weather_service)
         server.DATABASE_MANAGER_CACHE.reset()
 
         second = server.provider_state_service()

@@ -64,6 +64,7 @@ PERFORMANCE_PACKAGE = "performance/"
 PERFORMANCE_MORNING_BATTERY = "performance/morning_battery_service.py"
 PERFORMANCE_ACTIVITY_VALIDATION = "performance/activity_validation.py"
 WEATHER_PACKAGE = "weather/"
+WEATHER_SERVICE_MODULE = "weather/service.py"
 HISTORY_PACKAGE = "history/"
 PLANNING_PACKAGE = "planning/"
 PLANNING_COMPETITIONS = "planning/competitions.py"
@@ -220,6 +221,8 @@ def _explicit_owner(name: str) -> str | None:
             "ProviderRefreshTrackerCache": SYNC_REFRESH,
             "JSON_HTTP_CLIENT_CACHE": PROVIDER_HTTP,
             "JsonHttpClientCache": PROVIDER_HTTP,
+            "WEATHER_SERVICE_CACHE": WEATHER_SERVICE_MODULE,
+            "WeatherServiceCache": WEATHER_SERVICE_MODULE,
             "key_value_service": COMPOSITION_ROOT,
             "initialise_database": "db/bootstrap.py",
             "checkin_service": COMPOSITION_ROOT,

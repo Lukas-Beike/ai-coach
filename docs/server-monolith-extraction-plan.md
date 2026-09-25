@@ -976,6 +976,8 @@ Abhängigkeit: alle vorigen Phasen.
   Konfiguration binden.
 - [x] Den JSON-HTTP-Client-Cache an `backend/providers/http.py` binden und bei
   Wechsel des Provider-State-Services einen transportseitigen Client erzeugen.
+- [x] Den WeatherService-Cache an `backend/weather/service.py` binden und beim
+  Wechsel des Datenbankmanagers den Service dort ersetzen.
 - [x] Inventar neu erzeugen und mit `--check` abgleichen; alle verbleibenden
   Top-Level-Funktionen und ihre statischen Aufrufer prüfen. Es gibt keine
   unzugeordneten P0-Symbole oder unaufgerufenen server-Funktionen.

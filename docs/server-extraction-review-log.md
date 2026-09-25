@@ -8138,3 +8138,37 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Independently reviewed tracker consumers and lifecycle: refresh-history writes, retry classification, and state-event publication remain in the existing backend service and are unchanged. The architecture test now requires the server factory to delegate to the backend cache.
 - SonarCloud flagged a duplicated inventory path literal introduced by the ownership mapping. Reused the existing `SYNC_REFRESH` constant; the inventory consistency and architecture checks pass after the fix.
 - Validation: full native suite **2,817 tests passed, 12 skipped**; focused database (44, 3 skipped), provider (48), and architecture (45) suites passed; Python compilation, inventory `--check`, and `git diff --check` passed. SQLCipher-only tests remain skipped by the native Windows environment.
+
+## P18 Provider HTTP client cache ownership — merged review
+
+- Moved the shared JSON HTTP client cache into `backend/providers/http.py`.
+  The cache replaces its client when provider-state ownership changes, while
+  `server.py` supplies the active transport dependencies.
+- Independently reviewed cache lifecycle, concurrency, database-manager
+  replacement, and provider callers. Added coverage for reuse with the same
+  provider-state service and replacement after manager change; no actionable
+  findings remained.
+- PR #834 was squash-merged on 2026-09-25 as
+  `addfe6f473bb420035419b6014b94df342e590cb`. The Codex review service reported
+  that its usage limit prevented a review; the independent review was clean,
+  all other checks passed, and the user-authorized Codex-only bypass was used.
+- Validation: full native suite **2,818 tests passed, 12 skipped**; focused
+  database (44, 3 skipped) and architecture (46) suites passed; Python
+  compilation, inventory `--check`, and `git diff --check` passed.
+
+## P19 Weather service cache ownership — local review
+
+- Moved the cached `WeatherService` and manager-bound replacement into
+  `backend/weather/service.py`. `server.py` now supplies the current manager
+  and concrete service dependencies; its provider-runtime reset no longer owns
+  weather state.
+- Added architecture ownership coverage and extended the database-manager
+  replacement integration test to assert reuse before replacement. The
+  independent review verified service identity, manager reset behavior, and
+  restore/reset callers; no actionable runtime findings remained. It found and
+  fixed a duplicated inventory path literal and restored method separation.
+- `server.py` is three lines smaller. The inventory assigns the singleton and
+  cache class to the weather owner module.
+- Validation: full native suite **2,819 tests passed, 12 skipped**; focused
+  database (44, 3 skipped), weather (44), and architecture (47) suites passed;
+  Python compilation, inventory `--check`, and `git diff --check` passed.
