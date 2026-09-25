@@ -1068,5 +1068,5 @@ Startup-Faelle und verbietet direkte SQL-, Provider- und Datei-Lese/Schreib-
 Aufrufe im Composition Root. Die profilabhaengige Uhr gehoert jetzt
 `backend/athlete/clock.py`. Die verbleibenden Zeilen sind gepruefte
 Instanziierung des Service-Graphen, Konfiguration, gemeinsame Prozessressourcen
-und Startup/Shutdown. Die P11-Uhr und der Koerper-Audit sind lokal vollstaendig validiert; die
-Integration folgt als eigener PR auf dem inzwischen integrierten P10-Stand.
+und Startup/Shutdown. P0-P11 sind abgeschlossen: P10 wurde in PR #818 und
+P11 in PR #819 nach erfolgreicher Validierung in `develop` integriert.
