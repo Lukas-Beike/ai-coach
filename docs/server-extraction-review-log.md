@@ -8075,3 +8075,11 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   inventory checks pass after that correction.
 - This is a focused P11 ownership follow-up; it does not claim completion of
   any remaining composition-graph audit work.
+
+## P12 Garmin morning recovery composition — local review
+
+- Moved Garmin morning recovery configuration, profile-timezone lookup, provider fetch, and redacted operation transport out of `server.py` into `GarminMorningRemoteReader` under `backend/sync/garmin_service.py`.
+- `MorningBatterySource` now receives a typed remote-reader dependency. The shared service cache remains in the composition root and is recomposed when its bound configuration object changes, preserving shared identity for sync workers and routes.
+- Independent review found no actionable correctness, privacy, security, or ownership findings. The generated server inventory assigns the reader to `backend/sync/garmin_service.py`; `server.py` is 10 lines smaller.
+- Validation before rebase: full suite passed (2,806 tests, 12 skipped); focused Garmin/provider/performance/diagnostic/architecture suites, `compileall`, inventory `--check`, and `git diff --check` passed. Docker build could not run because the local Docker engine pipe is unavailable.
+- Rebased on the current `develop`; its database-manager cache extraction remains intact. The rebase required combining that cache owner with the new Garmin composition tracking.

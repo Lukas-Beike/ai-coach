@@ -107,7 +107,6 @@ from backend.providers import state as provider_state
 from backend.providers import weather as weather_provider
 from backend.providers import intervals_client as intervals_client_module
 from backend.providers.garmin import GarminClientFactory
-from backend.providers import garmin_morning
 from backend.http_api import server as http_server
 from backend.http_api.handler import HttpRequestHandlerDependencies, create_request_handler
 from backend.http_api.bootstrap_state import (
@@ -195,6 +194,7 @@ from backend.sync.performance import (
 )
 from backend.sync.garmin_service import (
     GARMIN_AUTOMATIC_SYNC_DAYS,
+    GarminMorningRemoteReader,
     GarminRemoteReader,
     GarminSyncCoordination,
     GarminSyncLifecycleState,
@@ -437,6 +437,7 @@ PROVIDER_HTTP_CLIENT: provider_http.JsonHttpClient | None = None
 PROVIDER_REFRESH_TRACKER: ProviderRefreshTracker | None = None
 WEATHER_SERVICE: WeatherService | None = None
 MORNING_BODY_BATTERY_SERVICE: MorningBodyBatteryService | None = None
+MORNING_BODY_BATTERY_CONFIG_ID: int | None = None
 
 PROVIDER_REFRESH_RETRY_BASE_SECONDS = 15 * 60
 PROVIDER_REFRESH_RETRY_MAX_SECONDS = 6 * 60 * 60
@@ -448,12 +449,13 @@ GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
 
 def reset_provider_runtime() -> None:
     global PROVIDER_HTTP_CLIENT, PROVIDER_REFRESH_TRACKER, PROVIDER_STATE_SERVICE
-    global WEATHER_SERVICE, MORNING_BODY_BATTERY_SERVICE
+    global WEATHER_SERVICE, MORNING_BODY_BATTERY_SERVICE, MORNING_BODY_BATTERY_CONFIG_ID
     PROVIDER_HTTP_CLIENT = None
     PROVIDER_REFRESH_TRACKER = None
     PROVIDER_STATE_SERVICE = None
     WEATHER_SERVICE = None
     MORNING_BODY_BATTERY_SERVICE = None
+    MORNING_BODY_BATTERY_CONFIG_ID = None
 
 
 def database_manager() -> DatabaseManager:
@@ -1022,36 +1024,22 @@ def public_weather_state_service() -> PublicWeatherStateService:
 
 def morning_body_battery_service() -> MorningBodyBatteryService:
     """Compose morning recovery orchestration from concrete runtime resources."""
-    global MORNING_BODY_BATTERY_SERVICE
+    global MORNING_BODY_BATTERY_SERVICE, MORNING_BODY_BATTERY_CONFIG_ID
     manager = database_manager()
-    if MORNING_BODY_BATTERY_SERVICE is None:
-        client_factory = garmin_client_factory()
+    config_id = id(CONFIG)
+    if (
+        MORNING_BODY_BATTERY_SERVICE is None
+        or MORNING_BODY_BATTERY_CONFIG_ID != config_id
+    ):
         source = MorningBatterySource(
             garmin_fixture_loader(),
-            lambda: bool(
-                client_factory.available()
-                and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())
-            ),
-            lambda checkin_date: garmin_morning.fetch_morning_body_battery(
-                client_factory.create(
-                    CONFIG.garmin_email or None, CONFIG.garmin_password or None
-                ),
-                checkin_date,
-                tokenstore=CONFIG.garmin_tokenstore,
-                email_configured=bool(CONFIG.garmin_email),
-                tokenstore_exists=Path(CONFIG.garmin_tokenstore).exists(),
-                profile_timezone=timezone_name(profile_service().get().get("timezone")),
-                fallback_zone=ATHLETE_CLOCK.now().tzinfo or timezone.utc,
-                external_call=lambda service, operation, callback, details: provider_http.external_call(
-                    service,
-                    operation,
-                    callback,
-                    details,
-                    logger=LOGGER,
-                    diagnostic_capture=DIAGNOSTIC_CAPTURE,
-                    operation_context=sync_observation.operation_context(),
-                ),
-                sleep_bounds=performance_morning_battery.sleep_bounds,
+            GarminMorningRemoteReader(
+                CONFIG,
+                garmin_client_factory(),
+                profile_service(),
+                ATHLETE_CLOCK,
+                DIAGNOSTIC_CAPTURE,
+                LOGGER,
             ),
             observability.safe_diagnostic_error,
         )
@@ -1068,6 +1056,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
             MorningBatteryEvents(runtime_events.STATE_EVENT_BUFFER.publish, LOGGER),
             MorningBatteryRetryPolicy(),
         )
+        MORNING_BODY_BATTERY_CONFIG_ID = config_id
     return MORNING_BODY_BATTERY_SERVICE
 
 

@@ -7,13 +7,16 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
-from datetime import date
+from datetime import date, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.athlete.profile import timezone_name
 from backend.config import Config
 from backend.errors import COACH_ABORTED_ERROR, AppError
+from backend.performance import morning_battery as performance_morning_battery
 from backend.providers import http as provider_http
+from backend.providers import garmin_morning
 from backend.providers.garmin import (
     GarminClientFactory,
     GarminCollectionOptions,
@@ -171,6 +174,70 @@ class GarminRemoteReader:
     def _raise_if_cancelled(cancel_event: threading.Event | None) -> None:
         if cancel_event is not None and cancel_event.is_set():
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
+
+
+class GarminMorningRemoteReader:
+    """Read the current sleep window and Body Battery through Garmin."""
+
+    def __init__(
+        self,
+        config: Config,
+        client_factory: GarminClientFactory,
+        profile_service: Any,
+        athlete_clock: Any,
+        diagnostic_capture: Any,
+        logger: logging.Logger,
+    ) -> None:
+        self._config = config
+        self._client_factory = client_factory
+        self._profile_service = profile_service
+        self._athlete_clock = athlete_clock
+        self._diagnostic_capture = diagnostic_capture
+        self._logger = logger
+
+    def configured(self) -> bool:
+        return self._client_factory.available() and bool(
+            self._config.garmin_email
+            or Path(self._config.garmin_tokenstore).exists()
+        )
+
+    def fetch(self, checkin_date: date) -> tuple[Any, Any]:
+        client = self._client_factory.create(
+            self._config.garmin_email or None,
+            self._config.garmin_password or None,
+        )
+        profile_timezone = timezone_name(
+            self._profile_service.get().get("timezone")
+        )
+        fallback_zone = self._athlete_clock.now().tzinfo or timezone.utc
+        return garmin_morning.fetch_morning_body_battery(
+            client,
+            checkin_date,
+            tokenstore=self._config.garmin_tokenstore,
+            email_configured=bool(self._config.garmin_email),
+            tokenstore_exists=Path(self._config.garmin_tokenstore).exists(),
+            profile_timezone=profile_timezone,
+            fallback_zone=fallback_zone,
+            external_call=self._external_call,
+            sleep_bounds=performance_morning_battery.sleep_bounds,
+        )
+
+    def _external_call(
+        self,
+        service: str,
+        operation: str,
+        callback: Callable[[], Any],
+        details: dict[str, Any] | None,
+    ) -> Any:
+        return provider_http.external_call(
+            service,
+            operation,
+            callback,
+            details,
+            logger=self._logger,
+            diagnostic_capture=self._diagnostic_capture,
+            operation_context=operation_context(),
+        )
 
 
 class GarminSyncSource:
