@@ -60,17 +60,21 @@ class ServerDatabaseTests(ServerTestCase):
         first_refresh_tracker = server.provider_refresh_tracker()
         first_weather_service = server.weather_service()
         self.assertIs(server.weather_service(), first_weather_service)
+        first_morning_service = server.morning_body_battery_service()
+        self.assertIs(server.morning_body_battery_service(), first_morning_service)
         server.DATABASE_MANAGER_CACHE.reset()
 
         second = server.provider_state_service()
         second_http_client = server.provider_http_client()
         second_refresh_tracker = server.provider_refresh_tracker()
         second_weather_service = server.weather_service()
+        second_morning_service = server.morning_body_battery_service()
 
         self.assertIsNot(second, first)
         self.assertIsNot(second_http_client, first_http_client)
         self.assertIsNot(second_refresh_tracker, first_refresh_tracker)
         self.assertIsNot(second_weather_service, first_weather_service)
+        self.assertIsNot(second_morning_service, first_morning_service)
         self.assertIs(second_http_client.provider_state, second)
         second.record_status(
             "openai", state="ok", reason="ok", message="OpenAI ist verfügbar.", http_status=200
