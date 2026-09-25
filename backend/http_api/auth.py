@@ -18,6 +18,7 @@ from backend.errors import AppError
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.responses import session_cookies
 
+RATE_LIMITER = RateLimiter()
 SESSION_COOKIE = "ic_session"
 CSRF_COOKIE = "ic_csrf"
 SESSION_TTL_SECONDS = 30 * 24 * 60 * 60

@@ -8116,3 +8116,10 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Independently reviewed cache replacement and synchronization: the cache remains a singleton, serializes resolution with the same reentrant DB lock, and replaces the service when the manager, configuration, or SQLCipher availability changes. No authentication, session, cookie, CSRF, or rate-limit behavior changed; importing the module performs no runtime I/O.
 - Added cache replacement and architecture ownership regressions. The generated inventory now assigns the cache class and singleton to `backend/http_api/auth.py`. `server.py` is 2,791 physical lines, down eight lines.
 - Validation: full native suite **2,813 tests passed, 12 skipped**; focused session-cache, database, and architecture suites passed; `compileall`, inventory `--check`, and `git diff --check` passed. The 12 native skips include SQLCipher-dependent cases unavailable on Windows; this change does not alter database or deployment behavior.
+
+## P15 HTTP rate-limiter state ownership — local review
+
+- Moved the process-wide `RateLimiter` instance into `backend/http_api/auth.py`, beside the session service cache. `server.py` imports that exact instance and passes it into the cache; existing handler and fixture consumers still share the same limiter.
+- Independently reviewed module initialization and callers: the owner import is inert, no second limiter is created, and rate-limit policy, bucket cleanup, session auth, and HTTP behavior are unchanged. The architecture regression verifies both ownership and the composition-root import.
+- Regenerated the server inventory and updated the P11 ownership checklist. `server.py` no longer constructs or owns rate-limit state.
+- Validation: full native suite **2,815 tests passed, 12 skipped**; focused session-cache, provider, HTTP, and architecture suites passed; compilation, inventory `--check`, and `git diff --check` passed. SQLCipher-only tests remain skipped by the native Windows environment.

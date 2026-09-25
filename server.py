@@ -129,9 +129,12 @@ from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.diagnostics_post import DiagnosticsCapturePostRoutes
 from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
-from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
-from backend.http_api.auth import SESSION_AUTH_SERVICE_CACHE, SessionAuthService
+from backend.http_api.auth import (
+    RATE_LIMITER,
+    SESSION_AUTH_SERVICE_CACHE,
+    SessionAuthService,
+)
 from backend.http_api.public_performance import (
     PublicFeedbackStateService,
     PublicPerformanceStateService,
@@ -398,7 +401,6 @@ INTERVALS_SYNC_WAIT_SECONDS = 120
 DB_LOCK = threading.RLock()
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: SyncJobWorker | None = None
-RATE_LIMITER = RateLimiter()
 
 
 CONFIG = load_config(ROOT, DATA_DIR)

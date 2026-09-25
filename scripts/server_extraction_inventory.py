@@ -213,6 +213,7 @@ def _explicit_owner(name: str) -> str | None:
             "database_manager": DB_MANAGER,
             "SESSION_AUTH_SERVICE_CACHE": HTTP_AUTH,
             "SessionAuthServiceCache": HTTP_AUTH,
+            "RATE_LIMITER": HTTP_AUTH,
             "key_value_service": COMPOSITION_ROOT,
             "initialise_database": "db/bootstrap.py",
             "checkin_service": COMPOSITION_ROOT,
