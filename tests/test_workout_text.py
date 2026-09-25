@@ -13,7 +13,7 @@ from backend.planning import workouts as planning_workouts
 
 class WorkoutTextTests(unittest.TestCase):
     def setUp(self):
-        self.enterContext(patch.object(server, "local_now", return_value=datetime.now()))
+        self.enterContext(patch.object(server.ATHLETE_CLOCK, "now", return_value=datetime.now()))
 
     def workout(self, description, minutes=61, **extra):
         return {
@@ -42,7 +42,7 @@ class WorkoutTextTests(unittest.TestCase):
                 lambda: client.update_library_workout("synthetic", workout),
                 lambda: client.plan_library_workout("synthetic", workout, workout["date"]),
                 lambda: planning_workouts.workout_event_payload(
-                    "synthetic", workout, today=server.local_now().date()
+                    "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
                 ),
             ):
                 with self.assertRaises(server.AppError):
@@ -55,7 +55,7 @@ class WorkoutTextTests(unittest.TestCase):
         description = "- 15m 50-70%\n- 15m 88-92%\n- 6m 50-60%\n- 15m 88-92%\n- 10m 50-60%"
         self.assert_invalid(self.workout(description, 65), "workout_duration_mismatch")
         payload = planning_workouts.workout_event_payload(
-            "synthetic", self.workout(description), today=server.local_now().date()
+            "synthetic", self.workout(description), today=server.ATHLETE_CLOCK.now().date()
         )
         self.assertEqual(payload["moving_time"], 3660)
         self.assertEqual(payload["description"], description)
@@ -84,7 +84,7 @@ class WorkoutTextTests(unittest.TestCase):
         workout = self.workout(description, 63)
         self.assertEqual(
             planning_workouts.workout_event_payload(
-                "synthetic", workout, today=server.local_now().date()
+                "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
             )["moving_time"],
             3780,
         )
@@ -120,7 +120,7 @@ class WorkoutTextTests(unittest.TestCase):
         workout = self.workout("- 1h2m30s Z2\n- 30s Z1\n- 5' Z1\n- 20\" Z1", 68)
         self.assertEqual(
             planning_workouts.workout_event_payload(
-                "synthetic", workout, today=server.local_now().date()
+                "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
             )["moving_time"],
             4100,
         )
@@ -130,7 +130,7 @@ class WorkoutTextTests(unittest.TestCase):
         self.assertIsNone(planning_workouts.validate_workout_description(workout))
         self.assertEqual(
             planning_workouts.workout_event_payload(
-                "synthetic", workout, today=server.local_now().date()
+                "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
             )["moving_time"],
             2400,
         )
@@ -142,7 +142,7 @@ class WorkoutTextTests(unittest.TestCase):
         self.assertIsNone(planning_workouts.validate_workout_description(workout))
         self.assertEqual(
             planning_workouts.workout_event_payload(
-                "synthetic", workout, today=server.local_now().date()
+                "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
             )["moving_time"],
             1800,
         )
@@ -174,11 +174,11 @@ class WorkoutTextTests(unittest.TestCase):
             with self.subTest(sport=sport):
                 workout = self.workout("Technik und Beweglichkeit nach Bedarf", 30, sport=sport)
                 normalized = planning_workouts.normalize_workout(
-                    workout, today=server.local_now().date()
+                    workout, today=server.ATHLETE_CLOCK.now().date()
                 )
                 self.assertEqual(normalized["description"], workout["description"])
                 payload = planning_workouts.workout_event_payload(
-                    "synthetic", normalized, today=server.local_now().date()
+                    "synthetic", normalized, today=server.ATHLETE_CLOCK.now().date()
                 )
                 self.assertEqual(payload["type"], sport)
                 self.assertEqual(payload["moving_time"], 1800)

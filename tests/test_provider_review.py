@@ -283,7 +283,7 @@ class ProviderReviewTests(unittest.TestCase):
                  "weight": {"calendarDate": "2026-08-31", "weight": 72}}
         garmin_sync.merge_sources(first, {})
         performance_history.append_garmin_performance_history(
-            first, {}, server.local_now().date()
+            first, {}, server.ATHLETE_CLOCK.now().date()
         )
         history = first["performance_history"]
         self.assertEqual([row["date"] for row in history], ["2026-08-30", "2026-08-31", "2026-09-01"])
@@ -293,7 +293,7 @@ class ProviderReviewTests(unittest.TestCase):
             ] if failed else [], "activities": [{"activityId": 8, "startTimeLocal": "2025-02-01T12:00:00"}]}
             garmin_sync.merge_sources(second, first)
             performance_history.append_garmin_performance_history(
-                second, first, server.local_now().date()
+                second, first, server.ATHLETE_CLOCK.now().date()
             )
             server.key_value_service().set("garmin_snapshot", json.dumps(second))
             server.sync_state_repository().save_snapshot({"synced_at": second["synced_at"], "athlete": {}, "recent_wellness": [], "recent_activities": []})
@@ -301,7 +301,7 @@ class ProviderReviewTests(unittest.TestCase):
                 server.sync_state_repository().latest_snapshot(),
                 server.garmin_payload_service().snapshot(),
                 server.profile_service().get(),
-                server.local_now().date(),
+                server.ATHLETE_CLOCK.now().date(),
             )
             for key in ("cycling_ftp_watts", "weight_kg"):
                 data = public["metrics"][key]
@@ -325,10 +325,10 @@ class ProviderReviewTests(unittest.TestCase):
                    "cycling_ftp": {"functionalThresholdPower": 300}}
         garmin_sync.merge_sources(payload, {})
         performance_history.append_garmin_performance_history(
-            payload, {}, server.local_now().date()
+            payload, {}, server.ATHLETE_CLOCK.now().date()
         )
         metric = performance_garmin_metrics.garmin_performance_metrics(
-            payload, server.local_now().date()
+            payload, server.ATHLETE_CLOCK.now().date()
         )["cycling_ftp_watts"]
         self.assertEqual(metric["freshness"], "current")
         self.assertIsNone(metric["observed_at"])
@@ -340,16 +340,16 @@ class ProviderReviewTests(unittest.TestCase):
                  "activities": [{"activityId": 1, "startTimeLocal": "2026-08-31T12:00:00", "activityType": "cycling", "maxHR": 180}]}
         garmin_sync.merge_sources(first, {})
         performance_history.append_garmin_performance_history(
-            first, {}, server.local_now().date()
+            first, {}, server.ATHLETE_CLOCK.now().date()
         )
         second = {"synced_at": "2026-09-05T09:00:00+00:00", "errors": [],
                   "activities": [{"activityId": 2, "startTimeLocal": "2025-02-01T12:00:00", "activityType": "cycling", "maxHR": 150}]}
         garmin_sync.merge_sources(second, first)
         performance_history.append_garmin_performance_history(
-            second, first, server.local_now().date()
+            second, first, server.ATHLETE_CLOCK.now().date()
         )
         metric = performance_garmin_metrics.garmin_performance_metrics(
-            second, server.local_now().date()
+            second, server.ATHLETE_CLOCK.now().date()
         )["cycling_max_hr_bpm"]
         self.assertEqual(metric["value"], 180)
         self.assertEqual(metric["observed_at"], "2026-08-31")

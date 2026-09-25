@@ -173,7 +173,7 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(
             [
                 planning_workouts.workout_event_payload(
-                    entry["id"], entry, today=server.local_now().date()
+                    entry["id"], entry, today=server.ATHLETE_CLOCK.now().date()
                 )["type"]
                 for entry in entries
             ],
@@ -322,8 +322,8 @@ class CoachReviewTests(unittest.TestCase):
         server.checkin_service().save({"soreness": 8})
         preview = server.adaptive_replan_preview_service().preview()
         self.assertTrue(preview["changes"])
-        advanced = server.local_now() + timedelta(days=2)
-        with patch.object(server, "local_now", return_value=advanced):
+        advanced = server.ATHLETE_CLOCK.now() + timedelta(days=2)
+        with patch.object(server.ATHLETE_CLOCK, "now", return_value=advanced):
             applied = server.illness_pause_sync_service().apply(preview["id"])
         self.assertEqual(applied["status"], "stale")
         self.assertEqual(applied["updated"], 0)

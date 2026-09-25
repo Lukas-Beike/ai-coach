@@ -27,6 +27,7 @@ HANDLER_PATH = BACKEND_ROOT / "http_api" / "handler.py"
 # backend-owned implementations, not server callbacks or compatibility
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("backend.athlete.clock", ("AthleteLocalClock",)),
     ("backend.http_api.handler", ("HttpRequestHandlerDependencies", "RequestHandler", "create_request_handler")),
     ("backend.coach.final_receipt", ("CoachFinalReceiptService",)),
     ("backend.coach.conversation_recovery", ("CoachConversationRecoveryService",)),
@@ -2107,7 +2108,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     coach_conversation_recovery_service coach_response_retry_policy
     coach_structured_response_service coach_structured_tool_round_service
     coach_final_receipt_service coach_structured_turn_service coach_chat_turn_service
-    morning_coach_job_completion_service coach_background_job_runner local_now
+    morning_coach_job_completion_service coach_background_job_runner
     public_bootstrap_service public_plan_state_service
     public_state_local_prelude_service public_state_weather_prelude_service
     public_state_calendar_projection_service public_state_service
@@ -2117,6 +2118,25 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     request_handler_class daily_sync_loop_service daily_sync_scheduler
     startup_sync_scheduler main
 """.split())
+
+# These functions intentionally contain control flow for resource caching,
+# schema initialization, and process lifecycle. All other root functions are
+# direct dependency construction or stateless time/configuration helpers.
+SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
+    {
+        "database_manager",
+        "session_auth_service",
+        "provider_state_service",
+        "provider_refresh_tracker",
+        "weather_service",
+        "morning_body_battery_service",
+        "sync_job_worker",
+        "initialise_database",
+        "provider_http_client",
+        "public_state_service",
+        "main",
+    }
+)
 
 
 def _python_files(root: Path) -> Iterable[Path]:
@@ -2552,6 +2572,53 @@ class ServerArchitectureTests(unittest.TestCase):
         )
         self.assertEqual(set(), classes)
 
+    def test_server_composition_bodies_do_not_own_domain_or_io_logic(self) -> None:
+        tree = _parse(SERVER_PATH)
+        functions = {
+            node.name: node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        control_flow = {
+            name
+            for name, function in functions.items()
+            if any(
+                isinstance(node, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With, ast.AsyncWith, ast.Match))
+                for node in ast.walk(function)
+            )
+        }
+        self.assertEqual(SERVER_COMPOSITION_CONTROL_FLOW, control_flow)
+
+        forbidden_calls = {
+            "execute",
+            "executemany",
+            "fetchone",
+            "fetchall",
+            "urlopen",
+            "send_request",
+            "request",
+            "post",
+            "put",
+            "delete",
+            "open",
+            "read",
+            "write",
+            "read_bytes",
+            "write_bytes",
+            "read_text",
+            "write_text",
+            "connect",
+        }
+        violations = [
+            f"{function.name}:{node.lineno}:{ast.unparse(node.func)}"
+            for function in functions.values()
+            for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in forbidden_calls
+        ]
+        self.assertEqual([], violations)
+
     def test_browser_fixture_does_not_patch_removed_response_functions(self) -> None:
         fixture = REPOSITORY_ROOT / "e2e" / "fixture_runtime.py"
         removed = {
@@ -2834,7 +2901,7 @@ class ServerArchitectureTests(unittest.TestCase):
                 "sync_job_queue_service",
                 "sync_public_state_service",
                 "activity_read_service",
-                "lambda: local_now().date()",
+                "lambda: ATHLETE_CLOCK.now().date()",
                 "ALL_SYNC_DAYS",
             ],
         )

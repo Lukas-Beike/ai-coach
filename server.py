@@ -52,6 +52,7 @@ from backend.athlete.checkins import (
     CheckinService,
 )
 from backend.athlete.context import AthleteContextService
+from backend.athlete.clock import AthleteLocalClock
 from backend.athlete.profile import DEFAULT_PROFILE, ProfileService, normalize_profile, timezone_name
 from backend.performance import morning_battery as performance_morning_battery
 from backend.performance.morning_battery_service import (
@@ -504,7 +505,7 @@ def provider_state_service() -> provider_state.ProviderStateService:
             KEY_VALUE_REPOSITORY,
             DB_LOCK,
             utc_now,
-            lambda: local_now().date(),
+            lambda: ATHLETE_CLOCK.now().date(),
             LOGGER,
         )
     return PROVIDER_STATE_SERVICE
@@ -627,7 +628,7 @@ def nutrition_service() -> NutritionService:
         db_lock=DB_LOCK,
         nutrition_repository=NutritionRepository(utc_now),
         utc_now=utc_now,
-        local_now=local_now,
+        local_now=ATHLETE_CLOCK.now,
     )
 
 
@@ -660,7 +661,7 @@ def coach_activity_read_tool_service() -> CoachActivityReadToolService:
         activity_read_service(),
         garmin_payload_service(),
         profile_service(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -697,7 +698,7 @@ def public_performance_state_service() -> PublicPerformanceStateService:
         garmin_payload_service(),
         profile_service(),
         garmin_projection_service(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -755,7 +756,7 @@ def intervals_snapshot_reader() -> IntervalsSnapshotReader:
         CONFIG,
         api_client,
         sync_state_repository(),
-        local_now,
+        ATHLETE_CLOCK.now,
         utc_now,
         SYNC_EARLIEST_DATE,
         SYNC_CHUNK_DAYS,
@@ -796,7 +797,7 @@ def sync_job_outcome_service() -> SyncJobOutcomeService:
 def daily_sync_marker_service() -> DailySyncMarkerService:
     """Compose transactional provider daily-marker persistence."""
     return DailySyncMarkerService(
-        database_manager(), KEY_VALUE_REPOSITORY, local_now
+        database_manager(), KEY_VALUE_REPOSITORY, ATHLETE_CLOCK.now
     )
 
 
@@ -810,7 +811,7 @@ def intervals_snapshot_service() -> IntervalsSnapshotService:
         workout_library_refresh_service(),
         workout_library_service(),
         REDACTOR.redact_text,
-        local_now,
+        ATHLETE_CLOCK.now,
         SYNC_EARLIEST_DATE,
         SYNC_CHUNK_DAYS,
         ALL_SYNC_DAYS,
@@ -858,7 +859,7 @@ def garmin_fixture_loader() -> garmin_sync.GarminFixtureLoader:
     return garmin_sync.GarminFixtureLoader(
         CONFIG,
         ROOT,
-        local_now,
+        ATHLETE_CLOCK.now,
         utc_now,
         SYNC_EARLIEST_DATE,
         ALL_SYNC_DAYS,
@@ -876,7 +877,7 @@ def garmin_payload_service() -> garmin_sync.GarminPayloadService:
         database_manager(),
         KEY_VALUE_REPOSITORY,
         sync_state_repository(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -903,7 +904,7 @@ def garmin_remote_reader() -> GarminRemoteReader:
         REDACTOR.redact_text,
         LOGGER,
         utc_now,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         SYNC_EARLIEST_DATE,
         SYNC_CHUNK_DAYS,
         ALL_SYNC_DAYS,
@@ -918,7 +919,7 @@ def garmin_sync_service() -> GarminSyncService:
             garmin_fixture_loader(),
             garmin_remote_reader(),
             SYNC_EARLIEST_DATE,
-            lambda: local_now().date(),
+            lambda: ATHLETE_CLOCK.now().date(),
         ),
         garmin_payload_service(),
         state_service,
@@ -953,7 +954,7 @@ def garmin_projection_service() -> GarminProjectionService:
         database_manager(),
         KEY_VALUE_REPOSITORY,
         REDACTOR,
-        local_now,
+        ATHLETE_CLOCK.now,
     )
 
 
@@ -1000,7 +1001,7 @@ def weather_service() -> WeatherService:
             ),
             runtime_maintenance.MAINTENANCE_GATE,
             lambda: datetime.now(timezone.utc),
-            lambda: local_now().date(),
+            lambda: ATHLETE_CLOCK.now().date(),
         )
     return WEATHER_SERVICE
 
@@ -1042,7 +1043,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
                 email_configured=bool(CONFIG.garmin_email),
                 tokenstore_exists=Path(CONFIG.garmin_tokenstore).exists(),
                 profile_timezone=timezone_name(profile_service().get().get("timezone")),
-                fallback_zone=local_now().tzinfo or timezone.utc,
+                fallback_zone=ATHLETE_CLOCK.now().tzinfo or timezone.utc,
                 external_call=lambda service, operation, callback, details: provider_http.external_call(
                     service,
                     operation,
@@ -1065,7 +1066,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
                 GARMIN_RESYNC_GATE,
                 GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
             ),
-            MorningBatteryClock(lambda: datetime.now(timezone.utc), local_now),
+            MorningBatteryClock(lambda: datetime.now(timezone.utc), ATHLETE_CLOCK.now),
             MorningBatteryEvents(runtime_events.STATE_EVENT_BUFFER.publish, LOGGER),
             MorningBatteryRetryPolicy(),
         )
@@ -1075,7 +1076,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
 def external_calendar_reader() -> calendar_external.ExternalCalendarReader:
     """Compose external-calendar reads for the active database manager."""
     return calendar_external.ExternalCalendarReader(
-        database_manager(), lambda: local_now().date()
+        database_manager(), lambda: ATHLETE_CLOCK.now().date()
     )
 
 
@@ -1091,7 +1092,7 @@ def external_calendar_sync_service() -> ExternalCalendarSyncService:
         runtime_events.STATE_EVENT_BUFFER,
         LOGGER,
         REDACTOR.redact_text,
-        local_now,
+        ATHLETE_CLOCK.now,
         utc_now,
         APP_VERSION,
         lock=shared_external_calendar_sync_lock(),
@@ -1136,7 +1137,7 @@ def checkin_service() -> CheckinService:
     return CheckinService(
         database_manager(),
         CHECKIN_REPOSITORY,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -1145,6 +1146,9 @@ def profile_service() -> ProfileService:
     return ProfileService(
         database_manager(), PROFILE_REPOSITORY, KEY_VALUE_REPOSITORY
     )
+
+
+ATHLETE_CLOCK = AthleteLocalClock(lambda: profile_service().get().get("timezone"))
 
 
 def coach_profile_update_service() -> CoachProfileUpdateService:
@@ -1215,7 +1219,7 @@ def planned_unit_service() -> planning_planned_unit_service.PlannedUnitService:
         database_manager(),
         PLANNING_REVISION_SERVICE,
         utc_now,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         uuid.uuid4,
         REDACTOR.redact_text,
         calendar_conflict_service(),
@@ -1238,7 +1242,7 @@ def planned_calendar_sync_service() -> PlannedCalendarSyncService:
         intervals_client,
         planned_unit_sync_state_writer(),
         utc_now,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -1250,7 +1254,7 @@ def planned_calendar_repair_service() -> PlannedCalendarRepairService:
         intervals_client,
         planned_unit_sync_state_writer(),
         utc_now,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         PLANNED_CALENDAR_FUTURE_DAYS,
     )
 
@@ -1262,7 +1266,7 @@ def remote_planned_unit_reconciler() -> RemotePlannedUnitReconciler:
         planned_unit_service(),
         PLANNING_REVISION_SERVICE,
         utc_now,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -1330,7 +1334,7 @@ def sync_job_executor() -> SyncJobExecutor:
     historical_sync = HistoricalSyncJobOwner(
         sync_state_repository=sync_state_repository(),
         queue_service=sync_job_queue_service(),
-        local_now=local_now,
+        local_now=ATHLETE_CLOCK.now,
         sync_period_defaults=SYNC_PERIOD_DEFAULTS,
         all_sync_days=ALL_SYNC_DAYS,
         sync_chunk_days=SYNC_CHUNK_DAYS,
@@ -1418,7 +1422,7 @@ def local_plan_creation_service() -> LocalTrainingPlanCreationService:
         workout_library_service(),
         calendar_conflict_service(),
         PLANNING_REVISION_SERVICE,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         utc_now,
         uuid.uuid4,
         LOGGER,
@@ -1430,7 +1434,7 @@ def training_plan_artifact_service() -> TrainingPlanArtifactService:
     return TrainingPlanArtifactService(
         database_manager(),
         local_plan_creation_service(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         utc_now,
         uuid.uuid4,
     )
@@ -1445,7 +1449,7 @@ def daily_planning_context_service() -> DailyPlanningContextService:
         external_calendar_reader(),
         morning_body_battery_service(),
         activity_feedback_service(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
     )
 
@@ -1459,7 +1463,7 @@ def structured_training_state_service() -> StructuredTrainingStateService:
         training_plan_service(),
         coach_dialogue_read_service().artifact_refs,
         sync_job_queue_service().list,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -1479,7 +1483,7 @@ def structured_training_change_service() -> planning_changes.StructuredTrainingC
         planned_unit_service(),
         PLANNING_REVISION_SERVICE,
         training_plan_service(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         coach_limits.COACH_TRAINING_CHANGE_LIMIT,
         lambda: runtime_events.STATE_EVENT_BUFFER.publish(
             "planning", {"status": "changed"}
@@ -1493,7 +1497,7 @@ def coach_training_patch_service() -> CoachTrainingPatchService:
         database_manager(), DB_LOCK, structured_training_change_validator(),
         structured_training_change_service(), local_plan_creation_service(),
         calendar_conflict_service(), KEY_VALUE_REPOSITORY,
-        runtime_events.STATE_EVENT_BUFFER, lambda: local_now().date(),
+        runtime_events.STATE_EVENT_BUFFER, lambda: ATHLETE_CLOCK.now().date(),
         coach_limits.COACH_TRAINING_CHANGE_LIMIT,
     )
 
@@ -1508,7 +1512,7 @@ def structured_training_plan_replacement_service() -> StructuredTrainingPlanRepl
         KEY_VALUE_REPOSITORY,
         calendar_conflict_service(),
         planned_unit_service(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         utc_now,
         uuid.uuid4,
     )
@@ -1520,7 +1524,7 @@ def adaptive_replan_apply_service() -> planning_adaptive.AdaptiveReplanApplyServ
         database_manager(),
         PLAN_ADJUSTMENT_REPOSITORY,
         PLANNING_REVISION_SERVICE,
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         utc_now,
     )
 
@@ -1534,7 +1538,7 @@ def illness_pause_sync_service() -> IllnessPauseSyncService:
         competition_service=competition_service(),
         adaptive_replan_preview_service=adaptive_replan_preview_service(),
         redactor=REDACTOR,
-        today=lambda: local_now().date(),
+        today=lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -1560,7 +1564,7 @@ def adaptive_replan_preview_service() -> AdaptiveReplanPreviewService:
         planned_unit_service(),
         external_calendar_reader(),
         weather_service(),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
         utc_now,
         uuid.uuid4,
         calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
@@ -1585,7 +1589,7 @@ def privacy_data_export_service() -> PrivacyDataExportService:
             activity_feedback_service=activity_feedback_service(),
             adaptive_preview_service=adaptive_replan_preview_service(),
             external_calendar_reader=external_calendar_reader(),
-            local_now=local_now,
+            local_now=ATHLETE_CLOCK.now,
             utc_now=utc_now,
         )
     )
@@ -1682,8 +1686,8 @@ def intervals_client(config: Config | None = None) -> intervals_client_module.In
     """Compose an Intervals client with the active provider transport and clock."""
     return intervals_client_module.IntervalsClient(
         config or CONFIG,
-        request=lambda *args, **kwargs: provider_http_client().request(*args, **kwargs),
-        now=lambda: local_now(),
+        request=provider_http_client().request,
+        now=lambda: ATHLETE_CLOCK.now(),
     )
 
 
@@ -1800,7 +1804,7 @@ def coach_quick_actions_service() -> CoachQuickActionsService:
     """Compose local quick-action reads and their public Coach projection."""
     return CoachQuickActionsService(
         database_manager(), KEY_VALUE_REPOSITORY, adaptive_replan_preview_service(),
-        lambda: local_now().date(), PLANNED_WORKOUT_LABEL,
+        lambda: ATHLETE_CLOCK.now().date(), PLANNED_WORKOUT_LABEL,
     )
 
 
@@ -1882,7 +1886,7 @@ def coach_dialogue_action_service() -> CoachDialogueActionService:
         DB_LOCK,
         sync_job_queue_service,
         CoachDialoguePlanScopeService(manager, DB_LOCK),
-        lambda: local_now().date(),
+        lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -1900,14 +1904,14 @@ def manual_morning_checkin_service() -> ManualMorningCheckinService:
     """Compose the fresh-sleep gate for explicit morning Coach requests."""
     return ManualMorningCheckinService(
         garmin_sync_service(), garmin_payload_service(), morning_body_battery_service(),
-        lambda: local_now().date(), LOGGER,
+        lambda: ATHLETE_CLOCK.now().date(), LOGGER,
     )
 
 
 def morning_checkin_state_service() -> MorningCheckinStateService:
     """Compose the local morning check-in state projection."""
     return MorningCheckinStateService(
-        database_manager(), KEY_VALUE_REPOSITORY, lambda: local_now().date()
+        database_manager(), KEY_VALUE_REPOSITORY, lambda: ATHLETE_CLOCK.now().date()
     )
 
 
@@ -2021,13 +2025,13 @@ def coach_structured_context_service() -> CoachStructuredContextService:
             competition_service(),
             training_plan_service(),
             adaptive_replan_preview_service(),
-            lambda: local_now().date(),
+            lambda: ATHLETE_CLOCK.now().date(),
         ),
         CoachPerformanceContextReader(
             profile_service(),
             garmin_payload_service(),
             garmin_projection_service(),
-            lambda: local_now().date(),
+            lambda: ATHLETE_CLOCK.now().date(),
         ),
     )
 
@@ -2261,7 +2265,7 @@ def coach_chat_turn_service() -> CoachChatTurnService:
 def morning_coach_job_completion_service() -> MorningCoachJobCompletionService:
     return MorningCoachJobCompletionService(
         database_manager(), DB_LOCK, KEY_VALUE_REPOSITORY,
-        coach_quick_actions_service, local_now, utc_now,
+        coach_quick_actions_service, ATHLETE_CLOCK.now, utc_now,
     )
 
 
@@ -2272,15 +2276,6 @@ def coach_background_job_runner() -> CoachBackgroundJobRunner:
         morning_coach_job_completion_service, coach_turn_failure_service,
         runtime_maintenance.MAINTENANCE_GATE, REDACTOR, LOGGER,
     )
-
-
-def local_now() -> datetime:
-    configured_timezone = timezone_name(profile_service().get().get("timezone"))
-    try:
-        from zoneinfo import ZoneInfo
-        return datetime.now(ZoneInfo(configured_timezone))
-    except Exception:
-        return datetime.now().astimezone()
 
 
 def public_bootstrap_service() -> PublicBootstrapService:
@@ -2323,7 +2318,7 @@ def public_bootstrap_service() -> PublicBootstrapService:
             sync_period_defaults=SYNC_PERIOD_DEFAULTS,
             all_sync_days=ALL_SYNC_DAYS,
             settings=SETTINGS,
-            local_date=lambda: local_now().date(),
+            local_date=lambda: ATHLETE_CLOCK.now().date(),
             morning_checkin_state_service=morning_checkin_state_service,
             coach_quick_actions_service=coach_quick_actions_service,
             provider_state_service=provider_state_service,
@@ -2350,7 +2345,7 @@ def public_plan_state_service() -> PublicPlanStateService:
         competitions=competition_service(),
         adaptive_preview=adaptive_replan_preview_service(),
         coach_quick_actions=coach_quick_actions_service(),
-        today=lambda: local_now().date(),
+        today=lambda: ATHLETE_CLOCK.now().date(),
         external_calendar_configured=bool(CONFIG.calendar_ical_url),
         external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
         default_workout_name=PLANNED_WORKOUT_LABEL,
@@ -2362,7 +2357,7 @@ def public_state_local_prelude_service() -> PublicStateLocalPrelude:
     return PublicStateLocalPrelude(
         sync_state_repository(), activity_feedback_service(),
         planned_unit_service(), weather_service(), database_manager(),
-        DB_LOCK, lambda: local_now().date(),
+        DB_LOCK, lambda: ATHLETE_CLOCK.now().date(),
         CalendarWindowRange(PLANNED_CALENDAR_HISTORY_DAYS, PLANNED_CALENDAR_FUTURE_DAYS),
     )
 
@@ -2383,7 +2378,7 @@ def public_state_calendar_projection_service() -> PublicStateCalendarProjection:
         external_calendar_configured=bool(CONFIG.calendar_ical_url),
         external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
         default_workout_name=PLANNED_WORKOUT_LABEL,
-        today=lambda: local_now().date(),
+        today=lambda: ATHLETE_CLOCK.now().date(),
     )
 
 
@@ -2425,7 +2420,7 @@ def public_state_service() -> PublicStateService:
                 all_sync_days=ALL_SYNC_DAYS,
                 calendar_history_days=PLANNED_CALENDAR_HISTORY_DAYS,
                 calendar_future_days=PLANNED_CALENDAR_FUTURE_DAYS,
-                local_now=local_now,
+                local_now=ATHLETE_CLOCK.now,
             )
         )
 
@@ -2486,7 +2481,7 @@ def privacy_archive_export_service() -> PrivacyArchiveExportService:
         PrivacyArchiveExportConfig(
             DATA_DIR,
             DB_PATH,
-            lambda: local_now().date(),
+            lambda: ATHLETE_CLOCK.now().date(),
             utc_now,
             maximum_bytes=MAX_PRIVACY_EXPORT_BYTES,
             minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
@@ -2599,7 +2594,7 @@ SYNC_GET_ROUTES = SyncGetRoutes(
     sync_job_queue_service,
     sync_public_state_service,
     activity_read_service,
-    lambda: local_now().date(),
+    lambda: ATHLETE_CLOCK.now().date(),
     ALL_SYNC_DAYS,
 )
 HISTORY_GET_ROUTES = HistoryGetRoutes(session_auth_service, change_history_service)
@@ -2650,7 +2645,7 @@ AUTH_POST_ROUTES = AuthPostRoutes(
     session_auth_service, runtime_maintenance.MAINTENANCE_GATE
 )
 NUTRITION_GET_ROUTES = NutritionGetRoutes(
-    session_auth_service, nutrition_service, local_now
+    session_auth_service, nutrition_service, ATHLETE_CLOCK.now
 )
 NUTRITION_POST_ROUTES = NutritionPostRoutes(
     nutrition_service, intervals_nutrition_sync_service

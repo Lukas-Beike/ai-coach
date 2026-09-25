@@ -768,7 +768,14 @@ Abhängigkeit: P1 sowie Ressourcen-/Worker-Verträge aus P6 und P8.
   - [x] Diagnosebericht, Capture-Projektion und Aufrufer auslagern;
     Capture-Status und Enable bleiben bereits dem konkreten
     `DiagnosticCapture` zugeordnet, die HTTP-Aufrufer sind nur Transport.
-    - [x] Vollständigen Diagnosebericht einschließlich redigierter Logs,
+    - [x] Remaining top-level function bodies audited with an AST guard: control
+  flow is limited to an explicit resource-cache/startup allowlist, and direct
+  SQL statements, provider requests, and file reads/writes are rejected in the
+  root. Other functions are constructors or pure startup/configuration helpers.
+- [x] Move profile-timezone lookup and local wall-clock calculation to
+  `backend/athlete/clock.py`; consumers use the injected clock owner, and the
+  current saved timezone and system-local fallback remain covered.
+- [x] Vollständigen Diagnosebericht einschließlich redigierter Logs,
       Capture-Status/Entries, DB-Zähler und Provider-Frische einem
       konkreten `DiagnosticReportService` zuordnen; der eigenständige
       Capture-Endpunkt delegiert unverändert an `DiagnosticCapture`.
@@ -1049,13 +1056,17 @@ es gibt keine Datenmigration und keine Rücknahme durch Löschen von Nutzerdaten
 
 ## 8. Abschlussstand
 
-Der erneute Audit hat den vorherigen Abschluss widerlegt: `RequestHandler` war
-noch als 184-zeilige Klasse in `server.py` implementiert, und die erlaubte
-Funktionsliste liess grosse Service-Fabriken ohne Inhaltspruefung zu. Die
-HTTP-Klasse liegt jetzt in `backend/http_api/handler.py`; dies schliesst nur
-diese konkrete P10-Luecke.
+Der erneute Audit hat den frueheren Abschluss widerlegt: Die 184-zeilige
+`RequestHandler`-Implementierung war noch in `server.py`, und die alte
+Architekturpruefung begrenzte nur Namen. Der Handler ist jetzt unter
+`backend/http_api/handler.py`; seine Komplexitaet bleibt auf der Klassenebene
+und wird von Sonar sowie Architekturtests geprueft.
 
-P11 ist weiterhin offen. Die verbliebenen Service-Fabriken muessen auf
-Orchestrierung und versteckte Domain-Logik geprueft werden; danach werden
-Inventar, Architekturtests und Endabnahme erneut mit dem echten Diff abgeglichen.
-Zeilenzahl allein ist kein Abschlusskriterium.
+P11 auditiert die verbleibenden Fabrikkoerper statt eine pauschale LOC-Grenze
+zu setzen. Eine AST-Regel beschraenkt Kontrollfluss auf explizite Resource- und
+Startup-Faelle und verbietet direkte SQL-, Provider- und Datei-Lese/Schreib-
+Aufrufe im Composition Root. Die profilabhaengige Uhr gehoert jetzt
+`backend/athlete/clock.py`. Die verbleibenden Zeilen sind gepruefte
+Instanziierung des Service-Graphen, Konfiguration, gemeinsame Prozessressourcen
+und Startup/Shutdown. Die P11-Uhr und der Koerper-Audit sind lokal vollstaendig validiert; die
+Integration folgt als eigener PR auf dem inzwischen integrierten P10-Stand.
