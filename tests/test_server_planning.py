@@ -191,7 +191,7 @@ class ServerPlanningTests(ServerTestCase):
             "date": tomorrow, "sport": "Ride", "name": "Lange Ausfahrt",
             "description": "- 240m 60% Easy endurance ride", "duration_minutes": 240, "target": "POWER",
         }])[0]
-        with patch.object(server.weather_service(), "state", return_value={"days": [{
+        with patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={"days": [{
             "date": tomorrow, "weather_code": 63, "precipitation_probability_max": 100,
             "rain_sum": 12, "showers_sum": 0, "snowfall_sum": 0,
         }]}) as weather:
@@ -208,7 +208,7 @@ class ServerPlanningTests(ServerTestCase):
             {"date": tomorrow.isoformat(), "sport": "VirtualRide", "name": "Indoor lang", "description": "- 240m 60% Indoor endurance ride", "duration_minutes": 240},
             {"date": day_three.isoformat(), "sport": "Ride", "name": "Spätere Ausfahrt", "description": "- 240m 60% Outdoor endurance ride", "duration_minutes": 240},
         ])
-        with patch.object(server.weather_service(), "state", return_value={"days": [{
+        with patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={"days": [{
             "date": tomorrow.isoformat(), "weather_code": 63, "precipitation_probability_max": 100,
             "rain_sum": 12, "showers_sum": 0, "snowfall_sum": 0,
         }]}):

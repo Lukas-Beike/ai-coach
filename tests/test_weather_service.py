@@ -3,12 +3,14 @@ import sqlite3
 import unittest
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
+from unittest.mock import Mock
 
 from backend.athlete.profile import ProfileService
 from backend.db.repositories import KeyValueRepository, ProfileRepository
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 from backend.weather import cache
+from backend.weather.assembly import WeatherAssembly
 from backend.weather.service import (
     WeatherCacheStore,
     WeatherRefreshJournal,
@@ -105,6 +107,39 @@ class Logger:
 
 
 class WeatherServiceTests(unittest.TestCase):
+
+    def test_weather_assembly_keeps_provider_and_database_dependencies_lazy(self):
+        callbacks = [Mock() for _ in range(8)]
+        (
+            manager,
+            profile,
+            client,
+            tracker,
+            operation_id,
+            now,
+            today,
+            preview,
+        ) = callbacks
+        observer = Mock()
+        assembly = WeatherAssembly(
+            database_manager=manager,
+            key_values=Mock(),
+            profile_service=profile,
+            client_factory=client,
+            refresh_tracker=tracker,
+            operation_context=Mock(),
+            operation_id_factory=operation_id,
+            maintenance_gate=MaintenanceGate(),
+            now=now,
+            today=today,
+            adaptive_preview_service=preview,
+            observer=observer,
+            logger=Mock(),
+        )
+
+        self.assertIsNotNone(assembly)
+        for callback in (*callbacks, observer):
+            callback.assert_not_called()
     def setUp(self):
         self.manager = DatabaseManager()
         self.addCleanup(self.manager.connection.close)

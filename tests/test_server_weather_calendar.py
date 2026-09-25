@@ -121,8 +121,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
         new = {"query": "Berlin", "location": {"name": "Berlin"}, "fetched_at": runtime_clock.utc_now(),
                "forecast": {"daily": {"time": [today.isoformat(), tomorrow], "temperature_2m_max": [15, 19]}}}
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=[old, new]) as fetch:
-            server.weather_service().state([], force=True)
-            server.weather_service().state([], force=True)
+            server.WEATHER_ASSEMBLY.service().state([], force=True)
+            server.WEATHER_ASSEMBLY.service().state([], force=True)
             server.profile_service().save({"weather_location": "Emsdetten"})
             server.initialise_database()
             calendar = server.public_plan_state_service().read(local_only=True)
@@ -175,9 +175,9 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "fetched_at": runtime_clock.utc_now(),
         }
         with patch.object(weather_provider.WeatherClient, "fetch", return_value=forecast) as fetch:
-            first = server.weather_sync_service().sync("test")
-            second = server.weather_sync_service().sync("test")
-            manual = server.weather_sync_service().sync("manuell", force=True)
+            first = server.WEATHER_ASSEMBLY.sync_service().sync("test")
+            second = server.WEATHER_ASSEMBLY.sync_service().sync("test")
+            manual = server.WEATHER_ASSEMBLY.sync_service().sync("manuell", force=True)
         self.assertEqual(first["status"], "ok")
         self.assertEqual(second["status"], "ok")
         self.assertEqual(manual["status"], "ok")
@@ -194,9 +194,9 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "fetched_at": runtime_clock.utc_now(),
         }
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=[server.AppError(503, "upstream"), forecast]) as fetch:
-            first = server.weather_service().state(refresh=True)
-            second = server.weather_service().state(refresh=True)
-            forced = server.weather_service().state(refresh=True, force=True)
+            first = server.WEATHER_ASSEMBLY.service().state(refresh=True)
+            second = server.WEATHER_ASSEMBLY.service().state(refresh=True)
+            forced = server.WEATHER_ASSEMBLY.service().state(refresh=True, force=True)
         self.assertEqual(fetch.call_count, 2)
         self.assertIn("Wetterdaten", first["error"])
         self.assertIn("noch nicht erneut", second["error"])
@@ -217,7 +217,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "preview",
             return_value={"changes": [{"id": "change-1"}]},
         ) as preview:
-            result = server.weather_sync_service().sync("test")
+            result = server.WEATHER_ASSEMBLY.sync_service().sync("test")
         preview.assert_called_once_with()
         self.assertTrue(result["needs_replan"])
         self.assertEqual(result["replan_changes"], 1)
@@ -532,7 +532,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 "list",
                 return_value=planned,
             ),
-            patch.object(server.weather_service(), "state", return_value={"days": []}),
+            patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={"days": []}),
             patch.object(server.ATHLETE_CLOCK, "now", return_value=datetime(2026, 8, 26, 12, 0)),
         ):
             result = server.public_plan_state_service().read(local_only=True)
@@ -862,7 +862,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             forecast,
             forecast,
         ]) as weather_request:
-            weather = server.weather_service().state(planned)
+            weather = server.WEATHER_ASSEMBLY.service().state(planned)
         self.assertEqual(len(weather["days"]), 14)
         self.assertEqual(weather["model"], "ICON-D2 (0–2 Tage) + ECMWF IFS HRES (3–14 Tage)")
         self.assertIn("models=ecmwf_ifs", weather_request.call_args_list[1].args[1])

@@ -343,7 +343,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         checkins = server.checkin_service()
         with patch.object(server, "checkin_service", return_value=checkins), patch.object(
             checkins, "context", return_value={"today": {"available_minutes": 30}}
-        ), patch.object(server.weather_service(), "state", return_value={}), patch.object(
+        ), patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={}), patch.object(
             server.calendar_external, "list_events", return_value=[]
         ):
             preview = server.adaptive_replan_preview_service().preview()
@@ -443,7 +443,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         checkins = server.checkin_service()
         with patch.object(server, "checkin_service", return_value=checkins), patch.object(
             checkins, "context", return_value={"today": {"illness": "Synthetic illness"}}
-        ), patch.object(server.weather_service(), "state", return_value={}), patch.object(
+        ), patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={}), patch.object(
             server.calendar_external, "list_events", return_value=[]
         ):
             preview = server.adaptive_replan_preview_service().preview()

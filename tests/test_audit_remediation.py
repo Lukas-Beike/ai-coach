@@ -90,7 +90,7 @@ class AuditRemediationTests(unittest.TestCase):
             server.profile_service().save({"weather_location": ""})
             return {"query": query, "forecast": {}, "fetched_at": runtime_clock.utc_now()}
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=fetch):
-            self.assertEqual(server.weather_service().state()["state"], "not_configured")
+            self.assertEqual(server.WEATHER_ASSEMBLY.service().state()["state"], "not_configured")
         self.assertFalse(server.key_value_service().get(weather_cache.CACHE_KEY))
         self.assertFalse(server.key_value_service().get(weather_cache.HISTORY_KEY))
 
@@ -154,13 +154,13 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
     def test_cached_weather_remains_stale_without_refresh(self):
         server.profile_service().save({"weather_location": "Synthetic city"})
         server.key_value_service().set(weather_cache.CACHE_KEY, json.dumps({"query": "Synthetic city", "forecast": {}, "fetched_at": "2020-01-01T00:00:00+00:00"}))
-        self.assertEqual(server.weather_service().state(refresh=False)["state"], "stale")
+        self.assertEqual(server.WEATHER_ASSEMBLY.service().state(refresh=False)["state"], "stale")
         with patch.object(
-            server.weather_service(),
+            server.WEATHER_ASSEMBLY.service(),
             "state",
             return_value={"stale": True, "days": [{}], "error": "Synthetic failure"},
         ):
-            server.weather_sync_service().sync()
+            server.WEATHER_ASSEMBLY.sync_service().sync()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT status FROM provider_refresh_history ORDER BY started_at DESC LIMIT 1").fetchone()["status"], "error")
 

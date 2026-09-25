@@ -134,6 +134,46 @@ mocked providers; no live account or runtime data was used.
 - External patch targets: no tests patch these root factories; tests consume
   the returned instances. No e2e fixture directly references these factories.
 
+## S2a2b boundary before implementation: weather services
+
+- `weather_service()` composes the existing `WEATHER_SERVICE_CACHE`, a
+  `WeatherCacheStore` for the active manager, a deferred WeatherClient factory,
+  and a refresh journal using the shared provider refresh tracker and sync
+  operation context. The cache store is bound to `profile_service()` and the
+  maintenance gate. `WeatherServiceCache.get` stores the client factory; it
+  does not invoke it during composition.
+- `weather_sync_service()` composes profile reads, the cached weather service,
+  adaptive preview generation, and a fresh observer. These are weather
+  application services; `public_weather_state_service()` stays for the later
+  HTTP/public-state slice.
+- Tests directly obtain the service to exercise refresh and cache behavior or
+  patch its `state` method; no tests patch either root factory. No e2e fixture
+  uses these factories.
+- Proposed interface: `WeatherAssembly` in `backend/weather/assembly.py`,
+  exposing only `service()` and `sync_service()`. Manager/profile/planning
+  providers and the HTTP client factory are explicit lazy inputs; the existing
+  weather cache remains the sole owner of the shared service instance.
+
+## S2a2b: weather service assembly
+
+- Completed in `backend/weather/assembly.py`. The root now supplies a focused
+  `WeatherAssembly`; weather cache lookup and sync-service construction live
+  with weather ownership. The existing manager-keyed cache remains the sole
+  owner, and its deferred WeatherClient factory remains uncalled until a
+  refresh actually needs it. The public weather projection stays for S5.
+- Removed the root weather and weather-sync factories. Root and test callers
+  now use the assembly methods; the architecture test checks the backend cache
+  boundary. Added a regression that the assembly constructor does not resolve
+  the database, profile, preview, or provider-client callbacks.
+- Focused checks passed: architecture (48), weather/calendar (44), database
+  (45 run, 3 skipped), sync-executor (13), planning (88), audit remediation
+  (17 run, 1 skipped), weather service (6), and workout repair (27). Inventory,
+  compileall, and diff checks passed.
+- Measured `server.py`: 2,713 physical / 2,349 nonblank lines, 217 import
+  statements, 163 top-level functions.
+- Docker image build is still blocked by the absent local Docker engine. No
+  live provider was contacted.
+
 ## S2a2a: provider refresh state assembly
 
 - Completed in `backend/sync/assembly.py` as `ProviderSyncAssembly`. It owns

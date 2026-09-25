@@ -87,12 +87,7 @@ from backend.sync.intervals import (
     IntervalsSyncWorkflow,
 )
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
-from backend.weather.service import (
-    WeatherCacheStore,
-    WeatherRefreshJournal,
-    WeatherService,
-    WEATHER_SERVICE_CACHE,
-)
+from backend.weather.assembly import WeatherAssembly
 from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
 from backend.db.key_value import KeyValueService
@@ -229,7 +224,6 @@ from backend.sync.executor import (
     SyncJobExecutor,
     SyncJobProviderDispatcher,
 )
-from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import SyncJobWorker, shared_sync_job_wake_event
 from backend.planning import adaptive as planning_adaptive
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
@@ -928,41 +922,9 @@ def full_provider_resync_service() -> FullProviderResyncService:
     )
 
 
-def weather_service() -> WeatherService:
-    """Return weather orchestration bound to the active runtime resources."""
-    manager = database_manager()
-    return WEATHER_SERVICE_CACHE.get(
-        manager,
-        WeatherCacheStore(manager, KEY_VALUE_REPOSITORY, profile_service()),
-        lambda: weather_provider.WeatherClient(
-            PROVIDER_TRANSPORT.json_http_client().request, runtime_clock.utc_now, LOGGER
-        ),
-        WeatherRefreshJournal(
-            PROVIDER_SYNC.refresh_tracker(),
-            sync_observation.OPERATION_CONTEXT,
-            lambda: uuid.uuid4().hex,
-            LOGGER,
-        ),
-        runtime_maintenance.MAINTENANCE_GATE,
-        lambda: datetime.now(timezone.utc),
-        lambda: ATHLETE_CLOCK.now().date(),
-    )
-
-
-def weather_sync_service() -> WeatherSyncService:
-    """Compose the observed weather refresh use case."""
-    return WeatherSyncService(
-        profile_service(),
-        weather_service(),
-        adaptive_replan_preview_service(),
-        PROVIDER_SYNC.operation_observer(),
-        LOGGER,
-    )
-
-
 def public_weather_state_service() -> PublicWeatherStateService:
     """Compose the public weather endpoint projection."""
-    return PublicWeatherStateService(weather_service())
+    return PublicWeatherStateService(WEATHER_ASSEMBLY.service())
 
 
 def morning_body_battery_service() -> MorningBodyBatteryService:
@@ -1288,7 +1250,7 @@ def sync_job_executor() -> SyncJobExecutor:
         ),
         calendar_weather_jobs=CalendarWeatherSyncJobOwner(
             external_calendar_sync_service=external_calendar_sync_service(),
-            weather_sync_service=weather_sync_service(),
+            weather_sync_service=WEATHER_ASSEMBLY.sync_service(),
         ),
     )
     return SyncJobExecutor(
@@ -1492,7 +1454,7 @@ def adaptive_replan_preview_service() -> AdaptiveReplanPreviewService:
         checkin_service(),
         planned_unit_service(),
         external_calendar_reader(),
-        weather_service(),
+        WEATHER_ASSEMBLY.service(),
         lambda: ATHLETE_CLOCK.now().date(),
         runtime_clock.utc_now,
         uuid.uuid4,
@@ -1612,6 +1574,25 @@ PROVIDER_TRANSPORT = ProviderTransportAssembly(
     opener=lambda: provider_http.urlopen,
     config=lambda: CONFIG,
     athlete_now=ATHLETE_CLOCK.now,
+)
+WEATHER_ASSEMBLY = WeatherAssembly(
+    database_manager=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    profile_service=profile_service,
+    client_factory=lambda: weather_provider.WeatherClient(
+        PROVIDER_TRANSPORT.json_http_client().request,
+        runtime_clock.utc_now,
+        LOGGER,
+    ),
+    refresh_tracker=PROVIDER_SYNC.refresh_tracker,
+    operation_context=sync_observation.OPERATION_CONTEXT,
+    operation_id_factory=lambda: uuid.uuid4().hex,
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    now=lambda: datetime.now(timezone.utc),
+    today=lambda: ATHLETE_CLOCK.now().date(),
+    adaptive_preview_service=adaptive_replan_preview_service,
+    observer=PROVIDER_SYNC.operation_observer,
+    logger=LOGGER,
 )
 
 
@@ -1940,7 +1921,7 @@ def coach_structured_context_service() -> CoachStructuredContextService:
     return CoachStructuredContextService(
         sync_state_repository(),
         checkin_service(),
-        weather_service(),
+        WEATHER_ASSEMBLY.service(),
         activity_feedback_service(),
         CoachPlanningContextReader(
             planned_unit_service(),
@@ -2256,7 +2237,7 @@ def public_plan_state_service() -> PublicPlanStateService:
         sync_state=sync_state_repository(),
         planned_units=planned_unit_service(),
         activity_feedback=activity_feedback_service(),
-        weather=weather_service(),
+        weather=WEATHER_ASSEMBLY.service(),
         adaptive_followup=adaptive_preview_followup_service(),
         database_manager_factory=database_manager,
         db_lock=DB_LOCK,
@@ -2280,7 +2261,7 @@ def public_state_local_prelude_service() -> PublicStateLocalPrelude:
     """Compose the local bootstrap read with its existing transaction owner."""
     return PublicStateLocalPrelude(
         sync_state_repository(), activity_feedback_service(),
-        planned_unit_service(), weather_service(), database_manager(),
+        planned_unit_service(), WEATHER_ASSEMBLY.service(), database_manager(),
         DB_LOCK, lambda: ATHLETE_CLOCK.now().date(),
         CalendarWindowRange(PLANNED_CALENDAR_HISTORY_DAYS, PLANNED_CALENDAR_FUTURE_DAYS),
     )
@@ -2288,7 +2269,7 @@ def public_state_local_prelude_service() -> PublicStateLocalPrelude:
 
 def public_state_weather_prelude_service() -> PublicStateWeatherPrelude:
     """Compose weather refresh after the local bootstrap lock is released."""
-    return PublicStateWeatherPrelude(weather_service(), adaptive_preview_followup_service())
+    return PublicStateWeatherPrelude(WEATHER_ASSEMBLY.service(), adaptive_preview_followup_service())
 
 
 def public_state_calendar_projection_service() -> PublicStateCalendarProjection:

@@ -2068,7 +2068,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     intervals_sync_service garmin_fixture_loader garmin_client_factory
     garmin_payload_service garmin_sync_state_service garmin_remote_reader
     garmin_sync_service garmin_projection_service full_provider_resync_service
-    weather_service weather_sync_service public_weather_state_service
+    public_weather_state_service
     morning_body_battery_service external_calendar_reader
     external_calendar_sync_service calendar_conflict_service
     activity_feedback_service activity_read_service duplicate_activity_service
@@ -2786,25 +2786,36 @@ class ServerArchitectureTests(unittest.TestCase):
             isinstance(node, ast.ClassDef) and node.name == "WeatherServiceCache"
             for node in weather_tree.body
         ))
-        server_tree = _parse(SERVER_PATH)
-        server_assignments = {
-            target.id
-            for node in server_tree.body
-            if isinstance(node, (ast.Assign, ast.AnnAssign))
-            for target in (
-                node.targets if isinstance(node, ast.Assign) else [node.target]
-            )
-            if isinstance(target, ast.Name)
-        }
-        self.assertNotIn("WEATHER_SERVICE", server_assignments)
-        service_factory = next(
-            node for node in server_tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "weather_service"
+        assembly_tree = _parse(BACKEND_ROOT / "weather" / "assembly.py")
+        assembly = next(
+            node for node in assembly_tree.body
+            if isinstance(node, ast.ClassDef)
+            and node.name == "WeatherAssembly"
+        )
+        service_method = next(
+            node for node in assembly.body
+            if isinstance(node, ast.FunctionDef) and node.name == "service"
         )
         self.assertIn(
-            "WEATHER_SERVICE_CACHE.get",
-            ast.unparse(service_factory),
+            "weather.WEATHER_SERVICE_CACHE.get",
+            ast.unparse(service_method),
         )
+        server_tree = _parse(SERVER_PATH)
+        weather_assembly = next(
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "WEATHER_ASSEMBLY"
+                for target in node.targets
+            )
+        )
+        self.assertIn("WeatherAssembly", ast.unparse(weather_assembly.value))
+        self.assertFalse(any(
+            isinstance(node, ast.FunctionDef)
+            and node.name in {"weather_service", "weather_sync_service"}
+            for node in server_tree.body
+        ))
 
     def test_morning_battery_cache_is_owned_by_performance_service_module(self) -> None:
         performance_tree = _parse(
