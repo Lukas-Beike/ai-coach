@@ -27,7 +27,7 @@ HANDLER_PATH = BACKEND_ROOT / "http_api" / "handler.py"
 # backend-owned implementations, not server callbacks or compatibility
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("backend.http_api.handler", ("HttpRequestHandlerDependencies", "create_request_handler")),
+    ("backend.http_api.handler", ("HttpRequestHandlerDependencies", "RequestHandler", "create_request_handler")),
     ("backend.coach.final_receipt", ("CoachFinalReceiptService",)),
     ("backend.coach.conversation_recovery", ("CoachConversationRecoveryService",)),
     ("backend.coach.response_retry", ("CoachResponseRetryPolicy",)),
@@ -2128,12 +2128,8 @@ def _parse(path: Path) -> ast.Module:
 
 
 def _request_handler_definition() -> ast.ClassDef:
-    factory = next(
-        node for node in _parse(HANDLER_PATH).body
-        if isinstance(node, ast.FunctionDef) and node.name == "create_request_handler"
-    )
     return next(
-        node for node in ast.walk(factory)
+        node for node in _parse(HANDLER_PATH).body
         if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
     )
 
@@ -2405,7 +2401,7 @@ class ServerArchitectureTests(unittest.TestCase):
                     node for node in ast.walk(method)
                     if isinstance(node, ast.Call)
                     and ast.unparse(node.func)
-                    == f"dependencies.response_transport.{transport_method}"
+                    == f"self.dependencies.response_transport.{transport_method}"
                 ]
                 self.assertEqual(len(calls), 1)
 
