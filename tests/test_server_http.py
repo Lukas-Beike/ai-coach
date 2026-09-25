@@ -1364,8 +1364,6 @@ class ServerHttpTests(ServerTestCase):
                     errors = []
 
                     with patch.object(server, "DB_LOCK", database_lock), patch.object(
-                        server, "PROVIDER_STATE_SERVICE", None
-                    ), patch.object(
                         provider_http, "urlopen", side_effect=AssertionError("State must stay local")
                     ):
                         state = server.provider_state_service()

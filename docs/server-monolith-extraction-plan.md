@@ -968,6 +968,9 @@ Abhängigkeit: alle vorigen Phasen.
 - [x] Den gemeinsamen `RateLimiter`-Zustand neben dem Session-Auth-Service
   unter `backend/http_api/auth.py` besitzen lassen; `server.py` verdrahtet
   dieselbe Instanz in den Service.
+- [x] Den gecachten `ProviderStateService` an `backend/providers/state.py`
+  binden. Die Cache-Ersetzung folgt dort dem aktiven Manager, Repository und
+  Lock; `server.py` behält nur die konkrete Service-Komposition.
 - [x] Inventar neu erzeugen und mit `--check` abgleichen; alle verbleibenden
   Top-Level-Funktionen und ihre statischen Aufrufer prüfen. Es gibt keine
   unzugeordneten P0-Symbole oder unaufgerufenen server-Funktionen.

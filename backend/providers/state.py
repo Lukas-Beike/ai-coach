@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import threading
 from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from typing import Any
@@ -226,3 +227,33 @@ class ProviderStateService:
                 },
             )
         return counts
+
+
+class ProviderStateServiceCache:
+    """Keep provider state bound to the active manager and synchronization lock."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._service: ProviderStateService | None = None
+        self._signature: tuple[Any, Any, Any] | None = None
+
+    def get(
+        self,
+        manager: Any,
+        repository: Any,
+        lock: Any,
+        now: Callable[[], Any],
+        today: Callable[[], Any],
+        logger: Any | None = None,
+    ) -> ProviderStateService:
+        with self._lock:
+            signature = (manager, repository, lock)
+            if self._service is None or self._signature != signature:
+                self._service = ProviderStateService(
+                    manager, repository, lock, now, today, logger
+                )
+                self._signature = signature
+            return self._service
+
+
+PROVIDER_STATE_SERVICE_CACHE = ProviderStateServiceCache()
