@@ -298,6 +298,15 @@ class ReleaseSourceTests(unittest.TestCase):
         self.git("checkout", "--detach", source)
         release_source.verify(self.root, source, "1.7.2")
 
+    def test_resolve_rejects_invalid_source_reference(self):
+        for invalid in ["-o", "--output", "develop;rm", "foo..bar", "refs/heads/.."]:
+            with self.assertRaisesRegex(ValueError, "valid source reference"):
+                release_source.resolve(self.root, invalid)
+
+    def test_verify_rejects_invalid_sha(self):
+        with self.assertRaisesRegex(ValueError, "differs"):
+            release_source.verify(self.root, "invalid-sha", "1.7.2")
+
     def test_tag_version_must_match_application(self):
         self.git("tag", "9.0.0")
         with self.assertRaisesRegex(ValueError, "APP_VERSION"):
