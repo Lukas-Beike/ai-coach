@@ -8007,3 +8007,24 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   Gemini payload 5 tests, and training-patch 6 tests passed. Full Python suite:
   2,792 passed, 12 skipped. Docker build, Python compilation, inventory check,
   and `git diff --check` passed.
+
+
+## P10 RequestHandler implementation owner -- local review
+
+- Moved the 184-line `RequestHandler` implementation from `server.py` to
+  `backend/http_api/handler.py`. Its HTTP-specific dependencies are explicit in
+  `HttpRequestHandlerDependencies`; authentication/CSRF/maintenance order,
+  body limits, redaction, disconnect handling, route dispatch, and response
+  transport behavior are preserved.
+- Updated server tests and the disposable browser fixture to get the composed
+  handler from the application factory; no `server.RequestHandler` compatibility
+  export remains. Architecture tests inspect the backend-owned implementation.
+- `server.py` decreased from 2,984 to 2,814 physical lines and from 2,589 to
+  2,438 nonblank lines. The extraction plan now records that P11 remains open:
+  the former closeout checked allowed names but did not audit factory bodies or
+  the size of the construction graph.
+- Validation: full Python suite **2,798 passed, 12 skipped**; focused server suite
+  **496 passed, 3 skipped**; architecture tests **39 passed**; all five Playwright
+  viewport projects **255 passed** in the isolated fixture container;
+  `py_compile`, inventory `--check`, `git diff --check`, and Python 3.14 Docker
+  build passed.

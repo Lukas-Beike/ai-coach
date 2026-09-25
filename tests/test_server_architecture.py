@@ -20,12 +20,14 @@ BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 if not BACKEND_ROOT.is_dir():
     BACKEND_ROOT = Path.cwd() / "backend"
 SERVER_PATH = REPOSITORY_ROOT / "server.py"
+HANDLER_PATH = BACKEND_ROOT / "http_api" / "handler.py"
 
 
 # This is deliberately explicit.  These small, dependency-light helpers are
 # backend-owned implementations, not server callbacks or compatibility
 # wrappers, and must not be reintroduced in server.py.
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("backend.http_api.handler", ("HttpRequestHandlerDependencies", "RequestHandler", "create_request_handler")),
     ("backend.coach.final_receipt", ("CoachFinalReceiptService",)),
     ("backend.coach.conversation_recovery", ("CoachConversationRecoveryService",)),
     ("backend.coach.response_retry", ("CoachResponseRetryPolicy",)),
@@ -2125,6 +2127,13 @@ def _parse(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
+def _request_handler_definition() -> ast.ClassDef:
+    return next(
+        node for node in _parse(HANDLER_PATH).body
+        if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
+    )
+
+
 def _dotted_name(node: ast.AST) -> str | None:
     if isinstance(node, ast.Name):
         return node.id
@@ -2373,10 +2382,7 @@ class ServerArchitectureTests(unittest.TestCase):
 
     def test_request_handler_response_methods_only_delegate_socket_writes(self) -> None:
         server_tree = _parse(SERVER_PATH)
-        handler = next(
-            node for node in server_tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
-        )
+        handler = _request_handler_definition()
         delegated_methods = {
             "send_sse_headers": "send_sse_headers",
             "send_sse_event": "send_sse_event",
@@ -2395,28 +2401,25 @@ class ServerArchitectureTests(unittest.TestCase):
                     node for node in ast.walk(method)
                     if isinstance(node, ast.Call)
                     and ast.unparse(node.func)
-                    == f"HTTP_RESPONSE_TRANSPORT.{transport_method}"
+                    == f"self.dependencies.response_transport.{transport_method}"
                 ]
                 self.assertEqual(len(calls), 1)
 
     def test_post_handler_preserves_authentication_csrf_and_maintenance_order(self) -> None:
         server_tree = _parse(SERVER_PATH)
-        handler = next(
-            node for node in server_tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
-        )
+        handler = _request_handler_definition()
         post = next(
             node for node in handler.body
             if isinstance(node, ast.FunctionDef) and node.name == "do_POST"
         )
         source = ast.unparse(post)
         ordered_calls = (
-            "HTTP_POST_DISPATCHER.handle_before_auth",
+            "dependencies.post_dispatcher.handle_before_auth",
             "self.auth_service.require_auth",
             "self.auth_service.require_csrf",
-            "HTTP_POST_DISPATCHER.handle_before_maintenance",
-            "runtime_maintenance.MAINTENANCE_GATE.operation",
-            "HTTP_POST_DISPATCHER.handle_authenticated",
+            "dependencies.post_dispatcher.handle_before_maintenance",
+            "dependencies.maintenance_gate.operation",
+            "dependencies.post_dispatcher.handle_authenticated",
         )
         positions = [source.index(call) for call in ordered_calls]
         self.assertEqual(positions, sorted(positions))
@@ -2547,7 +2550,7 @@ class ServerArchitectureTests(unittest.TestCase):
             functions - ALLOWED_SERVER_FUNCTIONS,
             "New server.py functions belong in a backend owner module.",
         )
-        self.assertEqual({"RequestHandler"}, classes)
+        self.assertEqual(set(), classes)
 
     def test_browser_fixture_does_not_patch_removed_response_functions(self) -> None:
         fixture = REPOSITORY_ROOT / "e2e" / "fixture_runtime.py"
@@ -2569,11 +2572,7 @@ class ServerArchitectureTests(unittest.TestCase):
         self.assertIn("coach_response_transport", patched)
 
     def test_request_handler_does_not_reintroduce_state_event_orchestration(self) -> None:
-        request_handler = next(
-            node
-            for node in _parse(SERVER_PATH).body
-            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
-        )
+        request_handler = _request_handler_definition()
         methods = {
             node.name
             for node in request_handler.body
@@ -2592,11 +2591,7 @@ class ServerArchitectureTests(unittest.TestCase):
         forbidden_paths: tuple[str, ...] = (),
     ) -> ast.Module:
         server_tree = _parse(SERVER_PATH)
-        request_handler = next(
-            node
-            for node in server_tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
-        )
+        request_handler = _request_handler_definition()
         methods = {
             node.name
             for node in request_handler.body
@@ -2621,7 +2616,7 @@ class ServerArchitectureTests(unittest.TestCase):
         if method_must_be_absent:
             self.assertNotIn(old_method, methods)
         self.assertEqual(len(route_dispatches), 1)
-        self.assertIn("HTTP_ROUTE_DISPATCHER.handle_get", ast.unparse(get_handler))
+        self.assertIn("dependencies.route_dispatcher.handle_get", ast.unparse(get_handler))
         if forbidden_paths:
             old_method_node = next(
                 node
@@ -2731,17 +2726,17 @@ class ServerArchitectureTests(unittest.TestCase):
             self.assertTrue(route_nodes)
             self.assertTrue(dispatches)
             handler = next(
-                node for node in ast.walk(server_tree)
+                node for node in _request_handler_definition().body
                 if isinstance(node, ast.FunctionDef) and node.name == "do_POST"
             )
             nodes = list(ast.walk(handler))
             self.assertTrue(any(
                 isinstance(node, ast.Call)
-                and "HTTP_POST_DISPATCHER" in ast.unparse(node.func)
+                and "dependencies.post_dispatcher" in ast.unparse(node.func)
                 for node in nodes
             ))
         elif is_put_dispatch:
-            handler = next(node for node in ast.walk(server_tree) if isinstance(node, ast.FunctionDef) and node.name == handler_method)
+            handler = next(node for node in _request_handler_definition().body if isinstance(node, ast.FunctionDef) and node.name == handler_method)
             nodes = list(ast.walk(handler))
             dispatcher = next(
                 node for node in server_tree.body
@@ -2749,9 +2744,9 @@ class ServerArchitectureTests(unittest.TestCase):
                 and any(isinstance(target, ast.Name) and target.id == "HTTP_ROUTE_DISPATCHER" for target in node.targets)
             )
             route_nodes = [node for node in ast.walk(dispatcher.value) if isinstance(node, ast.Name) and node.id == route_name]
-            dispatches = [node for node in nodes if isinstance(node, ast.Call) and "HTTP_ROUTE_DISPATCHER.handle_put" in ast.unparse(node)]
+            dispatches = [node for node in nodes if isinstance(node, ast.Call) and "dependencies.route_dispatcher.handle_put" in ast.unparse(node)]
         else:
-            handler = next(node for node in ast.walk(server_tree) if isinstance(node, ast.FunctionDef) and node.name == handler_method)
+            handler = next(node for node in _request_handler_definition().body if isinstance(node, ast.FunctionDef) and node.name == handler_method)
             nodes = list(ast.walk(handler))
             route_nodes = [node for node in nodes if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == route_name and node.func.attr == "handle"]
             dispatches = route_nodes
@@ -2915,10 +2910,7 @@ class ServerArchitectureTests(unittest.TestCase):
 
     def test_chat_stream_lifecycle_is_owned_by_http_api_module(self) -> None:
         server_tree = _parse(SERVER_PATH)
-        handler = next(
-            node for node in server_tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
-        )
+        handler = _request_handler_definition()
         self.assertFalse(any(
             isinstance(node, ast.FunctionDef) and node.name == "handle_chat_stream"
             for node in handler.body
@@ -2992,10 +2984,7 @@ class ServerArchitectureTests(unittest.TestCase):
 
     def test_sync_command_post_transport_is_owned_by_http_api_module(self) -> None:
         server_tree = _parse(SERVER_PATH)
-        handler = next(
-            node for node in server_tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
-        )
+        handler = _request_handler_definition()
         self.assertFalse(any(
             isinstance(node, ast.FunctionDef) and node.name == "_handle_sync_post"
             for node in handler.body

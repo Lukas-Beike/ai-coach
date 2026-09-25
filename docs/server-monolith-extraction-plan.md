@@ -1,14 +1,17 @@
 # Plan: server.py vollständig in fachliche Backend-Module aufteilen
 
-Stand: 24.09.2026. P0–P11 integriert und abgenommen.
+Stand: 25.09.2026. Der fruehere P0-P11-Abschluss wurde nach einem erneuten
+Audit korrigiert. Die 244 abgehakten Punkte deckten nicht die Funktionskoerper
+und Groesse des Composition-Graphen ab; deshalb sind P10/P11 wieder offen.
 Historischer Ausgangscommit: `58e352d`. Die Architekturregel in der
-Root-`AGENTS.md` ist integriert. Aktuelle Commits und offene Befunde stehen
-im `docs/server-extraction-review-log.md`; das Inventar wird pro Stand erzeugt.
+Root-`AGENTS.md` ist integriert. Aktuelle Befunde stehen im
+`docs/server-extraction-review-log.md`; das Inventar wird pro Stand erzeugt.
 
-Aktueller Stand (24.09.2026): 244 von 244 markierten Punkten (100 %) sind
-abgeschlossen. `server.py` hat 2.984 physische Zeilen als Composition Root,
-HTTP-Adapter und Prozess-Einstiegspunkt. Der geprüfte Endstand und die
-Abnahmebefunde stehen im Review-Log.
+Ausgang `origin/develop` `a176dd6`: `server.py` hatte 2.984 physische und
+2.589 nichtleere Zeilen. 172 Top-Level-Funktionen belegten 1.837 Zeilen,
+davon etwa 155 Service-Fabriken. Die Architekturpruefung begrenzte Namen,
+pruefte aber weder Funktionskoerper noch die Groesse des Verdrahtungsgraphen.
+Dieser Stand ist keine abgeschlossene Composition Root.
 
 ## 1. Ziel und verbindliche Abnahmekriterien
 
@@ -823,6 +826,10 @@ Abhängigkeit: P3–P9; Route-Migration kann vorher für abgeschlossene Use Case
     Refresh-/Local-Only-Regel in `PublicWeatherStateService` verlagern.
 - [x] `RequestHandler`, Route-Dispatch, Body-Limits, statische Dateien und SSE
   transportseitig auslagern; vorhandene `requests.py`/`responses.py` nutzen.
+  - [x] Die verbleibende RequestHandler-Klasse mit GET/POST/PUT-Fehlergrenzen,
+    Authentisierungsreihenfolge, Body-Parsing und Transportdelegation nach
+    `backend/http_api/handler.py` verschieben; Laufzeitabhaengigkeiten werden
+    explizit in `HttpRequestHandlerDependencies` gebunden.
   - [x] Reihenfolge, 404-Grenze und statischen GET-Fallback sowie die PUT-
     Routenauswahl in `HttpRouteDispatcher` bündeln; Auth-/CSRF-/Maintenance-
     Reihenfolge und die äußere Request-Fehlergrenze bleiben beim Handler.
@@ -1042,12 +1049,13 @@ es gibt keine Datenmigration und keine Rücknahme durch Löschen von Nutzerdaten
 
 ## 8. Abschlussstand
 
-P10-Service-/Transportgrenzen und P11-Komposition, Restcode-Audit,
-Architekturprüfung und integrierte Abnahme sind abgeschlossen. Fachlogik,
-Provider-Aufrufe, Persistenz und Use-Case-Orchestrierung liegen in ihren
-Backend-Eigentümern; `server.py` enthält die geprüften Verdrahtungsfunktionen,
-HTTP-Adapter und den Start-/Shutdown-Einstiegspunkt.
+Der erneute Audit hat den vorherigen Abschluss widerlegt: `RequestHandler` war
+noch als 184-zeilige Klasse in `server.py` implementiert, und die erlaubte
+Funktionsliste liess grosse Service-Fabriken ohne Inhaltspruefung zu. Die
+HTTP-Klasse liegt jetzt in `backend/http_api/handler.py`; dies schliesst nur
+diese konkrete P10-Luecke.
 
-Die Architekturtests begrenzen neue Top-Level-Funktionen in `server.py`, prüfen
-Backend-Rückgriffe und eager Importzyklen. Der Inventargenerator bleibt für
-künftige Änderungen als reproduzierbare Regression verfügbar.
+P11 ist weiterhin offen. Die verbliebenen Service-Fabriken muessen auf
+Orchestrierung und versteckte Domain-Logik geprueft werden; danach werden
+Inventar, Architekturtests und Endabnahme erneut mit dem echten Diff abgeglichen.
+Zeilenzahl allein ist kein Abschlusskriterium.

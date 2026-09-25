@@ -108,6 +108,7 @@ from backend.providers import intervals_client as intervals_client_module
 from backend.providers.garmin import GarminClientFactory
 from backend.providers import garmin_morning
 from backend.http_api import server as http_server
+from backend.http_api.handler import HttpRequestHandlerDependencies, create_request_handler
 from backend.http_api.bootstrap_state import (
     PublicBootstrapDependencies,
     PublicBootstrapService,
@@ -2693,199 +2694,28 @@ HTTP_POST_DISPATCHER = HttpPostDispatcher(
 HTTP_RESPONSE_TRANSPORT = HttpResponseTransport()
 
 
-class RequestHandler(BaseHTTPRequestHandler):
-    server_version = f"IntervalsCoach/{APP_VERSION}"
-    client_disconnect_errors = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
-    static_asset_service: StaticAssetService
 
-    @property
-    def auth_service(self) -> SessionAuthService:
-        return session_auth_service()
 
-    def log_message(self, fmt: str, *args: Any) -> None:
-        LOGGER.info(
-            fmt % args,
-            extra={
-                "event": "http_access",
-                "context": {"method": self.command, "path": urlparse(self.path).path, "request_id": getattr(self, "request_id", None)},
-            },
+def request_handler_class() -> type[BaseHTTPRequestHandler]:
+    return create_request_handler(
+        HttpRequestHandlerDependencies(
+            app_version=APP_VERSION,
+            logger=LOGGER,
+            session_auth_service=session_auth_service,
+            route_dispatcher=HTTP_ROUTE_DISPATCHER,
+            post_dispatcher=HTTP_POST_DISPATCHER,
+            response_transport=HTTP_RESPONSE_TRANSPORT,
+            maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+            redact_text=REDACTOR.redact_text,
+            public_app_error_status=public_app_error_status,
+            internal_server_error=INTERNAL_SERVER_ERROR,
+            max_body_bytes=MAX_BODY_BYTES,
+            max_audio_body_bytes=MAX_AUDIO_BODY_BYTES,
+            voice_audio_types=audio_provider.VOICE_AUDIO_TYPES,
+            normalize_audio_type=audio_provider.normalized_audio_type,
+            static_asset_service=StaticAssetService(PUBLIC_DIR),
         )
-
-    def setup(self) -> None:
-        super().setup()
-        self.connection.settimeout(20)
-
-    def log_client_disconnect(self) -> None:
-        context = {
-            "method": self.command,
-            "path": urlparse(self.path).path,
-            "request_id": getattr(self, "request_id", None),
-        }
-        for attribute, key in (("_response_status", "response_status"), ("_response_bytes", "response_bytes"), ("_response_error_type", "error_type")):
-            value = getattr(self, attribute, None)
-            if value is not None:
-                context[key] = value
-        started = getattr(self, "_response_started_at", None)
-        if started is not None:
-            context["response_duration_ms"] = round((time.perf_counter() - started) * 1000, 1)
-        LOGGER.info(
-            "HTTP client disconnected before response completed",
-            extra={
-                "event": "http_client_disconnected",
-                "context": context,
-            },
-        )
-
-    def do_GET(self) -> None:
-        self.request_id = uuid.uuid4().hex[:12]
-        try:
-            path = urlparse(self.path).path
-            HTTP_ROUTE_DISPATCHER.handle_get(self, path)
-        except AppError as exc:
-            if exc.status >= 500:
-                LOGGER.exception(
-                    exc.message,
-                    extra={"event": "http_app_error", "context": {"method": "GET", "path": self.path, "status": exc.status, "request_id": self.request_id}},
-                    exc_info=True,
-                )
-            self.send_json(public_app_error_status(exc), {"error": REDACTOR.redact_text(exc.message)[:1000]})
-        except Exception:
-            LOGGER.exception(
-                "Unhandled GET error",
-                extra={"event": "http_unhandled_error", "context": {"method": "GET", "path": self.path, "request_id": self.request_id}},
-                exc_info=True,
-            )
-            self.send_json(500, {"error": INTERNAL_SERVER_ERROR})
-
-    def do_POST(self) -> None:
-        self.request_id = uuid.uuid4().hex[:12]
-        try:
-            path = urlparse(self.path).path
-            if HTTP_POST_DISPATCHER.handle_before_auth(self, path):
-                return
-            session = self.auth_service.require_auth(self)
-            self.auth_service.require_csrf(self, session)
-            if HTTP_POST_DISPATCHER.handle_before_maintenance(self, path, session):
-                return
-            with runtime_maintenance.MAINTENANCE_GATE.operation():
-                HTTP_POST_DISPATCHER.handle_authenticated(self, path, session)
-        except AppError as exc:
-            if exc.status >= 500:
-                LOGGER.exception(
-                    exc.message,
-                    extra={"event": "http_app_error", "context": {"method": "POST", "path": self.path, "status": exc.status, "request_id": self.request_id}},
-                    exc_info=True,
-                )
-            status = public_app_error_status(exc)
-            headers = {"WWW-Authenticate": "Session"} if status == 401 else None
-            self.send_json(status, {"error": REDACTOR.redact_text(exc.message)[:1000]}, headers)
-        except Exception:
-            LOGGER.exception(
-                "Unhandled POST error",
-                extra={"event": "http_unhandled_error", "context": {"method": "POST", "path": self.path, "request_id": self.request_id}},
-                exc_info=True,
-            )
-            self.send_json(500, {"error": INTERNAL_SERVER_ERROR})
-
-    def send_sse_headers(self, *, persistent: bool = True) -> None:
-        HTTP_RESPONSE_TRANSPORT.send_sse_headers(self, persistent=persistent)
-
-    def send_sse_event(self, event: str, payload: Any, event_id: int | None = None) -> None:
-        HTTP_RESPONSE_TRANSPORT.send_sse_event(self, event, payload, event_id)
-
-    def do_PUT(self) -> None:
-        try:
-            with runtime_maintenance.MAINTENANCE_GATE.operation():
-                self._do_PUT()
-        except AppError as exc:
-            self.send_json(public_app_error_status(exc), {"error": REDACTOR.redact_text(exc.message)[:1000]})
-
-    def _do_PUT(self) -> None:
-        self.request_id = uuid.uuid4().hex[:12]
-        try:
-            path = urlparse(self.path).path
-            session = self.auth_service.require_auth(self)
-            self.auth_service.require_csrf(self, session)
-            HTTP_ROUTE_DISPATCHER.handle_put(self, path)
-        except AppError as exc:
-            if exc.status >= 500:
-                LOGGER.exception(
-                    exc.message,
-                    extra={"event": "http_app_error", "context": {"method": "PUT", "path": self.path, "status": exc.status, "request_id": self.request_id}},
-                    exc_info=True,
-                )
-            self.send_json(public_app_error_status(exc), {"error": REDACTOR.redact_text(exc.message)[:1000]})
-        except Exception:
-            LOGGER.exception(
-                "Unhandled PUT error",
-                extra={"event": "http_unhandled_error", "context": {"method": "PUT", "path": self.path, "request_id": self.request_id}},
-                exc_info=True,
-            )
-            self.send_json(500, {"error": INTERNAL_SERVER_ERROR})
-
-    def read_body(self, max_bytes: int = MAX_BODY_BYTES) -> bytes:
-        return read_request_body(
-            self.headers,
-            self.rfile.read,
-            max_bytes,
-            error=AppError,
-            too_large_status_threshold=MAX_BODY_BYTES,
-        )
-
-    def read_audio_body(self) -> bytes:
-        return read_request_audio_body(
-            self.headers,
-            self.rfile.read,
-            allowed_types=audio_provider.VOICE_AUDIO_TYPES,
-            normalize_type=audio_provider.normalized_audio_type,
-            max_bytes=MAX_AUDIO_BODY_BYTES,
-            error=AppError,
-        )
-
-    def read_json(self, max_bytes: int = MAX_BODY_BYTES) -> dict[str, Any]:
-        return read_request_json(
-            self.headers,
-            self.rfile.read,
-            max_bytes,
-            error=AppError,
-            too_large_status_threshold=MAX_BODY_BYTES,
-        )
-
-    def send_json(self, status: int, payload: Any, headers: dict[str, str | list[str]] | None = None) -> None:
-        HTTP_RESPONSE_TRANSPORT.send_json(self, status, payload, headers)
-
-    def send_file_stream(
-        self,
-        path: Path,
-        content_type: str,
-        filename: str,
-        *,
-        deadline: float | None = None,
-        cleanup: bool = False,
-    ) -> None:
-        HTTP_RESPONSE_TRANSPORT.send_file_stream(
-            self,
-            path,
-            content_type,
-            filename,
-            deadline=deadline,
-            cleanup=cleanup,
-        )
-
-    def send_bytes(self, status: int, data: bytes, content_type: str, headers: dict[str, str | list[str]] | None = None) -> None:
-        HTTP_RESPONSE_TRANSPORT.send_bytes(self, status, data, content_type, headers)
-
-    def send_static(self, path: str) -> None:
-        HTTP_RESPONSE_TRANSPORT.send_static(self, path)
-
-
-def request_handler_class() -> type[RequestHandler]:
-    static_assets = StaticAssetService(PUBLIC_DIR)
-
-    class ComposedRequestHandler(RequestHandler):
-        static_asset_service = static_assets
-
-    return ComposedRequestHandler
+    )
 
 
 def daily_sync_loop_service() -> DailySyncLoop:

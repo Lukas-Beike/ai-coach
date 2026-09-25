@@ -21,7 +21,7 @@ class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
         }
 
     def test_http_route_only_reads_body_and_delegates_with_session(self):
-        handler = object.__new__(server.RequestHandler)
+        handler = object.__new__(server.request_handler_class())
         handler.read_json = Mock(return_value=self.payload())
         handler.send_json = Mock()
         service = Mock()
