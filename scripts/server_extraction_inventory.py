@@ -214,6 +214,8 @@ def _explicit_owner(name: str) -> str | None:
             "SESSION_AUTH_SERVICE_CACHE": HTTP_AUTH,
             "SessionAuthServiceCache": HTTP_AUTH,
             "RATE_LIMITER": HTTP_AUTH,
+            "PROVIDER_STATE_SERVICE_CACHE": "providers/state.py",
+            "ProviderStateServiceCache": "providers/state.py",
             "key_value_service": COMPOSITION_ROOT,
             "initialise_database": "db/bootstrap.py",
             "checkin_service": COMPOSITION_ROOT,

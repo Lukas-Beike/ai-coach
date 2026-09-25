@@ -8123,3 +8123,10 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Independently reviewed module initialization and callers: the owner import is inert, no second limiter is created, and rate-limit policy, bucket cleanup, session auth, and HTTP behavior are unchanged. The architecture regression verifies both ownership and the composition-root import.
 - Regenerated the server inventory and updated the P11 ownership checklist. `server.py` no longer constructs or owns rate-limit state.
 - Validation: full native suite **2,815 tests passed, 12 skipped**; focused session-cache, provider, HTTP, and architecture suites passed; compilation, inventory `--check`, and `git diff --check` passed. SQLCipher-only tests remain skipped by the native Windows environment.
+
+## P16 Provider-state cache ownership — local review
+
+- Moved the `ProviderStateService` cache and replacement signature into `backend/providers/state.py`. The cache binds instances to the active database manager, repository, and synchronization lock; `server.py` now only supplies those concrete dependencies.
+- Removed provider-state cache invalidation from `reset_provider_runtime()`. A manager or lock change causes the owner cache to construct a service for the new dependencies. Updated the HTTP concurrency test to exercise this lookup path without patching removed server state.
+- Independently reviewed manager replacement, cache synchronization, and provider-state consumers. Existing usage, status, and rate-limit persistence transactions remain in `ProviderStateService`; no I/O was added to cache construction. Architecture tests prohibit reintroducing the cache into `server.py`.
+- Validation: full native suite **2,816 tests passed, 12 skipped**; focused database (44, 3 skipped), HTTP (67), provider (48), and architecture (44) suites passed; Python compilation, inventory `--check`, and `git diff --check` passed. SQLCipher-only tests remain skipped by the native Windows environment.

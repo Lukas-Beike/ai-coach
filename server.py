@@ -432,7 +432,6 @@ SNAPSHOT_REPOSITORY = SnapshotRepository()
 
 
 DATABASE_MANAGER_CACHE = DatabaseManagerCache()
-PROVIDER_STATE_SERVICE: provider_state.ProviderStateService | None = None
 PROVIDER_HTTP_CLIENT: provider_http.JsonHttpClient | None = None
 PROVIDER_REFRESH_TRACKER: ProviderRefreshTracker | None = None
 WEATHER_SERVICE: WeatherService | None = None
@@ -448,11 +447,10 @@ GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
 
 
 def reset_provider_runtime() -> None:
-    global PROVIDER_HTTP_CLIENT, PROVIDER_REFRESH_TRACKER, PROVIDER_STATE_SERVICE
+    global PROVIDER_HTTP_CLIENT, PROVIDER_REFRESH_TRACKER
     global WEATHER_SERVICE, MORNING_BODY_BATTERY_SERVICE, MORNING_BODY_BATTERY_CONFIG_ID
     PROVIDER_HTTP_CLIENT = None
     PROVIDER_REFRESH_TRACKER = None
-    PROVIDER_STATE_SERVICE = None
     WEATHER_SERVICE = None
     MORNING_BODY_BATTERY_SERVICE = None
     MORNING_BODY_BATTERY_CONFIG_ID = None
@@ -491,18 +489,14 @@ def session_auth_service() -> SessionAuthService:
 
 def provider_state_service() -> provider_state.ProviderStateService:
     """Return provider observability state bound to the active database manager."""
-    global PROVIDER_STATE_SERVICE
-    manager = database_manager()
-    if PROVIDER_STATE_SERVICE is None:
-        PROVIDER_STATE_SERVICE = provider_state.ProviderStateService(
-            manager,
-            KEY_VALUE_REPOSITORY,
-            DB_LOCK,
-            utc_now,
-            lambda: ATHLETE_CLOCK.now().date(),
-            LOGGER,
-        )
-    return PROVIDER_STATE_SERVICE
+    return provider_state.PROVIDER_STATE_SERVICE_CACHE.get(
+        database_manager(),
+        KEY_VALUE_REPOSITORY,
+        DB_LOCK,
+        utc_now,
+        lambda: ATHLETE_CLOCK.now().date(),
+        LOGGER,
+    )
 
 
 def provider_refresh_tracker() -> ProviderRefreshTracker:

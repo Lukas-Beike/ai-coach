@@ -63,6 +63,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
     ("backend.http_api.auth", ("SessionAuthServiceCache",)),
+    ("backend.providers.state", ("ProviderStateServiceCache",)),
     ("backend.coach.conversation", ("CoachConversationHistoryService",)),
     ("backend.http_api.post_dispatch", ("HttpAuthenticatedPostRoutes", "HttpPostDispatcher")),
     ("backend.http_api.response_transport", ("HttpResponseTransport",)),
@@ -2128,7 +2129,6 @@ SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
     {
         "database_manager",
         "session_auth_service",
-        "provider_state_service",
         "provider_refresh_tracker",
         "weather_service",
         "morning_body_battery_service",
@@ -2657,6 +2657,32 @@ class ServerArchitectureTests(unittest.TestCase):
             and any(alias.name == "RATE_LIMITER" for alias in node.names)
             for node in server_tree.body
         ))
+
+    def test_provider_state_service_cache_is_owned_by_provider_state(self) -> None:
+        state_tree = _parse(BACKEND_ROOT / "providers" / "state.py")
+        self.assertTrue(any(
+            isinstance(node, ast.ClassDef) and node.name == "ProviderStateServiceCache"
+            for node in state_tree.body
+        ))
+        server_tree = _parse(SERVER_PATH)
+        server_assignments = {
+            target.id
+            for node in server_tree.body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            if isinstance(target, ast.Name)
+        }
+        self.assertNotIn("PROVIDER_STATE_SERVICE", server_assignments)
+        service_factory = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "provider_state_service"
+        )
+        self.assertIn(
+            "provider_state.PROVIDER_STATE_SERVICE_CACHE.get",
+            ast.unparse(service_factory),
+        )
 
     def test_server_composition_bodies_do_not_own_domain_or_io_logic(self) -> None:
         tree = _parse(SERVER_PATH)
