@@ -974,6 +974,8 @@ Abhängigkeit: alle vorigen Phasen.
 - [x] Den `ProviderRefreshTracker`-Cache nach `backend/sync/refresh.py`
   verlagern und an Datenbankmanager, Event-Puffer sowie Retry- und Retention-
   Konfiguration binden.
+- [x] Den JSON-HTTP-Client-Cache an `backend/providers/http.py` binden und bei
+  Wechsel des Provider-State-Services einen transportseitigen Client erzeugen.
 - [x] Inventar neu erzeugen und mit `--check` abgleichen; alle verbleibenden
   Top-Level-Funktionen und ihre statischen Aufrufer prüfen. Es gibt keine
   unzugeordneten P0-Symbole oder unaufgerufenen server-Funktionen.

@@ -56,6 +56,7 @@ class ServerDatabaseTests(ServerTestCase):
     def test_provider_state_service_is_recreated_with_database_manager(self):
         first = server.provider_state_service()
         first_http_client = server.provider_http_client()
+        self.assertIs(server.provider_http_client(), first_http_client)
         first_refresh_tracker = server.provider_refresh_tracker()
         first_weather_service = server.weather_service()
         server.DATABASE_MANAGER_CACHE.reset()

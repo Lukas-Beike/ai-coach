@@ -433,7 +433,6 @@ SNAPSHOT_REPOSITORY = SnapshotRepository()
 
 
 DATABASE_MANAGER_CACHE = DatabaseManagerCache()
-PROVIDER_HTTP_CLIENT: provider_http.JsonHttpClient | None = None
 WEATHER_SERVICE: WeatherService | None = None
 MORNING_BODY_BATTERY_SERVICE: MorningBodyBatteryService | None = None
 MORNING_BODY_BATTERY_CONFIG_ID: int | None = None
@@ -447,9 +446,7 @@ GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
 
 
 def reset_provider_runtime() -> None:
-    global PROVIDER_HTTP_CLIENT
     global WEATHER_SERVICE, MORNING_BODY_BATTERY_SERVICE, MORNING_BODY_BATTERY_CONFIG_ID
-    PROVIDER_HTTP_CLIENT = None
     WEATHER_SERVICE = None
     MORNING_BODY_BATTERY_SERVICE = None
     MORNING_BODY_BATTERY_CONFIG_ID = None
@@ -1637,22 +1634,18 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
 
 def provider_http_client() -> provider_http.JsonHttpClient:
     """Return the observed JSON client bound to the active provider state."""
-    global PROVIDER_HTTP_CLIENT
-    state = provider_state_service()
-    if PROVIDER_HTTP_CLIENT is None or PROVIDER_HTTP_CLIENT.provider_state is not state:
-        PROVIDER_HTTP_CLIENT = provider_http.JsonHttpClient(
-            APP_VERSION,
-            provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
-            LOGGER,
-            DIAGNOSTIC_CAPTURE,
-            state,
-            REDACTOR.redact_text,
-            partial(observability.safe_response_headers, redact=REDACTOR.redact_text),
-            utc_now,
-            sync_observation.operation_context,
-            opener=provider_http.urlopen,
-        )
-    return PROVIDER_HTTP_CLIENT
+    return provider_http.JSON_HTTP_CLIENT_CACHE.get(
+        APP_VERSION,
+        provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
+        LOGGER,
+        DIAGNOSTIC_CAPTURE,
+        provider_state_service(),
+        REDACTOR.redact_text,
+        partial(observability.safe_response_headers, redact=REDACTOR.redact_text),
+        utc_now,
+        sync_observation.operation_context,
+        opener=provider_http.urlopen,
+    )
 
 
 def intervals_client(config: Config | None = None) -> intervals_client_module.IntervalsClient:
