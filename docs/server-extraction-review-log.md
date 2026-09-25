@@ -8035,4 +8035,12 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Added an AST guard for composition-root function bodies. It permits control flow only in the explicit cache, resource, startup, and lifecycle allowlist, and rejects direct SQL, provider-request, and file-read/write calls.
 - Migrated tests and the browser fixture to patch/use the clock at its owner. The generated inventory now assigns `ATHLETE_CLOCK` to `backend/athlete/clock.py`; no P0 symbols remain.
 - Validation on this P11 tree: Python 3.14 container suite 2,802 tests, 11 skipped; architecture tests 40 passed; desktop Playwright 51 passed in an isolated fixture container; Docker build, syntax compilation, inventory `--check`, and `git diff --check` passed. The native Windows suite ran 2,802 tests but two SQLCipher-dependent cases could not start because the Windows wheel is intentionally unavailable; both passed in the container suite.
-- P11 is validated locally. Its integration follows the merged P10 RequestHandler PR.
+- PR #819 was squash-merged into `develop` at `578695e69a1480169f74395b67edb64038d638f6` on 2026-09-25. All CI checks except the explicit Codex review gate passed; the gate was bypassed as user-authorized without posting `@codex`, and the PR has no review threads.
+
+## Server extraction P0-P11 — merged closeout
+
+- PR #818 moved `RequestHandler` into `backend/http_api/handler.py` and was squash-merged on 2026-09-25 as `04b877c46e1a58bff1e003c827c9d976cb24305a`.
+- PR #819 moved athlete-local time ownership into `backend/athlete/clock.py`, audited composition-root bodies, and was squash-merged on 2026-09-25 as `578695e69a1480169f74395b67edb64038d638f6`. Both merge commits are in `develop` ancestry; review-thread lists are empty.
+- Required test, CodeQL, Sonar, quality, syntax, SBOM, and five-project browser checks passed for PR #819. The only failure was the explicit Codex review gate; it was bypassed as user-authorized without posting an `@codex` request.
+- Final `server.py`: 2,809 physical lines and 2,433 nonblank lines, down from the previously recorded 2,589 nonblank lines. Remaining code is audited configuration, dependency construction, shared process resources, and startup/shutdown wiring; no LOC target was imposed.
+- Final validation: Python 3.14 full suite 2,802 tests (11 skipped), 40 architecture tests, 51 local desktop browser tests, five CI viewport projects, Docker build, syntax compilation, inventory `--check`, and `git diff --check` passed.
