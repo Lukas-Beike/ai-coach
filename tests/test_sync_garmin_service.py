@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import tempfile
 import threading
 import unittest
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from backend.config import Config
 from backend.errors import AppError
 from backend.sync.garmin_service import (
+    GarminMorningRemoteReader,
     GarminRemoteReader,
     GarminSyncCoordination,
     GarminSyncLifecycleState,
@@ -130,31 +132,32 @@ class _RemoteReader:
 
 
 def _config(**changes) -> Config:
-    return replace(
-        Config(
-            port=8080,
-            openai_api_key="",
-            openai_base_url="",
-            openai_model="",
-            gemini_api_key="",
-            gemini_model="",
-            ai_provider="openai",
-            intervals_api_key="",
-            intervals_athlete_id="",
-            garmin_email="",
-            garmin_password="",
-            garmin_tokenstore="",
-            garmin_fixture_path="",
-            calendar_ical_url="",
-            app_password="",
-            secure_cookies=False,
-            data_retention_days=30,
-        ),
-        garmin_email="athlete@example.invalid",
-        garmin_password="secret",
-        garmin_tokenstore="missing-tokenstore",
-        **changes,
+    config = Config(
+        port=8080,
+        openai_api_key="",
+        openai_base_url="",
+        openai_model="",
+        gemini_api_key="",
+        gemini_model="",
+        ai_provider="openai",
+        intervals_api_key="",
+        intervals_athlete_id="",
+        garmin_email="",
+        garmin_password="",
+        garmin_tokenstore="",
+        garmin_fixture_path="",
+        calendar_ical_url="",
+        app_password="",
+        secure_cookies=False,
+        data_retention_days=30,
     )
+    overrides = {
+        "garmin_email": "athlete@example.invalid",
+        "garmin_password": "secret",
+        "garmin_tokenstore": "missing-tokenstore",
+    }
+    overrides.update(changes)
+    return replace(config, **overrides)
 
 
 class GarminSyncServiceTests(unittest.TestCase):
@@ -438,6 +441,111 @@ class GarminRemoteReaderTests(unittest.TestCase):
             reader.fetch(1, None, status=Mock(), cancel_event=cancelled)
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         call.assert_not_called()
+
+
+class GarminMorningRemoteReaderTests(unittest.TestCase):
+    def make_reader(self, config=None, factory=None):
+        self.config = config or _config()
+        self.factory = factory or Mock()
+        self.client = Mock()
+        self.factory.create.return_value = self.client
+        self.profile = Mock()
+        self.profile.get.return_value = {"timezone": "Europe/Berlin"}
+        self.clock = Mock()
+        self.clock.now.return_value = datetime(
+            2026, 9, 4, 6, 0, tzinfo=timezone.utc
+        )
+        self.diagnostic_capture = object()
+        self.logger = Mock()
+        return GarminMorningRemoteReader(
+            self.config,
+            self.factory,
+            self.profile,
+            self.clock,
+            self.diagnostic_capture,
+            self.logger,
+        )
+
+    def test_configuration_requires_available_client_and_email_or_tokenstore(self):
+        factory = Mock()
+        factory.available.return_value = True
+        reader = self.make_reader(factory=factory)
+        self.assertTrue(reader.configured())
+
+        with tempfile.TemporaryDirectory() as directory:
+            missing_tokenstore = Path(directory) / "missing"
+            factory.available.return_value = False
+            reader = self.make_reader(
+                config=_config(
+                    garmin_email="", garmin_tokenstore=str(missing_tokenstore)
+                ),
+                factory=factory,
+            )
+            self.assertFalse(reader.configured())
+
+            tokenstore = Path(directory) / "tokens"
+            tokenstore.touch()
+            factory.available.return_value = True
+            reader = self.make_reader(
+                config=_config(garmin_email="", garmin_tokenstore=str(tokenstore)),
+                factory=factory,
+            )
+            self.assertTrue(reader.configured())
+
+    def test_fetch_uses_current_profile_zone_and_redacted_operation_transport(self):
+        reader = self.make_reader()
+        expected = ({"sleep": True}, [{"value": 70}])
+        with (
+            patch(
+                "backend.sync.garmin_service.garmin_morning.fetch_morning_body_battery",
+                return_value=expected,
+            ) as fetch,
+            patch(
+                "backend.sync.garmin_service.provider_http.external_call",
+                return_value="safe-result",
+            ) as external_call,
+            patch(
+                "backend.sync.garmin_service.operation_context",
+                return_value={"operation_id": "op-1", "trigger": "manual"},
+            ),
+        ):
+            result = reader.fetch(date(2026, 9, 4))
+            self.assertEqual(result, expected)
+            self.assertEqual(
+                fetch.call_args.args[:2],
+                (self.client, date(2026, 9, 4)),
+            )
+            self.assertEqual(
+                fetch.call_args.kwargs["profile_timezone"], "Europe/Berlin"
+            )
+            self.assertEqual(
+                fetch.call_args.kwargs["fallback_zone"], timezone.utc
+            )
+            self.assertIs(fetch.call_args.kwargs["external_call"].__self__, reader)
+            self.assertEqual(
+                fetch.call_args.kwargs["sleep_bounds"].__module__,
+                "backend.performance.morning_battery",
+            )
+            self.assertEqual(
+                fetch.call_args.kwargs["external_call"](
+                    "garmin", "morning_sleep", lambda: None, {"date": "2026-09-04"}
+                ),
+                "safe-result",
+            )
+
+        self.factory.create.assert_called_once_with(
+            "athlete@example.invalid", "secret"
+        )
+        self.profile.get.assert_called_once_with()
+        external_call.assert_called_once()
+        self.assertIs(
+            external_call.call_args.kwargs["diagnostic_capture"],
+            self.diagnostic_capture,
+        )
+        self.assertEqual(
+            external_call.call_args.kwargs["operation_context"],
+            {"operation_id": "op-1", "trigger": "manual"},
+        )
 
 
 if __name__ == "__main__":

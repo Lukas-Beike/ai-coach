@@ -2573,6 +2573,32 @@ class ServerArchitectureTests(unittest.TestCase):
         )
         self.assertEqual(set(), classes)
 
+    def test_morning_battery_source_uses_backend_garmin_reader_instance(self) -> None:
+        tree = _parse(SERVER_PATH)
+        factory = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "morning_body_battery_service"
+        )
+        source = next(
+            node
+            for node in ast.walk(factory)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "MorningBatterySource"
+        )
+
+        self.assertIsInstance(source.args[1], ast.Call)
+        self.assertIsInstance(source.args[1].func, ast.Name)
+        self.assertEqual(source.args[1].func.id, "GarminMorningRemoteReader")
+        self.assertNotIn("fetch_morning_body_battery", ast.unparse(factory))
+        self.assertNotIn("provider_http.external_call", ast.unparse(factory))
+        reader = (BACKEND_ROOT / "sync" / "garmin_service.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("class GarminMorningRemoteReader:", reader)
+
     def test_server_composition_bodies_do_not_own_domain_or_io_logic(self) -> None:
         tree = _parse(SERVER_PATH)
         functions = {

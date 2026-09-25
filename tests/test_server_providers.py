@@ -22,6 +22,20 @@ from support import build_gemini_request_payload
 
 class ServerProvidersTests(ServerTestCase):
 
+    def test_morning_recovery_service_is_shared_and_recomposed_for_config(self):
+        original = server.morning_body_battery_service()
+        self.assertIs(original, server.morning_body_battery_service())
+
+        updated_config = replace(
+            server.CONFIG, garmin_email="updated-test@example.invalid"
+        )
+        with patch.object(server, "CONFIG", updated_config):
+            updated = server.morning_body_battery_service()
+            self.assertIsNot(updated, original)
+            self.assertIs(updated, server.morning_body_battery_service())
+
+        self.assertIsNot(server.morning_body_battery_service(), updated)
+
     def test_persisted_job_is_revalidated_before_provider_dispatch(self):
         with patch.object(server.GarminSyncService, "sync") as sync:
             with self.assertRaises(server.AppError) as raised:

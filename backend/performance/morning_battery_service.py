@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, Protocol
 
 from backend.performance import garmin_projection, morning_battery
 from backend.providers.garmin_morning import merge_garmin_records
@@ -112,26 +112,32 @@ class MorningBatteryStore:
         return value if isinstance(value, dict) else {}
 
 
+class MorningBatteryRemoteSource(Protocol):
+    """Expose configured Garmin reads to the morning recovery workflow."""
+
+    def configured(self) -> bool: ...
+
+    def fetch(self, checkin_date: date) -> tuple[Any, Any]: ...
+
+
 class MorningBatterySource:
     """Own fixture and Garmin reads, including safe provider error rendering."""
 
     def __init__(
         self,
         fixture_loader: Any,
-        remote_configured: Callable[[], bool],
-        fetch_remote: Callable[[date], tuple[Any, Any]],
+        remote_reader: MorningBatteryRemoteSource,
         safe_error: Callable[[Exception], Any],
     ) -> None:
         self._fixture_loader = fixture_loader
-        self._remote_configured = remote_configured
-        self._fetch_remote = fetch_remote
+        self._remote_reader = remote_reader
         self._safe_error = safe_error
 
     def fixture_available(self) -> bool:
         return self._fixture_loader.path() is not None
 
     def configured(self) -> bool:
-        return self._remote_configured()
+        return self._remote_reader.configured()
 
     def fetch(self, checkin_date: date) -> tuple[Any, Any]:
         if self.fixture_available():
@@ -148,7 +154,7 @@ class MorningBatterySource:
         return self.fetch_remote(checkin_date)
 
     def fetch_remote(self, checkin_date: date) -> tuple[Any, Any]:
-        return self._fetch_remote(checkin_date)
+        return self._remote_reader.fetch(checkin_date)
 
     def safe_provider_error(self, error: Exception) -> Any:
         return self._safe_error(error)
