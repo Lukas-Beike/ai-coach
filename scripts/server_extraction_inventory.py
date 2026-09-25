@@ -218,6 +218,8 @@ def _explicit_owner(name: str) -> str | None:
             "ProviderStateServiceCache": "providers/state.py",
             "PROVIDER_REFRESH_TRACKER_CACHE": SYNC_REFRESH,
             "ProviderRefreshTrackerCache": SYNC_REFRESH,
+            "JSON_HTTP_CLIENT_CACHE": PROVIDER_HTTP,
+            "JsonHttpClientCache": PROVIDER_HTTP,
             "key_value_service": COMPOSITION_ROOT,
             "initialise_database": "db/bootstrap.py",
             "checkin_service": COMPOSITION_ROOT,

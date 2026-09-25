@@ -65,6 +65,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.http_api.auth", ("SessionAuthServiceCache",)),
     ("backend.providers.state", ("ProviderStateServiceCache",)),
     ("backend.sync.refresh", ("ProviderRefreshTrackerCache",)),
+    ("backend.providers.http", ("JsonHttpClientCache",)),
     ("backend.coach.conversation", ("CoachConversationHistoryService",)),
     ("backend.http_api.post_dispatch", ("HttpAuthenticatedPostRoutes", "HttpPostDispatcher")),
     ("backend.http_api.response_transport", ("HttpResponseTransport",)),
@@ -2134,7 +2135,6 @@ SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
         "morning_body_battery_service",
         "sync_job_worker",
         "initialise_database",
-        "provider_http_client",
         "public_state_service",
         "main",
     }
@@ -2708,6 +2708,32 @@ class ServerArchitectureTests(unittest.TestCase):
         )
         self.assertIn(
             "sync_refresh.PROVIDER_REFRESH_TRACKER_CACHE.get",
+            ast.unparse(service_factory),
+        )
+
+    def test_provider_http_client_cache_is_owned_by_provider_transport(self) -> None:
+        transport_tree = _parse(BACKEND_ROOT / "providers" / "http.py")
+        self.assertTrue(any(
+            isinstance(node, ast.ClassDef) and node.name == "JsonHttpClientCache"
+            for node in transport_tree.body
+        ))
+        server_tree = _parse(SERVER_PATH)
+        server_assignments = {
+            target.id
+            for node in server_tree.body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            if isinstance(target, ast.Name)
+        }
+        self.assertNotIn("PROVIDER_HTTP_CLIENT", server_assignments)
+        service_factory = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "provider_http_client"
+        )
+        self.assertIn(
+            "provider_http.JSON_HTTP_CLIENT_CACHE.get",
             ast.unparse(service_factory),
         )
 
