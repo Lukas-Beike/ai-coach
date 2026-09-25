@@ -962,6 +962,9 @@ Abhängigkeit: alle vorigen Phasen.
   Provider-Patches liegen bei den Provider-Modulen; verbliebene Konfigurations-,
   Datenbank- und Service-Fabrik-Patches testen isolierte Composition-Root-
   Integrationen.
+- [x] Den Cache und die Konfigurationssignatur des Session-Auth-Services nach
+  `backend/http_api/auth.py` verlagern. `server.py` behÃ¤lt die konkrete
+  Konstruktion aus aktivem DB-Manager, Lock und Sicherheitskonfiguration.
 - [x] Inventar neu erzeugen und mit `--check` abgleichen; alle verbleibenden
   Top-Level-Funktionen und ihre statischen Aufrufer prüfen. Es gibt keine
   unzugeordneten P0-Symbole oder unaufgerufenen server-Funktionen.

@@ -131,7 +131,7 @@ from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
-from backend.http_api.auth import SessionAuthService
+from backend.http_api.auth import SESSION_AUTH_SERVICE_CACHE, SessionAuthService
 from backend.http_api.public_performance import (
     PublicFeedbackStateService,
     PublicPerformanceStateService,
@@ -430,8 +430,6 @@ SNAPSHOT_REPOSITORY = SnapshotRepository()
 
 
 DATABASE_MANAGER_CACHE = DatabaseManagerCache()
-SESSION_AUTH_SERVICE: SessionAuthService | None = None
-SESSION_AUTH_SIGNATURE: tuple[Any, Config, bool] | None = None
 PROVIDER_STATE_SERVICE: provider_state.ProviderStateService | None = None
 PROVIDER_HTTP_CLIENT: provider_http.JsonHttpClient | None = None
 PROVIDER_REFRESH_TRACKER: ProviderRefreshTracker | None = None
@@ -483,16 +481,10 @@ def database_manager() -> DatabaseManager:
 
 def session_auth_service() -> SessionAuthService:
     """Compose the HTTP session owner from the active persistence and security configuration."""
-    global SESSION_AUTH_SERVICE, SESSION_AUTH_SIGNATURE
     with DB_LOCK:
-        manager = database_manager()
-        signature = (manager, CONFIG, SQLCIPHER_AVAILABLE)
-        if SESSION_AUTH_SERVICE is None or SESSION_AUTH_SIGNATURE != signature:
-            SESSION_AUTH_SERVICE = SessionAuthService(
-                manager, DB_LOCK, CONFIG, SQLCIPHER_AVAILABLE, RATE_LIMITER
-            )
-            SESSION_AUTH_SIGNATURE = signature
-        return SESSION_AUTH_SERVICE
+        return SESSION_AUTH_SERVICE_CACHE.get(
+            database_manager(), DB_LOCK, CONFIG, SQLCIPHER_AVAILABLE, RATE_LIMITER
+        )
 
 
 def provider_state_service() -> provider_state.ProviderStateService:
