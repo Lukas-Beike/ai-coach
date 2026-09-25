@@ -8130,3 +8130,11 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Removed provider-state cache invalidation from `reset_provider_runtime()`. A manager or lock change causes the owner cache to construct a service for the new dependencies. Updated the HTTP concurrency test to exercise this lookup path without patching removed server state.
 - Independently reviewed manager replacement, cache synchronization, and provider-state consumers. Existing usage, status, and rate-limit persistence transactions remain in `ProviderStateService`; no I/O was added to cache construction. Architecture tests prohibit reintroducing the cache into `server.py`.
 - Validation: full native suite **2,816 tests passed, 12 skipped**; focused database (44, 3 skipped), HTTP (67), provider (48), and architecture (44) suites passed; Python compilation, inventory `--check`, and `git diff --check` passed. SQLCipher-only tests remain skipped by the native Windows environment.
+
+## P17 Provider-refresh tracker cache ownership — local review
+
+- Moved `ProviderRefreshTracker` cache ownership and replacement into `backend/sync/refresh.py`. Its cache binds the tracker to the active manager, state-event buffer, retention limits, and retry limits; `server.py` now supplies these concrete dependencies.
+- Removed the tracker singleton and its manager-change reset from `server.py`. The owning cache serializes construction and replaces the tracker when its persistence or sync configuration changes.
+- Independently reviewed tracker consumers and lifecycle: refresh-history writes, retry classification, and state-event publication remain in the existing backend service and are unchanged. The architecture test now requires the server factory to delegate to the backend cache.
+- SonarCloud flagged a duplicated inventory path literal introduced by the ownership mapping. Reused the existing `SYNC_REFRESH` constant; the inventory consistency and architecture checks pass after the fix.
+- Validation: full native suite **2,817 tests passed, 12 skipped**; focused database (44, 3 skipped), provider (48), and architecture (45) suites passed; Python compilation, inventory `--check`, and `git diff --check` passed. SQLCipher-only tests remain skipped by the native Windows environment.

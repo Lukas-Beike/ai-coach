@@ -971,6 +971,9 @@ Abhängigkeit: alle vorigen Phasen.
 - [x] Den gecachten `ProviderStateService` an `backend/providers/state.py`
   binden. Die Cache-Ersetzung folgt dort dem aktiven Manager, Repository und
   Lock; `server.py` behält nur die konkrete Service-Komposition.
+- [x] Den `ProviderRefreshTracker`-Cache nach `backend/sync/refresh.py`
+  verlagern und an Datenbankmanager, Event-Puffer sowie Retry- und Retention-
+  Konfiguration binden.
 - [x] Inventar neu erzeugen und mit `--check` abgleichen; alle verbleibenden
   Top-Level-Funktionen und ihre statischen Aufrufer prüfen. Es gibt keine
   unzugeordneten P0-Symbole oder unaufgerufenen server-Funktionen.

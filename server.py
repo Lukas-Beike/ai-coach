@@ -175,6 +175,7 @@ from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_selection import StructuredPlanSyncService
 from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync import refresh as sync_refresh
 from backend.sync.refresh import ProviderRefreshTracker
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
 from backend.sync.planned_units import RemotePlannedUnitReconciler
@@ -433,7 +434,6 @@ SNAPSHOT_REPOSITORY = SnapshotRepository()
 
 DATABASE_MANAGER_CACHE = DatabaseManagerCache()
 PROVIDER_HTTP_CLIENT: provider_http.JsonHttpClient | None = None
-PROVIDER_REFRESH_TRACKER: ProviderRefreshTracker | None = None
 WEATHER_SERVICE: WeatherService | None = None
 MORNING_BODY_BATTERY_SERVICE: MorningBodyBatteryService | None = None
 MORNING_BODY_BATTERY_CONFIG_ID: int | None = None
@@ -447,10 +447,9 @@ GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
 
 
 def reset_provider_runtime() -> None:
-    global PROVIDER_HTTP_CLIENT, PROVIDER_REFRESH_TRACKER
+    global PROVIDER_HTTP_CLIENT
     global WEATHER_SERVICE, MORNING_BODY_BATTERY_SERVICE, MORNING_BODY_BATTERY_CONFIG_ID
     PROVIDER_HTTP_CLIENT = None
-    PROVIDER_REFRESH_TRACKER = None
     WEATHER_SERVICE = None
     MORNING_BODY_BATTERY_SERVICE = None
     MORNING_BODY_BATTERY_CONFIG_ID = None
@@ -501,20 +500,16 @@ def provider_state_service() -> provider_state.ProviderStateService:
 
 def provider_refresh_tracker() -> ProviderRefreshTracker:
     """Return refresh history orchestration bound to the active database manager."""
-    global PROVIDER_REFRESH_TRACKER
-    manager = database_manager()
-    if PROVIDER_REFRESH_TRACKER is None:
-        PROVIDER_REFRESH_TRACKER = ProviderRefreshTracker(
-            manager,
-            runtime_events.STATE_EVENT_BUFFER,
-            lambda: datetime.now(timezone.utc),
-            lambda: uuid.uuid4().hex,
-            retention_days=sync_freshness.PROVIDER_REFRESH_RETENTION_DAYS,
-            max_rows=sync_freshness.PROVIDER_REFRESH_MAX_ROWS,
-            retry_base_seconds=PROVIDER_REFRESH_RETRY_BASE_SECONDS,
-            retry_max_seconds=PROVIDER_REFRESH_RETRY_MAX_SECONDS,
-        )
-    return PROVIDER_REFRESH_TRACKER
+    return sync_refresh.PROVIDER_REFRESH_TRACKER_CACHE.get(
+        database_manager(),
+        runtime_events.STATE_EVENT_BUFFER,
+        lambda: datetime.now(timezone.utc),
+        lambda: uuid.uuid4().hex,
+        retention_days=sync_freshness.PROVIDER_REFRESH_RETENTION_DAYS,
+        max_rows=sync_freshness.PROVIDER_REFRESH_MAX_ROWS,
+        retry_base_seconds=PROVIDER_REFRESH_RETRY_BASE_SECONDS,
+        retry_max_seconds=PROVIDER_REFRESH_RETRY_MAX_SECONDS,
+    )
 
 
 def sync_operation_observer() -> sync_observation.SyncOperationObserver:
