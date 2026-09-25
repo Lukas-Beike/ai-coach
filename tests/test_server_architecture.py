@@ -2625,9 +2625,19 @@ class ServerArchitectureTests(unittest.TestCase):
             isinstance(node, ast.ClassDef) and node.name == "SessionAuthServiceCache"
             for node in auth_tree.body
         ))
+        self.assertTrue(any(
+            isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "RATE_LIMITER"
+                for target in node.targets
+            )
+            and ast.unparse(node.value) == "RateLimiter()"
+            for node in auth_tree.body
+        ))
+        server_tree = _parse(SERVER_PATH)
         server_assignments = {
             target.id
-            for node in _parse(SERVER_PATH).body
+            for node in server_tree.body
             if isinstance(node, (ast.Assign, ast.AnnAssign))
             for target in (
                 node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -2635,10 +2645,18 @@ class ServerArchitectureTests(unittest.TestCase):
             if isinstance(target, ast.Name)
         }
         self.assertTrue(
-            {"SESSION_AUTH_SERVICE", "SESSION_AUTH_SIGNATURE"}.isdisjoint(
-                server_assignments
-            )
+            {
+                "SESSION_AUTH_SERVICE",
+                "SESSION_AUTH_SIGNATURE",
+                "RATE_LIMITER",
+            }.isdisjoint(server_assignments)
         )
+        self.assertTrue(any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "backend.http_api.auth"
+            and any(alias.name == "RATE_LIMITER" for alias in node.names)
+            for node in server_tree.body
+        ))
 
     def test_server_composition_bodies_do_not_own_domain_or_io_logic(self) -> None:
         tree = _parse(SERVER_PATH)

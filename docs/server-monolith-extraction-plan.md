@@ -965,6 +965,9 @@ Abhängigkeit: alle vorigen Phasen.
 - [x] Den Cache und die Konfigurationssignatur des Session-Auth-Services nach
   `backend/http_api/auth.py` verlagern. `server.py` behÃ¤lt die konkrete
   Konstruktion aus aktivem DB-Manager, Lock und Sicherheitskonfiguration.
+- [x] Den gemeinsamen `RateLimiter`-Zustand neben dem Session-Auth-Service
+  unter `backend/http_api/auth.py` besitzen lassen; `server.py` verdrahtet
+  dieselbe Instanz in den Service.
 - [x] Inventar neu erzeugen und mit `--check` abgleichen; alle verbleibenden
   Top-Level-Funktionen und ihre statischen Aufrufer prüfen. Es gibt keine
   unzugeordneten P0-Symbole oder unaufgerufenen server-Funktionen.
