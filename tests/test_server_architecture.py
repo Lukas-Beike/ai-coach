@@ -62,6 +62,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
+    ("backend.http_api.auth", ("SessionAuthServiceCache",)),
     ("backend.coach.conversation", ("CoachConversationHistoryService",)),
     ("backend.http_api.post_dispatch", ("HttpAuthenticatedPostRoutes", "HttpPostDispatcher")),
     ("backend.http_api.response_transport", ("HttpResponseTransport",)),
@@ -2120,7 +2121,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
 """.split())
 
 # These functions intentionally retain the small amount of root control flow
-# for session/provider caching, schema initialization, and process lifecycle.
+# for provider caching, schema initialization, and process lifecycle.
 # The manager cache is owned by backend.db.manager; invalidating root-owned
 # provider caches stays in the composition root. Other functions are helpers.
 SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
@@ -2616,6 +2617,27 @@ class ServerArchitectureTests(unittest.TestCase):
         self.assertEqual(
             [ast.unparse(argument) for argument in assignment.value.args],
             ["ATHLETE_PROFILE_SERVICE"],
+        )
+
+    def test_session_auth_cache_state_is_owned_by_http_api_auth(self) -> None:
+        auth_tree = _parse(BACKEND_ROOT / "http_api" / "auth.py")
+        self.assertTrue(any(
+            isinstance(node, ast.ClassDef) and node.name == "SessionAuthServiceCache"
+            for node in auth_tree.body
+        ))
+        server_assignments = {
+            target.id
+            for node in _parse(SERVER_PATH).body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            if isinstance(target, ast.Name)
+        }
+        self.assertTrue(
+            {"SESSION_AUTH_SERVICE", "SESSION_AUTH_SIGNATURE"}.isdisjoint(
+                server_assignments
+            )
         )
 
     def test_server_composition_bodies_do_not_own_domain_or_io_logic(self) -> None:
