@@ -8192,3 +8192,26 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Validation: full native suite **2,820 tests passed, 12 skipped**; focused
   provider (48), database (44, 3 skipped), and architecture (48) suites passed;
   Python compilation, inventory `--check`, and `git diff --check` passed.
+- PR #836 was squash-merged on 2026-09-25 as
+  `e3dc00da25932c32b0606a13dab2cf24f8efb24f`. The Codex usage limit prevented
+  its review; independent review was clean, all other checks passed, and the
+  user-authorized Codex-only bypass was used.
+
+## P10/P11 server extraction — final audit closeout
+
+- PRs #818–#836 complete the reopened HTTP, composition-root, and runtime-cache
+  ownership work. The generated inventory reports zero unassigned P0 symbols;
+  all remaining server definitions are composition-root entries. The
+  architecture suite constrains composition control flow, rejects domain/I/O
+  work in those bodies, checks backend import direction and cycles, and guards
+  against reintroducing extracted definitions in `server.py`.
+- Final `server.py`: 2,756 physical lines, 171 top-level definitions, and a
+  46-line longest definition. These are concrete dependency factories and
+  process lifecycle wiring; no domain workflow remains in the root. The line
+  count is not a separate acceptance threshold.
+- Final validation on PR #836: **2,820 tests passed, 12 skipped**; focused
+  provider, database, and architecture suites passed; compilation, inventory
+  `--check`, CodeQL, SonarCloud, Conventional Commit validation, and diff checks
+  passed. The explicit Codex review was blocked by account usage limits; the
+  independent review was clear and the user-authorized sole-blocker bypass was
+  applied. PR #836 is merged with no review threads.
