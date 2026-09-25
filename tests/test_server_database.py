@@ -33,6 +33,18 @@ from server_test_support import create_test_session, server, ServerTestCase
 
 class ServerDatabaseTests(ServerTestCase):
 
+    def test_unavailable_sqlcipher_closes_manager_for_changed_secure_configuration(self):
+        manager = server.database_manager()
+        configured = replace(server.CONFIG, app_password="synthetic-encrypted-key")
+        with patch.object(server, "CONFIG", configured), patch.object(
+            server, "SQLCIPHER_AVAILABLE", False
+        ), self.assertRaisesRegex(RuntimeError, "SQLCipher"):
+            server.database_manager()
+
+        with self.assertRaisesRegex(RuntimeError, "database manager is closed"):
+            with manager.unit_of_work():
+                pass
+
     def test_database_uses_exact_current_schema(self):
         server.initialise_database()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -46,9 +58,7 @@ class ServerDatabaseTests(ServerTestCase):
         first_http_client = server.provider_http_client()
         first_refresh_tracker = server.provider_refresh_tracker()
         first_weather_service = server.weather_service()
-        server.database_manager().close()
-        server.DATABASE_MANAGER = None
-        server.DATABASE_MANAGER_SIGNATURE = None
+        server.DATABASE_MANAGER_CACHE.reset()
 
         second = server.provider_state_service()
         second_http_client = server.provider_http_client()
@@ -82,10 +92,8 @@ class ServerDatabaseTests(ServerTestCase):
                 ):
                     with self.assertRaises(RuntimeError):
                         server.initialise_database()
-                    server.database_manager().close()
             finally:
-                server.DATABASE_MANAGER = None
-                server.DATABASE_MANAGER_SIGNATURE = None
+                server.DATABASE_MANAGER_CACHE.reset()
 
             connection = sqlite3.connect(database_path)
             try:
@@ -396,9 +404,7 @@ class ServerDatabaseTests(ServerTestCase):
                             self.assertIn("workouts", payload)
                             self.assertIs(connection.sock, keep_alive_socket)
                         finally:
-                            switched_manager.close()
-                            server.DATABASE_MANAGER = None
-                            server.DATABASE_MANAGER_SIGNATURE = None
+                            server.DATABASE_MANAGER_CACHE.reset()
         finally:
             connection.close()
             httpd.shutdown()
@@ -843,9 +849,7 @@ class ServerDatabaseTests(ServerTestCase):
             operation_id="operation-background-manager-refresh",
         )
 
-        first_manager.close()
-        server.DATABASE_MANAGER = None
-        server.DATABASE_MANAGER_SIGNATURE = None
+        server.DATABASE_MANAGER_CACHE.reset()
         second_manager = server.database_manager()
 
         self.assertIsNot(first_manager, second_manager)

@@ -335,7 +335,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
                     )
                     self.assertEqual(server.sync_job_store().claim()["id"], job["id"])
                 finally:
-                    server.database_manager().close()
+                    server.DATABASE_MANAGER_CACHE.reset()
 
     def test_chat_reset_changes_history_generation(self):
         before = server.chat_history_page_service().page()["generation"]

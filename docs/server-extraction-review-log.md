@@ -8044,3 +8044,31 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Required test, CodeQL, Sonar, quality, syntax, SBOM, and five-project browser checks passed for PR #819. The only failure was the explicit Codex review gate; it was bypassed as user-authorized without posting an `@codex` request.
 - Final `server.py`: 2,809 physical lines and 2,433 nonblank lines, down from the previously recorded 2,589 nonblank lines. Remaining code is audited configuration, dependency construction, shared process resources, and startup/shutdown wiring; no LOC target was imposed.
 - Final validation: Python 3.14 full suite 2,802 tests (11 skipped), 40 architecture tests, 51 local desktop browser tests, five CI viewport projects, Docker build, syntax compilation, inventory `--check`, and `git diff --check` passed.
+
+## P11 follow-up — database manager cache ownership (local review)
+
+- Moved database-manager cache state and signature-based replacement into
+  `backend/db/manager.py`. The composition root passes concrete constructor
+  dependencies; the backend does not call a factory or callback from
+  `server.py`. Root-owned provider caches are still invalidated by the root
+  when the database signature changes.
+- The independent review found and fixed three issues: the first extraction
+  draft passed a server callback into the cache; a closed manager could leave
+  new leases waiting forever; and workout-text tests relied on configuration
+  left by another test module. Cache construction now takes direct dependency
+  values, closed leases fail promptly, and those tests use temporary isolated
+  application state. A regression test also verifies that unavailable SQLCipher
+  closes a stale manager before the startup error is raised.
+- `server.py`: 2,807 physical lines, down from 2,809. Backend Python source is
+  46,122 lines, up from 46,068 due to the cohesive cache owner.
+- Validation: native full suite **2,804 tests passed, 12 skipped**; focused
+  database and architecture tests passed; workout-text tests passed; syntax,
+  inventory `--check`, and `git diff --check` passed. Docker build could not
+  start because the local Docker Engine named pipe was unavailable.
+- Rebased onto `develop` commit `5a0ab70` after the server integration tests
+  were split. The manager cleanup moved into `server_test_support.py`, manager
+  regressions now live in `test_server_database.py`, and workout-text tests use
+  the shared `ServerTestCase`; no imports of the removed `test_server.py`
+  remain.
+- This is a focused P11 ownership follow-up; it does not claim completion of
+  any remaining composition-graph audit work.

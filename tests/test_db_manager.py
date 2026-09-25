@@ -5,13 +5,36 @@ import time
 import unittest
 from pathlib import Path
 
-from backend.db.manager import DatabaseManager
+from backend.db.manager import DatabaseManager, DatabaseManagerCache
 from backend.db.schema import database_schema_is_current, initialize_schema
 
 
 class DatabaseManagerTests(unittest.TestCase):
     def make_manager(self, root: str) -> DatabaseManager:
         return DatabaseManager(Path(root) / "test.db", sqlite3, reader_count=4, row_factory=sqlite3.Row)
+
+    def test_cache_reuses_replaces_and_resets_the_active_manager(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = DatabaseManagerCache()
+            first_signature = (str(Path(root) / "first.db"), "", False)
+            second_signature = (str(Path(root) / "second.db"), "", False)
+
+            first = cache.get(first_signature, first_signature[0], sqlite3)
+            self.assertIs(cache.get(first_signature, first_signature[0], sqlite3), first)
+            self.assertTrue(cache.matches(first_signature))
+
+            second = cache.get(second_signature, second_signature[0], sqlite3)
+            self.assertIsNot(second, first)
+            self.assertFalse(cache.matches(first_signature))
+            with self.assertRaisesRegex(RuntimeError, "database manager is closed"):
+                with first.unit_of_work():
+                    pass
+
+            cache.reset()
+            self.assertFalse(cache.matches(second_signature))
+            with self.assertRaisesRegex(RuntimeError, "database manager is closed"):
+                with second.unit_of_work():
+                    pass
 
     def test_unit_of_work_rolls_back_and_reader_pool_reuses_connections(self):
         with tempfile.TemporaryDirectory() as root:

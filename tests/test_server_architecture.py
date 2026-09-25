@@ -2048,7 +2048,7 @@ FORBIDDEN_SERVER_SYMBOLS = (
 # Functions in server.py are fixed composition helpers, local clock utilities,
 # the HTTP adapter, and process lifecycle. New orchestration belongs in backend.
 ALLOWED_SERVER_FUNCTIONS = frozenset("""
-    utc_now database_manager session_auth_service provider_state_service
+    utc_now reset_provider_runtime database_manager session_auth_service provider_state_service
     provider_refresh_tracker sync_operation_observer provider_freshness_service
     sync_job_store sync_job_queue_service sync_command_endpoint
     provider_refresh_command_service sync_conflict_command_service
@@ -2119,9 +2119,10 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     startup_sync_scheduler main
 """.split())
 
-# These functions intentionally contain control flow for resource caching,
-# schema initialization, and process lifecycle. All other root functions are
-# direct dependency construction or stateless time/configuration helpers.
+# These functions intentionally retain the small amount of root control flow
+# for session/provider caching, schema initialization, and process lifecycle.
+# The manager cache is owned by backend.db.manager; invalidating root-owned
+# provider caches stays in the composition root. Other functions are helpers.
 SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
     {
         "database_manager",
