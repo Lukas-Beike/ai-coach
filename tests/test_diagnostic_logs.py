@@ -16,7 +16,7 @@ def _redactor() -> Redactor:
         port=8090,
         openai_api_key="sk-test-secret-value",
         openai_base_url="https://api.openai.com/v1",
-        openai_model="gpt-5.6-sol",
+        openai_model="gpt-6-luna",
         gemini_api_key="",
         gemini_model="gemini-test",
         ai_provider="openai",
