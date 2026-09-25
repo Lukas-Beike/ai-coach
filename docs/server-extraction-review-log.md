@@ -8172,3 +8172,23 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Validation: full native suite **2,819 tests passed, 12 skipped**; focused
   database (44, 3 skipped), weather (44), and architecture (47) suites passed;
   Python compilation, inventory `--check`, and `git diff --check` passed.
+- PR #835 was squash-merged on 2026-09-25 as
+  `67ba67f3f71c955991505b43a74b174fe38ddd0f`. The Codex usage limit prevented
+  its review; the independent review was clean, all other checks passed, and
+  the user-authorized Codex-only bypass was used.
+
+## P20 Morning Body Battery service cache ownership — local review
+
+- Moved the morning recovery service cache into
+  `backend/performance/morning_battery_service.py`, binding replacement to
+  both the active database manager and Garmin configuration identity.
+  `server.py` now composes service dependencies without owning cache globals.
+- Removed `reset_provider_runtime()` after its final cache responsibility
+  moved. Independent review verified manager replacement, configuration
+  replacement, and that the injected Garmin fixture/remote constructors remain
+  side-effect free; no actionable findings remained.
+- `server.py` is 32 lines smaller. The generated inventory assigns the cache
+  to the performance service module.
+- Validation: full native suite **2,820 tests passed, 12 skipped**; focused
+  provider (48), database (44, 3 skipped), and architecture (48) suites passed;
+  Python compilation, inventory `--check`, and `git diff --check` passed.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -329,3 +330,40 @@ class MorningBodyBatteryService:
             return self.store.current()
         value = snapshot.get("morning_body_battery")
         return value if isinstance(value, dict) else None
+
+
+class MorningBodyBatteryServiceCache:
+    """Keep morning recovery bound to the active database and config."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._manager: Any = None
+        self._config_id: int | None = None
+        self._service: MorningBodyBatteryService | None = None
+
+    def get(
+        self,
+        manager: Any,
+        config_id: int,
+        store: MorningBatteryStore,
+        source: MorningBatterySource,
+        execution_gate: MorningBatteryExecutionGate,
+        clock: MorningBatteryClock,
+        events: MorningBatteryEvents,
+        retry_policy: MorningBatteryRetryPolicy,
+    ) -> MorningBodyBatteryService:
+        with self._lock:
+            if (
+                self._service is None
+                or self._manager is not manager
+                or self._config_id != config_id
+            ):
+                self._service = MorningBodyBatteryService(
+                    store, source, execution_gate, clock, events, retry_policy
+                )
+                self._manager = manager
+                self._config_id = config_id
+            return self._service
+
+
+MORNING_BODY_BATTERY_SERVICE_CACHE = MorningBodyBatteryServiceCache()

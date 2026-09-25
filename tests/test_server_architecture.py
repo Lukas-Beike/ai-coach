@@ -67,6 +67,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.sync.refresh", ("ProviderRefreshTrackerCache",)),
     ("backend.providers.http", ("JsonHttpClientCache",)),
     ("backend.weather.service", ("WeatherServiceCache",)),
+    ("backend.performance.morning_battery_service", ("MorningBodyBatteryServiceCache",)),
     ("backend.coach.conversation", ("CoachConversationHistoryService",)),
     ("backend.http_api.post_dispatch", ("HttpAuthenticatedPostRoutes", "HttpPostDispatcher")),
     ("backend.http_api.response_transport", ("HttpResponseTransport",)),
@@ -2053,7 +2054,7 @@ FORBIDDEN_SERVER_SYMBOLS = (
 # Functions in server.py are fixed composition helpers, local clock utilities,
 # the HTTP adapter, and process lifecycle. New orchestration belongs in backend.
 ALLOWED_SERVER_FUNCTIONS = frozenset("""
-    utc_now reset_provider_runtime database_manager session_auth_service provider_state_service
+    utc_now database_manager session_auth_service provider_state_service
     provider_refresh_tracker sync_operation_observer provider_freshness_service
     sync_job_store sync_job_queue_service sync_command_endpoint
     provider_refresh_command_service sync_conflict_command_service
@@ -2125,14 +2126,12 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
 """.split())
 
 # These functions intentionally retain the small amount of root control flow
-# for provider caching, schema initialization, and process lifecycle.
-# The manager cache is owned by backend.db.manager; invalidating root-owned
-# provider caches stays in the composition root. Other functions are helpers.
+# for schema initialization and process lifecycle. Runtime caches bind their
+# services to explicit dependencies in the owning backend modules.
 SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
     {
         "database_manager",
         "session_auth_service",
-        "morning_body_battery_service",
         "sync_job_worker",
         "initialise_database",
         "public_state_service",
@@ -2760,6 +2759,41 @@ class ServerArchitectureTests(unittest.TestCase):
         )
         self.assertIn(
             "WEATHER_SERVICE_CACHE.get",
+            ast.unparse(service_factory),
+        )
+
+    def test_morning_battery_cache_is_owned_by_performance_service_module(self) -> None:
+        performance_tree = _parse(
+            BACKEND_ROOT / "performance" / "morning_battery_service.py"
+        )
+        self.assertTrue(any(
+            isinstance(node, ast.ClassDef)
+            and node.name == "MorningBodyBatteryServiceCache"
+            for node in performance_tree.body
+        ))
+        server_tree = _parse(SERVER_PATH)
+        server_assignments = {
+            target.id
+            for node in server_tree.body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            if isinstance(target, ast.Name)
+        }
+        self.assertNotIn("MORNING_BODY_BATTERY_SERVICE", server_assignments)
+        self.assertNotIn("MORNING_BODY_BATTERY_CONFIG_ID", server_assignments)
+        self.assertNotIn("reset_provider_runtime", {
+            node.name for node in server_tree.body
+            if isinstance(node, ast.FunctionDef)
+        })
+        service_factory = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "morning_body_battery_service"
+        )
+        self.assertIn(
+            "MORNING_BODY_BATTERY_SERVICE_CACHE.get",
             ast.unparse(service_factory),
         )
 
