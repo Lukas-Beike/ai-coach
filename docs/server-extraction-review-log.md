@@ -8065,10 +8065,13 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
   database and architecture tests passed; workout-text tests passed; syntax,
   inventory `--check`, and `git diff --check` passed. Docker build could not
   start because the local Docker Engine named pipe was unavailable.
-- Rebased onto `develop` commit `5a0ab70` after the server integration tests
-  were split. The manager cleanup moved into `server_test_support.py`, manager
+- Rebased onto `develop` commit `d0e4d32`, including the server test split from
+  `5a0ab70`. The manager cleanup moved into `server_test_support.py`, manager
   regressions now live in `test_server_database.py`, and workout-text tests use
   the shared `ServerTestCase`; no imports of the removed `test_server.py`
   remain.
+- The PR SonarCloud analysis found one duplicated closed-manager error literal;
+  it is now a single module constant. The focused database, architecture, and
+  inventory checks pass after that correction.
 - This is a focused P11 ownership follow-up; it does not claim completion of
   any remaining composition-graph audit work.

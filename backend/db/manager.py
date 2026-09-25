@@ -15,6 +15,9 @@ import threading
 from typing import Any, Callable, Iterator
 
 
+DATABASE_MANAGER_CLOSED_MESSAGE = "database manager is closed"
+
+
 class DatabaseManager:
     """One serialized writer plus a bounded pool of read connections."""
 
@@ -66,11 +69,11 @@ class DatabaseManager:
     def _lease(self) -> Iterator[None]:
         with self._state:
             if self._closed:
-                raise RuntimeError("database manager is closed")
+                raise RuntimeError(DATABASE_MANAGER_CLOSED_MESSAGE)
             while self._draining:
                 self._state.wait()
                 if self._closed:
-                    raise RuntimeError("database manager is closed")
+                    raise RuntimeError(DATABASE_MANAGER_CLOSED_MESSAGE)
             self._active += 1
         try:
             yield
@@ -145,7 +148,7 @@ class DatabaseManager:
         """Stop new leases, wait for active work, and close every connection."""
         with self._state:
             if self._closed:
-                raise RuntimeError("database manager is closed")
+                raise RuntimeError(DATABASE_MANAGER_CLOSED_MESSAGE)
             self._draining = True
             while self._active:
                 self._state.wait()
