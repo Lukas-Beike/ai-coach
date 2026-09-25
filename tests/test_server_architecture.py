@@ -2054,7 +2054,7 @@ FORBIDDEN_SERVER_SYMBOLS = (
 # Functions in server.py are fixed composition helpers, local clock utilities,
 # the HTTP adapter, and process lifecycle. New orchestration belongs in backend.
 ALLOWED_SERVER_FUNCTIONS = frozenset("""
-    utc_now database_manager session_auth_service provider_state_service
+    database_manager session_auth_service provider_state_service
     provider_refresh_tracker sync_operation_observer provider_freshness_service
     sync_job_store sync_job_queue_service sync_command_endpoint
     provider_refresh_command_service sync_conflict_command_service
@@ -2090,7 +2090,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     illness_pause_sync_service coach_adaptive_apply_service
     adaptive_preview_followup_service adaptive_replan_preview_service
     privacy_data_export_service privacy_delete_service athlete_context_service
-    initialise_database key_value_service provider_http_client intervals_client
+    initialise_database key_value_service
     gemini_json_client audio_transcription_client gemini_stream_client
     openai_responses_client coach_conversation_provision_service
     coach_conversation_reset_service openai_stream_client coach_quick_actions_service
@@ -2724,30 +2724,47 @@ class ServerArchitectureTests(unittest.TestCase):
         )
 
     def test_provider_http_client_cache_is_owned_by_provider_transport(self) -> None:
-        transport_tree = _parse(BACKEND_ROOT / "providers" / "http.py")
-        self.assertTrue(any(
-            isinstance(node, ast.ClassDef) and node.name == "JsonHttpClientCache"
-            for node in transport_tree.body
-        ))
-        server_tree = _parse(SERVER_PATH)
-        server_assignments = {
-            target.id
-            for node in server_tree.body
-            if isinstance(node, (ast.Assign, ast.AnnAssign))
-            for target in (
-                node.targets if isinstance(node, ast.Assign) else [node.target]
-            )
-            if isinstance(target, ast.Name)
-        }
-        self.assertNotIn("PROVIDER_HTTP_CLIENT", server_assignments)
-        service_factory = next(
-            node for node in server_tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "provider_http_client"
+        transport_tree = _parse(
+            BACKEND_ROOT / "providers" / "transport_assembly.py"
+        )
+        assembly = next(
+            node for node in transport_tree.body
+            if isinstance(node, ast.ClassDef)
+            and node.name == "ProviderTransportAssembly"
+        )
+        json_client = next(
+            node for node in assembly.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "json_http_client"
         )
         self.assertIn(
             "provider_http.JSON_HTTP_CLIENT_CACHE.get",
-            ast.unparse(service_factory),
+            ast.unparse(json_client),
         )
+        transport_module = _parse(BACKEND_ROOT / "providers" / "http.py")
+        self.assertTrue(any(
+            isinstance(node, ast.ClassDef) and node.name == "JsonHttpClientCache"
+            for node in transport_module.body
+        ))
+        server_tree = _parse(SERVER_PATH)
+        provider_transport = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id == "PROVIDER_TRANSPORT"
+                for target in node.targets
+            )
+        )
+        self.assertIn(
+            "ProviderTransportAssembly",
+            ast.unparse(provider_transport.value),
+        )
+        self.assertFalse(any(
+            isinstance(node, ast.FunctionDef)
+            and node.name in {"provider_http_client", "intervals_client"}
+            for node in server_tree.body
+        ))
 
     def test_weather_service_cache_is_owned_by_weather_service_module(self) -> None:
         weather_tree = _parse(BACKEND_ROOT / "weather" / "service.py")

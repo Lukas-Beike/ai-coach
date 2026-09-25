@@ -86,7 +86,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.observed = set()
         self.issued = {}
         for owner, name in (
-            (server.provider_http_client(), "request"),
+            (server.PROVIDER_TRANSPORT.json_http_client(), "request"),
             (provider_http, "urlopen"),
             (gemini_provider, "urlopen"),
             (openai_provider, "urlopen"),

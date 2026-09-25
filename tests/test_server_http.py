@@ -385,7 +385,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertLess(len(json.dumps(bootstrap, ensure_ascii=False)), 20_000)
 
     def test_bootstrap_never_refreshes_provider_network(self):
-        with patch.object(server.provider_http_client(), "request", side_effect=AssertionError("network")), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "request", side_effect=AssertionError("network")), patch.object(
             server.provider_http, "external_call", side_effect=AssertionError("network")
         ):
             bootstrap = server.public_bootstrap_service().read()
@@ -582,7 +582,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertNotIn("public_calendar", state)
 
     def test_intervals_collection_pagination_is_bounded_and_reported(self):
-        client = server.intervals_client(replace(server.CONFIG, intervals_api_key="test-key"))
+        client = server.PROVIDER_TRANSPORT.intervals_client(replace(server.CONFIG, intervals_api_key="test-key"))
         first_page = [{"id": f"activity-{index}"} for index in range(500)]
         second_page = [{"id": "activity-500"}]
         with patch.object(client._api, "get", side_effect=[first_page, second_page]) as get:
@@ -634,11 +634,11 @@ class ServerHttpTests(ServerTestCase):
 
         def send_request():
             try:
-                server.provider_http_client().request("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {}, service="gemini", cancel_event=cancelled)
+                server.PROVIDER_TRANSPORT.json_http_client().request("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {}, service="gemini", cancel_event=cancelled)
             except server.AppError as exc:
                 outcome["error"] = exc
 
-        with patch.object(server.provider_http_client(), "opener", side_effect=blocked_urlopen):
+        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", side_effect=blocked_urlopen):
             caller = threading.Thread(target=send_request)
             caller.start()
             self.assertTrue(started.wait(1))
@@ -669,9 +669,9 @@ class ServerHttpTests(ServerTestCase):
                 self.close()
 
         response = Response()
-        with patch.object(server.provider_http_client(), "opener", return_value=response):
+        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", return_value=response):
             self.assertEqual(
-                server.provider_http_client().request(
+                server.PROVIDER_TRANSPORT.json_http_client().request(
                     "GET", "https://intervals.icu/api/v1/athlete/0", service="intervals", cancel_event=cancel_event
                 ),
                 {},
@@ -702,9 +702,9 @@ class ServerHttpTests(ServerTestCase):
             cancel_event.set()
             return response
 
-        with patch.object(server.provider_http_client(), "opener", side_effect=return_cancelled_response):
+        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", side_effect=return_cancelled_response):
             with self.assertRaises(server.AppError) as raised:
-                server.provider_http_client().request(
+                server.PROVIDER_TRANSPORT.json_http_client().request(
                     "GET", "https://intervals.icu/api/v1/athlete/0", service="intervals", cancel_event=cancel_event
                 )
         self.assertEqual(raised.exception.reason, "chat_cancelled")
@@ -724,8 +724,8 @@ class ServerHttpTests(ServerTestCase):
             def read(self, *_args):
                 return b""
 
-        with patch.object(server.provider_http_client(), "opener", return_value=EmptyResponse()):
-            self.assertIsNone(server.provider_http_client().request("DELETE", "https://intervals.icu/api/v1/athlete/0", service="intervals"))
+        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", return_value=EmptyResponse()):
+            self.assertIsNone(server.PROVIDER_TRANSPORT.json_http_client().request("DELETE", "https://intervals.icu/api/v1/athlete/0", service="intervals"))
 
         class OversizedResponse(EmptyResponse):
             status = 200
@@ -734,11 +734,11 @@ class ServerHttpTests(ServerTestCase):
                 return b"1234"
 
         with (
-            patch.object(server.provider_http_client(), "max_response_bytes", 3),
-            patch.object(server.provider_http_client(), "opener", return_value=OversizedResponse()),
+            patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "max_response_bytes", 3),
+            patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", return_value=OversizedResponse()),
             self.assertRaises(server.AppError) as raised,
         ):
-            server.provider_http_client().request("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
+            server.PROVIDER_TRANSPORT.json_http_client().request("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
         self.assertEqual(raised.exception.status, 502)
         self.assertEqual(raised.exception.message, "Die Antwort des externen Dienstes ist zu groß.")
 
@@ -754,7 +754,7 @@ class ServerHttpTests(ServerTestCase):
 
         audio = b"fake-webm-audio"
         with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="test-key", openai_base_url="https://foundry.example.invalid/openai/v1/")), patch.object(
-            server.provider_http_client(), "request", side_effect=fake_http_json
+            server.PROVIDER_TRANSPORT.json_http_client(), "request", side_effect=fake_http_json
         ):
             result = _transcribe_via_http_route(audio, "audio/webm;codecs=opus")
 
@@ -973,9 +973,9 @@ class ServerHttpTests(ServerTestCase):
             {},
             response_body,
         )
-        with patch.object(server.provider_http_client(), "opener", side_effect=upstream_error):
+        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", side_effect=upstream_error):
             with self.assertRaises(server.AppError):
-                server.provider_http_client().request("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
+                server.PROVIDER_TRANSPORT.json_http_client().request("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
         self.assertTrue(response_body.closed)
 
     def test_intervals_public_state_reports_sync_health(self):
@@ -1140,7 +1140,7 @@ class ServerHttpTests(ServerTestCase):
             auth.require_auth(handler)
         self.assertEqual(raised.exception.status, 429)
         self.assertIn("17 Sekunden", raised.exception.message)
-        rate_limit.assert_called_once_with(server.RATE_LIMITER, "api:203.0.113.7", 180, 60)
+        rate_limit.assert_called_once_with(http_auth.RATE_LIMITER, "api:203.0.113.7", 180, 60)
 
     def test_openai_rate_limit_headers_are_exposed_without_local_limits(self):
         class FakeResponse:
@@ -1160,8 +1160,8 @@ class ServerHttpTests(ServerTestCase):
             def read(self, *args):
                 return b"{}"
 
-        with patch.object(server.provider_http_client(), "opener", return_value=FakeResponse()):
-            server.provider_http_client().request("POST", "https://api.openai.com/v1/responses", payload={}, service="openai")
+        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", return_value=FakeResponse()):
+            server.PROVIDER_TRANSPORT.json_http_client().request("POST", "https://api.openai.com/v1/responses", payload={}, service="openai")
         summary = server.provider_state_service().summary("openai")
         self.assertNotIn("request_limit", summary)
         self.assertNotIn("token_limit", summary)

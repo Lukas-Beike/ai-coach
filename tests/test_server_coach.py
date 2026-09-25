@@ -911,7 +911,7 @@ class ServerCoachTests(ServerTestCase):
             def bulk_delete_events(self, identifiers):
                 return 0
 
-        with patch.object(server, "intervals_client", FakeIntervalsClient), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
             result = server.competition_sync_service().sync("test", push_local=True)

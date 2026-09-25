@@ -71,3 +71,46 @@ mocked providers; no live account or runtime data was used.
 - Docker image build could not run because the local Docker engine pipe is
   unavailable. SQLCipher-dependent checks remain limited to the existing
   skips; no application or provider data was used.
+
+## S2a1 boundary before implementation: provider transports
+
+- `provider_http_client()` currently composes the owner cache in
+  `backend/providers/http.py` with provider state, diagnostics, redaction,
+  clock, and sync-operation context. The active provider state and client must
+  continue to be bound to the current manager. `intervals_client(config)` is
+  stateless and uses the active config only when called.
+- About 136 test references call these root factories to access the concrete
+  clients; they patch the returned HTTP client's request/opener. No fixture
+  patches either root factory, and `e2e/fixture_runtime.py` has no transport
+  lookup. `provider_http.urlopen` and `server.CONFIG` are patched by provider
+  tests, so the new owner must resolve those at client construction time.
+- Proposed interface: one provider-only `ProviderTransportAssembly` in
+  `backend/providers/` with `json_http_client()` and
+  `intervals_client(config=None)`. `server.py` creates the object with named
+  dependencies and replaces route/service/test lookups with those methods.
+  Its constructor performs no provider, DB, file, or thread I/O; the existing
+  JSON client cache remains the only client cache owner. The getter for
+  provider state and the manager will stay lazy until `json_http_client()` is
+  called.
+
+## S2a1: provider transport assembly
+
+- Completed in `backend/providers/transport_assembly.py`. The root now creates
+  one provider-only assembly with explicit dependencies. Its constructor only
+  stores those dependencies; client creation remains lazy. The JSON HTTP cache
+  stays in `backend/providers/http.py`, and its active provider state still
+  follows the current manager. Intervals config and the provider opener are
+  resolved when their methods run, preserving the test patch points.
+- Removed the root `provider_http_client()` and `intervals_client()`
+  forwarding factories. Service factories, tests, and fixture setup use the
+  assembly methods directly. Updated auth rate-limiter references to
+  `backend/http_api/auth.py` where earlier fixture/test lookups still targeted
+  a removed root binding.
+- Focused checks passed: architecture (48), providers (49), Intervals client
+  (2), HTTP (67), sync (80), weather/calendar (44), planning (88), performance
+  (38), and database (45 run, 3 skipped). Inventory, compileall (including
+  `e2e/fixture_runtime.py`), and diff checks passed.
+- Measured `server.py`: 2,753 physical / 2,381 nonblank lines, 220 import
+  statements, 168 top-level functions.
+- Docker image build remains unavailable because the local Docker engine pipe
+  is absent. No live provider was contacted.

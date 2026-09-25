@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 import server_test_support as fixtures
 from backend.db.manager import DATABASE_MANAGER_CACHE
+from backend.http_api.auth import RATE_LIMITER
 from backend.http_api.rate_limit import RateLimiter
 from backend.performance import context as performance_context
 from backend.performance import garmin_metrics as performance_garmin_metrics
@@ -201,7 +202,7 @@ class ProviderReviewTests(unittest.TestCase):
                 with patch.object(server, "database_manager", return_value=self.manager_for_login()):
                     result = server.session_auth_service().login_user(Mock(client_address=("127.0.0.1", 0)), password)
                     self.assertTrue(result["authenticated"])
-                    rate_limit.assert_called_with(server.RATE_LIMITER, "login:127.0.0.1", 5, 900)
+                    rate_limit.assert_called_with(RATE_LIMITER, "login:127.0.0.1", 5, 900)
                     with self.assertRaises(server.AppError) as error:
                         server.session_auth_service().login_user(Mock(client_address=("127.0.0.1", 0)), password + "x")
                     self.assertEqual(error.exception.status, 401)
@@ -375,7 +376,7 @@ class ProviderReviewTests(unittest.TestCase):
             server.key_value_service().set("marker", "fresh")
             result = server.session_auth_service().login_user(Mock(client_address=("127.0.0.1", 0)), configured.app_password)
             self.assertTrue(result["authenticated"])
-            rate_limit.assert_called_with(server.RATE_LIMITER, "login:127.0.0.1", 5, 900)
+            rate_limit.assert_called_with(RATE_LIMITER, "login:127.0.0.1", 5, 900)
             DATABASE_MANAGER_CACHE.reset()
             self.assertEqual(server.key_value_service().get("marker"), "fresh")
 

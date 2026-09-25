@@ -112,7 +112,7 @@ from backend.providers import http as provider_http
 from backend.providers import openai as openai_provider
 from backend.providers import state as provider_state
 from backend.providers import weather as weather_provider
-from backend.providers import intervals_client as intervals_client_module
+from backend.providers.transport_assembly import ProviderTransportAssembly
 from backend.providers.garmin import GarminClientFactory
 from backend.http_api import server as http_server
 from backend.http_api.handler import HttpRequestHandlerDependencies, create_request_handler
@@ -602,7 +602,7 @@ def intervals_nutrition_sync_service() -> IntervalsNutritionSyncService:
     """Compose nutrition sync to Intervals.icu wellness."""
     api_client = IntervalsApiClient(
         api_key=CONFIG.intervals_api_key,
-        request=provider_http_client().request,
+        request=PROVIDER_TRANSPORT.json_http_client().request,
     )
     return IntervalsNutritionSyncService(
         config=CONFIG,
@@ -716,7 +716,7 @@ def intervals_snapshot_reader() -> IntervalsSnapshotReader:
     """Compose the Intervals provider snapshot reader."""
     api_client = IntervalsApiClient(
         api_key=CONFIG.intervals_api_key,
-        request=provider_http_client().request,
+        request=PROVIDER_TRANSPORT.json_http_client().request,
     )
     return IntervalsSnapshotReader(
         CONFIG,
@@ -956,7 +956,7 @@ def weather_service() -> WeatherService:
         manager,
         WeatherCacheStore(manager, KEY_VALUE_REPOSITORY, profile_service()),
         lambda: weather_provider.WeatherClient(
-            provider_http_client().request, runtime_clock.utc_now, LOGGER
+            PROVIDER_TRANSPORT.json_http_client().request, runtime_clock.utc_now, LOGGER
         ),
         WeatherRefreshJournal(
             provider_refresh_tracker(),
@@ -1139,7 +1139,7 @@ def competition_sync_service() -> CompetitionSyncService:
     """Compose the complete competition synchronization use case."""
     return CompetitionSyncService(
         CONFIG,
-        intervals_client,
+        PROVIDER_TRANSPORT.intervals_client,
         competition_sync_reconciler(),
         competition_service(),
         database_manager(),
@@ -1189,7 +1189,7 @@ def planned_calendar_sync_service() -> PlannedCalendarSyncService:
     return PlannedCalendarSyncService(
         CONFIG,
         database_manager(),
-        intervals_client,
+        PROVIDER_TRANSPORT.intervals_client,
         planned_unit_sync_state_writer(),
         runtime_clock.utc_now,
         lambda: ATHLETE_CLOCK.now().date(),
@@ -1201,7 +1201,7 @@ def planned_calendar_repair_service() -> PlannedCalendarRepairService:
     return PlannedCalendarRepairService(
         CONFIG,
         database_manager(),
-        intervals_client,
+        PROVIDER_TRANSPORT.intervals_client,
         planned_unit_sync_state_writer(),
         runtime_clock.utc_now,
         lambda: ATHLETE_CLOCK.now().date(),
@@ -1247,7 +1247,7 @@ def workout_library_refresh_service() -> WorkoutLibraryRefreshService:
     return WorkoutLibraryRefreshService(
         CONFIG,
         database_manager(),
-        intervals_client,
+        PROVIDER_TRANSPORT.intervals_client,
         workout_library_remote_reconciler(),
         workout_library_service(),
         workout_library_sync_state_service(),
@@ -1260,7 +1260,7 @@ def workout_library_refresh_service() -> WorkoutLibraryRefreshService:
 def workout_library_sync_service() -> WorkoutLibrarySyncService:
     """Compose the explicit single-entry workout-library synchronization use case."""
     return WorkoutLibrarySyncService(
-        CONFIG, intervals_client, workout_library_sync_state_service()
+        CONFIG, PROVIDER_TRANSPORT.intervals_client, workout_library_sync_state_service()
     )
 
 
@@ -1483,7 +1483,7 @@ def illness_pause_sync_service() -> IllnessPauseSyncService:
     """Compose the explicitly approved illness-pause remote sync use case."""
     return IllnessPauseSyncService(
         CONFIG,
-        intervals_client(),
+        PROVIDER_TRANSPORT.intervals_client(),
         adaptive_replan_apply_service=adaptive_replan_apply_service(),
         competition_service=competition_service(),
         adaptive_replan_preview_service=adaptive_replan_preview_service(),
@@ -1611,30 +1611,29 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     runtime_clock.utc_now,
 )
 
-
-def provider_http_client() -> provider_http.JsonHttpClient:
-    """Return the observed JSON client bound to the active provider state."""
-    return provider_http.JSON_HTTP_CLIENT_CACHE.get(
-        APP_VERSION,
-        provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
-        LOGGER,
-        DIAGNOSTIC_CAPTURE,
-        provider_state_service(),
-        REDACTOR.redact_text,
-        partial(observability.safe_response_headers, redact=REDACTOR.redact_text),
+PROVIDER_TRANSPORT = ProviderTransportAssembly(
+    app_version=APP_VERSION,
+    max_response_bytes=provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
+    logger=LOGGER,
+    diagnostic_capture=DIAGNOSTIC_CAPTURE,
+    provider_state=lambda: provider_state.get_provider_state_service(
+        database_manager(),
+        KEY_VALUE_REPOSITORY,
+        DB_LOCK,
         runtime_clock.utc_now,
-        sync_observation.operation_context,
-        opener=provider_http.urlopen,
-    )
-
-
-def intervals_client(config: Config | None = None) -> intervals_client_module.IntervalsClient:
-    """Compose an Intervals client with the active provider transport and clock."""
-    return intervals_client_module.IntervalsClient(
-        config or CONFIG,
-        request=provider_http_client().request,
-        now=lambda: ATHLETE_CLOCK.now(),
-    )
+        lambda: ATHLETE_CLOCK.now().date(),
+        LOGGER,
+    ),
+    redact_text=REDACTOR.redact_text,
+    safe_response_headers=partial(
+        observability.safe_response_headers, redact=REDACTOR.redact_text
+    ),
+    now=runtime_clock.utc_now,
+    operation_context=sync_observation.operation_context,
+    opener=lambda: provider_http.urlopen,
+    config=lambda: CONFIG,
+    athlete_now=ATHLETE_CLOCK.now,
+)
 
 
 def gemini_json_client() -> gemini_provider.GeminiJsonClient:
@@ -1643,7 +1642,7 @@ def gemini_json_client() -> gemini_provider.GeminiJsonClient:
         api_key=CONFIG.gemini_api_key,
         base_url=GEMINI_API_BASE_URL,
         response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-        http_client=provider_http_client(),
+        http_client=PROVIDER_TRANSPORT.json_http_client(),
         provider_state=provider_state_service(),
     )
 
@@ -1658,7 +1657,7 @@ def audio_transcription_client() -> audio_provider.AudioTranscriptionClient:
         default_openai_base_url=DEFAULT_OPENAI_BASE_URL,
         openai_transcription_model="gpt-transcribe",
         response_timeout_seconds=90,
-        http_client=provider_http_client(),
+        http_client=PROVIDER_TRANSPORT.json_http_client(),
         gemini_client=gemini_json_client(),
     )
 
@@ -1691,7 +1690,7 @@ def openai_responses_client() -> openai_provider.OpenAIResponsesClient:
         background_poll_seconds=OPENAI_BACKGROUND_POLL_SECONDS,
         background_max_seconds=OPENAI_BACKGROUND_MAX_SECONDS,
         thinking_level=SETTINGS.selected_thinking_level,
-        http_client=provider_http_client(),
+        http_client=PROVIDER_TRANSPORT.json_http_client(),
         provider_state=provider_state_service(),
         logger=LOGGER,
         monotonic=time.monotonic,
@@ -1952,7 +1951,7 @@ def coach_proposal_execution_service() -> CoachProposalExecutionService:
     """Compose guarded dispatch for confirmed Coach actions."""
     return CoachProposalExecutionService(
         database_manager(), duplicate_activity_service(), history_undo_service(),
-        intervals_client, runtime_maintenance.MAINTENANCE_GATE,
+        PROVIDER_TRANSPORT.intervals_client, runtime_maintenance.MAINTENANCE_GATE,
         now=time.time, utc_now=runtime_clock.utc_now,
     )
 

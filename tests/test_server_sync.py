@@ -462,8 +462,7 @@ class ServerSyncTests(ServerTestCase):
                 calls.extend(events)
                 return [{"id": index} for index, _ in enumerate(events, 1)]
 
-        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=FakeIntervalsClient()
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=FakeIntervalsClient()
         ):
             result = server.illness_pause_sync_service().apply(preview["id"], sync_illness_to_intervals=True)
 
@@ -619,7 +618,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertTrue(archived["library_entry"]["archived"])
 
     def test_existing_intervals_coach_folder_is_reused(self):
-        client = server.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        client = server.PROVIDER_TRANSPORT.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
         with patch.object(client, "get", return_value=[{"id": 77, "name": "Intervals Coach", "type": "FOLDER"}]), patch.object(
             client, "post", return_value={"id": "remote-1"}
         ) as post:
@@ -816,7 +815,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(fake.maximum, 2)
 
     def test_intervals_collection_rejects_repeated_full_page(self):
-        client = server.intervals_client(replace(server.CONFIG, intervals_api_key="test-key"))
+        client = server.PROVIDER_TRANSPORT.intervals_client(replace(server.CONFIG, intervals_api_key="test-key"))
         page = [{"id": f"activity-{index}"} for index in range(500)]
         with patch.object(client._api, "get", side_effect=[page, page]):
             with self.assertRaises(server.AppError) as raised:
@@ -1140,8 +1139,7 @@ class ServerSyncTests(ServerTestCase):
         recorder, client = self._prepare_remote_contract_fixture()
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
             server.sync_job_queue_service().enqueue(
                 "intervals", "refresh", {"days": 7, "reason": "startup"}
@@ -1153,8 +1151,7 @@ class ServerSyncTests(ServerTestCase):
         recorder, client = self._prepare_remote_contract_fixture()
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
             server.sync_job_queue_service().enqueue(
                 "intervals", "refresh", {"days": 7, "reason": "daily"}
@@ -1166,8 +1163,7 @@ class ServerSyncTests(ServerTestCase):
         recorder, client = self._prepare_competition_contract_fixture()
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
             server.sync_job_queue_service().enqueue(
                 "intervals", "refresh", {"days": 7, "reason": "startup"}
@@ -1179,8 +1175,7 @@ class ServerSyncTests(ServerTestCase):
         recorder, client = self._prepare_competition_contract_fixture()
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
             server.sync_job_queue_service().enqueue(
                 "intervals", "refresh", {"days": 7, "reason": "daily"}
@@ -1192,8 +1187,7 @@ class ServerSyncTests(ServerTestCase):
         recorder, client = self._prepare_remote_contract_fixture()
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
             server.intervals_sync_service().sync("activity", activity_days=7)
         self.assertEqual(recorder.mutations, [])
@@ -1202,8 +1196,7 @@ class ServerSyncTests(ServerTestCase):
         recorder, client = self._prepare_remote_contract_fixture()
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
             server.full_provider_resync_service().resync("intervals")
         self.assertEqual(recorder.mutations, [])
@@ -1218,8 +1211,7 @@ class ServerSyncTests(ServerTestCase):
         competition_id = saved["competitions"][0]["id"]
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
-        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
             created = server.competition_sync_service().sync("explicit approval", push_local=True)
             server.competition_service().save({
@@ -1247,8 +1239,7 @@ class ServerSyncTests(ServerTestCase):
         client = RecordedIntervalsClient(recorder)
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
             server.intervals_sync_service().sync("read-only", activity_days=1)
         self.assertEqual(recorder.mutations, [])
@@ -1298,7 +1289,7 @@ class ServerSyncTests(ServerTestCase):
 
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=new_snapshot
-        ), patch.object(server, "intervals_client", FakeIntervalsClient), patch.object(
+        ), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ), patch.object(SelectedWorkoutSyncService, "sync", return_value={"workouts": 0}):
             result = server.full_provider_resync_service().resync("intervals")
@@ -1415,7 +1406,7 @@ class ServerSyncTests(ServerTestCase):
             def bulk_delete_events(self, identifiers):
                 return 0
 
-        with patch.object(server, "intervals_client", FakeIntervalsClient), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
             result = server.competition_sync_service().sync("test", push_local=True)
@@ -1456,7 +1447,7 @@ class ServerSyncTests(ServerTestCase):
             def bulk_delete_events(self, identifiers):
                 return 0
 
-        with patch.object(server, "intervals_client", FakeIntervalsClient), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
             result = server.competition_sync_service().sync("test", push_local=True)
@@ -1500,7 +1491,7 @@ class ServerSyncTests(ServerTestCase):
             def bulk_delete_events(self, identifiers):
                 return 0
 
-        with patch.object(server, "intervals_client", FakeIntervalsClient), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
             result = server.competition_sync_service().sync("test")
@@ -1533,7 +1524,7 @@ class ServerSyncTests(ServerTestCase):
             def bulk_delete_events(self, identifiers):
                 return 0
 
-        with patch.object(server, "intervals_client", FakeIntervalsClient), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
             result = server.competition_sync_service().sync("test")
@@ -1687,9 +1678,9 @@ class ServerSyncTests(ServerTestCase):
             {},
             BytesIO(error_body),
         )
-        with patch.object(server.provider_http_client(), "opener", side_effect=upstream_error):
+        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", side_effect=upstream_error):
             with self.assertRaises(server.AppError) as raised:
-                server.provider_http_client().request("POST", "https://intervals.icu/api/v1/athlete/0/workouts", payload={}, service="intervals")
+                server.PROVIDER_TRANSPORT.json_http_client().request("POST", "https://intervals.icu/api/v1/athlete/0/workouts", payload={}, service="intervals")
         self.assertEqual(raised.exception.status, 502)
         self.assertIn("422", raised.exception.message)
         self.assertIn("Invalid workout type", raised.exception.message)

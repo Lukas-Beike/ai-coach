@@ -590,7 +590,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertIn("LOCAL TRAINING LIBRARY", server.coach_training_context_service().build())
 
     def test_library_update_always_sends_required_folder(self):
-        client = server.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        client = server.PROVIDER_TRANSPORT.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
         with patch.object(client, "get_or_create_workout_folder", return_value=12345) as folder, patch.object(
             client, "put", return_value={"id": "remote-1"}
         ) as put:
@@ -609,7 +609,7 @@ class ServerPlanningTests(ServerTestCase):
         })
 
     def test_unknown_workout_sport_falls_back_to_provider_other_type(self):
-        client = server.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        client = server.PROVIDER_TRANSPORT.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
         with patch.object(client, "get", return_value=[]), patch.object(
             client, "post", side_effect=[{"id": 12345}, {"id": "remote-1"}]
         ) as post:
@@ -681,7 +681,7 @@ class ServerPlanningTests(ServerTestCase):
         })
 
     def test_ambiguous_description_blocks_all_workout_export_paths_before_writes(self):
-        client = server.intervals_client()
+        client = server.PROVIDER_TRANSPORT.intervals_client()
         workout = {
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "type": "Run", "description": "- 6km Z1 HR\n- Optional bis insgesamt 8km",
@@ -1569,8 +1569,7 @@ class ServerPlanningTests(ServerTestCase):
         })
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
-        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
             result = server.workout_library_refresh_service().refresh("read-only")
         self.assertEqual(result["local_synced"], 0)
@@ -1603,8 +1602,7 @@ class ServerPlanningTests(ServerTestCase):
             "type": "Ride",
             "name": "Remote original",
         }])
-        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
             result = server.competition_sync_service().sync("read-only")
         competition = server.competition_service().list()[0]
@@ -1652,7 +1650,7 @@ class ServerPlanningTests(ServerTestCase):
                 return 0
 
         client = FakeIntervalsClient()
-        with patch.object(server, "intervals_client", return_value=client), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
             server.competition_sync_service().sync("test")
@@ -1668,7 +1666,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(saved["competition"]["sync_state"], "local")
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute("UPDATE competitions SET intervals_event_id=NULL, sync_dirty=1, sync_state='local', sync_conflict='' WHERE id=?", (competition_id,))
-        with patch.object(server, "intervals_client", return_value=client), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
             server.competition_sync_service().sync("test")
@@ -1695,7 +1693,7 @@ class ServerPlanningTests(ServerTestCase):
                 deleted.extend(identifiers)
                 return len(identifiers)
 
-        with patch.object(server, "intervals_client", FakeIntervalsClient), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
             server.competition_sync_service().sync("test", push_local=True)

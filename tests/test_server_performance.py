@@ -660,7 +660,7 @@ class ServerPerformanceTests(ServerTestCase):
                     "duplicate_id": pair["duplicate_id"],
                     "snapshot_synced_at": pair["snapshot_synced_at"],
                 },
-                server.intervals_client(),
+                server.PROVIDER_TRANSPORT.intervals_client(),
             )
         delete.assert_called_once_with("i-garmin")
         self.assertEqual(result["kept_activity_id"], "i-wahoo")

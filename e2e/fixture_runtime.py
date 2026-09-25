@@ -19,6 +19,7 @@ os.environ.update({
 })
 sys.path.insert(0, "/app")
 import server
+from backend.http_api import auth as http_auth
 
 
 def blocked_provider(*args, **kwargs):
@@ -37,7 +38,7 @@ server.coach_conversation_provision_service = FixtureConversationProvisionServic
 # Browser scenarios deliberately poll and reload the single disposable fixture
 # far more aggressively than one athlete does. Rate limiting has dedicated unit
 # coverage; disable it here to keep unrelated UI scenarios order-independent.
-server.RATE_LIMITER.allow = lambda key, limit, window_seconds: (True, 0)
+http_auth.RATE_LIMITER.allow = lambda key, limit, window_seconds: (True, 0)
 
 
 def fixture_coach_response(payload, **kwargs):

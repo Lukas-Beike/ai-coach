@@ -34,7 +34,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.bad_parse = False
         self.fail_delete = False
         self.enterContext(patch.object(
-            server.provider_http_client(), "request", side_effect=AssertionError("Unexpected live network")
+            server.PROVIDER_TRANSPORT.json_http_client(), "request", side_effect=AssertionError("Unexpected live network")
         ))
         self.enterContext(patch.object(intervals_client_module.IntervalsClient, "get_paged_collection", side_effect=lambda *a, **k: deepcopy(list(self.remote.values()))))
         self.enterContext(patch.object(intervals_client_module.IntervalsClient, "get", side_effect=self.get))

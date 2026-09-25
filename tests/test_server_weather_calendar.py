@@ -650,7 +650,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(conflict["match"], "date")
 
     def test_library_upload_uses_single_workout_endpoint_and_canonical_sport(self):
-        client = server.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        client = server.PROVIDER_TRANSPORT.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
         with patch.object(client, "get", return_value=[]), patch.object(
             client, "post", side_effect=[{"id": 12345}, {"id": "remote-1"}]
         ) as post:
@@ -675,7 +675,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "type": "Run", "description": description, "name": "Recovery 6-8km",
             "duration_minutes": 40, "moving_time": 2400,
         }
-        client = server.intervals_client()
+        client = server.PROVIDER_TRANSPORT.intervals_client()
         with patch.object(client, "get_or_create_workout_folder", return_value=1), \
                 patch.object(client, "post", return_value={"id": "synthetic"}) as post, \
                 patch.object(client, "put", return_value={"id": "synthetic"}) as put:
@@ -799,7 +799,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
     def test_explicit_plan_push_records_a_remote_calendar_write(self):
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
-        with patch.object(server, "intervals_client", return_value=client):
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client):
             result = server.workout_library_sync_service().plan_remote(
                 "remote-workout-1",
                 {"name": "Planned", "type": "Ride"},
@@ -857,7 +857,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             {"id": "ride-2", "name": "Spätere Ausfahrt", "type": "Ride", "start_date_local": day_six + "T09:00:00", "moving_time": 3600},
         ]
         server.profile_service().save({"weather_location": "Münster"})
-        with patch.object(server.provider_http_client(), "request", side_effect=[
+        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "request", side_effect=[
             {"results": [{"name": "Münster", "country": "Deutschland", "country_code": "DE", "latitude": 51.96, "longitude": 7.63, "timezone": "Europe/Berlin"}]},
             forecast,
             forecast,
