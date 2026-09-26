@@ -275,7 +275,7 @@
         </details>
         <details class="settings-section logs-section collapsible-section" data-more-segment-panel="operations">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Server-Logs</span><span class="collapsible-summary-meta">Bereinigte Laufzeitdaten</span></summary>
-          <div class="settings-section-heading"><div><h3>Server-Logs</h3><p>Die letzten bereinigten Einträge aus dem Fehler- und Laufzeitprotokoll.</p></div><button id="logsRefreshButton" type="button" class="secondary-button">Logs aktualisieren</button></div>
+          <div class="settings-section-heading"><div><h3>Server-Logs</h3><p>Die bereinigten Einträge aus Fehler- und Laufzeitprotokoll.</p></div><div class="settings-inline-action"><button id="logsDownloadButton" type="button" class="secondary-button">Logs herunterladen</button><button id="logsRefreshButton" type="button" class="secondary-button">Logs aktualisieren</button></div></div>
           <pre id="logsOutput" class="logs-output">Logs werden beim Öffnen geladen…</pre>
         </details>
         <details class="settings-section collapsible-section" data-more-segment-panel="privacy">
@@ -314,12 +314,8 @@
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Diagnose</span><span class="collapsible-summary-meta">Bereinigten Status herunterladen</span></summary>
           <div class="diagnostic-actions">
             <button type="button" id="diagnosticsButton" class="secondary-button">Diagnose herunterladen</button>
-            <label class="diagnostic-capture-toggle" for="diagnosticCaptureToggle">
-              <input type="checkbox" id="diagnosticCaptureToggle">
-              <span>Erweiterte technische Diagnose für eine Stunde aufzeichnen</span>
-            </label>
-            <p id="diagnosticCaptureStatus" class="fine-print">Aus. Antwortinhalte und Athletendaten werden nicht aufgezeichnet.</p>
-            <p class="fine-print">Der normale Diagnoseexport enthält technische Fehlerdaten der letzten 20 Coach-Aufträge, auch ohne aktive Aufzeichnung. Er enthält keine API-Schlüssel, Tokens oder Trainingsdaten. Während der aktiven Aufzeichnung werden zusätzlich Antwortformen und technische Metadaten gespeichert – niemals Antwortinhalte oder Athletendaten.</p>
+            <p id="diagnosticCaptureStatus" class="fine-print">Erweiterte technische Diagnose ist immer aktiv.</p>
+            <p class="fine-print">Gespeichert werden nur begrenzte technische Metadaten und Antwortformen, keine Antwortinhalte, Athletendaten, Zugangsdaten oder Tokens.</p>
           </div>
         </details>
       </section>
@@ -367,6 +363,6 @@
   <script src="/views.js?v=217" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/app.js?v=220" defer></script>
+  <script src="/app.js?v=222" defer></script>
 </body>
 </html>

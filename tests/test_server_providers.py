@@ -496,10 +496,8 @@ class ServerProvidersTests(ServerTestCase):
         self.assertNotIn("do-not-log-request-body", log_text)
         self.assertNotIn("do-not-log-response-body", log_text)
 
-    def test_user_enabled_diagnostic_capture_keeps_response_shape_without_content(self):
-        self.assertFalse(server.DIAGNOSTIC_CAPTURE.status()["active"])
-        enabled = server.DIAGNOSTIC_CAPTURE.set_enabled(True)
-        self.assertTrue(enabled["active"])
+    def test_diagnostic_capture_is_always_active_and_keeps_response_shape_without_content(self):
+        self.assertTrue(server.DIAGNOSTIC_CAPTURE.status()["active"])
         response = {
             "bodyBattery": 82,
             "access_token": "must-never-appear",
@@ -525,8 +523,6 @@ class ServerProvidersTests(ServerTestCase):
         self.assertIn("shape", response_capture)
         self.assertNotIn("content", response_capture)
 
-        server.DIAGNOSTIC_CAPTURE.set_enabled(False)
-        self.assertFalse(server.DIAGNOSTIC_CAPTURE.status()["active"])
         server.provider_http.external_call(
             "garmin",
             "body_battery",
@@ -656,7 +652,6 @@ class ServerProvidersTests(ServerTestCase):
         upstream_error = HTTPError(
             "https://api.openai.com/v1/responses", 400, "Bad Request", {"x-request-id": "req_test_456"}, BytesIO(raw_error)
         )
-        server.DIAGNOSTIC_CAPTURE.set_enabled(True)
         config = replace(server.CONFIG, openai_api_key="openai-test")
         with patch.object(server, "CONFIG", config), patch.object(openai_provider, "urlopen", side_effect=upstream_error):
             with self.assertRaises(server.AppError) as raised:
@@ -727,7 +722,6 @@ class ServerProvidersTests(ServerTestCase):
             def __iter__(self):
                 yield b"data: {}\n"
 
-        server.DIAGNOSTIC_CAPTURE.set_enabled(True)
         with (
             patch.object(provider_http, "MAX_EXTERNAL_RESPONSE_BYTES", 1),
             patch.object(openai_provider, "urlopen", return_value=OversizedResponse()),
