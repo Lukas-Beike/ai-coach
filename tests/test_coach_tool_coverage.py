@@ -420,7 +420,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
     def test_delete_duplicate_intervals_activity(self):
         common = {"type": "Ride", "start_date_local": "2026-09-06T10:00:00", "moving_time": 3600, "distance": 30000}
         snapshot = {"recent_activities": [{**common, "id": "synthetic-wahoo", "source": "Wahoo"}, {**common, "id": "synthetic-garmin", "source": "GARMIN_CONNECT"}]}
-        server.sync_state_repository().save_view(snapshot)
+        server.SYNC_PERSISTENCE.state_repository().save_view(snapshot)
         with patch.object(intervals_client_module.IntervalsClient, "delete_activity", return_value=None):
             result = self.run_tool(
                 "delete_duplicate_intervals_activity",
