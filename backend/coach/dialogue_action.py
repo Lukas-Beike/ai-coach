@@ -118,7 +118,7 @@ class CoachDialogueActionService:
                 )
         retry_push = bool(retry_job and retry_job["type"] in {"plan_push", "competition_push"})
         remote_write = (
-            name in {"start_intervals_plan_sync", "sync_competitions"}
+            name in {"start_intervals_plan_sync", "sync_competitions", "delete_duplicate_intervals_activity"}
             or (name == "apply_adaptive_replan" and bool(arguments.get("sync_illness_to_intervals")))
             or retry_push
         )
@@ -218,3 +218,5 @@ class CoachDialogueActionService:
             require_coach_scope(action, "adaptive_replan:" + str(arguments.get("adjustment_id") or ""))
         if name in {"save_nutrition_entry", "delete_nutrition_entry"}:
             require_coach_scope(action, "local_nutrition")
+        if name == "delete_duplicate_intervals_activity":
+            require_coach_scope(action, "intervals_sync")

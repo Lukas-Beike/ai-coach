@@ -29,6 +29,7 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `clarify_coach_request` | `success` | `test_clarification_and_cancellation_preserve_athlete_data` |
 | `commit_training_plan` | `success` | `test_requested_draft_commit_and_metadata_lifecycle` |
 | `delete_activity_feedback` | `success` | `test_daily_feedback_and_activity_feedback_are_separate_from_profile` |
+| `delete_duplicate_intervals_activity` | `success` | `test_delete_duplicate_intervals_activity` |
 | `delete_competition` | `success` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |
 | `get_sync_job` | `success` | `test_provider_reads_and_job_status_use_correct_provider` |
 | `get_activity_details` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |

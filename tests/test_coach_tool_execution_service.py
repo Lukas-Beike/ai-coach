@@ -218,6 +218,13 @@ class StructuredToolExecutionTests(unittest.TestCase):
         self.assertEqual(self.lock.enter_count, 0)
         self.assertEqual(self.database_manager.uow_count, 0)
 
+    def test_delete_duplicate_intervals_activity_is_also_outside_local_database_transaction(self) -> None:
+        self.tool_dispatch.execute.return_value = {"ok": True}
+
+        self.assertEqual(self.execute("delete_duplicate_intervals_activity"), {"ok": True})
+        self.assertEqual(self.lock.enter_count, 0)
+        self.assertEqual(self.database_manager.uow_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

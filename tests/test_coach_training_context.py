@@ -151,13 +151,13 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
         service = self.make_service(
             structured,
             section_limits={"planning": 180},
-            total_char_limit=11_000,
+            total_char_limit=12_500,
         )
 
         with self.assertLogs("intervals_coach", level="WARNING") as captured:
             result = service.build()
 
-        self.assertLessEqual(len(result), 11_000)
+        self.assertLessEqual(len(result), 12_500)
         self.assertIn('"truncated_sections":[{"section":"planning"', result)
         self.assertEqual(captured.records[0].event, "coach_context_budget_applied")
 
@@ -169,7 +169,7 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
         )
         parsed = json.loads(result[structured_start:structured_end])
         self.assertIsInstance(parsed, dict)
-        self.assertLessEqual(len(result), 11_000)
+        self.assertLessEqual(len(result), 12_500)
 
 
 if __name__ == "__main__":

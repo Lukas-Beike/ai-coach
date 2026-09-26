@@ -188,6 +188,44 @@ class CoachPlanningActionToolServiceTests(unittest.TestCase):
         )
         self.assertNotIn("proposal", result)
 
+    def test_undo_applies_directly_when_apply_is_true(self) -> None:
+        self.history.preview.return_value = {
+            "status": "preview",
+            "change": {"id": "change-1"},
+            "proposal": {
+                "action_type": "undo_change",
+                "payload": {"change_id": "change-1", "expected_current_hash": "current-hash"},
+            },
+        }
+        self.history.apply.return_value = {
+            "status": "undone",
+            "restored_entity_type": "planned_unit",
+            "restored_entity_id": "unit-1",
+        }
+        result = self.service.execute(
+            "undo_training_change",
+            {"change_id": "change-1", "apply": True},
+            {"operation": "undo_training_change", "authorization_scope": ["change:change-1"]},
+            "turn-1",
+            "csrf-hash-1",
+        )
+        self.assertEqual(
+            result,
+            {
+                "ok": True,
+                "status": "undone",
+                "change": {"id": "change-1"},
+                "restored_entity_type": "planned_unit",
+                "restored_entity_id": "unit-1",
+            },
+        )
+        self.history.preview.assert_called_once_with("change-1")
+        self.history.apply.assert_called_once_with({
+            "change_id": "change-1",
+            "expected_current_hash": "current-hash",
+        })
+        self.proposals.create.assert_not_called()
+
     def test_undo_rejects_missing_operation_before_history_or_proposal_factories(self) -> None:
         with self.assertRaises(AppError) as raised:
             self.service.execute(

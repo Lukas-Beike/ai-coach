@@ -1219,6 +1219,7 @@ function renderCoachOverview(data) {
 function renderCoachReceipts() {
   const root = $("#coachReceipts");
   if (!root) return;
+  root.hidden = true;
   root.replaceChildren();
   (state.coachReceipts || []).slice(-3).reverse().forEach((receipt) => root.append(createActionReceipt(receipt)));
 }
@@ -1246,6 +1247,7 @@ const COACH_RECEIPT_LABELS = {
   sync_competitions: "Wettkampfsynchronisierung beauftragt",
   resolve_training_sync_conflict: "Synchronisierungsentscheidung gespeichert",
   start_intervals_plan_sync: "Intervals-Synchronisierung beauftragt",
+  delete_duplicate_intervals_activity: "Garmin-Duplikat gelöscht",
 };
 const SYNC_JOB_RECEIPT_LABELS = {
   queued: "Synchronisierung beauftragt", running: "Synchronisierung läuft",
@@ -1686,19 +1688,8 @@ function jumpToChatComposer() {
 function updateChatQueueStatus() {
   const status = $("#chatQueueStatus");
   if (!status) return;
-  const count = state.chatQueue.length;
-  if (!state.busy || !count) {
-    status.hidden = true;
-    status.textContent = "";
-    return;
-  }
-  const steering = state.chatQueue.filter((entry) => entry.mode === "steer").length;
-  const queued = count - steering;
-  const details = [];
-  if (steering) details.push(`${steering} Steuerung${steering === 1 ? "" : "en"}`);
-  if (queued) details.push(`${queued} Nachricht${queued === 1 ? "" : "en"} in der Warteschlange`);
-  status.hidden = false;
-  status.textContent = `${details.join(" · ")} · wird nach der aktuellen Antwort verarbeitet`;
+  status.hidden = true;
+  status.textContent = "";
 }
 
 function coachWorkingLabel() {
@@ -1846,10 +1837,6 @@ function createPendingMessage(entry) {
   const node = document.createElement("div");
   node.className = "message user pending";
   node.textContent = entry.message;
-  const label = document.createElement("span");
-  label.className = "pending-label";
-  label.textContent = entry.mode === "steer" ? "Steuerung · als Nächstes" : "Warteschlange · danach";
-  node.append(label);
   return node;
 }
 
