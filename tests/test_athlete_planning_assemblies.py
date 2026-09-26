@@ -24,6 +24,10 @@ class AthleteDataAssemblyTests(unittest.TestCase):
             utc_now=now,
             local_date=today,
             event_buffer=event_buffer,
+            competition_repository=repositories[2],
+            normalize_profile=Mock(name="normalize_profile"),
+            normalize_competition=Mock(name="normalize_competition"),
+            uuid_factory=Mock(name="uuid_factory"),
         )
 
         feedback = assembly.activity_feedback()

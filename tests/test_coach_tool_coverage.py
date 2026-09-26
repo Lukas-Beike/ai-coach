@@ -19,6 +19,7 @@ from backend.providers import http as provider_http
 from backend.providers import openai as openai_provider
 from backend.sync.intervals import IntervalsSyncService
 from backend.providers import intervals_client as intervals_client_module
+from backend.sync.adaptive import IllnessPauseSyncService
 
 
 def covers(*cases):
@@ -377,7 +378,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         preview = self.run_tool("preview_adaptive_replan", {}, ["adaptive_replan"])
         before = self.state()["planned_units"]
         arguments = {"adjustment_id": preview["id"], "sync_illness_to_intervals": True}
-        with patch.object(server.IllnessPauseSyncService, "sync", return_value={"status": "ok", "synced": 3}) as remote:
+        with patch.object(IllnessPauseSyncService, "sync", return_value={"status": "ok", "synced": 3}) as remote:
             denied, _ = self.turn("Nur lokal übernehmen.", [lambda _: self.call("apply_adaptive_replan", arguments, ["adaptive_replan:" + preview["id"]]),
                                                           {"output_text": "Nicht übertragen."}])
             self.assertEqual(denied["status"], "failed")
@@ -393,7 +394,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
     @covers("undo_training_change:success")
     def test_undo_is_a_bound_preview_until_explicit_confirmation(self):
         server.PLANNING_DATA.workout_library().create_template({"name": "Synthetic undo template", "description": "- 30m 60% Easy", "duration_minutes": 30})
-        change = server.change_history_service().list()[0]
+        change = server.HISTORY.change_history_service().list()[0]
         before = server.PLANNING_DATA.workout_library().list()
         result = self.run_tool("undo_training_change", {"change_id": change["id"]}, ["change:" + change["id"]], message="Das möchte ich rückgängig machen.")
         self.assertEqual(result["proposed_action"]["status"], "preview")

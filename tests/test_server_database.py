@@ -975,10 +975,10 @@ class ServerDatabaseTests(ServerTestCase):
 
     def test_privacy_delete_removes_change_history(self):
         server.ATHLETE_DATA.profile().save({"name": "Ada"})
-        self.assertTrue(server.change_history_service().list())
+        self.assertTrue(server.HISTORY.change_history_service().list())
         with patch.object(openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
             server.PRIVACY_ASSEMBLY.delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
-        self.assertEqual(server.change_history_service().list(), [])
+        self.assertEqual(server.HISTORY.change_history_service().list(), [])
 
 
 if __name__ == "__main__":

@@ -1613,3 +1613,51 @@ were public bootstrap and sync state projections.
   Docker build still cannot connect to the local Docker Engine named pipe.
 - Root size after this slice: 1,422 physical / 1,239 nonblank lines, 121
   imports, and 27 top-level definitions. S6 continues.
+
+## S6: Coach conversations, local actions, history, and remaining page factories
+
+- Caller trace: Coach response and Gemini history/payload services are used by
+  Coach turns, with focused conversation and dialogue tests patching their
+  construction sites. Quick actions feed public state and background jobs;
+  clarification and dialogue actions feed structured tool rounds; morning
+  check-in services feed HTTP, diagnostics, public state, and Coach jobs.
+  Change history and undo are consumed by HTTP, Coach dispatch, and planning
+  tests. Athlete context is used by sync, HTTP, and planning tests. Library and
+  chat-history pages are constructed for HTTP requests. Planning-command
+  receipts and orchestration are shared by turn opening, chat turns, and the
+  HTTP planning command route.
+- Owners: conversation/model response composition belongs to
+  `CoachConversationAssembly`; local Coach actions and check-ins belong to
+  `CoachLocalAssembly`; history and undo belong to `HistoryAssembly`; athlete
+  context belongs to `AthleteDataAssembly`; HTTP page/route construction stays
+  in `HttpApiAssembly`; receipts and planning commands belong to
+  `CoachTurnAssembly`. Illness-pause sync is owned by
+  `SyncCommandAssembly`.
+- The assemblies receive existing manager, lock, repository, event, stream,
+  configuration, and provider owners explicitly. Service factory freshness is
+  preserved. Gemini and turn callbacks stay lazy where needed, including the
+  late provider-response edge. HTTP routes retain their existing dispatch
+  owners. Tests now patch/import at those owners; the planning command route
+  test imports its route from `backend.http_api` instead of a removed root
+  alias. New isolated assembly tests use mocks, with integration tests retaining
+  their temporary databases and mocked transports.
+- Focused results: planning command 6, Coach tool coverage 28, HTTP 68,
+  architecture 46, Coach conversation assembly 3, Coach local assembly 2,
+  history assembly 1, athlete/planning assembly 2, sync command assembly 3
+  Coach integration 48, and sync integration 80 passed. The first full run
+  exposed stale morning-check-in test imports and an early-captured provider
+  factory on the illness-pause path. The tests now import from the service
+  owner, and the provider factory remains late-bound. The corrected full suite
+  passed: 2,872 tests, 12 skipped for SQLCipher runtime. `compileall`,
+  `git diff --check`, inventory regeneration, and a fresh inventory `--check`
+  passed. Docker build remains unavailable because the local Docker Engine
+  named pipe is absent.
+- Root size: 1,274 physical / 1,136 nonblank lines, 108 imports, and eight
+  top-level functions. Remaining root code consists of explicit configuration
+  and resource selection, named domain assembly wiring, a small set of shared
+  process state factories, and readable startup/shutdown lifecycle. The
+  practical line target is exceeded because these concrete assembly calls and
+  imports are intentionally visible at the root; collapsing them into another
+  graph module would hide ownership. The final architecture suite passes and
+  the remaining size is justified by the explicit wiring requirement in the
+  plan.

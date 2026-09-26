@@ -9,7 +9,7 @@ from backend.coach.turn_assembly import CoachTurnAssembly
 class CoachTurnAssemblyTests(unittest.TestCase):
     def make_assembly(self):
         names = (
-            "database_manager", "command_receipts", "attachments", "dialogue",
+            "database_manager", "attachments", "dialogue",
             "payload", "transport", "rounds", "jobs", "failure", "conversation",
         )
         deps = {name: Mock(name=name) for name in names}
@@ -27,6 +27,7 @@ class CoachTurnAssemblyTests(unittest.TestCase):
         conversation_service = Mock(name="conversation_service")
         deps["database_manager"].return_value = manager
         deps["conversation"].return_value = conversation_service
+        deps["tool_dispatch"] = Mock(name="tool_dispatch")
         assembly = CoachTurnAssembly(
             database_manager=deps["database_manager"],
             database_lock=lock,
@@ -42,7 +43,6 @@ class CoachTurnAssemblyTests(unittest.TestCase):
             maintenance_gate=maintenance_gate,
             tools=lambda: tools,
             read_only_tools=lambda: read_only_tools,
-            command_receipt_service=deps["command_receipts"],
             attachment_context_service=deps["attachments"],
             dialogue_read_service=deps["dialogue"],
             request_payload_service=deps["payload"],
@@ -51,6 +51,7 @@ class CoachTurnAssemblyTests(unittest.TestCase):
             job_store=deps["jobs"],
             turn_failure_service=deps["failure"],
             conversation_provision_service=deps["conversation"],
+            tool_dispatch_service=deps["tool_dispatch"],
         )
         return assembly, deps, {
             "manager": manager,
@@ -68,12 +69,11 @@ class CoachTurnAssemblyTests(unittest.TestCase):
 
         self.assertIs(service._database_manager, deps["database_manager"])
         self.assertIs(service._database_lock, owners["lock"])
-        self.assertIs(service._receipts, deps["command_receipts"].return_value)
+        self.assertIs(service._receipts._manager_factory, deps["database_manager"])
         self.assertIs(service._settings, owners["settings"])
         self.assertIs(service._conversations, owners["conversation_service"])
         self.assertIs(service._conversation_gate, owners["conversation_gate"])
         self.assertIs(service._maintenance_gate, owners["maintenance_gate"])
-        deps["command_receipts"].assert_called_once_with()
         deps["conversation"].assert_called_once_with()
         deps["attachments"].assert_not_called()
         deps["transport"].assert_not_called()

@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 from backend.coach import context as coach_context, streams as coach_streams
 from backend.coach.attachments import gemini_history_parts
 from backend.coach.context import CoachIntervalsContextService, future_coach_planned_workouts
+from backend.coach.morning import ManualMorningCheckinService
 from backend.coach.proposals import validated_coach_action_preview_input
 from backend.http_api import server as http_server_module
 from backend.planning import competitions as planning_competitions
@@ -415,7 +416,7 @@ class ServerCoachTests(ServerTestCase):
         error = server.AppError(503, "Garmin sleep is not ready", reason="garmin_sleep_not_ready")
         with patch("backend.coach.job_store.CoachJobStore.message", return_value="Morgen-Check-in"), patch(
             "backend.coach.job_store.CoachJobStore.merge_receipt"
-        ), patch.object(server.ManualMorningCheckinService, "prepare", side_effect=error), patch(
+        ), patch.object(ManualMorningCheckinService, "prepare", side_effect=error), patch(
             "backend.coach.chat_turn.CoachChatTurnService.run"
         ) as chat:
             with self.assertRaises(server.AppError):
@@ -428,7 +429,7 @@ class ServerCoachTests(ServerTestCase):
         completion = {"status": "completed", "coach_quick_actions": {"morning_checkin": False}}
         with patch("backend.coach.job_store.CoachJobStore.message", return_value="Morgen-Check-in"), patch(
             "backend.coach.job_store.CoachJobStore.merge_receipt"
-        ), patch.object(server.ManualMorningCheckinService, "prepare"), patch(
+        ), patch.object(ManualMorningCheckinService, "prepare"), patch(
             "backend.coach.chat_turn.CoachChatTurnService.run",
             return_value={"status": "completed", "message": {"content": "Guten Morgen"}},
         ), patch(
@@ -727,7 +728,7 @@ class ServerCoachTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             row = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact["artifact_id"],)).fetchone()
         self.assertEqual(row["status"], "superseded")
-        self.assertEqual(server.coach_dialogue_read_service().artifact_refs(), [])
+        self.assertEqual(server.COACH_CONVERSATION.dialogue_read_service().artifact_refs(), [])
 
     def test_coach_reset_keeps_local_history_when_reset_transaction_fails(self):
         message = server.COACH_CONVERSATION.message_service().add("user", "Keep this message")
@@ -875,7 +876,7 @@ class ServerCoachTests(ServerTestCase):
 
     def test_coach_competition_update_is_pushed_to_existing_remote_event(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()
-        saved = server.athlete_context_service().save({}, [{"name": "Old Race", "event_date": event_date, "sport": "Cycling"}])
+        saved = server.ATHLETE_DATA.context().save({}, [{"name": "Old Race", "event_date": event_date, "sport": "Cycling"}])
         competition_id = saved["competitions"][0]["id"]
         external_id = planning_competitions.competition_external_id(competition_id)
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -936,7 +937,7 @@ class ServerCoachTests(ServerTestCase):
         }
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.PLAN_ADJUSTMENT_REPOSITORY.create_preview(db, str(uuid.uuid4()), json.dumps(preview), runtime_clock.utc_now())
-        actions = server.coach_quick_actions_service().state()
+        actions = server.COACH_LOCAL.quick_actions_service().state()
         self.assertFalse(actions["morning_checkin"])
         self.assertTrue(actions["adjust_plan"])
         self.assertEqual([item["name"] for item in actions["plan_blockers"]], ["Lange Ausfahrt"])
@@ -983,7 +984,7 @@ class ServerCoachTests(ServerTestCase):
             "status": "completed", "sync_job_ids": list(range(50)),
             "command_receipts": [{"tool": "save_checkin", "result": {"ok": True, "status": "saved"}, "request": {"scope": list(range(50))}}],
         })}
-        result = server.coach_dialogue_read_service()._command_result(row)
+        result = server.COACH_CONVERSATION.dialogue_read_service()._command_result(row)
         self.assertEqual(result["client_turn_id"], "turn-1")
         self.assertEqual(len(result["sync_job_ids"]), 40)
         self.assertTrue(result["steps"][0]["scope_truncated"])

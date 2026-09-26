@@ -89,7 +89,7 @@ class FixtureResponseTransport:
         )
 
 
-server.coach_response_transport = FixtureResponseTransport
+server.COACH_CONVERSATION.response_transport = FixtureResponseTransport
 initialise = server.initialise_database
 artifact = {}
 

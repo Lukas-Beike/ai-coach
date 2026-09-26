@@ -323,7 +323,7 @@ class ServerHttpTests(ServerTestCase):
     def test_chat_history_pagination_and_bounded_search_use_message_id_cursor(self):
         for index in range(5):
             server.COACH_CONVERSATION.message_service().add("user", f"searchable {index}")
-        page_service = server.chat_history_page_service()
+        page_service = server.HTTP_API.chat_history_page_service()
         first = page_service.page(limit=2)
         second = page_service.page(cursor=first["next_cursor"], limit=2)
         page_ids = [item["id"] for item in first["messages"] + second["messages"]]
@@ -345,7 +345,7 @@ class ServerHttpTests(ServerTestCase):
         for content in contents:
             server.COACH_CONVERSATION.message_service().add("user", content)
 
-        page_service = server.chat_history_page_service()
+        page_service = server.HTTP_API.chat_history_page_service()
         for search_term, expected in (
             ("percent%marker", "literal percent%marker"),
             ("underscore_marker", "literal underscore_marker"),
@@ -360,8 +360,8 @@ class ServerHttpTests(ServerTestCase):
             {"id": f"template-{index}", "name": f"Template {index}", "type": "Ride", "description": "- 30m Z2"}
             for index in range(3)
         ])
-        first = server.library_page_service().page(limit=2)
-        second = server.library_page_service().page(cursor=first["next_cursor"], limit=2)
+        first = server.HTTP_API.library_page_service().page(limit=2)
+        second = server.HTTP_API.library_page_service().page(cursor=first["next_cursor"], limit=2)
         names = [item["name"] for page in (first, second) for item in page["workouts"]]
         self.assertEqual(names, ["Template 0", "Template 1", "Template 2"])
         self.assertIsNone(second["next_cursor"])
@@ -840,7 +840,7 @@ class ServerHttpTests(ServerTestCase):
         with patch.object(
             openai_provider.OpenAIResponsesClient, "background", return_value=expected
         ) as background:
-            result = server.coach_response_transport().background_request(
+            result = server.COACH_CONVERSATION.response_transport().background_request(
                 payload, on_response_id=checkpoint
             )
 
@@ -1197,7 +1197,7 @@ class ServerHttpTests(ServerTestCase):
             "responses",
             return_value={"output_text": "ok"},
         ) as responses:
-            result = server.coach_response_transport().request(payload)
+            result = server.COACH_CONVERSATION.response_transport().request(payload)
         self.assertEqual(result["output_text"], "ok")
         responses.assert_called_once_with(payload)
 
@@ -1212,7 +1212,7 @@ class ServerHttpTests(ServerTestCase):
             "stream",
             return_value={"status": "completed"},
         ) as stream:
-            result = server.coach_response_transport().stream_request(payload, on_delta, cancel_event, on_response_id)
+            result = server.COACH_CONVERSATION.response_transport().stream_request(payload, on_delta, cancel_event, on_response_id)
 
         self.assertEqual(result["status"], "completed")
         stream.assert_called_once_with(

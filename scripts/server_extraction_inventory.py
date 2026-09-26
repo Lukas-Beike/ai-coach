@@ -214,6 +214,8 @@ def _explicit_owner(name: str) -> str | None:
             "NUTRITION_ASSEMBLY": "backend/nutrition/assembly",
             "MODEL_TRANSPORT": "backend/providers/model_assembly",
             "COACH_CONVERSATION": "backend/coach/conversation_assembly",
+            "COACH_LOCAL": "backend/coach/local_assembly",
+            "HISTORY": "backend/history/assembly",
             "COACH_CONTEXT": "backend/coach/context_assembly",
             "COACH_READ_TOOLS": "backend/coach/read_tools_assembly",
             "COACH_PROPOSALS": "backend/coach/proposal_assembly",

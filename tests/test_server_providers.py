@@ -139,9 +139,9 @@ class ServerProvidersTests(ServerTestCase):
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
         tool = {"type": "function", "name": "save_checkin", "description": "Save check-in", "parameters": {"type": "object", "properties": {"payload": {"type": "object"}}}}
         with patch.object(server, "CONFIG", config), patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "request", side_effect=fake_http_json):
-            initial = server.gemini_conversation_response_service().request({"model": "gemini-3.8-flash", "conversation": "gemini_test", "instructions": "Coach rules", "input": "Speichere meine Tagesform.", "tools": [tool], "tool_choice": "auto", "max_output_tokens": 321})
+            initial = server.COACH_CONVERSATION.gemini_conversation_response_service().request({"model": "gemini-3.8-flash", "conversation": "gemini_test", "instructions": "Coach rules", "input": "Speichere meine Tagesform.", "tools": [tool], "tool_choice": "auto", "max_output_tokens": 321})
             call = next(item for item in initial["output"] if item["type"] == "function_call")
-            followup = server.gemini_conversation_response_service().request({"conversation": "gemini_test", "instructions": "Coach rules", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "tools": [tool], "tool_choice": "auto"})
+            followup = server.COACH_CONVERSATION.gemini_conversation_response_service().request({"conversation": "gemini_test", "instructions": "Coach rules", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "tools": [tool], "tool_choice": "auto"})
 
         self.assertEqual(captured[0]["url"], "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent")
         self.assertEqual(captured[0]["headers"]["x-goog-api-key"], "test-gemini-key")
@@ -183,7 +183,7 @@ class ServerProvidersTests(ServerTestCase):
         deltas = []
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
         with patch.object(server, "CONFIG", config), patch.object(gemini_provider, "urlopen", side_effect=fake_urlopen):
-            result = server.coach_response_transport().stream_request(
+            result = server.COACH_CONVERSATION.response_transport().stream_request(
                 {"_ai_provider": "gemini", "model": "gemini-3.8-flash", "input": "BegrÃ¼ÃŸe mich."},
                 deltas.append,
             )
@@ -212,7 +212,7 @@ class ServerProvidersTests(ServerTestCase):
             patch.object(gemini_provider, "urlopen", return_value=StreamResponse()),
             self.assertRaises(server.AppError) as raised,
         ):
-            server.gemini_conversation_response_service().stream({"model": "gemini-3.8-flash", "input": "test"}, lambda _: None)
+            server.COACH_CONVERSATION.gemini_conversation_response_service().stream({"model": "gemini-3.8-flash", "input": "test"}, lambda _: None)
 
         self.assertEqual(raised.exception.status, 502)
         self.assertEqual(raised.exception.reason, "response_too_large")
@@ -231,10 +231,10 @@ class ServerProvidersTests(ServerTestCase):
 
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
         with patch.object(server, "CONFIG", config), patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "request", side_effect=fake_http_json):
-            initial = server.gemini_conversation_response_service().request({"conversation": "gemini-persist-response", "input": "Speichere meine Tagesform.", "parallel_tool_calls": False})
+            initial = server.COACH_CONVERSATION.gemini_conversation_response_service().request({"conversation": "gemini-persist-response", "input": "Speichere meine Tagesform.", "parallel_tool_calls": False})
             call = next(item for item in initial["output"] if item["type"] == "function_call")
             with self.assertRaises(server.AppError):
-                server.gemini_conversation_response_service().request({"conversation": "gemini-persist-response", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "parallel_tool_calls": False})
+                server.COACH_CONVERSATION.gemini_conversation_response_service().request({"conversation": "gemini-persist-response", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "parallel_tool_calls": False})
 
         history = json.loads(server.key_value_service().get("gemini_conversation_history") or "[]")
         self.assertEqual(history[-2]["parts"][0]["functionCall"]["name"], "save_checkin")
@@ -248,7 +248,7 @@ class ServerProvidersTests(ServerTestCase):
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
         with patch.object(server, "CONFIG", config), patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "request", return_value=response):
             with self.assertRaises(server.AppError) as raised:
-                server.gemini_conversation_response_service().request({"conversation": "gemini-single-tool", "input": "Aktualisiere meine Daten.", "parallel_tool_calls": False})
+                server.COACH_CONVERSATION.gemini_conversation_response_service().request({"conversation": "gemini-single-tool", "input": "Aktualisiere meine Daten.", "parallel_tool_calls": False})
 
         self.assertEqual(raised.exception.reason, "parallel_tool_calls_unsupported")
         self.assertEqual(json.loads(server.key_value_service().get("gemini_conversation_history") or "[]"), [])
@@ -292,9 +292,9 @@ class ServerProvidersTests(ServerTestCase):
     def test_gemini_turn_uses_its_captured_provider_and_reasoning_level(self):
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
         payload = {"_ai_provider": "gemini", "model": "gemini-3.8-flash", "input": "Prüfe die Form.", "reasoning": {"effort": "low"}}
-        with patch.object(server, "CONFIG", config), patch.object(server, "gemini_conversation_response_service") as service_factory, patch.object(openai_provider.OpenAIResponsesClient, "responses") as openai:
+        with patch.object(server, "CONFIG", config), patch.object(server.COACH_CONVERSATION, "gemini_conversation_response_service") as service_factory, patch.object(openai_provider.OpenAIResponsesClient, "responses") as openai:
             service_factory.return_value.request.return_value = {"output_text": "ok"}
-            self.assertEqual(server.coach_response_transport().request(payload)["output_text"], "ok")
+            self.assertEqual(server.COACH_CONVERSATION.response_transport().request(payload)["output_text"], "ok")
         service_factory.return_value.request.assert_called_once_with(payload)
         openai.assert_not_called()
         request, _, _ = build_gemini_request_payload(server, payload, "gemini-3.8-flash")
@@ -380,7 +380,7 @@ class ServerProvidersTests(ServerTestCase):
 
         config = replace(server.CONFIG, openai_api_key="test-key", openai_base_url="https://foundry.example.invalid/openai/v1/")
         with patch.object(server, "CONFIG", config), patch.object(openai_provider, "urlopen", return_value=FakeResponse()) as urlopen:
-            server.coach_response_transport().stream_request({"model": "foundry-deployment"}, lambda _: None)
+            server.COACH_CONVERSATION.response_transport().stream_request({"model": "foundry-deployment"}, lambda _: None)
 
         self.assertEqual(urlopen.call_args.args[0].full_url, "https://foundry.example.invalid/openai/v1/responses")
 
@@ -396,7 +396,7 @@ class ServerProvidersTests(ServerTestCase):
         with patch.object(server, "CONFIG", config), patch.object(
             server.PROVIDER_TRANSPORT.json_http_client(), "request", side_effect=fake_openai
         ):
-            server.coach_response_transport().request({"model": "gpt-6-luna", "input": "test"})
+            server.COACH_CONVERSATION.response_transport().request({"model": "gpt-6-luna", "input": "test"})
         self.assertEqual(captured["reasoning"], {"effort": "low"})
 
     def test_openai_background_creation_defers_usage_recording(self):
@@ -434,7 +434,7 @@ class ServerProvidersTests(ServerTestCase):
             on_delta("Heute locker.")
             return {"id": "resp_attached_stream", "status": "completed", "output_text": "Heute locker."}
 
-        with patch.object(server, "coach_response_transport") as transport_factory:
+        with patch.object(server.COACH_CONVERSATION, "response_transport") as transport_factory:
             transport_factory.return_value.stream_request.side_effect = streamed_response
             result = server.COACH_TURNS.chat_turn_service().run(
                 "Wie soll ich heute trainieren?", client_turn_id="turn-attached-provider-stream",
@@ -688,7 +688,7 @@ class ServerProvidersTests(ServerTestCase):
             patch.object(openai_provider, "urlopen", side_effect=upstream_error),
             self.assertRaises(server.AppError) as raised,
         ):
-            server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None)
+            server.COACH_CONVERSATION.response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "rate_limit_exceeded")
         self.assertEqual(raised.exception.retry_after_seconds, 9)
 
@@ -706,7 +706,7 @@ class ServerProvidersTests(ServerTestCase):
         config = replace(server.CONFIG, openai_api_key="openai-test")
         with patch.object(server, "CONFIG", config), patch.object(openai_provider, "urlopen", side_effect=upstream_error):
             with self.assertRaises(server.AppError) as raised:
-                server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None)
+                server.COACH_CONVERSATION.response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "conversation_state_invalid")
         captured = server.DIAGNOSTIC_CAPTURE.entries()
         failed = next(entry for entry in reversed(captured) if entry["event"] == "openai_stream_failed")
@@ -747,7 +747,7 @@ class ServerProvidersTests(ServerTestCase):
 
         deltas = []
         with patch.object(openai_provider, "urlopen", return_value=FakeResponse()) as urlopen:
-            result = server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, deltas.append)
+            result = server.COACH_CONVERSATION.response_transport().stream_request({"model": "gpt-6-luna"}, deltas.append)
         self.assertEqual("".join(deltas), "Hallo")
         self.assertEqual(result["id"], "resp-test")
         request = urlopen.call_args.args[0]
@@ -778,7 +778,7 @@ class ServerProvidersTests(ServerTestCase):
             patch.object(openai_provider, "urlopen", return_value=OversizedResponse()),
             self.assertRaises(server.AppError) as raised,
         ):
-            server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None)
+            server.COACH_CONVERSATION.response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None)
 
         self.assertEqual(raised.exception.status, 502)
         self.assertEqual(raised.exception.reason, "response_too_large")
@@ -794,7 +794,7 @@ class ServerProvidersTests(ServerTestCase):
         cancel_event.set()
         with patch.object(openai_provider, "urlopen") as urlopen:
             with self.assertRaises(server.AppError) as raised:
-                server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None, cancel_event)
+                server.COACH_CONVERSATION.response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None, cancel_event)
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         urlopen.assert_not_called()
         self.assertEqual(
@@ -821,7 +821,7 @@ class ServerProvidersTests(ServerTestCase):
 
         with patch.object(openai_provider, "urlopen", return_value=TimeoutResponse()):
             with self.assertRaises(server.AppError) as raised:
-                server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None)
+                server.COACH_CONVERSATION.response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: None)
         self.assertEqual(raised.exception.reason, "provider_timeout")
         self.assertEqual(raised.exception.status, 504)
         self.assertEqual(
@@ -858,7 +858,7 @@ class ServerProvidersTests(ServerTestCase):
 
         with patch.object(openai_provider, "urlopen", return_value=DisconnectResponse()):
             with self.assertRaises(ClientDisconnected):
-                server.coach_response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: (_ for _ in ()).throw(ClientDisconnected()))
+                server.COACH_CONVERSATION.response_transport().stream_request({"model": "gpt-6-luna"}, lambda _: (_ for _ in ()).throw(ClientDisconnected()))
         self.assertEqual(
             server.provider_state_service().summary("openai")["last_operation"],
             "responses_stream_cancelled",

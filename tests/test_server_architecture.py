@@ -2847,11 +2847,10 @@ class ServerArchitectureTests(unittest.TestCase):
             if isinstance(node, ast.Assign)
             for target in node.targets
             if isinstance(target, ast.Attribute)
-            and isinstance(target.value, ast.Name)
-            and target.value.id == "server"
+            and ast.unparse(target.value) in {"server", "server.COACH_CONVERSATION"}
         ]
         self.assertTrue(removed.isdisjoint(patched))
-        self.assertIn("coach_response_transport", patched)
+        self.assertIn("response_transport", patched)
 
     def test_request_handler_does_not_reintroduce_state_event_orchestration(self) -> None:
         request_handler = _request_handler_definition()

@@ -135,7 +135,7 @@ class ServerTestCase(unittest.TestCase):
 
     @staticmethod
     def history_preview(change_id, session_csrf_hash="session-csrf-hash"):
-        preview = server.history_undo_service().preview(change_id)
+        preview = server.HISTORY.undo_service().preview(change_id)
         proposal = server.COACH_PROPOSALS.creation_service().create(
             preview.pop("proposal"), session_csrf_hash
         )

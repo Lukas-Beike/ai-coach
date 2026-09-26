@@ -15,7 +15,7 @@ from backend.db.manager import DATABASE_MANAGER_CACHE
 
 def build_gemini_request_payload(server, payload, model):
     """Exercise the concrete Gemini request owner with active test settings."""
-    return server.gemini_request_payload_service().build(
+    return server.COACH_CONVERSATION.gemini_request_payload_service().build(
         payload,
         model,
         default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,

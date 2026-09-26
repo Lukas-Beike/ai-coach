@@ -51,7 +51,7 @@ class ServerSyncTests(ServerTestCase):
             "rationale": "Test",
         })
         if include_competition:
-            server.athlete_context_service().save({}, [{
+            server.ATHLETE_DATA.context().save({}, [{
                 "name": "Contract race",
                 "event_date": (date.today() + timedelta(days=30)).isoformat(),
                 "sport": "Cycling",
@@ -61,7 +61,7 @@ class ServerSyncTests(ServerTestCase):
     def _prepare_competition_contract_fixture(self):
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
-        server.athlete_context_service().save({}, [{
+        server.ATHLETE_DATA.context().save({}, [{
             "name": "Competition contract",
             "event_date": (date.today() + timedelta(days=30)).isoformat(),
             "sport": "Cycling",
@@ -473,7 +473,7 @@ class ServerSyncTests(ServerTestCase):
 
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=FakeIntervalsClient()
         ):
-            result = server.illness_pause_sync_service().apply(preview["id"], sync_illness_to_intervals=True)
+            result = server.SYNC_COMMANDS.illness_pause().apply(preview["id"], sync_illness_to_intervals=True)
 
         self.assertEqual(result["intervals_sync"]["status"], "ok")
         self.assertEqual(result["intervals_sync"]["category"], "SICK")
@@ -1212,7 +1212,7 @@ class ServerSyncTests(ServerTestCase):
 
     def test_explicit_competition_sync_records_create_change_and_delete_contract(self):
         event_date = (date.today() + timedelta(days=30)).isoformat()
-        saved = server.athlete_context_service().save({}, [{
+        saved = server.ATHLETE_DATA.context().save({}, [{
             "name": "Explicit race",
             "event_date": event_date,
             "sport": "Cycling",
@@ -1229,7 +1229,7 @@ class ServerSyncTests(ServerTestCase):
                 "event_date": event_date,
                 "sport": "Cycling",
             })
-            server.athlete_context_service().save({}, [])
+            server.ATHLETE_DATA.context().save({}, [])
             deleted = server.PROVIDER_RESYNC.competition_sync_service().sync("explicit approval", push_local=True)
         self.assertEqual(created["pushed"], 1)
         self.assertEqual(deleted["deleted_remote"], 1)
@@ -1254,7 +1254,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(recorder.mutations, [])
 
     def test_full_intervals_resync_preserves_local_library_and_never_remote_data(self):
-        server.athlete_context_service().save({}, [{"name": "Old local race", "event_date": (date.today() + timedelta(days=30)).isoformat()}])
+        server.ATHLETE_DATA.context().save({}, [{"name": "Old local race", "event_date": (date.today() + timedelta(days=30)).isoformat()}])
         server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": "old-workout", "name": "Local template", "type": "Ride",
             "description": "- 30m Z2", "moving_time": 1800,
@@ -1395,7 +1395,7 @@ class ServerSyncTests(ServerTestCase):
 
     def test_competition_sync_pushes_local_events_idempotently(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()
-        saved = server.athlete_context_service().save({}, [{"name": "Test Race", "event_date": event_date, "priority": "A", "sport": "Cycling"}])
+        saved = server.ATHLETE_DATA.context().save({}, [{"name": "Test Race", "event_date": event_date, "priority": "A", "sport": "Cycling"}])
         local_id = saved["competitions"][0]["id"]
         calls = {}
         remote = []
@@ -1434,7 +1434,7 @@ class ServerSyncTests(ServerTestCase):
 
     def test_competition_sync_marks_dirty_identity_match_as_conflict(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()
-        server.athlete_context_service().save({}, [{
+        server.ATHLETE_DATA.context().save({}, [{
             "name": "Existing Race", "event_date": event_date, "priority": "A", "sport": "Cycling",
         }])
         pushed = []
@@ -1513,13 +1513,13 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(competition["sync_dirty"], 0)
 
         # Saving the profile after an import must retain the provider link.
-        server.athlete_context_service().save({}, [competition])
+        server.ATHLETE_DATA.context().save({}, [competition])
         saved_again = server.PLANNING_DATA.competition().list()[0]
         self.assertEqual(saved_again["intervals_event_id"], "777")
 
     def test_competition_sync_skips_unsupported_local_sports(self):
         event_date = (date.today() + timedelta(days=30)).isoformat()
-        server.athlete_context_service().save({}, [{"name": "Swim Race", "event_date": event_date, "sport": "Swim"}])
+        server.ATHLETE_DATA.context().save({}, [{"name": "Swim Race", "event_date": event_date, "sport": "Swim"}])
         pushed = []
 
         class FakeIntervalsClient:

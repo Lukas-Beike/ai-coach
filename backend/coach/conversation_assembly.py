@@ -8,13 +8,19 @@ from typing import Any
 
 from backend.coach.attachments import MAX_GEMINI_INLINE_IMAGE_BYTES
 from backend.coach.conversation import (
+    CoachAttachmentContextService,
     CoachConversationHistoryService,
     CoachConversationProvisionService,
     CoachConversationResetService,
     CoachMessageService,
+    GeminiConversationResponseService,
     GeminiConversationHistoryService,
     GeminiLocalChatHistoryService,
+    GeminiRequestPayloadService,
+    GeminiResponseNormalizationService,
 )
+from backend.coach.dialogue import CoachDialogueReadService
+from backend.coach.response_transport import CoachResponseTransport
 from backend.coach.streams import ChatStreamRegistry
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
@@ -41,6 +47,11 @@ class CoachConversationAssembly:
         utc_now: Callable[[], str],
         uuid_factory: Callable[[], uuid.UUID],
         logger: Any,
+        profile_service: Callable[[], Any],
+        model_transport: Any,
+        default_thinking_level: Callable[[], Any],
+        default_max_output_tokens: int,
+        json_media_type: str,
         max_gemini_inline_image_bytes: Callable[[], int] | None = None,
     ) -> None:
         self._settings = settings
@@ -55,6 +66,11 @@ class CoachConversationAssembly:
         self._utc_now = utc_now
         self._uuid_factory = uuid_factory
         self._logger = logger
+        self._profile_service = profile_service
+        self._model_transport = model_transport
+        self._default_thinking_level = default_thinking_level
+        self._default_max_output_tokens = default_max_output_tokens
+        self._json_media_type = json_media_type
         self._max_gemini_inline_image_bytes = (
             max_gemini_inline_image_bytes
             or (lambda: MAX_GEMINI_INLINE_IMAGE_BYTES)
@@ -104,4 +120,46 @@ class CoachConversationAssembly:
             self._database_manager(),
             self._chat_repository,
             max_inline_bytes=self._max_gemini_inline_image_bytes(),
+        )
+
+    def dialogue_read_service(self) -> CoachDialogueReadService:
+        manager = self._database_manager()
+        return CoachDialogueReadService(
+            manager, self.message_service(), self._key_values,
+            self._profile_service(),
+        )
+
+    def attachment_context_service(self) -> CoachAttachmentContextService:
+        return CoachAttachmentContextService(self._database_manager())
+
+    def gemini_request_payload_service(self) -> GeminiRequestPayloadService:
+        return GeminiRequestPayloadService(
+            self.gemini_history_service(), self.gemini_local_history_service(),
+            self._database_manager(), self._key_values,
+        )
+
+    def gemini_response_normalization_service(self) -> GeminiResponseNormalizationService:
+        return GeminiResponseNormalizationService(
+            self.gemini_history_service(), self._database_manager(),
+            self._key_values, self._uuid_factory,
+        )
+
+    def gemini_conversation_response_service(self) -> GeminiConversationResponseService:
+        return GeminiConversationResponseService(
+            self.gemini_request_payload_service(),
+            self.gemini_response_normalization_service(),
+            self._model_transport.gemini_json_client(),
+            self._model_transport.gemini_stream_client(),
+            settings_service=self._settings,
+            default_thinking_level=self._default_thinking_level(),
+            default_max_output_tokens=self._default_max_output_tokens,
+            json_media_type=self._json_media_type,
+        )
+
+    def response_transport(self) -> CoachResponseTransport:
+        return CoachResponseTransport(
+            self._settings,
+            self._model_transport.openai_responses_client,
+            self._model_transport.openai_stream_client,
+            self.gemini_conversation_response_service,
         )

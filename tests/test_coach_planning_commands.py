@@ -10,6 +10,7 @@ from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.authorization import coach_session_key
 from backend.coach.proposals import coach_action_hash
+from backend.http_api.planning_commands_post import PlanningCommandsPostRoutes
 
 
 class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
@@ -28,7 +29,7 @@ class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
         service.execute.return_value = {"status": "completed"}
         provision = Mock()
         provision.ensure.return_value = "synthetic-conversation"
-        routes = server.PlanningCommandsPostRoutes(lambda: service, lambda: provision)
+        routes = PlanningCommandsPostRoutes(lambda: service, lambda: provision)
         handled = routes.handle(
             handler, "/api/planning/commands", {"csrf_hash": "synthetic-session"}
         )
@@ -40,7 +41,7 @@ class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
         handler.send_json.assert_called_once_with(200, {"status": "completed"})
 
     def test_success_replays_without_second_effect_and_binds_session_and_conversation(self):
-        service = server.coach_planning_command_service()
+        service = server.COACH_TURNS.planning_command_service()
         payload = self.payload()
         with patch.object(service._tools, "execute", return_value={"ok": True, "status": "applied"}) as execute:
             first = service.execute(payload, conversation_id="conversation-one", session_csrf_hash="session-one")
@@ -61,7 +62,7 @@ class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
             execute.assert_called_once()
 
     def test_invalid_command_never_claims_turn(self):
-        service = server.coach_planning_command_service()
+        service = server.COACH_TURNS.planning_command_service()
         invalid = (
             None,
             {**self.payload(), "client_turn_id": ""},
@@ -77,7 +78,7 @@ class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM coach_commands").fetchone()["count"], 0)
 
     def test_existing_running_claim_does_not_execute_again(self):
-        service = server.coach_planning_command_service()
+        service = server.COACH_TURNS.planning_command_service()
         payload = self.payload(turn="running-command")
         identity = {
             "client_turn_id": payload["client_turn_id"],
@@ -102,7 +103,7 @@ class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
         execute.assert_not_called()
 
     def test_artifact_revision_is_checked_before_claim(self):
-        service = server.coach_planning_command_service()
+        service = server.COACH_TURNS.planning_command_service()
         revision = self.state()["planning_revision"]
         payload = {
             "client_turn_id": "artifact-command", "operation": "commit_training_plan",
@@ -115,7 +116,7 @@ class CoachPlanningCommandTests(DialogueHarness, unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM coach_commands").fetchone()["count"], 0)
 
     def test_tool_failure_rolls_back_effect_and_persists_failure_receipt(self):
-        service = server.coach_planning_command_service()
+        service = server.COACH_TURNS.planning_command_service()
 
         def fail(*_args, **_kwargs):
             with server.database_manager().unit_of_work() as db:

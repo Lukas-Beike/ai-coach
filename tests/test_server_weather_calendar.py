@@ -158,7 +158,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
         server.key_value_service().set(weather_cache.CACHE_KEY, json.dumps({"query": "Berlin", "forecast": {}}))
         server.key_value_service().set(weather_cache.FAILURE_KEY, json.dumps({"count": 2, "retry_at": "2099-01-01T00:00:00+00:00"}))
-        server.athlete_context_service().save({"weather_location": "Koeln"}, [])
+        server.ATHLETE_DATA.context().save({"weather_location": "Koeln"}, [])
         self.assertEqual(server.key_value_service().get(weather_cache.CACHE_KEY), "")
         self.assertEqual(server.key_value_service().get(weather_cache.FAILURE_KEY), "")
 
@@ -470,7 +470,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 ("event-2", "family-4", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, runtime_clock.utc_now()),
             )
         preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
-        server.illness_pause_sync_service().apply(preview["id"])
+        server.SYNC_COMMANDS.illness_pause().apply(preview["id"])
         persisted = server.PLANNING_DATA.planned_unit().list()[0]["private_calendar_adjustment"]
         self.assertEqual(persisted["label"], "Aufgrund privater Termine angepasst")
         self.assertEqual(persisted["events"][0]["name"], "Family appointment")
@@ -648,7 +648,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
 
     def test_calendar_conflicts_include_local_competitions_with_date_fallback(self):
         day = (date.today() + timedelta(days=3)).isoformat()
-        server.athlete_context_service().save({}, [{"name": "Local Race", "event_date": day, "sport": "Cycling", "start_date_local": day + "T10:00:00", "moving_time": 7200}])
+        server.ATHLETE_DATA.context().save({}, [{"name": "Local Race", "event_date": day, "sport": "Cycling", "start_date_local": day + "T10:00:00", "moving_time": 7200}])
         conflict = server.PLANNING_WORKFLOWS.calendar_conflict_service().conflicts({"date": day})[0]
         self.assertEqual(conflict["source"], "local_competition")
         self.assertEqual(conflict["match"], "date")

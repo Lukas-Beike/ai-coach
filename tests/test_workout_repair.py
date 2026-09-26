@@ -348,7 +348,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             calendar_external, "list_events", return_value=[]
         ):
             preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
-        self.assertEqual(server.illness_pause_sync_service().apply(preview["id"])["updated"], 1)
+        self.assertEqual(server.SYNC_COMMANDS.illness_pause().apply(preview["id"])["updated"], 1)
         current = server.PLANNING_DATA.planned_unit().list()[0]
         self.assertEqual(current["sport"], "Swim")
         self.assertIn("- 30m Z1 Pace", current["description"])
@@ -449,7 +449,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         ):
             preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         self.assertEqual(preview["changes"][0]["after"]["duration_minutes"], 0)
-        self.assertEqual(server.illness_pause_sync_service().apply(preview["id"])["updated"], 1)
+        self.assertEqual(server.SYNC_COMMANDS.illness_pause().apply(preview["id"])["updated"], 1)
         self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
         self.assertEqual(self.mutations, [])
 

@@ -9,6 +9,7 @@ from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.read_service import ActivityReadService
 from backend.athlete.checkins import CheckinService
+from backend.athlete.context import AthleteContextService
 from backend.athlete.profile import ProfileService
 from backend.db import DatabaseManager
 from backend.db.repositories import (
@@ -16,6 +17,7 @@ from backend.db.repositories import (
     CheckinRepository,
     ProfileRepository,
     SnapshotRepository,
+    CompetitionRepository,
 )
 
 
@@ -34,6 +36,10 @@ class AthleteDataAssembly:
         utc_now: Callable[[], Any],
         local_date: Callable[[], Any],
         event_buffer: Any,
+        competition_repository: CompetitionRepository,
+        normalize_profile: Callable[[Any], Any],
+        normalize_competition: Callable[[Any], Any],
+        uuid_factory: Callable[[], Any],
     ) -> None:
         self._database_manager = database_manager
         self._activity_feedback_repository = activity_feedback_repository
@@ -44,6 +50,10 @@ class AthleteDataAssembly:
         self._utc_now = utc_now
         self._local_date = local_date
         self._event_buffer = event_buffer
+        self._competition_repository = competition_repository
+        self._normalize_profile = normalize_profile
+        self._normalize_competition = normalize_competition
+        self._uuid_factory = uuid_factory
 
     def activity_feedback(self) -> ActivityFeedbackService:
         return ActivityFeedbackService(
@@ -81,4 +91,11 @@ class AthleteDataAssembly:
             manager,
             self._profile_repository,
             self._key_value_repository,
+        )
+
+    def context(self) -> AthleteContextService:
+        return AthleteContextService(
+            self._database_manager(), self.profile(), self._competition_repository,
+            self._normalize_profile, self._normalize_competition,
+            self._utc_now, self._uuid_factory,
         )

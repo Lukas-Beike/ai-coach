@@ -29,6 +29,8 @@ from backend.http_api.response_transport import HttpResponseTransport
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.sync_commands import SyncCommandEndpoint
+from backend.http_api.chat_page import ChatHistoryPageService
+from backend.http_api.library_page import LibraryPageService
 from backend.http_api.state_events_transport import StateEventTransport
 from backend.http_api.settings_put import SettingsPutRoutes
 from backend.http_api.state_events_get import StateEventsGetRoutes
@@ -69,7 +71,9 @@ class HttpApiAssembly:
         data_dir: Callable[[], Path],
         readiness_maintenance_gate: Callable[[], Any],
         session_auth_service: Callable[[], Any],
-        chat_history_page_service: Callable[[], Any],
+        conversation_history_service: Callable[[], Any],
+        proposal_read_service: Callable[[], Any],
+        chat_page_max: int,
         coach_command_receipt_service: Callable[[], Any],
         coach_job_submission_service: Callable[[], Any],
         coach_job_cancellation_service: Callable[[], Any],
@@ -79,7 +83,6 @@ class HttpApiAssembly:
         public_performance_state_service: Callable[[], Any],
         public_feedback_state_service: Callable[[], Any],
         public_sync_state_service: Callable[[], Any],
-        library_page_service: Callable[[], Any],
         profile_service: Callable[[], Any],
         competition_service: Callable[[], Any],
         activity_read_service: Callable[[], Any],
@@ -124,21 +127,24 @@ class HttpApiAssembly:
         logger: Any,
         max_backup_bytes: int,
     ) -> None:
-        self.coach_get_routes = CoachGetRoutes(
-            session_auth_service, chat_history_page_service,
-            coach_command_receipt_service, coach_job_submission_service,
-        )
         self._database_manager = database_manager
         self._database_lock = database_lock
         self._data_dir = data_dir
         self._readiness_maintenance_gate = readiness_maintenance_gate
+        self._conversation_history_service = conversation_history_service
+        self._proposal_read_service = proposal_read_service
+        self._chat_page_max = chat_page_max
+        self.coach_get_routes = CoachGetRoutes(
+            session_auth_service, self.chat_history_page_service,
+            coach_command_receipt_service, coach_job_submission_service,
+        )
         self.public_get_routes = PublicGetRoutes(
             maintenance_gate, self.readiness_service, session_auth_service,
             public_bootstrap_service,
         )
         self.planning_get_routes = PlanningGetRoutes(
             session_auth_service, public_plan_state_service,
-            public_weather_state_service, library_page_service,
+            public_weather_state_service, self.library_page_service,
         )
         self.athlete_get_routes = AthleteGetRoutes(
             session_auth_service, public_performance_state_service,
@@ -251,6 +257,15 @@ class HttpApiAssembly:
             self._backup_service, self._privacy_export_service,
             monotonic=self._monotonic,
             time_limit_seconds=self._export_time_limit_seconds,
+        )
+
+    def library_page_service(self) -> LibraryPageService:
+        return LibraryPageService(self._database_manager())
+
+    def chat_history_page_service(self) -> ChatHistoryPageService:
+        return ChatHistoryPageService(
+            self._conversation_history_service(), self._proposal_read_service(),
+            maximum=self._chat_page_max,
         )
 
     def sync_command_endpoint(self) -> SyncCommandEndpoint:

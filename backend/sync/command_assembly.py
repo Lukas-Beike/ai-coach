@@ -11,6 +11,7 @@ from backend.sync.conflict_commands import SyncConflictCommandService
 from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.plan_selection import StructuredPlanSyncService
+from backend.sync.adaptive import IllnessPauseSyncService
 
 
 class SyncCommandAssembly:
@@ -29,6 +30,12 @@ class SyncCommandAssembly:
         utc_now: Callable[[], Any],
         training_change_limit: int,
         all_sync_days: int,
+        config: Callable[[], Any],
+        intervals_client: Callable[[], Any],
+        adaptive_replan_apply: Callable[[], Any],
+        adaptive_replan_preview: Callable[[], Any],
+        redactor: Any,
+        today: Callable[[], Any],
     ) -> None:
         self._database_manager = database_manager
         self._queue_service = queue_service
@@ -40,6 +47,22 @@ class SyncCommandAssembly:
         self._utc_now = utc_now
         self._training_change_limit = training_change_limit
         self._all_sync_days = all_sync_days
+        self._config = config
+        self._intervals_client = intervals_client
+        self._adaptive_replan_apply = adaptive_replan_apply
+        self._adaptive_replan_preview = adaptive_replan_preview
+        self._redactor = redactor
+        self._today = today
+
+    def illness_pause(self) -> IllnessPauseSyncService:
+        return IllnessPauseSyncService(
+            self._config(), self._intervals_client(),
+            adaptive_replan_apply_service=self._adaptive_replan_apply(),
+            competition_service=self._competition_service(),
+            adaptive_replan_preview_service=self._adaptive_replan_preview(),
+            redactor=self._redactor,
+            today=self._today,
+        )
 
     def provider_refresh(self) -> ProviderRefreshCommandService:
         return ProviderRefreshCommandService(

@@ -26,6 +26,7 @@ from backend.planning import context as planning_context
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync import garmin as garmin_sync
 from backend.sync import scheduler_assembly as sync_scheduler_assembly
+from backend.sync.adaptive import IllnessPauseSyncService
 from backend.weather import cache as weather_cache
 
 server = dialogue.server
@@ -271,7 +272,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
             return self.call("apply_adaptive_replan", {"adjustment_id": latest["id"]}, scope=["adaptive_replan:" + latest["id"]])
         first, _ = self.turn("Show a preview, do not apply it.", [preview, apply, {"output_text": "Preview ready."}])
         self.assertEqual(first["command_receipts"][1]["result"]["reason"], "adaptive_approval_required")
-        with patch.object(server.IllnessPauseSyncService, "apply", return_value={"status": "applied"}) as mutation:
+        with patch.object(IllnessPauseSyncService, "apply", return_value={"status": "applied"}) as mutation:
             second, _ = self.turn("Apply that preview.", [apply, {"output_text": "Applied."}])
         mutation.assert_called_once()
         self.assertEqual(second["status"], "completed")
@@ -291,7 +292,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
         def response(payload, **kwargs):
             step = next(steps)
             return step(payload) if callable(step) else step
-        with patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="synthetic"))), patch("backend.coach.context.CoachTrainingContextService.build", side_effect=["Old Garmin data", "Fresh Garmin data"]) as context, patch.object(server, "coach_response_transport") as transport_factory:
+        with patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="synthetic"))), patch("backend.coach.context.CoachTrainingContextService.build", side_effect=["Old Garmin data", "Fresh Garmin data"]) as context, patch.object(server.COACH_CONVERSATION, "response_transport") as transport_factory:
             transport_factory.return_value.request.side_effect = response
             result = server.COACH_TURNS.chat_turn_service().run("Read refreshed data", client_turn_id="refresh-context", session_csrf_hash="synthetic")
         self.assertEqual(result["status"], "completed")
@@ -341,8 +342,8 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
                     DATABASE_MANAGER_CACHE.reset()
 
     def test_chat_reset_changes_history_generation(self):
-        before = server.chat_history_page_service().page()["generation"]
+        before = server.HTTP_API.chat_history_page_service().page()["generation"]
         server.COACH_CONVERSATION.reset_service().reset()
         self.assertNotEqual(
-            server.chat_history_page_service().page()["generation"], before
+            server.HTTP_API.chat_history_page_service().page()["generation"], before
         )

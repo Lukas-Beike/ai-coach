@@ -246,7 +246,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         def respond(payload, **kwargs):
             captured.append(payload)
             return {"id": "synthetic-response", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Synthetic analysis"}]}]}
-        with patch.object(server, "coach_response_transport") as transport_factory, patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))):
+        with patch.object(server.COACH_CONVERSATION, "response_transport") as transport_factory, patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))):
             transport_factory.return_value.background_request.side_effect = respond
             server.COACH_TURNS.chat_turn_service().run("Analyze", client_turn_id="worker-turn", session_csrf_hash="synthetic-csrf", background_job=True)
         self.assertIn('data:image/png;base64,' + PNG, json.dumps(captured[0]["input"]))
@@ -261,7 +261,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             captured.append(payload)
             return {"id": "synthetic-response", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Synthetic follow-up"}]}]}
 
-        with patch.object(server, "coach_response_transport") as transport_factory, patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))):
+        with patch.object(server.COACH_CONVERSATION, "response_transport") as transport_factory, patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))):
             transport_factory.return_value.background_request.side_effect = respond
             server.COACH_TURNS.chat_turn_service().run("Analyze the route", client_turn_id="route-turn", session_csrf_hash="synthetic-csrf", background_job=True)
             server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("What should I change?", "followup-turn", "synthetic-csrf")

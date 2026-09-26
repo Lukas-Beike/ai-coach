@@ -30,7 +30,6 @@ from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
 )
-from backend.athlete.context import AthleteContextService
 from backend.athlete.clock import AthleteLocalClock
 from backend.athlete.assembly import AthleteDataAssembly
 from backend.athlete.profile import (
@@ -99,7 +98,7 @@ from backend.http_api.auth import (
 from backend.http_api.public_state_assembly import PublicStateAssembly
 from backend.nutrition.assembly import NutritionAssembly
 from backend.sync.command_assembly import SyncCommandAssembly
-from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
+from backend.sync.adaptive import AdaptivePreviewFollowupService
 from backend.sync.planned_calendar_assembly import PlannedCalendarSyncAssembly
 from backend.sync.planned_unit_assembly import PlannedUnitSyncAssembly
 from backend.sync.library import workout_library_sync_running
@@ -123,16 +122,10 @@ from backend.planning import season as planning_season
 from backend.planning import training_plans as planning_training_plans
 from backend.sync import scheduler as sync_scheduler_runtime
 from backend.coach import context as coach_context_module
-from backend.coach.context import CoachQuickActionsService
 from backend.coach.context_assembly import CoachContextAssembly
 from backend.coach.read_tools_assembly import CoachReadToolsAssembly
-from backend.coach.conversation import (
-    CoachAttachmentContextService,
-    GeminiConversationResponseService,
-    GeminiRequestPayloadService,
-    GeminiResponseNormalizationService,
-)
 from backend.coach.conversation_assembly import CoachConversationAssembly
+from backend.coach.local_assembly import CoachLocalAssembly
 from backend.coach.conversation_gate import CoachConversationGate
 from backend.coach.proposal_assembly import CoachProposalAssembly
 from backend.coach.planning_tools_assembly import CoachPlanningToolsAssembly
@@ -141,25 +134,15 @@ from backend.coach.command_tools_assembly import CoachCommandToolsAssembly
 from backend.coach.structured_tool_round_assembly import CoachStructuredToolRoundAssembly
 from backend.coach.background_jobs_assembly import CoachBackgroundJobsAssembly
 from backend.coach.turn_assembly import CoachTurnAssembly
-from backend.coach.receipt_reads import CoachCommandReceiptService
-from backend.coach.dialogue import CoachDialogueReadService, dialogue_tools
-from backend.coach.dialogue_action import CoachDialogueActionService
-from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
-from backend.coach.clarification import CoachClarificationService
-from backend.coach.response_transport import CoachResponseTransport
+from backend.coach.dialogue import dialogue_tools
 from backend.coach import structured_tool_round
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
 )
-from backend.coach.planning_commands import CoachPlanningCommandService
-from backend.coach.morning import ManualMorningCheckinService, MorningCheckinStateService
 from backend.coach.job_worker import COACH_JOB_WORKER
 from backend.coach.tools import build_tool_contracts
 from backend.coach.service import command_receipt
-from backend.history.service import ChangeHistoryService
-from backend.history.undo_service import HistoryUndoService
-from backend.http_api.library_page import LibraryPageService
-from backend.http_api.chat_page import ChatHistoryPageService
+from backend.history.assembly import HistoryAssembly
 from backend.http_api.response_transport import HttpResponseTransport
 from backend.backup.assembly import BackupAssembly
 
@@ -337,6 +320,10 @@ ATHLETE_DATA = AthleteDataAssembly(
     utc_now=runtime_clock.utc_now,
     local_date=lambda: ATHLETE_CLOCK.now().date(),
     event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    competition_repository=COMPETITION_REPOSITORY,
+    normalize_profile=normalize_profile,
+    normalize_competition=planning_competitions.normalize_competition,
+    uuid_factory=uuid.uuid4,
 )
 ATHLETE_PROFILE_SERVICE = ATHLETE_DATA.profile_for(
     database_manager_runtime.DATABASE_MANAGER_CACHE
@@ -377,7 +364,7 @@ PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
     weather_service=lambda: WEATHER_ASSEMBLY.service(),
     morning_body_battery_service=morning_body_battery_service,
     sync_job_queue_service=lambda: SYNC_JOB_QUEUE.service(),
-    coach_artifact_refs=lambda: coach_dialogue_read_service().artifact_refs,
+    coach_artifact_refs=lambda: COACH_CONVERSATION.dialogue_read_service().artifact_refs,
     local_date=lambda: ATHLETE_CLOCK.now().date(),
     utc_now=runtime_clock.utc_now,
     uuid_factory=uuid.uuid4,
@@ -390,16 +377,16 @@ PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
     weather_adaptive_max_minutes=planning_adaptive.WEATHER_ADAPTIVE_MAX_MINUTES,
 )
 
-def illness_pause_sync_service() -> IllnessPauseSyncService:
-    return IllnessPauseSyncService(
-        CONFIG, PROVIDER_TRANSPORT.intervals_client(),
-        adaptive_replan_apply_service=PLANNING_DATA.adaptive_apply(),
-        competition_service=PLANNING_DATA.competition(),
-        adaptive_replan_preview_service=PLANNING_WORKFLOWS.adaptive_replan_preview_service(),
-        redactor=REDACTOR,
-        today=lambda: ATHLETE_CLOCK.now().date(),
-    )
-
+HISTORY = HistoryAssembly(
+    database_manager=database_manager,
+    profile_repository=PROFILE_REPOSITORY,
+    profile_service=ATHLETE_DATA.profile,
+    workout_library_service=PLANNING_DATA.workout_library,
+    competition_service=PLANNING_DATA.competition,
+    planned_unit_service=PLANNING_DATA.planned_unit,
+    training_plan_service=PLANNING_DATA.training_plan,
+    planning_revision_service=PLANNING_REVISION_SERVICE,
+)
 
 PRIVACY_ASSEMBLY = PrivacyAssembly(
     database_manager=database_manager,
@@ -450,25 +437,6 @@ BACKUP_ASSEMBLY = BackupAssembly(
 )
 
 
-def change_history_service() -> ChangeHistoryService:
-    """Compose local change-history reads for the active database manager."""
-    return ChangeHistoryService(database_manager(), PROFILE_REPOSITORY)
-
-
-def history_undo_service() -> HistoryUndoService:
-    """Compose transactional local history undo orchestration."""
-    return HistoryUndoService(
-        database_manager(),
-        change_history_service(),
-        ATHLETE_DATA.profile(),
-        PLANNING_DATA.workout_library(),
-        PLANNING_DATA.competition(),
-        PLANNING_DATA.planned_unit(),
-        PLANNING_DATA.training_plan(),
-        PLANNING_REVISION_SERVICE,
-    )
-
-
 def sync_job_worker() -> sync_worker_runtime.SyncJobWorker:
     """Return the one restartable persistent synchronization worker."""
     global SYNC_JOB_WORKER
@@ -482,19 +450,6 @@ def sync_job_worker() -> sync_worker_runtime.SyncJobWorker:
 
 
 
-
-
-def athlete_context_service() -> AthleteContextService:
-    """Compose atomic athlete profile and competition persistence."""
-    return AthleteContextService(
-        database_manager(),
-        ATHLETE_DATA.profile(),
-        COMPETITION_REPOSITORY,
-        normalize_profile,
-        planning_competitions.normalize_competition,
-        runtime_clock.utc_now,
-        uuid.uuid4,
-    )
 
 
 def initialise_database() -> None:
@@ -696,7 +651,25 @@ COACH_CONVERSATION = CoachConversationAssembly(
     utc_now=runtime_clock.utc_now,
     uuid_factory=uuid.uuid4,
     logger=LOGGER,
+    profile_service=ATHLETE_DATA.profile,
+    model_transport=MODEL_TRANSPORT,
+    default_thinking_level=SETTINGS.selected_thinking_level,
+    default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+    json_media_type=JSON_MEDIA_TYPE,
     max_gemini_inline_image_bytes=lambda: coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES,
+)
+COACH_LOCAL = CoachLocalAssembly(
+    database_manager=database_manager,
+    database_lock=DB_LOCK,
+    key_values=KEY_VALUE_REPOSITORY,
+    sync_job_queue=SYNC_JOB_QUEUE.service,
+    local_date=lambda: ATHLETE_CLOCK.now().date(),
+    adaptive_preview=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
+    planned_workout_label=PLANNED_WORKOUT_LABEL,
+    garmin_sync=GARMIN_ASSEMBLY.sync_service,
+    garmin_payload=GARMIN_ASSEMBLY.payload_service,
+    morning_body_battery=morning_body_battery_service,
+    logger=LOGGER,
 )
 PLANNED_UNIT_SYNC = PlannedUnitSyncAssembly(
     database_manager=database_manager,
@@ -796,7 +769,7 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
     structured_training_state_service=PLANNING_WORKFLOWS.structured_training_state_service,
     workout_library_service=PLANNING_DATA.workout_library,
     planned_unit_service=PLANNING_DATA.planned_unit,
-    change_history_service=change_history_service,
+    change_history_service=HISTORY.change_history_service,
     competition_service=PLANNING_DATA.competition,
     training_plan_service=PLANNING_DATA.training_plan,
     nutrition_service=NUTRITION_ASSEMBLY.service,
@@ -806,7 +779,7 @@ COACH_PROPOSALS = CoachProposalAssembly(
     database_manager=database_manager,
     sync_state_repository=SYNC_PERSISTENCE.state_repository,
     duplicate_activity_service=ATHLETE_DATA.duplicate_activity,
-    history_undo_service=history_undo_service,
+    history_undo_service=HISTORY.undo_service,
     intervals_client_factory=PROVIDER_TRANSPORT.intervals_client,
     maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
     now=lambda: time.time(),
@@ -901,6 +874,12 @@ SYNC_COMMANDS = SyncCommandAssembly(
     utc_now=runtime_clock.utc_now,
     training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
     all_sync_days=ALL_SYNC_DAYS,
+    config=lambda: CONFIG,
+    intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
+    adaptive_replan_apply=PLANNING_DATA.adaptive_apply,
+    adaptive_replan_preview=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
+    redactor=REDACTOR,
+    today=lambda: ATHLETE_CLOCK.now().date(),
 )
 
 
@@ -912,129 +891,9 @@ SYNC_COMMANDS = SyncCommandAssembly(
 
 
 
-def coach_quick_actions_service() -> CoachQuickActionsService:
-    """Compose local quick-action reads and their public Coach projection."""
-    return CoachQuickActionsService(
-        database_manager(), KEY_VALUE_REPOSITORY, PLANNING_WORKFLOWS.adaptive_replan_preview_service(),
-        lambda: ATHLETE_CLOCK.now().date(), PLANNED_WORKOUT_LABEL,
-    )
-
-
-
-
-
-
-
-
-
-
-def coach_dialogue_read_service() -> CoachDialogueReadService:
-    """Compose local, read-only Coach dialogue projections."""
-    manager = database_manager()
-    return CoachDialogueReadService(
-        manager, COACH_CONVERSATION.message_service(), KEY_VALUE_REPOSITORY, ATHLETE_DATA.profile()
-    )
-
-
-def coach_dialogue_action_service() -> CoachDialogueActionService:
-    """Compose live dialogue authorization with its existing state owners."""
-    manager = database_manager()
-    return CoachDialogueActionService(
-        manager,
-        DB_LOCK,
-        SYNC_JOB_QUEUE.service,
-        CoachDialoguePlanScopeService(manager, DB_LOCK),
-        lambda: ATHLETE_CLOCK.now().date(),
-    )
-
-
-def coach_clarification_service() -> CoachClarificationService:
-    """Compose persistence for validated pending Coach questions."""
-    return CoachClarificationService(database_manager(), KEY_VALUE_REPOSITORY, DB_LOCK)
-
-
-def coach_attachment_context_service() -> CoachAttachmentContextService:
-    """Compose local attachment reads for the current Coach turn."""
-    return CoachAttachmentContextService(database_manager())
-
-
-def manual_morning_checkin_service() -> ManualMorningCheckinService:
-    """Compose the fresh-sleep gate for explicit morning Coach requests."""
-    return ManualMorningCheckinService(
-        GARMIN_ASSEMBLY.sync_service(), GARMIN_ASSEMBLY.payload_service(), morning_body_battery_service(),
-        lambda: ATHLETE_CLOCK.now().date(), LOGGER,
-    )
-
-
-def morning_checkin_state_service() -> MorningCheckinStateService:
-    """Compose the local morning check-in state projection."""
-    return MorningCheckinStateService(
-        database_manager(), KEY_VALUE_REPOSITORY, lambda: ATHLETE_CLOCK.now().date()
-    )
-
-
-def gemini_request_payload_service() -> GeminiRequestPayloadService:
-    """Compose Gemini's bounded, persisted request-history builder."""
-    return GeminiRequestPayloadService(
-        COACH_CONVERSATION.gemini_history_service(), COACH_CONVERSATION.gemini_local_history_service(),
-        database_manager(), KEY_VALUE_REPOSITORY,
-    )
-
-
-def gemini_response_normalization_service() -> GeminiResponseNormalizationService:
-    """Compose Gemini response and durable function-call normalization."""
-    return GeminiResponseNormalizationService(
-        COACH_CONVERSATION.gemini_history_service(), database_manager(), KEY_VALUE_REPOSITORY,
-        uuid.uuid4,
-    )
-
-
-def gemini_conversation_response_service() -> GeminiConversationResponseService:
-    """Compose Gemini conversation response orchestration."""
-    return GeminiConversationResponseService(
-        gemini_request_payload_service(),
-        gemini_response_normalization_service(),
-        MODEL_TRANSPORT.gemini_json_client(),
-        MODEL_TRANSPORT.gemini_stream_client(),
-        settings_service=SETTINGS,
-        default_thinking_level=SETTINGS.selected_thinking_level(),
-        default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
-        json_media_type=JSON_MEDIA_TYPE,
-    )
-
-
 CHAT_PAGE_MAX = 100
 
 
-def library_page_service() -> LibraryPageService:
-    """Compose the read-only workout-library page query."""
-    return LibraryPageService(database_manager())
-
-
-def chat_history_page_service() -> ChatHistoryPageService:
-    """Compose bounded local chat history and session-bound proposal reads."""
-    return ChatHistoryPageService(
-        COACH_CONVERSATION.history_service(),
-        COACH_PROPOSALS.read_service(),
-        maximum=CHAT_PAGE_MAX,
-    )
-
-
-def coach_command_receipt_service() -> CoachCommandReceiptService:
-    """Compose session-bound Coach command receipt reads."""
-    return CoachCommandReceiptService(
-        database_manager, DB_LOCK, now=time.time,
-    )
-
-
-
-
-def coach_response_transport() -> CoachResponseTransport:
-    """Compose concrete OpenAI and Gemini response adapters."""
-    return CoachResponseTransport(
-        SETTINGS, MODEL_TRANSPORT.openai_responses_client, MODEL_TRANSPORT.openai_stream_client,
-        gemini_conversation_response_service,
-    )
 
 
 COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, COACH_DIALOGUE_TOOLS = build_tool_contracts(
@@ -1063,7 +922,7 @@ COACH_PLANNING_TOOLS = CoachPlanningToolsAssembly(
     event_buffer=runtime_events.STATE_EVENT_BUFFER,
     training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
     adaptive_preview_service=lambda: PLANNING_WORKFLOWS.adaptive_replan_preview_service(),
-    illness_pause_sync_service=illness_pause_sync_service,
+    illness_pause_sync_service=SYNC_COMMANDS.illness_pause,
 )
 
 
@@ -1100,7 +959,7 @@ COACH_TOOL_DISPATCH = CoachToolDispatchAssembly(
     adaptive_preview=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
     adaptive_apply=COACH_PLANNING_TOOLS.adaptive_apply_service,
     training_plan_service=PLANNING_DATA.training_plan,
-    history_undo=history_undo_service,
+    history_undo=HISTORY.undo_service,
     proposal_creation=COACH_PROPOSALS.creation_service,
 )
 
@@ -1115,13 +974,13 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
     read_only_tools=lambda: STRUCTURED_READ_ONLY_TOOLS,
     sync_period_defaults=SYNC_PERIOD_DEFAULTS,
     all_sync_days=ALL_SYNC_DAYS,
-    clarification_service=lambda: coach_clarification_service(),
+    clarification_service=COACH_LOCAL.clarification_service,
     training_patch_service=lambda: COACH_PLANNING_TOOLS.training_patch_service(),
     sync_state_repository=lambda: SYNC_PERSISTENCE.state_repository(),
     proposal_creation_service=lambda: COACH_PROPOSALS.creation_service(),
     tool_dispatch_service=lambda: COACH_TOOL_DISPATCH.service(),
     job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
-    dialogue_action_service=lambda: coach_dialogue_action_service(),
+    dialogue_action_service=COACH_LOCAL.dialogue_action_service,
     planning_authority_service=SYNC_COMMANDS.authority,
     training_context_service=lambda: COACH_CONTEXT.training_context_service(),
     response_service=lambda: COACH_TURNS.structured_response_service(),
@@ -1151,8 +1010,8 @@ COACH_BACKGROUND_JOBS = CoachBackgroundJobsAssembly(
     stream_registry=lambda: coach_streams.CHAT_STREAM_REGISTRY,
     session_auth_service=session_auth_service,
     chat_turn_service=lambda: COACH_TURNS.chat_turn_service(),
-    manual_morning_checkin_service=manual_morning_checkin_service,
-    quick_actions_service=coach_quick_actions_service,
+    manual_morning_checkin_service=COACH_LOCAL.manual_morning_checkin_service,
+    quick_actions_service=COACH_LOCAL.quick_actions_service,
     athlete_clock=lambda: ATHLETE_CLOCK.now,
     background_horizon_days=lambda: coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
     max_attachment_storage_bytes=lambda: coach_attachments.MAX_ATTACHMENT_STORAGE_BYTES,
@@ -1175,24 +1034,16 @@ COACH_TURNS = CoachTurnAssembly(
     maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
     tools=lambda: COACH_DIALOGUE_TOOLS,
     read_only_tools=lambda: STRUCTURED_READ_ONLY_TOOLS,
-    command_receipt_service=lambda: coach_command_receipt_service(),
-    attachment_context_service=lambda: coach_attachment_context_service(),
-    dialogue_read_service=lambda: coach_dialogue_read_service(),
+    attachment_context_service=lambda: COACH_CONVERSATION.attachment_context_service(),
+    dialogue_read_service=lambda: COACH_CONVERSATION.dialogue_read_service(),
     request_payload_service=lambda: COACH_CONTEXT.request_payload_service(),
-    response_transport=lambda: coach_response_transport(),
+    response_transport=lambda: COACH_CONVERSATION.response_transport(),
     tool_round_service=lambda: COACH_TOOL_ROUNDS.service(),
     job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
     turn_failure_service=lambda: COACH_BACKGROUND_JOBS.turn_failure_service(),
     conversation_provision_service=lambda: COACH_CONVERSATION.provision_service,
+    tool_dispatch_service=COACH_TOOL_DISPATCH.service,
 )
-
-
-def coach_planning_command_service() -> CoachPlanningCommandService:
-    """Compose the session-bound planning command endpoint owner."""
-    return CoachPlanningCommandService(
-        database_manager(), DB_LOCK, coach_command_receipt_service(),
-        COACH_TOOL_DISPATCH.service(), COACH_BACKGROUND_JOBS.turn_failure_service(), runtime_clock.utc_now,
-    )
 
 
 
@@ -1255,8 +1106,8 @@ PUBLIC_STATE = PublicStateAssembly(
     daily_planning_context_service=PLANNING_WORKFLOWS.daily_planning_context_service,
     adaptive_preview_followup_service=lambda: AdaptivePreviewFollowupService(PLANNING_WORKFLOWS.adaptive_replan_preview_service(), LOGGER),
     adaptive_replan_preview_service=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
-    morning_checkin_state_service=morning_checkin_state_service,
-    coach_quick_actions_service=coach_quick_actions_service,
+    morning_checkin_state_service=COACH_LOCAL.morning_checkin_state_service,
+    coach_quick_actions_service=COACH_LOCAL.quick_actions_service,
     provider_state_service=provider_state_service,
     local_date=lambda: ATHLETE_CLOCK.now().date(),
     local_now=lambda: ATHLETE_CLOCK.now,
@@ -1288,7 +1139,7 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
     garmin_sync_state=GARMIN_ASSEMBLY.sync_state_service,
     external_calendar_sync=EXTERNAL_CALENDAR.sync_service,
     external_calendar_reader=EXTERNAL_CALENDAR.reader,
-    morning_checkin=morning_checkin_state_service,
+    morning_checkin=COACH_LOCAL.morning_checkin_state_service,
     workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
     diagnostic_capture=DIAGNOSTIC_CAPTURE,
     log_path=lambda: LOG_PATH,
@@ -1314,13 +1165,15 @@ HTTP_API = HttpApiAssembly(
 
     ),
     maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-    database_manager=database_manager,
+    database_manager=lambda: database_manager(),
     database_lock=lambda: DB_LOCK,
     data_dir=lambda: DATA_DIR,
     readiness_maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
     session_auth_service=session_auth_service,
-    chat_history_page_service=chat_history_page_service,
-    coach_command_receipt_service=coach_command_receipt_service,
+    conversation_history_service=COACH_CONVERSATION.history_service,
+    proposal_read_service=COACH_PROPOSALS.read_service,
+    chat_page_max=CHAT_PAGE_MAX,
+    coach_command_receipt_service=COACH_TURNS.command_receipt_service,
     coach_job_submission_service=COACH_BACKGROUND_JOBS.job_submission_service,
     coach_job_cancellation_service=COACH_BACKGROUND_JOBS.cancellation_service,
     public_bootstrap_service=PUBLIC_STATE.bootstrap_service,
@@ -1329,7 +1182,6 @@ HTTP_API = HttpApiAssembly(
     public_performance_state_service=PUBLIC_STATE.performance_state_service,
     public_feedback_state_service=PUBLIC_STATE.feedback_state_service,
     public_sync_state_service=PUBLIC_STATE.sync_public_state_service,
-    library_page_service=library_page_service,
     profile_service=ATHLETE_DATA.profile,
     competition_service=PLANNING_DATA.competition,
     activity_read_service=ATHLETE_DATA.activity_read,
@@ -1342,8 +1194,8 @@ HTTP_API = HttpApiAssembly(
     athlete_clock=ATHLETE_CLOCK,
     local_today=lambda: ATHLETE_CLOCK.now().date(),
     all_sync_days=ALL_SYNC_DAYS,
-    change_history_service=change_history_service,
-    history_undo_service=history_undo_service,
+    change_history_service=HISTORY.change_history_service,
+    history_undo_service=HISTORY.undo_service,
     proposal_creation_service=COACH_PROPOSALS.creation_service,
     proposal_confirmation_service=COACH_PROPOSALS.confirmation_service,
     proposal_execution_service=COACH_PROPOSALS.execution_service,
@@ -1359,8 +1211,8 @@ HTTP_API = HttpApiAssembly(
     privacy_delete_service=PRIVACY_ASSEMBLY.delete_service,
     backup_restore_service=BACKUP_ASSEMBLY.restore_service,
     state_event_buffer=runtime_events.STATE_EVENT_BUFFER,
-    athlete_context_service=athlete_context_service,
-    coach_planning_command_service=coach_planning_command_service,
+    athlete_context_service=ATHLETE_DATA.context,
+    coach_planning_command_service=COACH_TURNS.planning_command_service,
     audio_transcription_client=MODEL_TRANSPORT.audio_transcription_client,
     sync_state_repository=SYNC_PERSISTENCE.state_repository,
     performance_refresh_service=INTERVALS_SYNC.performance_service,

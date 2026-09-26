@@ -23,6 +23,9 @@ class CoachConversationAssemblyTests(unittest.TestCase):
         utc_now = Mock(return_value="2026-09-26T00:00:00Z")
         uuid_factory = Mock(name="uuid_factory")
         logger = Mock(name="logger")
+        profile_service = Mock(name="profile_service")
+        model_transport = Mock(name="model_transport")
+        default_thinking_level = Mock(name="default_thinking_level")
         assembly = CoachConversationAssembly(
             settings=settings,
             database_manager=manager_provider,
@@ -36,6 +39,11 @@ class CoachConversationAssemblyTests(unittest.TestCase):
             utc_now=utc_now,
             uuid_factory=uuid_factory,
             logger=logger,
+            profile_service=profile_service,
+            model_transport=model_transport,
+            default_thinking_level=default_thinking_level,
+            default_max_output_tokens=2048,
+            json_media_type="application/json",
             max_gemini_inline_image_bytes=lambda: 4096,
         )
         return assembly, {
@@ -53,6 +61,9 @@ class CoachConversationAssemblyTests(unittest.TestCase):
             "utc_now": utc_now,
             "uuid_factory": uuid_factory,
             "logger": logger,
+            "profile_service": profile_service,
+            "model_transport": model_transport,
+            "default_thinking_level": default_thinking_level,
         }
 
     def test_construction_is_lazy_and_service_factories_keep_shared_identities(self):
@@ -99,6 +110,25 @@ class CoachConversationAssemblyTests(unittest.TestCase):
         self.assertIs(reset_factory.call_args.args[4], dependencies["lock"])
         self.assertIs(reset_factory.call_args.args[5], dependencies["conversation_lock"])
         self.assertEqual(dependencies["openai_provider"].call_count, 2)
+
+    def test_dialogue_and_gemini_services_keep_shared_factories_and_lazy_config(self):
+        assembly, dependencies = self.make_assembly()
+        with (
+            patch.object(conversation_assembly, "CoachDialogueReadService") as dialogue,
+            patch.object(conversation_assembly, "CoachMessageService") as message,
+            patch.object(conversation_assembly, "GeminiConversationResponseService") as gemini,
+        ):
+            assembly.dialogue_read_service()
+            assembly.gemini_conversation_response_service()
+
+        self.assertIs(dialogue.call_args.args[0], dependencies["manager"])
+        self.assertIs(dialogue.call_args.args[1], message.return_value)
+        self.assertIs(dialogue.call_args.args[3], dependencies["profile_service"].return_value)
+        self.assertEqual(dependencies["default_thinking_level"].call_count, 1)
+        self.assertEqual(dependencies["manager_provider"].call_count, 7)
+        self.assertEqual(dependencies["model_transport"].gemini_json_client.call_count, 1)
+        self.assertEqual(dependencies["model_transport"].gemini_stream_client.call_count, 1)
+        self.assertIsNotNone(gemini.call_args)
 
 
 if __name__ == "__main__":

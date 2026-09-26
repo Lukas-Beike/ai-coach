@@ -38,7 +38,7 @@ class CoachReviewTests(unittest.TestCase):
         return {"type": "function_call", "name": name, "call_id": call_id, "arguments": json.dumps(arguments)}
 
     def history_preview(self, change_id, session_csrf_hash="review-session"):
-        preview = server.history_undo_service().preview(change_id)
+        preview = server.HISTORY.undo_service().preview(change_id)
         proposal = server.COACH_PROPOSALS.creation_service().create(
             preview.pop("proposal"), session_csrf_hash
         )
@@ -150,7 +150,7 @@ class CoachReviewTests(unittest.TestCase):
             )
         with patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="summary-recovery-conversation"))), patch(
             "backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic summary context"
-        ), patch.object(server, "coach_response_transport") as transport_factory:
+        ), patch.object(server.COACH_CONVERSATION, "response_transport") as transport_factory:
             transport_factory.return_value.background_request.side_effect = server.AppError(
                 503, "Model unavailable"
             )
@@ -264,7 +264,7 @@ class CoachReviewTests(unittest.TestCase):
 
     def test_current_undo_token_enforces_session_hash_expiry_and_competing_execution(self):
         template = server.PLANNING_DATA.workout_library().create_template({"name": "Protected synthetic", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
-        change = next(row for row in server.change_history_service().list() if row["entity_id"] == template["id"])
+        change = next(row for row in server.HISTORY.change_history_service().list() if row["entity_id"] == template["id"])
         proposal = self.history_preview(change["id"])["proposed_action"]
         with self.assertRaises(server.AppError):
             server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "other-session")
@@ -290,7 +290,7 @@ class CoachReviewTests(unittest.TestCase):
         self.assertCountEqual(results, ["applied", "rejected"])
         self.assertEqual(server.PLANNING_DATA.workout_library().list(), [])
         template = server.PLANNING_DATA.workout_library().create_template({"name": "Expiry synthetic", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
-        change = next(row for row in server.change_history_service().list() if row["entity_id"] == template["id"])
+        change = next(row for row in server.HISTORY.change_history_service().list() if row["entity_id"] == template["id"])
         proposal = self.history_preview(change["id"])["proposed_action"]
         confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
         with patch.object(server.time, "time", return_value=time.time() + COACH_ACTION_TTL_SECONDS + 1):
@@ -300,14 +300,14 @@ class CoachReviewTests(unittest.TestCase):
 
     def test_reload_preserves_pending_undo_but_changed_target_rejects_application(self):
         template = server.PLANNING_DATA.workout_library().create_template({"name": "Synthetic original", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
-        change = next(row for row in server.change_history_service().list() if row["entity_id"] == template["id"])
+        change = next(row for row in server.HISTORY.change_history_service().list() if row["entity_id"] == template["id"])
         proposal = self.history_preview(change["id"])["proposed_action"]
-        history = server.chat_history_page_service().page(
+        history = server.HTTP_API.chat_history_page_service().page(
             session_csrf_hash="review-session"
         )
         self.assertEqual(history["proposed_actions"][0]["id"], proposal["id"])
         self.assertEqual(
-            server.chat_history_page_service()
+            server.HTTP_API.chat_history_page_service()
             .page(session_csrf_hash="other-session")["proposed_actions"],
             [],
         )
@@ -325,7 +325,7 @@ class CoachReviewTests(unittest.TestCase):
         self.assertTrue(preview["changes"])
         advanced = server.ATHLETE_CLOCK.now() + timedelta(days=2)
         with patch.object(server.ATHLETE_CLOCK, "now", return_value=advanced):
-            applied = server.illness_pause_sync_service().apply(preview["id"])
+            applied = server.SYNC_COMMANDS.illness_pause().apply(preview["id"])
         self.assertEqual(applied["status"], "stale")
         self.assertEqual(applied["updated"], 0)
         self.assertEqual(applied["stale"][0]["reason"], "past")
@@ -333,7 +333,7 @@ class CoachReviewTests(unittest.TestCase):
 
     def test_expired_proposal_gc_and_confirmation_serialize_without_losing_drafts(self):
         template = server.PLANNING_DATA.workout_library().create_template({"name": "GC synthetic", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
-        change = next(row for row in server.change_history_service().list() if row["entity_id"] == template["id"])
+        change = next(row for row in server.HISTORY.change_history_service().list() if row["entity_id"] == template["id"])
         expired = self.history_preview(change["id"])["proposed_action"]
         active = self.history_preview(change["id"])["proposed_action"]
         draft = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
@@ -369,7 +369,7 @@ class CoachReviewTests(unittest.TestCase):
 
     def test_explicit_reconfirmation_after_reload_rotates_only_unused_token(self):
         template = server.PLANNING_DATA.workout_library().create_template({"name": "Token recovery", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
-        change = next(row for row in server.change_history_service().list() if row["entity_id"] == template["id"])
+        change = next(row for row in server.HISTORY.change_history_service().list() if row["entity_id"] == template["id"])
         proposal = self.history_preview(change["id"])["proposed_action"]
         first = server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
         self.assertEqual(server.COACH_PROPOSALS.read_service().current("review-session")[0]["status"], "ready")

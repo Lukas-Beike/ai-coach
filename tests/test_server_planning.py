@@ -263,7 +263,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(preview["illness_pause"]["start_date"], server.ATHLETE_CLOCK.now().date().isoformat())
         self.assertEqual(len(preview["changes"]), 1)
         self.assertEqual(server.PLANNING_DATA.planned_unit().list()[0]["description"], "- 5m 115%\n- 40m 55%")
-        result = server.illness_pause_sync_service().apply(preview["id"])
+        result = server.SYNC_COMMANDS.illness_pause().apply(preview["id"])
         self.assertEqual(result["updated"], 1)
         self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
         self.assertTrue(server.PLANNING_DATA.planned_unit().list(include_archived=True)[0]["archived"])
@@ -290,12 +290,12 @@ class ServerPlanningTests(ServerTestCase):
         self.assertTrue(preview["changes"][0].get("source_fingerprint"))
         server.PLANNING_DATA.planned_unit().update(draft["id"], {"action": "update", "name": "Athletenänderung"})
 
-        result = server.illness_pause_sync_service().apply(preview["id"])
+        result = server.SYNC_COMMANDS.illness_pause().apply(preview["id"])
         self.assertEqual(result["status"], "stale")
         self.assertEqual(result["updated"], 0)
         self.assertEqual(result["stale"][0]["reason"], "changed")
         self.assertEqual(server.PLANNING_DATA.planned_unit().list()[0]["name"], "Athletenänderung")
-        repeated = server.illness_pause_sync_service().apply(preview["id"])
+        repeated = server.SYNC_COMMANDS.illness_pause().apply(preview["id"])
         self.assertEqual(repeated["status"], "already_stale")
 
     def test_adaptive_preview_reports_missing_target_and_repeat_apply_is_safe(self):
@@ -307,7 +307,7 @@ class ServerPlanningTests(ServerTestCase):
         server.ATHLETE_DATA.checkin().save({"illness": "Fever", "soreness": 8})
         preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         server.PLANNING_DATA.planned_unit().update(draft["id"], {"action": "delete"})
-        result = server.illness_pause_sync_service().apply(preview["id"])
+        result = server.SYNC_COMMANDS.illness_pause().apply(preview["id"])
         self.assertEqual(result["status"], "stale")
         self.assertEqual(result["stale"][0]["reason"], "missing")
 
@@ -316,10 +316,10 @@ class ServerPlanningTests(ServerTestCase):
             "description": "- 5m 110%\n- 40m 55%", "duration_minutes": 45, "target": "POWER",
         }])[0]
         fresh_preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
-        applied = server.illness_pause_sync_service().apply(fresh_preview["id"])
+        applied = server.SYNC_COMMANDS.illness_pause().apply(fresh_preview["id"])
         self.assertEqual(applied["status"], "ok")
         self.assertGreaterEqual(applied["updated"], 1)
-        self.assertEqual(server.illness_pause_sync_service().apply(fresh_preview["id"])["status"], "already_applied")
+        self.assertEqual(server.SYNC_COMMANDS.illness_pause().apply(fresh_preview["id"])["status"], "already_applied")
         self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
         self.assertIn(fresh["id"], [item["id"] for item in server.PLANNING_DATA.planned_unit().list(include_archived=True)])
 
@@ -516,14 +516,14 @@ class ServerPlanningTests(ServerTestCase):
         server.PLANNING_DATA.planned_unit().update(local["id"], {"action": "delete"})
 
         deletion = next(
-            item for item in server.change_history_service().list()
+            item for item in server.HISTORY.change_history_service().list()
             if item["entity_type"] == "planned_unit"
             and item["entity_id"] == local["id"]
             and item["action"] == "delete"
         )
         self.assertNotEqual(deletion["before_hash"], deletion["after_hash"])
         self.assertEqual(deletion["diff"]["fields"]["local_deleted"], {"changed": True})
-        server.history_undo_service().apply({
+        server.HISTORY.undo_service().apply({
             "change_id": deletion["id"],
             "expected_current_hash": deletion["after_hash"],
         })
@@ -818,7 +818,7 @@ class ServerPlanningTests(ServerTestCase):
 
         with server.database_manager().unit_of_work() as db:
             server.CHAT_REPOSITORY.add(db, "user", "Synthetic draft request", client_turn_id="gemini-draft")
-        refs = server.coach_dialogue_read_service().artifact_refs()
+        refs = server.COACH_CONVERSATION.dialogue_read_service().artifact_refs()
 
         self.assertIn(draft["artifact_id"], [item["id"] for item in refs])
 
@@ -1229,14 +1229,14 @@ class ServerPlanningTests(ServerTestCase):
         plan = next(item for item in server.PLANNING_DATA.training_plan().list() if item["id"] == plan_entry["plan_id"])
         server.PLANNING_DATA.training_plan().update(plan["id"], {"action": "update", "name": "Renamed Plan"})
         metadata_change = next(
-            item for item in server.change_history_service().list()
+            item for item in server.HISTORY.change_history_service().list()
             if item["entity_type"] == "training_plan"
             and item["entity_id"] == plan["id"]
             and item["action"] == "update"
         )
         before_undo = server.PLANNING_WORKFLOWS.structured_training_state_service().read()["planning_revision"]
 
-        server.history_undo_service().apply({
+        server.HISTORY.undo_service().apply({
             "change_id": metadata_change["id"],
             "expected_current_hash": metadata_change["after_hash"],
         })
@@ -1318,7 +1318,7 @@ class ServerPlanningTests(ServerTestCase):
         old_plan = next(plan for plan in server.PLANNING_DATA.training_plan().list() if plan["id"] == empty_plan_id)
         self.assertEqual(old_plan["status"], "archived")
         metadata_history = next(
-            item for item in server.change_history_service().list()
+            item for item in server.HISTORY.change_history_service().list()
             if item["entity_type"] == "training_plan"
             and item["entity_id"] == empty_plan_id
             and item["action"] == "update"
@@ -1367,11 +1367,11 @@ class ServerPlanningTests(ServerTestCase):
             session_csrf_hash="", sync_job_ids=[],
         )
         deleted_history = next(
-            item for item in server.change_history_service().list()
+            item for item in server.HISTORY.change_history_service().list()
             if item["entity_type"] == "planned_unit" and item["entity_id"] == old["id"] and item["action"] == "delete"
         )
         with self.assertRaises(server.AppError) as error:
-            server.history_undo_service().apply({"change_id": deleted_history["id"], "expected_current_hash": deleted_history["after_hash"]})
+            server.HISTORY.undo_service().apply({"change_id": deleted_history["id"], "expected_current_hash": deleted_history["after_hash"]})
         self.assertEqual(error.exception.reason, "plan_date_conflict")
 
     def test_structured_training_reads_expose_complete_bounded_plan(self):
@@ -1579,7 +1579,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_read_competition_pull_keeps_dirty_local_changes_as_conflict(self):
         event_date = (date.today() + timedelta(days=33)).isoformat()
-        saved = server.athlete_context_service().save({}, [{
+        saved = server.ATHLETE_DATA.context().save({}, [{
             "name": "Remote original",
             "event_date": event_date,
             "sport": "Cycling",
@@ -1616,7 +1616,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_structured_athlete_context_persists_competitions(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()
-        result = server.athlete_context_service().save(
+        result = server.ATHLETE_DATA.context().save(
             {"name": "Ada", "training_background": "Five years of cycling", "typical_weekly_volume": "8 hours"},
             [{
                 "name": "Münsterland Giro",
@@ -1637,7 +1637,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_competition_conflict_can_adopt_remote_or_keep_local(self):
         event_date = (date.today() + timedelta(days=61)).isoformat()
-        saved = server.athlete_context_service().save({}, [{"name": "Remote Race", "event_date": event_date, "sport": "Cycling"}])
+        saved = server.ATHLETE_DATA.context().save({}, [{"name": "Remote Race", "event_date": event_date, "sport": "Cycling"}])
         competition_id = saved["competitions"][0]["id"]
 
         class FakeIntervalsClient:
@@ -1680,7 +1680,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_competition_removal_creates_remote_delete_tombstone(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()
-        saved = server.athlete_context_service().save({}, [{"name": "Delete Race", "event_date": event_date}])
+        saved = server.ATHLETE_DATA.context().save({}, [{"name": "Delete Race", "event_date": event_date}])
         local_id = saved["competitions"][0]["id"]
         deleted = []
 
@@ -1699,7 +1699,7 @@ class ServerPlanningTests(ServerTestCase):
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
             server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
-            server.athlete_context_service().save({}, [])
+            server.ATHLETE_DATA.context().save({}, [])
             result = server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
 
         self.assertEqual(result["deleted_remote"], 1)
@@ -1739,7 +1739,7 @@ class ServerPlanningTests(ServerTestCase):
     def test_change_history_records_safe_diff_and_explicit_undo(self):
         server.ATHLETE_DATA.profile().save({"name": "Ada", "weight_kg": "71"})
         server.ATHLETE_DATA.profile().save({"name": "Bea", "weight_kg": "72"})
-        history = server.change_history_service().list()
+        history = server.HISTORY.change_history_service().list()
         latest = next(item for item in history if item["entity_type"] == "profile")
         self.assertEqual(latest["action"], "update")
         self.assertEqual(latest["diff"]["fields"]["name"], {"changed": True})
@@ -1754,12 +1754,12 @@ class ServerPlanningTests(ServerTestCase):
         self.assertTrue(result["remote_untouched"])
         self.assertEqual(server.ATHLETE_DATA.profile().get()["name"], "Ada")
         with self.assertRaises(server.AppError) as replay:
-            server.history_undo_service().preview(latest["id"])
+            server.HISTORY.undo_service().preview(latest["id"])
         self.assertEqual(replay.exception.status, 409)
 
     def test_deleted_local_library_entry_can_be_undone_without_provider_write(self):
         entry = server.PLANNING_DATA.workout_library().create_local_entry({"name": "Easy", "sport": "Ride", "duration_minutes": 30, "description": "- 30m 60%"})
-        created = next(item for item in server.change_history_service().list() if item["entity_id"] == entry["id"] and item["action"] == "create")
+        created = next(item for item in server.HISTORY.change_history_service().list() if item["entity_id"] == entry["id"] and item["action"] == "create")
         preview = self.history_preview(created["id"])
         confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(preview["proposed_action"]["id"], "session-csrf-hash")
         result = server.COACH_PROPOSALS.execution_service().execute(confirmed["action_token"], "session-csrf-hash", confirmed["proposed_action"]["payload_hash"])
