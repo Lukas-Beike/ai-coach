@@ -711,3 +711,39 @@ mocked providers; no live account or runtime data was used.
   diff check, and root factory reference search passed.
 - Measured `server.py`: 2,372 physical / 2,057 nonblank lines, 215 AST import
   statements, 131 top-level functions.
+
+## S2i boundary before implementation: planned-unit sync reconciliation
+
+- `planned_unit_sync_state_writer()` and
+  `remote_planned_unit_reconciler()` form one planned-unit sync persistence
+  boundary. The writer is used by planned-calendar sync/repair; the reconciler
+  is the lazy callback used by Intervals snapshot sync. Direct test callers are
+  in planning, weather/calendar, and workout-repair tests. No e2e fixture
+  references these factories, and constructor patches target the owning backend
+  classes directly.
+- Preserve a fresh writer and reconciler per call; the singleton planning
+  revision service; redactor; current manager and planned-unit service; UTC
+  clock; and athlete-local date callback. Intervals sync currently constructs
+  the reconciler only when needed through its callback, so its assembly input
+  must remain a deferred `PLANNED_UNIT_SYNC.remote_reconciler` lookup.
+- Proposed owner/interface: `PlannedUnitSyncAssembly` in
+  `backend/sync/planned_unit_assembly.py`, exposing only `state_writer()` and
+  `remote_reconciler()`. It receives explicit revision/redactor and manager/
+  planned-unit-service/clock/date dependencies and introduces no cache or I/O.
+
+## S2i: planned-unit sync persistence and reconciliation assembly
+
+- Completed in `backend/sync/planned_unit_assembly.py` as
+  `PlannedUnitSyncAssembly`, exposing only `state_writer()` and
+  `remote_reconciler()`. Removed both root factories, migrated direct server
+  test callers, and updated the Intervals sync assembly input.
+- Preserved the shared planning revision service and redactor; fresh state
+  writers/reconcilers; current database manager and planned-unit service; UTC
+  clock; and athlete-local date. Intervals sync resolves the reconciliation
+  operation lazily on demand. No storage or provider I/O was added.
+- Focused planned-unit, planned-calendar, and writer domain tests passed: 48
+  tests. The affected guarded server planning, weather/calendar, sync, repair,
+  and architecture matrix passed: 287 tests. Inventory check, compileall, diff
+  check, and old-factory reference search passed.
+- Measured `server.py`: 2,363 physical / 2,052 nonblank lines, 214 AST import
+  statements, 129 top-level functions.

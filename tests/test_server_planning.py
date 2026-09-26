@@ -412,9 +412,9 @@ class ServerPlanningTests(ServerTestCase):
             "start_date_local": tomorrow + "T07:00:00", "type": "Ride", "name": "Remote Einheit",
             "description": "- 30m Z2", "moving_time": 1800,
         }
-        first = server.remote_planned_unit_reconciler().reconcile([event])
+        first = server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([event])
         revision_after_import = server.structured_training_state_service().read()["planning_revision"]
-        second = server.remote_planned_unit_reconciler().reconcile([event])
+        second = server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([event])
         self.assertEqual(server.structured_training_state_service().read()["planning_revision"], revision_after_import)
         planned = server.planned_unit_service().list()
         self.assertEqual(first["imported"], 1)
@@ -422,7 +422,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(second["imported"], 0)
         self.assertEqual(planned[0]["remote_event_id"], "remote-event-1")
         server.planned_unit_service().update(planned[0]["id"], {"action": "update", "name": "Lokal geändert"})
-        conflict = server.remote_planned_unit_reconciler().reconcile(
+        conflict = server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile(
             [{**event, "name": "Remote geändert"}]
         )
         self.assertEqual(conflict["conflicts"], 1)
@@ -435,10 +435,10 @@ class ServerPlanningTests(ServerTestCase):
             "start_date_local": tomorrow + "T07:00:00", "type": "Ride", "name": "Remote Original",
             "description": "- 30m Z2", "moving_time": 1800,
         }
-        server.remote_planned_unit_reconciler().reconcile([event])
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([event])
         local = server.planned_unit_service().list()[0]
         server.planned_unit_service().update(local["id"], {"action": "update", "name": "Lokal geändert"})
-        result = server.remote_planned_unit_reconciler().reconcile([event])
+        result = server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([event])
         current = server.planned_unit_service().list()[0]
         self.assertEqual(result["conflicts"], 0)
         self.assertEqual(current["name"], "Lokal geändert")
@@ -446,7 +446,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_remote_planned_import_and_payload_preserve_sport(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        server.remote_planned_unit_reconciler().reconcile([{
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([{
             "id": "remote-run", "category": "WORKOUT", "start_date_local": tomorrow + "T08:00:00",
             "type": "Run", "name": "Remote Lauf", "moving_time": 1800,
         }])
@@ -465,15 +465,15 @@ class ServerPlanningTests(ServerTestCase):
             "start_date_local": tomorrow + "T07:00:00", "type": "Ride", "name": "Original",
             "description": "- 30m Z2", "moving_time": 1800,
         }
-        server.remote_planned_unit_reconciler().reconcile([event])
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([event])
         local = server.planned_unit_service().list()[0]
         server.planned_unit_service().update(local["id"], {"action": "update", "name": "Lokal"})
-        server.remote_planned_unit_reconciler().reconcile(
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile(
             [{**event, "name": "Remote"}]
         )
         kept = server.planned_unit_service().resolve_conflict(local["id"], "keep_local")
         self.assertEqual(kept["planned_unit"]["name"], "Lokal")
-        server.remote_planned_unit_reconciler().reconcile(
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile(
             [{**event, "name": "Remote"}]
         )
         adopted = server.planned_unit_service().resolve_conflict(
@@ -1326,7 +1326,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_broad_plan_replace_preserves_imported_provider_units(self):
         remote_date = (date.today() + timedelta(days=2)).isoformat()
-        server.remote_planned_unit_reconciler().reconcile([{
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([{
             "id": "remote-future-workout", "category": "WORKOUT", "type": "Ride",
             "name": "Provider workout", "start_date_local": remote_date + "T07:00:00",
             "moving_time": 1800,

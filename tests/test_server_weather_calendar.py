@@ -625,12 +625,12 @@ class ServerWeatherCalendarTests(ServerTestCase):
 
     def test_calendar_conflict_is_detected_before_push(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        server.remote_planned_unit_reconciler().reconcile([{"id": "existing", "name": "Existing", "category": "WORKOUT", "type": "Ride", "start_date_local": tomorrow + "T08:00:00", "moving_time": 3600}])
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([{"id": "existing", "name": "Existing", "category": "WORKOUT", "type": "Ride", "start_date_local": tomorrow + "T08:00:00", "moving_time": 3600}])
         self.assertEqual(server.calendar_conflict_service().conflicts({"date": tomorrow})[0]["name"], "Existing")
 
     def test_calendar_conflicts_use_time_windows_when_both_events_are_timed(self):
         day = (date.today() + timedelta(days=2)).isoformat()
-        server.remote_planned_unit_reconciler().reconcile([{"id": "later", "name": "Later", "category": "WORKOUT", "type": "Ride", "start_date_local": day + "T12:00:00", "moving_time": 1800}])
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([{"id": "later", "name": "Later", "category": "WORKOUT", "type": "Ride", "start_date_local": day + "T12:00:00", "moving_time": 1800}])
         self.assertEqual(server.calendar_conflict_service().conflicts({"date": day, "start_date_local": day + "T08:00:00", "duration_minutes": 60}), [])
         conflict = server.calendar_conflict_service().conflicts({"date": day, "start_date_local": day + "T12:15:00", "duration_minutes": 30})[0]
         self.assertEqual(conflict["name"], "Later")

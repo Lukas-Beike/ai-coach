@@ -171,9 +171,8 @@ from backend.sync.conflict_commands import SyncConflictCommandService
 from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_selection import StructuredPlanSyncService
 from backend.sync.plan_repair import PlanRepairManifestService
-from backend.sync.reconcile import PlannedUnitSyncStateWriter
-from backend.sync.planned_units import RemotePlannedUnitReconciler
 from backend.sync.planned_calendar_assembly import PlannedCalendarSyncAssembly
+from backend.sync.planned_unit_assembly import PlannedUnitSyncAssembly
 from backend.sync.library import workout_library_sync_running
 from backend.sync.library_assembly import WorkoutLibrarySyncAssembly
 from backend.sync.selected import SelectedWorkoutSyncService
@@ -744,22 +743,6 @@ def planned_unit_service() -> planning_planned_unit_service.PlannedUnitService:
     )
 
 
-def planned_unit_sync_state_writer() -> PlannedUnitSyncStateWriter:
-    """Compose planned-unit synchronization persistence."""
-    return PlannedUnitSyncStateWriter(PLANNING_REVISION_SERVICE, REDACTOR)
-
-
-def remote_planned_unit_reconciler() -> RemotePlannedUnitReconciler:
-    """Compose remote planned-unit reconciliation."""
-    return RemotePlannedUnitReconciler(
-        database_manager(),
-        planned_unit_service(),
-        PLANNING_REVISION_SERVICE,
-        runtime_clock.utc_now,
-        lambda: ATHLETE_CLOCK.now().date(),
-    )
-
-
 def planning_authority_service() -> PlanningAuthorityService:
     """Compose explicit local-authority decisions before provider sync."""
     return PlanningAuthorityService(
@@ -1152,7 +1135,7 @@ INTERVALS_SYNC = IntervalsSyncAssembly(
     intervals_resync_gate=INTERVALS_RESYNC_GATE,
     intervals_sync_lock=INTERVALS_SYNC_LOCK,
     sync_job_queue=SYNC_JOB_QUEUE.service,
-    remote_planned_unit_reconciler=remote_planned_unit_reconciler,
+    remote_planned_unit_reconciler=lambda: PLANNED_UNIT_SYNC.remote_reconciler(),
     workout_library_refresh_service=lambda: WORKOUT_LIBRARY_SYNC.refresh_service(),
     workout_library_service=workout_library_service,
     sync_period_defaults=SYNC_PERIOD_DEFAULTS,
@@ -1189,11 +1172,19 @@ PROVIDER_TRANSPORT = ProviderTransportAssembly(
     config=lambda: CONFIG,
     athlete_now=ATHLETE_CLOCK.now,
 )
+PLANNED_UNIT_SYNC = PlannedUnitSyncAssembly(
+    database_manager=database_manager,
+    planned_unit_service=planned_unit_service,
+    planning_revision_service=PLANNING_REVISION_SERVICE,
+    redactor=REDACTOR,
+    utc_now=runtime_clock.utc_now,
+    today=lambda: ATHLETE_CLOCK.now().date(),
+)
 PLANNED_CALENDAR_SYNC = PlannedCalendarSyncAssembly(
     config=lambda: CONFIG,
     database_manager=database_manager,
     intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
-    state_writer=planned_unit_sync_state_writer,
+    state_writer=PLANNED_UNIT_SYNC.state_writer,
     utc_now=runtime_clock.utc_now,
     today=lambda: ATHLETE_CLOCK.now().date(),
     future_days=PLANNED_CALENDAR_FUTURE_DAYS,

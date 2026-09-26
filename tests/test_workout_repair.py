@@ -69,7 +69,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
 
     def set_planned_sync_state(self, local_id, state, remote_event=None):
         with server.database_manager().unit_of_work() as db:
-            server.planned_unit_sync_state_writer().persist(
+            server.PLANNED_UNIT_SYNC.state_writer().persist(
                 db,
                 local_id,
                 state,
