@@ -1493,7 +1493,7 @@ mocked providers; no live account or runtime data was used.
 - Changed files: `server.py`, new HTTP assembly, E2E fixture, direct HTTP test
   callers and architecture assertions, inventory generator/output, and this log.
 
-## S6 boundary before implementation: remaining planning workflows
+## S6 complete: planning workflow factories
 
 - S5 leaves planning workflow factories in `server.py` for calendar conflicts,
   local workout/plan creation, daily planning context, structured planning
@@ -1517,8 +1517,11 @@ mocked providers; no live account or runtime data was used.
   battery service. Preserve preview/local mutation transaction boundaries,
   current service freshness, and deferred callbacks held by callers. Only the
   existing callback test seam moves from `server` to `PLANNING_WORKFLOWS`.
+- Completed in `e529e6d`: `PlanningWorkflowAssembly` owns those factories;
+  direct class patch seams target their planning modules. After the develop
+  rebase, planning and weather/calendar checks pass (44 tests each).
 
-## S6 boundary before implementation: sync command factories
+## S6 complete: sync command factories
 
 - The remaining sync command factories have callers in Coach command/tool
   assembly, the HTTP sync endpoint, and focused Coach planning, sync, and
@@ -1535,3 +1538,42 @@ mocked providers; no live account or runtime data was used.
 - Direct test callers move to `server.SYNC_COMMANDS`; the HTTP endpoint's
   existing root patch seam remains because the endpoint itself remains a root
   factory. Current service freshness and queue/provider identities are retained.
+- Completed in `a18e8f3`. The full sync integration module passed after
+  migrating one stale planning-authority patch target (80 tests).
+
+## S6 complete: nutrition, HTTP sync endpoint, and public state version
+
+- Two remaining root factories had single-owner callers. Nutrition is consumed
+  by Coach read/command tools and HTTP nutrition routes, with one direct tool
+  coverage test. The sync POST endpoint factory is called only by the HTTP sync
+  command route and its late-bound test patch target.
+- `NutritionAssembly` in `backend/nutrition/assembly.py` now owns the local
+  nutrition service and explicit Intervals wellness sync. It receives the same
+  manager, DB lock, UTC/local clocks, current config, and provider request
+  factory; it creates fresh repositories/services on each call as before.
+- `HttpApiAssembly` now constructs its own `SyncCommandEndpoint` from the
+  existing queue, state, performance refresh, full resync, period settings, and
+  UUID factory. The HTTP route still creates the endpoint lazily for each
+  handled path, and its patch seam is `HTTP_API.sync_command_endpoint`.
+
+The public state assembly also now constructs `StateVersionService` locally from
+its shared manager, key-value and snapshot repositories, and athlete profile
+service. The one root factory had no direct test patch callers; its consumers
+were public bootstrap and sync state projections.
+
+- `NutritionAssembly` owns both nutrition service factories; `HttpApiAssembly`
+  owns the lazy sync endpoint; `PublicStateAssembly` owns the version service.
+  Tests patch at these owners. Manager, lock, repository, provider request,
+  configuration, route-lazy, and athlete-profile identities are preserved.
+- The stale extraction-inventory zero-P0 architecture assertion was removed:
+  the inventory remains a generated ownership aid, while structural boundary
+  tests govern the composition root. The generator recognizes
+  `NUTRITION_ASSEMBLY` as a composition-root binding.
+- Focused results after rebase: planning 44, weather/calendar 44, sync 80,
+  architecture 46, HTTP 68, nutrition assembly 2, and public-state assembly
+  4 tests passed. Compilation, inventory `--check`, and `git diff --check`
+  passed. Docker is unavailable, so browser fixture checks cannot run.
+- Current root size: 1,464 physical / 1,264 nonblank lines, 125 imports,
+  and 32 top-level definitions. It remains above the practical target; S6
+  continues with remaining root wiring and factories. Inventory totals do not
+  establish completion.

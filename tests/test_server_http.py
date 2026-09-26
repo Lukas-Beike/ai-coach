@@ -78,7 +78,7 @@ class ServerHttpTests(ServerTestCase):
         handler.send_json = Mock()
         endpoint = Mock()
         endpoint.execute.return_value = (202, {"id": "job-3"})
-        with patch.object(server, "sync_command_endpoint", return_value=endpoint) as factory:
+        with patch.object(server.HTTP_API, "sync_command_endpoint", return_value=endpoint) as factory:
             self.assertFalse(server.HTTP_API.sync_command_post_route.handle(handler, "/api/unknown"))
             factory.assert_not_called()
             self.assertTrue(server.HTTP_API.sync_command_post_route.handle(handler, "/api/weather/sync"))

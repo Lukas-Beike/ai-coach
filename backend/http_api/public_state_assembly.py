@@ -20,6 +20,7 @@ from backend.http_api.state_prelude import (
     PublicStateLocalPrelude,
     PublicStateWeatherPrelude,
 )
+from backend.http_api.state_versions import StateVersionService
 from backend.sync.status import SyncPublicStateService
 
 
@@ -37,6 +38,7 @@ class PublicStateAssembly:
         app_name: str,
         app_version: str,
         key_values: Callable[[], Any],
+        snapshot_repository: Any,
         sync_persistence: Callable[[], Any],
         planning_data: Callable[[], Any],
         athlete_data: Callable[[], Any],
@@ -54,7 +56,6 @@ class PublicStateAssembly:
         diagnostic_capture: Callable[[], Any],
         intervals_sync_lock: Callable[[], Any],
         workout_library_sync_running: Callable[[], Callable[[], bool]],
-        state_version_service: Callable[[], Any],
         daily_planning_context_service: Callable[[], Any],
         adaptive_preview_followup_service: Callable[[], Any],
         adaptive_replan_preview_service: Callable[[], Any],
@@ -78,6 +79,7 @@ class PublicStateAssembly:
         self._app_name = app_name
         self._app_version = app_version
         self._key_values = key_values
+        self._snapshot_repository = snapshot_repository
         self._sync_persistence = sync_persistence
         self._planning_data = planning_data
         self._athlete_data = athlete_data
@@ -95,7 +97,6 @@ class PublicStateAssembly:
         self._diagnostic_capture = diagnostic_capture
         self._intervals_sync_lock = intervals_sync_lock
         self._workout_library_sync_running = workout_library_sync_running
-        self._state_version_service = state_version_service
         self._daily_planning_context_service = daily_planning_context_service
         self._adaptive_preview_followup_service = adaptive_preview_followup_service
         self._adaptive_replan_preview_service = adaptive_replan_preview_service
@@ -123,6 +124,14 @@ class PublicStateAssembly:
             self._local_date,
         )
 
+    def state_version_service(self) -> StateVersionService:
+        return StateVersionService(
+            self._database_manager(),
+            self._key_values(),
+            self._snapshot_repository,
+            self._athlete_data().profile(),
+        )
+
     def feedback_state_service(self) -> PublicFeedbackStateService:
         athlete = self._athlete_data()
         return PublicFeedbackStateService(athlete.checkin(), athlete.activity_feedback())
@@ -140,7 +149,7 @@ class PublicStateAssembly:
             garmin.sync_state_service(),
             self._maintenance_gate(),
             self._sync_job_queue().service(),
-            self._state_version_service(),
+            self.state_version_service(),
             self._intervals_sync_lock(),
         )
 
@@ -172,7 +181,7 @@ class PublicStateAssembly:
             garmin_sync_state_service=garmin.sync_state_service,
             garmin_sync_service=garmin.sync_service,
             sync_job_queue_service=self._sync_job_queue().service,
-            state_version_service=self._state_version_service,
+            state_version_service=self.state_version_service,
             coach_message_service=conversation.message_service,
             training_plan_service=planning.training_plan,
             local_calendar_events=self._calendar_local().local_calendar_events,

@@ -16,7 +16,7 @@ class PublicStateAssemblyTests(unittest.TestCase):
             "sync_job_queue", "weather", "workout_library_sync", "provider_resync",
             "coach_conversation", "calendar_local", "planning_season", "intervals_state",
             "diagnostic_capture", "intervals_sync_lock", "workout_library_sync_running",
-            "state_version_service", "daily_context", "adaptive_followup", "adaptive_preview",
+            "snapshot_repository", "daily_context", "adaptive_followup", "adaptive_preview",
             "morning_checkin", "quick_actions", "provider_state", "local_date", "local_now",
             "calendar_window", "calendar_history", "calendar_future", "sync_defaults",
             "all_sync_days", "workout_label",
@@ -47,6 +47,7 @@ class PublicStateAssemblyTests(unittest.TestCase):
             app_name="Synthetic Coach",
             app_version="test-version",
             key_values=deps["key_values"],
+            snapshot_repository=deps["snapshot_repository"],
             sync_persistence=deps["sync_persistence"],
             planning_data=deps["planning_data"],
             athlete_data=deps["athlete_data"],
@@ -64,7 +65,6 @@ class PublicStateAssemblyTests(unittest.TestCase):
             diagnostic_capture=deps["diagnostic_capture"],
             intervals_sync_lock=deps["intervals_sync_lock"],
             workout_library_sync_running=deps["workout_library_sync_running"],
-            state_version_service=deps["state_version_service"],
             daily_planning_context_service=deps["daily_context"],
             adaptive_preview_followup_service=deps["adaptive_followup"],
             adaptive_replan_preview_service=deps["adaptive_preview"],
@@ -103,6 +103,19 @@ class PublicStateAssemblyTests(unittest.TestCase):
         self.assertIs(service._intervals_sync_lock, deps["intervals_sync_lock"]())
         self.assertIs(service._database_manager, owners["manager"])
         self.assertIs(service._config, owners["config"])
+
+    def test_state_version_service_uses_shared_repositories_and_athlete_profile(self):
+        assembly, deps, owners = self.make_assembly()
+        profile_service = Mock(name="profile_service")
+        athlete = deps["athlete_data"].return_value
+        athlete.profile.return_value = profile_service
+
+        service = assembly.state_version_service()
+
+        self.assertIs(service._database_manager, owners["manager"])
+        self.assertIs(service._key_value_repository, deps["key_values"]())
+        self.assertIs(service._snapshot_repository, deps["snapshot_repository"])
+        self.assertIs(service._profile_service, profile_service)
 
     def test_public_state_assembly_retains_the_reentrant_lock_and_settings(self):
         assembly, _deps, owners = self.make_assembly()

@@ -13,6 +13,7 @@ from backend.calendar import canonical as calendar_canonical, local as calendar_
 from backend.coach.context import CoachIntervalsContextService
 from backend.http_api.public_weather import PublicWeatherStateService
 from backend.planning import planned_units as planning_planned_units, workouts as planning_workouts
+from backend.planning import adaptive_preview_service
 from backend.planning import planned_unit_service as planning_planned_unit_service
 from backend.providers import calendar as calendar_provider, intervals_client as intervals_client_module, weather as weather_provider
 from backend.sync import snapshots as sync_snapshots
@@ -216,7 +217,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "fetched_at": runtime_clock.utc_now(),
         }
         with patch.object(weather_provider.WeatherClient, "fetch", return_value=forecast), patch.object(
-            server.AdaptiveReplanPreviewService,
+            adaptive_preview_service.AdaptiveReplanPreviewService,
             "preview",
             return_value={"changes": [{"id": "change-1"}]},
         ) as preview:

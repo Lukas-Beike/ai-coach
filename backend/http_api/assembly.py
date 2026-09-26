@@ -26,6 +26,7 @@ from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
 from backend.http_api.privacy_get import PrivacyGetRoutes
 from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.response_transport import HttpResponseTransport
+from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.state_events_transport import StateEventTransport
 from backend.http_api.settings_put import SettingsPutRoutes
 from backend.http_api.state_events_get import StateEventsGetRoutes
@@ -101,8 +102,12 @@ class HttpApiAssembly:
         state_event_buffer: Any,
         athlete_context_service: Callable[[], Any],
         coach_planning_command_service: Callable[[], Any],
-        sync_command_endpoint_factory: Callable[[], Callable[[], Any]],
         sync_job_queue_service: Callable[[], Any],
+        sync_state_repository: Callable[[], Any],
+        performance_refresh_service: Callable[[], Any],
+        full_provider_resync_service: Callable[[], Any],
+        sync_period_defaults: Any,
+        uuid_factory: Callable[[], str],
         audio_transcription_client: Callable[[], Any],
         nutrition_service: Callable[[], Any],
         intervals_nutrition_sync_service: Callable[[], Any],
@@ -195,7 +200,7 @@ class HttpApiAssembly:
             (self.settings_put_routes, self.athlete_put_routes, self.nutrition_put_routes),
         )
         self.sync_command_post_route = SyncCommandPostRoute(
-            lambda: sync_command_endpoint_factory()()
+            lambda: self.sync_command_endpoint()
         )
         self.authenticated_post_routes = HttpAuthenticatedPostRoutes(
             self.coach_actions_post_routes, self.chat_post_routes,
@@ -211,6 +216,24 @@ class HttpApiAssembly:
         )
         self.response_transport = http_response_transport
         self._handler_configuration = handler_configuration
+        self._sync_job_queue_service = sync_job_queue_service
+        self._sync_state_repository = sync_state_repository
+        self._performance_refresh_service = performance_refresh_service
+        self._full_provider_resync_service = full_provider_resync_service
+        self._sync_period_defaults = sync_period_defaults
+        self._all_sync_days = all_sync_days
+        self._uuid_factory = uuid_factory
+
+    def sync_command_endpoint(self) -> SyncCommandEndpoint:
+        return SyncCommandEndpoint(
+            self._sync_job_queue_service(),
+            self._sync_state_repository(),
+            self._performance_refresh_service(),
+            self._full_provider_resync_service(),
+            self._uuid_factory,
+            self._sync_period_defaults,
+            self._all_sync_days,
+        )
 
     def request_handler_class(self) -> type[BaseHTTPRequestHandler]:
         handler = self._handler_configuration()

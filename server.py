@@ -77,7 +77,7 @@ from backend.weather.assembly import WeatherAssembly
 from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
 from backend.db.key_value import KeyValueService
-from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, NutritionRepository, PlanAdjustmentRepository, PlanningStateRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
+from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, PlanningStateRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db import manager as database_manager_runtime
 from backend.db.manager import (
     DATABASE_LOCK as DB_LOCK,
@@ -88,7 +88,6 @@ from backend.config import (
     DEFAULT_OPENAI_BASE_URL,
     load_config,
 )
-from backend.providers.intervals import IntervalsApiClient
 from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
 from backend.providers import http as provider_http
@@ -103,11 +102,8 @@ from backend.http_api.auth import (
     SessionAuthService,
     get_session_auth_service,
 )
-from backend.http_api.state_versions import StateVersionService
 from backend.http_api.public_state_assembly import PublicStateAssembly
-from backend.http_api.sync_commands import SyncCommandEndpoint
-from backend.nutrition.service import NutritionService
-from backend.nutrition.sync import IntervalsNutritionSyncService
+from backend.nutrition.assembly import NutritionAssembly
 from backend.sync.command_assembly import SyncCommandAssembly
 from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
 from backend.sync.planned_calendar_assembly import PlannedCalendarSyncAssembly
@@ -296,47 +292,6 @@ PROVIDER_SYNC = ProviderSyncAssembly(
 )
 
 
-def sync_command_endpoint() -> SyncCommandEndpoint:
-    """Compose authenticated manual synchronization POST commands."""
-    return SyncCommandEndpoint(
-        SYNC_JOB_QUEUE.service(), SYNC_PERSISTENCE.state_repository(),
-        INTERVALS_SYNC.performance_service(), PROVIDER_RESYNC.full_resync_service(),
-        lambda: uuid.uuid4().hex, SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS,
-    )
-
-
-def nutrition_service() -> NutritionService:
-    """Compose nutrition and calorie tracking for the active database manager."""
-    return NutritionService(
-        database_manager=database_manager(),
-        db_lock=DB_LOCK,
-        nutrition_repository=NutritionRepository(runtime_clock.utc_now),
-        utc_now=runtime_clock.utc_now,
-        local_now=ATHLETE_CLOCK.now,
-    )
-
-
-def intervals_nutrition_sync_service() -> IntervalsNutritionSyncService:
-    """Compose nutrition sync to Intervals.icu wellness."""
-    api_client = IntervalsApiClient(
-        api_key=CONFIG.intervals_api_key,
-        request=PROVIDER_TRANSPORT.json_http_client().request,
-    )
-    return IntervalsNutritionSyncService(
-        config=CONFIG,
-        api_client=api_client,
-        nutrition_service=nutrition_service(),
-    )
-
-
-def state_version_service() -> StateVersionService:
-    """Compose the read-only browser version projection."""
-    return StateVersionService(
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        SNAPSHOT_REPOSITORY,
-        ATHLETE_DATA.profile(),
-    )
 
 
 
@@ -705,6 +660,14 @@ PROVIDER_TRANSPORT = ProviderTransportAssembly(
     config=lambda: CONFIG,
     athlete_now=ATHLETE_CLOCK.now,
 )
+NUTRITION_ASSEMBLY = NutritionAssembly(
+    config=lambda: CONFIG,
+    database_manager=database_manager,
+    database_lock=DB_LOCK,
+    utc_now=runtime_clock.utc_now,
+    local_now=ATHLETE_CLOCK.now,
+    intervals_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
+)
 MODEL_TRANSPORT = ModelTransportAssembly(
     config=lambda: CONFIG,
     selected_thinking_level=SETTINGS.selected_thinking_level,
@@ -843,7 +806,7 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
     change_history_service=change_history_service,
     competition_service=PLANNING_DATA.competition,
     training_plan_service=PLANNING_DATA.training_plan,
-    nutrition_service=nutrition_service,
+    nutrition_service=NUTRITION_ASSEMBLY.service,
     training_change_limit=lambda: coach_limits.COACH_TRAINING_CHANGE_LIMIT,
 )
 COACH_PROPOSALS = CoachProposalAssembly(
@@ -1122,7 +1085,7 @@ COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
     checkin_service=lambda: ATHLETE_DATA.checkin(),
     activity_feedback_service=lambda: ATHLETE_DATA.activity_feedback(),
     competition_service=lambda: PLANNING_DATA.competition(),
-    nutrition_service=lambda: nutrition_service(),
+    nutrition_service=NUTRITION_ASSEMBLY.service,
     profile_service=lambda: ATHLETE_DATA.profile(),
     database_manager=lambda: database_manager(),
     database_lock=DB_LOCK,
@@ -1278,6 +1241,7 @@ PUBLIC_STATE = PublicStateAssembly(
     app_name=APP_NAME,
     app_version=APP_VERSION,
     key_values=lambda: KEY_VALUE_REPOSITORY,
+    snapshot_repository=SNAPSHOT_REPOSITORY,
     sync_persistence=lambda: SYNC_PERSISTENCE,
     planning_data=lambda: PLANNING_DATA,
     athlete_data=lambda: ATHLETE_DATA,
@@ -1295,7 +1259,6 @@ PUBLIC_STATE = PublicStateAssembly(
     diagnostic_capture=lambda: DIAGNOSTIC_CAPTURE,
     intervals_sync_lock=lambda: INTERVALS_SYNC_LOCK,
     workout_library_sync_running=lambda: workout_library_sync_running,
-    state_version_service=state_version_service,
     daily_planning_context_service=PLANNING_WORKFLOWS.daily_planning_context_service,
     adaptive_preview_followup_service=lambda: AdaptivePreviewFollowupService(PLANNING_WORKFLOWS.adaptive_replan_preview_service(), LOGGER),
     adaptive_replan_preview_service=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
@@ -1440,10 +1403,14 @@ HTTP_API = HttpApiAssembly(
     state_event_buffer=runtime_events.STATE_EVENT_BUFFER,
     athlete_context_service=athlete_context_service,
     coach_planning_command_service=coach_planning_command_service,
-    sync_command_endpoint_factory=lambda: sync_command_endpoint,
     audio_transcription_client=MODEL_TRANSPORT.audio_transcription_client,
-    nutrition_service=nutrition_service,
-    intervals_nutrition_sync_service=intervals_nutrition_sync_service,
+    sync_state_repository=SYNC_PERSISTENCE.state_repository,
+    performance_refresh_service=INTERVALS_SYNC.performance_service,
+    full_provider_resync_service=PROVIDER_RESYNC.full_resync_service,
+    sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+    uuid_factory=lambda: uuid.uuid4().hex,
+    nutrition_service=NUTRITION_ASSEMBLY.service,
+    intervals_nutrition_sync_service=NUTRITION_ASSEMBLY.intervals_sync_service,
     http_response_transport=HttpResponseTransport(),
     openai_response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
     logger=LOGGER,

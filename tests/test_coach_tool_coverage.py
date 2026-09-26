@@ -479,7 +479,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             message="Entferne den Ernährungseintrag lokal.",
         )
         self.assertEqual(deleted["deleted_id"], entry_id)
-        self.assertEqual(server.nutrition_service().get_day_summary("2026-09-07")["entry_count"], 0)
+        self.assertEqual(server.NUTRITION_ASSEMBLY.service().get_day_summary("2026-09-07")["entry_count"], 0)
 
     def test_every_mutating_tool_rejects_missing_user_authorization_without_effect(self):
         exceptions = server.STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}

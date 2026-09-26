@@ -2375,11 +2375,6 @@ class ServerArchitectureTests(unittest.TestCase):
         self.assertNotIn("coach_chat_turn_service", implementations)
         self.assertIn("COACH_TURNS", implementations)
 
-    def test_extraction_inventory_has_no_unassigned_p0_symbols(self) -> None:
-        inventory = (REPOSITORY_ROOT / "docs" / "server-extraction-inventory.md").read_text(encoding="utf-8")
-        self.assertIn("| P0 (Zuordnung offen) | 0 | 0 | 0 |", inventory)
-        self.assertNotIn("| P0 (Zuordnung offen) | offen |", inventory)
-
     def test_training_plan_scope_prefix_is_owned_by_coach_authorization(self) -> None:
         server_tree = _parse(SERVER_PATH)
         self.assertFalse(

@@ -14,6 +14,7 @@ from backend.activities import calendar_projection as activity_calendar_projecti
 from backend.coach import context as coach_context, limits as coach_limits
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.planning import adaptive as planning_adaptive, competitions as planning_competitions, season as planning_season, workouts as planning_workouts
+from backend.planning import adaptive_preview_service, calendar_service, local_plan_creation_service
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import events as runtime_events
 from backend.sync.intervals import IntervalsSnapshotReader
@@ -219,7 +220,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_planning_state_exposes_required_adaptive_update(self):
         server.ATHLETE_DATA.profile().save({"weather_location": ""})
-        with patch.object(server.AdaptiveReplanPreviewService, "latest_preview", return_value={"status": "preview", "changes": [{"date": "2026-09-01"}]}):
+        with patch.object(adaptive_preview_service.AdaptiveReplanPreviewService, "latest_preview", return_value={"status": "preview", "changes": [{"date": "2026-09-01"}]}):
             planning = planning_season.planning_state(
                 server.PLANNING_DATA.competition().list(),
                 server.ATHLETE_CLOCK.now().date(),
@@ -963,7 +964,7 @@ class ServerPlanningTests(ServerTestCase):
         })
         server.PLANNING_DATA.planned_unit().update(workout["id"], {"action": "archive"})
         with patch.object(
-            server.CalendarConflictService,
+            calendar_service.CalendarConflictService,
             "conflicts",
             return_value=[{"name": "Occupied"}],
         ) as conflicts:
@@ -1499,7 +1500,7 @@ class ServerPlanningTests(ServerTestCase):
             }],
         }
         with patch.object(
-            server.LocalTrainingPlanCreationService,
+            local_plan_creation_service.LocalTrainingPlanCreationService,
             "save",
             side_effect=RuntimeError("creation failed"),
         ):

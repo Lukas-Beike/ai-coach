@@ -373,7 +373,7 @@ class ServerSyncTests(ServerTestCase):
         server.key_value_service().set("sync_operation_phase", "fetching")
         server.key_value_service().set("sync_operation_progress", "35")
         server.key_value_service().set("sync_operation_message", "Daten werden gelesen…")
-        with patch.object(server, "state_version_service") as versions:
+        with patch.object(server.PUBLIC_STATE, "state_version_service") as versions:
             versions.return_value.versions.return_value = {"activities": "v1"}
             status = server.PUBLIC_STATE.sync_public_state_service().state()
         self.assertEqual(status["operation_id"], "operation-test")

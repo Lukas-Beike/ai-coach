@@ -211,6 +211,7 @@ def _explicit_owner(name: str) -> str | None:
             "PLANNING_DATA": "backend/planning/assembly",
             "PRIVACY_ASSEMBLY": "backend/privacy",
             "BACKUP_ASSEMBLY": "backend/backup/assembly",
+            "NUTRITION_ASSEMBLY": "backend/nutrition/assembly",
             "MODEL_TRANSPORT": "backend/providers/model_assembly",
             "COACH_CONVERSATION": "backend/coach/conversation_assembly",
             "COACH_CONTEXT": "backend/coach/context_assembly",
