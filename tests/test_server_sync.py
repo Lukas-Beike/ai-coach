@@ -26,6 +26,7 @@ from backend.sync import garmin_service
 from backend.sync.performance import PerformanceRefreshFollowupService
 from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync import queue as sync_queue
+from backend.sync import executor as sync_executor
 from server_test_support import _current_performance_context, _garmin_metrics, server, ServerTestCase
 from support import IntervalsRequestRecorder, parsed_workout_fixture, RecordedIntervalsClient
 
@@ -123,8 +124,8 @@ class ServerSyncTests(ServerTestCase):
             server.SYNC_JOB_QUEUE.service().state(job["id"])["status"], "queued"
         )
         claimed = server.SYNC_JOB_QUEUE.store().claim()
-        with patch.object(server.SyncJobExecutor, "execute", return_value={"status": "ok"}):
-            server.sync_job_executor().run(claimed)
+        with patch.object(sync_executor.SyncJobExecutor, "execute", return_value={"status": "ok"}):
+            server.SYNC_JOB_EXECUTION.executor().run(claimed)
         completed = server.SYNC_JOB_QUEUE.service().state(job["id"])
         self.assertEqual(completed["status"], "completed")
         self.assertEqual(completed["progress"], {"completed": 1, "total": 1})
@@ -136,8 +137,8 @@ class ServerSyncTests(ServerTestCase):
         )
         claimed = server.SYNC_JOB_QUEUE.store().claim()
         provider_detail = "https://athlete:secret-pass@example.invalid/private-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        with patch.object(server.SyncJobExecutor, "execute", side_effect=server.AppError(503, provider_detail, reason="network_error")):
-            server.sync_job_executor().run(claimed)
+        with patch.object(sync_executor.SyncJobExecutor, "execute", side_effect=server.AppError(503, provider_detail, reason="network_error")):
+            server.SYNC_JOB_EXECUTION.executor().run(claimed)
         state = server.SYNC_JOB_QUEUE.service().state(job["id"])
         self.assertEqual(state["status"], "queued")
         self.assertEqual(state["error_class"], "network_error")
@@ -157,8 +158,8 @@ class ServerSyncTests(ServerTestCase):
         )
         claimed = server.SYNC_JOB_QUEUE.store().claim()
         result = {"status": "error", "results": [{"library_workout_id": local_id, "status": "conflict", "error": "changed"}]}
-        with patch.object(server.SyncJobExecutor, "execute", return_value=result):
-            server.sync_job_executor().run(claimed)
+        with patch.object(sync_executor.SyncJobExecutor, "execute", return_value=result):
+            server.SYNC_JOB_EXECUTION.executor().run(claimed)
         state = server.SYNC_JOB_QUEUE.service().state(job["id"])
         self.assertEqual(state["status"], "failed")
         self.assertEqual(state["items"][0]["status"], "failed")
@@ -227,11 +228,11 @@ class ServerSyncTests(ServerTestCase):
         performance_service.refresh.return_value = {"status": "ok"}
         competition_service = Mock()
         competition_service.sync.return_value = {"status": "ok", "pushed": 1}
-        with patch.object(server, "performance_refresh_service", return_value=performance_service), patch.object(
-            server, "competition_sync_service", return_value=competition_service
+        with patch.object(server, "PerformanceRefreshService", return_value=performance_service), patch.object(
+            server, "CompetitionSyncService", return_value=competition_service
         ):
-            self.assertEqual(server.sync_job_executor().execute(performance_job)["status"], "ok")
-            self.assertEqual(server.sync_job_executor().execute(competition_job)["pushed"], 1)
+            self.assertEqual(server.SYNC_JOB_EXECUTION.executor().execute(performance_job)["status"], "ok")
+            self.assertEqual(server.SYNC_JOB_EXECUTION.executor().execute(competition_job)["pushed"], 1)
         performance_service.refresh.assert_called_once_with()
         competition_service.sync.assert_called_once_with(
             reason="Coach request", push_local=True
@@ -244,12 +245,12 @@ class ServerSyncTests(ServerTestCase):
         }
         performance_service = Mock()
         performance_service.refresh.return_value = {"status": "ok"}
-        with patch.object(server, "performance_refresh_service", return_value=performance_service), patch.object(
+        with patch.object(server, "PerformanceRefreshService", return_value=performance_service), patch.object(
             IntervalsSyncService,
             "sync",
             side_effect=AssertionError("normalized job fell through to full sync"),
         ):
-            self.assertEqual(server.sync_job_executor().execute(refresh_job)["status"], "ok")
+            self.assertEqual(server.SYNC_JOB_EXECUTION.executor().execute(refresh_job)["status"], "ok")
         performance_service.refresh.assert_called_once_with()
 
     def test_intervals_job_delegates_performance_follow_up_to_common_sync_path(self):
@@ -260,13 +261,13 @@ class ServerSyncTests(ServerTestCase):
         competition_service = Mock()
         competition_service.sync.return_value = {"status": "ok"}
         with patch.object(IntervalsSyncService, "sync", return_value={"status": "ok"}) as sync, patch.object(
-            server, "competition_sync_service", return_value=competition_service
+            server, "CompetitionSyncService", return_value=competition_service
         ), patch.object(
             sync_queue.SyncJobQueueService,
             "enqueue",
             return_value={"id": "job-performance-follow-up"},
         ) as enqueue:
-            result = server.sync_job_executor().execute(refresh_job)
+            result = server.SYNC_JOB_EXECUTION.executor().execute(refresh_job)
         self.assertEqual(result["status"], "ok")
         sync.assert_called_once()
         enqueue.assert_not_called()
@@ -1146,7 +1147,7 @@ class ServerSyncTests(ServerTestCase):
             server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals", "refresh", {"days": 7, "reason": "startup"}
             )
-            server.sync_job_executor().run(server.SYNC_JOB_QUEUE.store().claim())
+            server.SYNC_JOB_EXECUTION.executor().run(server.SYNC_JOB_QUEUE.store().claim())
         self.assertEqual(recorder.mutations, [])
 
     def test_daily_sync_contract_rejects_remote_mutations(self):
@@ -1158,7 +1159,7 @@ class ServerSyncTests(ServerTestCase):
             server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals", "refresh", {"days": 7, "reason": "daily"}
             )
-            server.sync_job_executor().run(server.SYNC_JOB_QUEUE.store().claim())
+            server.SYNC_JOB_EXECUTION.executor().run(server.SYNC_JOB_QUEUE.store().claim())
         self.assertEqual(recorder.mutations, [])
 
     def test_startup_sync_competition_contract_rejects_remote_mutations(self):
@@ -1170,7 +1171,7 @@ class ServerSyncTests(ServerTestCase):
             server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals", "refresh", {"days": 7, "reason": "startup"}
             )
-            server.sync_job_executor().run(server.SYNC_JOB_QUEUE.store().claim())
+            server.SYNC_JOB_EXECUTION.executor().run(server.SYNC_JOB_QUEUE.store().claim())
         self.assertEqual(recorder.mutations, [])
 
     def test_daily_sync_competition_contract_rejects_remote_mutations(self):
@@ -1182,7 +1183,7 @@ class ServerSyncTests(ServerTestCase):
             server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals", "refresh", {"days": 7, "reason": "daily"}
             )
-            server.sync_job_executor().run(server.SYNC_JOB_QUEUE.store().claim())
+            server.SYNC_JOB_EXECUTION.executor().run(server.SYNC_JOB_QUEUE.store().claim())
         self.assertEqual(recorder.mutations, [])
 
     def test_manual_activity_sync_contract_rejects_remote_mutations(self):
@@ -1346,7 +1347,7 @@ class ServerSyncTests(ServerTestCase):
             with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")):
                 def attempt_sync():
                     try:
-                        server.sync_job_executor().execute(
+                        server.SYNC_JOB_EXECUTION.executor().execute(
                             server.SYNC_JOB_QUEUE.service().enqueue(
                                 "intervals",
                                 "competition_push",

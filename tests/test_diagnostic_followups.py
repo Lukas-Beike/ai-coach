@@ -128,14 +128,14 @@ class DiagnosticFollowupTests(unittest.TestCase):
 
     def test_regular_garmin_jobs_refresh_recovery_but_historical_jobs_do_not(self):
         with patch.object(GarminSyncService, "sync", return_value={"status": "partial"}), patch.object(server.morning_body_battery_service(), "refresh") as recovery:
-            server.sync_job_executor().execute(
+            server.SYNC_JOB_EXECUTION.executor().execute(
                 server.SYNC_JOB_QUEUE.service().enqueue(
                     "garmin", "refresh", {"days": 30}
                 )
             )
             recovery.assert_called_once_with()
             recovery.reset_mock()
-            server.sync_job_executor().execute(
+            server.SYNC_JOB_EXECUTION.executor().execute(
                 server.SYNC_JOB_QUEUE.service().enqueue(
                     "garmin",
                     "historical_backfill",

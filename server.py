@@ -70,6 +70,7 @@ from backend.runtime import maintenance as runtime_maintenance
 from backend.runtime import clock as runtime_clock
 from backend.sync.assembly import ProviderSyncAssembly
 from backend.sync.queue_assembly import SyncJobQueueAssembly
+from backend.sync.execution_assembly import SyncJobExecutionAssembly
 from backend.sync.garmin_assembly import GarminAssembly
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
@@ -209,14 +210,6 @@ from backend.sync.full_resync import (
 from backend.sync.external_calendar import (
     ExternalCalendarSyncService,
     shared_external_calendar_sync_lock,
-)
-from backend.sync.executor import (
-    CalendarWeatherSyncJobOwner,
-    GarminSyncJobOwner,
-    HistoricalSyncJobOwner,
-    IntervalsSyncJobOwner,
-    SyncJobExecutor,
-    SyncJobProviderDispatcher,
 )
 from backend.sync.worker import SyncJobWorker, shared_sync_job_wake_event
 from backend.planning import adaptive as planning_adaptive
@@ -1074,54 +1067,13 @@ def selected_workout_sync_service() -> SelectedWorkoutSyncService:
     )
 
 
-def sync_job_executor() -> SyncJobExecutor:
-    """Compose the concrete persistent provider-job dispatcher."""
-    historical_sync = HistoricalSyncJobOwner(
-        sync_state_repository=sync_state_repository(),
-        queue_service=SYNC_JOB_QUEUE.service(),
-        local_now=ATHLETE_CLOCK.now,
-        sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-        all_sync_days=ALL_SYNC_DAYS,
-        sync_chunk_days=SYNC_CHUNK_DAYS,
-        sync_earliest_date=SYNC_EARLIEST_DATE,
-    )
-    provider_dispatcher = SyncJobProviderDispatcher(
-        intervals_jobs=IntervalsSyncJobOwner(
-            historical_sync=historical_sync,
-            intervals_sync_service=intervals_sync_service(),
-            performance_refresh_service=performance_refresh_service(),
-            selected_workout_sync_service=selected_workout_sync_service(),
-            competition_sync_service=competition_sync_service(),
-            sync_operation_observer=PROVIDER_SYNC.operation_observer(),
-            intervals_resync_gate=INTERVALS_RESYNC_GATE,
-        ),
-        garmin_jobs=GarminSyncJobOwner(
-            historical_sync=historical_sync,
-            garmin_sync_service=GARMIN_ASSEMBLY.sync_service(),
-            morning_body_battery_service=morning_body_battery_service(),
-            garmin_fixture_loader=GARMIN_ASSEMBLY.fixture_loader(),
-            all_sync_days=ALL_SYNC_DAYS,
-        ),
-        calendar_weather_jobs=CalendarWeatherSyncJobOwner(
-            external_calendar_sync_service=external_calendar_sync_service(),
-            weather_sync_service=WEATHER_ASSEMBLY.sync_service(),
-        ),
-    )
-    return SyncJobExecutor(
-        provider_dispatcher=provider_dispatcher,
-        historical_sync=historical_sync,
-        outcome_service=SYNC_JOB_QUEUE.outcome_service(),
-        all_sync_days=ALL_SYNC_DAYS,
-    )
-
-
 def sync_job_worker() -> SyncJobWorker:
     """Return the one restartable persistent synchronization worker."""
     global SYNC_JOB_WORKER
     if SYNC_JOB_WORKER is None:
         SYNC_JOB_WORKER = SyncJobWorker(
             SYNC_JOB_QUEUE.store(),
-            sync_job_executor(),
+            SYNC_JOB_EXECUTION.executor(),
             runtime_maintenance.MAINTENANCE_GATE,
             SYNC_JOB_POLL_SECONDS,
             wake_event=shared_sync_job_wake_event(),
@@ -1486,6 +1438,28 @@ WEATHER_ASSEMBLY = WeatherAssembly(
     adaptive_preview_service=adaptive_replan_preview_service,
     observer=PROVIDER_SYNC.operation_observer,
     logger=LOGGER,
+)
+
+SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
+    sync_state_repository=sync_state_repository,
+    queue_service=SYNC_JOB_QUEUE.service,
+    local_now=ATHLETE_CLOCK.now,
+    sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+    all_sync_days=ALL_SYNC_DAYS,
+    sync_chunk_days=SYNC_CHUNK_DAYS,
+    sync_earliest_date=SYNC_EARLIEST_DATE,
+    intervals_sync_service=intervals_sync_service,
+    performance_refresh_service=performance_refresh_service,
+    selected_workout_sync_service=selected_workout_sync_service,
+    competition_sync_service=competition_sync_service,
+    operation_observer=PROVIDER_SYNC.operation_observer,
+    intervals_resync_gate=INTERVALS_RESYNC_GATE,
+    garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
+    morning_body_battery_service=morning_body_battery_service,
+    garmin_fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
+    external_calendar_sync_service=external_calendar_sync_service,
+    weather_sync_service=WEATHER_ASSEMBLY.sync_service,
+    outcome_service=SYNC_JOB_QUEUE.outcome_service,
 )
 
 

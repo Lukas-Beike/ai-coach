@@ -297,3 +297,49 @@ mocked providers; no live account or runtime data was used.
   Docker engine pipe. No live provider or application data was used.
 - Remaining risk: image and SQLCipher integration checks need the application
   Docker runtime.
+
+## S2b2 boundary before implementation: sync-job executor
+
+- `sync_job_executor` is the only root constructor for the provider job
+  dispatcher, and sync worker plus provider/diagnostic/sync tests invoke it
+  directly. No fixture patches this factory. Tests patch `server.SyncJobExecutor`
+  for execution result/failure scenarios; move that patch to
+  `backend.sync.executor.SyncJobExecutor`, and resolve the class through that
+  owner module. No e2e fixture references this factory.
+- Preserve one `HistoricalSyncJobOwner` instance shared by the Intervals and
+  Garmin owner groups; preserve the current active sync-state repository,
+  queue/outcome services, provider observer, gates, and the weather/Garmin
+  service owners. Executor construction remains uncached and occurs only when
+  explicitly requested by the lazy worker factory or a test. Creating the
+  assembly itself must only store callbacks and not touch the DB or providers.
+- Proposed interface: `SyncJobExecutionAssembly` in
+  `backend/sync/execution_assembly.py`, exposing only `executor()`. Its
+  named inputs are the concrete factories for the historical, Intervals,
+  Garmin, calendar/weather owners and queue outcomes plus the current window
+  settings. The worker singleton and daily/startup schedulers remain for the
+  following lifecycle slice.
+
+## S2b2: sync-job executor assembly
+
+- Completed in `backend/sync/execution_assembly.py` as
+  `SyncJobExecutionAssembly.executor()`. It keeps executor creation uncached,
+  constructs one shared `HistoricalSyncJobOwner` for the Intervals and Garmin
+  owner groups, and resolves all provider, queue, outcome, and state factories
+  only when an executor is requested. Worker singleton and scheduler
+  construction remain for the next slice.
+- Removed the root executor factory and migrated worker/test callers to
+  `SYNC_JOB_EXECUTION.executor()`. Tests patch `SyncJobExecutor` through
+  `backend.sync.executor`; service factory tests patch the server class names
+  that the retained root factory functions actually look up. Added a focused
+  regression that assembly construction does not invoke any supplied factory.
+- Focused sync, provider, diagnostics, and architecture checks passed: 207
+  tests, 1 SQLCipher skip, 79.369 seconds. Three dispatch regressions initially
+  exposed tests patching factories after their callbacks had been captured;
+  patches were moved to the constructors at the actual lookup sites, and the
+  full focused rerun passed. Inventory check, compileall, and diff check passed.
+- Measured `server.py`: 2,580 physical / 2,235 nonblank lines, 213 import
+  statements, 152 top-level functions.
+- Docker build was attempted; the local Docker engine pipe is still unavailable.
+  No live provider or application data was used.
+- Remaining risk: image and SQLCipher integration checks need the application
+  Docker runtime.

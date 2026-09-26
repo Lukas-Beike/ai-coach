@@ -18,11 +18,38 @@ from backend.providers import calendar as calendar_provider, gemini as gemini_pr
 from backend.providers.transport_assembly import ProviderTransportAssembly
 from backend.sync import garmin as garmin_sync, garmin_service, observation as sync_observation
 from backend.sync import freshness as sync_freshness
+from backend.sync.execution_assembly import SyncJobExecutionAssembly
 from server_test_support import _transcribe_via_http_route, server, ServerTestCase
 from support import build_gemini_request_payload
 
 
 class ServerProvidersTests(ServerTestCase):
+
+    def test_sync_job_execution_assembly_keeps_factories_lazy(self):
+        deferred = Mock(side_effect=AssertionError("factory resolved during assembly"))
+        assembly = SyncJobExecutionAssembly(
+            sync_state_repository=deferred,
+            queue_service=deferred,
+            local_now=deferred,
+            sync_period_defaults={},
+            all_sync_days=365,
+            sync_chunk_days=30,
+            sync_earliest_date=datetime(2020, 1, 1).date(),
+            intervals_sync_service=deferred,
+            performance_refresh_service=deferred,
+            selected_workout_sync_service=deferred,
+            competition_sync_service=deferred,
+            operation_observer=deferred,
+            intervals_resync_gate=object(),
+            garmin_sync_service=deferred,
+            morning_body_battery_service=deferred,
+            garmin_fixture_loader=deferred,
+            external_calendar_sync_service=deferred,
+            weather_sync_service=deferred,
+            outcome_service=deferred,
+        )
+        self.assertIsNotNone(assembly)
+        deferred.assert_not_called()
 
     def test_provider_transport_assembly_keeps_late_dependencies_lazy(self):
         calls = []
@@ -62,7 +89,7 @@ class ServerProvidersTests(ServerTestCase):
     def test_persisted_job_is_revalidated_before_provider_dispatch(self):
         with patch.object(garmin_service.GarminSyncService, "sync") as sync:
             with self.assertRaises(server.AppError) as raised:
-                server.sync_job_executor().execute({
+                server.SYNC_JOB_EXECUTION.executor().execute({
                     "id": "unsupported-job",
                     "provider": "garmin",
                     "type": "removed_job_type",

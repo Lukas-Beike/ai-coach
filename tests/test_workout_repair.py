@@ -159,7 +159,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         ])
         self.assertEqual(receipt["status"], "completed", receipt.get("failed_command_receipts"))
         job = server.SYNC_JOB_QUEUE.store().claim()
-        result = server.sync_job_executor().execute(job)
+        result = server.SYNC_JOB_EXECUTION.executor().execute(job)
         self.assertTrue(result["ok"], result)
         server.SYNC_JOB_QUEUE.outcome_service().complete(job["id"], result)
         self.assertEqual(

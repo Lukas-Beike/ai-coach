@@ -171,7 +171,7 @@ class ProviderReviewTests(unittest.TestCase):
             server.privacy_delete_service().delete("LOKALE DATEN LÖSCHEN")
             deleted.set()
 
-        executor = server.sync_job_executor()
+        executor = server.SYNC_JOB_EXECUTION.executor()
         sync_worker = SyncJobWorker(
             server.SYNC_JOB_QUEUE.store(),
             executor,

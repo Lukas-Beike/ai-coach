@@ -2064,7 +2064,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     public_performance_state_service public_feedback_state_service
     sync_public_state_service sync_state_repository performance_refresh_service
     intervals_snapshot_reader performance_refresh_followup_service
-    sync_job_outcome_service daily_sync_marker_service intervals_snapshot_service
+    daily_sync_marker_service intervals_snapshot_service
     intervals_sync_service full_provider_resync_service
     public_weather_state_service
     morning_body_battery_service external_calendar_reader
@@ -2077,7 +2077,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     planned_calendar_repair_service remote_planned_unit_reconciler
     workout_library_sync_state_service planning_authority_service
     workout_library_remote_reconciler workout_library_refresh_service
-    workout_library_sync_service selected_workout_sync_service sync_job_executor
+    workout_library_sync_service selected_workout_sync_service
     sync_job_worker workout_library_service workout_library_plan_service
     coach_library_plan_tool_service local_plan_creation_service
     training_plan_artifact_service daily_planning_context_service
