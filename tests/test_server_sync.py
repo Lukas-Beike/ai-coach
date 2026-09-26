@@ -1730,7 +1730,7 @@ class ServerSyncTests(ServerTestCase):
             side_effect=[{"id": first["id"], "external_id": "remote-1"}, server.AppError(502, "provider unavailable")],
         ) as sync_entry:
             pending = {item["library_workout_id"]: item for item in server.planning_authority_service().pending_plan_push_entries()}
-            result = server.selected_workout_sync_service().sync({"entries": [pending[first["id"]], pending[second["id"]]]})
+            result = server.SELECTED_WORKOUT_SYNC.service().sync({"entries": [pending[first["id"]], pending[second["id"]]]})
         self.assertEqual(result["status"], "partial")
         self.assertEqual(len(result["results"]), 2)
         self.assertEqual(result["results"][0]["status"], "synced")

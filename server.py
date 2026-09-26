@@ -175,7 +175,7 @@ from backend.sync.planned_calendar_assembly import PlannedCalendarSyncAssembly
 from backend.sync.planned_unit_assembly import PlannedUnitSyncAssembly
 from backend.sync.library import workout_library_sync_running
 from backend.sync.library_assembly import WorkoutLibrarySyncAssembly
-from backend.sync.selected import SelectedWorkoutSyncService
+from backend.sync.selected_assembly import SelectedWorkoutSyncAssembly
 from backend.sync.garmin_service import (
     GARMIN_AUTOMATIC_SYNC_DAYS,
     GarminMorningRemoteReader,
@@ -753,21 +753,6 @@ def planning_authority_service() -> PlanningAuthorityService:
     )
 
 
-def selected_workout_sync_service() -> SelectedWorkoutSyncService:
-    """Compose selected workout and planned-unit synchronization."""
-    return SelectedWorkoutSyncService(
-        CONFIG,
-        database_manager(),
-        WORKOUT_LIBRARY_SYNC.sync_service(),
-        PLANNED_CALENDAR_SYNC.sync_service(),
-        PLANNED_CALENDAR_SYNC.repair_service(),
-        REDACTOR.redact_text,
-        lock=INTERVALS_SYNC_LOCK,
-        wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
-        provider_resync_gate=INTERVALS_RESYNC_GATE,
-    )
-
-
 def sync_job_worker() -> sync_worker_runtime.SyncJobWorker:
     """Return the one restartable persistent synchronization worker."""
     global SYNC_JOB_WORKER
@@ -1200,6 +1185,17 @@ WORKOUT_LIBRARY_SYNC = WorkoutLibrarySyncAssembly(
     utc_now=runtime_clock.utc_now,
     uuid_factory=uuid.uuid4,
 )
+SELECTED_WORKOUT_SYNC = SelectedWorkoutSyncAssembly(
+    config=lambda: CONFIG,
+    database_manager=database_manager,
+    workout_library_sync_service=WORKOUT_LIBRARY_SYNC.sync_service,
+    planned_calendar_sync_service=PLANNED_CALENDAR_SYNC.sync_service,
+    planned_calendar_repair_service=PLANNED_CALENDAR_SYNC.repair_service,
+    redactor=REDACTOR.redact_text,
+    lock=INTERVALS_SYNC_LOCK,
+    wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
+    provider_resync_gate=INTERVALS_RESYNC_GATE,
+)
 WEATHER_ASSEMBLY = WeatherAssembly(
     database_manager=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
@@ -1251,7 +1247,7 @@ SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     sync_earliest_date=SYNC_EARLIEST_DATE,
     intervals_sync_service=INTERVALS_SYNC.sync_service,
     performance_refresh_service=INTERVALS_SYNC.performance_service,
-    selected_workout_sync_service=selected_workout_sync_service,
+    selected_workout_sync_service=SELECTED_WORKOUT_SYNC.service,
     competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
     operation_observer=PROVIDER_SYNC.operation_observer,
     intervals_resync_gate=INTERVALS_RESYNC_GATE,

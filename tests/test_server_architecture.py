@@ -2071,7 +2071,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     change_history_service history_undo_service competition_service
     training_plan_service
     planned_unit_service
-    planning_authority_service selected_workout_sync_service
+    planning_authority_service
     sync_job_worker workout_library_service workout_library_plan_service
     coach_library_plan_tool_service local_plan_creation_service
     training_plan_artifact_service daily_planning_context_service

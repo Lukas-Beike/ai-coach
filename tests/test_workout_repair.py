@@ -135,7 +135,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         )
 
     def repair(self, local_id):
-        return server.selected_workout_sync_service().sync({"repair": True, "entries": [self.selection(local_id)]})
+        return server.SELECTED_WORKOUT_SYNC.service().sync({"repair": True, "entries": [self.selection(local_id)]})
 
     def test_coach_corrects_sport_and_repair_job_removes_duplicate_without_recreation(self):
         local_id = self.seed(wrong_sport=True)
@@ -294,7 +294,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 return deepcopy(list(self.remote.values()))
 
             with patch.object(intervals_client_module.IntervalsClient, "get_paged_collection", side_effect=read):
-                result = server.selected_workout_sync_service().sync({"repair": True, "entries": [self.selection(identity) for identity in ids]})
+                result = server.SELECTED_WORKOUT_SYNC.service().sync({"repair": True, "entries": [self.selection(identity) for identity in ids]})
             self.assertEqual(len(calls), 2)
             self.assertEqual(result["ok"], not corrupt)
             self.assertEqual(result["failed_object_ids"], [ids[0]] if corrupt else [])
@@ -357,7 +357,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             self.assertNotIn(key, current)
         parsed = parsed_workout_fixture(1800, sport="Swim", kind="pace", units="pace_zone", value=1)
         with patch.object(intervals_client_module.IntervalsClient, "upsert_calendar_events", return_value=[{"id": "swim-event", **parsed}]):
-            self.assertTrue(server.selected_workout_sync_service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})["ok"])
+            self.assertTrue(server.SELECTED_WORKOUT_SYNC.service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})["ok"])
         self.assertEqual(server.planned_unit_service().list()[0]["icu_training_load"], 20)
 
     def test_provider_io_allows_database_polling_and_excludes_same_unit_push(self):
@@ -457,7 +457,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         local_id = self.seed()
         self.remote.pop("duplicate")
         self.approve_illness_pause()
-        result = server.selected_workout_sync_service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})
+        result = server.SELECTED_WORKOUT_SYNC.service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})
         self.assertTrue(result["ok"], result)
         self.assertEqual(set(self.remote), {"race"})
         self.assertEqual(self.mutations, [("delete", "existing")])
@@ -479,7 +479,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         for protected in ({"paired_activity_id": "completed"}, {"paired_event_id": "completed"},
                           {"start_date_local": "2026-09-06T00:00:00"}, {"category": "RACE_A"}):
             self.remote["existing"] = {**original, **protected}
-            result = server.selected_workout_sync_service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})
+            result = server.SELECTED_WORKOUT_SYNC.service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})
             self.assertFalse(result["ok"], {"protected": protected, "result": result, "mutations": self.mutations})
             self.assertEqual(self.mutations, [])
         self.remote["existing"] = original
@@ -489,7 +489,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             return self.get(path)
 
         with patch.object(intervals_client_module.IntervalsClient, "get", side_effect=restore_during_read):
-            self.assertFalse(server.selected_workout_sync_service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})["ok"])
+            self.assertFalse(server.SELECTED_WORKOUT_SYNC.service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})["ok"])
         self.assertEqual(self.mutations, [])
         self.assertFalse(server.planned_unit_service().list()[0]["archived"])
 

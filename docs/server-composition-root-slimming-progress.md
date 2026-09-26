@@ -747,3 +747,42 @@ mocked providers; no live account or runtime data was used.
   check, and old-factory reference search passed.
 - Measured `server.py`: 2,363 physical / 2,052 nonblank lines, 214 AST import
   statements, 129 top-level functions.
+
+## S2j boundary before implementation: selected workout synchronization
+
+- `selected_workout_sync_service()` composes the one selected-workout use case
+  across the workout-library, planned-calendar, and library-repair owners. It is
+  consumed lazily by `SyncJobExecutionAssembly`; direct callers are sync and
+  workout-repair tests. No e2e fixture references the root factory, and class
+  patches target `backend.sync.selected.SelectedWorkoutSyncService` directly.
+- Preserve a fresh use case, current CONFIG/database manager, current library
+  sync service, fresh planned-calendar sync and repair services, redactor,
+  singleton `INTERVALS_SYNC_LOCK`, repair wait duration, and shared provider
+  resync gate. All subordinate service callbacks remain lazy until the selected
+  use case is requested.
+- Proposed owner/interface: `SelectedWorkoutSyncAssembly` in
+  `backend/sync/selected_assembly.py`, exposing only `service()`. It accepts
+  explicit config/manager and subordinate service providers plus redactor, the
+  shared lock, wait duration, and gate.
+- `sync_job_worker()` still protects a single unstarted worker instance used by
+  `main()`; `tests/test_server_runtime.py` patches the root cache to isolate its
+  startup test. Keep this lifecycle resource and its root cache for the worker
+  slice/S6 review unless an explicit owner can preserve that same instance and
+  the current test seam.
+
+## S2j: selected-workout synchronization assembly
+
+- Completed in `backend/sync/selected_assembly.py` as
+  `SelectedWorkoutSyncAssembly.service()`. Removed the root factory and
+  migrated the sync executor and direct test callers.
+- Preserved fresh use-case construction, current config/database manager, lazy
+  subordinate library/calendar services, redactor, singleton Intervals lock,
+  repair wait duration, and provider-resync gate.
+- Selected assembly and executor tests passed: 25 tests. The guarded server
+  sync, workout-repair, and architecture checks passed: 155 tests. Inventory
+  check, compileall, diff check, and factory reference search passed.
+- S2 provider/sync factories are now owned by the sync/provider assemblies.
+  `sync_job_worker()` and its root singleton remain as an explicit lazy lifecycle
+  resource used by `main()`; S6 will review this retained process identity.
+- Measured `server.py`: 2,359 physical / 2,050 nonblank lines, 214 AST import
+  statements, 128 top-level functions.
