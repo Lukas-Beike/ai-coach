@@ -302,7 +302,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_chat_history_pagination_and_bounded_search_use_message_id_cursor(self):
         for index in range(5):
-            server.coach_message_service().add("user", f"searchable {index}")
+            server.COACH_CONVERSATION.message_service().add("user", f"searchable {index}")
         page_service = server.chat_history_page_service()
         first = page_service.page(limit=2)
         second = page_service.page(cursor=first["next_cursor"], limit=2)
@@ -323,7 +323,7 @@ class ServerHttpTests(ServerTestCase):
             "literal backslashmarker",
         )
         for content in contents:
-            server.coach_message_service().add("user", content)
+            server.COACH_CONVERSATION.message_service().add("user", content)
 
         page_service = server.chat_history_page_service()
         for search_term, expected in (
@@ -356,7 +356,7 @@ class ServerHttpTests(ServerTestCase):
             ],
         })
         for index in range(500):
-            server.coach_message_service().add("user", f"message {index}")
+            server.COACH_CONVERSATION.message_service().add("user", f"message {index}")
         bootstrap = server.public_bootstrap_service().read()
         self.assertEqual(
             list(bootstrap),

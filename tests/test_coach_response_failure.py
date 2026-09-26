@@ -35,7 +35,7 @@ class CoachResponseFailureTests(unittest.TestCase):
                 raise server.AppError(429, "rate limited", reason="rate_limit_exceeded")
             return {"id": "resp_final", "status": "completed", "output_text": "Sync beauftragt."}
 
-        with patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))), \
+        with patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))), \
                 patch("backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic local context"), \
                 patch.object(openai_provider.OpenAIResponsesClient, "background", side_effect=create), \
                 patch.object(server.time, "sleep"), \
@@ -76,7 +76,7 @@ class CoachResponseFailureTests(unittest.TestCase):
         failed_response = {"id": "resp_summary", "status": "failed", "error": {
             "code": "server_error", "message": "DO_NOT_EXPORT_PROVIDER_CONTENT",
         }}
-        with patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))), \
+        with patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))), \
                 patch("backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic local context"), \
                 patch.object(openai_provider.OpenAIResponsesClient, "background", side_effect=create), \
                 patch.object(

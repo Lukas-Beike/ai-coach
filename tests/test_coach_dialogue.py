@@ -50,7 +50,7 @@ class DialogueHarness:
                 "duration_minutes": 30, "target": "AUTO", "rationale": "Synthetic training goal"}
 
     def request(self, scope, target="local", period=None, remote_write=False, sync_scope=None):
-        current = [item for item in server.coach_message_service().list() if item["role"] == "user"][-1]
+        current = [item for item in server.COACH_CONVERSATION.message_service().list() if item["role"] == "user"][-1]
         return {"summary": "Synthetic current request", "source_message_ids": [current["id"]],
                 "target": target, "scope": scope, "period": period, "constraints": [],
                 "remote_write": remote_write, "sync_scope": sync_scope}
@@ -69,7 +69,7 @@ class DialogueHarness:
         def response(payload, *args, **extra):
             step = next(steps)
             return step(payload) if callable(step) else step
-        with patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))), patch(
+        with patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))), patch(
             "backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic local data"
         ), patch.object(server, "coach_response_transport") as transport_factory:
             transport = transport_factory.return_value
@@ -157,7 +157,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
     def test_question_survives_final_provider_failure_and_reply_continues(self):
         def question(_):
             return self.call("clarify_coach_request", {
-                "source_message_ids": [server.coach_message_service().list()[-1]["id"]],
+                "source_message_ids": [server.COACH_CONVERSATION.message_service().list()[-1]["id"]],
                 "summary": "Plan the route", "question": "Samstag oder Sonntag?"})
         def broken(_):
             raise server.AppError(502, "Synthetic internal detail", reason="response_failed")
@@ -441,7 +441,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
     def test_screenshot_followup_moves_and_adds_atomically_without_literal_name(self):
         existing = server.local_plan_creation_service().save([self.workout()], plan_name="September")[0]
         def question(_):
-            current = server.coach_message_service().list()[-1]["id"]
+            current = server.COACH_CONVERSATION.message_service().list()[-1]["id"]
             return self.call("clarify_coach_request", {"source_message_ids": [current],
                 "summary": "Diese Woche anpassen, Donnerstag bleibt frei.", "question": "Wie soll ich Dienstag und Mittwoch anpassen?"})
         first, _ = self.turn("Diese Woche müssen wir etwas anpassen.", [question, {"output_text": "Wie soll ich Dienstag und Mittwoch anpassen?"}])
@@ -515,7 +515,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_provider_switch_retains_pending_question(self):
         def question(_):
-            return self.call("clarify_coach_request", {"source_message_ids": [server.coach_message_service().list()[-1]["id"]],
+            return self.call("clarify_coach_request", {"source_message_ids": [server.COACH_CONVERSATION.message_service().list()[-1]["id"]],
                 "summary": "Eine von zwei Einheiten verschieben", "question": "Die lockere oder die intensive Einheit?"})
         self.turn("Die Einheit verschieben", [question, {"output_text": "Welche Einheit?"}])
         with patch.object(server.SETTINGS, "selected_ai_provider", return_value="gemini"):
@@ -530,7 +530,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["status"], "cancelled")
         self.assertIsNone(json.loads(server.key_value_service().get("coach_pending_request")))
         server.key_value_service().set("coach_pending_request", json.dumps({"summary": "Synthetic", "source_message_ids": []}))
-        server.coach_conversation_reset_service().reset()
+        server.COACH_CONVERSATION.reset_service().reset()
         self.assertIsNone(json.loads(server.key_value_service().get("coach_pending_request")))
 
     def test_remote_write_requires_per_step_sync_authority(self):
@@ -691,7 +691,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(len(self.state()["planned_units"]), 1)
 
     def test_request_provenance_rejects_assistant_or_missing_current_message(self):
-        server.coach_message_service().add("user", "Synthetic request")
+        server.COACH_CONVERSATION.message_service().add("user", "Synthetic request")
         value = self.request(["local_checkin"])
         current = value["source_message_ids"][0]
         for ids in ([current + 1], [current - 1], [], [True]):
@@ -730,7 +730,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         server.local_plan_creation_service().save([self.workout("2026-09-08"), self.workout("2026-09-11")])
         before = self.state()
         def question(_):
-            return self.call("clarify_coach_request", {"source_message_ids": [server.coach_message_service().list()[-1]["id"]],
+            return self.call("clarify_coach_request", {"source_message_ids": [server.COACH_CONVERSATION.message_service().list()[-1]["id"]],
                 "summary": "Oberkörper verschieben", "question": "Meinst du Oberkörper am Dienstag oder Freitag?"})
         result, _ = self.turn("Die Oberkörpereinheit bitte verschieben", [lambda _: self.call("read_training_state"), question, {"output_text": "Welche?"}])
         self.assertEqual(result["message"]["content"], "Meinst du Oberkörper am Dienstag oder Freitag?")
@@ -891,9 +891,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             operation_id="operation-before-reset",
         )
         self.assertEqual(job["status"], "queued")
-        server.coach_conversation_reset_service().reset()
+        server.COACH_CONVERSATION.reset_service().reset()
         self.assertIsNone(server.coach_job_store().claim())
-        self.assertEqual(server.coach_message_service().list(), [])
+        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
         with server.database_manager().unit_of_work() as db:
             command = db.execute(
                 "SELECT status, receipt FROM coach_commands WHERE client_turn_id='queued-before-reset'"
@@ -994,7 +994,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(raised.exception.reason, "command_scope_denied")
 
     def test_local_draft_commit_uses_local_dialogue_with_fresh_response_chain(self):
-        server.coach_message_service().add("user", "Ein Entwurf bitte")
+        server.COACH_CONVERSATION.message_service().add("user", "Ein Entwurf bitte")
         with server.database_manager().unit_of_work() as db:
             origin = server.CHAT_REPOSITORY.add(db, "user", "Synthetic draft", client_turn_id="draft-source")
         draft = server.training_plan_artifact_service().stage(

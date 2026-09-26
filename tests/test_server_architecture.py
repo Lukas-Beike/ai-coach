@@ -2082,14 +2082,12 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     adaptive_preview_followup_service adaptive_replan_preview_service
     athlete_context_service
     initialise_database key_value_service
-    coach_conversation_provision_service coach_conversation_reset_service
     coach_quick_actions_service
-    gemini_conversation_history_service coach_message_service
-    coach_conversation_history_service coach_job_store coach_turn_failure_service
+    coach_job_store coach_turn_failure_service
     coach_job_submission_service coach_cancellation_service coach_dialogue_read_service
     coach_dialogue_action_service coach_clarification_service
     coach_attachment_context_service manual_morning_checkin_service
-    morning_checkin_state_service gemini_local_chat_history_service
+    morning_checkin_state_service
     gemini_request_payload_service gemini_response_normalization_service
     gemini_conversation_response_service library_page_service
     chat_history_page_service coach_proposal_read_service coach_command_receipt_service
@@ -3235,7 +3233,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "CHAT_POST_ROUTES",
             ("/api/chat", "/api/chat/reset", "client_turn_id"),
-            "ChatPostRoutes(coach_job_submission_service, coach_conversation_reset_service, coach_attachments.MAX_REQUEST_BYTES)",
+            "ChatPostRoutes(coach_job_submission_service, COACH_CONVERSATION.reset_service, coach_attachments.MAX_REQUEST_BYTES)",
         )
         route_source = (BACKEND_ROOT / "http_api" / "chat_post.py").read_text(
             encoding="utf-8"
@@ -3342,7 +3340,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "PLANNING_COMMANDS_POST_ROUTES",
             ("/api/planning/commands",),
-            "PlanningCommandsPostRoutes(coach_planning_command_service, lambda: coach_conversation_provision_service())",
+            "PlanningCommandsPostRoutes(coach_planning_command_service, lambda: COACH_CONVERSATION.provision_service())",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "planning_commands_post.py"

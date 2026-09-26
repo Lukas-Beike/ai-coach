@@ -318,7 +318,7 @@ class ServerProvidersTests(ServerTestCase):
             command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-gemini-background-restart",)).fetchone()
         self.assertEqual(command["status"], "completed")
         self.assertEqual(json.loads(command["receipt"])["status"], "failed")
-        self.assertEqual(server.gemini_conversation_history_service().load(), [
+        self.assertEqual(server.COACH_CONVERSATION.gemini_history_service().load(), [
             {"role": "user", "parts": [{"text": "Erstelle einen Plan."}]},
             {"role": "model", "parts": [{"functionCall": {"name": "stage_training_plan", "args": {}}}]},
         ])
@@ -327,7 +327,7 @@ class ServerProvidersTests(ServerTestCase):
         server.key_value_service().set("openai_conversation_id", "conv-test")
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="gemini")
         with patch.object(server, "CONFIG", config), patch.object(openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True) as delete:
-            result = server.coach_conversation_reset_service().reset()
+            result = server.COACH_CONVERSATION.reset_service().reset()
         delete.assert_called_once_with("conv-test")
         self.assertTrue(result["remote_conversation_deleted"])
 

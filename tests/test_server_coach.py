@@ -496,7 +496,7 @@ class ServerCoachTests(ServerTestCase):
 
         # Reproduce a legacy raw slice that starts with a tool response.
         server.key_value_service().set("gemini_conversation_history", json.dumps(history[-60:]))
-        trimmed = server.gemini_conversation_history_service().load()
+        trimmed = server.COACH_CONVERSATION.gemini_history_service().load()
 
         self.assertEqual(len(trimmed), 58)
         self.assertEqual(trimmed[0]["parts"][0]["text"], "Frage 0")
@@ -516,9 +516,9 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(selected[1]["inlineData"], {"mimeType": "image/jpeg", "data": "raw-image"})
 
     def test_gemini_rebuilds_history_from_the_shared_local_dialogue(self):
-        server.coach_message_service().add("user", "Was war mein letzter Schwerpunkt?")
-        server.coach_message_service().add("assistant", "Der Schwerpunkt war die Schwelle.")
-        server.coach_message_service().add("user", "Und wie geht es weiter?")
+        server.COACH_CONVERSATION.message_service().add("user", "Was war mein letzter Schwerpunkt?")
+        server.COACH_CONVERSATION.message_service().add("assistant", "Der Schwerpunkt war die Schwelle.")
+        server.COACH_CONVERSATION.message_service().add("user", "Und wie geht es weiter?")
         server.key_value_service().set("gemini_conversation_history", json.dumps([
             {"role": "user", "parts": [{"text": "Veraltete Gemini-Frage"}]},
             {"role": "model", "parts": [{"text": "Veraltete Gemini-Antwort"}]},
@@ -553,7 +553,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(workout["properties"]["duration_minutes"]["minimum"], 5)
 
     def test_context_preview_exposes_context_and_last_chat_input(self):
-        server.coach_message_service().add("user", "Wie soll ich morgen trainieren?")
+        server.COACH_CONVERSATION.message_service().add("user", "Wie soll ich morgen trainieren?")
         preview = server.coach_context_preview_service().preview(server.SETTINGS.selected_ai_provider())
         self.assertIn("You are the athlete's long-term endurance coach.", preview["context_text"])
         self.assertIn("BEGIN UNTRUSTED EXTERNAL DATA", preview["context_text"])
@@ -722,7 +722,7 @@ class ServerCoachTests(ServerTestCase):
             "turn-before-reset",
         )
         with patch.object(openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
-            result = server.coach_conversation_reset_service().reset()
+            result = server.COACH_CONVERSATION.reset_service().reset()
         self.assertEqual(result["status"], "ok")
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             row = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact["artifact_id"],)).fetchone()
@@ -730,7 +730,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(server.coach_dialogue_read_service().artifact_refs(), [])
 
     def test_coach_reset_keeps_local_history_when_reset_transaction_fails(self):
-        message = server.coach_message_service().add("user", "Keep this message")
+        message = server.COACH_CONVERSATION.message_service().add("user", "Keep this message")
         generation = server.key_value_service().get("chat_generation")
         original_set = server.KEY_VALUE_REPOSITORY.set
 
@@ -741,7 +741,7 @@ class ServerCoachTests(ServerTestCase):
 
         with patch.object(server.KEY_VALUE_REPOSITORY, "set", side_effect=fail_pending_request):
             with self.assertRaisesRegex(RuntimeError, "synthetic reset failure"):
-                server.coach_conversation_reset_service().reset()
+                server.COACH_CONVERSATION.reset_service().reset()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             saved = db.execute("SELECT id FROM messages WHERE id=?", (message["id"],)).fetchone()
         self.assertIsNotNone(saved)
@@ -749,16 +749,16 @@ class ServerCoachTests(ServerTestCase):
 
     def test_coach_reset_clears_local_state_when_remote_delete_fails(self):
         server.key_value_service().set("openai_conversation_id", "conv-reset-failure")
-        server.coach_message_service().add("user", "Clear this message")
+        server.COACH_CONVERSATION.message_service().add("user", "Clear this message")
         with patch.object(
             openai_provider.OpenAIResponsesClient,
             "delete_conversation",
             side_effect=RuntimeError("synthetic remote failure"),
         ):
-            result = server.coach_conversation_reset_service().reset()
+            result = server.COACH_CONVERSATION.reset_service().reset()
         self.assertFalse(result["remote_conversation_deleted"])
         self.assertEqual(server.key_value_service().get("openai_conversation_id"), "")
-        self.assertEqual(server.coach_message_service().list(), [])
+        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
 
     def test_background_job_replay_reuses_receipt_without_republishing(self):
         registry = server.coach_streams.CHAT_STREAM_REGISTRY

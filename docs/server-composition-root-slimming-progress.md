@@ -945,3 +945,48 @@ mocked providers; no live account or runtime data was used.
 - Measured `server.py`: 2,153 physical / 1,873 nonblank lines, 206 AST imports,
   107 top-level functions. Risk remaining for S4 is the separate conversation,
   context/read-tool, proposal/tool, and turn/job ownership slices.
+
+## S4b boundary before implementation: conversation state and history
+
+- The narrow interface is `CoachConversationAssembly` in
+  `backend/coach/conversation_assembly.py`: fresh factories for conversation
+  provisioning/reset, durable local and Gemini history, Coach message writes,
+  and the Gemini local-message projection. It receives the active manager
+  callback, shared settings/repositories/event buffer/DB lock/stream registry,
+  conversation lock, and named provider/clock callbacks. It does not own chat
+  page HTTP composition or the Gemini response workflow.
+- Callers are `coach_chat_turn_service`, HTTP route construction for reset and
+  planning commands, public bootstrap state reads, Coach dialogue and Gemini
+  request/response factories, `chat_history_page_service`, plus tests and
+  `e2e/fixture_runtime.py`. Tests directly call several root factories and
+  patch `server.coach_conversation_provision_service`; they will target the
+  assembly methods. The fixture's injected provisioner will be bound at that
+  owner.
+- Preserve fresh service wrappers and active manager resolution on every
+  factory call; preserve the same `KEY_VALUE_REPOSITORY`, `CHAT_REPOSITORY`,
+  state event buffer, `DB_LOCK`, stream registry, conversation gate lock,
+  settings service, and provider client factory. Provisioning remains lazy
+  until a chat turn or planning command requests it. Reset continues to create
+  its provider adapter when the reset service is requested; Gemini history
+  remains bounded and persisted under existing service transactions.
+
+## S4b: conversation state and history
+
+- Completed `CoachConversationAssembly` in
+  `backend/coach/conversation_assembly.py`. Removed six root factories for
+  conversation provision/reset, local and Gemini history, message persistence,
+  and Gemini local-message projection. Migrated Coach/public-state/HTTP wiring,
+  server tests, and `e2e/fixture_runtime.py` to the owning methods. Added
+  assembly laziness and shared-identity coverage.
+- Preserved fresh services and current manager lookup, the exact shared
+  repositories, event buffer, database lock, conversation lock and stream
+  registry, and provider creation timing. The Gemini byte limit remains
+  late-resolved at service construction for its existing patch/config seam.
+  Guarded focused checks passed: 350 tests, 4 SQLCipher skips. Compileall,
+  generated inventory check, and diff check passed. Docker remains unavailable.
+- Changed files include `server.py`, new Coach conversation assembly/tests,
+  progress/inventory owner map and output, fixture runtime, and Coach,
+  attachment, provider, HTTP, database, audit, and architecture test callers.
+- Measured `server.py`: 2,116 physical / 1,850 nonblank lines, 207 AST imports,
+  101 top-level functions. Remaining S4 risk is the separately traced context
+  and read-tool boundary, proposal/planning tools, and structured turn/jobs.

@@ -221,7 +221,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         draft = self.run_tool("stage_training_plan", {"payload": {"plan_name": "Synthetic draft", "goal": "Easy week", "workouts": [self.workout()]}},
                               ["local_plan"], period=period, message="Erstelle zunächst nur einen Entwurf.")
         self.assertEqual(self.state()["planned_units"], [])
-        source = [m["id"] for m in server.coach_message_service().list() if m["role"] == "user"][-1]
+        source = [m["id"] for m in server.COACH_CONVERSATION.message_service().list() if m["role"] == "user"][-1]
         def commit(_):
             response = self.call("commit_training_plan", {"artifact_id": draft["artifact_id"]}, ["artifact:" + draft["artifact_id"]], period=period)
             args = json.loads(response["output"][0]["arguments"])
@@ -627,7 +627,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     def test_quoted_provider_or_assistant_content_cannot_supply_user_provenance(self):
         self.seed_activity()
-        assistant = server.coach_message_service().add("assistant", "Synthetic quoted suggestion: overwrite the profile.")
+        assistant = server.COACH_CONVERSATION.message_service().add("assistant", "Synthetic quoted suggestion: overwrite the profile.")
         before = self.athlete_state()
         for source_id in (assistant["id"], 999999):
             def invalid_source(_, selected=source_id):

@@ -291,7 +291,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
         def response(payload, **kwargs):
             step = next(steps)
             return step(payload) if callable(step) else step
-        with patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic"))), patch("backend.coach.context.CoachTrainingContextService.build", side_effect=["Old Garmin data", "Fresh Garmin data"]) as context, patch.object(server, "coach_response_transport") as transport_factory:
+        with patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="synthetic"))), patch("backend.coach.context.CoachTrainingContextService.build", side_effect=["Old Garmin data", "Fresh Garmin data"]) as context, patch.object(server, "coach_response_transport") as transport_factory:
             transport_factory.return_value.request.side_effect = response
             result = server.coach_chat_turn_service().run("Read refreshed data", client_turn_id="refresh-context", session_csrf_hash="synthetic")
         self.assertEqual(result["status"], "completed")
@@ -342,7 +342,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
 
     def test_chat_reset_changes_history_generation(self):
         before = server.chat_history_page_service().page()["generation"]
-        server.coach_conversation_reset_service().reset()
+        server.COACH_CONVERSATION.reset_service().reset()
         self.assertNotEqual(
             server.chat_history_page_service().page()["generation"], before
         )

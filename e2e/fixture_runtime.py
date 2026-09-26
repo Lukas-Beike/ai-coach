@@ -34,7 +34,7 @@ class FixtureConversationProvisionService:
         return "fixture-conversation"
 
 
-server.coach_conversation_provision_service = FixtureConversationProvisionService
+server.COACH_CONVERSATION.provision_service = FixtureConversationProvisionService
 # Browser scenarios deliberately poll and reload the single disposable fixture
 # far more aggressively than one athlete does. Rate limiting has dedicated unit
 # coverage; disable it here to keep unrelated UI scenarios order-independent.

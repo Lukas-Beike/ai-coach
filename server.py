@@ -217,16 +217,11 @@ from backend.coach.request_payload import CoachRequestPayloadService
 from backend.coach.sync_tools import CoachSyncToolService
 from backend.coach.conversation import (
     CoachAttachmentContextService,
-    CoachConversationHistoryService,
-    CoachConversationProvisionService,
-    CoachConversationResetService,
-    CoachMessageService,
-    GeminiConversationHistoryService,
     GeminiConversationResponseService,
-    GeminiLocalChatHistoryService,
     GeminiRequestPayloadService,
     GeminiResponseNormalizationService,
 )
+from backend.coach.conversation_assembly import CoachConversationAssembly
 from backend.coach.conversation_gate import CoachConversationGate
 from backend.coach.proposals import (
     CoachProposalCreationService,
@@ -1099,6 +1094,21 @@ MODEL_TRANSPORT = ModelTransportAssembly(
     wall_time=time.monotonic,
     wait=time.sleep,
 )
+COACH_CONVERSATION = CoachConversationAssembly(
+    settings=SETTINGS,
+    database_manager=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    chat_repository=CHAT_REPOSITORY,
+    state_event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    database_lock=DB_LOCK,
+    streams=coach_streams.CHAT_STREAM_REGISTRY,
+    conversation_lock=COACH_CONVERSATION_GATE.lock,
+    openai_client=MODEL_TRANSPORT.openai_responses_client,
+    utc_now=runtime_clock.utc_now,
+    uuid_factory=uuid.uuid4,
+    logger=LOGGER,
+    max_gemini_inline_image_bytes=lambda: coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES,
+)
 PLANNED_UNIT_SYNC = PlannedUnitSyncAssembly(
     database_manager=database_manager,
     planned_unit_service=PLANNING_DATA.planned_unit,
@@ -1243,51 +1253,11 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
 
 
 
-def coach_conversation_provision_service() -> CoachConversationProvisionService:
-    """Compose the Coach conversation ID provisioner from active services."""
-    return CoachConversationProvisionService(
-        SETTINGS,
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        MODEL_TRANSPORT.openai_responses_client(),
-        DB_LOCK,
-        uuid.uuid4,
-    )
-
-
-def coach_conversation_reset_service() -> CoachConversationResetService:
-    """Compose the Coach chat reset owner from concrete storage and provider adapters."""
-    return CoachConversationResetService(
-        database_manager(), KEY_VALUE_REPOSITORY, MODEL_TRANSPORT.openai_responses_client(),
-        coach_streams.CHAT_STREAM_REGISTRY, DB_LOCK, COACH_CONVERSATION_GATE.lock,
-        runtime_clock.utc_now, uuid.uuid4, LOGGER,
-    )
-
-
-
-
 def coach_quick_actions_service() -> CoachQuickActionsService:
     """Compose local quick-action reads and their public Coach projection."""
     return CoachQuickActionsService(
         database_manager(), KEY_VALUE_REPOSITORY, adaptive_replan_preview_service(),
         lambda: ATHLETE_CLOCK.now().date(), PLANNED_WORKOUT_LABEL,
-    )
-
-
-def gemini_conversation_history_service() -> GeminiConversationHistoryService:
-    """Compose bounded, restart-safe local Gemini history persistence."""
-    return GeminiConversationHistoryService(database_manager(), KEY_VALUE_REPOSITORY)
-
-
-def coach_message_service() -> CoachMessageService:
-    """Compose local chat persistence and committed state-event publication."""
-    return CoachMessageService(database_manager(), CHAT_REPOSITORY, runtime_events.STATE_EVENT_BUFFER)
-
-
-def coach_conversation_history_service() -> CoachConversationHistoryService:
-    """Compose local conversation history reads from shared persistence state."""
-    return CoachConversationHistoryService(
-        database_manager(), CHAT_REPOSITORY, KEY_VALUE_REPOSITORY, DB_LOCK
     )
 
 
@@ -1340,7 +1310,7 @@ def coach_dialogue_read_service() -> CoachDialogueReadService:
     """Compose local, read-only Coach dialogue projections."""
     manager = database_manager()
     return CoachDialogueReadService(
-        manager, coach_message_service(), KEY_VALUE_REPOSITORY, ATHLETE_DATA.profile()
+        manager, COACH_CONVERSATION.message_service(), KEY_VALUE_REPOSITORY, ATHLETE_DATA.profile()
     )
 
 
@@ -1381,17 +1351,10 @@ def morning_checkin_state_service() -> MorningCheckinStateService:
     )
 
 
-def gemini_local_chat_history_service() -> GeminiLocalChatHistoryService:
-    """Compose the read-only local-message projection for Gemini."""
-    return GeminiLocalChatHistoryService(
-        database_manager(), CHAT_REPOSITORY, max_inline_bytes=coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES
-    )
-
-
 def gemini_request_payload_service() -> GeminiRequestPayloadService:
     """Compose Gemini's bounded, persisted request-history builder."""
     return GeminiRequestPayloadService(
-        gemini_conversation_history_service(), gemini_local_chat_history_service(),
+        COACH_CONVERSATION.gemini_history_service(), COACH_CONVERSATION.gemini_local_history_service(),
         database_manager(), KEY_VALUE_REPOSITORY,
     )
 
@@ -1399,7 +1362,7 @@ def gemini_request_payload_service() -> GeminiRequestPayloadService:
 def gemini_response_normalization_service() -> GeminiResponseNormalizationService:
     """Compose Gemini response and durable function-call normalization."""
     return GeminiResponseNormalizationService(
-        gemini_conversation_history_service(), database_manager(), KEY_VALUE_REPOSITORY,
+        COACH_CONVERSATION.gemini_history_service(), database_manager(), KEY_VALUE_REPOSITORY,
         uuid.uuid4,
     )
 
@@ -1429,7 +1392,7 @@ def library_page_service() -> LibraryPageService:
 def chat_history_page_service() -> ChatHistoryPageService:
     """Compose bounded local chat history and session-bound proposal reads."""
     return ChatHistoryPageService(
-        coach_conversation_history_service(),
+        COACH_CONVERSATION.history_service(),
         coach_proposal_read_service(),
         maximum=CHAT_PAGE_MAX,
     )
@@ -1527,7 +1490,7 @@ def coach_request_payload_service() -> CoachRequestPayloadService:
 def coach_context_preview_service() -> CoachContextPreviewService:
     """Compose read-only, user-inspectable Coach context preview."""
     return CoachContextPreviewService(
-        SYNC_PERSISTENCE.state_repository(), coach_message_service(), coach_training_context_service(),
+        SYNC_PERSISTENCE.state_repository(), COACH_CONVERSATION.message_service(), coach_training_context_service(),
         coach_structured_context_service(), PLANNING_DATA.workout_library(),
         CoachContextPreviewLimits(
             library_limit=coach_context_module.COACH_LIBRARY_LIMIT,
@@ -1717,7 +1680,7 @@ def coach_chat_turn_service() -> CoachChatTurnService:
     """Compose the session-bound chat turn owner."""
     return CoachChatTurnService(
         database_manager, DB_LOCK, coach_command_receipt_service(), SETTINGS,
-        coach_conversation_provision_service, coach_structured_turn_service, runtime_clock.utc_now,
+        COACH_CONVERSATION.provision_service, coach_structured_turn_service, runtime_clock.utc_now,
         COACH_CONVERSATION_GATE, runtime_maintenance.MAINTENANCE_GATE,
     )
 
@@ -1758,7 +1721,7 @@ def public_bootstrap_service() -> PublicBootstrapService:
             garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
             sync_job_queue_service=SYNC_JOB_QUEUE.service,
             state_version_service=state_version_service,
-            coach_message_service=coach_message_service,
+            coach_message_service=COACH_CONVERSATION.message_service,
             training_plan_service=PLANNING_DATA.training_plan,
             local_calendar_events=calendar_local.local_calendar_events,
             planning_state=planning_season.planning_state,
@@ -1857,7 +1820,7 @@ def public_state_service() -> PublicStateService:
                 app_version=APP_VERSION,
                 config=CONFIG,
                 settings=SETTINGS,
-                coach_messages=coach_message_service(),
+                coach_messages=COACH_CONVERSATION.message_service(),
                 training_plans=PLANNING_DATA.training_plan(),
                 workout_library=PLANNING_DATA.workout_library(),
                 profile=ATHLETE_DATA.profile(),
@@ -2005,7 +1968,7 @@ COACH_ACTIONS_POST_ROUTES = CoachActionsPostRoutes(
 )
 CHAT_POST_ROUTES = ChatPostRoutes(
     coach_job_submission_service,
-    coach_conversation_reset_service,
+    COACH_CONVERSATION.reset_service,
     coach_attachments.MAX_REQUEST_BYTES,
 )
 CHAT_STREAM_TRANSPORT = CoachChatStreamTransport(
@@ -2031,7 +1994,7 @@ SETTINGS_PUT_ROUTES = SettingsPutRoutes(SETTINGS)
 ATHLETE_PUT_ROUTES = AthletePutRoutes(athlete_context_service, ATHLETE_DATA.profile)
 PLANNING_COMMANDS_POST_ROUTES = PlanningCommandsPostRoutes(
     coach_planning_command_service,
-    lambda: coach_conversation_provision_service(),
+    lambda: COACH_CONVERSATION.provision_service(),
 )
 FEEDBACK_POST_ROUTES = FeedbackPostRoutes(ATHLETE_DATA.checkin)
 CHAT_CANCEL_POST_ROUTES = ChatCancelPostRoutes(coach_cancellation_service)

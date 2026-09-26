@@ -148,7 +148,7 @@ class CoachReviewTests(unittest.TestCase):
                 "UPDATE coach_commands SET intent=?, receipt=? WHERE client_turn_id=?",
                 (json.dumps(intent), json.dumps(persisted_receipt), client_turn_id),
             )
-        with patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="summary-recovery-conversation"))), patch(
+        with patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="summary-recovery-conversation"))), patch(
             "backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic summary context"
         ), patch.object(server, "coach_response_transport") as transport_factory:
             transport_factory.return_value.background_request.side_effect = server.AppError(
