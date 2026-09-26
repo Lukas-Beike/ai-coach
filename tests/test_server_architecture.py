@@ -2961,7 +2961,6 @@ class ServerArchitectureTests(unittest.TestCase):
             "CHAT_STREAM_TRANSPORT",
             "SYNC_COMMAND_POST_ROUTE",
             "HISTORY_UNDO_POST_ROUTES",
-            "DIAGNOSTICS_CAPTURE_POST_ROUTES",
             "PRIVACY_DELETE_POST_ROUTES",
             "NUTRITION_POST_ROUTES",
         }
@@ -2995,7 +2994,6 @@ class ServerArchitectureTests(unittest.TestCase):
                 "CHAT_STREAM_TRANSPORT": "_chat_stream",
                 "SYNC_COMMAND_POST_ROUTE": "_sync_commands",
                 "HISTORY_UNDO_POST_ROUTES": "_history_undo",
-                "DIAGNOSTICS_CAPTURE_POST_ROUTES": "_diagnostics_capture",
                 "PRIVACY_DELETE_POST_ROUTES": "_privacy_delete",
                 "NUTRITION_POST_ROUTES": "_nutrition",
             }
@@ -3355,18 +3353,6 @@ class ServerArchitectureTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertNotIn("server", route_source.casefold())
 
-    def test_diagnostics_capture_post_route_is_owned_by_http_api_module(self) -> None:
-        self._assert_write_route_owned(
-            "_handle_data_post",
-            "DIAGNOSTICS_CAPTURE_POST_ROUTES",
-            ("/api/diagnostics/capture",),
-            "DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)",
-        )
-        route_source = (
-            BACKEND_ROOT / "http_api" / "diagnostics_post.py"
-        ).read_text(encoding="utf-8")
-        self.assertNotIn("server", route_source.casefold())
-
     def test_privacy_delete_post_route_is_owned_by_http_api_module(self) -> None:
         server_tree = self._assert_write_route_owned(
             "_handle_data_post",
@@ -3421,7 +3407,6 @@ class ServerArchitectureTests(unittest.TestCase):
                 "session_auth_service",
                 "recent_log_entries_service",
                 "diagnostic_report_service",
-                "DIAGNOSTIC_CAPTURE",
             ],
         )
         self._assert_get_route_owned("_handle_diagnostics_get", "PRIVACY_GET_ROUTES")

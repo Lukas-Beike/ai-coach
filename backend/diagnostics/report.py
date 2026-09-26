@@ -158,7 +158,7 @@ class DiagnosticReportService:
             },
             "note": (
                 "Zugangsdaten, Tokens, Rohantworten und Athleteninhalte sind ausgeschlossen; "
-                "die optionale Diagnoseaufzeichnung speichert nur technische Antwortformen "
+                "die immer aktive Diagnoseaufzeichnung speichert nur technische Antwortformen "
                 "und Metadaten."
             ),
         }

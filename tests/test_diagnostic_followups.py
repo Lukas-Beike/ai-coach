@@ -234,7 +234,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertTrue(history[0]["error"]["frames"])
         self.assertNotIn(private, json.dumps(history))
         self.assertNotIn("synthetic-session", json.dumps(history))
-        self.assertFalse(server.DIAGNOSTIC_CAPTURE.status()["active"])
+        self.assertTrue(server.DIAGNOSTIC_CAPTURE.status()["active"])
 
     def test_rejected_tool_and_incomplete_reply_keep_classified_diagnostics(self):
         result, _ = self.turn("Synthetic missing activity feedback", [

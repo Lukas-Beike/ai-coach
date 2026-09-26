@@ -128,7 +128,6 @@ from backend.http_api.privacy_restore_post import PrivacyRestorePostRoutes
 from backend.http_api.auth_post import AuthPostRoutes
 from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
-from backend.http_api.diagnostics_post import DiagnosticsCapturePostRoutes
 from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.readiness import ReadinessService
@@ -1609,7 +1608,6 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     lambda key: key_value_service().get(key),
     lambda key, value: key_value_service().set(key, value),
     REDACTOR,
-    utc_now,
 )
 
 
@@ -2534,7 +2532,6 @@ DIAGNOSTICS_GET_ROUTES = DiagnosticsGetRoutes(
     session_auth_service,
     recent_log_entries_service,
     diagnostic_report_service,
-    DIAGNOSTIC_CAPTURE,
 )
 SYNC_GET_ROUTES = SyncGetRoutes(
     session_auth_service,
@@ -2568,7 +2565,6 @@ CHAT_STREAM_TRANSPORT = CoachChatStreamTransport(
     response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
 )
 TRANSCRIBE_POST_ROUTES = TranscribePostRoutes(SETTINGS, audio_transcription_client)
-DIAGNOSTICS_CAPTURE_POST_ROUTES = DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)
 PRIVACY_DELETE_POST_ROUTES = PrivacyDeletePostRoutes(privacy_delete_service)
 PRIVACY_GET_ROUTES = PrivacyGetRoutes(
     session_auth_service, export_stream_transport, privacy_delete_service
@@ -2623,7 +2619,6 @@ AUTHENTICATED_POST_ROUTES = HttpAuthenticatedPostRoutes(
     CHAT_STREAM_TRANSPORT,
     SYNC_COMMAND_POST_ROUTE,
     HISTORY_UNDO_POST_ROUTES,
-    DIAGNOSTICS_CAPTURE_POST_ROUTES,
     PRIVACY_DELETE_POST_ROUTES,
     NUTRITION_POST_ROUTES,
 )
