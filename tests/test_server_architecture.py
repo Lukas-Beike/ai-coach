@@ -2091,15 +2091,12 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     gemini_request_payload_service gemini_response_normalization_service
     gemini_conversation_response_service library_page_service
     chat_history_page_service coach_command_receipt_service
-    coach_turn_opening_service
     coach_response_transport
     coach_tool_dispatch_service coach_structured_tool_execution_service
     coach_structured_tool_failure_service coach_structured_tool_round_journal
     coach_planning_command_service coach_structured_tool_replay_service
-    coach_structured_outcome_service coach_structured_tool_preparation_service
-    coach_conversation_recovery_service coach_response_retry_policy
-    coach_structured_response_service coach_structured_tool_round_service
-    coach_final_receipt_service coach_structured_turn_service coach_chat_turn_service
+    coach_structured_tool_preparation_service
+    coach_structured_tool_round_service
     morning_coach_job_completion_service coach_background_job_runner
     public_bootstrap_service public_plan_state_service
     public_state_local_prelude_service public_state_weather_prelude_service
@@ -2431,7 +2428,8 @@ class ServerArchitectureTests(unittest.TestCase):
     def test_chat_turn_has_no_server_adapter(self) -> None:
         implementations = _top_level_implementations(_parse(SERVER_PATH))
         self.assertNotIn("chat_with_coach", implementations)
-        self.assertIn("coach_chat_turn_service", implementations)
+        self.assertNotIn("coach_chat_turn_service", implementations)
+        self.assertIn("COACH_TURNS", implementations)
 
     def test_extraction_inventory_has_no_unassigned_p0_symbols(self) -> None:
         inventory = (REPOSITORY_ROOT / "docs" / "server-extraction-inventory.md").read_text(encoding="utf-8")

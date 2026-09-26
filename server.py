@@ -207,24 +207,17 @@ from backend.coach.planning_tools_assembly import CoachPlanningToolsAssembly
 from backend.coach.tool_dispatch_assembly import CoachToolDispatchAssembly
 from backend.coach.command_tools_assembly import CoachCommandToolsAssembly
 from backend.coach.structured_tool_round_assembly import CoachStructuredToolRoundAssembly
+from backend.coach.turn_assembly import CoachTurnAssembly
 from backend.coach.receipt_reads import CoachCommandReceiptService
-from backend.coach.turn_opening import CoachTurnOpeningService
-from backend.coach.turn_outcome import CoachStructuredOutcomeService
 from backend.coach.dialogue import CoachDialogueReadService, dialogue_tools
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.coach.clarification import CoachClarificationService
-from backend.coach.response_retry import CoachResponseRetryPolicy
-from backend.coach.conversation_recovery import CoachConversationRecoveryService
-from backend.coach.final_receipt import CoachFinalReceiptService
 from backend.coach.response_transport import CoachResponseTransport
-from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach import structured_tool_round
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
 )
-from backend.coach.structured_turn import CoachStructuredTurnDependencies, CoachStructuredTurnService
-from backend.coach.chat_turn import CoachChatTurnService
 from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.cancellation import CoachCancellationService
@@ -1347,12 +1340,6 @@ def coach_command_receipt_service() -> CoachCommandReceiptService:
     )
 
 
-def coach_turn_opening_service() -> CoachTurnOpeningService:
-    """Compose atomic creation and session binding for a new Coach turn."""
-    return CoachTurnOpeningService(
-        database_manager(), DB_LOCK, CHAT_REPOSITORY,
-        coach_command_receipt_service(), runtime_clock.utc_now, uuid.uuid4,
-    )
 
 
 def coach_response_transport() -> CoachResponseTransport:
@@ -1450,13 +1437,40 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
     dialogue_action_service=lambda: coach_dialogue_action_service(),
     planning_authority_service=lambda: planning_authority_service(),
     training_context_service=lambda: COACH_CONTEXT.training_context_service(),
-    response_service=lambda: coach_structured_response_service(),
+    response_service=lambda: COACH_TURNS.structured_response_service(),
     tool_round_limits=lambda: CoachStructuredToolRoundLimits(
         max_rounds=structured_tool_round.COACH_TOOL_MAX_ROUNDS,
         background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
         default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
         long_plan_max_output_tokens=coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
     ),
+)
+
+
+COACH_TURNS = CoachTurnAssembly(
+    database_manager=lambda: database_manager(),
+    database_lock=DB_LOCK,
+    chat_repository=CHAT_REPOSITORY,
+    key_value_repository=KEY_VALUE_REPOSITORY,
+    event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    utc_now=runtime_clock.utc_now,
+    uuid_factory=uuid.uuid4,
+    root=ROOT,
+    logger=LOGGER,
+    settings=SETTINGS,
+    conversation_gate=COACH_CONVERSATION_GATE,
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    tools=lambda: COACH_DIALOGUE_TOOLS,
+    read_only_tools=lambda: STRUCTURED_READ_ONLY_TOOLS,
+    command_receipt_service=lambda: coach_command_receipt_service(),
+    attachment_context_service=lambda: coach_attachment_context_service(),
+    dialogue_read_service=lambda: coach_dialogue_read_service(),
+    request_payload_service=lambda: COACH_CONTEXT.request_payload_service(),
+    response_transport=lambda: coach_response_transport(),
+    tool_round_service=lambda: COACH_TOOL_ROUNDS.service(),
+    job_store=lambda: coach_job_store(),
+    turn_failure_service=lambda: coach_turn_failure_service(),
+    conversation_provision_service=lambda: COACH_CONVERSATION.provision_service,
 )
 
 
@@ -1468,68 +1482,18 @@ def coach_planning_command_service() -> CoachPlanningCommandService:
     )
 
 
-def coach_structured_outcome_service() -> CoachStructuredOutcomeService:
-    """Compose final Coach outcome projection and pending-request storage."""
-    return CoachStructuredOutcomeService(
-        database_manager(), DB_LOCK, KEY_VALUE_REPOSITORY,
-        frozenset(STRUCTURED_READ_ONLY_TOOLS),
-    )
 
 
-def coach_conversation_recovery_service() -> CoachConversationRecoveryService:
-    """Compose the durable recovery owner from concrete storage services."""
-    return CoachConversationRecoveryService(
-        database_manager(), DB_LOCK, KEY_VALUE_REPOSITORY, coach_job_store(), LOGGER,
-    )
 
 
-def coach_response_retry_policy() -> CoachResponseRetryPolicy:
-    """Compose retry policy with the application logger."""
-    return CoachResponseRetryPolicy(LOGGER)
 
 
-def coach_structured_response_service() -> CoachStructuredResponseService:
-    """Compose the response loop from concrete transport and durable owners."""
-    return CoachStructuredResponseService(
-        coach_response_transport(), coach_conversation_recovery_service(),
-        coach_response_retry_policy(), coach_job_store(),
-    )
 
 
-def coach_final_receipt_service() -> CoachFinalReceiptService:
-    """Compose the atomic final Coach receipt owner."""
-    return CoachFinalReceiptService(
-        database_manager(), DB_LOCK, CHAT_REPOSITORY, KEY_VALUE_REPOSITORY,
-        runtime_events.STATE_EVENT_BUFFER, runtime_clock.utc_now,
-    )
 
 
-def coach_structured_turn_service() -> CoachStructuredTurnService:
-    """Compose the complete structured turn from concrete Coach owners."""
-    return CoachStructuredTurnService(CoachStructuredTurnDependencies(
-        opening=coach_turn_opening_service(),
-        attachments=coach_attachment_context_service(),
-        dialogue=coach_dialogue_read_service(),
-        payload=COACH_CONTEXT.request_payload_service(),
-        response=coach_structured_response_service(),
-        rounds=COACH_TOOL_ROUNDS.service(),
-        outcome=coach_structured_outcome_service(),
-        final_receipt=coach_final_receipt_service(),
-        failure=coach_turn_failure_service(),
-        tools=COACH_DIALOGUE_TOOLS,
-        read_only_tools=frozenset(STRUCTURED_READ_ONLY_TOOLS),
-        logger=LOGGER,
-        root=ROOT,
-    ))
 
 
-def coach_chat_turn_service() -> CoachChatTurnService:
-    """Compose the session-bound chat turn owner."""
-    return CoachChatTurnService(
-        database_manager, DB_LOCK, coach_command_receipt_service(), SETTINGS,
-        COACH_CONVERSATION.provision_service, coach_structured_turn_service, runtime_clock.utc_now,
-        COACH_CONVERSATION_GATE, runtime_maintenance.MAINTENANCE_GATE,
-    )
 
 
 def morning_coach_job_completion_service() -> MorningCoachJobCompletionService:
@@ -1541,7 +1505,7 @@ def morning_coach_job_completion_service() -> MorningCoachJobCompletionService:
 
 def coach_background_job_runner() -> CoachBackgroundJobRunner:
     return CoachBackgroundJobRunner(
-        coach_job_store(), coach_chat_turn_service, session_auth_service,
+        coach_job_store(), COACH_TURNS.chat_turn_service, session_auth_service,
         coach_streams.CHAT_STREAM_REGISTRY, manual_morning_checkin_service,
         morning_coach_job_completion_service, coach_turn_failure_service,
         runtime_maintenance.MAINTENANCE_GATE, REDACTOR, LOGGER,

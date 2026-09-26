@@ -1282,3 +1282,56 @@ mocked providers; no live account or runtime data was used.
 - `server.py`: 1,965 physical / 1,738 nonblank lines, 194 AST imports,
   77 top-level functions. Docker remains unavailable because the local engine
   pipe is absent.
+
+
+## S4e2 boundary before implementation: Coach turn assembly
+
+- The narrow owner will be `CoachTurnAssembly` in
+  `backend/coach/turn_assembly.py`. It will own structured turn dependencies,
+  structured/chat turn construction, turn opening, structured outcome, final
+  receipts, response retry/recovery, and structured response construction.
+  Background job stores, submission/cancellation, completion, and the runner
+  stay for S4e3; the shared failure service stays at its current root factory
+  until that slice.
+- Trace: `CoachChatTurnService` receives the structured-turn factory lazily;
+  the structured turn currently eagerly builds opening, attachment/dialogue/
+  payload, response, rounds, outcome, final-receipt, and failure services.
+  Structured response eagerly resolves transport, recovery, retry, and job
+  store. Preserve those timings, the active `COACH_CONVERSATION`, existing
+  `COACH_TOOL_ROUNDS`, current settings/maintenance/conversation gates, and the
+  root's deferred `coach_response_transport` patch seam.
+- Tests directly call the chat-turn factory across audit, attachment, dialogue,
+  response-failure, review, and provider suites; structured-turn construction
+  is called by the review test; outcome projection is exercised through its
+  direct behavior tests. No test patches these root factories. Constructor
+  behavior seams patch the backend `CoachChatTurnService.run` and concrete
+  outcome/receipt/recovery/response owners; tests will call the new assembly
+  methods at their real lookup sites.
+- The assembly takes explicit providers for the existing manager, lock,
+  repositories, clock, UUID source, transport, tool-round assembly, job store,
+  and still-root-owned turn-failure service. The chat-turn's structured-turn
+  and conversation callbacks remain late-bound, without root access from the
+  backend. No singleton service instances are added.
+
+
+## S4e2 complete: Coach turn assembly
+
+- Added `CoachTurnAssembly` in `backend/coach/turn_assembly.py` for structured
+  and chat turn construction, turn opening, outcomes, final receipts, structured
+  response/recovery/retry, and the still-lazy structured-turn edge from chat.
+  Removed these factories from `server.py`; the background runner still calls
+  the assembly directly and its other job factories remain for S4e3.
+- Preserved manager/lock/repository identities, the current tool-round assembly,
+  conversation provision callback timing, settings and gates, response transport
+  patch point, and eager support construction when a structured turn is created.
+  Tests now call assembly methods and patch `CoachChatTurnService` in its owning
+  backend module; no root compatibility names remain for the moved services.
+- Changed files: `server.py`, new turn assembly and focused tests, direct test
+  callers/patch targets, generated extraction inventory, and this progress log.
+- Checks passed: Coach matrix (536), plus audit remediation (17, one skipped),
+  runtime (13), providers (50), database (45, three skipped), provider review
+  (15), and architecture (48). Inventory `--check`, compileall, and `git diff
+  --check` passed. These runs used temporary state and mocked providers.
+- `server.py`: 1,929 physical / 1,700 nonblank lines, 187 AST imports,
+  69 top-level functions. Docker remains unavailable because the local engine
+  pipe is absent.

@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from backend.coach import streams as coach_streams
+from backend.coach.chat_turn import CoachChatTurnService
 import server_test_support as fixtures
 from support import isolated_server, reset_application_state
 from backend.coach.dialogue import validate_request
@@ -75,7 +76,7 @@ class DialogueHarness:
             transport = transport_factory.return_value
             transport.request.side_effect = response
             transport.background_request.side_effect = response
-            receipt = server.coach_chat_turn_service().run(message, client_turn_id=turn or f"turn-{self.counter}", session_csrf_hash="synthetic-session", **kwargs)
+            receipt = server.COACH_TURNS.chat_turn_service().run(message, client_turn_id=turn or f"turn-{self.counter}", session_csrf_hash="synthetic-session", **kwargs)
         return receipt, transport.background_request if kwargs.get("background_job") else transport.request
 
     def state(self):
@@ -856,7 +857,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 db.execute("UPDATE coach_commands SET status='completed' WHERE client_turn_id='morning-quick'")
             return {"status": "completed", "message": {"id": 1}}
         with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
-            server.CoachChatTurnService, "run", side_effect=complete_command,
+            CoachChatTurnService, "run", side_effect=complete_command,
         ):
             server.coach_background_job_runner().run(job)
         self.assertEqual(server.key_value_service().get("morning_checkin_date"), "2026-09-07")
@@ -879,7 +880,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             return {"status": "completed", "message": {"id": 1}, "awaiting_clarification": True}
 
         with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
-            server.CoachChatTurnService, "run", side_effect=complete_with_question,
+            CoachChatTurnService, "run", side_effect=complete_with_question,
         ):
             server.coach_background_job_runner().run(job)
         self.assertNotEqual(server.key_value_service().get("morning_checkin_status"), "ready")
@@ -990,7 +991,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
     def test_foreign_session_cannot_replay_receipt(self):
         self.turn("Wie geht es weiter?", [{"output_text": "Synthetic advice"}], turn="owned-turn")
         with self.assertRaises(server.AppError) as raised:
-            server.coach_chat_turn_service().run("Weiter", client_turn_id="owned-turn", session_csrf_hash="other-session")
+            server.COACH_TURNS.chat_turn_service().run("Weiter", client_turn_id="owned-turn", session_csrf_hash="other-session")
         self.assertEqual(raised.exception.reason, "command_scope_denied")
 
     def test_local_draft_commit_uses_local_dialogue_with_fresh_response_chain(self):

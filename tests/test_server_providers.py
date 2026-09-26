@@ -436,7 +436,7 @@ class ServerProvidersTests(ServerTestCase):
 
         with patch.object(server, "coach_response_transport") as transport_factory:
             transport_factory.return_value.stream_request.side_effect = streamed_response
-            result = server.coach_chat_turn_service().run(
+            result = server.COACH_TURNS.chat_turn_service().run(
                 "Wie soll ich heute trainieren?", client_turn_id="turn-attached-provider-stream",
                 session_csrf_hash=csrf_hash, background_job=True, on_text_delta=deltas.append,
             )

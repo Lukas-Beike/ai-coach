@@ -29,7 +29,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         }
 
     def finalize(self, response: dict, receipts: list[dict], **options):
-        return server.coach_structured_outcome_service().finalize(
+        return server.COACH_TURNS.outcome_service().finalize(
             response, receipts,
             question=options.get("question", ""),
             cancelled=options.get("cancelled", False),

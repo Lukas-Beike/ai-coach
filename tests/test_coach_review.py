@@ -154,7 +154,7 @@ class CoachReviewTests(unittest.TestCase):
             transport_factory.return_value.background_request.side_effect = server.AppError(
                 503, "Model unavailable"
             )
-            result = server.coach_chat_turn_service().run(
+            result = server.COACH_TURNS.chat_turn_service().run(
                 message,
                 client_turn_id=client_turn_id,
                 session_csrf_hash=csrf_hash,
@@ -256,7 +256,7 @@ class CoachReviewTests(unittest.TestCase):
         with server.database_manager().unit_of_work() as db:
             db.execute("INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES ('foreign', 'foreign', 'review-conversation', '{}', 'local', 'running', ?, ?, ?)", (json.dumps(identity), runtime_clock.utc_now(), runtime_clock.utc_now()))
         with self.assertRaises(server.AppError) as error:
-            server.coach_structured_turn_service().run("Edit", intent=self.intent("save_checkin", ["local_checkin"]), conversation_id="review-conversation", client_turn_id="foreign", session_csrf_hash="intruder", ai_provider=server.SETTINGS.selected_ai_provider())
+            server.COACH_TURNS.structured_turn_service().run("Edit", intent=self.intent("save_checkin", ["local_checkin"]), conversation_id="review-conversation", client_turn_id="foreign", session_csrf_hash="intruder", ai_provider=server.SETTINGS.selected_ai_provider())
         self.assertEqual(error.exception.status, 403)
         with server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT status FROM coach_commands WHERE client_turn_id='foreign'").fetchone()["status"], "running")

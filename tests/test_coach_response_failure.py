@@ -44,7 +44,7 @@ class CoachResponseFailureTests(unittest.TestCase):
                     "enqueue",
                     wraps=server.SYNC_JOB_QUEUE.service().enqueue,
                 ) as enqueue:
-            receipt = server.coach_chat_turn_service().run(message, client_turn_id=turn_id,
+            receipt = server.COACH_TURNS.chat_turn_service().run(message, client_turn_id=turn_id,
                                            session_csrf_hash="synthetic-session", background_job=True)
         self.assertEqual(receipt["status"], "completed")
         enqueue.assert_called_once()
@@ -84,9 +84,9 @@ class CoachResponseFailureTests(unittest.TestCase):
                     "enqueue",
                     wraps=server.SYNC_JOB_QUEUE.service().enqueue,
                 ) as enqueue:
-            receipt = server.coach_chat_turn_service().run(message, client_turn_id=turn_id,
+            receipt = server.COACH_TURNS.chat_turn_service().run(message, client_turn_id=turn_id,
                                            session_csrf_hash="synthetic-session", background_job=True)
-            replay = server.coach_chat_turn_service().run(message, client_turn_id=turn_id,
+            replay = server.COACH_TURNS.chat_turn_service().run(message, client_turn_id=turn_id,
                                           session_csrf_hash="synthetic-session", background_job=True)
         enqueue.assert_called_once()
         self.assertEqual(responses, 2)
