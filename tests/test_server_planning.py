@@ -42,7 +42,7 @@ class ServerPlanningTests(ServerTestCase):
             "authorization_scope": [f"library_workout:{local_id}"],
         }
         with patch.object(sync_queue.SyncJobQueueService, "enqueue", return_value={"id": "job-plan-push"}) as enqueue:
-            result = server.coach_tool_dispatch_service().execute(
+            result = server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync",
                 {"entries": [entry]},
                 intent=intent,
@@ -70,11 +70,11 @@ class ServerPlanningTests(ServerTestCase):
             "enqueue",
             side_effect=[{"id": "job-performance"}, {"id": "job-competition"}],
         ) as enqueue:
-            performance = server.coach_tool_dispatch_service().execute(
+            performance = server.COACH_TOOL_DISPATCH.service().execute(
                 "refresh_current_performance", {}, intent=refresh_intent, conversation_id="conversation-jobs",
                 client_turn_id="turn-performance", session_csrf_hash="", sync_job_ids=[],
             )
-            competition = server.coach_tool_dispatch_service().execute(
+            competition = server.COACH_TOOL_DISPATCH.service().execute(
                 "sync_competitions", {}, intent=competition_intent, conversation_id="conversation-jobs",
                 client_turn_id="turn-competition", session_csrf_hash="", sync_job_ids=[],
             )
@@ -113,7 +113,7 @@ class ServerPlanningTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan_create"],
         }
         with self.assertRaises(server.AppError) as error:
-            server.coach_tool_dispatch_service().execute(
+            server.COACH_TOOL_DISPATCH.service().execute(
                 "apply_training_changes",
                 {"changes": [{
                     "action": "create", "date": (date.today() + timedelta(days=4)).isoformat(),
@@ -142,7 +142,7 @@ class ServerPlanningTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [],
             "authorization_scope": ["local_plan_create", f"planned_unit:{existing_id}"],
         }
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "apply_training_changes",
             {"changes": [{"local_id": existing_id, "action": "update", "date": original_date,
                            "expected_payload_hash": target["expected_payload_hash"]}, {
@@ -175,7 +175,7 @@ class ServerPlanningTests(ServerTestCase):
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
             "artifact_id": None, "ambiguities": [], "authorization_scope": [f"planned_unit:{created[0]['id']}"],
         }
-        server.coach_tool_dispatch_service().execute(
+        server.COACH_TOOL_DISPATCH.service().execute(
             "apply_training_changes",
             {"changes": [{"local_id": created[0]["id"], "action": "update", "name": "Renamed",
                            "expected_payload_hash": target["expected_payload_hash"]}]},
@@ -1032,7 +1032,7 @@ class ServerPlanningTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [],
             "authorization_scope": ["local_plan_create", f"training_plan:{plan_id}"],
         }
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "apply_training_changes",
             {"changes": [{"action": "create", "date": "2099-04-02", "sport": "Run",
                           "name": "Plan addition", "description": "- 20m 60% easy", "duration_minutes": 20,
@@ -1199,7 +1199,7 @@ class ServerPlanningTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
             "follow_up_operations": [],
         }
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "replace_training_plan",
             {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Replacement", "goal": "", "workouts": [
                 {"date": archived["date"], "sport": "Ride", "name": "New", "description": "- 40m 60% easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
@@ -1283,7 +1283,7 @@ class ServerPlanningTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [], "authorization_scope": [f"training_plan:{past_plan_id}"],
             "follow_up_operations": [],
         }
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "replace_training_plan",
             {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Past Plan", "goal": "", "workouts": [
                 {"date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "New", "description": "- 40m 60% easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
@@ -1357,7 +1357,7 @@ class ServerPlanningTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
             "follow_up_operations": [],
         }
-        server.coach_tool_dispatch_service().execute(
+        server.COACH_TOOL_DISPATCH.service().execute(
             "replace_training_plan",
             {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Conflict Replacement", "goal": "", "workouts": [
                 {"date": old["date"], "sport": "Ride", "name": "New", "description": "- 40m 60% easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
@@ -1380,12 +1380,12 @@ class ServerPlanningTests(ServerTestCase):
                 "sport": "Ride", "name": f"Session {index}", "description": "- 30m 60% easy",
             })
         intent = {"intent": "local_action", "operation": "read_training_state", "target_system": "local", "authorization_scope": []}
-        state = server.coach_tool_dispatch_service().execute(
+        state = server.COACH_TOOL_DISPATCH.service().execute(
             "read_training_state", {}, intent=intent, conversation_id="read-plan", client_turn_id="read-plan",
             session_csrf_hash="", sync_job_ids=[],
         )
         self.assertEqual(len(state["planned_units"]), coach_limits.COACH_TRAINING_CHANGE_LIMIT)
-        listed = server.coach_tool_dispatch_service().execute(
+        listed = server.COACH_TOOL_DISPATCH.service().execute(
             "list_planned_workouts", {"limit": coach_limits.COACH_TRAINING_CHANGE_LIMIT}, intent=intent,
             conversation_id="read-plan", client_turn_id="read-plan", session_csrf_hash="", sync_job_ids=[],
         )
@@ -1440,7 +1440,7 @@ class ServerPlanningTests(ServerTestCase):
             "authorization_scope": ["local_plan"], "bulk_change": True,
         }
         with self.assertRaises(server.AppError) as raised:
-            server.coach_tool_dispatch_service().execute(
+            server.COACH_TOOL_DISPATCH.service().execute(
                 "apply_training_changes", {"changes": [{"local_id": planned["id"], "action": "update"}]},
                 intent=intent, conversation_id="bulk-required", client_turn_id="bulk-required",
                 session_csrf_hash="", sync_job_ids=[],
@@ -1462,7 +1462,7 @@ class ServerPlanningTests(ServerTestCase):
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
             "authorization_scope": ["local_plan"], "bulk_change": True,
         }
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "apply_training_changes", {
                 "expected_revision": state["planning_revision"],
                 "changes": [

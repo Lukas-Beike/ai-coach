@@ -24,7 +24,7 @@ class ServerFrontendTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
         }
 
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "apply_training_changes",
             {"expected_revision": state["planning_revision"], "changes": [{
                 "local_id": planned["id"], "action": "delete",

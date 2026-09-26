@@ -187,7 +187,7 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server.PlanningAuthorityService, "mark_planning_authoritative"), patch.object(
             server.PlanPushCommandService, "enqueue", return_value={"ok": True, "status": "queued"},
         ) as enqueue:
-            result = server.coach_tool_dispatch_service().execute(
+            result = server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync", {"entries": entries}, intent=intent,
                 conversation_id="conversation-large-replacement", client_turn_id="turn-large-replacement",
                 session_csrf_hash="", sync_job_ids=[],
@@ -209,7 +209,7 @@ class ServerSyncTests(ServerTestCase):
         entries = [{"library_workout_id": local_ids[0], "expected_payload_hash": "b" * 64}]
 
         with patch.object(server.PlanPushCommandService, "enqueue") as enqueue, self.assertRaises(server.AppError) as error:
-            server.coach_tool_dispatch_service().execute(
+            server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync", {"entries": entries}, intent=intent,
                 conversation_id="conversation-created-subset", client_turn_id="turn-created-subset",
                 session_csrf_hash="", sync_job_ids=[],
@@ -301,7 +301,7 @@ class ServerSyncTests(ServerTestCase):
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
         }
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "apply_training_changes",
             {"changes": [
                 {"local_id": planned["id"], "action": "update", "name": "First"},
@@ -328,7 +328,7 @@ class ServerSyncTests(ServerTestCase):
             "_sync_changed_entries_only": True, "_changed_sync_entry_ids": [changed["id"]],
         }
         with patch.object(sync_queue.SyncJobQueueService, "enqueue", return_value={"id": "job-changed"}) as enqueue:
-            result = server.coach_tool_dispatch_service().execute(
+            result = server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync", {}, intent=intent,
                 conversation_id="conversation-changed-sync", client_turn_id="turn-changed-sync",
                 session_csrf_hash="", sync_job_ids=[],
@@ -354,7 +354,7 @@ class ServerSyncTests(ServerTestCase):
             "_changed_sync_entry_ids": [item["library_workout_id"] for item in selected],
         }
         with patch.object(sync_queue.SyncJobQueueService, "enqueue", return_value={"id": "job-large-changed"}) as enqueue:
-            result = server.coach_tool_dispatch_service().execute(
+            result = server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync", {"entries": selected}, intent=intent,
                 conversation_id="conversation-large-changed", client_turn_id="turn-large-changed",
                 session_csrf_hash="", sync_job_ids=[],

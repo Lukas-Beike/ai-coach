@@ -217,6 +217,7 @@ def _explicit_owner(name: str) -> str | None:
             "COACH_READ_TOOLS": "backend/coach/read_tools_assembly",
             "COACH_PROPOSALS": "backend/coach/proposal_assembly",
             "COACH_PLANNING_TOOLS": "backend/coach/planning_tools_assembly",
+            "COACH_TOOL_DISPATCH": "backend/coach/tool_dispatch_assembly",
             "EXTERNAL_CALENDAR": COMPOSITION_ROOT,
             "AppError": ERRORS_MODULE,
             "public_app_error_status": ERRORS_MODULE,

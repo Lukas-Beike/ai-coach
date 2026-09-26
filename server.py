@@ -1,7 +1,6 @@
 from __future__ import annotations
 from backend.coach import attachments as coach_attachments
 from backend.coach.profile_update import CoachProfileUpdateService
-from backend.coach.training_template_tools import TrainingTemplateToolService
 from backend.coach import limits as coach_limits
 from backend.coach import streams as coach_streams
 
@@ -192,12 +191,8 @@ from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.public_state import PublicStateDependencies, PublicStateService
 from backend.sync import scheduler as sync_scheduler_runtime
 from backend.coach.athlete_record_tools import CoachAthleteRecordToolService
-from backend.coach.planning_action_tools import CoachPlanningActionToolService
-from backend.coach.plan_artifact_tools import CoachPlanArtifactToolService
 from backend.coach.tool_replay import CoachStructuredToolReplayService
 from backend.coach.tool_preparation import CoachStructuredToolPreparationService
-from backend.coach.planning_change_tools import CoachPlanningChangeToolService
-from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.coach import context as coach_context_module
 from backend.coach.context import CoachQuickActionsService
 from backend.coach.context_assembly import CoachContextAssembly
@@ -214,6 +209,7 @@ from backend.coach.conversation_assembly import CoachConversationAssembly
 from backend.coach.conversation_gate import CoachConversationGate
 from backend.coach.proposal_assembly import CoachProposalAssembly
 from backend.coach.planning_tools_assembly import CoachPlanningToolsAssembly
+from backend.coach.tool_dispatch_assembly import CoachToolDispatchAssembly
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.turn_opening import CoachTurnOpeningService
 from backend.coach.dialogue import CoachDialogueReadService, dialogue_tools
@@ -1431,30 +1427,24 @@ COACH_PLANNING_TOOLS = CoachPlanningToolsAssembly(
 )
 
 
-def coach_tool_dispatch_service() -> CoachToolDispatchService:
-    """Compose the concrete Coach tool owners without retaining tool logic."""
-    return CoachToolDispatchService(
-        COACH_READ_TOOLS.read_service,
-        coach_profile_update_service,
-        coach_athlete_record_tool_service,
-        CoachPlanArtifactToolService(COACH_PLANNING_TOOLS.training_plan_artifact_service),
-        CoachPlanningChangeToolService(
-            structured_training_plan_replacement_service,
-            structured_training_change_service,
-        ),
-        TrainingTemplateToolService(
-            database_manager, DB_LOCK, PLANNING_DATA.workout_library
-        ),
-        COACH_PLANNING_TOOLS.library_plan_tool_service,
-        coach_sync_tool_service,
-        CoachPlanningActionToolService(
-            adaptive_replan_preview_service,
-            COACH_PLANNING_TOOLS.adaptive_apply_service,
-            PLANNING_DATA.training_plan,
-            history_undo_service,
-            COACH_PROPOSALS.creation_service,
-        ),
-    )
+COACH_TOOL_DISPATCH = CoachToolDispatchAssembly(
+    read_tools=COACH_READ_TOOLS.read_service,
+    profile_update=coach_profile_update_service,
+    athlete_records=coach_athlete_record_tool_service,
+    training_plan_artifacts=COACH_PLANNING_TOOLS.training_plan_artifact_service,
+    training_plan_replacement=structured_training_plan_replacement_service,
+    training_changes=structured_training_change_service,
+    database_manager=database_manager,
+    database_lock=DB_LOCK,
+    workout_library_service=PLANNING_DATA.workout_library,
+    library_plan_tools=COACH_PLANNING_TOOLS.library_plan_tool_service,
+    sync_tools=coach_sync_tool_service,
+    adaptive_preview=adaptive_replan_preview_service,
+    adaptive_apply=COACH_PLANNING_TOOLS.adaptive_apply_service,
+    training_plan_service=PLANNING_DATA.training_plan,
+    history_undo=history_undo_service,
+    proposal_creation=COACH_PROPOSALS.creation_service,
+)
 
 
 def coach_structured_tool_execution_service() -> CoachStructuredToolExecutionService:
@@ -1467,7 +1457,7 @@ def coach_structured_tool_execution_service() -> CoachStructuredToolExecutionSer
         COACH_PLANNING_TOOLS.training_patch_service(),
         SYNC_PERSISTENCE.state_repository(),
         COACH_PROPOSALS.creation_service(),
-        coach_tool_dispatch_service(),
+        COACH_TOOL_DISPATCH.service(),
     )
 
 
@@ -1489,7 +1479,7 @@ def coach_planning_command_service() -> CoachPlanningCommandService:
     """Compose the durable, session-bound local planning command owner."""
     return CoachPlanningCommandService(
         database_manager(), DB_LOCK, coach_command_receipt_service(),
-        coach_tool_dispatch_service(), coach_turn_failure_service(), runtime_clock.utc_now,
+        COACH_TOOL_DISPATCH.service(), coach_turn_failure_service(), runtime_clock.utc_now,
     )
 
 

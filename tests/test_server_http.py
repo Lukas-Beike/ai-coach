@@ -109,7 +109,7 @@ class ServerHttpTests(ServerTestCase):
             "authorization_scope": ["local_plan_create", f"planned_unit:{first['id']}"],
         }
         with self.assertRaises(server.AppError) as error:
-            server.coach_tool_dispatch_service().execute(
+            server.COACH_TOOL_DISPATCH.service().execute(
                 "apply_training_changes",
                 {"changes": [{"local_id": second["id"], "action": "archive"}, {
                     "action": "create", "date": (date.today() + timedelta(days=3)).isoformat(),
@@ -792,7 +792,7 @@ class ServerHttpTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
             "follow_up_operations": [],
         }
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "replace_training_plan",
             {
                 "expected_revision": state["planning_revision"],

@@ -1131,3 +1131,53 @@ mocked providers; no live account or runtime data was used.
   87 top-level functions. No behavior regression found in the executed matrix;
   the Docker runtime check remains unavailable. Remaining S4 work is the
   planning/sync tool composition and dispatcher, then structured turns/jobs.
+
+## S4d2b boundary before implementation: Coach tool dispatch
+
+- The narrow owner is `CoachToolDispatchAssembly` in
+  `backend/coach/tool_dispatch_assembly.py`, with one fresh `service()` factory.
+  It owns only the concrete dispatcher graph and its lightweight routing
+  adapters. It does not own structured execution/rounds, durable receipts,
+  background jobs, HTTP routes, or the underlying planning and sync use cases.
+- Direct factory callers are `coach_structured_tool_execution_service` and
+  `coach_planning_command_service`; behavior tests call the dispatcher directly
+  across Coach, HTTP, planning, sync, frontend, and review suites. Those callers
+  will move to the dispatcher assembly. No tests patch the root dispatcher
+  factory; service behavior patches remain at `backend.coach.*` constructors
+  and shared owner/service lookup sites.
+- The factory must preserve each currently deferred edge: read tools, profile
+  updates, athlete records, plan artifacts, library plans, and sync tools stay
+  callable until a tool is executed; adaptive preview/apply, training-plan,
+  history undo, and proposal creation stay callbacks owned by the action tool.
+  The dispatcher factory itself must not open storage or contact providers.
+- Shared identity comes from existing owners and is passed explicitly: the
+  current `DB_LOCK`, active `database_manager` factory, `PLANNING_DATA`,
+  `COACH_READ_TOOLS`, `COACH_PROPOSALS`, and the existing planning tool
+  assembly. No owner or cache is recreated. The only new object per request is
+  the same fresh `CoachToolDispatchService` and its current routing wrappers.
+
+
+## S4d2b: Coach tool dispatch
+
+- Added `CoachToolDispatchAssembly` in
+  `backend/coach/tool_dispatch_assembly.py` and removed the dispatcher factory
+  from `server.py`. Structured execution and planning-command construction now
+  request a fresh dispatcher from this owner; direct behavior-test callers were
+  migrated as well. The dispatcher owner builds only its routing wrappers and
+  delegates effects to the existing planning, sync, history, proposal, read,
+  and athlete owners.
+- Preserved all callable edges for read, profile, athlete, artifact, planning,
+  library, sync, adaptive, history, and proposal services. `TrainingTemplateTool`
+  still receives the shared database-lock object, active manager callback, and
+  planning library callback. The assembly performs no storage/provider access;
+  its dispatcher service remains fresh per caller.
+- Focused Coach tool execution/coverage, dialogue/review, planning, sync, HTTP,
+  frontend-contract, and architecture matrix passed: 492 tests. Compileall,
+  generated inventory `--check`, and `git diff --check` passed. The S4d2a Docker
+  build attempt remains unavailable because the local Docker engine pipe is not
+  present.
+- Changed files: `server.py`, new dispatcher assembly and focused tests,
+  dispatcher behavior callers in Coach, frontend, HTTP, planning, and sync
+  tests, inventory owner mapping and generated report, and this progress log.
+- Measured `server.py`: 2,013 physical / 1,772 nonblank lines, 200 AST imports,
+  86 top-level functions. No behavior regression found in the executed matrix.

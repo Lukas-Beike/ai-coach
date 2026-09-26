@@ -97,7 +97,7 @@ class CoachReviewTests(unittest.TestCase):
         }
         with patch.object(IntervalsSyncService, "sync") as sync:
             with self.assertRaises(server.AppError) as error:
-                server.coach_tool_dispatch_service().execute(
+                server.COACH_TOOL_DISPATCH.service().execute(
                     "start_provider_refresh",
                     {"days": 3661, "_wait_for_completion": True},
                     **kwargs,
@@ -119,7 +119,7 @@ class CoachReviewTests(unittest.TestCase):
             "sync",
             side_effect=[{"status": "ok", "waited_for_existing": True, "activity_days": 3}, {"status": "ok", "activity_days": 365}],
         ) as sync:
-            result = server.coach_tool_dispatch_service().execute(
+            result = server.COACH_TOOL_DISPATCH.service().execute(
                 "start_provider_refresh",
                 {"days": 365, "_wait_for_completion": True},
                 **kwargs,
@@ -191,8 +191,8 @@ class CoachReviewTests(unittest.TestCase):
                 )
                 intent = self.intent("commit_training_plan", ["artifact:"+artifact["artifact_id"]]); intent["artifact_id"] = artifact["artifact_id"]
                 kwargs = dict(intent=intent, conversation_id="review-conversation", client_turn_id="commit", session_csrf_hash="review-session", sync_job_ids=[])
-                result = server.coach_tool_dispatch_service().execute("commit_training_plan", {"artifact_id":artifact["artifact_id"]}, **kwargs)
-                replay = server.coach_tool_dispatch_service().execute("commit_training_plan", {"artifact_id":artifact["artifact_id"]}, **kwargs)
+                result = server.COACH_TOOL_DISPATCH.service().execute("commit_training_plan", {"artifact_id":artifact["artifact_id"]}, **kwargs)
+                replay = server.COACH_TOOL_DISPATCH.service().execute("commit_training_plan", {"artifact_id":artifact["artifact_id"]}, **kwargs)
                 self.assertEqual(len(result["library_entry_ids"]),count)
                 self.assertEqual(len(server.PLANNING_DATA.planned_unit().list(1000)),count)
                 self.assertEqual(replay["status"],"already_applied")
@@ -212,7 +212,7 @@ class CoachReviewTests(unittest.TestCase):
             )
         intent=self.intent("commit_training_plan",["artifact:"+artifact["artifact_id"]]);intent["artifact_id"]=artifact["artifact_id"]
         with self.assertRaises(server.AppError):
-            server.coach_tool_dispatch_service().execute("commit_training_plan",{"artifact_id":artifact["artifact_id"]},intent=intent,conversation_id="review-conversation",client_turn_id="commit",session_csrf_hash="review-session",sync_job_ids=[])
+            server.COACH_TOOL_DISPATCH.service().execute("commit_training_plan",{"artifact_id":artifact["artifact_id"]},intent=intent,conversation_id="review-conversation",client_turn_id="commit",session_csrf_hash="review-session",sync_job_ids=[])
         self.assertEqual(server.PLANNING_DATA.planned_unit().list(),[])
         self.assertEqual(server.PLANNING_DATA.training_plan().list(),[])
         with server.database_manager().unit_of_work() as db:self.assertEqual(db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?",(artifact["artifact_id"],)).fetchone()["status"],"draft")
@@ -222,7 +222,7 @@ class CoachReviewTests(unittest.TestCase):
         server.PLANNING_DATA.planned_unit().create(workout)
         intent = self.intent("stage_training_plan", ["local_plan"], ("commit_training_plan",))
         with self.assertRaises(server.AppError) as error:
-            server.coach_tool_dispatch_service().execute(
+            server.COACH_TOOL_DISPATCH.service().execute(
                 "stage_training_plan", {"payload": {"plan_name": "Conflict", "goal": "Base", "workouts": [workout]}},
                 intent=intent, conversation_id="review-conversation", client_turn_id="conflict",
                 session_csrf_hash="review-session", sync_job_ids=[],
@@ -238,17 +238,17 @@ class CoachReviewTests(unittest.TestCase):
                 templates=[{"name":"Synthetic template","sport":"Run","duration_minutes":30} for _ in range(3)]
                 templates[position]["duration_minutes"]="invalid"
                 with self.assertRaises(server.AppError):
-                    server.coach_tool_dispatch_service().execute("manage_training_templates",{"templates":templates},intent=self.intent("manage_training_templates",["local_template"]),conversation_id="review-conversation",client_turn_id="batch",session_csrf_hash="review-session",sync_job_ids=[])
+                    server.COACH_TOOL_DISPATCH.service().execute("manage_training_templates",{"templates":templates},intent=self.intent("manage_training_templates",["local_template"]),conversation_id="review-conversation",client_turn_id="batch",session_csrf_hash="review-session",sync_job_ids=[])
                 self.assertEqual(server.PLANNING_DATA.workout_library().list(),[])
 
 
     def test_created_refresh_job_is_readable_only_by_own_turn(self):
         intent={**self.intent("start_provider_refresh",["garmin_refresh"],("get_sync_job",)),"intent":"remote_sync","target_system":"garmin"}
         ids=[];kwargs=dict(intent=intent,conversation_id="review-conversation",client_turn_id="refresh",session_csrf_hash="review-session",sync_job_ids=ids)
-        job=server.coach_tool_dispatch_service().execute("start_provider_refresh",{},**kwargs)
-        status=server.coach_tool_dispatch_service().execute("get_sync_job",{"job_id":job["sync_job_id"]},**kwargs)
+        job=server.COACH_TOOL_DISPATCH.service().execute("start_provider_refresh",{},**kwargs)
+        status=server.COACH_TOOL_DISPATCH.service().execute("get_sync_job",{"job_id":job["sync_job_id"]},**kwargs)
         self.assertEqual(status["job"]["id"],job["sync_job_id"])
-        with self.assertRaises(server.AppError):server.coach_tool_dispatch_service().execute("get_sync_job",{"job_id":job["sync_job_id"]},**{**kwargs,"sync_job_ids":[]})
+        with self.assertRaises(server.AppError):server.COACH_TOOL_DISPATCH.service().execute("get_sync_job",{"job_id":job["sync_job_id"]},**{**kwargs,"sync_job_ids":[]})
 
 
     def test_running_foreign_command_is_neither_executed_nor_closed(self):

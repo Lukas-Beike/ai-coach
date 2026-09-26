@@ -46,7 +46,7 @@ class ServerCoachTests(ServerTestCase):
             "authorization_scope": [f"artifact:{artifact['artifact_id']}"],
         }
         with self.assertRaises(server.AppError) as denied:
-            server.coach_tool_dispatch_service().execute(
+            server.COACH_TOOL_DISPATCH.service().execute(
                 "commit_training_plan",
                 {"artifact_id": str(uuid.uuid4())},
                 intent=intent,
@@ -77,7 +77,7 @@ class ServerCoachTests(ServerTestCase):
         }
 
         with self.assertRaises(server.AppError) as denied:
-            server.coach_tool_dispatch_service().execute(
+            server.COACH_TOOL_DISPATCH.service().execute(
                 "commit_training_plan", {"artifact_id": artifact["artifact_id"]},
                 intent=intent, conversation_id="conversation-current", client_turn_id="turn-current",
                 session_csrf_hash="", sync_job_ids=[],
@@ -101,14 +101,14 @@ class ServerCoachTests(ServerTestCase):
             "intent": "local_action", "operation": "save_competition", "target_system": "local",
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_competitions"],
         }
-        listed = server.coach_tool_dispatch_service().execute(
+        listed = server.COACH_TOOL_DISPATCH.service().execute(
             "list_competitions", {}, intent=intent, conversation_id="conversation-competition",
             client_turn_id="turn-competition", session_csrf_hash="", sync_job_ids=[],
         )
         self.assertEqual(listed["competitions"][0]["id"], competition["id"])
 
         with patch.object(sync_queue.SyncJobQueueService, "enqueue", return_value={"id": "job-competition"}) as enqueue:
-            synced = server.coach_tool_dispatch_service().execute(
+            synced = server.COACH_TOOL_DISPATCH.service().execute(
                 "sync_competitions", {},
                 intent={**intent, "operation": "sync_competitions", "intent": "remote_sync", "target_system": "intervals"},
                 conversation_id="conversation-competition", client_turn_id="turn-competition-sync",
@@ -148,7 +148,7 @@ class ServerCoachTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [], "authorization_scope": [],
         }
 
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "get_activity_details", {"activity_id": "activity-1"}, intent=intent,
             conversation_id="conversation-activity-detail", client_turn_id="turn-activity-detail",
             session_csrf_hash="", sync_job_ids=[],
@@ -182,17 +182,17 @@ class ServerCoachTests(ServerTestCase):
             "intent": "local_action", "operation": "apply_workout_library_plan", "target_system": "local",
             "artifact_id": None, "ambiguities": [], "authorization_scope": [f"library_workout:{template['id']}"],
         }
-        scheduled = server.coach_tool_dispatch_service().execute(
+        scheduled = server.COACH_TOOL_DISPATCH.service().execute(
             "apply_workout_library_plan", {"entries": [{"library_workout_id": template["id"], "date": tomorrow}]},
             intent=intent, conversation_id="conversation-library", client_turn_id="turn-library",
             session_csrf_hash="", sync_job_ids=[],
         )
         self.assertEqual(scheduled["local_planned"], 1)
-        library = server.coach_tool_dispatch_service().execute(
+        library = server.COACH_TOOL_DISPATCH.service().execute(
             "list_workout_library", {"limit": 10}, intent=intent, conversation_id="conversation-library",
             client_turn_id="turn-library-read", session_csrf_hash="", sync_job_ids=[],
         )
-        planned = server.coach_tool_dispatch_service().execute(
+        planned = server.COACH_TOOL_DISPATCH.service().execute(
             "list_planned_workouts", {"limit": 10}, intent=intent, conversation_id="conversation-library",
             client_turn_id="turn-library-read", session_csrf_hash="", sync_job_ids=[],
         )
@@ -209,7 +209,7 @@ class ServerCoachTests(ServerTestCase):
                 "UPDATE planned_units SET sync_state='conflict', sync_dirty=1, sync_conflict=? WHERE local_id=?",
                 (json.dumps({"type": "remote_changed", "remote": {"name": "Remote"}}), planned["id"]),
             )
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "resolve_training_sync_conflict",
             {"local_id": planned["id"], "strategy": "keep_local"},
             intent={
@@ -248,7 +248,7 @@ class ServerCoachTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_template"],
         }
 
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "manage_training_templates",
             {"templates": [{"local_id": item["id"], "action": "archive"} for item in templates]},
             intent=intent, conversation_id="conversation-template", client_turn_id="turn-template",
@@ -274,7 +274,7 @@ class ServerCoachTests(ServerTestCase):
         }
         job_ids = []
         with patch.object(sync_queue.SyncJobQueueService, "enqueue", return_value={"id": "job-all"}) as enqueue:
-            result = server.coach_tool_dispatch_service().execute(
+            result = server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync", {}, intent=intent,
                 conversation_id="conversation-sync", client_turn_id="turn-sync",
                 session_csrf_hash="", sync_job_ids=job_ids,
@@ -299,7 +299,7 @@ class ServerCoachTests(ServerTestCase):
         }
         pending = {item["library_workout_id"]: item for item in server.planning_authority_service().pending_plan_push_entries()}
         with self.assertRaises(server.AppError) as error:
-            server.coach_tool_dispatch_service().execute(
+            server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync",
                 {"entries": [pending[first["id"]]]},
                 intent=intent, conversation_id="conversation-sync-all", client_turn_id="turn-sync-all",
