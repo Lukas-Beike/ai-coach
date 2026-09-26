@@ -73,6 +73,7 @@ from backend.sync.queue_assembly import SyncJobQueueAssembly
 from backend.sync.execution_assembly import SyncJobExecutionAssembly
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
 from backend.sync.scheduler_assembly import SyncSchedulerAssembly
+from backend.sync.persistence_assembly import SyncPersistenceAssembly
 from backend.sync.garmin_assembly import GarminAssembly
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
@@ -177,7 +178,6 @@ from backend.sync.conflict_commands import SyncConflictCommandService
 from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_selection import StructuredPlanSyncService
 from backend.sync.plan_repair import PlanRepairManifestService
-from backend.sync.daily import DailySyncMarkerService
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
 from backend.sync.planned_units import RemotePlannedUnitReconciler
 from backend.sync.planned_calendar import (
@@ -191,7 +191,6 @@ from backend.sync.library import (
     WorkoutLibrarySyncStateService,
     workout_library_sync_running,
 )
-from backend.sync.state import SyncStateRepository
 from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync.performance import (
     PerformanceRefreshFollowupService,
@@ -466,7 +465,7 @@ PROVIDER_SYNC = ProviderSyncAssembly(
 def sync_command_endpoint() -> SyncCommandEndpoint:
     """Compose authenticated manual synchronization POST commands."""
     return SyncCommandEndpoint(
-        SYNC_JOB_QUEUE.service(), sync_state_repository(),
+        SYNC_JOB_QUEUE.service(), SYNC_PERSISTENCE.state_repository(),
         performance_refresh_service(), full_provider_resync_service(),
         lambda: uuid.uuid4().hex, SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS,
     )
@@ -594,7 +593,7 @@ def state_version_service() -> StateVersionService:
 def public_performance_state_service() -> PublicPerformanceStateService:
     """Compose the read-only performance projection."""
     return PublicPerformanceStateService(
-        sync_state_repository(),
+        SYNC_PERSISTENCE.state_repository(),
         GARMIN_ASSEMBLY.payload_service(),
         profile_service(),
         GARMIN_ASSEMBLY.projection_service(),
@@ -623,19 +622,12 @@ def sync_public_state_service() -> SyncPublicStateService:
     )
 
 
-def sync_state_repository() -> SyncStateRepository:
-    """Compose transactional provider synchronization state."""
-    return SyncStateRepository(
-        database_manager(), KEY_VALUE_REPOSITORY, SNAPSHOT_REPOSITORY, runtime_clock.utc_now
-    )
-
-
 def performance_refresh_service() -> PerformanceRefreshService:
     """Compose targeted Intervals performance refresh persistence."""
     return PerformanceRefreshService(
         CONFIG,
         database_manager(),
-        sync_state_repository(),
+        SYNC_PERSISTENCE.state_repository(),
         KEY_VALUE_REPOSITORY,
         intervals_snapshot_reader(),
         runtime_events.STATE_EVENT_BUFFER,
@@ -655,7 +647,7 @@ def intervals_snapshot_reader() -> IntervalsSnapshotReader:
     return IntervalsSnapshotReader(
         CONFIG,
         api_client,
-        sync_state_repository(),
+        SYNC_PERSISTENCE.state_repository(),
         ATHLETE_CLOCK.now,
         runtime_clock.utc_now,
         SYNC_EARLIEST_DATE,
@@ -680,19 +672,12 @@ def performance_refresh_followup_service() -> PerformanceRefreshFollowupService:
     )
 
 
-def daily_sync_marker_service() -> DailySyncMarkerService:
-    """Compose transactional provider daily-marker persistence."""
-    return DailySyncMarkerService(
-        database_manager(), KEY_VALUE_REPOSITORY, ATHLETE_CLOCK.now
-    )
-
-
 def intervals_snapshot_service() -> IntervalsSnapshotService:
     """Compose Intervals snapshot and sync-window persistence."""
     return IntervalsSnapshotService(
         database_manager(),
         KEY_VALUE_REPOSITORY,
-        sync_state_repository(),
+        SYNC_PERSISTENCE.state_repository(),
         remote_planned_unit_reconciler(),
         workout_library_refresh_service(),
         workout_library_service(),
@@ -712,8 +697,8 @@ def intervals_sync_service() -> IntervalsSyncService:
         IntervalsSyncWorkflow(
             intervals_snapshot_reader(),
             intervals_snapshot_service(),
-            sync_state_repository(),
-            daily_sync_marker_service(),
+            SYNC_PERSISTENCE.state_repository(),
+            SYNC_PERSISTENCE.daily_markers(),
             SYNC_PERIOD_DEFAULTS,
             ALL_SYNC_DAYS,
         ),
@@ -815,7 +800,7 @@ def external_calendar_sync_service() -> ExternalCalendarSyncService:
         CONFIG,
         database_manager(),
         KEY_VALUE_REPOSITORY,
-        daily_sync_marker_service(),
+        SYNC_PERSISTENCE.daily_markers(),
         PROVIDER_SYNC.operation_observer(),
         adaptive_replan_preview_service(),
         runtime_events.STATE_EVENT_BUFFER,
@@ -1348,13 +1333,22 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     runtime_clock.utc_now,
 )
 
+SYNC_PERSISTENCE = SyncPersistenceAssembly(
+    database_manager=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    snapshots=SNAPSHOT_REPOSITORY,
+    utc_now=runtime_clock.utc_now,
+    athlete_clock=lambda: ATHLETE_CLOCK,
+)
+
+
 GARMIN_ASSEMBLY = GarminAssembly(
     config=lambda: CONFIG,
     root=ROOT,
     database_manager=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
-    sync_state_repository=sync_state_repository,
-    daily_sync_marker_service=daily_sync_marker_service,
+    sync_state_repository=SYNC_PERSISTENCE.state_repository,
+    daily_sync_marker_service=SYNC_PERSISTENCE.daily_markers,
     redactor=REDACTOR,
     logger=LOGGER,
     diagnostic_capture=DIAGNOSTIC_CAPTURE,
@@ -1380,7 +1374,7 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
     maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
     wake_event=shared_sync_job_wake_event,
     all_sync_days=ALL_SYNC_DAYS,
-    daily_sync_marker_service=daily_sync_marker_service,
+    daily_sync_marker_service=SYNC_PERSISTENCE.daily_markers,
     redact_text=REDACTOR.redact_text,
     logger=LOGGER,
     retry_base_seconds=SYNC_JOB_RETRY_BASE_SECONDS,
@@ -1431,7 +1425,7 @@ WEATHER_ASSEMBLY = WeatherAssembly(
 )
 
 SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
-    sync_state_repository=sync_state_repository,
+    sync_state_repository=SYNC_PERSISTENCE.state_repository,
     queue_service=SYNC_JOB_QUEUE.service,
     local_now=ATHLETE_CLOCK.now,
     sync_period_defaults=SYNC_PERIOD_DEFAULTS,
@@ -1466,12 +1460,12 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
     config=lambda: CONFIG,
     profile_service=profile_service,
     queue_service=SYNC_JOB_QUEUE.service,
-    daily_sync_marker_service=daily_sync_marker_service,
+    daily_sync_marker_service=SYNC_PERSISTENCE.daily_markers,
     garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
     database_manager=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
     database_lock=DB_LOCK,
-    sync_state_repository=sync_state_repository,
+    sync_state_repository=SYNC_PERSISTENCE.state_repository,
     intervals_resync_gate=INTERVALS_RESYNC_GATE,
     maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
     morning_body_battery_service=morning_body_battery_service,
@@ -1787,7 +1781,7 @@ def coach_turn_opening_service() -> CoachTurnOpeningService:
 def coach_proposal_creation_service() -> CoachProposalCreationService:
     """Compose session-bound Coach proposal creation."""
     return CoachProposalCreationService(
-        database_manager(), sync_state_repository(), now=time.time, utc_now=runtime_clock.utc_now,
+        database_manager(), SYNC_PERSISTENCE.state_repository(), now=time.time, utc_now=runtime_clock.utc_now,
         uuid_factory=uuid.uuid4,
     )
 
@@ -1809,7 +1803,7 @@ def coach_proposal_execution_service() -> CoachProposalExecutionService:
 def coach_structured_context_service() -> CoachStructuredContextService:
     """Compose the authoritative, read-only Coach context builder."""
     return CoachStructuredContextService(
-        sync_state_repository(),
+        SYNC_PERSISTENCE.state_repository(),
         checkin_service(),
         WEATHER_ASSEMBLY.service(),
         activity_feedback_service(),
@@ -1834,7 +1828,7 @@ def coach_structured_context_service() -> CoachStructuredContextService:
 def coach_training_context_service() -> CoachTrainingContextService:
     """Compose bounded Coach prompt context from concrete read services."""
     return CoachTrainingContextService(
-        sync_state_repository(), coach_structured_context_service(), workout_library_service(),
+        SYNC_PERSISTENCE.state_repository(), coach_structured_context_service(), workout_library_service(),
         local_planned_limit=coach_context_module.COACH_LOCAL_PLANNED_LIMIT,
         library_limit=coach_context_module.COACH_LIBRARY_LIMIT,
         library_description_limit=coach_context_module.COACH_LIBRARY_DESCRIPTION_LIMIT,
@@ -1856,7 +1850,7 @@ def coach_request_payload_service() -> CoachRequestPayloadService:
 def coach_context_preview_service() -> CoachContextPreviewService:
     """Compose read-only, user-inspectable Coach context preview."""
     return CoachContextPreviewService(
-        sync_state_repository(), coach_message_service(), coach_training_context_service(),
+        SYNC_PERSISTENCE.state_repository(), coach_message_service(), coach_training_context_service(),
         coach_structured_context_service(), workout_library_service(),
         CoachContextPreviewLimits(
             library_limit=coach_context_module.COACH_LIBRARY_LIMIT,
@@ -1924,7 +1918,7 @@ def coach_structured_tool_execution_service() -> CoachStructuredToolExecutionSer
         KEY_VALUE_REPOSITORY,
         coach_clarification_service(),
         coach_training_patch_service(),
-        sync_state_repository(),
+        SYNC_PERSISTENCE.state_repository(),
         coach_proposal_creation_service(),
         coach_tool_dispatch_service(),
     )
@@ -1971,7 +1965,7 @@ def coach_structured_tool_preparation_service() -> CoachStructuredToolPreparatio
     """Compose structured tool preparation with current Coach state owners."""
     return CoachStructuredToolPreparationService(
         coach_dialogue_action_service(),
-        sync_state_repository(),
+        SYNC_PERSISTENCE.state_repository(),
         planning_authority_service(),
         frozenset(STRUCTURED_READ_ONLY_TOOLS),
         SYNC_PERIOD_DEFAULTS,
@@ -2083,7 +2077,7 @@ def public_bootstrap_service() -> PublicBootstrapService:
             app_name=APP_NAME,
             app_version=APP_VERSION,
             key_values=KEY_VALUE_REPOSITORY,
-            sync_state_repository=sync_state_repository,
+            sync_state_repository=SYNC_PERSISTENCE.state_repository,
             planned_unit_service=planned_unit_service,
             competition_service=competition_service,
             external_calendar_reader=external_calendar_reader,
@@ -2124,7 +2118,7 @@ def public_bootstrap_service() -> PublicBootstrapService:
 def public_plan_state_service() -> PublicPlanStateService:
     """Compose the public planning projection from its concrete read owners."""
     return PublicPlanStateService(PublicPlanDependencies(
-        sync_state=sync_state_repository(),
+        sync_state=SYNC_PERSISTENCE.state_repository(),
         planned_units=planned_unit_service(),
         activity_feedback=activity_feedback_service(),
         weather=WEATHER_ASSEMBLY.service(),
@@ -2150,7 +2144,7 @@ def public_plan_state_service() -> PublicPlanStateService:
 def public_state_local_prelude_service() -> PublicStateLocalPrelude:
     """Compose the local bootstrap read with its existing transaction owner."""
     return PublicStateLocalPrelude(
-        sync_state_repository(), activity_feedback_service(),
+        SYNC_PERSISTENCE.state_repository(), activity_feedback_service(),
         planned_unit_service(), WEATHER_ASSEMBLY.service(), database_manager(),
         DB_LOCK, lambda: ATHLETE_CLOCK.now().date(),
         CalendarWindowRange(PLANNED_CALENDAR_HISTORY_DAYS, PLANNED_CALENDAR_FUTURE_DAYS),
@@ -2198,7 +2192,7 @@ def public_state_service() -> PublicStateService:
                 profile=profile_service(),
                 public_feedback=public_feedback_state_service(),
                 public_performance=public_performance_state_service(),
-                sync_state=sync_state_repository(),
+                sync_state=SYNC_PERSISTENCE.state_repository(),
                 provider_freshness=PROVIDER_SYNC.freshness_service(),
                 garmin_sync_state=GARMIN_ASSEMBLY.sync_state_service(),
                 sync_public_state=sync_public_state_service(),
@@ -2245,7 +2239,7 @@ def diagnostic_report_service() -> DiagnosticReportService:
         app_name=APP_NAME,
         app_version=APP_VERSION,
         utc_now=runtime_clock.utc_now,
-        sync_state=sync_state_repository(),
+        sync_state=SYNC_PERSISTENCE.state_repository(),
         garmin_projection=GARMIN_ASSEMBLY.projection_service(),
         garmin_client_factory=GARMIN_ASSEMBLY.client_factory(),
         garmin_fixture_loader=GARMIN_ASSEMBLY.fixture_loader(),

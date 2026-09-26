@@ -276,7 +276,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_public_state_exposes_daily_planning_context(self):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
-        server.sync_state_repository().save_snapshot({"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [{"name": "Locker", "start_date_local": f"{today}T08:00:00"}]})
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [{"name": "Locker", "start_date_local": f"{today}T08:00:00"}]})
         server.checkin_service().save({"checkin_date": today, "motivation": 8})
         state = server.public_state_service().read(local_only=True)
         self.assertEqual(state["daily_planning_context"][0]["date"], today)
@@ -284,7 +284,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_activity_pagination_has_stable_cursor_without_duplicates(self):
         today = server.ATHLETE_CLOCK.now().date()
-        server.sync_state_repository().save_snapshot({
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({
             "synced_at": "now", "athlete": {}, "recent_wellness": [], "upcoming_calendar": [],
             "recent_activities": [
                 {"id": f"activity-{index}", "name": f"Activity {index}", "type": "Ride", "start_date_local": today.isoformat()}
@@ -347,7 +347,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_bootstrap_is_bounded_and_excludes_history_collections(self):
         today = server.ATHLETE_CLOCK.now().date()
-        server.sync_state_repository().save_snapshot({
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({
             "synced_at": "now", "athlete": {}, "recent_wellness": [], "upcoming_calendar": [],
             "recent_activities": [
                 {"id": f"activity-{index}", "type": "Ride", "start_date_local": today.isoformat()}
@@ -573,7 +573,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_public_state_exposes_provider_calendar_window(self):
         today = server.ATHLETE_CLOCK.now().date()
-        server.sync_state_repository().save_snapshot({
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({
             "synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [],
             "provider_sync": {"calendar_window": {"start": (today - timedelta(days=10)).isoformat(), "end": (today + timedelta(days=20)).isoformat()}},
         })
@@ -915,7 +915,7 @@ class ServerHttpTests(ServerTestCase):
     def test_public_state_exposes_completed_and_planned_activity_tabs(self):
         server.planned_unit_service().create({"date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "Intervalle", "description": "- 30m Z2", "duration_minutes": 30})
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [{"name": "Morgenlauf"}], "recent_wellness": [], "upcoming_calendar": []}
-        server.sync_state_repository().save_snapshot(snapshot)
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
         state = server.public_state_service().read()
         self.assertEqual(state["app"]["name"], "Intervals Coach")
         self.assertEqual(state["app"]["version"], server.APP_VERSION)

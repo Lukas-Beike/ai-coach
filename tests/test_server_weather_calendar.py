@@ -15,6 +15,8 @@ from backend.http_api.public_weather import PublicWeatherStateService
 from backend.planning import planned_units as planning_planned_units, workouts as planning_workouts
 from backend.providers import calendar as calendar_provider, intervals_client as intervals_client_module, weather as weather_provider
 from backend.sync import snapshots as sync_snapshots
+from backend.sync.daily import DailySyncMarkerService
+from backend.sync.state import SyncStateRepository
 from backend.sync.intervals import IntervalsSnapshotReader
 from backend.sync.library import WorkoutLibraryRefreshService
 from backend.sync.performance import PerformanceRefreshFollowupService
@@ -45,7 +47,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
         ), patch.object(WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}), patch.object(
             PerformanceRefreshFollowupService, "enqueue_after_sync"
-        ) as enqueue, patch.object(server.DailySyncMarkerService, "mark") as mark:
+        ) as enqueue, patch.object(DailySyncMarkerService, "mark") as mark:
             server.intervals_sync_service().sync(
                 "startup historical backfill",
                 activity_days=90,
@@ -236,7 +238,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
 
     def test_daily_planning_context_combines_checkin_recovery_weather_and_appointments(self):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
-        server.sync_state_repository().save_snapshot({
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({
             "synced_at": "2026-08-31T08:00:00+00:00",
             "athlete": {},
             "recent_activities": [],
@@ -265,8 +267,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 ("appointment-1", "uid-1", "Familientermin", today, f"{today}T18:00:00", f"{today}T20:00:00", 120, 0, 1, 0, runtime_clock.utc_now()),
             )
         context = server.daily_planning_context_service().build(
-            server.sync_state_repository().latest_snapshot(),
-            server.sync_state_repository().latest_snapshot()["upcoming_calendar"],
+            server.SYNC_PERSISTENCE.state_repository().latest_snapshot(),
+            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["upcoming_calendar"],
             {"days": [{"date": today, "weather_code": 63, "condition": "Regen", "temperature_min": 8, "temperature_max": 13}]},
         )
         day = next(item for item in context if item["date"] == today)
@@ -523,7 +525,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         }
         with (
             patch.object(
-                server.SyncStateRepository,
+                SyncStateRepository,
                 "latest_snapshot",
                 return_value=snapshot,
             ),
@@ -740,7 +742,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         }])
         library = server.workout_library_service().list()[0]
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        server.sync_state_repository().save_snapshot({
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({
             "synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [],
             "upcoming_calendar": [{"id": "remote-event", "name": "Bereits geplant", "start_date_local": tomorrow + "T09:00:00"}],
         })

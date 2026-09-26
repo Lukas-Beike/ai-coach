@@ -128,7 +128,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
     def seed_activity(self):
         activity = {"id": "synthetic-run", "type": "Run", "name": "Synthetic run", "start_date_local": "2026-09-06T10:00:00",
                     "moving_time": 1800, "distance": 5000}
-        server.sync_state_repository().save_view({
+        server.SYNC_PERSISTENCE.state_repository().save_view({
             "recent_activities": [activity], "recent_wellness": [], "planned_workouts": [],
             "raw_provider_data": {"activities": [{**activity, "raw_detail": "Synthetic complete provider record"}]},
         })
@@ -403,14 +403,14 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
     def test_duplicate_inspection_returns_preview_without_deleting_provider_data(self):
         common = {"type": "Ride", "start_date_local": "2026-09-06T10:00:00", "moving_time": 3600, "distance": 30000}
         snapshot = {"recent_activities": [{**common, "id": "synthetic-wahoo", "source": "Wahoo"}, {**common, "id": "synthetic-garmin", "source": "GARMIN_CONNECT"}]}
-        server.sync_state_repository().save_view(snapshot)
+        server.SYNC_PERSISTENCE.state_repository().save_view(snapshot)
         result = self.run_tool("inspect_activity_duplicates", message="Ist die letzte Radausfahrt doppelt vorhanden?")
         self.assertIsNotNone(result["duplicate"])
         self.assertEqual(result["duplicate"]["canonical_id"], "synthetic-wahoo")
         self.assertEqual(result["proposed_action"]["action_type"], "delete_duplicate_intervals_activity")
         self.assertEqual(result["proposed_action"]["status"], "preview")
         self.assertEqual(
-            server.sync_state_repository().latest_snapshot()["recent_activities"],
+            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["recent_activities"],
             snapshot["recent_activities"],
         )
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])

@@ -651,9 +651,9 @@ class ServerPerformanceTests(ServerTestCase):
             ],
         }
         snapshot["raw_provider_data"] = {"activities": list(snapshot["recent_activities"])}
-        server.sync_state_repository().save_snapshot(snapshot)
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
         pair = latest_wahoo_garmin_duplicate(
-            server.sync_state_repository().latest_snapshot() or {}
+            server.SYNC_PERSISTENCE.state_repository().latest_snapshot() or {}
         )
         with patch.object(intervals_client_module.IntervalsClient, "delete_activity", return_value=None) as delete:
             result = server.duplicate_activity_service().delete(
@@ -669,7 +669,7 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(
             [
                 item["id"]
-                for item in server.sync_state_repository().latest_snapshot()[
+                for item in server.SYNC_PERSISTENCE.state_repository().latest_snapshot()[
                     "recent_activities"
                 ]
             ],

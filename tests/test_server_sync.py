@@ -407,7 +407,7 @@ class ServerSyncTests(ServerTestCase):
 
     def test_daily_sync_markers_are_separate_per_provider(self):
         local_day = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
-        markers = server.daily_sync_marker_service()
+        markers = server.SYNC_PERSISTENCE.daily_markers()
         markers.mark("intervals", local_day)
         self.assertFalse(markers.is_due("intervals", local_day))
         self.assertTrue(markers.is_due("intervals", local_day + timedelta(hours=1)))
@@ -585,7 +585,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertIsNone(comparison)
 
     def test_existing_snapshot_uses_configured_intervals_window(self):
-        server.sync_state_repository().save_snapshot({"synced_at": "2026-08-28T08:00:00+00:00", "athlete": {}, "recent_activities": [{"id": "old"}], "recent_wellness": [], "upcoming_calendar": []})
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({"synced_at": "2026-08-28T08:00:00+00:00", "athlete": {}, "recent_activities": [{"id": "old"}], "recent_wellness": [], "upcoming_calendar": []})
         calls = []
 
         def fake_get(path, params=None):
@@ -873,7 +873,7 @@ class ServerSyncTests(ServerTestCase):
             "recent_wellness": [],
             "upcoming_calendar": [],
         }
-        server.sync_state_repository().save_snapshot(snapshot)
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
         context = server.coach_training_context_service().build()
         self.assertIn("Ride 0", context)
         self.assertNotIn("Ride 5", context)
@@ -887,7 +887,7 @@ class ServerSyncTests(ServerTestCase):
     def test_sync_period_supports_all_available_data_marker(self):
         from backend.sync.windows import split_date_windows
 
-        repository = server.sync_state_repository()
+        repository = server.SYNC_PERSISTENCE.state_repository()
         self.assertEqual(
             repository.set_sync_period(
                 "intervals", -1, server.ALL_SYNC_DAYS
@@ -947,7 +947,7 @@ class ServerSyncTests(ServerTestCase):
     def test_sync_intervals_uses_saved_period_when_not_explicitly_given(self):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
         config = replace(server.CONFIG, intervals_api_key="test-key")
-        server.sync_state_repository().set_sync_period(
+        server.SYNC_PERSISTENCE.state_repository().set_sync_period(
             "intervals", 65, server.ALL_SYNC_DAYS
         )
         with patch.object(server, "CONFIG", config), patch.object(
@@ -1301,7 +1301,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(deleted, [])
         self.assertEqual(
-            server.sync_state_repository().latest_snapshot()["synced_at"], "new"
+            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["synced_at"], "new"
         )
         self.assertEqual(
             {competition["name"] for competition in server.competition_service().list()},
@@ -1314,7 +1314,7 @@ class ServerSyncTests(ServerTestCase):
 
     def test_full_intervals_resync_keeps_last_snapshot_on_provider_failure(self):
         old_snapshot = {"synced_at": "old", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
-        server.sync_state_repository().save_snapshot(old_snapshot)
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(old_snapshot)
 
         with patch.object(
             IntervalsSnapshotReader,
@@ -1326,7 +1326,7 @@ class ServerSyncTests(ServerTestCase):
             with self.assertRaises(RuntimeError):
                 server.full_provider_resync_service().resync("intervals")
         self.assertEqual(
-            server.sync_state_repository().latest_snapshot()["synced_at"], "old"
+            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["synced_at"], "old"
         )
 
     def test_full_garmin_resync_keeps_last_snapshot_on_provider_failure(self):

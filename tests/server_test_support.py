@@ -77,7 +77,7 @@ def _garmin_metrics(snapshot):
     )
 
 def _current_performance_context(snapshot=None):
-    effective_snapshot = snapshot if snapshot is not None else server.sync_state_repository().latest_snapshot()
+    effective_snapshot = snapshot if snapshot is not None else server.SYNC_PERSISTENCE.state_repository().latest_snapshot()
     return performance_context.current_performance_context(
         effective_snapshot,
         server.GARMIN_ASSEMBLY.payload_service().snapshot(),

@@ -485,7 +485,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertGreaterEqual(local_clock.call_count, 2)
 
     def test_privacy_export_zip_streams_collections_and_contains_complete_manifest(self):
-        server.sync_state_repository().save_snapshot({"export-test": True, "synced_at": "2026-09-01", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({"export-test": True, "synced_at": "2026-09-01", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})
         temporary = server.privacy_archive_export_service().create_file()
         try:
             with zipfile.ZipFile(temporary) as archive:
@@ -665,7 +665,7 @@ class ServerDatabaseTests(ServerTestCase):
 
     def test_privacy_delete_rolls_back_earlier_table_deletes_on_sql_failure(self):
         server.coach_message_service().add("user", "Synthetic private message")
-        server.sync_state_repository().save_snapshot({
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({
             "synced_at": "synthetic", "recent_activities": [], "recent_wellness": [],
             "upcoming_calendar": [],
         })

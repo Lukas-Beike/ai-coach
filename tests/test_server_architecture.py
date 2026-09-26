@@ -2062,9 +2062,9 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     intervals_nutrition_sync_service coach_athlete_record_tool_service
     coach_activity_read_tool_service coach_read_tool_service state_version_service
     public_performance_state_service public_feedback_state_service
-    sync_public_state_service sync_state_repository performance_refresh_service
+    sync_public_state_service performance_refresh_service
     intervals_snapshot_reader performance_refresh_followup_service
-    daily_sync_marker_service intervals_snapshot_service
+    intervals_snapshot_service
     intervals_sync_service full_provider_resync_service
     public_weather_state_service
     morning_body_battery_service external_calendar_reader

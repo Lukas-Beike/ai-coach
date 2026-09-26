@@ -119,7 +119,7 @@ class ServerCoachTests(ServerTestCase):
         )
 
     def test_explicit_activity_detail_reads_only_the_requested_complete_raw_record(self):
-        server.sync_state_repository().save_snapshot({
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({
             "synced_at": "2026-09-11T08:00:00+00:00",
             "athlete": {},
             "recent_activities": [
@@ -340,7 +340,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertNotIn("latlng", detail["streams"])
 
     def test_coach_activity_feedback_is_persisted_and_attached_to_activity(self):
-        server.sync_state_repository().save_snapshot({
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({
             "synced_at": "2026-08-30T08:00:00+00:00",
             "athlete": {},
             "recent_activities": [{"id": "activity-1", "name": "Morgenlauf", "start_date_local": "2026-08-30T07:00:00"}],
@@ -365,7 +365,7 @@ class ServerCoachTests(ServerTestCase):
             })
         self.assertEqual(raised.exception.status, 404)
 
-        server.sync_state_repository().save_snapshot({
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({
             "synced_at": "now", "athlete": {},
             "recent_activities": [{"id": "activity-2", "name": "Abendlauf", "start_date_local": "2026-08-30T18:00:00"}],
             "recent_wellness": [], "upcoming_calendar": [],
@@ -681,16 +681,16 @@ class ServerCoachTests(ServerTestCase):
         }
         intervals_before = json.dumps(intervals_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         garmin_before = json.dumps(garmin_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        server.sync_state_repository().save_snapshot(intervals_snapshot)
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(intervals_snapshot)
         server.key_value_service().set("garmin_snapshot", json.dumps(garmin_snapshot, ensure_ascii=False))
 
         context = server.coach_training_context_service().build()
 
         self.assertEqual(
-            server.sync_state_repository().latest_snapshot(), intervals_snapshot
+            server.SYNC_PERSISTENCE.state_repository().latest_snapshot(), intervals_snapshot
         )
         self.assertEqual(server.GARMIN_ASSEMBLY.payload_service().snapshot(), garmin_snapshot)
-        self.assertEqual(json.dumps(server.sync_state_repository().latest_snapshot(), ensure_ascii=False, sort_keys=True, separators=(",", ":")), intervals_before)
+        self.assertEqual(json.dumps(server.SYNC_PERSISTENCE.state_repository().latest_snapshot(), ensure_ascii=False, sort_keys=True, separators=(",", ":")), intervals_before)
         self.assertEqual(json.dumps(server.GARMIN_ASSEMBLY.payload_service().snapshot(), ensure_ascii=False, sort_keys=True, separators=(",", ":")), garmin_before)
         self.assertNotIn("provider_detail", context)
         self.assertNotIn("vendor_payload", context)

@@ -162,7 +162,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertEqual(server.key_value_service().get("garmin_snapshot"), original)
 
     def test_feedback_answer_after_plain_text_morning_question_is_saved_once(self):
-        server.sync_state_repository().save_snapshot({"synced_at": runtime_clock.utc_now(), "recent_activities": [{"id": "synthetic-ride", "name": "Synthetic recovery ride", "type": "Ride", "start_date_local": "2026-09-06T10:00:00"}]})
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({"synced_at": runtime_clock.utc_now(), "recent_activities": [{"id": "synthetic-ride", "name": "Synthetic recovery ride", "type": "Ride", "start_date_local": "2026-09-06T10:00:00"}]})
         self.turn("Morgen-Check-in", [{"output_text": "Wie haben sich deine Beine bei der gestrigen Fahrt angefühlt?"}])
         result, _ = self.turn("Beine fühlten sich gut an, die geringe Leistung war aber zäh und langweilig.", [
             lambda _: self.call("inspect_activity_duplicates"),
@@ -205,8 +205,8 @@ class DiagnosticFollowupTests(unittest.TestCase):
                        "start_date_local": "2026-09-06T10:00:00", "moving_time": 3600, "distance": 30000},
                       {"id": "synthetic-garmin", "source": "Garmin", "type": "Ride",
                        "start_date_local": "2026-09-06T10:01:00", "moving_time": 3610, "distance": 30100}]
-        server.sync_state_repository().save_snapshot({"synced_at": runtime_clock.utc_now(), "recent_activities": activities})
-        before = server.sync_state_repository().latest_snapshot()
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({"synced_at": runtime_clock.utc_now(), "recent_activities": activities})
+        before = server.SYNC_PERSISTENCE.state_repository().latest_snapshot()
         with patch.object(intervals_client_module, "IntervalsClient") as provider:
             result, model = self.turn("Analysiere die letzte Fahrt.", [
                 lambda _: self.call("inspect_activity_duplicates"),
@@ -214,7 +214,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             ])
         self.assertEqual(result["status"], "completed")
         provider.assert_not_called()
-        self.assertEqual(server.sync_state_repository().latest_snapshot(), before)
+        self.assertEqual(server.SYNC_PERSISTENCE.state_repository().latest_snapshot(), before)
         output = json.loads(model.call_args.args[0]["input"][0]["output"])
         self.assertTrue(output["ok"])
         self.assertEqual(output["duplicate"]["canonical_id"], "synthetic-wahoo")

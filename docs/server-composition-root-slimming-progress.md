@@ -423,3 +423,50 @@ mocked providers; no live account or runtime data was used.
   No live provider or application data was used.
 - Remaining risk: image and SQLCipher integration checks need the application
   Docker runtime.
+
+## S2c boundary before implementation: synchronization persistence factories
+
+- `sync_state_repository()` and `daily_sync_marker_service()` each construct a
+  fresh repository/service per call. Their manager dependency must remain late
+  through `database_manager()` so manager replacement is respected; both retain
+  the process-shared key/value repository, with sync state also retaining the
+  shared snapshot repository and UTC clock, and daily markers retaining the
+  athlete-local clock callback. Do not cache either returned object.
+- The methods feed Intervals and Garmin services, provider refresh and queue
+  services, weather/calendar workflows, public state, Coach context, HTTP, and
+  temporary-database tests. Test helpers and ten test modules call the root
+  factories directly; migrate those calls to the assembly methods rather than
+  retaining forwarding functions. No e2e fixture references these factories.
+- Direct constructor patch targets are `tests/test_server_weather_calendar.py`
+  for `server.DailySyncMarkerService` and `server.SyncStateRepository`; move
+  each patch to `backend.sync.daily.DailySyncMarkerService` and
+  `backend.sync.state.SyncStateRepository`, respectively. No test depends on
+  repository object identity across calls; durable state identity is carried by
+  the shared manager/repositories and database.
+- Proposed owner/interface: `SyncPersistenceAssembly` in
+  `backend/sync/persistence_assembly.py`, exposing only
+  `state_repository()` and `daily_markers()`. Construction is inert and stores
+  explicit late manager and clock dependencies.
+
+## S2c: sync persistence assembly
+
+- Completed in `backend/sync/persistence_assembly.py` as
+  `SyncPersistenceAssembly.state_repository()` and `.daily_markers()`. Both
+  return fresh objects and resolve the current database manager on every call;
+  shared key/value and snapshot repositories remain the same instances.
+- Preserved late athlete-clock lookup for daily markers. The first broad run
+  exposed a patch-target timing regression when the clock method was captured
+  during root assembly. The assembly now resolves the clock owner when creating
+  each marker service, and the regression plus the full focused rerun passed.
+- Migrated server, test-helper, and ten test-module callers to the explicit
+  assembly methods. Constructor patches now target their backend owners. Added a
+  focused composition test for inert assembly construction and current-manager
+  lookup.
+- Focused sync, weather/calendar, HTTP, Coach, provider, performance, database,
+  diagnostic, Coach-tool, architecture, and assembly checks passed: 428 tests,
+  4 SQLCipher-dependent skips. Inventory check, compileall, and diff check
+  passed.
+- Measured `server.py`: 2,546 physical / 2,205 nonblank lines, 215 AST import
+  statements, 147 top-level functions.
+- No live provider or application data was used. Remaining environment risk is
+  SQLCipher/container-only validation, since the Docker engine is unavailable.
