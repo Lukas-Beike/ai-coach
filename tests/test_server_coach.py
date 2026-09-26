@@ -93,7 +93,7 @@ class ServerCoachTests(ServerTestCase):
             "apply_workout_library_plan", "delete_activity_feedback", "refresh_current_performance",
         }, names)
 
-        competition = server.competition_service().save({
+        competition = server.PLANNING_DATA.competition().save({
             "name": "Local Race", "event_date": "2099-01-01", "sport": "Cycling", "priority": "A",
         })["competition"]
         intent = {
@@ -164,16 +164,16 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(result["activity_validation"]["activity"]["sport"], "Laufen")
 
         with self.assertRaises(server.AppError) as missing:
-            server.activity_read_service().detail(
+            server.ATHLETE_DATA.activity_read().detail(
                 "activity-3",
                 garmin_snapshot=server.GARMIN_ASSEMBLY.payload_service().snapshot(),
-                profile=server.profile_service().get(),
+                profile=server.ATHLETE_DATA.profile().get(),
                 today=server.ATHLETE_CLOCK.now().date(),
             )
         self.assertEqual(missing.exception.reason, "activity_details_not_found")
 
     def test_structured_coach_reads_local_detail_and_schedules_library_templates(self):
-        template = server.workout_library_service().create_template({
+        template = server.PLANNING_DATA.workout_library().create_template({
             "sport": "Ride", "name": "Local tempo", "description": "- 60m 85%", "duration_minutes": 60,
         })
         tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
@@ -199,7 +199,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(planned["local"][0]["date"], tomorrow)
 
     def test_structured_coach_can_keep_a_planning_conflict_local_before_push(self):
-        planned = server.planned_unit_service().create({
+        planned = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "Local",
             "description": "- 30m 60% easy",
         })
@@ -222,11 +222,11 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(result["planned_unit"]["name"], "Local")
 
     def test_structured_state_exposes_current_local_targets_and_hashes(self):
-        planned = server.planned_unit_service().create({
+        planned = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Run", "name": "Easy run", "description": "- 30m 60% easy",
         })
-        template = server.workout_library_service().create_template({
+        template = server.PLANNING_DATA.workout_library().create_template({
             "sport": "Ride", "name": "Endurance", "description": "- 45m Z2", "duration_minutes": 45,
         })
 
@@ -239,7 +239,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(planned_ref["date"], planned["date"])
 
     def test_structured_coach_can_archive_multiple_templates_directly(self):
-        templates = [server.workout_library_service().create_template({
+        templates = [server.PLANNING_DATA.workout_library().create_template({
             "sport": "Ride", "name": f"Template {index}", "description": "- 30m Z2", "duration_minutes": 30,
         }) for index in range(2)]
         intent = {
@@ -255,14 +255,14 @@ class ServerCoachTests(ServerTestCase):
         )
 
         self.assertEqual(len(result["templates"]), 2)
-        self.assertEqual(server.workout_library_service().list(), [])
-        self.assertEqual(len(server.workout_library_service().list(include_archived=True)), 2)
+        self.assertEqual(server.PLANNING_DATA.workout_library().list(), [])
+        self.assertEqual(len(server.PLANNING_DATA.workout_library().list(include_archived=True)), 2)
 
     def test_structured_coach_syncs_all_pending_plan_objects_without_selection(self):
-        template = server.workout_library_service().create_template({
+        template = server.PLANNING_DATA.workout_library().create_template({
             "sport": "Ride", "name": "Template", "description": "- 45m Z2", "duration_minutes": 45,
         })
-        planned = server.planned_unit_service().create({
+        planned = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Run", "name": "Planned", "description": "- 30m 60% easy",
         })
@@ -285,10 +285,10 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(job_ids, ["job-all"])
 
     def test_structured_coach_all_pending_sync_rejects_a_subset(self):
-        first = server.workout_library_service().create_local_entry({
+        first = server.PLANNING_DATA.workout_library().create_local_entry({
             "sport": "Ride", "name": "First pending", "description": "- 30m 60% easy", "duration_minutes": 30,
         })
-        second = server.workout_library_service().create_local_entry({
+        second = server.PLANNING_DATA.workout_library().create_local_entry({
             "sport": "Run", "name": "Second pending", "description": "- 20m 60% easy", "duration_minutes": 20,
         })
         intent = {
@@ -347,7 +347,7 @@ class ServerCoachTests(ServerTestCase):
             "recent_wellness": [],
             "upcoming_calendar": [],
         })
-        result = server.activity_feedback_service().save_coach("activity-1", {
+        result = server.ATHLETE_DATA.activity_feedback().save_coach("activity-1", {
             "activity_name": "Morgenlauf", "activity_date": "2026-08-30T07:00:00", "notes": "Linkes Knie ungewohnt empfindlich",
         })
         self.assertEqual(result["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich")
@@ -360,7 +360,7 @@ class ServerCoachTests(ServerTestCase):
 
     def test_coach_activity_feedback_requires_a_known_snapshot_activity(self):
         with self.assertRaises(server.AppError) as raised:
-            server.activity_feedback_service().save_coach("unknown", {
+            server.ATHLETE_DATA.activity_feedback().save_coach("unknown", {
                 "activity_name": "Unbekannt", "activity_date": "2026-08-30", "notes": "War gut",
             })
         self.assertEqual(raised.exception.status, 404)
@@ -370,7 +370,7 @@ class ServerCoachTests(ServerTestCase):
             "recent_activities": [{"id": "activity-2", "name": "Abendlauf", "start_date_local": "2026-08-30T18:00:00"}],
             "recent_wellness": [], "upcoming_calendar": [],
         })
-        result = server.activity_feedback_service().save_coach("activity-2", {
+        result = server.ATHLETE_DATA.activity_feedback().save_coach("activity-2", {
             "activity_name": "Abendlauf", "activity_date": "2026-08-30", "notes": "Locker, aber am Ende müde",
         })
         self.assertEqual(result["activity_feedback"]["activity_id"], "activity-2")
@@ -618,7 +618,7 @@ class ServerCoachTests(ServerTestCase):
             ],
             "upcoming_calendar": [],
         }
-        planned = server.planned_unit_service().list(250, future_only=True)
+        planned = server.PLANNING_DATA.planned_unit().list(250, future_only=True)
         first = CoachIntervalsContextService().project(snapshot, planned, today)
         second = CoachIntervalsContextService().project(
             {**snapshot, "recent_activities": list(reversed(snapshot["recent_activities"]))}, planned, today
@@ -642,9 +642,9 @@ class ServerCoachTests(ServerTestCase):
             "description": "- 60m 92%\n\nprivate provider detail " + "x" * 20_000,
             "athlete_detail": "must not be projected",
         }
-        server.planned_unit_service().create({**event, "sport": event["type"]})
+        server.PLANNING_DATA.planned_unit().create({**event, "sport": event["type"]})
         projected = CoachIntervalsContextService().project(
-            {"upcoming_calendar": []}, server.planned_unit_service().list(250, future_only=True), today
+            {"upcoming_calendar": []}, server.PLANNING_DATA.planned_unit().list(250, future_only=True), today
         )["planned_workouts"][0]
         self.assertEqual(projected["name"], "Threshold ride")
         self.assertEqual(projected["status"], "planned")
@@ -813,7 +813,7 @@ class ServerCoachTests(ServerTestCase):
             "rationale": "Grundlage",
         }])[0]
 
-        library = server.workout_library_service().list(include_archived=True)
+        library = server.PLANNING_DATA.workout_library().list(include_archived=True)
         self.assertEqual(len(library), 1)
         self.assertEqual(template["id"], next(item["id"] for item in library if not item.get("date")))
         self.assertEqual(planned["source"], "library")
@@ -821,14 +821,14 @@ class ServerCoachTests(ServerTestCase):
         self.assertIsNone(planned["external_id"])
 
     def test_saved_profile_is_included_in_coach_context(self):
-        server.profile_service().save({"name": "Ada", "goals": "Münsterland Giro", "constraints": "No hard sessions after poor sleep"})
+        server.ATHLETE_DATA.profile().save({"name": "Ada", "goals": "Münsterland Giro", "constraints": "No hard sessions after poor sleep"})
         context = server.coach_training_context_service().build()
         self.assertIn('"name":"Ada"', context)
         self.assertIn("Münsterland Giro", context)
         self.assertIn("No hard sessions after poor sleep", context)
 
     def test_coach_can_create_update_and_delete_competition_without_replacing_profile(self):
-        server.profile_service().save({"name": "Ada", "goals": "Long course"})
+        server.ATHLETE_DATA.profile().save({"name": "Ada", "goals": "Long course"})
         event_date = (date.today() + timedelta(days=60)).isoformat()
         arguments = {
             "competition_id": "",
@@ -844,12 +844,12 @@ class ServerCoachTests(ServerTestCase):
             "description": "",
             "moving_time_seconds": -1,
         }
-        created = server.competition_service().save(arguments)
+        created = server.PLANNING_DATA.competition().save(arguments)
         competition_id = created["competition"]["id"]
         self.assertEqual(created["status"], "created")
-        self.assertEqual(server.profile_service().get()["name"], "Ada")
+        self.assertEqual(server.ATHLETE_DATA.profile().get()["name"], "Ada")
 
-        updated = server.competition_service().save({
+        updated = server.PLANNING_DATA.competition().save({
             **arguments,
             "competition_id": competition_id,
             "name": "Münsterland Giro 2027",
@@ -864,10 +864,10 @@ class ServerCoachTests(ServerTestCase):
                 "UPDATE competitions SET intervals_event_id=?, external_id=? WHERE id=?",
                 ("123", planning_competitions.competition_external_id(competition_id), competition_id),
             )
-        deleted = server.competition_service().delete(competition_id)
+        deleted = server.PLANNING_DATA.competition().delete(competition_id)
         self.assertEqual(deleted["status"], "deleted")
         self.assertTrue(deleted["remote_sync_pending"])
-        self.assertEqual(server.competition_service().list(), [])
+        self.assertEqual(server.PLANNING_DATA.competition().list(), [])
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             tombstone = db.execute("SELECT intervals_event_id, external_id FROM competition_sync_tombstones").fetchone()
         self.assertEqual(tombstone["intervals_event_id"], "123")
@@ -882,7 +882,7 @@ class ServerCoachTests(ServerTestCase):
                 "UPDATE competitions SET intervals_event_id=?, external_id=?, sync_dirty=0 WHERE id=?",
                 ("123", external_id, competition_id),
             )
-        server.competition_service().save({
+        server.PLANNING_DATA.competition().save({
             "competition_id": competition_id,
             "name": "Updated Race",
             "event_date": event_date,
@@ -920,7 +920,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(result["pushed"], 1)
         self.assertEqual(pushed[0]["id"], 123)
         self.assertEqual(pushed[0]["name"], "Updated Race")
-        self.assertEqual(server.competition_service().list()[0]["sync_dirty"], 0)
+        self.assertEqual(server.PLANNING_DATA.competition().list()[0]["sync_dirty"], 0)
 
     def test_coach_quick_actions_hide_completed_morning_and_limit_plan_blockers_to_three_days(self):
         today = server.ATHLETE_CLOCK.now().date()

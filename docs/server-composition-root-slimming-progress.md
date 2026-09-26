@@ -786,3 +786,62 @@ mocked providers; no live account or runtime data was used.
   resource used by `main()`; S6 will review this retained process identity.
 - Measured `server.py`: 2,359 physical / 2,050 nonblank lines, 214 AST import
   statements, 128 top-level functions.
+
+## S3 boundary before implementation: athlete and planning persistence
+
+- Current root factories are traced from `server.py` and the S0 AST map. The
+  athlete-owned group is activity feedback/read/duplicate, check-ins, and
+  profile. The planning-owned group is competitions, training-plan metadata,
+  planned-unit persistence, workout-library persistence, and adaptive preview
+  application. Cross-domain callers include Coach, HTTP/public state, sync,
+  history undo, privacy export, and test setup. `tests/support.py` and
+  `tests/server_test_support.py` directly call profile service; many tests
+  directly call all persistence factories. No `e2e/fixture_runtime.py` factory
+  patch was found for this group. Constructor patch targets are inspected per
+  factory before caller migration.
+- Preserve the active manager per call; existing repositories, revision
+  service, event buffer, clock and UUID identities; fresh service wrappers;
+  athlete-local date as a late callback; and local-only library/planned-unit
+  writes. Preview apply continues through its existing domain service and does
+  not bypass the explicit approval path. Keep transactional behavior inside
+  the existing service classes. The athlete clock retains its single eager
+  profile-service identity for clock configuration; service factory calls
+  remain fresh and manager-aware.
+- Proposed narrow owners: `AthleteDataAssembly` in `backend/athlete/assembly.py`
+  for activity, check-in, and profile services; `PlanningDataAssembly` in
+  `backend/planning/assembly.py` for competition, training-plan, planned-unit, workout
+  library, and adaptive-apply services. Each stores explicit late manager,
+  date, clock/event, conflict-reader and revision dependencies. No assembly
+  performs storage/provider I/O in its constructor. Privacy and backup remain a
+  separately traced S3 slice because restore additionally owns maintenance,
+  worker cancellation, queue generation reset and database-manager rebinding.
+
+## S3a: athlete and local planning persistence assemblies
+
+- Completed `AthleteDataAssembly` for activity feedback/read/duplicate,
+  check-in, and profile service creation; `PlanningDataAssembly` owns
+  competition service creation alongside its planning repository. The athlete clock still
+  receives one eagerly bound profile service over the same manager-cache owner;
+  ordinary services still resolve the active manager per factory call.
+- Completed `PlanningDataAssembly` for training-plan metadata, planned-unit,
+  workout-library, and approved adaptive-preview application services. Shared
+  revision, repository, event, clock, redaction, local-date, UUID, and calendar
+  conflict dependencies are explicit. Conflict lookup stays lazy until a
+  planned-unit service is requested. Existing use cases retain transaction,
+  revision/hash validation, preview approval, and local-only write behavior.
+- Removed ten root factories and updated Coach, HTTP, public state, sync,
+  history, support fixtures, and direct test lookups to call the assemblies.
+  Updated route-boundary expectations, added assembly identity/laziness tests,
+  and assigned the two assembly globals in the generated inventory owner map.
+- Focused checks: architecture + assembly (50 passed); athlete/planning/database
+  server checks (186 passed, 3 SQLCipher skips). Compileall, generated inventory
+  `--check`, and diff check passed. Docker remains unavailable on this host.
+- Changed files include `server.py`, new
+  `backend/athlete/assembly.py` and `backend/planning/assembly.py`, inventory
+  generator/output, architecture tests, new
+  `tests/test_athlete_planning_assemblies.py`, and direct service callers in
+  support, Coach, athlete, database, HTTP, planning, provider, sync, weather,
+  and repair tests.
+- Measured `server.py`: 2,271 physical / 1,991 nonblank lines, 210 AST imports,
+  118 top-level functions. Risk remaining for S3 is the separately traced
+  privacy/backup/restore assembly and its SQLCipher integration check.

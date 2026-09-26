@@ -966,9 +966,9 @@ class ServerProvidersTests(ServerTestCase):
             calendar_ical_url="",
         )
         with patch.object(server, "CONFIG", config):
-            server.profile_service().save({"weather_location": "Berlin"})
+            server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
             initial = {(item["provider"], item["area"]): item for item in server.PROVIDER_SYNC.freshness_service().current(
-                profile=server.profile_service().get(), garmin_has_core_error=bool(server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()),
+                profile=server.ATHLETE_DATA.profile().get(), garmin_has_core_error=bool(server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()),
                 garmin_tokenstore_exists=Path(server.CONFIG.garmin_tokenstore).exists())}
             self.assertEqual(initial[("intervals", "activities")]["state"], "never_loaded")
             self.assertEqual(initial[("weather", "forecast")]["state"], "never_loaded")
@@ -979,14 +979,14 @@ class ServerProvidersTests(ServerTestCase):
                 refresh_id, "error", "failed", error_code="network_error"
             )
             failed = {(item["provider"], item["area"]): item for item in server.PROVIDER_SYNC.freshness_service().current(
-                profile=server.profile_service().get(), garmin_has_core_error=bool(server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()),
+                profile=server.ATHLETE_DATA.profile().get(), garmin_has_core_error=bool(server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()),
                 garmin_tokenstore_exists=Path(server.CONFIG.garmin_tokenstore).exists())}
             self.assertEqual(failed[("intervals", "activities")]["state"], "error")
             self.assertEqual(failed[("intervals", "activities")]["error_code"], "network_error")
             self.assertIsNone(failed[("intervals", "activities")]["next_retry_at"])
             with patch.object(server, "CONFIG", replace(config, intervals_api_key="")):
                 unconfigured = {(item["provider"], item["area"]): item for item in server.PROVIDER_SYNC.freshness_service().current(
-                    profile=server.profile_service().get(), garmin_has_core_error=bool(server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()),
+                    profile=server.ATHLETE_DATA.profile().get(), garmin_has_core_error=bool(server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()),
                     garmin_tokenstore_exists=Path(server.CONFIG.garmin_tokenstore).exists())}
             self.assertEqual(unconfigured[("intervals", "activities")]["state"], "not_configured")
             self.assertEqual(unconfigured[("intervals", "activities")]["error_code"], "network_error")
@@ -995,7 +995,7 @@ class ServerProvidersTests(ServerTestCase):
                 requested_by="test", available_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
             )
             scheduled = {(item["provider"], item["area"]): item for item in server.PROVIDER_SYNC.freshness_service().current(
-                profile=server.profile_service().get(), garmin_has_core_error=bool(server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()),
+                profile=server.ATHLETE_DATA.profile().get(), garmin_has_core_error=bool(server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()),
                 garmin_tokenstore_exists=Path(server.CONFIG.garmin_tokenstore).exists())}
             self.assertTrue(scheduled[("intervals", "activities")]["next_retry_at"])
             refresh_id = server.PROVIDER_SYNC.refresh_tracker().start(
@@ -1011,7 +1011,7 @@ class ServerProvidersTests(ServerTestCase):
                     (stale_at, stale_at, refresh_id),
                 )
             stale = {(item["provider"], item["area"]): item for item in server.PROVIDER_SYNC.freshness_service().current(
-                profile=server.profile_service().get(), garmin_has_core_error=bool(server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()),
+                profile=server.ATHLETE_DATA.profile().get(), garmin_has_core_error=bool(server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()),
                 garmin_tokenstore_exists=Path(server.CONFIG.garmin_tokenstore).exists())}
             self.assertEqual(stale[("intervals", "activities")]["state"], "stale")
             self.assertTrue(stale[("intervals", "activities")]["has_last_good"])

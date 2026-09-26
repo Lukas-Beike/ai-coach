@@ -143,7 +143,7 @@ class ServerPerformanceTests(ServerTestCase):
         }
         metrics = performance_current_metrics.current_performance_metrics(
             snapshot,
-            server.profile_service().get(),
+            server.ATHLETE_DATA.profile().get(),
             _garmin_metrics(server.GARMIN_ASSEMBLY.payload_service().snapshot()),
         )
         self.assertEqual(metrics["running_vo2max_ml_kg_min"]["value"], 55)
@@ -224,7 +224,7 @@ class ServerPerformanceTests(ServerTestCase):
         }
         metrics = performance_current_metrics.current_performance_metrics(
             snapshot,
-            server.profile_service().get(),
+            server.ATHLETE_DATA.profile().get(),
             _garmin_metrics(server.GARMIN_ASSEMBLY.payload_service().snapshot()),
         )
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 302)
@@ -590,7 +590,7 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(metrics["cycling_eftp_watts"]["value"], 309)
 
     def test_manual_body_profile_values_are_used_when_api_values_are_absent(self):
-        server.profile_service().save({"weight_kg": "71,4", "body_fat_pct": "10.5", "height_cm": "181"})
+        server.ATHLETE_DATA.profile().save({"weight_kg": "71,4", "body_fat_pct": "10.5", "height_cm": "181"})
         performance = _current_performance_context({"synced_at": "now", "athlete": {}, "recent_wellness": [], "recent_activities": []})
         self.assertEqual(performance["metrics"]["weight_kg"]["value"], 71.4)
         self.assertEqual(performance["metrics"]["body_fat_pct"]["source"], "Manuell")
@@ -656,7 +656,7 @@ class ServerPerformanceTests(ServerTestCase):
             server.SYNC_PERSISTENCE.state_repository().latest_snapshot() or {}
         )
         with patch.object(intervals_client_module.IntervalsClient, "delete_activity", return_value=None) as delete:
-            result = server.duplicate_activity_service().delete(
+            result = server.ATHLETE_DATA.duplicate_activity().delete(
                 {
                     "canonical_id": pair["canonical_id"],
                     "duplicate_id": pair["duplicate_id"],

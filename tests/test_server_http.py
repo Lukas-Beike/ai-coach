@@ -94,11 +94,11 @@ class ServerHttpTests(ServerTestCase):
                 handler.send_json.assert_called_once_with(200, {"plans": []})
 
     def test_mixed_edit_scope_cannot_authorize_unrelated_existing_unit(self):
-        first = server.planned_unit_service().create({
+        first = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Ride", "name": "First", "description": "- 20m 60% easy",
         })
-        second = server.planned_unit_service().create({
+        second = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=2)).isoformat(),
             "sport": "Run", "name": "Second", "description": "- 20m 60% easy",
         })
@@ -119,10 +119,10 @@ class ServerHttpTests(ServerTestCase):
                 session_csrf_hash="", sync_job_ids=[],
             )
         self.assertEqual(error.exception.reason, "intent_scope_denied")
-        self.assertIsNotNone(next(item for item in server.planned_unit_service().list() if item["id"] == second["id"]))
+        self.assertIsNotNone(next(item for item in server.PLANNING_DATA.planned_unit().list() if item["id"] == second["id"]))
 
     def test_local_public_state_does_not_fetch_weather(self):
-        server.profile_service().save({"weather_location": "Berlin"})
+        server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=AssertionError("weather must stay local")):
             state = server.public_state_service().read(local_only=True)
         self.assertTrue(state["configured"]["weather"])
@@ -254,7 +254,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertIsNone(auth.authenticated_session(Handler(f"ic_session={token}")))
 
     def test_public_state_exposes_checkin_history(self):
-        server.checkin_service().save(
+        server.ATHLETE_DATA.checkin().save(
             {"checkin_date": "2026-08-30", "motivation": 8}
         )
         state = server.public_state_service().read(local_only=True)
@@ -277,7 +277,7 @@ class ServerHttpTests(ServerTestCase):
     def test_public_state_exposes_daily_planning_context(self):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
         server.SYNC_PERSISTENCE.state_repository().save_snapshot({"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [{"name": "Locker", "start_date_local": f"{today}T08:00:00"}]})
-        server.checkin_service().save({"checkin_date": today, "motivation": 8})
+        server.ATHLETE_DATA.checkin().save({"checkin_date": today, "motivation": 8})
         state = server.public_state_service().read(local_only=True)
         self.assertEqual(state["daily_planning_context"][0]["date"], today)
         self.assertEqual(state["daily_planning_context"][0]["checkin"]["motivation"], 8)
@@ -291,7 +291,7 @@ class ServerHttpTests(ServerTestCase):
                 for index in range(5)
             ] + [{"id": "old", "name": "Old", "type": "Ride", "start_date_local": "2000-01-01"}],
         })
-        service = server.activity_read_service()
+        service = server.ATHLETE_DATA.activity_read()
         first = service.page(limit=2, days=1, today=today)
         second = service.page(first["next_cursor"], 2, 1, today=today)
         third = service.page(second["next_cursor"], 2, 1, today=today)
@@ -781,7 +781,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(oversized.exception.status, 413)
 
     def test_complete_plan_replace_can_create_more_sessions_and_archive_old_ones(self):
-        old = server.planned_unit_service().create({
+        old = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Ride", "name": "Old", "description": "- 30m 60% easy",
         })
@@ -806,8 +806,8 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(result["status"], "replaced")
         self.assertEqual(result["archived_count"], 1)
         self.assertEqual(result["created_count"], 2)
-        self.assertEqual({item["name"] for item in server.planned_unit_service().list()}, {"New 1", "New 2"})
-        archived = next(item for item in server.planned_unit_service().list(20, include_archived=True) if item["id"] == old["id"])
+        self.assertEqual({item["name"] for item in server.PLANNING_DATA.planned_unit().list()}, {"New 1", "New 2"})
+        archived = next(item for item in server.PLANNING_DATA.planned_unit().list(20, include_archived=True) if item["id"] == old["id"])
         self.assertTrue(archived["archived"])
         self.assertTrue(archived["local_deleted"])
 
@@ -913,7 +913,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(len(messages), 1)
 
     def test_public_state_exposes_completed_and_planned_activity_tabs(self):
-        server.planned_unit_service().create({"date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "Intervalle", "description": "- 30m Z2", "duration_minutes": 30})
+        server.PLANNING_DATA.planned_unit().create({"date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "Intervalle", "description": "- 30m Z2", "duration_minutes": 30})
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [{"name": "Morgenlauf"}], "recent_wellness": [], "upcoming_calendar": []}
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
         state = server.public_state_service().read()

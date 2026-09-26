@@ -81,7 +81,7 @@ def _current_performance_context(snapshot=None):
     return performance_context.current_performance_context(
         effective_snapshot,
         server.GARMIN_ASSEMBLY.payload_service().snapshot(),
-        server.profile_service().get(),
+        server.ATHLETE_DATA.profile().get(),
         server.ATHLETE_CLOCK.now().date(),
     )
 

@@ -300,7 +300,7 @@ class ProviderReviewTests(unittest.TestCase):
             public = performance_context.current_performance_context(
                 server.SYNC_PERSISTENCE.state_repository().latest_snapshot(),
                 server.GARMIN_ASSEMBLY.payload_service().snapshot(),
-                server.profile_service().get(),
+                server.ATHLETE_DATA.profile().get(),
                 server.ATHLETE_CLOCK.now().date(),
             )
             for key in ("cycling_ftp_watts", "weight_kg"):

@@ -203,7 +203,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertNotIn("private upstream", result["message"]["content"])
 
     def test_profile_proposal_acceptance_preserves_existing_fields_and_replays_once(self):
-        server.profile_service().save({"name": "Synthetic Athlete", "training_background": "Regular cycling.", "equipment": "Indoor bike"})
+        server.ATHLETE_DATA.profile().save({"name": "Synthetic Athlete", "training_background": "Regular cycling.", "equipment": "Indoor bike"})
         self.turn("Ich gehe täglich spazieren.", [{"output_text": "Soll ich die tägliche Alltagsbewegung dauerhaft im Profil ergänzen?"}])
         change = {"field": "training_background", "expected_value": "Regular cycling.", "value": "Regular cycling. Daily easy walks."}
         result, _ = self.turn("Ja bitte füge das dauerhaft in mein Profil hinzu", [
@@ -212,21 +212,21 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             {"output_text": "Im Profil gespeichert."},
         ], turn="profile-acceptance")
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(server.profile_service().get()["equipment"], "Indoor bike")
-        self.assertEqual(server.profile_service().get()["name"], "Synthetic Athlete")
-        self.assertEqual(server.profile_service().get()["training_background"], change["value"])
+        self.assertEqual(server.ATHLETE_DATA.profile().get()["equipment"], "Indoor bike")
+        self.assertEqual(server.ATHLETE_DATA.profile().get()["name"], "Synthetic Athlete")
+        self.assertEqual(server.ATHLETE_DATA.profile().get()["training_background"], change["value"])
         replay, model = self.turn("Ja bitte füge das dauerhaft in mein Profil hinzu", [], turn="profile-acceptance")
         model.assert_not_called()
         self.assertEqual(replay, result)
         self.assertEqual(result["sync_job_ids"], [])
 
     def test_profile_patch_conflict_is_atomic_and_can_be_repaired(self):
-        server.profile_service().save({"name": "Synthetic", "training_background": "Current facts"})
-        original = server.profile_service().get()
+        server.ATHLETE_DATA.profile().save({"name": "Synthetic", "training_background": "Current facts"})
+        original = server.ATHLETE_DATA.profile().get()
         changes = [{"field": "name", "expected_value": "Synthetic", "value": "Updated"},
                    {"field": "training_background", "expected_value": "Old facts", "value": "New facts"}]
         def repair(_):
-            self.assertEqual(server.profile_service().get(), original)
+            self.assertEqual(server.ATHLETE_DATA.profile().get(), original)
             return self.call("update_profile", {"changes": [changes[0], {"field": "training_background", "expected_value": "Current facts", "value": "Current facts. Daily walking."}]}, ["local_profile"])
         result, _ = self.turn("Bitte dauerhaft merken", [
             lambda _: self.call("update_profile", {"changes": changes}, ["local_profile"]),
@@ -234,10 +234,10 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         ])
         self.assertEqual(result["status"], "completed")
         self.assertTrue(result["command_receipts"][0]["resolved"])
-        self.assertEqual(server.profile_service().get()["name"], "Updated")
+        self.assertEqual(server.ATHLETE_DATA.profile().get()["name"], "Updated")
 
     def test_profile_conflict_repair_does_not_hide_an_independent_field_failure(self):
-        server.profile_service().save({"name": "Synthetic", "training_background": "Current facts"})
+        server.ATHLETE_DATA.profile().save({"name": "Synthetic", "training_background": "Current facts"})
         result, _ = self.turn("Bitte speichere beide Profilangaben", [
             lambda _: self.call("update_profile", {"changes": [
                 {"field": "training_background", "expected_value": "Old facts", "value": "New facts"},
@@ -249,8 +249,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         ])
         self.assertEqual(result["status"], "partial")
         self.assertFalse(result["command_receipts"][0].get("resolved"))
-        self.assertEqual(server.profile_service().get()["name"], "Updated")
-        self.assertEqual(server.profile_service().get()["training_background"], "Current facts")
+        self.assertEqual(server.ATHLETE_DATA.profile().get()["name"], "Updated")
+        self.assertEqual(server.ATHLETE_DATA.profile().get()["training_background"], "Current facts")
 
     def test_profile_rejects_unknown_duplicate_invalid_and_unscoped_changes(self):
         good = {"field": "name", "expected_value": "", "value": "Synthetic"}
@@ -258,12 +258,12 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                  ([{**good, "field": "api_key"}], ["local_profile"]),
                  ([{**good, "value": None}], ["local_profile"]),
                  ([{**good, "value": "x" * 4001}], ["local_profile"]),
-                 ([good, {"field": "timezone", "expected_value": server.profile_service().get()["timezone"], "value": "Mars/Test"}], ["local_profile"])]
-        before = server.profile_service().get()
+                 ([good, {"field": "timezone", "expected_value": server.ATHLETE_DATA.profile().get()["timezone"], "value": "Mars/Test"}], ["local_profile"])]
+        before = server.ATHLETE_DATA.profile().get()
         for changes, scope in cases:
             result, _ = self.turn("Bitte speichern", [lambda _, c=changes, s=scope: self.call("update_profile", {"changes": c}, s), {"output_text": "Nicht gespeichert."}])
             self.assertEqual(result["status"], "failed")
-            self.assertEqual(server.profile_service().get(), before)
+            self.assertEqual(server.ATHLETE_DATA.profile().get(), before)
 
     def test_sync_invalid_id_repair_clears_error_and_queues_only_selected_unit(self):
         units = server.local_plan_creation_service().save([self.workout("2026-09-09"), self.workout("2026-09-11")])
@@ -498,9 +498,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         result, _ = self.turn("Bitte bis zum Giro durchplanen, zweimal Oberkörper pro Woche.", [rebuild, {"output_text": "Der Zeitraum ist geplant."}])
         self.assertEqual(result["status"], "completed")
         self.assertTrue(any(item["local_id"] == entries[1]["id"] for item in self.state()["planned_units"]))
-        old_plan = next(item for item in server.training_plan_service().list() if item["name"] == "Alter Plan")
+        old_plan = next(item for item in server.PLANNING_DATA.training_plan().list() if item["name"] == "Alter Plan")
         self.assertNotEqual(old_plan["status"], "archived")
-        new_plan = next(item for item in server.training_plan_service().list() if item["name"] == "Bis zum Giro")
+        new_plan = next(item for item in server.PLANNING_DATA.training_plan().list() if item["name"] == "Bis zum Giro")
         self.assertIn("Zweimal Oberkörper pro Woche", new_plan["constraints"])
 
     def test_out_of_period_change_is_rejected(self):
@@ -737,23 +737,23 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(self.state(), before)
 
     def test_competition_edit_uses_resolved_id_without_literal_name(self):
-        competition = server.competition_service().save({"name": "Synthetic Giro", "event_date": "2026-10-03", "sport": "Ride", "priority": "A"})
+        competition = server.PLANNING_DATA.competition().save({"name": "Synthetic Giro", "event_date": "2026-10-03", "sport": "Ride", "priority": "A"})
         competition_id = competition.get("competition", competition).get("id")
         if not competition_id:
-            competition_id = server.competition_service().list()[0]["id"]
+            competition_id = server.PLANNING_DATA.competition().list()[0]["id"]
         result, _ = self.turn("Den bitte einen Tag später", [lambda _: self.call("save_competition", {
             "payload": {"competition_id": competition_id, "event_date": "2026-10-04"}}, [f"competition:{competition_id}"]), {"output_text": "Auf den 4. Oktober verschoben."}])
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(server.competition_service().list()[0]["event_date"], "2026-10-04")
+        self.assertEqual(server.PLANNING_DATA.competition().list()[0]["event_date"], "2026-10-04")
 
     def test_different_target_id_cannot_escape_action_scope(self):
         for name in ("First", "Second"):
-            server.competition_service().save({"name": name, "event_date": "2026-10-03", "sport": "Ride", "priority": "A"})
-        one, two = server.competition_service().list()
+            server.PLANNING_DATA.competition().save({"name": name, "event_date": "2026-10-03", "sport": "Ride", "priority": "A"})
+        one, two = server.PLANNING_DATA.competition().list()
         result, _ = self.turn("Den ersten entfernen", [lambda _: self.call("delete_competition", {"competition_id": two["id"]},
             [f"competition:{one['id']}"]), {"output_text": "Nicht entfernt."}])
         self.assertEqual(result["status"], "failed")
-        self.assertEqual(len(server.competition_service().list()), 2)
+        self.assertEqual(len(server.PLANNING_DATA.competition().list()), 2)
 
     def test_plan_create_and_explicit_sync_use_separate_step_targets(self):
         before = self.state()
@@ -909,8 +909,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
     def test_same_effect_and_call_are_idempotent_inside_turn(self):
         def save(_):
             return self.call("save_checkin", {"payload": {"notes": "Synthetic tired"}}, ["local_checkin"], call_id="same-call")
-        service = server.checkin_service()
-        with patch.object(server, "checkin_service", return_value=service), patch.object(
+        service = server.ATHLETE_DATA.checkin()
+        with patch.object(server.ATHLETE_DATA, "checkin", return_value=service), patch.object(
             service, "save_coach", wraps=service.save_coach
         ) as save_checkin:
             result, _ = self.turn("Müde heute", [save, save, {"output_text": "Gespeichert."}])
@@ -981,8 +981,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         def cancel(_):
             cancelled.set()
             return self.call("save_checkin", {"payload": {"notes": "Synthetic"}}, ["local_checkin"])
-        service = server.checkin_service()
-        with patch.object(server, "checkin_service", return_value=service), patch.object(service, "save_coach") as save:
+        service = server.ATHLETE_DATA.checkin()
+        with patch.object(server.ATHLETE_DATA, "checkin", return_value=service), patch.object(service, "save_coach") as save:
             result, _ = self.turn("Heute müde", [cancel], cancel_event=cancelled)
         save.assert_not_called()
         self.assertEqual(result["status"], "cancelled")
@@ -1054,8 +1054,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             args["_request"]["summary"] = "Same request rephrased by the model"
             response["output"][0]["arguments"] = json.dumps(args)
             return response
-        service = server.checkin_service()
-        with patch.object(server, "checkin_service", return_value=service), patch.object(
+        service = server.ATHLETE_DATA.checkin()
+        with patch.object(server.ATHLETE_DATA, "checkin", return_value=service), patch.object(
             service, "save_coach", wraps=service.save_coach
         ) as save:
             result, _ = self.turn("Müde heute", [lambda _: self.call("save_checkin", {"payload": {"notes": "Synthetic tired"}},
@@ -1083,7 +1083,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_archived_plan_cannot_be_replaced_as_current_plan(self):
         server.local_plan_creation_service().save([self.workout()], plan_name="Archived")
-        plan = server.training_plan_service().list()[0]
+        plan = server.PLANNING_DATA.training_plan().list()[0]
         with server.database_manager().unit_of_work() as db:
             db.execute("UPDATE training_plans SET status='archived' WHERE id=?", (plan["id"],))
         before = self.state()

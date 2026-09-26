@@ -164,6 +164,6 @@ def reset_application_state(server) -> None:
     with server.DB_LOCK, server.database_manager().unit_of_work() as db:
         for table in tables:
             db.execute(f"DELETE FROM {table}")
-    server.profile_service().save({})
+    server.ATHLETE_DATA.profile().save({})
     coach_streams.CHAT_STREAM_REGISTRY.clear_state()
 

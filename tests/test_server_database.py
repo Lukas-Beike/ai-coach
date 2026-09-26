@@ -171,7 +171,7 @@ class ServerDatabaseTests(ServerTestCase):
             self.assertEqual(repository.get(db), payload)
 
     def test_competition_repository_preserves_order_and_full_row_lookup_contract(self):
-        saved = server.competition_service().save({
+        saved = server.PLANNING_DATA.competition().save({
             "name": "Repository race",
             "event_date": "2026-09-20",
             "sport": "Run",
@@ -430,7 +430,7 @@ class ServerDatabaseTests(ServerTestCase):
             "id": "remote-template-1", "name": "Archived template", "type": "Ride",
             "description": "- 60m 60% local", "duration_minutes": 60,
         }])[0]
-        server.workout_library_service().update(archived["id"], {"action": "archive"})
+        server.PLANNING_DATA.workout_library().update(archived["id"], {"action": "archive"})
         server.key_value_service().set("garmin_snapshot", json.dumps({"source": "Garmin", "days": []}))
         server.key_value_service().set(weather_cache.CACHE_KEY, json.dumps({"query": "Berlin", "forecast": {}}))
         server.key_value_service().set("calendar_display", json.dumps({"past_weeks": 2, "future_weeks": 6}))
@@ -827,19 +827,19 @@ class ServerDatabaseTests(ServerTestCase):
                     self.assertNotEqual(row["csrf_hash"], csrf)
 
     def test_local_library_template_can_be_edited_archived_restored_and_deleted(self):
-        entry = server.workout_library_service().create_local_entry({
+        entry = server.PLANNING_DATA.workout_library().create_local_entry({
             "sport": "Ride", "name": "Lokale Vorlage", "description": "- 45m 60% Easy ride", "duration_minutes": 45,
         })
-        updated = server.workout_library_service().update(entry["id"], {"action": "update", "name": "Neue Vorlage", "description": "- 45m 55% Recovery ride"})
+        updated = server.PLANNING_DATA.workout_library().update(entry["id"], {"action": "update", "name": "Neue Vorlage", "description": "- 45m 55% Recovery ride"})
         self.assertEqual(updated["library_entry"]["name"], "Neue Vorlage")
-        self.assertEqual(server.workout_library_service().list()[0]["name"], "Neue Vorlage")
-        server.workout_library_service().update(entry["id"], {"action": "archive"})
-        self.assertEqual(server.workout_library_service().list(), [])
-        self.assertTrue(server.workout_library_service().list(include_archived=True)[0]["archived"])
-        server.workout_library_service().update(entry["id"], {"action": "restore"})
-        self.assertEqual(len(server.workout_library_service().list()), 1)
-        server.workout_library_service().update(entry["id"], {"action": "delete"})
-        self.assertEqual(server.workout_library_service().list(include_archived=True), [])
+        self.assertEqual(server.PLANNING_DATA.workout_library().list()[0]["name"], "Neue Vorlage")
+        server.PLANNING_DATA.workout_library().update(entry["id"], {"action": "archive"})
+        self.assertEqual(server.PLANNING_DATA.workout_library().list(), [])
+        self.assertTrue(server.PLANNING_DATA.workout_library().list(include_archived=True)[0]["archived"])
+        server.PLANNING_DATA.workout_library().update(entry["id"], {"action": "restore"})
+        self.assertEqual(len(server.PLANNING_DATA.workout_library().list()), 1)
+        server.PLANNING_DATA.workout_library().update(entry["id"], {"action": "delete"})
+        self.assertEqual(server.PLANNING_DATA.workout_library().list(include_archived=True), [])
 
     def test_gemini_function_schemas_keep_openai_nullable_fields_as_json_schema(self):
         schema = {"type": "object", "properties": {"notes": {"type": ["string", "null"]}}}
@@ -973,7 +973,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertTrue(readiness["maintenance"]["active"])
 
     def test_privacy_delete_removes_change_history(self):
-        server.profile_service().save({"name": "Ada"})
+        server.ATHLETE_DATA.profile().save({"name": "Ada"})
         self.assertTrue(server.change_history_service().list())
         with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
             server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)

@@ -207,6 +207,8 @@ def _explicit_owner(name: str) -> str | None:
             "utc_now": RUNTIME_PACKAGE,
             "ATHLETE_CLOCK": "backend/athlete/clock.py",
             "ATHLETE_PROFILE_SERVICE": COMPOSITION_ROOT,
+            "ATHLETE_DATA": "backend/athlete/assembly",
+            "PLANNING_DATA": "backend/planning/assembly",
             "EXTERNAL_CALENDAR": COMPOSITION_ROOT,
             "AppError": ERRORS_MODULE,
             "public_app_error_status": ERRORS_MODULE,

@@ -38,7 +38,7 @@ class AuditRemediationTests(unittest.TestCase):
     turn = dialogue.CoachDialogueTests.turn
 
     def competition(self):
-        item = server.competition_service().save({"name": "Synthetic race", "event_date": "2026-10-01", "sport": "Cycling"})["competition"]
+        item = server.PLANNING_DATA.competition().save({"name": "Synthetic race", "event_date": "2026-10-01", "sport": "Cycling"})["competition"]
         external = planning_competitions.competition_external_id(item["id"])
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute("UPDATE competitions SET intervals_event_id='123', external_id=?, sync_dirty=0, sync_state='synced' WHERE id=?", (external, item["id"]))
@@ -48,31 +48,31 @@ class AuditRemediationTests(unittest.TestCase):
     def test_competition_fetch_preserves_a_concurrent_local_edit(self):
         item, remote = self.competition()
         def fetch(*args):
-            server.competition_service().save({"competition_id": item["id"], "name": "New local name"})
+            server.PLANNING_DATA.competition().save({"competition_id": item["id"], "name": "New local name"})
             return [remote]
         client = Mock()
         client.fetch_competition_events.side_effect = fetch
         with patch.object(intervals_client_module, "IntervalsClient", return_value=client):
             server.PROVIDER_RESYNC.competition_sync_service().sync()
-        current = server.competition_service().list()[0]
+        current = server.PLANNING_DATA.competition().list()[0]
         self.assertEqual(current["name"], "New local name")
         self.assertEqual(current["sync_dirty"], 1)
 
     def test_tombstone_suppresses_import_before_and_after_remote_delete(self):
         item, remote = self.competition()
-        server.competition_service().delete(item["id"])
+        server.PLANNING_DATA.competition().delete(item["id"])
         client = Mock()
         client.fetch_competition_events.return_value = [remote]
         with patch.object(intervals_client_module, "IntervalsClient", return_value=client):
             server.PROVIDER_RESYNC.competition_sync_service().sync()
-            self.assertEqual(server.competition_service().list(), [])
+            self.assertEqual(server.PLANNING_DATA.competition().list(), [])
             server.PROVIDER_RESYNC.competition_sync_service().sync(push_local=True)
-        self.assertEqual(server.competition_service().list(), [])
+        self.assertEqual(server.PLANNING_DATA.competition().list(), [])
         client.bulk_delete_events.assert_called_once()
 
     def test_delete_only_acknowledges_captured_tombstones(self):
         item, remote = self.competition()
-        server.competition_service().delete(item["id"])
+        server.PLANNING_DATA.competition().delete(item["id"])
         client = Mock()
         client.fetch_competition_events.return_value = [remote]
         def delete(_):
@@ -85,10 +85,10 @@ class AuditRemediationTests(unittest.TestCase):
             self.assertEqual([row["id"] for row in db.execute("SELECT id FROM competition_sync_tombstones")], ["later"])
 
     def test_weather_fetch_participates_in_maintenance_and_rechecks_location(self):
-        server.profile_service().save({"weather_location": "Synthetic city"})
+        server.ATHLETE_DATA.profile().save({"weather_location": "Synthetic city"})
         def fetch(query):
             self.assertGreater(runtime_maintenance.MAINTENANCE_GATE.state()["running_operations"], 0)
-            server.profile_service().save({"weather_location": ""})
+            server.ATHLETE_DATA.profile().save({"weather_location": ""})
             return {"query": query, "forecast": {}, "fetched_at": runtime_clock.utc_now()}
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=fetch):
             self.assertEqual(server.WEATHER_ASSEMBLY.service().state()["state"], "not_configured")
@@ -96,7 +96,7 @@ class AuditRemediationTests(unittest.TestCase):
         self.assertFalse(server.key_value_service().get(weather_cache.HISTORY_KEY))
 
     def test_privacy_delete_drains_a_direct_weather_read(self):
-        server.profile_service().save({"weather_location": "Synthetic city"})
+        server.ATHLETE_DATA.profile().save({"weather_location": "Synthetic city"})
         entered, release, deleted = threading.Event(), threading.Event(), threading.Event()
         failures = []
         def fetch(query):
@@ -153,7 +153,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_cached_weather_remains_stale_without_refresh(self):
-        server.profile_service().save({"weather_location": "Synthetic city"})
+        server.ATHLETE_DATA.profile().save({"weather_location": "Synthetic city"})
         server.key_value_service().set(weather_cache.CACHE_KEY, json.dumps({"query": "Synthetic city", "forecast": {}, "fetched_at": "2020-01-01T00:00:00+00:00"}))
         self.assertEqual(server.WEATHER_ASSEMBLY.service().state(refresh=False)["state"], "stale")
         with patch.object(
@@ -204,7 +204,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
 
     def test_privacy_export_has_every_checkin_and_library_record(self):
         for offset in range(20):
-            server.checkin_service().save(
+            server.ATHLETE_DATA.checkin().save(
                 {
                     "checkin_date": (
                         date(2026, 9, 7) - timedelta(days=offset)

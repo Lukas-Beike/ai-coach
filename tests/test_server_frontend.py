@@ -13,7 +13,7 @@ from server_test_support import server, ServerTestCase
 class ServerFrontendTests(ServerTestCase):
 
     def test_structured_coach_deletes_local_planned_unit_without_ui_preview(self):
-        planned = server.planned_unit_service().create({
+        planned = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Ride", "name": "Remove me", "description": "- 20m 60% easy",
         })
@@ -36,7 +36,7 @@ class ServerFrontendTests(ServerTestCase):
 
         self.assertEqual(result["status"], "applied")
         self.assertEqual(result["changes"][0]["status"], "deleted")
-        self.assertEqual(server.planned_unit_service().list(), [])
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
 
     def test_frontend_loads_domain_areas_instead_of_monolithic_state(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")

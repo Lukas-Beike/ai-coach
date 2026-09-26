@@ -18,9 +18,9 @@ class ServerAthleteTests(ServerTestCase):
 
     def test_profile_timezone_is_validated_and_local_now_uses_it(self):
         with self.assertRaises(server.AppError) as raised:
-            server.profile_service().save({"timezone": "Mars/NotAZone"})
+            server.ATHLETE_DATA.profile().save({"timezone": "Mars/NotAZone"})
         self.assertEqual(raised.exception.status, 400)
-        profile = server.profile_service().save({"timezone": "UTC"})
+        profile = server.ATHLETE_DATA.profile().save({"timezone": "UTC"})
         self.assertEqual(profile["timezone"], "UTC")
         self.assertEqual(getattr(server.ATHLETE_CLOCK.now().tzinfo, "key", None), "UTC")
 
@@ -31,11 +31,11 @@ class ServerAthleteTests(ServerTestCase):
         }, validate_timezone=True)
         self.assertEqual(profile["availability"], "Dienstag abends möglich")
         self.assertNotIn("availability_schedule", profile)
-        server.profile_service().save({
+        server.ATHLETE_DATA.profile().save({
             "availability": profile["availability"],
             "availability_schedule": [{"weekday": 1, "max_minutes": 90}],
         })
-        self.assertNotIn("availability_schedule", server.profile_service().get())
+        self.assertNotIn("availability_schedule", server.ATHLETE_DATA.profile().get())
         context = server.coach_structured_context_service().build({"recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})
         self.assertNotIn("weekly_availability", context)
 
@@ -47,7 +47,7 @@ class ServerAthleteTests(ServerTestCase):
                 "2026-08-31",
             )
             with self.assertRaises(server.AppError) as raised:
-                server.checkin_service().save({"checkin_date": "2026-09-01"})
+                server.ATHLETE_DATA.checkin().save({"checkin_date": "2026-09-01"})
         self.assertEqual(raised.exception.status, 400)
 
     def test_profile_save_resets_button_before_follow_up_refresh(self):

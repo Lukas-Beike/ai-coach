@@ -170,9 +170,9 @@ class DiagnosticFollowupTests(unittest.TestCase):
             {"output_text": "Deine Rückmeldung zur Fahrt ist gespeichert."},
         ])
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(len(server.activity_feedback_service().list()), 1)
+        self.assertEqual(len(server.ATHLETE_DATA.activity_feedback().list()), 1)
         self.assertEqual(
-            server.activity_feedback_service().list()[0]["activity_id"],
+            server.ATHLETE_DATA.activity_feedback().list()[0]["activity_id"],
             "synthetic-ride",
         )
 

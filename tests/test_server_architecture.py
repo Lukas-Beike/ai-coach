@@ -3149,8 +3149,8 @@ class ServerArchitectureTests(unittest.TestCase):
             [
                 "session_auth_service",
                 "public_performance_state_service",
-                "profile_service",
-                "competition_service",
+                "ATHLETE_DATA.profile",
+                "PLANNING_DATA.competition",
                 "public_feedback_state_service",
                 "coach_context_preview_service",
                 "SETTINGS",
@@ -3169,7 +3169,7 @@ class ServerArchitectureTests(unittest.TestCase):
                 "session_auth_service",
                 "SYNC_JOB_QUEUE.service",
                 "sync_public_state_service",
-                "activity_read_service",
+                "ATHLETE_DATA.activity_read",
                 "lambda: ATHLETE_CLOCK.now().date()",
                 "ALL_SYNC_DAYS",
             ],
@@ -3356,7 +3356,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "FEEDBACK_POST_ROUTES",
             ("/api/feedback",),
-            "FeedbackPostRoutes(checkin_service)",
+            "FeedbackPostRoutes(ATHLETE_DATA.checkin)",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "feedback_post.py"
@@ -3430,7 +3430,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_do_PUT",
             "ATHLETE_PUT_ROUTES",
             ("/api/athlete-context", "/api/profile"),
-            "AthletePutRoutes(athlete_context_service, profile_service)",
+            "AthletePutRoutes(athlete_context_service, ATHLETE_DATA.profile)",
         )
         route_source = (BACKEND_ROOT / "http_api" / "athlete_put.py").read_text(
             encoding="utf-8"
