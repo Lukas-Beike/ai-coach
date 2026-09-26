@@ -112,7 +112,7 @@ class CoachStructuredToolRoundService:
                     metadata, state.command_receipts, question=question, cancelled=cancelled,
                     context=state.context, allow_mutations=state.allow_mutations,
                 )
-                local_transaction = name not in {"start_provider_refresh", "apply_adaptive_replan"}
+                local_transaction = name not in {"start_provider_refresh", "apply_adaptive_replan", "delete_duplicate_intervals_activity"}
                 with (
                     self._database_lock if local_transaction else nullcontext(),
                     self._database_manager().unit_of_work() if local_transaction else nullcontext(),
