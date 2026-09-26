@@ -833,18 +833,18 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(result["status"], "completed")
 
     def test_background_coach_job_is_persisted_and_session_scoped(self):
-        job = server.coach_job_submission_service().enqueue(
+        job = server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
             "turn-background-persisted",
             "csrf-background-owner",
             operation_id="operation-background-persisted",
         )
         self.assertEqual(job["status"], "queued")
-        status = server.coach_job_submission_service().stream_status("csrf-background-owner")
+        status = server.COACH_BACKGROUND_JOBS.job_submission_service().stream_status("csrf-background-owner")
         self.assertEqual(status["mode"], "background")
         self.assertEqual(status["operation_id"], "operation-background-persisted")
         self.assertEqual(
-            server.coach_job_submission_service().stream_status("csrf-other"),
+            server.COACH_BACKGROUND_JOBS.job_submission_service().stream_status("csrf-other"),
             {"status": "idle", "operation_id": None},
         )
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -858,7 +858,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertIn("2 Wochen", user_message["content"])
 
     def test_background_submission_atomically_allows_only_one_active_turn_per_session(self):
-        service = server.coach_job_submission_service()
+        service = server.COACH_BACKGROUND_JOBS.job_submission_service()
         original_active = service.active
         barrier = threading.Barrier(2)
         results = []
@@ -1210,9 +1210,9 @@ class ServerHttpTests(ServerTestCase):
                 coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
             self.assertEqual(duplicate.exception.reason, "chat_already_running")
             with self.assertRaises(server.AppError) as raised:
-                server.coach_cancellation_service().cancel(session_key, "other-operation")
+                server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(session_key, "other-operation")
             self.assertEqual(raised.exception.status, 409)
-            result = server.coach_cancellation_service().cancel(session_key, operation_id)
+            result = server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(session_key, operation_id)
             self.assertEqual(result["status"], "cancelling")
             self.assertTrue(cancel_event.is_set())
         finally:
@@ -1220,7 +1220,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_chat_stream_status_is_scoped_to_the_session(self):
         session_key = "session-stream-status-test"
-        service = server.coach_job_submission_service()
+        service = server.COACH_BACKGROUND_JOBS.job_submission_service()
         self.assertEqual(service.stream_status(session_key), {"status": "idle", "operation_id": None})
         operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
         try:
@@ -1309,7 +1309,7 @@ class ServerHttpTests(ServerTestCase):
         response = Mock()
         cancel_event._openai_response = response
         try:
-            result = server.coach_cancellation_service().cancel(session_key, operation_id)
+            result = server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(session_key, operation_id)
             self.assertEqual(result["status"], "cancelling")
             response.close.assert_called_once_with()
             self.assertTrue(cancel_event.is_set())

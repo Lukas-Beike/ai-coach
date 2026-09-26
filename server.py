@@ -207,6 +207,7 @@ from backend.coach.planning_tools_assembly import CoachPlanningToolsAssembly
 from backend.coach.tool_dispatch_assembly import CoachToolDispatchAssembly
 from backend.coach.command_tools_assembly import CoachCommandToolsAssembly
 from backend.coach.structured_tool_round_assembly import CoachStructuredToolRoundAssembly
+from backend.coach.background_jobs_assembly import CoachBackgroundJobsAssembly
 from backend.coach.turn_assembly import CoachTurnAssembly
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.dialogue import CoachDialogueReadService, dialogue_tools
@@ -219,16 +220,7 @@ from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
 )
 from backend.coach.planning_commands import CoachPlanningCommandService
-from backend.coach.job_store import CoachJobStore
-from backend.coach.cancellation import CoachCancellationService
-from backend.coach.turn_failures import (
-    CoachTurnFailureDependencies,
-    CoachTurnFailureService,
-)
-from backend.coach.job_submission import CoachJobSubmissionService
 from backend.coach.morning import ManualMorningCheckinService, MorningCheckinStateService
-from backend.coach.morning_completion import MorningCoachJobCompletionService
-from backend.coach.background_job import CoachBackgroundJobRunner
 from backend.coach.job_worker import COACH_JOB_WORKER
 from backend.coach.tools import build_tool_contracts
 from backend.coach.service import command_receipt
@@ -599,8 +591,8 @@ BACKUP_ASSEMBLY = BackupAssembly(
     schema_is_current=database_schema_is_current,
     maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
     sync_jobs=lambda: SYNC_JOB_QUEUE.service(),
-    coach_jobs=lambda: coach_job_store(),
-    coach_failures=lambda: coach_turn_failure_service(),
+    coach_jobs=lambda: COACH_BACKGROUND_JOBS.job_store(),
+    coach_failures=lambda: COACH_BACKGROUND_JOBS.turn_failure_service(),
     sync_wake_event=shared_sync_job_wake_event,
     coach_wake_event=COACH_JOB_WORKER.wake_event,
     redact=REDACTOR.redact_text,
@@ -1196,49 +1188,12 @@ def coach_quick_actions_service() -> CoachQuickActionsService:
     )
 
 
-def coach_job_store() -> CoachJobStore:
-    """Compose durable Coach background-job persistence."""
-    return CoachJobStore(
-        database_manager, DB_LOCK, COACH_JOB_WORKER.wake_event,
-        runtime_maintenance.MAINTENANCE_GATE, runtime_clock.utc_now,
-    )
 
 
-def coach_turn_failure_service() -> CoachTurnFailureService:
-    """Compose durable terminal Coach failure handling from current resources."""
-    return CoachTurnFailureService(
-        CoachTurnFailureDependencies(
-            database_manager=database_manager,
-            database_lock=DB_LOCK,
-            chat_repository=CHAT_REPOSITORY,
-            key_values=KEY_VALUE_REPOSITORY,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            redactor=REDACTOR,
-            utc_now=runtime_clock.utc_now,
-            repository_root=ROOT,
-            read_only_tools=frozenset(STRUCTURED_READ_ONLY_TOOLS),
-        )
-    )
 
 
-def coach_job_submission_service() -> CoachJobSubmissionService:
-    """Compose validation and committed side effects for background submissions."""
-    return CoachJobSubmissionService(
-        database_manager, CHAT_REPOSITORY, DB_LOCK, SETTINGS,
-        runtime_events.STATE_EVENT_BUFFER, coach_streams.CHAT_STREAM_REGISTRY,
-        COACH_JOB_WORKER.wake_event, runtime_clock.utc_now,
-        background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
-        max_attachment_storage_bytes=coach_attachments.MAX_ATTACHMENT_STORAGE_BYTES,
-        max_gemini_inline_image_bytes=coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES,
-    )
 
 
-def coach_cancellation_service() -> CoachCancellationService:
-    """Compose session-scoped Coach cancellation from its state owners."""
-    return CoachCancellationService(
-        coach_job_submission_service(), coach_job_store(),
-        coach_streams.CHAT_STREAM_REGISTRY,
-    )
 
 
 def coach_dialogue_read_service() -> CoachDialogueReadService:
@@ -1433,7 +1388,7 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
     sync_state_repository=lambda: SYNC_PERSISTENCE.state_repository(),
     proposal_creation_service=lambda: COACH_PROPOSALS.creation_service(),
     tool_dispatch_service=lambda: COACH_TOOL_DISPATCH.service(),
-    job_store=lambda: coach_job_store(),
+    job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
     dialogue_action_service=lambda: coach_dialogue_action_service(),
     planning_authority_service=lambda: planning_authority_service(),
     training_context_service=lambda: COACH_CONTEXT.training_context_service(),
@@ -1444,6 +1399,32 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
         default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
         long_plan_max_output_tokens=coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
     ),
+)
+
+
+COACH_BACKGROUND_JOBS = CoachBackgroundJobsAssembly(
+    database_manager=lambda: database_manager(),
+    database_lock=DB_LOCK,
+    worker_wake_event=lambda: COACH_JOB_WORKER.wake_event,
+    maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
+    utc_now=runtime_clock.utc_now,
+    chat_repository=CHAT_REPOSITORY,
+    key_value_repository=KEY_VALUE_REPOSITORY,
+    event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    redactor=REDACTOR,
+    repository_root=ROOT,
+    logger=LOGGER,
+    read_only_tools=lambda: STRUCTURED_READ_ONLY_TOOLS,
+    settings=SETTINGS,
+    stream_registry=lambda: coach_streams.CHAT_STREAM_REGISTRY,
+    session_auth_service=session_auth_service,
+    chat_turn_service=lambda: COACH_TURNS.chat_turn_service(),
+    manual_morning_checkin_service=manual_morning_checkin_service,
+    quick_actions_service=coach_quick_actions_service,
+    athlete_clock=lambda: ATHLETE_CLOCK.now,
+    background_horizon_days=lambda: coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
+    max_attachment_storage_bytes=lambda: coach_attachments.MAX_ATTACHMENT_STORAGE_BYTES,
+    max_gemini_inline_image_bytes=lambda: coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES,
 )
 
 
@@ -1468,8 +1449,8 @@ COACH_TURNS = CoachTurnAssembly(
     request_payload_service=lambda: COACH_CONTEXT.request_payload_service(),
     response_transport=lambda: coach_response_transport(),
     tool_round_service=lambda: COACH_TOOL_ROUNDS.service(),
-    job_store=lambda: coach_job_store(),
-    turn_failure_service=lambda: coach_turn_failure_service(),
+    job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
+    turn_failure_service=lambda: COACH_BACKGROUND_JOBS.turn_failure_service(),
     conversation_provision_service=lambda: COACH_CONVERSATION.provision_service,
 )
 
@@ -1478,7 +1459,7 @@ def coach_planning_command_service() -> CoachPlanningCommandService:
     """Compose the session-bound planning command endpoint owner."""
     return CoachPlanningCommandService(
         database_manager(), DB_LOCK, coach_command_receipt_service(),
-        COACH_TOOL_DISPATCH.service(), coach_turn_failure_service(), runtime_clock.utc_now,
+        COACH_TOOL_DISPATCH.service(), COACH_BACKGROUND_JOBS.turn_failure_service(), runtime_clock.utc_now,
     )
 
 
@@ -1496,20 +1477,8 @@ def coach_planning_command_service() -> CoachPlanningCommandService:
 
 
 
-def morning_coach_job_completion_service() -> MorningCoachJobCompletionService:
-    return MorningCoachJobCompletionService(
-        database_manager(), DB_LOCK, KEY_VALUE_REPOSITORY,
-        coach_quick_actions_service, ATHLETE_CLOCK.now, runtime_clock.utc_now,
-    )
 
 
-def coach_background_job_runner() -> CoachBackgroundJobRunner:
-    return CoachBackgroundJobRunner(
-        coach_job_store(), COACH_TURNS.chat_turn_service, session_auth_service,
-        coach_streams.CHAT_STREAM_REGISTRY, manual_morning_checkin_service,
-        morning_coach_job_completion_service, coach_turn_failure_service,
-        runtime_maintenance.MAINTENANCE_GATE, REDACTOR, LOGGER,
-    )
 
 
 def public_bootstrap_service() -> PublicBootstrapService:
@@ -1732,7 +1701,7 @@ COACH_GET_ROUTES = CoachGetRoutes(
     session_auth_service,
     chat_history_page_service,
     coach_command_receipt_service,
-    coach_job_submission_service,
+    COACH_BACKGROUND_JOBS.job_submission_service,
 )
 PUBLIC_GET_ROUTES = PublicGetRoutes(
     runtime_maintenance.MAINTENANCE_GATE,
@@ -1778,13 +1747,13 @@ COACH_ACTIONS_POST_ROUTES = CoachActionsPostRoutes(
     COACH_PROPOSALS.execution_service,
 )
 CHAT_POST_ROUTES = ChatPostRoutes(
-    coach_job_submission_service,
+    COACH_BACKGROUND_JOBS.job_submission_service,
     COACH_CONVERSATION.reset_service,
     coach_attachments.MAX_REQUEST_BYTES,
 )
 CHAT_STREAM_TRANSPORT = CoachChatStreamTransport(
     coach_streams.CHAT_STREAM_REGISTRY,
-    coach_job_submission_service,
+    COACH_BACKGROUND_JOBS.job_submission_service,
     coach_command_receipt_service,
     REDACTOR.redact_text,
     LOGGER,
@@ -1808,7 +1777,7 @@ PLANNING_COMMANDS_POST_ROUTES = PlanningCommandsPostRoutes(
     lambda: COACH_CONVERSATION.provision_service(),
 )
 FEEDBACK_POST_ROUTES = FeedbackPostRoutes(ATHLETE_DATA.checkin)
-CHAT_CANCEL_POST_ROUTES = ChatCancelPostRoutes(coach_cancellation_service)
+CHAT_CANCEL_POST_ROUTES = ChatCancelPostRoutes(COACH_BACKGROUND_JOBS.cancellation_service)
 PRIVACY_RESTORE_POST_ROUTES = PrivacyRestorePostRoutes(
     session_auth_service, BACKUP_ASSEMBLY.restore_service, MAX_BACKUP_BYTES
 )
@@ -1896,10 +1865,10 @@ def main() -> None:
     daily_thread: threading.Thread | None = None
     try:
         SYNC_JOB_QUEUE.service().resume_interrupted()
-        coach_job_store().resume_interrupted(coach_turn_failure_service())
+        COACH_BACKGROUND_JOBS.job_store().resume_interrupted(COACH_BACKGROUND_JOBS.turn_failure_service())
         sync_worker = sync_job_worker()
         sync_worker.start()
-        COACH_JOB_WORKER.start(coach_job_store, coach_background_job_runner, runtime_maintenance.MAINTENANCE_GATE)
+        COACH_JOB_WORKER.start(COACH_BACKGROUND_JOBS.job_store, COACH_BACKGROUND_JOBS.background_job_runner, runtime_maintenance.MAINTENANCE_GATE)
         SYNC_SCHEDULERS.startup_scheduler().schedule()
         daily_loop = SYNC_SCHEDULERS.daily_loop()
         daily_thread = threading.Thread(target=daily_loop.run, daemon=True)

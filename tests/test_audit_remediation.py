@@ -299,11 +299,11 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
         self.assertTrue(transport_factory.return_value.request.call_args.args[0]["instructions"].startswith("Fresh Garmin data"))
 
     def test_restart_job_observes_cancel_during_session_restore(self):
-        server.coach_job_submission_service().enqueue("Synthetic request", "cancel-race", "synthetic-session", operation_id="cancel-operation")
-        job = server.coach_job_store().claim()
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Synthetic request", "cancel-race", "synthetic-session", operation_id="cancel-operation")
+        job = server.COACH_BACKGROUND_JOBS.job_store().claim()
         coach_streams.CHAT_STREAM_REGISTRY.clear_state()  # Process restart loses in-memory events.
         def restore(_):
-            self.assertEqual(server.coach_cancellation_service().cancel("synthetic-session", "cancel-operation")["status"], "cancelling")
+            self.assertEqual(server.COACH_BACKGROUND_JOBS.cancellation_service().cancel("synthetic-session", "cancel-operation")["status"], "cancelling")
             self.assertIsNone(coach_streams.CHAT_STREAM_REGISTRY.get_background_event("cancel-operation"))
             with server.database_manager().unit_of_work() as db:
                 receipt = db.execute(
@@ -315,7 +315,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
             self.assertTrue(kwargs["cancel_event"].is_set())
             return {"status": "cancelled"}
         with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", side_effect=restore), patch("backend.coach.chat_turn.CoachChatTurnService.run", side_effect=coach) as execute:
-            server.coach_background_job_runner().run(job)
+            server.COACH_BACKGROUND_JOBS.background_job_runner().run(job)
         execute.assert_called_once()
 
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher runtime required")

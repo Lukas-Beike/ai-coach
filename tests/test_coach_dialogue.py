@@ -847,11 +847,11 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(len(result["sync_job_ids"]), 1)
 
     def test_successful_morning_quick_action_is_marked_complete_without_word_matching(self):
-        server.coach_job_submission_service().enqueue(
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Natural wording without a fixed trigger", "morning-quick", "synthetic-session",
             request_kind="morning_checkin",
         )
-        job = server.coach_job_store().claim()
+        job = server.COACH_BACKGROUND_JOBS.job_store().claim()
         def complete_command(*args, **kwargs):
             with server.database_manager().unit_of_work() as db:
                 db.execute("UPDATE coach_commands SET status='completed' WHERE client_turn_id='morning-quick'")
@@ -859,7 +859,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
             CoachChatTurnService, "run", side_effect=complete_command,
         ):
-            server.coach_background_job_runner().run(job)
+            server.COACH_BACKGROUND_JOBS.background_job_runner().run(job)
         self.assertEqual(server.key_value_service().get("morning_checkin_date"), "2026-09-07")
         self.assertEqual(server.key_value_service().get("morning_checkin_status"), "ready")
         self.assertFalse(server.coach_quick_actions_service().state()["morning_checkin"])
@@ -868,11 +868,11 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertFalse(json.loads(row["receipt"])["coach_quick_actions"]["morning_checkin"])
 
     def test_morning_quick_action_stays_pending_while_coach_awaits_clarification(self):
-        server.coach_job_submission_service().enqueue(
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Natural wording without a fixed trigger", "morning-question", "synthetic-session",
             request_kind="morning_checkin",
         )
-        job = server.coach_job_store().claim()
+        job = server.COACH_BACKGROUND_JOBS.job_store().claim()
 
         def complete_with_question(*args, **kwargs):
             with server.database_manager().unit_of_work() as db:
@@ -882,18 +882,18 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
             CoachChatTurnService, "run", side_effect=complete_with_question,
         ):
-            server.coach_background_job_runner().run(job)
+            server.COACH_BACKGROUND_JOBS.background_job_runner().run(job)
         self.assertNotEqual(server.key_value_service().get("morning_checkin_status"), "ready")
         self.assertTrue(server.coach_quick_actions_service().state()["morning_checkin"])
 
     def test_chat_reset_cancels_queued_background_turn_without_reappearing_message(self):
-        job = server.coach_job_submission_service().enqueue(
+        job = server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Plan something", "queued-before-reset", "synthetic-session",
             operation_id="operation-before-reset",
         )
         self.assertEqual(job["status"], "queued")
         server.COACH_CONVERSATION.reset_service().reset()
-        self.assertIsNone(server.coach_job_store().claim())
+        self.assertIsNone(server.COACH_BACKGROUND_JOBS.job_store().claim())
         self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
         with server.database_manager().unit_of_work() as db:
             command = db.execute(
@@ -929,12 +929,12 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_background_resumes_response_and_committed_effect_without_replaying(self):
         turn_id = "background-resume"
-        server.coach_job_submission_service().enqueue("Müde heute", turn_id, "synthetic-session")
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Müde heute", turn_id, "synthetic-session")
         call = self.call("save_checkin", {"payload": {"notes": "Synthetic tired"}}, ["local_checkin"], call_id="saved-call")["output"][0]
         args = json.loads(call["arguments"])
         prior = {"call_id": call["call_id"], "tool": call["name"], "effect_key": coach_service.dialogue_effect_key(call["name"], args),
                  "result": {"ok": True, "status": "saved"}}
-        server.coach_job_store().merge_receipt(turn_id, {"openai_response_id": "synthetic-response", "command_receipts": [prior]})
+        server.COACH_BACKGROUND_JOBS.job_store().merge_receipt(turn_id, {"openai_response_id": "synthetic-response", "command_receipts": [prior]})
         with patch.object(CoachToolDispatchService, "execute", side_effect=AssertionError("must not replay")):
             result, model = self.turn("Müde heute", [{"output": [call]}, {"output_text": "Bereits gespeichert."}], turn=turn_id, background_job=True)
         self.assertEqual(result["status"], "completed")
@@ -942,9 +942,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_background_replays_checkpointed_outputs_before_new_response(self):
         turn_id = "background-outputs"
-        server.coach_job_submission_service().enqueue("Wie geht es weiter?", turn_id, "synthetic-session")
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Wie geht es weiter?", turn_id, "synthetic-session")
         outputs = [{"type": "function_call_output", "call_id": "read", "output": '{"ok":true}'}]
-        server.coach_job_store().merge_receipt(turn_id, {"openai_response_id": "old-response", "pending_tool_outputs": outputs})
+        server.COACH_BACKGROUND_JOBS.job_store().merge_receipt(turn_id, {"openai_response_id": "old-response", "pending_tool_outputs": outputs})
         result, model = self.turn("Wie geht es weiter?", [{"output_text": "Fortgesetzt."}], turn=turn_id, background_job=True)
         self.assertEqual(result["status"], "completed")
         self.assertEqual(model.call_args.args[0]["input"], outputs)

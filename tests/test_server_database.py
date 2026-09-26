@@ -857,7 +857,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertEqual(changes["maxItems"], coach_limits.COACH_TRAINING_CHANGE_LIMIT)
 
     def test_background_submission_resolves_current_database_manager_per_call(self):
-        service = server.coach_job_submission_service()
+        service = server.COACH_BACKGROUND_JOBS.job_submission_service()
         first_manager = server.database_manager()
         first = service.enqueue(
             "Eine lange Planung bitte", "turn-background-manager-refresh", "csrf-background-manager-refresh",
@@ -886,16 +886,16 @@ class ServerDatabaseTests(ServerTestCase):
                 "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                 (auth.session_token_hash("session-background-bound"), csrf_hash, time.time() + 3600, runtime_clock.utc_now(), runtime_clock.utc_now()),
             )
-        server.coach_job_submission_service().enqueue(
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",
             "turn-background-bound",
             csrf_hash,
             operation_id="operation-background-bound",
         )
-        job = server.coach_job_store().claim()
+        job = server.COACH_BACKGROUND_JOBS.job_store().claim()
         seen = {}
         with patch("backend.coach.chat_turn.CoachChatTurnService.run", side_effect=lambda *args, **kwargs: seen.update(kwargs) or {}):
-            server.coach_background_job_runner().run(job)
+            server.COACH_BACKGROUND_JOBS.background_job_runner().run(job)
         self.assertEqual(seen["session_csrf_hash"], csrf_hash)
 
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher ist in dieser Testumgebung nicht verfügbar.")

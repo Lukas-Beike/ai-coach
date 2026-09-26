@@ -33,7 +33,7 @@ class ServerRuntimeTests(ServerTestCase):
         ), patch.object(server, "COACH_JOB_WORKER", CoachJobWorker()):
             server.sync_job_worker().start()
             server.COACH_JOB_WORKER.start(
-                server.coach_job_store, server.coach_background_job_runner,
+                server.COACH_BACKGROUND_JOBS.job_store, server.COACH_BACKGROUND_JOBS.background_job_runner,
                 server.runtime_maintenance.MAINTENANCE_GATE,
             )
         sync_start.assert_called_once_with()
@@ -139,11 +139,11 @@ class ServerRuntimeTests(ServerTestCase):
             )
         operation_id, _cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(csrf_hash)
         try:
-            server.coach_job_submission_service().enqueue(
+            server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
                 "Wie soll ich heute trainieren?", "turn-background-streamed", csrf_hash,
                 operation_id=operation_id,
             )
-            job = server.coach_job_store().claim()
+            job = server.COACH_BACKGROUND_JOBS.job_store().claim()
 
             def complete_chat(*_args, **kwargs):
                 kwargs["on_text_delta"]("Erster ")
@@ -151,7 +151,7 @@ class ServerRuntimeTests(ServerTestCase):
                 return {"status": "completed", "session_key": "must-not-leave-server", "message": {"id": 42, "role": "assistant", "content": "Erster Teil"}}
 
             with patch("backend.coach.chat_turn.CoachChatTurnService.run", side_effect=complete_chat):
-                server.coach_background_job_runner().run(job)
+                server.COACH_BACKGROUND_JOBS.background_job_runner().run(job)
 
             events = coach_streams.CHAT_STREAM_REGISTRY.events(csrf_hash, operation_id)
             self.assertEqual(events.get_nowait(), ("delta", {"text": "Erster "}))
@@ -164,19 +164,19 @@ class ServerRuntimeTests(ServerTestCase):
             coach_streams.CHAT_STREAM_REGISTRY.unregister(csrf_hash, operation_id)
 
     def test_background_worker_requeues_transient_coach_contention(self):
-        server.coach_job_submission_service().enqueue(
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",
             "turn-background-requeue",
             "csrf-background-requeue",
             operation_id="operation-background-requeue",
         )
-        job = server.coach_job_store().claim()
+        job = server.COACH_BACKGROUND_JOBS.job_store().claim()
         auth = server.session_auth_service()
         with patch(
             "backend.coach.chat_turn.CoachChatTurnService.run",
             side_effect=server.AppError(429, "busy", reason="chat_queue_full"),
         ), patch.object(auth, "restore_coach_session_csrf_hash", return_value="csrf-background-requeue"):
-            server.coach_background_job_runner().run(job)
+            server.COACH_BACKGROUND_JOBS.background_job_runner().run(job)
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             command = db.execute(
                 "SELECT status, receipt FROM coach_commands WHERE client_turn_id='turn-background-requeue'"
@@ -187,14 +187,14 @@ class ServerRuntimeTests(ServerTestCase):
         self.assertGreater(float(receipt["retry_after"]), time.time())
 
     def test_background_worker_preserves_checkpointed_recovery_phase(self):
-        server.coach_job_submission_service().enqueue(
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",
             "turn-background-recovery-phase",
             "csrf-background-recovery-phase",
             operation_id="operation-background-recovery-phase",
         )
-        job = server.coach_job_store().claim()
-        server.coach_job_store().merge_receipt(
+        job = server.COACH_BACKGROUND_JOBS.job_store().claim()
+        server.COACH_BACKGROUND_JOBS.job_store().merge_receipt(
             "turn-background-recovery-phase",
             {"openai_response_id": "resp-recovery-phase", "phase": "waiting_final_response", "tool_rounds": 1},
         )
@@ -218,7 +218,7 @@ class ServerRuntimeTests(ServerTestCase):
         with patch("backend.coach.chat_turn.CoachChatTurnService.run", side_effect=capture_phase), patch.object(
             server.session_auth_service(), "restore_coach_session_csrf_hash", return_value="csrf-background-recovery-phase"
         ):
-            server.coach_background_job_runner().run(job)
+            server.COACH_BACKGROUND_JOBS.background_job_runner().run(job)
         self.assertEqual(seen["phase"], "waiting_final_response")
 
     def test_settings_persist_in_data_for_container_restart(self):

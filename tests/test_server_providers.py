@@ -307,13 +307,13 @@ class ServerProvidersTests(ServerTestCase):
             {"role": "model", "parts": [{"functionCall": {"name": "stage_training_plan", "args": {}}}]},
         ]))
         with patch.object(server, "CONFIG", config):
-            server.coach_job_submission_service().enqueue(
+            server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
                 "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
                 "turn-gemini-background-restart",
                 "csrf-gemini-background-restart",
             )
-            self.assertIsNotNone(server.coach_job_store().claim())
-            self.assertEqual(server.coach_job_store().resume_interrupted(server.coach_turn_failure_service()), 0)
+            self.assertIsNotNone(server.COACH_BACKGROUND_JOBS.job_store().claim())
+            self.assertEqual(server.COACH_BACKGROUND_JOBS.job_store().resume_interrupted(server.COACH_BACKGROUND_JOBS.turn_failure_service()), 0)
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-gemini-background-restart",)).fetchone()
         self.assertEqual(command["status"], "completed")
@@ -421,11 +421,11 @@ class ServerProvidersTests(ServerTestCase):
     def test_attached_durable_job_uses_provider_stream_instead_of_background_polling(self):
         csrf_hash = "csrf-attached-provider-stream"
         server.key_value_service().set("openai_conversation_id", "conv-attached-provider-stream")
-        server.coach_job_submission_service().enqueue(
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Wie soll ich heute trainieren?", "turn-attached-provider-stream", csrf_hash,
             operation_id="operation-attached-provider-stream",
         )
-        self.assertIsNotNone(server.coach_job_store().claim())
+        self.assertIsNotNone(server.COACH_BACKGROUND_JOBS.job_store().claim())
         deltas = []
 
         def streamed_response(_payload, on_delta, _cancel_event, **kwargs):
@@ -867,17 +867,17 @@ class ServerProvidersTests(ServerTestCase):
     def test_background_chat_cancel_closes_the_active_provider_response(self):
         operation_id = "background-stream-cancel-close"
         session_key = "session-background-cancel-close"
-        server.coach_job_submission_service().enqueue(
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Eine Trainingsanfrage", "turn-background-cancel-close", session_key,
             operation_id=operation_id,
         )
-        self.assertIsNotNone(server.coach_job_store().claim())
+        self.assertIsNotNone(server.COACH_BACKGROUND_JOBS.job_store().claim())
         registry = coach_streams.CHAT_STREAM_REGISTRY
         cancel_event = registry.get_background_event(operation_id)
         response = Mock()
         cancel_event._provider_response = response
 
-        result = server.coach_cancellation_service().cancel(session_key, operation_id)
+        result = server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(session_key, operation_id)
 
         self.assertEqual(result, {"status": "cancelling", "operation_id": operation_id})
         self.assertTrue(cancel_event.is_set())

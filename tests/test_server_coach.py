@@ -419,7 +419,7 @@ class ServerCoachTests(ServerTestCase):
             "backend.coach.chat_turn.CoachChatTurnService.run"
         ) as chat:
             with self.assertRaises(server.AppError):
-                server.coach_background_job_runner()._execute(
+                server.COACH_BACKGROUND_JOBS.background_job_runner()._execute(
                     {}, receipt, "operation", "client-turn", "session", threading.Event(), False
                 )
         chat.assert_not_called()
@@ -435,7 +435,7 @@ class ServerCoachTests(ServerTestCase):
             "backend.coach.morning_completion.MorningCoachJobCompletionService.complete",
             return_value=completion,
         ) as persist_completion:
-            result = server.coach_background_job_runner()._execute(
+            result = server.COACH_BACKGROUND_JOBS.background_job_runner()._execute(
                 {}, {"request_kind": "morning_checkin"}, "operation", "turn-morning", "session",
                 threading.Event(), False,
             )
@@ -445,7 +445,7 @@ class ServerCoachTests(ServerTestCase):
 
     def test_structured_command_failure_response_keeps_confirmed_sync_effects(self):
         commands = [{"tool": "start_intervals_plan_sync", "result": {"ok": True, "status": "queued"}}]
-        status, text, question, cancelled = server.coach_turn_failure_service()._response(
+        status, text, question, cancelled = server.COACH_BACKGROUND_JOBS.turn_failure_service()._response(
             server.AppError(429, "Provider limit", reason="rate_limit_exceeded"), commands, commands, [], ["start_intervals_plan_sync"],
         )
         self.assertEqual(status, "partial")
@@ -460,7 +460,7 @@ class ServerCoachTests(ServerTestCase):
             {"tool": "save_checkin", "result": {"ok": True, "status": "saved"}},
             {"tool": "clarify_coach_request", "result": {"ok": True, "question": "Wie fühlst du dich?"}},
         ]
-        status, text, question, cancelled = server.coach_turn_failure_service()._response(
+        status, text, question, cancelled = server.COACH_BACKGROUND_JOBS.turn_failure_service()._response(
             server.AppError(502, "Provider error", reason="provider_unavailable"), commands, commands[:1], [], [],
         )
         self.assertEqual(status, "completed")
@@ -474,7 +474,7 @@ class ServerCoachTests(ServerTestCase):
             {"tool": "save_checkin", "result": {"ok": True, "status": "saved"}},
             {"tool": "clarify_coach_request", "result": {"ok": True, "question": "Wie fühlst du dich?"}},
         ]
-        status, _text, question, cancelled = server.coach_turn_failure_service()._response(
+        status, _text, question, cancelled = server.COACH_BACKGROUND_JOBS.turn_failure_service()._response(
             server.AppError(499, "Cancelled", reason="chat_cancelled"), commands, commands[:1], [], [],
         )
         self.assertEqual(status, "partial")
@@ -777,16 +777,16 @@ class ServerCoachTests(ServerTestCase):
             patch.object(registry, "set_background_event") as register_event,
             patch.object(server.COACH_JOB_WORKER.wake_event, "set") as wake_worker,
         ):
-            first = server.coach_job_submission_service().enqueue(
+            first = server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
                 "Eine lange Planung bitte", "turn-background-idempotent", "csrf-background-idempotent",
                 operation_id="operation-background-idempotent",
             )
-            replay = server.coach_job_submission_service().enqueue(
+            replay = server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
                 "Andere Nachricht ignorieren", "turn-background-idempotent", "csrf-background-idempotent",
                 operation_id="operation-background-replay",
             )
             with self.assertRaises(server.AppError) as foreign_replay:
-                server.coach_job_submission_service().enqueue(
+                server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
                     "Fremde Sitzung", "turn-background-idempotent", "csrf-background-foreign",
                 )
 

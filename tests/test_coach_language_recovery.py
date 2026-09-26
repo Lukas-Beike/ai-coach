@@ -104,9 +104,9 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
 
     def test_background_recovery_retries_same_tool_output_with_same_parent(self):
         turn = "synthetic-retry-recovery"
-        server.coach_job_submission_service().enqueue("Bitte fortsetzen", turn, "synthetic-session")
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Bitte fortsetzen", turn, "synthetic-session")
         outputs = [{"type": "function_call_output", "call_id": "saved", "output": '{"ok":true}'}]
-        server.coach_job_store().merge_receipt(turn, {"openai_response_id": "resp_waiting", "response_input": outputs,
+        server.COACH_BACKGROUND_JOBS.job_store().merge_receipt(turn, {"openai_response_id": "resp_waiting", "response_input": outputs,
                                                    "previous_response_id": "resp_tool"})
         with patch("backend.coach.response_retry.time.sleep"):
             result, model = self.turn("Bitte fortsetzen", [limited, {"id": "resp_final", "output_text": "Fertig."}], turn=turn, background_job=True)

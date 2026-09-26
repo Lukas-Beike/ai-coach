@@ -2083,8 +2083,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     athlete_context_service
     initialise_database key_value_service
     coach_quick_actions_service
-    coach_job_store coach_turn_failure_service
-    coach_job_submission_service coach_cancellation_service coach_dialogue_read_service
+    coach_dialogue_read_service
     coach_dialogue_action_service coach_clarification_service
     coach_attachment_context_service manual_morning_checkin_service
     morning_checkin_state_service
@@ -2097,7 +2096,6 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     coach_planning_command_service coach_structured_tool_replay_service
     coach_structured_tool_preparation_service
     coach_structured_tool_round_service
-    morning_coach_job_completion_service coach_background_job_runner
     public_bootstrap_service public_plan_state_service
     public_state_local_prelude_service public_state_weather_prelude_service
     public_state_calendar_projection_service public_state_service
@@ -3229,7 +3227,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "CHAT_POST_ROUTES",
             ("/api/chat", "/api/chat/reset", "client_turn_id"),
-            "ChatPostRoutes(coach_job_submission_service, COACH_CONVERSATION.reset_service, coach_attachments.MAX_REQUEST_BYTES)",
+            "ChatPostRoutes(COACH_BACKGROUND_JOBS.job_submission_service, COACH_CONVERSATION.reset_service, coach_attachments.MAX_REQUEST_BYTES)",
         )
         route_source = (BACKEND_ROOT / "http_api" / "chat_post.py").read_text(
             encoding="utf-8"
@@ -3269,7 +3267,7 @@ class ServerArchitectureTests(unittest.TestCase):
             [ast.unparse(arg) for arg in assignment.value.args],
             [
                 "coach_streams.CHAT_STREAM_REGISTRY",
-                "coach_job_submission_service",
+                "COACH_BACKGROUND_JOBS.job_submission_service",
                 "coach_command_receipt_service",
                 "REDACTOR.redact_text",
                 "LOGGER",
@@ -3360,7 +3358,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "do_POST",
             "CHAT_CANCEL_POST_ROUTES",
             ("/api/chat/cancel",),
-            "ChatCancelPostRoutes(coach_cancellation_service)",
+            "ChatCancelPostRoutes(COACH_BACKGROUND_JOBS.cancellation_service)",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "chat_cancel_post.py"

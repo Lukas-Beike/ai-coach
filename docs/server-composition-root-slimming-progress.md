@@ -1335,3 +1335,55 @@ mocked providers; no live account or runtime data was used.
 - `server.py`: 1,929 physical / 1,700 nonblank lines, 187 AST imports,
   69 top-level functions. Docker remains unavailable because the local engine
   pipe is absent.
+
+
+## S4e3 boundary before implementation: Coach background-job assembly
+
+- The narrow owner will be `CoachBackgroundJobsAssembly` in
+  `backend/coach/background_jobs_assembly.py`. It will own durable job-store,
+  turn-failure, submission, cancellation, morning-completion, and background
+  runner factories. The shared `COACH_JOB_WORKER` object and lifecycle ordering
+  remain explicit root resources for S6.
+- Callers include Coach read tools (job/failure providers), tool rounds and
+  turns (job/failure providers), chat and cancel POST routes (submission and
+  cancellation providers), and `main()` (interrupted-job recovery and worker
+  start). Tests invoke these service factories across Coach, provider, database,
+  HTTP, runtime, and audit suites. The runtime test swaps the worker object and
+  must keep doing so. No current test patches a moved root factory by name;
+  constructors and `COACH_JOB_WORKER.wake_event` remain the behavioral seams.
+- Preserve each factory's current construction timing, the shared worker wake
+  event, stream registry, event buffer, maintenance gate, key-value/chat
+  repositories, redactor/logger, attachment limits, and manager callback.
+  Submission and cancellation remain fresh services; job-store wrappers keep
+  referring to the same database and worker resources.
+- The runner depends on chat-turn construction, while turn and tool-round
+  assemblies depend on job-store/failure services. The specific late edge will
+  be a callable from the background assembly to `COACH_TURNS.chat_turn_service`;
+  the turn and round assemblies will resolve background-owned providers lazily.
+  This keeps the cycle explicit and avoids a broad registry or root import.
+
+
+## S4e3 complete: Coach background-job assembly
+
+- Added `CoachBackgroundJobsAssembly` in
+  `backend/coach/background_jobs_assembly.py` for job storage, turn failures,
+  submission, cancellation, morning completion, and the background runner.
+  Removed the matching root factories and routed Coach read/turn/tool/HTTP
+  callers and `main()` startup through the named assembly.
+- Preserved the one `COACH_JOB_WORKER` and its wake event, maintenance gate,
+  stream registry, repositories, event buffer, manager callback, fresh service
+  construction, attachment limits, and runner's deferred chat-turn callback.
+  Providers resolve at factory-use time where the old root factory did so,
+  including the worker replacement test seam and patched attachment limits.
+  Direct tests now call the assembly methods; no root compatibility aliases
+  remain.
+- Changed files: `server.py`, new background-jobs assembly and tests, direct
+  test callers/architecture expectations, extraction inventory, and this log.
+- Checks passed: Coach matrix (539); server Coach (48), HTTP (67), database
+  (45, three skipped), providers (50), sync (80), runtime (13), audit
+  remediation (17, one skipped), and architecture (48). The focused assembly
+  test passed (3). Inventory `--check`, compileall, and `git diff --check`
+  passed. Tests used temporary state and mocked providers.
+- `server.py`: 1,898 physical / 1,667 nonblank lines, 182 AST imports,
+  63 top-level functions. Docker build was attempted and remains unavailable:
+  the Docker engine named pipe is missing.
