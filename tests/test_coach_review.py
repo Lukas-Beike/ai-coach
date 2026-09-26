@@ -39,7 +39,7 @@ class CoachReviewTests(unittest.TestCase):
 
     def history_preview(self, change_id, session_csrf_hash="review-session"):
         preview = server.history_undo_service().preview(change_id)
-        proposal = server.coach_proposal_creation_service().create(
+        proposal = server.COACH_PROPOSALS.creation_service().create(
             preview.pop("proposal"), session_csrf_hash
         )
         return {**preview, "proposed_action": proposal["proposed_action"]}
@@ -267,20 +267,20 @@ class CoachReviewTests(unittest.TestCase):
         change = next(row for row in server.change_history_service().list() if row["entity_id"] == template["id"])
         proposal = self.history_preview(change["id"])["proposed_action"]
         with self.assertRaises(server.AppError):
-            server.coach_proposal_confirmation_service().confirm(proposal["id"], "other-session")
-        confirmed = server.coach_proposal_confirmation_service().confirm(proposal["id"], "review-session")
+            server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "other-session")
+        confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
         token = confirmed["action_token"]
         with self.assertRaises(server.AppError):
-            server.coach_proposal_execution_service().execute(token, "other-session", proposal["payload_hash"])
+            server.COACH_PROPOSALS.execution_service().execute(token, "other-session", proposal["payload_hash"])
         with self.assertRaises(server.AppError):
-            server.coach_proposal_execution_service().execute(token, "review-session", "0" * 64)
+            server.COACH_PROPOSALS.execution_service().execute(token, "review-session", "0" * 64)
         self.assertEqual(len(server.PLANNING_DATA.workout_library().list()), 1)
         barrier = threading.Barrier(2)
 
         def execute():
             barrier.wait(timeout=5)
             try:
-                server.coach_proposal_execution_service().execute(token, "review-session", proposal["payload_hash"])
+                server.COACH_PROPOSALS.execution_service().execute(token, "review-session", proposal["payload_hash"])
                 return "applied"
             except server.AppError:
                 return "rejected"
@@ -292,10 +292,10 @@ class CoachReviewTests(unittest.TestCase):
         template = server.PLANNING_DATA.workout_library().create_template({"name": "Expiry synthetic", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
         change = next(row for row in server.change_history_service().list() if row["entity_id"] == template["id"])
         proposal = self.history_preview(change["id"])["proposed_action"]
-        confirmed = server.coach_proposal_confirmation_service().confirm(proposal["id"], "review-session")
+        confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
         with patch.object(server.time, "time", return_value=time.time() + COACH_ACTION_TTL_SECONDS + 1):
             with self.assertRaises(server.AppError):
-                server.coach_proposal_execution_service().execute(confirmed["action_token"], "review-session", proposal["payload_hash"])
+                server.COACH_PROPOSALS.execution_service().execute(confirmed["action_token"], "review-session", proposal["payload_hash"])
         self.assertEqual(len(server.PLANNING_DATA.workout_library().list()), 1)
 
     def test_reload_preserves_pending_undo_but_changed_target_rejects_application(self):
@@ -312,9 +312,9 @@ class CoachReviewTests(unittest.TestCase):
             [],
         )
         server.PLANNING_DATA.workout_library().update(template["id"], {"action": "update", "name": "Synthetic changed"})
-        confirmed = server.coach_proposal_confirmation_service().confirm(proposal["id"], "review-session")
+        confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
         with self.assertRaises(server.AppError):
-            server.coach_proposal_execution_service().execute(confirmed["action_token"], "review-session", proposal["payload_hash"])
+            server.COACH_PROPOSALS.execution_service().execute(confirmed["action_token"], "review-session", proposal["payload_hash"])
         self.assertEqual(server.PLANNING_DATA.workout_library().list()[0]["name"], "Synthetic changed")
 
     def test_adaptive_apply_after_day_change_preserves_now_past_unit(self):
@@ -353,7 +353,7 @@ class CoachReviewTests(unittest.TestCase):
         def confirm():
             barrier.wait(timeout=5)
             try:
-                server.coach_proposal_confirmation_service().confirm(expired["id"], "review-session")
+                server.COACH_PROPOSALS.confirmation_service().confirm(expired["id"], "review-session")
                 return "accepted"
             except server.AppError:
                 return "rejected"
@@ -362,7 +362,7 @@ class CoachReviewTests(unittest.TestCase):
             gc_result, confirmation = executor.submit(collect), executor.submit(confirm)
             self.assertEqual(gc_result.result(), 1)
             self.assertEqual(confirmation.result(), "rejected")
-        self.assertEqual([item["id"] for item in server.coach_proposal_read_service().current("review-session")], [active["id"]])
+        self.assertEqual([item["id"] for item in server.COACH_PROPOSALS.read_service().current("review-session")], [active["id"]])
         with server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (draft["artifact_id"],)).fetchone()["status"], "draft")
 
@@ -371,12 +371,12 @@ class CoachReviewTests(unittest.TestCase):
         template = server.PLANNING_DATA.workout_library().create_template({"name": "Token recovery", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
         change = next(row for row in server.change_history_service().list() if row["entity_id"] == template["id"])
         proposal = self.history_preview(change["id"])["proposed_action"]
-        first = server.coach_proposal_confirmation_service().confirm(proposal["id"], "review-session")
-        self.assertEqual(server.coach_proposal_read_service().current("review-session")[0]["status"], "ready")
-        second = server.coach_proposal_confirmation_service().confirm(proposal["id"], "review-session")
+        first = server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
+        self.assertEqual(server.COACH_PROPOSALS.read_service().current("review-session")[0]["status"], "ready")
+        second = server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
         with self.assertRaises(server.AppError):
-            server.coach_proposal_execution_service().execute(first["action_token"], "review-session", proposal["payload_hash"])
-        server.coach_proposal_execution_service().execute(second["action_token"], "review-session", proposal["payload_hash"])
+            server.COACH_PROPOSALS.execution_service().execute(first["action_token"], "review-session", proposal["payload_hash"])
+        server.COACH_PROPOSALS.execution_service().execute(second["action_token"], "review-session", proposal["payload_hash"])
         with self.assertRaises(server.AppError):
-            server.coach_proposal_confirmation_service().confirm(proposal["id"], "review-session")
+            server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
         self.assertEqual(server.PLANNING_DATA.workout_library().list(), [])

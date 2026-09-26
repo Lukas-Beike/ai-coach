@@ -215,12 +215,7 @@ from backend.coach.conversation import (
 )
 from backend.coach.conversation_assembly import CoachConversationAssembly
 from backend.coach.conversation_gate import CoachConversationGate
-from backend.coach.proposals import (
-    CoachProposalCreationService,
-    CoachProposalConfirmationService,
-    CoachProposalExecutionService,
-    CoachProposalReadService,
-)
+from backend.coach.proposal_assembly import CoachProposalAssembly
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.turn_opening import CoachTurnOpeningService
 from backend.coach.dialogue import CoachDialogueReadService, dialogue_tools
@@ -1179,6 +1174,17 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
     nutrition_service=nutrition_service,
     training_change_limit=lambda: coach_limits.COACH_TRAINING_CHANGE_LIMIT,
 )
+COACH_PROPOSALS = CoachProposalAssembly(
+    database_manager=database_manager,
+    sync_state_repository=SYNC_PERSISTENCE.state_repository,
+    duplicate_activity_service=ATHLETE_DATA.duplicate_activity,
+    history_undo_service=history_undo_service,
+    intervals_client_factory=PROVIDER_TRANSPORT.intervals_client,
+    maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
+    now=lambda: time.time(),
+    utc_now=runtime_clock.utc_now,
+    uuid_factory=uuid.uuid4,
+)
 
 PROVIDER_RESYNC = ProviderResyncAssembly(
     config=lambda: CONFIG,
@@ -1405,14 +1411,9 @@ def chat_history_page_service() -> ChatHistoryPageService:
     """Compose bounded local chat history and session-bound proposal reads."""
     return ChatHistoryPageService(
         COACH_CONVERSATION.history_service(),
-        coach_proposal_read_service(),
+        COACH_PROPOSALS.read_service(),
         maximum=CHAT_PAGE_MAX,
     )
-
-
-def coach_proposal_read_service() -> CoachProposalReadService:
-    """Compose session-bound Coach proposal reads and expiration cleanup."""
-    return CoachProposalReadService(database_manager(), now=time.time)
 
 
 def coach_command_receipt_service() -> CoachCommandReceiptService:
@@ -1427,28 +1428,6 @@ def coach_turn_opening_service() -> CoachTurnOpeningService:
     return CoachTurnOpeningService(
         database_manager(), DB_LOCK, CHAT_REPOSITORY,
         coach_command_receipt_service(), runtime_clock.utc_now, uuid.uuid4,
-    )
-
-
-def coach_proposal_creation_service() -> CoachProposalCreationService:
-    """Compose session-bound Coach proposal creation."""
-    return CoachProposalCreationService(
-        database_manager(), SYNC_PERSISTENCE.state_repository(), now=time.time, utc_now=runtime_clock.utc_now,
-        uuid_factory=uuid.uuid4,
-    )
-
-
-def coach_proposal_confirmation_service() -> CoachProposalConfirmationService:
-    """Compose atomic, session-bound confirmation of Coach action previews."""
-    return CoachProposalConfirmationService(database_manager(), now=time.time)
-
-
-def coach_proposal_execution_service() -> CoachProposalExecutionService:
-    """Compose guarded dispatch for confirmed Coach actions."""
-    return CoachProposalExecutionService(
-        database_manager(), ATHLETE_DATA.duplicate_activity(), history_undo_service(),
-        PROVIDER_TRANSPORT.intervals_client, runtime_maintenance.MAINTENANCE_GATE,
-        now=time.time, utc_now=runtime_clock.utc_now,
     )
 
 
@@ -1492,7 +1471,7 @@ def coach_tool_dispatch_service() -> CoachToolDispatchService:
             coach_adaptive_apply_service,
             PLANNING_DATA.training_plan,
             history_undo_service,
-            coach_proposal_creation_service,
+            COACH_PROPOSALS.creation_service,
         ),
     )
 
@@ -1506,7 +1485,7 @@ def coach_structured_tool_execution_service() -> CoachStructuredToolExecutionSer
         coach_clarification_service(),
         coach_training_patch_service(),
         SYNC_PERSISTENCE.state_repository(),
-        coach_proposal_creation_service(),
+        COACH_PROPOSALS.creation_service(),
         coach_tool_dispatch_service(),
     )
 
@@ -1907,11 +1886,11 @@ SYNC_GET_ROUTES = SyncGetRoutes(
 HISTORY_GET_ROUTES = HistoryGetRoutes(session_auth_service, change_history_service)
 HISTORY_UNDO_POST_ROUTES = HistoryUndoPostRoutes(
     history_undo_service,
-    coach_proposal_creation_service,
+    COACH_PROPOSALS.creation_service,
 )
 COACH_ACTIONS_POST_ROUTES = CoachActionsPostRoutes(
-    coach_proposal_confirmation_service,
-    coach_proposal_execution_service,
+    COACH_PROPOSALS.confirmation_service,
+    COACH_PROPOSALS.execution_service,
 )
 CHAT_POST_ROUTES = ChatPostRoutes(
     coach_job_submission_service,

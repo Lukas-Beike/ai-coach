@@ -1032,3 +1032,40 @@ mocked providers; no live account or runtime data was used.
 - Measured `server.py`: 2,063 physical / 1,808 nonblank lines, 207 AST imports,
   95 top-level functions. Remaining S4 work is proposal/planning tool assembly
   and structured turn/background-job wiring.
+
+## S4d1 boundary before implementation: Coach proposals
+
+- The narrow owner is `CoachProposalAssembly` in
+  `backend/coach/proposal_assembly.py`, exposing fresh read, create, confirm,
+  and execute service factories. It does not own planning mutations, receipt
+  state, tool dispatch, or route construction.
+- Direct callers are chat-history page construction, planning-action tool
+  composition, history-undo and coach-action HTTP route groups, and review test
+  helpers. Tests/support directly create proposals; these lookups will move to
+  the proposal owner. No tests currently patch these root factory names.
+- Preserve current manager resolution on each factory request, fresh sync
+  state/profile/history services, the live maintenance gate at execution
+  service creation, and lazy Intervals client lookup inside proposal
+  execution. Keep `time.time` proposal expiry behavior and the separate UTC
+  execution timestamp callback. Route service callbacks remain lazy until
+  their HTTP action runs.
+
+
+## S4d1: Coach proposals
+
+- Completed `CoachProposalAssembly` in `backend/coach/proposal_assembly.py`.
+  Removed four root factories for proposal read, create, confirmation, and
+  execution. Migrated history, tool, HTTP route, fixture, and review callers to
+  the proposal owner. Added lazy construction, current-manager, provider
+  callback, and maintenance-gate identity coverage.
+- Preserved active manager and maintenance-gate resolution, fresh sync-state,
+  duplicate-activity and undo services, lazy Intervals client construction,
+  proposal expiry clock patching, and UTC timestamps. Guarded proposal, planning,
+  route, and architecture matrix passed: 189 tests. Compileall, inventory
+  check, and diff check passed. Docker remains unavailable.
+- Changed files include `server.py`, new proposal assembly/tests, progress and
+  inventory owner map/output, and proposal route, support, planning, review,
+  and architecture test callers.
+- Measured `server.py`: 2,042 physical / 1,795 nonblank lines, 207 AST imports,
+  91 top-level functions. Remaining S4 work is Coach planning-tool composition
+  and structured turn/background-job wiring.

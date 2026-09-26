@@ -1748,8 +1748,8 @@ class ServerPlanningTests(ServerTestCase):
         self.assertNotIn('"after"', json.dumps(latest))
         self.assertNotIn("prompt", json.dumps(latest).casefold())
         preview = self.history_preview(latest["id"])
-        confirmed = server.coach_proposal_confirmation_service().confirm(preview["proposed_action"]["id"], "session-csrf-hash")
-        result = server.coach_proposal_execution_service().execute(confirmed["action_token"], "session-csrf-hash", confirmed["proposed_action"]["payload_hash"])
+        confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(preview["proposed_action"]["id"], "session-csrf-hash")
+        result = server.COACH_PROPOSALS.execution_service().execute(confirmed["action_token"], "session-csrf-hash", confirmed["proposed_action"]["payload_hash"])
         self.assertTrue(result["remote_untouched"])
         self.assertEqual(server.ATHLETE_DATA.profile().get()["name"], "Ada")
         with self.assertRaises(server.AppError) as replay:
@@ -1760,8 +1760,8 @@ class ServerPlanningTests(ServerTestCase):
         entry = server.PLANNING_DATA.workout_library().create_local_entry({"name": "Easy", "sport": "Ride", "duration_minutes": 30, "description": "- 30m 60%"})
         created = next(item for item in server.change_history_service().list() if item["entity_id"] == entry["id"] and item["action"] == "create")
         preview = self.history_preview(created["id"])
-        confirmed = server.coach_proposal_confirmation_service().confirm(preview["proposed_action"]["id"], "session-csrf-hash")
-        result = server.coach_proposal_execution_service().execute(confirmed["action_token"], "session-csrf-hash", confirmed["proposed_action"]["payload_hash"])
+        confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(preview["proposed_action"]["id"], "session-csrf-hash")
+        result = server.COACH_PROPOSALS.execution_service().execute(confirmed["action_token"], "session-csrf-hash", confirmed["proposed_action"]["payload_hash"])
         self.assertEqual(result["status"], "undone")
         self.assertFalse(server.PLANNING_DATA.workout_library().list(include_archived=True))
 

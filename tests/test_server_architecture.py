@@ -2090,9 +2090,8 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     morning_checkin_state_service
     gemini_request_payload_service gemini_response_normalization_service
     gemini_conversation_response_service library_page_service
-    chat_history_page_service coach_proposal_read_service coach_command_receipt_service
-    coach_turn_opening_service coach_proposal_creation_service
-    coach_proposal_confirmation_service coach_proposal_execution_service
+    chat_history_page_service coach_command_receipt_service
+    coach_turn_opening_service
     coach_response_transport
     coach_tool_dispatch_service coach_structured_tool_execution_service
     coach_structured_tool_failure_service coach_structured_tool_round_journal
@@ -3208,7 +3207,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_data_post",
             "HISTORY_UNDO_POST_ROUTES",
             ("/api/change-history/undo/preview", "/api/change-history/undo"),
-            "HistoryUndoPostRoutes(history_undo_service, coach_proposal_creation_service)",
+            "HistoryUndoPostRoutes(history_undo_service, COACH_PROPOSALS.creation_service)",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "history_undo_post.py"
@@ -3220,7 +3219,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "COACH_ACTIONS_POST_ROUTES",
             ("/api/coach/actions/confirm", "/api/coach/actions/execute"),
-            "CoachActionsPostRoutes(coach_proposal_confirmation_service, coach_proposal_execution_service)",
+            "CoachActionsPostRoutes(COACH_PROPOSALS.confirmation_service, COACH_PROPOSALS.execution_service)",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "coach_actions_post.py"
