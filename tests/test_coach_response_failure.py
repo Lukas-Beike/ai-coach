@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
+from backend.providers import openai as openai_provider
 from backend.sync import queue as sync_queue
 
 server = dialogue.server
@@ -36,7 +37,7 @@ class CoachResponseFailureTests(unittest.TestCase):
 
         with patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))), \
                 patch("backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic local context"), \
-                patch.object(server.openai_provider.OpenAIResponsesClient, "background", side_effect=create), \
+                patch.object(openai_provider.OpenAIResponsesClient, "background", side_effect=create), \
                 patch.object(server.time, "sleep"), \
                 patch.object(
                     sync_queue.SyncJobQueueService,
@@ -77,7 +78,7 @@ class CoachResponseFailureTests(unittest.TestCase):
         }}
         with patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))), \
                 patch("backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic local context"), \
-                patch.object(server.openai_provider.OpenAIResponsesClient, "background", side_effect=create), \
+                patch.object(openai_provider.OpenAIResponsesClient, "background", side_effect=create), \
                 patch.object(
                     sync_queue.SyncJobQueueService,
                     "enqueue",

@@ -609,7 +609,7 @@ class ServerPerformanceTests(ServerTestCase):
             IntervalsSnapshotReader,
             "fetch_performance_snapshot",
             fetch_performance_snapshot,
-        ), patch.object(server, "openai_responses_client") as openai_client:
+        ), patch.object(server.MODEL_TRANSPORT, "openai_responses_client") as openai_client:
             with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")):
                 result = server.INTERVALS_SYNC.performance_service().refresh()
         self.assertEqual(result["status"], "ok")

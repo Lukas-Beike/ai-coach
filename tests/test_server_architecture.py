@@ -2082,9 +2082,8 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     adaptive_preview_followup_service adaptive_replan_preview_service
     athlete_context_service
     initialise_database key_value_service
-    gemini_json_client audio_transcription_client gemini_stream_client
-    openai_responses_client coach_conversation_provision_service
-    coach_conversation_reset_service openai_stream_client coach_quick_actions_service
+    coach_conversation_provision_service coach_conversation_reset_service
+    coach_quick_actions_service
     gemini_conversation_history_service coach_message_service
     coach_conversation_history_service coach_job_store coach_turn_failure_service
     coach_job_submission_service coach_cancellation_service coach_dialogue_read_service
@@ -3299,7 +3298,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "TRANSCRIBE_POST_ROUTES",
             ("/api/transcribe",),
-            "TranscribePostRoutes(SETTINGS, audio_transcription_client)",
+            "TranscribePostRoutes(SETTINGS, MODEL_TRANSPORT.audio_transcription_client)",
         )
         route_source = (BACKEND_ROOT / "http_api" / "transcribe_post.py").read_text(
             encoding="utf-8"

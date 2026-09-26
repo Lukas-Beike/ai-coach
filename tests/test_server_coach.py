@@ -1,4 +1,5 @@
 """Server integration tests for coach."""
+from backend.providers import openai as openai_provider
 from backend.runtime import clock as runtime_clock
 
 import json
@@ -720,7 +721,7 @@ class ServerCoachTests(ServerTestCase):
             "conversation-before-reset",
             "turn-before-reset",
         )
-        with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
+        with patch.object(openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
             result = server.coach_conversation_reset_service().reset()
         self.assertEqual(result["status"], "ok")
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -750,7 +751,7 @@ class ServerCoachTests(ServerTestCase):
         server.key_value_service().set("openai_conversation_id", "conv-reset-failure")
         server.coach_message_service().add("user", "Clear this message")
         with patch.object(
-            server.openai_provider.OpenAIResponsesClient,
+            openai_provider.OpenAIResponsesClient,
             "delete_conversation",
             side_effect=RuntimeError("synthetic remote failure"),
         ):

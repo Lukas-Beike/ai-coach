@@ -211,6 +211,7 @@ def _explicit_owner(name: str) -> str | None:
             "PLANNING_DATA": "backend/planning/assembly",
             "PRIVACY_ASSEMBLY": "backend/privacy",
             "BACKUP_ASSEMBLY": "backend/backup/assembly",
+            "MODEL_TRANSPORT": "backend/providers/model_assembly",
             "EXTERNAL_CALENDAR": COMPOSITION_ROOT,
             "AppError": ERRORS_MODULE,
             "public_app_error_status": ERRORS_MODULE,

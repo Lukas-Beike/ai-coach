@@ -11,6 +11,7 @@ from unittest.mock import call, Mock, patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 
+from backend.providers import openai as openai_provider
 from backend.coach import streams as coach_streams
 from backend.errors import ClientDisconnected
 from backend.http_api import responses
@@ -291,7 +292,7 @@ class ServerProvidersTests(ServerTestCase):
     def test_gemini_turn_uses_its_captured_provider_and_reasoning_level(self):
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
         payload = {"_ai_provider": "gemini", "model": "gemini-3.8-flash", "input": "Prüfe die Form.", "reasoning": {"effort": "low"}}
-        with patch.object(server, "CONFIG", config), patch.object(server, "gemini_conversation_response_service") as service_factory, patch.object(server.openai_provider.OpenAIResponsesClient, "responses") as openai:
+        with patch.object(server, "CONFIG", config), patch.object(server, "gemini_conversation_response_service") as service_factory, patch.object(openai_provider.OpenAIResponsesClient, "responses") as openai:
             service_factory.return_value.request.return_value = {"output_text": "ok"}
             self.assertEqual(server.coach_response_transport().request(payload)["output_text"], "ok")
         service_factory.return_value.request.assert_called_once_with(payload)
@@ -325,7 +326,7 @@ class ServerProvidersTests(ServerTestCase):
     def test_gemini_reset_deletes_an_existing_openai_conversation(self):
         server.key_value_service().set("openai_conversation_id", "conv-test")
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="gemini")
-        with patch.object(server, "CONFIG", config), patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True) as delete:
+        with patch.object(server, "CONFIG", config), patch.object(openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True) as delete:
             result = server.coach_conversation_reset_service().reset()
         delete.assert_called_once_with("conv-test")
         self.assertTrue(result["remote_conversation_deleted"])
@@ -353,7 +354,7 @@ class ServerProvidersTests(ServerTestCase):
 
         config = replace(server.CONFIG, openai_api_key="test-key", openai_base_url="https://foundry.example.invalid/openai/v1")
         with patch.object(server, "CONFIG", config), patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "request", side_effect=fake_http_json):
-            result = server.openai_responses_client().request(
+            result = server.MODEL_TRANSPORT.openai_responses_client().request(
                 "/responses", {"model": "foundry-deployment", "input": "Hi"}
             )
 
@@ -403,14 +404,14 @@ class ServerProvidersTests(ServerTestCase):
         with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "request", return_value=response), patch.object(
             server.provider_state_service(), "record_usage"
         ) as record_usage:
-            server.openai_responses_client().request(
+            server.MODEL_TRANSPORT.openai_responses_client().request(
                 "/responses",
                 {"model": "gpt-6-luna", "background": True, "store": True, "input": "test"},
             )
         record_usage.assert_not_called()
 
     def test_openai_client_composition_keeps_background_limits_and_runtime_hooks(self):
-        client = server.openai_responses_client()
+        client = server.MODEL_TRANSPORT.openai_responses_client()
 
         self.assertEqual(client.background_poll_seconds, server.OPENAI_BACKGROUND_POLL_SECONDS)
         self.assertEqual(client.background_max_seconds, server.OPENAI_BACKGROUND_MAX_SECONDS)
@@ -831,7 +832,7 @@ class ServerProvidersTests(ServerTestCase):
         self.assertEqual(failures[-1]["context"]["reason"], "provider_timeout")
 
     def test_openai_stream_client_uses_runtime_state_and_diagnostics(self):
-        client = server.openai_stream_client()
+        client = server.MODEL_TRANSPORT.openai_stream_client()
 
         self.assertIs(client.telemetry.provider_state, server.provider_state_service())
         self.assertIs(client.telemetry.diagnostic_capture, server.DIAGNOSTIC_CAPTURE)
@@ -906,7 +907,7 @@ class ServerProvidersTests(ServerTestCase):
         server.key_value_service().set("openai_usage", json.dumps({"date": server.ATHLETE_CLOCK.now().date().isoformat(), "total_tokens": 10}))
         config = replace(server.CONFIG, openai_api_key="test-key")
         with patch.object(server, "CONFIG", config), patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "request", return_value={"status": "completed"}) as request:
-            result = server.openai_responses_client().request("/responses", {"model": "gpt-6-luna"})
+            result = server.MODEL_TRANSPORT.openai_responses_client().request("/responses", {"model": "gpt-6-luna"})
         self.assertEqual(result["status"], "completed")
         request.assert_called_once()
 

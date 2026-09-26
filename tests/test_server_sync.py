@@ -954,7 +954,7 @@ class ServerSyncTests(ServerTestCase):
         )
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-        ) as fetch_snapshot, patch.object(WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}), patch.object(server, "openai_responses_client") as openai_client:
+        ) as fetch_snapshot, patch.object(WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}), patch.object(server.MODEL_TRANSPORT, "openai_responses_client") as openai_client:
             result = server.INTERVALS_SYNC.sync_service().sync("test")
         fetch_snapshot.assert_called_once_with(activity_days=65)
         openai_client.assert_not_called()

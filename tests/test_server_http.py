@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import call, Mock, patch
 from urllib.error import HTTPError
 
+from backend.providers import openai as openai_provider
 from backend.coach import streams as coach_streams
 from backend.errors import ClientDisconnected
 from backend.http_api import auth as http_auth, readiness as readiness_module, response_transport, responses
@@ -817,7 +818,7 @@ class ServerHttpTests(ServerTestCase):
         expected = {"id": "resp_background_1", "status": "completed", "output_text": "fertig", "usage": {}}
         payload = {"model": "gpt-6-luna", "input": "fake"}
         with patch.object(
-            server.openai_provider.OpenAIResponsesClient, "background", return_value=expected
+            openai_provider.OpenAIResponsesClient, "background", return_value=expected
         ) as background:
             result = server.coach_response_transport().background_request(
                 payload, on_response_id=checkpoint
@@ -1172,7 +1173,7 @@ class ServerHttpTests(ServerTestCase):
     def test_responses_request_routes_openai_to_provider_client(self):
         payload = {"model": "gpt-6-luna"}
         with patch.object(
-            server.openai_provider.OpenAIResponsesClient,
+            openai_provider.OpenAIResponsesClient,
             "responses",
             return_value={"output_text": "ok"},
         ) as responses:
@@ -1187,7 +1188,7 @@ class ServerHttpTests(ServerTestCase):
         on_response_id = Mock()
 
         with patch.object(
-            server.openai_provider.OpenAIStreamClient,
+            openai_provider.OpenAIStreamClient,
             "stream",
             return_value={"status": "completed"},
         ) as stream:

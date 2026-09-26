@@ -92,12 +92,11 @@ from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config
 from backend.providers.intervals import IntervalsApiClient
 from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
-from backend.providers import gemini as gemini_provider
 from backend.providers import http as provider_http
-from backend.providers import openai as openai_provider
 from backend.providers import state as provider_state
 from backend.providers import weather as weather_provider
 from backend.providers.transport_assembly import ProviderTransportAssembly
+from backend.providers.model_assembly import ModelTransportAssembly
 from backend.http_api import server as http_server
 from backend.http_api.handler import HttpRequestHandlerDependencies, create_request_handler
 from backend.http_api.bootstrap_state import (
@@ -662,7 +661,7 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
     utc_now=runtime_clock.utc_now,
     maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
     planning_revision_service=PLANNING_REVISION_SERVICE,
-    openai_client=lambda: openai_responses_client(),
+    openai_client=lambda: MODEL_TRANSPORT.openai_responses_client(),
     logger=LOGGER,
     data_dir=lambda: DATA_DIR,
     database_path=lambda: DB_PATH,
@@ -1078,6 +1077,28 @@ PROVIDER_TRANSPORT = ProviderTransportAssembly(
     config=lambda: CONFIG,
     athlete_now=ATHLETE_CLOCK.now,
 )
+MODEL_TRANSPORT = ModelTransportAssembly(
+    config=lambda: CONFIG,
+    selected_thinking_level=SETTINGS.selected_thinking_level,
+    provider_http_client=PROVIDER_TRANSPORT.json_http_client,
+    provider_state_service=provider_state_service,
+    diagnostic_capture=DIAGNOSTIC_CAPTURE,
+    logger=LOGGER,
+    app_version=APP_VERSION,
+    gemini_base_url=GEMINI_API_BASE_URL,
+    default_openai_base_url=DEFAULT_OPENAI_BASE_URL,
+    openai_responses_path=OPENAI_RESPONSES_PATH,
+    json_media_type=JSON_MEDIA_TYPE,
+    max_audio_bytes=MAX_AUDIO_BODY_BYTES,
+    response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+    background_poll_seconds=OPENAI_BACKGROUND_POLL_SECONDS,
+    background_max_seconds=OPENAI_BACKGROUND_MAX_SECONDS,
+    max_response_bytes=lambda: provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
+    utc_now=runtime_clock.utc_now,
+    monotonic=time.perf_counter,
+    wall_time=time.monotonic,
+    wait=time.sleep,
+)
 PLANNED_UNIT_SYNC = PlannedUnitSyncAssembly(
     database_manager=database_manager,
     planned_unit_service=PLANNING_DATA.planned_unit,
@@ -1214,66 +1235,12 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
 )
 
 
-def gemini_json_client() -> gemini_provider.GeminiJsonClient:
-    """Compose the Gemini JSON adapter from the active runtime settings."""
-    return gemini_provider.GeminiJsonClient(
-        api_key=CONFIG.gemini_api_key,
-        base_url=GEMINI_API_BASE_URL,
-        response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-        http_client=PROVIDER_TRANSPORT.json_http_client(),
-        provider_state=provider_state_service(),
-    )
 
 
-def audio_transcription_client() -> audio_provider.AudioTranscriptionClient:
-    """Compose the transient audio adapter from active provider settings."""
-    return audio_provider.AudioTranscriptionClient(
-        max_audio_bytes=MAX_AUDIO_BODY_BYTES,
-        openai_api_key=CONFIG.openai_api_key,
-        gemini_api_key=CONFIG.gemini_api_key,
-        openai_base_url=CONFIG.openai_base_url,
-        default_openai_base_url=DEFAULT_OPENAI_BASE_URL,
-        openai_transcription_model="gpt-transcribe",
-        response_timeout_seconds=90,
-        http_client=PROVIDER_TRANSPORT.json_http_client(),
-        gemini_client=gemini_json_client(),
-    )
 
 
-def gemini_stream_client() -> gemini_provider.GeminiStreamClient:
-    """Compose the Gemini streaming client from the active runtime settings."""
-    return gemini_provider.GeminiStreamClient(
-        api_key=CONFIG.gemini_api_key,
-        base_url=GEMINI_API_BASE_URL,
-        response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-        max_bytes=provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
-        app_version=APP_VERSION,
-        json_media_type=JSON_MEDIA_TYPE,
-        provider_state=provider_state_service(),
-        logger=LOGGER,
-        opener=gemini_provider.urlopen,
-        monotonic=time.perf_counter,
-        now=runtime_clock.utc_now,
-    )
 
 
-def openai_responses_client() -> openai_provider.OpenAIResponsesClient:
-    """Compose the OpenAI Responses adapter from the active runtime settings."""
-    return openai_provider.OpenAIResponsesClient(
-        api_key=CONFIG.openai_api_key,
-        base_url=CONFIG.openai_base_url,
-        default_base_url=DEFAULT_OPENAI_BASE_URL,
-        responses_path=OPENAI_RESPONSES_PATH,
-        response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-        background_poll_seconds=OPENAI_BACKGROUND_POLL_SECONDS,
-        background_max_seconds=OPENAI_BACKGROUND_MAX_SECONDS,
-        thinking_level=SETTINGS.selected_thinking_level,
-        http_client=PROVIDER_TRANSPORT.json_http_client(),
-        provider_state=provider_state_service(),
-        logger=LOGGER,
-        monotonic=time.monotonic,
-        wait=time.sleep,
-    )
 
 
 def coach_conversation_provision_service() -> CoachConversationProvisionService:
@@ -1282,7 +1249,7 @@ def coach_conversation_provision_service() -> CoachConversationProvisionService:
         SETTINGS,
         database_manager(),
         KEY_VALUE_REPOSITORY,
-        openai_responses_client(),
+        MODEL_TRANSPORT.openai_responses_client(),
         DB_LOCK,
         uuid.uuid4,
     )
@@ -1291,36 +1258,12 @@ def coach_conversation_provision_service() -> CoachConversationProvisionService:
 def coach_conversation_reset_service() -> CoachConversationResetService:
     """Compose the Coach chat reset owner from concrete storage and provider adapters."""
     return CoachConversationResetService(
-        database_manager(), KEY_VALUE_REPOSITORY, openai_responses_client(),
+        database_manager(), KEY_VALUE_REPOSITORY, MODEL_TRANSPORT.openai_responses_client(),
         coach_streams.CHAT_STREAM_REGISTRY, DB_LOCK, COACH_CONVERSATION_GATE.lock,
         runtime_clock.utc_now, uuid.uuid4, LOGGER,
     )
 
 
-def openai_stream_client() -> openai_provider.OpenAIStreamClient:
-    """Compose the OpenAI streaming client from the active runtime settings."""
-    return openai_provider.OpenAIStreamClient(
-        openai_provider.OpenAIStreamConfig(
-            api_key=CONFIG.openai_api_key,
-            base_url=CONFIG.openai_base_url,
-            default_base_url=DEFAULT_OPENAI_BASE_URL,
-            responses_path=OPENAI_RESPONSES_PATH,
-            timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-        max_bytes=provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
-            app_version=APP_VERSION,
-            media_type=JSON_MEDIA_TYPE,
-        ),
-        openai_provider.OpenAIStreamTelemetry(
-            provider_state_service(),
-            DIAGNOSTIC_CAPTURE,
-            LOGGER,
-            time.perf_counter,
-            runtime_clock.utc_now,
-        ),
-        SETTINGS.selected_thinking_level,
-        opener=openai_provider.urlopen,
-        wait=time.sleep,
-    )
 
 
 def coach_quick_actions_service() -> CoachQuickActionsService:
@@ -1466,8 +1409,8 @@ def gemini_conversation_response_service() -> GeminiConversationResponseService:
     return GeminiConversationResponseService(
         gemini_request_payload_service(),
         gemini_response_normalization_service(),
-        gemini_json_client(),
-        gemini_stream_client(),
+        MODEL_TRANSPORT.gemini_json_client(),
+        MODEL_TRANSPORT.gemini_stream_client(),
         settings_service=SETTINGS,
         default_thinking_level=SETTINGS.selected_thinking_level(),
         default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
@@ -1602,7 +1545,7 @@ def coach_context_preview_service() -> CoachContextPreviewService:
 def coach_response_transport() -> CoachResponseTransport:
     """Compose concrete OpenAI and Gemini response adapters."""
     return CoachResponseTransport(
-        SETTINGS, openai_responses_client, openai_stream_client,
+        SETTINGS, MODEL_TRANSPORT.openai_responses_client, MODEL_TRANSPORT.openai_stream_client,
         gemini_conversation_response_service,
     )
 
@@ -2074,7 +2017,7 @@ CHAT_STREAM_TRANSPORT = CoachChatStreamTransport(
     max_request_bytes=coach_attachments.MAX_REQUEST_BYTES,
     response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
 )
-TRANSCRIBE_POST_ROUTES = TranscribePostRoutes(SETTINGS, audio_transcription_client)
+TRANSCRIBE_POST_ROUTES = TranscribePostRoutes(SETTINGS, MODEL_TRANSPORT.audio_transcription_client)
 DIAGNOSTICS_CAPTURE_POST_ROUTES = DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)
 PRIVACY_DELETE_POST_ROUTES = PrivacyDeletePostRoutes(PRIVACY_ASSEMBLY.delete_service)
 PRIVACY_GET_ROUTES = PrivacyGetRoutes(

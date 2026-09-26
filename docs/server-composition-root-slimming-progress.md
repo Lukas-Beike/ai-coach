@@ -903,3 +903,45 @@ mocked providers; no live account or runtime data was used.
 - Measured `server.py`: 2,210 physical / 1,930 nonblank lines, 207 AST imports,
   112 top-level functions. S3 still has no dedicated privacy or backup factory
   chain in the root; Coach and HTTP slices remain.
+
+## S4a boundary before implementation: Coach provider transports
+
+- `gemini_json_client()`, `audio_transcription_client()`,
+  `gemini_stream_client()`, `openai_responses_client()`, and
+  `openai_stream_client()` have direct consumers across Gemini/OpenAI Coach
+  services, transcription HTTP, privacy deletion, sync follow-up, performance
+  tests, provider tests and `tests/support.py`. No e2e fixture names these
+  factory methods. Direct root callers will use one provider-owned transport
+  assembly; the direct `patch.object(server, "openai_responses_client")` sites
+  in performance and sync tests will patch that method at its owner.
+- Preserve dynamic CONFIG and model/thinking-level selection; the same cached
+  provider HTTP client and manager-bound provider-state service; response size,
+  timeout, retry and telemetry policies; redaction/logger/diagnostics; and
+  provider module opener lookup. Audio remains in-memory short-lived
+  transcription. Constructors stay lazy with respect to requests; each method
+  creates the same fresh adapter as its old root factory.
+- Proposed owner: `ModelTransportAssembly` in
+  `backend/providers/model_assembly.py`, exposing only the five methods above.
+  It receives config/settings providers plus provider HTTP/state, diagnostics,
+  redaction/logging and timing inputs explicitly. `server.py` connects this
+  provider boundary to Coach and HTTP; no Coach workflow enters this module.
+
+## S4a: Coach provider transports
+
+- Completed `ModelTransportAssembly` in `backend/providers/model_assembly.py`.
+  Removed five provider client factories from `server.py`; Coach and
+  transcription composition now use the provider owner directly. Updated
+  provider, Coach, HTTP, sync, performance, and architecture test callers and
+  added assembly identity/laziness coverage.
+- Kept active configuration and selected thinking-level lookup dynamic, and
+  preserved shared provider HTTP and state owners, timeout/size policies,
+  telemetry, opener patch points, and transient in-memory audio handling.
+  Guarded checks passed: model assembly/provider suite (53 passed); provider,
+  transcription, performance, and sync matrix (172 passed). Compileall,
+  generated inventory check, and diff check passed. Docker remains unavailable.
+- Changed files include `server.py`, the new model transport assembly and its
+  tests, generated inventory and owner map, progress record, and direct Coach,
+  HTTP, sync, provider, performance, and architecture test callers.
+- Measured `server.py`: 2,153 physical / 1,873 nonblank lines, 206 AST imports,
+  107 top-level functions. Risk remaining for S4 is the separate conversation,
+  context/read-tool, proposal/tool, and turn/job ownership slices.
