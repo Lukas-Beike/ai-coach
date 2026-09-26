@@ -54,6 +54,7 @@ def build_tool_contracts(
         "apply_adaptive_replan",
         "update_training_plan",
         "undo_training_change",
+        "delete_duplicate_intervals_activity",
         "apply_workout_library_plan",
         "save_nutrition_entry",
         "delete_nutrition_entry",
@@ -228,7 +229,31 @@ def build_tool_contracts(
                 "status": {"type": "string", "enum": sorted(TRAINING_PLAN_STATUSES)},
             },
         }}),
-        _canonical_coach_tool("undo_training_change", "Return an undo preview for a local change; do not apply it silently.", {"change_id": {"type": "string"}}),
+        _canonical_coach_tool(
+            "undo_training_change",
+            "Return an undo preview for a local change, or apply the undo directly when explicitly confirmed or requested by the athlete using apply=true.",
+            {
+                "change_id": {"type": "string"},
+                "apply": {
+                    "type": "boolean",
+                    "description": "Apply the undo directly after explicit athlete confirmation or request.",
+                },
+            },
+        ),
+        _canonical_coach_tool(
+            "delete_duplicate_intervals_activity",
+            "Delete a duplicate Garmin cycling activity from Intervals.icu after explicit athlete confirmation or request, retaining the canonical Wahoo recording.",
+            {
+                "duplicate_id": {
+                    "type": "string",
+                    "description": "Optional Intervals.icu activity ID of the duplicate to delete. Omit to delete the latest detected duplicate.",
+                },
+                "canonical_id": {
+                    "type": "string",
+                    "description": "Optional Intervals.icu activity ID of the canonical Wahoo activity to retain.",
+                },
+            },
+        ),
         _canonical_coach_tool(
             "save_nutrition_entry",
             "Save a meal, snack, or nutritional intake with calories and macronutrients (carbs, protein, fat). Use when the athlete describes what they ate via speech/text or shares a food photo.",

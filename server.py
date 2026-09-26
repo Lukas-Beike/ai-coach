@@ -586,6 +586,8 @@ def coach_sync_tool_service() -> CoachSyncToolService:
         sync_conflict_command_service(), structured_plan_sync_service(),
         plan_repair_manifest_service(), plan_push_command_service(),
         provider_refresh_command_service(),
+        duplicate_activity=duplicate_activity_service(),
+        intervals_client_factory=intervals_client,
     )
 
 

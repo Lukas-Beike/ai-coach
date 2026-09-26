@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from typing import Any
 
+from backend.activities.duplicates import latest_wahoo_garmin_duplicate
 from backend.coach.authorization import authorized_operations, require_coach_scope
 from backend.errors import STRUCTURED_AUTHORIZATION_ERROR, AppError
 from backend.sync.authority import PlanningAuthorityService
@@ -18,6 +20,7 @@ from backend.sync.queue import SyncJobQueueService
 COACH_SYNC_TOOL_NAMES = frozenset({
     "start_intervals_plan_sync", "get_sync_job", "sync_competitions",
     "resolve_training_sync_conflict", "start_provider_refresh", "refresh_current_performance",
+    "delete_duplicate_intervals_activity",
 })
 
 
@@ -33,6 +36,8 @@ class CoachSyncToolService:
         plan_repair: PlanRepairManifestService,
         plan_push: PlanPushCommandService,
         provider_refresh: ProviderRefreshCommandService,
+        duplicate_activity: Any | None = None,
+        intervals_client_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._queue = queue
         self._authority = authority
@@ -41,6 +46,8 @@ class CoachSyncToolService:
         self._plan_repair = plan_repair
         self._plan_push = plan_push
         self._provider_refresh = provider_refresh
+        self._duplicate_activity = duplicate_activity
+        self._intervals_client_factory = intervals_client_factory
 
     def execute(
         self,
@@ -66,6 +73,8 @@ class CoachSyncToolService:
             return self._start_provider_refresh(arguments, intent, sync_job_ids, cancel_event)
         if name == "refresh_current_performance":
             return self._refresh_current_performance(arguments, intent, sync_job_ids)
+        if name == "delete_duplicate_intervals_activity":
+            return self._delete_duplicate_activity(arguments, intent)
         return None
 
     def _start_provider_refresh(
@@ -152,3 +161,23 @@ class CoachSyncToolService:
         result = self._conflicts.retry_job(job_id)
         sync_job_ids.append(job_id)
         return result
+
+    def _delete_duplicate_activity(
+        self, arguments: dict[str, Any], intent: dict[str, Any]
+    ) -> dict[str, Any]:
+        if "delete_duplicate_intervals_activity" not in authorized_operations(intent) or intent.get("target_system") != "intervals":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Sync nicht.", reason="intent_scope_denied")
+        require_coach_scope(intent, "intervals_sync")
+        if not self._duplicate_activity or not self._intervals_client_factory:
+            raise AppError(500, "Duplikat-Bereinigung ist nicht verfuegbar.")
+        snapshot = self._duplicate_activity._latest_snapshot() or {}
+        duplicate = latest_wahoo_garmin_duplicate(snapshot)
+        if not duplicate:
+            return {"ok": False, "status": "no_duplicate_found", "message": "Kein Wahoo-/Garmin-Duplikat vorhanden."}
+        payload = {
+            "canonical_id": str(arguments.get("canonical_id") or duplicate["canonical_id"]),
+            "duplicate_id": str(arguments.get("duplicate_id") or duplicate["duplicate_id"]),
+            "snapshot_synced_at": duplicate.get("snapshot_synced_at"),
+        }
+        result = self._duplicate_activity.delete(payload, self._intervals_client_factory())
+        return {"ok": True, **result}

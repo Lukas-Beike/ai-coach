@@ -18,6 +18,7 @@ from backend.providers import gemini as gemini_provider
 from backend.providers import http as provider_http
 from backend.providers import openai as openai_provider
 from backend.sync.intervals import IntervalsSyncService
+from backend.providers import intervals_client as intervals_client_module
 
 
 def covers(*cases):
@@ -413,6 +414,23 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             snapshot["recent_activities"],
         )
         self.assertEqual(server.sync_job_queue_service().list(), [])
+
+    @covers("delete_duplicate_intervals_activity:success")
+    def test_delete_duplicate_intervals_activity(self):
+        common = {"type": "Ride", "start_date_local": "2026-09-06T10:00:00", "moving_time": 3600, "distance": 30000}
+        snapshot = {"recent_activities": [{**common, "id": "synthetic-wahoo", "source": "Wahoo"}, {**common, "id": "synthetic-garmin", "source": "GARMIN_CONNECT"}]}
+        server.sync_state_repository().save_view(snapshot)
+        with patch.object(intervals_client_module.IntervalsClient, "delete_activity", return_value=None):
+            result = self.run_tool(
+                "delete_duplicate_intervals_activity",
+                {"duplicate_id": "synthetic-garmin", "canonical_id": "synthetic-wahoo"},
+                ["intervals_sync"],
+                target="intervals",
+                remote_write=True,
+                message="Lösche das Garmin-Duplikat für die Wahoo-Ausfahrt aus Intervals.",
+            )
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["status"], "deleted")
 
     @covers("clarify_coach_request:success", "cancel_coach_request:success")
     def test_clarification_and_cancellation_preserve_athlete_data(self):

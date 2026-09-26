@@ -106,6 +106,75 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         self.assertEqual((raised.exception.status, raised.exception.reason), (403, "request_target"))
         self.conflicts.retry_job.assert_not_called()
 
+    def test_delete_duplicate_intervals_activity_requires_scope_and_executes(self):
+        duplicate_service = Mock()
+        intervals_client = Mock()
+        service = CoachSyncToolService(
+            self.queue, self.authority, self.conflicts,
+            self.plan_sync, self.plan_repair, self.plan_push, self.provider_refresh,
+            duplicate_activity=duplicate_service,
+            intervals_client_factory=lambda: intervals_client,
+        )
+        intent = {
+            "operation": "delete_duplicate_intervals_activity",
+            "target_system": "intervals",
+            "authorization_scope": [],
+        }
+        with self.assertRaises(AppError) as raised:
+            service.execute("delete_duplicate_intervals_activity", {}, intent=intent, sync_job_ids=[])
+        self.assertEqual(raised.exception.reason, "intent_scope_denied")
+
+        intent["authorization_scope"] = ["intervals_sync"]
+        duplicate_service._latest_snapshot.return_value = {
+            "recent_activities": [
+                {
+                    "id": "wahoo-1",
+                    "type": "Ride",
+                    "device_name": "ELEMNT BOLT",
+                    "start_date_local": "2026-09-26T10:00:00",
+                    "moving_time": 3600,
+                    "distance": 30000,
+                },
+                {
+                    "id": "garmin-1",
+                    "type": "Ride",
+                    "device_name": "Garmin Edge 830",
+                    "start_date_local": "2026-09-26T10:00:00",
+                    "moving_time": 3600,
+                    "distance": 30000,
+                },
+            ],
+            "synced_at": "2026-09-26T12:00:00Z",
+        }
+        duplicate_service.delete.return_value = {
+            "status": "deleted",
+            "deleted_activity_id": "garmin-1",
+            "kept_activity_id": "wahoo-1",
+        }
+        result = service.execute(
+            "delete_duplicate_intervals_activity",
+            {"duplicate_id": "garmin-1", "canonical_id": "wahoo-1"},
+            intent=intent,
+            sync_job_ids=[],
+        )
+        self.assertEqual(
+            result,
+            {
+                "ok": True,
+                "status": "deleted",
+                "deleted_activity_id": "garmin-1",
+                "kept_activity_id": "wahoo-1",
+            },
+        )
+        duplicate_service.delete.assert_called_once_with(
+            {
+                "canonical_id": "wahoo-1",
+                "duplicate_id": "garmin-1",
+                "snapshot_synced_at": "2026-09-26T12:00:00Z",
+            },
+            intervals_client,
+        )
+
     def test_current_turn_job_can_be_read_without_extra_scope(self):
         self.queue.state.return_value = {"id": "job-1"}
         self.assertEqual(

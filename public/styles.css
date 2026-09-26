@@ -202,8 +202,7 @@ h2 {
 .coach-provider-item small { color: var(--subtle); font-size: .64rem; }
 .coach-quick-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .coach-quick-actions .btn { flex: 1 1 180px; font-size: .74rem; }
-.coach-receipts { display: grid; gap: 8px; margin: 0 0 14px; }
-.coach-receipts:empty { display: none; }
+.coach-receipts { display: none !important; }
 .action-receipt { text-align: left; }
 .action-receipt.is-error { border-color: rgba(255, 69, 58, .4); color: var(--ink); background: rgba(255, 69, 58, .08); }
 .action-receipt-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -363,8 +362,7 @@ h2 {
 }
 .quick-message-templates::-webkit-scrollbar { display: none; }
 .quick-message-templates[hidden] { display: none; }
-.chat-queue-status { grid-column: 1 / -1; min-height: 1.1em; padding: 1px 2px 0; color: var(--muted); font-size: .68rem; }
-.chat-queue-status[hidden] { display: none; }
+.chat-queue-status { display: none !important; }
 .quick-message-label {
   flex: 0 0 auto;
   color: var(--subtle);
