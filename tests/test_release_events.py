@@ -11,7 +11,7 @@ import unittest
 
 
 WORKFLOW = (
-    Path(__file__).resolve().parents[1] / ".github/workflows/weekly-release.yml"
+    Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml"
 ).read_text(encoding="utf-8")
 CREATE_RELEASE = WORKFLOW.split("  create-release:\n", 1)[1]
 
