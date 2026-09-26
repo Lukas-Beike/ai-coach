@@ -17,6 +17,7 @@ from backend.providers import intervals_client as intervals_client_module
 from backend.sync.intervals import IntervalsSnapshotReader
 from backend.sync.performance import PerformanceRefreshService
 from backend.weather import history as weather_history
+from backend.sync import queue as sync_queue
 from server_test_support import _current_performance_context, _garmin_metrics, server, ServerTestCase
 
 
@@ -25,10 +26,10 @@ class ServerPerformanceTests(ServerTestCase):
     def test_performance_refresh_jobs_are_deduplicated_atomically(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
-            first = server.sync_job_queue_service().enqueue(
+            first = server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals", "performance_refresh", {"reason": "first"}, requested_by="scheduler"
             )
-            second = server.sync_job_queue_service().enqueue(
+            second = server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals", "performance_refresh", {"reason": "second"}, requested_by="coach"
             )
         self.assertEqual(second["id"], first["id"])
@@ -43,7 +44,7 @@ class ServerPerformanceTests(ServerTestCase):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config), patch.object(
             PerformanceRefreshService, "running", return_value=True
-        ), patch.object(server.SyncJobQueueService, "enqueue") as enqueue:
+        ), patch.object(sync_queue.SyncJobQueueService, "enqueue") as enqueue:
             self.assertIsNone(
                 server.performance_refresh_followup_service().enqueue_after_sync(
                     "startup"

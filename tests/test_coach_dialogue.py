@@ -20,6 +20,7 @@ from backend.coach import service as coach_service
 from backend.coach import structured_tool_round
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.sync.intervals import IntervalsSyncService
+from backend.sync import queue as sync_queue
 
 server = fixtures.server
 
@@ -330,7 +331,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             if remote:
                 server.local_plan_creation_service().save([self.workout()])
                 payload = {"reason": "Synthetic retry", "entries": server.planning_authority_service().pending_plan_push_entries()}
-            job = server.sync_job_queue_service().enqueue(
+            job = server.SYNC_JOB_QUEUE.service().enqueue(
                 provider, kind, payload, requested_by="coach"
             )
             with server.database_manager().unit_of_work() as db:
@@ -339,7 +340,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                                                     {"output_text": "Noch nicht gestartet."}])
             self.assertEqual(result["status"], "failed")
             self.assertEqual(
-                server.sync_job_queue_service().state(job["id"])["status"], "failed"
+                server.SYNC_JOB_QUEUE.service().state(job["id"])["status"], "failed"
             )
             result, _ = self.turn("Ja, bei dem Anbieter nochmal versuchen", [
                 lambda _, j=job: self.call("get_sync_job", {"job_id": j["id"]}),
@@ -348,7 +349,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             ])
             self.assertEqual(result["status"], "completed")
             self.assertEqual(
-                server.sync_job_queue_service().state(job["id"])["status"], "queued"
+                server.SYNC_JOB_QUEUE.service().state(job["id"])["status"], "queued"
             )
             self.assertEqual(result["sync_job_ids"], [job["id"]])
 
@@ -533,7 +534,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertIsNone(json.loads(server.key_value_service().get("coach_pending_request")))
 
     def test_remote_write_requires_per_step_sync_authority(self):
-        with patch.object(server.SyncJobQueueService, "enqueue") as enqueue:
+        with patch.object(sync_queue.SyncJobQueueService, "enqueue") as enqueue:
             result, _ = self.turn("Ja, speichern", [lambda _: self.call("start_intervals_plan_sync", {}, ["local_plan"],
                 target="intervals", sync_scope="all_pending"), {"output_text": "Nicht synchronisiert."}])
         enqueue.assert_not_called()
@@ -783,7 +784,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertTrue(all(step["result"]["ok"] for step in result["command_receipts"]))
         self.assertEqual(
-            server.sync_job_queue_service().state(result["sync_job_ids"][0])["status"],
+            server.SYNC_JOB_QUEUE.service().state(result["sync_job_ids"][0])["status"],
             "queued",
         )
 
@@ -792,9 +793,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         def broken(_):
             raise server.AppError(503, "Synthetic model unavailable", reason="provider_unavailable")
         with patch.object(
-            server.SyncJobQueueService,
+            sync_queue.SyncJobQueueService,
             "enqueue",
-            wraps=server.sync_job_queue_service().enqueue,
+            wraps=server.SYNC_JOB_QUEUE.service().enqueue,
         ) as enqueue:
             result, _ = self.turn("Sync zu intervals.icu durchführen", [
                 lambda _: self.call("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"],
@@ -815,12 +816,12 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertIn("noch nicht bestätigt", text)
         self.assertNotIn("Der Coach-Auftrag konnte nicht abgeschlossen werden", text)
         self.assertEqual(
-            server.sync_job_queue_service().state(result["sync_job_ids"][0])["status"],
+            server.SYNC_JOB_QUEUE.service().state(result["sync_job_ids"][0])["status"],
             "queued",
         )
 
     def test_failed_plan_cannot_sync_created_entries(self):
-        with patch.object(server.SyncJobQueueService, "enqueue") as enqueue:
+        with patch.object(sync_queue.SyncJobQueueService, "enqueue") as enqueue:
             result, _ = self.turn("Planen und übertragen", [lambda _: self.call("start_intervals_plan_sync", {}, ["intervals_sync"],
                 target="intervals", remote_write=True, sync_scope="created"), {"output_text": "Noch nicht gespeichert."}])
         enqueue.assert_not_called()

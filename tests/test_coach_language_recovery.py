@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from test_coach_dialogue import DialogueHarness, server
+from backend.sync import queue as sync_queue
 
 from backend.coach.outcomes import coach_failure_lines
 from backend.coach.response_retry import CoachResponseRetryPolicy
@@ -49,9 +50,9 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
             patch("backend.coach.response_retry.time.sleep") as sleep,
             patch("backend.coach.response_retry.secrets.randbelow", return_value=0),
             patch.object(
-                server.SyncJobQueueService,
+                sync_queue.SyncJobQueueService,
                 "enqueue",
-                wraps=server.sync_job_queue_service().enqueue,
+                wraps=server.SYNC_JOB_QUEUE.service().enqueue,
             ) as enqueue,
         ):
             result, model = self.turn("Bitte den Plan nochmal übertragen", [sync, limited, {"id": "resp_final", "output_text": "Sync beauftragt."}])
@@ -61,7 +62,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(model.call_args_list[1].args[0], model.call_args_list[2].args[0])
         self.assertEqual(model.call_args.args[0]["previous_response_id"], "resp_sync")
         self.assertEqual(
-            server.sync_job_queue_service().state(result["sync_job_ids"][0])["status"],
+            server.SYNC_JOB_QUEUE.service().state(result["sync_job_ids"][0])["status"],
             "queued",
         )
         _, next_model = self.turn("Und, ist er fertig?", [{"output_text": "Ich prüfe den Auftrag."}])
@@ -117,7 +118,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
 
     def test_failed_answer_keeps_observed_sync_status(self):
         server.local_plan_creation_service().save([self.workout()])
-        job = server.sync_job_queue_service().enqueue(
+        job = server.SYNC_JOB_QUEUE.service().enqueue(
             "intervals",
             "plan_push",
             {"entries": server.planning_authority_service().pending_plan_push_entries()},

@@ -143,11 +143,11 @@ class ProviderReviewTests(unittest.TestCase):
         self.assertEqual(runtime_maintenance.MAINTENANCE_GATE.state(), {"active": False, "running_operations": 0})
 
     def test_privacy_delete_discards_queued_provider_payloads(self):
-        server.sync_job_queue_service().enqueue("intervals", "refresh", {"days": 7})
-        server.sync_job_queue_service().enqueue("garmin", "refresh", {"days": 7})
+        server.SYNC_JOB_QUEUE.service().enqueue("intervals", "refresh", {"days": 7})
+        server.SYNC_JOB_QUEUE.service().enqueue("garmin", "refresh", {"days": 7})
         server.privacy_delete_service().delete("LOKALE DATEN LÖSCHEN")
-        self.assertIsNone(server.sync_job_store().claim())
-        self.assertEqual(server.sync_job_queue_service().list(), [])
+        self.assertIsNone(server.SYNC_JOB_QUEUE.store().claim())
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     def test_privacy_delete_discards_claimed_coach_payload_without_failure_write(self):
         job = {"_maintenance_generation": runtime_maintenance.MAINTENANCE_GATE.current_generation()}
@@ -158,7 +158,7 @@ class ProviderReviewTests(unittest.TestCase):
         failure.assert_not_called()
 
     def test_running_job_failure_cleanup_is_drained_before_deletion(self):
-        server.sync_job_queue_service().enqueue("intervals", "refresh", {"days": 7})
+        server.SYNC_JOB_QUEUE.service().enqueue("intervals", "refresh", {"days": 7})
         entered, release, deleted = threading.Event(), threading.Event(), threading.Event()
 
         def execute(_job):
@@ -173,7 +173,7 @@ class ProviderReviewTests(unittest.TestCase):
 
         executor = server.sync_job_executor()
         sync_worker = SyncJobWorker(
-            server.sync_job_store(),
+            server.SYNC_JOB_QUEUE.store(),
             executor,
             runtime_maintenance.MAINTENANCE_GATE,
             0.01,
@@ -192,7 +192,7 @@ class ProviderReviewTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         self.assertTrue(deleted.is_set())
         self.assertFalse(server.key_value_service().get("private_after_fetch"))
-        self.assertEqual(server.sync_job_queue_service().list(), [])
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     def test_utf8_login_does_not_normalize_password_or_expose_it(self):
         for password in ("synthetic-ascii-123", "synthetic-\u00e4\u00f6\u00fc-123", "synthetic-\U0001f6b4-123"):

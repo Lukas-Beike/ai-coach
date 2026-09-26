@@ -19,6 +19,7 @@ from backend.runtime import events as runtime_events
 from backend.sync.intervals import IntervalsSnapshotReader
 from backend.sync.library import WorkoutLibraryRefreshService
 from backend.sync.planned_units import RemotePlannedUnitReconciler
+from backend.sync import queue as sync_queue
 from server_test_support import _current_performance_context, server, ServerTestCase
 from support import IntervalsRequestRecorder, parsed_workout_fixture, RecordedIntervalsClient
 
@@ -40,7 +41,7 @@ class ServerPlanningTests(ServerTestCase):
             "ambiguities": [],
             "authorization_scope": [f"library_workout:{local_id}"],
         }
-        with patch.object(server.SyncJobQueueService, "enqueue", return_value={"id": "job-plan-push"}) as enqueue:
+        with patch.object(sync_queue.SyncJobQueueService, "enqueue", return_value={"id": "job-plan-push"}) as enqueue:
             result = server.coach_tool_dispatch_service().execute(
                 "start_intervals_plan_sync",
                 {"entries": [entry]},
@@ -65,7 +66,7 @@ class ServerPlanningTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_competitions"],
         }
         with patch.object(
-            server.SyncJobQueueService,
+            sync_queue.SyncJobQueueService,
             "enqueue",
             side_effect=[{"id": "job-performance"}, {"id": "job-competition"}],
         ) as enqueue:

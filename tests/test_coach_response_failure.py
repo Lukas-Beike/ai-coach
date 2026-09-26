@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
+from backend.sync import queue as sync_queue
 
 server = dialogue.server
 
@@ -38,9 +39,9 @@ class CoachResponseFailureTests(unittest.TestCase):
                 patch.object(server.openai_provider.OpenAIResponsesClient, "background", side_effect=create), \
                 patch.object(server.time, "sleep"), \
                 patch.object(
-                    server.SyncJobQueueService,
+                    sync_queue.SyncJobQueueService,
                     "enqueue",
-                    wraps=server.sync_job_queue_service().enqueue,
+                    wraps=server.SYNC_JOB_QUEUE.service().enqueue,
                 ) as enqueue:
             receipt = server.coach_chat_turn_service().run(message, client_turn_id=turn_id,
                                            session_csrf_hash="synthetic-session", background_job=True)
@@ -78,9 +79,9 @@ class CoachResponseFailureTests(unittest.TestCase):
                 patch("backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic local context"), \
                 patch.object(server.openai_provider.OpenAIResponsesClient, "background", side_effect=create), \
                 patch.object(
-                    server.SyncJobQueueService,
+                    sync_queue.SyncJobQueueService,
                     "enqueue",
-                    wraps=server.sync_job_queue_service().enqueue,
+                    wraps=server.SYNC_JOB_QUEUE.service().enqueue,
                 ) as enqueue:
             receipt = server.coach_chat_turn_service().run(message, client_turn_id=turn_id,
                                            session_csrf_hash="synthetic-session", background_job=True)
@@ -98,7 +99,7 @@ class CoachResponseFailureTests(unittest.TestCase):
         self.assertIn("Plansynchronisierung beauftragt", receipt["message"]["content"])
         self.assertIn("noch nicht bestätigt", receipt["message"]["content"])
         self.assertEqual(
-            server.sync_job_queue_service().state(receipt["sync_job_ids"][0])[
+            server.SYNC_JOB_QUEUE.service().state(receipt["sync_job_ids"][0])[
                 "status"
             ],
             "queued",

@@ -30,6 +30,7 @@ from backend.http_api.response_transport import STREAM_CHUNK_BYTES
 from backend.providers import gemini as gemini_provider
 from backend.runtime import maintenance as runtime_maintenance
 from backend.weather import cache as weather_cache
+from backend.sync import queue as sync_queue
 from server_test_support import create_test_session, server, ServerTestCase
 
 
@@ -120,7 +121,7 @@ class ServerDatabaseTests(ServerTestCase):
             self.assertEqual(tables, {"unexpected_records"})
 
     def test_database_initialization_does_not_recover_jobs(self):
-        with patch.object(server.SyncJobQueueService, "resume_interrupted") as sync_recovery, patch(
+        with patch.object(sync_queue.SyncJobQueueService, "resume_interrupted") as sync_recovery, patch(
             "backend.coach.job_store.CoachJobStore.resume_interrupted"
         ) as coach_recovery:
             server.initialise_database()

@@ -3174,7 +3174,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "SYNC_GET_ROUTES",
             [
                 "session_auth_service",
-                "sync_job_queue_service",
+                "SYNC_JOB_QUEUE.service",
                 "sync_public_state_service",
                 "activity_read_service",
                 "lambda: ATHLETE_CLOCK.now().date()",

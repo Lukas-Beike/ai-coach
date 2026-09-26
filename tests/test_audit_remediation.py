@@ -282,10 +282,10 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
         self.assertIsNotNone(json.loads(server.key_value_service().get("coach_pending_request")))
 
     def test_completed_async_job_refreshes_model_context(self):
-        job = server.sync_job_queue_service().enqueue(
+        job = server.SYNC_JOB_QUEUE.service().enqueue(
             "garmin", "refresh", {"days": 1}
         )
-        server.sync_job_outcome_service().update(job["id"], "completed")
+        server.SYNC_JOB_QUEUE.outcome_service().update(job["id"], "completed")
         steps = iter([lambda _: self.call("get_sync_job", {"job_id": job["id"]}), {"output_text": "Fresh data read."}])
         def response(payload, **kwargs):
             step = next(steps)
@@ -324,18 +324,18 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
             with patch.object(server, "CONFIG", replace(server.CONFIG, app_password="synthetic-encrypted-key")), patch.object(server, "DATA_DIR", root), patch.object(server, "DB_PATH", root / "test.db"), patch.object(server, "LOG_PATH", root / "test.log"):
                 try:
                     server.initialise_database()
-                    job = server.sync_job_queue_service().enqueue(
+                    job = server.SYNC_JOB_QUEUE.service().enqueue(
                         "intervals", "refresh", {"days": 1}
                     )
-                    server.sync_job_store().claim()
+                    server.SYNC_JOB_QUEUE.store().claim()
                     backup = server.database_backup_service().read_bytes()
-                    server.sync_job_outcome_service().update(job["id"], "completed")
+                    server.SYNC_JOB_QUEUE.outcome_service().update(job["id"], "completed")
                     self.assertTrue(server.database_restore_service().restore(backup)["restored"])
                     self.assertEqual(
-                        server.sync_job_queue_service().state(job["id"])["status"],
+                        server.SYNC_JOB_QUEUE.service().state(job["id"])["status"],
                         "queued",
                     )
-                    self.assertEqual(server.sync_job_store().claim()["id"], job["id"])
+                    self.assertEqual(server.SYNC_JOB_QUEUE.store().claim()["id"], job["id"])
                 finally:
                     DATABASE_MANAGER_CACHE.reset()
 

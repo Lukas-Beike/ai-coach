@@ -248,3 +248,52 @@ mocked providers; no live account or runtime data was used.
   `tests/test_server_providers.py`, and `tests/test_server_sync.py`.
 - Remaining risk: SQLCipher integration and image build still require the
   application Docker runtime, unavailable on this host.
+
+## S2b1 boundary before implementation: sync-job queue control plane
+
+- The root factories `sync_job_store`, `sync_job_queue_service`, and
+  `sync_job_outcome_service` form the persistent job control-plane seam. Their
+  callers are shared by manual HTTP sync, Coach refresh/planning commands,
+  performance follow-ups, public state, sync execution, scheduling, startup
+  recovery, and temporary-storage tests. Tests directly call the factories
+  throughout the suite; no fixture patches these root functions. Several tests
+  patch `server.SyncJobQueueService` methods, so those patches must move to
+  `backend.sync.queue.SyncJobQueueService` and the assembly must resolve the
+  class through its owning module.
+- `SyncJobStore` wrappers are fresh per factory call and must use the current
+  manager with the existing UTC clock and UUID factory. Queue and outcome
+  wrappers are also fresh. Preserve the same state-event buffer, maintenance
+  gate, and `shared_sync_job_wake_event()` owner identity across queue service,
+  outcome service, and the later worker assembly. Resolve the manager and wake
+  event when the corresponding method is called; do not make assembly creation
+  touch storage or start work. Daily marker service construction remains a
+  callable edge from queue construction.
+- Proposed interface: `SyncJobQueueAssembly` in
+  `backend/sync/queue_assembly.py`, exposing `store()`, `service()`, and
+  `outcome_service()`. Worker singleton creation, executor wiring, schedulers,
+  command endpoints, and provider/domain sync services remain outside this
+  slice.
+
+## S2b1: sync-job queue control plane assembly
+
+- Completed in `backend/sync/queue_assembly.py` as `SyncJobQueueAssembly`, with
+  `store()`, `service()`, and `outcome_service()`. The root supplies manager,
+  clock, UUID, event-buffer, maintenance-gate, shared wake-event, marker,
+  redaction, logging, and retry dependencies. Store and service wrappers remain
+  fresh per call; database and wake-event lookup remains lazy.
+- Removed the three root factories and migrated root, Coach, HTTP, scheduler,
+  fixture, and test consumers to `SYNC_JOB_QUEUE`. Tests now patch
+  `SyncJobQueueService` through `backend.sync.queue`; no queue factory alias
+  remains in the root.
+- Focused queue/job/sync/lifecycle/Coach/architecture run exercised 273 tests.
+  The first combined run found one stale architecture expectation for the
+  removed root factory; after updating it, that route ownership test passed and
+  the full architecture module passed (48 tests). Queue, job outcome, job
+  contract, sync, runtime, Coach dialogue/recovery, and response-failure tests
+  passed. Inventory check, compileall, and diff check passed.
+- Measured `server.py`: 2,606 physical / 2,260 nonblank lines, 213 import
+  statements, 153 top-level functions.
+- Docker build was attempted again and remains blocked by the missing local
+  Docker engine pipe. No live provider or application data was used.
+- Remaining risk: image and SQLCipher integration checks need the application
+  Docker runtime.

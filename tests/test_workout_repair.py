@@ -158,12 +158,12 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             {"output_text": "Reparatur-Sync gestartet."},
         ])
         self.assertEqual(receipt["status"], "completed", receipt.get("failed_command_receipts"))
-        job = server.sync_job_store().claim()
+        job = server.SYNC_JOB_QUEUE.store().claim()
         result = server.sync_job_executor().execute(job)
         self.assertTrue(result["ok"], result)
-        server.sync_job_outcome_service().complete(job["id"], result)
+        server.SYNC_JOB_QUEUE.outcome_service().complete(job["id"], result)
         self.assertEqual(
-            server.sync_job_queue_service().state(job["id"])["status"], "completed"
+            server.SYNC_JOB_QUEUE.service().state(job["id"])["status"], "completed"
         )
         self.assertEqual(set(self.remote), {"existing", "race"})
         self.assertEqual(self.remote["existing"]["type"], "Run")
@@ -217,8 +217,8 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
                 entries.append({"library_workout_id": local_id, "expected_payload_hash": planning_library.library_payload_hash(row["payload"])})
         server.plan_push_command_service().enqueue(entries, [], reason="Synthetic full repair", repair=True)
-        first = server.sync_job_store().claim()
-        server.sync_job_outcome_service().complete(first["id"], {"ok": True})
+        first = server.SYNC_JOB_QUEUE.store().claim()
+        server.SYNC_JOB_QUEUE.outcome_service().complete(first["id"], {"ok": True})
         snapshot = {"synced_at": "synthetic-after-repair", "athlete": {}, "recent_activities": [],
                     "recent_wellness": [], "upcoming_calendar": []}
         with patch.object(IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot), patch.object(
@@ -230,7 +230,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         ) as imported:
             for claim in (False, True):
                 if claim:
-                    last = server.sync_job_store().claim()
+                    last = server.SYNC_JOB_QUEUE.store().claim()
                 result = server.intervals_sync_service().sync(
                     "Synthetic between chunks", activity_days=42
                 )
@@ -240,7 +240,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 imported.assert_not_called()
                 for entry in entries:
                     self.assertEqual(self.selection(entry["library_workout_id"]), entry)
-            server.sync_job_outcome_service().complete(last["id"], {"ok": True})
+            server.SYNC_JOB_QUEUE.outcome_service().complete(last["id"], {"ok": True})
             server.intervals_sync_service().sync(
                 "Synthetic after final verification", activity_days=42
             )
@@ -586,7 +586,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                     {"output_text": "Keine Reparatur gestartet."},
                 ])
                 self.assertEqual(receipt["status"], "failed")
-                self.assertIsNone(server.sync_job_store().claim())
+                self.assertIsNone(server.SYNC_JOB_QUEUE.store().claim())
         self.assertEqual(self.mutations, [])
 
     def test_coach_repair_rejects_incomplete_period_before_queueing(self):
@@ -604,7 +604,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             {"output_text": "Auswahl unvollstaendig."},
         ])
         self.assertEqual(receipt["status"], "failed")
-        self.assertIsNone(server.sync_job_store().claim())
+        self.assertIsNone(server.SYNC_JOB_QUEUE.store().claim())
         self.assertEqual(self.mutations, [])
 
     def test_coach_repair_resolves_complete_manifest_beyond_one_page(self):
@@ -634,12 +634,12 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         ])
         self.assertEqual(receipt["status"], "completed", receipt)
         selected = []
-        while job := server.sync_job_store().claim():
+        while job := server.SYNC_JOB_QUEUE.store().claim():
             payload = server.json.loads(job["payload"])
             selected.extend(entry["library_workout_id"] for entry in payload["entries"])
             self.assertLessEqual(len(payload["entries"]), 28)
             self.assertTrue(payload["repair"])
-            server.sync_job_outcome_service().complete(job["id"], {"ok": True})
+            server.SYNC_JOB_QUEUE.outcome_service().complete(job["id"], {"ok": True})
         self.assertEqual(set(selected), expected)
         self.assertEqual(len(selected), len(expected))
         self.assertEqual(self.mutations, [])

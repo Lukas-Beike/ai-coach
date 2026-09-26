@@ -16,6 +16,7 @@ from backend.coach.context import CoachIntervalsContextService, future_coach_pla
 from backend.coach.proposals import validated_coach_action_preview_input
 from backend.http_api import server as http_server_module
 from backend.planning import competitions as planning_competitions
+from backend.sync import queue as sync_queue
 from server_test_support import server, ServerTestCase
 from support import build_gemini_request_payload
 
@@ -105,7 +106,7 @@ class ServerCoachTests(ServerTestCase):
         )
         self.assertEqual(listed["competitions"][0]["id"], competition["id"])
 
-        with patch.object(server.SyncJobQueueService, "enqueue", return_value={"id": "job-competition"}) as enqueue:
+        with patch.object(sync_queue.SyncJobQueueService, "enqueue", return_value={"id": "job-competition"}) as enqueue:
             synced = server.coach_tool_dispatch_service().execute(
                 "sync_competitions", {},
                 intent={**intent, "operation": "sync_competitions", "intent": "remote_sync", "target_system": "intervals"},
@@ -271,7 +272,7 @@ class ServerCoachTests(ServerTestCase):
             "_sync_all_pending": True,
         }
         job_ids = []
-        with patch.object(server.SyncJobQueueService, "enqueue", return_value={"id": "job-all"}) as enqueue:
+        with patch.object(sync_queue.SyncJobQueueService, "enqueue", return_value={"id": "job-all"}) as enqueue:
             result = server.coach_tool_dispatch_service().execute(
                 "start_intervals_plan_sync", {}, intent=intent,
                 conversation_id="conversation-sync", client_turn_id="turn-sync",

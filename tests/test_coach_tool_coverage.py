@@ -148,7 +148,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(receipt["status"], "completed")
         self.assertEqual(server.profile_service().get()["training_background"], "Regular cycling. Daily walking.")
         self.assertEqual(server.profile_service().get()["equipment"], "Indoor bike")
-        self.assertEqual(server.sync_job_queue_service().list(), [])
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     @covers("read_training_state:success", "list_planned_workouts:success", "list_workout_library:success",
             "list_training_plans:success", "list_competitions:success", "list_change_history:success", "list_recent_activities:success",
@@ -193,7 +193,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             else:
                 self.assertEqual(templates[0]["archived"], action == "archive")
             self.assertEqual(self.state()["planned_units"], planned_before)
-        self.assertEqual(server.sync_job_queue_service().list(), [])
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     @covers("apply_training_patch:create", "apply_training_patch:update", "apply_training_patch:move",
             "apply_training_patch:archive", "apply_training_patch:restore", "apply_training_patch:delete")
@@ -212,7 +212,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 self.assertEqual(units, [])
             else:
                 self.assertEqual([(u["local_id"], u["date"], u["name"]) for u in units], [(local_id, "2026-09-11", "Synthetic renamed")])
-        self.assertEqual(server.sync_job_queue_service().list(), [])
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     @covers("stage_training_plan:success", "commit_training_plan:success", "update_training_plan:update",
             "update_training_plan:archive", "update_training_plan:delete")
@@ -250,7 +250,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         result = self.state()["planned_units"]
         self.assertEqual([u["date"] for u in result], ["2026-09-11", "2026-10-05"])
         self.assertEqual(result[-1]["local_id"], units[-1]["id"])
-        self.assertEqual(server.sync_job_queue_service().list(), [])
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     @covers("save_checkin:success", "save_activity_feedback:success", "delete_activity_feedback:success")
     def test_daily_feedback_and_activity_feedback_are_separate_from_profile(self):
@@ -275,18 +275,18 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         competition_id = server.competition_service().list()[0]["id"]
         self.run_tool("save_competition", {"payload": {"competition_id": competition_id, "event_date": "2026-10-04"}}, ["competition:" + competition_id], message="Den bitte einen Tag später.")
         self.assertEqual(server.competition_service().list()[0]["event_date"], "2026-10-04")
-        self.assertEqual(server.sync_job_queue_service().list(), [])
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
         self.run_tool("sync_competitions", {}, ["local_competitions", "intervals_sync"], target="intervals", remote_write=True, message="Übertrage die Wettkämpfe zu Intervals.")
         self.assertEqual(
             [
                 (job["provider"], job["type"])
-                for job in server.sync_job_queue_service().list()
+                for job in server.SYNC_JOB_QUEUE.service().list()
             ],
             [("intervals", "competition_push")],
         )
         self.run_tool("delete_competition", {"competition_id": competition_id}, ["competition:" + competition_id], message="Entferne diesen Wettkampf lokal.")
         self.assertEqual(server.competition_service().list(), [])
-        self.assertEqual(len(server.sync_job_queue_service().list()), 1)
+        self.assertEqual(len(server.SYNC_JOB_QUEUE.service().list()), 1)
 
     @covers("start_provider_refresh:intervals", "start_provider_refresh:garmin", "start_provider_refresh:calendar",
             "start_provider_refresh:weather", "refresh_current_performance:success", "get_sync_job:success")
@@ -302,13 +302,13 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             self.assertEqual((job["provider"], job["type"], job["status"]), (provider, "refresh", "queued"))
         result = self.run_tool("refresh_current_performance", {}, ["intervals_refresh"], target="intervals")
         self.assertEqual(
-            server.sync_job_queue_service().state(result["sync_job_id"])["type"],
+            server.SYNC_JOB_QUEUE.service().state(result["sync_job_id"])["type"],
             "performance_refresh",
         )
         self.assertTrue(
             all(
                 job["type"] not in {"plan_push", "competition_push"}
-                for job in server.sync_job_queue_service().list()
+                for job in server.SYNC_JOB_QUEUE.service().list()
             )
         )
 
@@ -344,7 +344,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             self.run_tool("resolve_training_sync_conflict", {"local_id": local_id, "strategy": strategy}, ["planned_unit:" + local_id])
             self.assertEqual(len(self.state()["planned_units"]), 1 if strategy == "keep_local" else 0)
         for provider, kind, remote in (("intervals", "competition_push", True), ("garmin", "refresh", False)):
-            job = server.sync_job_queue_service().enqueue(
+            job = server.SYNC_JOB_QUEUE.service().enqueue(
                 provider,
                 kind,
                 {"reason": "Synthetic", **({} if remote else {"days": 7})},
@@ -354,7 +354,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 db.execute("UPDATE sync_jobs SET status='failed' WHERE id=?", (job["id"],))
             self.run_tool("resolve_training_sync_conflict", {"job_id": job["id"]}, ["sync_job:" + job["id"], "intervals_sync" if remote else "garmin_refresh"], target=provider, remote_write=remote)
             self.assertEqual(
-                server.sync_job_queue_service().state(job["id"])["status"], "queued"
+                server.SYNC_JOB_QUEUE.service().state(job["id"])["status"], "queued"
             )
 
     @covers("preview_adaptive_replan:success", "apply_adaptive_replan:local")
@@ -368,7 +368,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         applied = self.run_tool("apply_adaptive_replan", {"adjustment_id": preview["id"]}, ["adaptive_replan:" + preview["id"]], message="Ja, diese vorgeschlagene Anpassung übernehmen.")
         self.assertEqual(applied["updated"], 1)
         self.assertLess(server.planned_unit_service().list()[0]["duration_minutes"], 90)
-        self.assertEqual(server.sync_job_queue_service().list(), [])
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     @covers("apply_adaptive_replan:intervals")
     def test_illness_sync_requires_explicit_remote_acceptance_after_preview(self):
@@ -413,7 +413,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             server.sync_state_repository().latest_snapshot()["recent_activities"],
             snapshot["recent_activities"],
         )
-        self.assertEqual(server.sync_job_queue_service().list(), [])
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     @covers("delete_duplicate_intervals_activity:success")
     def test_delete_duplicate_intervals_activity(self):
@@ -532,7 +532,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(self.state()["planning_revision"], initial["planning_revision"] + 1)
         self.assertEqual(next(u for u in self.state()["planned_units"] if u["local_id"] == sunday), sunday_before)
         self.assertEqual(next(u["sport"] for u in self.state()["planned_units"] if u["local_id"] == friday), "Run")
-        self.assertEqual(server.sync_job_queue_service().list(), [])
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
         replay, model = self.turn("Freitag lieber einen sehr lockeren 8-km-Lauf, Sonntag Kraft behalten.", [], turn="friday-repair")
         model.assert_not_called()
         self.assertEqual(replay, result)
@@ -651,7 +651,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             stored = server.planned_unit_service().list()[0]
             self.assertEqual((stored["sport"], stored["type"]), (sport, sport))
             self.assertEqual(stored["id"], unit["id"])
-        self.assertEqual(server.sync_job_queue_service().list(), [])
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     def test_stale_adaptive_preview_preserves_intervening_edit(self):
         unit = server.local_plan_creation_service().save([{**self.workout(), "duration_minutes": 90}])[0]

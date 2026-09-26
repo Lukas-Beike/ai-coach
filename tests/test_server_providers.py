@@ -963,7 +963,7 @@ class ServerProvidersTests(ServerTestCase):
                     garmin_tokenstore_exists=Path(server.CONFIG.garmin_tokenstore).exists())}
             self.assertEqual(unconfigured[("intervals", "activities")]["state"], "not_configured")
             self.assertEqual(unconfigured[("intervals", "activities")]["error_code"], "network_error")
-            server.sync_job_queue_service().enqueue(
+            server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals", "refresh", {"days": 1},
                 requested_by="test", available_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
             )

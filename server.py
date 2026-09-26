@@ -69,6 +69,7 @@ from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 from backend.runtime import clock as runtime_clock
 from backend.sync.assembly import ProviderSyncAssembly
+from backend.sync.queue_assembly import SyncJobQueueAssembly
 from backend.sync.garmin_assembly import GarminAssembly
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
@@ -238,11 +239,6 @@ from backend.planning.training_plan_artifact_service import TrainingPlanArtifact
 from backend.planning import training_plans as planning_training_plans
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.public_state import PublicStateDependencies, PublicStateService
-from backend.sync.jobs import (
-    SyncJobStore,
-)
-from backend.sync.job_outcomes import SyncJobOutcomeService
-from backend.sync.queue import SyncJobQueueService
 from backend.sync.scheduler import (
     AUTO_UPDATE_LABEL,
     DailySyncScheduler,
@@ -478,27 +474,10 @@ PROVIDER_SYNC = ProviderSyncAssembly(
 )
 
 
-def sync_job_store() -> SyncJobStore:
-    """Compose durable synchronization-job persistence."""
-    return SyncJobStore(database_manager(), runtime_clock.utc_now, lambda: uuid.uuid4().hex)
-
-
-def sync_job_queue_service() -> SyncJobQueueService:
-    """Compose the persistent sync-job queue control plane."""
-    return SyncJobQueueService(
-        sync_job_store(),
-        runtime_events.STATE_EVENT_BUFFER,
-        runtime_maintenance.MAINTENANCE_GATE,
-        shared_sync_job_wake_event(),
-        ALL_SYNC_DAYS,
-        daily_sync_marker_service(),
-    )
-
-
 def sync_command_endpoint() -> SyncCommandEndpoint:
     """Compose authenticated manual synchronization POST commands."""
     return SyncCommandEndpoint(
-        sync_job_queue_service(), sync_state_repository(),
+        SYNC_JOB_QUEUE.service(), sync_state_repository(),
         performance_refresh_service(), full_provider_resync_service(),
         lambda: uuid.uuid4().hex, SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS,
     )
@@ -507,7 +486,7 @@ def sync_command_endpoint() -> SyncCommandEndpoint:
 def provider_refresh_command_service() -> ProviderRefreshCommandService:
     """Compose authorized Coach refresh command execution."""
     return ProviderRefreshCommandService(
-        sync_job_queue_service(), intervals_sync_service(), ALL_SYNC_DAYS
+        SYNC_JOB_QUEUE.service(), intervals_sync_service(), ALL_SYNC_DAYS
     )
 
 
@@ -517,13 +496,13 @@ def sync_conflict_command_service() -> SyncConflictCommandService:
         database_manager(),
         planned_unit_service(),
         competition_service(),
-        sync_job_queue_service(),
+        SYNC_JOB_QUEUE.service(),
     )
 
 
 def plan_push_command_service() -> PlanPushCommandService:
     """Compose explicit Coach plan-push chunking and queue persistence."""
-    return PlanPushCommandService(sync_job_queue_service())
+    return PlanPushCommandService(SYNC_JOB_QUEUE.service())
 
 
 def structured_plan_sync_service() -> StructuredPlanSyncService:
@@ -544,7 +523,7 @@ def plan_repair_manifest_service() -> PlanRepairManifestService:
 def coach_sync_tool_service() -> CoachSyncToolService:
     """Compose concrete sync commands for structured Coach tool execution."""
     return CoachSyncToolService(
-        sync_job_queue_service(), planning_authority_service(),
+        SYNC_JOB_QUEUE.service(), planning_authority_service(),
         sync_conflict_command_service(), structured_plan_sync_service(),
         plan_repair_manifest_service(), plan_push_command_service(),
         provider_refresh_command_service(),
@@ -649,7 +628,7 @@ def sync_public_state_service() -> SyncPublicStateService:
         profile_service(),
         GARMIN_ASSEMBLY.sync_state_service(),
         runtime_maintenance.MAINTENANCE_GATE,
-        sync_job_queue_service(),
+        SYNC_JOB_QUEUE.service(),
         state_version_service(),
         INTERVALS_SYNC_LOCK,
     )
@@ -702,27 +681,13 @@ def performance_refresh_followup_service() -> PerformanceRefreshFollowupService:
     """Compose performance follow-up queueing and polling."""
     return PerformanceRefreshFollowupService(
         CONFIG,
-        sync_job_queue_service(),
+        SYNC_JOB_QUEUE.service(),
         performance_refresh_service(),
         database_manager(),
         KEY_VALUE_REPOSITORY,
         LOGGER,
         wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
         poll_seconds=SYNC_JOB_POLL_SECONDS,
-    )
-
-
-def sync_job_outcome_service() -> SyncJobOutcomeService:
-    """Compose durable sync-job result and retry handling."""
-    return SyncJobOutcomeService(
-        sync_job_store(),
-        runtime_events.STATE_EVENT_BUFFER,
-        shared_sync_job_wake_event(),
-        REDACTOR.redact_text,
-        LOGGER,
-        lambda: datetime.now(timezone.utc),
-        SYNC_JOB_RETRY_BASE_SECONDS,
-        SYNC_JOB_RETRY_MAX_SECONDS,
     )
 
 
@@ -1113,7 +1078,7 @@ def sync_job_executor() -> SyncJobExecutor:
     """Compose the concrete persistent provider-job dispatcher."""
     historical_sync = HistoricalSyncJobOwner(
         sync_state_repository=sync_state_repository(),
-        queue_service=sync_job_queue_service(),
+        queue_service=SYNC_JOB_QUEUE.service(),
         local_now=ATHLETE_CLOCK.now,
         sync_period_defaults=SYNC_PERIOD_DEFAULTS,
         all_sync_days=ALL_SYNC_DAYS,
@@ -1145,7 +1110,7 @@ def sync_job_executor() -> SyncJobExecutor:
     return SyncJobExecutor(
         provider_dispatcher=provider_dispatcher,
         historical_sync=historical_sync,
-        outcome_service=sync_job_outcome_service(),
+        outcome_service=SYNC_JOB_QUEUE.outcome_service(),
         all_sync_days=ALL_SYNC_DAYS,
     )
 
@@ -1155,7 +1120,7 @@ def sync_job_worker() -> SyncJobWorker:
     global SYNC_JOB_WORKER
     if SYNC_JOB_WORKER is None:
         SYNC_JOB_WORKER = SyncJobWorker(
-            sync_job_store(),
+            SYNC_JOB_QUEUE.store(),
             sync_job_executor(),
             runtime_maintenance.MAINTENANCE_GATE,
             SYNC_JOB_POLL_SECONDS,
@@ -1242,7 +1207,7 @@ def structured_training_state_service() -> StructuredTrainingStateService:
         competition_service(),
         training_plan_service(),
         coach_dialogue_read_service().artifact_refs,
-        sync_job_queue_service().list,
+        SYNC_JOB_QUEUE.service().list,
         lambda: ATHLETE_CLOCK.now().date(),
     )
 
@@ -1462,6 +1427,22 @@ GARMIN_ASSEMBLY = GarminAssembly(
     event_buffer=runtime_events.STATE_EVENT_BUFFER,
     lock_wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
     morning_body_battery_service=morning_body_battery_service,
+)
+
+SYNC_JOB_QUEUE = SyncJobQueueAssembly(
+    database_manager=database_manager,
+    now=runtime_clock.utc_now,
+    current_time=lambda: datetime.now(timezone.utc),
+    uuid_factory=lambda: uuid.uuid4().hex,
+    event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    wake_event=shared_sync_job_wake_event,
+    all_sync_days=ALL_SYNC_DAYS,
+    daily_sync_marker_service=daily_sync_marker_service,
+    redact_text=REDACTOR.redact_text,
+    logger=LOGGER,
+    retry_base_seconds=SYNC_JOB_RETRY_BASE_SECONDS,
+    retry_max_seconds=SYNC_JOB_RETRY_MAX_SECONDS,
 )
 
 PROVIDER_TRANSPORT = ProviderTransportAssembly(
@@ -1701,7 +1682,7 @@ def coach_dialogue_action_service() -> CoachDialogueActionService:
     return CoachDialogueActionService(
         manager,
         DB_LOCK,
-        sync_job_queue_service,
+        SYNC_JOB_QUEUE.service,
         CoachDialoguePlanScopeService(manager, DB_LOCK),
         lambda: ATHLETE_CLOCK.now().date(),
     )
@@ -2113,7 +2094,7 @@ def public_bootstrap_service() -> PublicBootstrapService:
             provider_freshness_service=PROVIDER_SYNC.freshness_service,
             garmin_sync_state_service=GARMIN_ASSEMBLY.sync_state_service,
             garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
-            sync_job_queue_service=sync_job_queue_service,
+            sync_job_queue_service=SYNC_JOB_QUEUE.service,
             state_version_service=state_version_service,
             coach_message_service=coach_message_service,
             training_plan_service=training_plan_service,
@@ -2356,7 +2337,7 @@ def database_restore_service() -> DatabaseRestoreService:
         database_manager,
         DB_LOCK,
         runtime_maintenance.MAINTENANCE_GATE,
-        sync_job_queue_service(),
+        SYNC_JOB_QUEUE.service(),
         coach_job_store(),
         coach_turn_failure_service(),
         shared_sync_job_wake_event(),
@@ -2407,7 +2388,7 @@ DIAGNOSTICS_GET_ROUTES = DiagnosticsGetRoutes(
 )
 SYNC_GET_ROUTES = SyncGetRoutes(
     session_auth_service,
-    sync_job_queue_service,
+    SYNC_JOB_QUEUE.service,
     sync_public_state_service,
     activity_read_service,
     lambda: ATHLETE_CLOCK.now().date(),
@@ -2540,7 +2521,7 @@ def daily_sync_loop_service() -> DailySyncLoop:
 def daily_sync_scheduler() -> DailySyncScheduler:
     return DailySyncScheduler(
         profile_service(),
-        sync_job_queue_service(),
+        SYNC_JOB_QUEUE.service(),
         daily_sync_marker_service(),
         GARMIN_ASSEMBLY.sync_service(),
         database_manager(),
@@ -2563,7 +2544,7 @@ def daily_sync_scheduler() -> DailySyncScheduler:
 def startup_sync_scheduler() -> StartupSyncScheduler:
     return StartupSyncScheduler(
         profile_service(),
-        sync_job_queue_service(),
+        SYNC_JOB_QUEUE.service(),
         GARMIN_ASSEMBLY.sync_service(),
         sync_state_repository(),
         config=StartupSyncSchedulerConfig(
@@ -2592,7 +2573,7 @@ def main() -> None:
     daily_loop: DailySyncLoop | None = None
     daily_thread: threading.Thread | None = None
     try:
-        sync_job_queue_service().resume_interrupted()
+        SYNC_JOB_QUEUE.service().resume_interrupted()
         coach_job_store().resume_interrupted(coach_turn_failure_service())
         sync_worker = sync_job_worker()
         sync_worker.start()
