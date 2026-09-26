@@ -17,7 +17,7 @@ class ServerFrontendTests(ServerTestCase):
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Ride", "name": "Remove me", "description": "- 20m 60% easy",
         })
-        state = server.structured_training_state_service().read()
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
         target = next(item for item in state["planned_units"] if item["local_id"] == planned["id"])
         intent = {
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",

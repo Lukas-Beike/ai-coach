@@ -158,6 +158,7 @@ from backend.sync import worker as sync_worker_runtime
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.planning import adaptive as planning_adaptive
 from backend.planning.assembly import PlanningDataAssembly
+from backend.planning.workflows_assembly import PlanningWorkflowAssembly
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.calendar_service import CalendarConflictService
 from backend.planning import changes as planning_changes
@@ -466,11 +467,6 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
     )
 
 
-def calendar_conflict_service() -> CalendarConflictService:
-    """Compose local and external planning-conflict reads."""
-    return CalendarConflictService(database_manager(), EXTERNAL_CALENDAR.reader())
-
-
 ATHLETE_DATA = AthleteDataAssembly(
     database_manager=database_manager,
     activity_feedback_repository=ACTIVITY_FEEDBACK_REPOSITORY,
@@ -498,12 +494,53 @@ PLANNING_DATA = PlanningDataAssembly(
     local_date=lambda: ATHLETE_CLOCK.now().date(),
     uuid_factory=uuid.uuid4,
     redact=REDACTOR.redact_text,
-    calendar_conflict_service=lambda: calendar_conflict_service(),
+    calendar_conflict_service=lambda: PLANNING_WORKFLOWS.calendar_conflict_service(),
     publish_change=lambda: runtime_events.STATE_EVENT_BUFFER.publish(
         "coach", {"status": "changed"}
     ),
     plan_adjustment_repository=PLAN_ADJUSTMENT_REPOSITORY,
 )
+PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
+    database_manager=database_manager,
+    planned_unit_service=PLANNING_DATA.planned_unit,
+    workout_library_service=PLANNING_DATA.workout_library,
+    competition_service=PLANNING_DATA.competition,
+    training_plan_service=PLANNING_DATA.training_plan,
+    checkin_service=lambda: ATHLETE_DATA.checkin(),
+    activity_feedback_service=ATHLETE_DATA.activity_feedback,
+    planning_state_repository=PLANNING_STATE_REPOSITORY,
+    training_plan_repository=TRAINING_PLAN_REPOSITORY,
+    key_values=KEY_VALUE_REPOSITORY,
+    planning_revision=PLANNING_REVISION_SERVICE,
+    plan_adjustment_repository=PLAN_ADJUSTMENT_REPOSITORY,
+    external_calendar_reader=lambda: EXTERNAL_CALENDAR.reader(),
+    weather_service=lambda: WEATHER_ASSEMBLY.service(),
+    morning_body_battery_service=morning_body_battery_service,
+    sync_job_queue_service=lambda: SYNC_JOB_QUEUE.service(),
+    coach_artifact_refs=lambda: coach_dialogue_read_service().artifact_refs,
+    local_date=lambda: ATHLETE_CLOCK.now().date(),
+    utc_now=runtime_clock.utc_now,
+    uuid_factory=uuid.uuid4,
+    event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    logger=LOGGER,
+    training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
+    calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
+    checkin_text_limit=CHECKIN_TEXT_LIMITS["illness"],
+    default_illness_pause_days=planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS,
+    weather_adaptive_max_minutes=planning_adaptive.WEATHER_ADAPTIVE_MAX_MINUTES,
+)
+
+def illness_pause_sync_service() -> IllnessPauseSyncService:
+    return IllnessPauseSyncService(
+        CONFIG, PROVIDER_TRANSPORT.intervals_client(),
+        adaptive_replan_apply_service=PLANNING_DATA.adaptive_apply(),
+        competition_service=PLANNING_DATA.competition(),
+        adaptive_replan_preview_service=PLANNING_WORKFLOWS.adaptive_replan_preview_service(),
+        redactor=REDACTOR,
+        today=lambda: ATHLETE_CLOCK.now().date(),
+    )
+
+
 PRIVACY_ASSEMBLY = PrivacyAssembly(
     database_manager=database_manager,
     database_lock=lambda: DB_LOCK,
@@ -514,7 +551,7 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
     training_plan_service=PLANNING_DATA.training_plan,
     checkin_service=ATHLETE_DATA.checkin,
     activity_feedback_service=ATHLETE_DATA.activity_feedback,
-    adaptive_preview_service=lambda: adaptive_replan_preview_service(),
+    adaptive_preview_service=lambda: PLANNING_WORKFLOWS.adaptive_replan_preview_service(),
     external_calendar_reader=lambda: EXTERNAL_CALENDAR.reader(),
     local_now=lambda: ATHLETE_CLOCK.now(),
     utc_now=runtime_clock.utc_now,
@@ -590,136 +627,7 @@ def sync_job_worker() -> sync_worker_runtime.SyncJobWorker:
     return SYNC_JOB_WORKER
 
 
-def workout_library_plan_service() -> WorkoutLibraryPlanService:
-    """Compose atomic local planning from saved workout templates."""
-    return WorkoutLibraryPlanService(
-        database_manager(),
-        PLANNING_DATA.planned_unit(),
-        calendar_conflict_service(),
-        lambda: runtime_events.STATE_EVENT_BUFFER.publish(
-            "coach", {"status": "changed"}
-        ),
-    )
 
-
-def local_plan_creation_service() -> LocalTrainingPlanCreationService:
-    """Compose atomic local plan creation and template reuse."""
-    return LocalTrainingPlanCreationService(
-        database_manager(),
-        TRAINING_PLAN_REPOSITORY,
-        PLANNING_DATA.planned_unit(),
-        PLANNING_DATA.workout_library(),
-        calendar_conflict_service(),
-        PLANNING_REVISION_SERVICE,
-        lambda: ATHLETE_CLOCK.now().date(),
-        runtime_clock.utc_now,
-        uuid.uuid4,
-        LOGGER,
-    )
-
-
-def daily_planning_context_service() -> DailyPlanningContextService:
-    """Compose the date-specific planning read model."""
-    return DailyPlanningContextService(
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        ATHLETE_DATA.checkin(),
-        EXTERNAL_CALENDAR.reader(),
-        morning_body_battery_service(),
-        ATHLETE_DATA.activity_feedback(),
-        lambda: ATHLETE_CLOCK.now().date(),
-        calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
-    )
-
-
-def structured_training_state_service() -> StructuredTrainingStateService:
-    """Compose read-only structured planning-state projection."""
-    return StructuredTrainingStateService(
-        database_manager(),
-        PLANNING_STATE_REPOSITORY,
-        PLANNING_DATA.competition(),
-        PLANNING_DATA.training_plan(),
-        coach_dialogue_read_service().artifact_refs,
-        SYNC_JOB_QUEUE.service().list,
-        lambda: ATHLETE_CLOCK.now().date(),
-    )
-
-
-def structured_training_change_validator() -> planning_changes.StructuredTrainingChangeValidator:
-    """Compose transaction-scoped structured planning validation."""
-    return planning_changes.StructuredTrainingChangeValidator(
-        PLANNING_STATE_REPOSITORY, calendar_conflict_service()
-    )
-
-
-def structured_training_change_service() -> planning_changes.StructuredTrainingChangeService:
-    """Compose atomic structured planning changes."""
-    return planning_changes.StructuredTrainingChangeService(
-        database_manager(),
-        structured_training_change_validator(),
-        planning_changes.StructuredTrainingPlanResolver(TRAINING_PLAN_REPOSITORY),
-        PLANNING_DATA.planned_unit(),
-        PLANNING_REVISION_SERVICE,
-        PLANNING_DATA.training_plan(),
-        lambda: ATHLETE_CLOCK.now().date(),
-        coach_limits.COACH_TRAINING_CHANGE_LIMIT,
-        lambda: runtime_events.STATE_EVENT_BUFFER.publish(
-            "planning", {"status": "changed"}
-        ),
-    )
-
-
-def structured_training_plan_replacement_service() -> StructuredTrainingPlanReplacementService:
-    """Compose atomic structured training-plan replacement."""
-    return StructuredTrainingPlanReplacementService(
-        database_manager(),
-        PLANNING_STATE_REPOSITORY,
-        PLANNING_REVISION_SERVICE,
-        TRAINING_PLAN_REPOSITORY,
-        KEY_VALUE_REPOSITORY,
-        calendar_conflict_service(),
-        PLANNING_DATA.planned_unit(),
-        lambda: ATHLETE_CLOCK.now().date(),
-        runtime_clock.utc_now,
-        uuid.uuid4,
-    )
-
-
-def illness_pause_sync_service() -> IllnessPauseSyncService:
-    """Compose the explicitly approved illness-pause remote sync use case."""
-    return IllnessPauseSyncService(
-        CONFIG,
-        PROVIDER_TRANSPORT.intervals_client(),
-        adaptive_replan_apply_service=PLANNING_DATA.adaptive_apply(),
-        competition_service=PLANNING_DATA.competition(),
-        adaptive_replan_preview_service=adaptive_replan_preview_service(),
-        redactor=REDACTOR,
-        today=lambda: ATHLETE_CLOCK.now().date(),
-    )
-
-
-def adaptive_preview_followup_service() -> AdaptivePreviewFollowupService:
-    """Compose the local preview check after a provider refresh."""
-    return AdaptivePreviewFollowupService(adaptive_replan_preview_service(), LOGGER)
-
-
-def adaptive_replan_preview_service() -> AdaptiveReplanPreviewService:
-    """Compose adaptive preview creation and read state."""
-    return AdaptiveReplanPreviewService(
-        database_manager(),
-        PLAN_ADJUSTMENT_REPOSITORY,
-        ATHLETE_DATA.checkin(),
-        PLANNING_DATA.planned_unit(),
-        EXTERNAL_CALENDAR.reader(),
-        WEATHER_ASSEMBLY.service(),
-        lambda: ATHLETE_CLOCK.now().date(),
-        runtime_clock.utc_now,
-        uuid.uuid4,
-        calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
-        CHECKIN_TEXT_LIMITS["illness"],
-        planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS,
-        planning_adaptive.WEATHER_ADAPTIVE_MAX_MINUTES,
-    )
 
 
 
@@ -831,7 +739,7 @@ EXTERNAL_CALENDAR = ExternalCalendarAssembly(
     key_values=KEY_VALUE_REPOSITORY,
     daily_markers=SYNC_PERSISTENCE.daily_markers,
     operation_observer=PROVIDER_SYNC.operation_observer,
-    adaptive_preview_service=lambda: adaptive_replan_preview_service(),
+    adaptive_preview_service=lambda: PLANNING_WORKFLOWS.adaptive_replan_preview_service(),
     event_buffer=runtime_events.STATE_EVENT_BUFFER,
     logger=LOGGER,
     redact_text=REDACTOR.redact_text,
@@ -987,7 +895,7 @@ WEATHER_ASSEMBLY = WeatherAssembly(
     maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
     now=lambda: datetime.now(timezone.utc),
     today=lambda: ATHLETE_CLOCK.now().date(),
-    adaptive_preview_service=adaptive_replan_preview_service,
+    adaptive_preview_service=lambda: PLANNING_WORKFLOWS.adaptive_replan_preview_service(),
     observer=PROVIDER_SYNC.operation_observer,
     logger=LOGGER,
 )
@@ -998,11 +906,11 @@ COACH_CONTEXT = CoachContextAssembly(
     weather_service=WEATHER_ASSEMBLY.service,
     activity_feedback_service=ATHLETE_DATA.activity_feedback,
     planned_unit_service=PLANNING_DATA.planned_unit,
-    daily_context_service=daily_planning_context_service,
+    daily_context_service=PLANNING_WORKFLOWS.daily_planning_context_service,
     external_calendar_reader=EXTERNAL_CALENDAR.reader,
     competition_service=PLANNING_DATA.competition,
     training_plan_service=PLANNING_DATA.training_plan,
-    adaptive_preview_service=adaptive_replan_preview_service,
+    adaptive_preview_service=lambda: PLANNING_WORKFLOWS.adaptive_replan_preview_service(),
     today=lambda: ATHLETE_CLOCK.now().date(),
     profile_service=ATHLETE_DATA.profile,
     garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
@@ -1028,7 +936,7 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
     garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
     profile_service=ATHLETE_DATA.profile,
     today=lambda: ATHLETE_CLOCK.now().date(),
-    structured_training_state_service=structured_training_state_service,
+    structured_training_state_service=PLANNING_WORKFLOWS.structured_training_state_service,
     workout_library_service=PLANNING_DATA.workout_library,
     planned_unit_service=PLANNING_DATA.planned_unit,
     change_history_service=change_history_service,
@@ -1137,7 +1045,7 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
 def coach_quick_actions_service() -> CoachQuickActionsService:
     """Compose local quick-action reads and their public Coach projection."""
     return CoachQuickActionsService(
-        database_manager(), KEY_VALUE_REPOSITORY, adaptive_replan_preview_service(),
+        database_manager(), KEY_VALUE_REPOSITORY, PLANNING_WORKFLOWS.adaptive_replan_preview_service(),
         lambda: ATHLETE_CLOCK.now().date(), PLANNED_WORKOUT_LABEL,
     )
 
@@ -1273,18 +1181,18 @@ COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, 
 COACH_PLANNING_TOOLS = CoachPlanningToolsAssembly(
     database_manager=database_manager,
     database_lock=DB_LOCK,
-    local_plan_creation_service=local_plan_creation_service,
+    local_plan_creation_service=PLANNING_WORKFLOWS.local_plan_creation_service,
     athlete_date=lambda: ATHLETE_CLOCK.now().date(),
     utc_now=runtime_clock.utc_now,
     uuid_factory=uuid.uuid4,
-    workout_library_plan_service=workout_library_plan_service,
-    training_change_validator=structured_training_change_validator,
-    training_change_service=structured_training_change_service,
-    calendar_conflict_service=calendar_conflict_service,
+    workout_library_plan_service=PLANNING_WORKFLOWS.workout_library_plan_service,
+    training_change_validator=PLANNING_WORKFLOWS.structured_training_change_validator,
+    training_change_service=PLANNING_WORKFLOWS.structured_training_change_service,
+    calendar_conflict_service=PLANNING_WORKFLOWS.calendar_conflict_service,
     key_value_repository=KEY_VALUE_REPOSITORY,
     event_buffer=runtime_events.STATE_EVENT_BUFFER,
     training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
-    adaptive_preview_service=adaptive_replan_preview_service,
+    adaptive_preview_service=lambda: PLANNING_WORKFLOWS.adaptive_replan_preview_service(),
     illness_pause_sync_service=illness_pause_sync_service,
 )
 
@@ -1312,14 +1220,14 @@ COACH_TOOL_DISPATCH = CoachToolDispatchAssembly(
     profile_update=COACH_COMMAND_TOOLS.profile_update_service,
     athlete_records=COACH_COMMAND_TOOLS.athlete_record_tool_service,
     training_plan_artifacts=COACH_PLANNING_TOOLS.training_plan_artifact_service,
-    training_plan_replacement=structured_training_plan_replacement_service,
-    training_changes=structured_training_change_service,
+    training_plan_replacement=PLANNING_WORKFLOWS.structured_training_plan_replacement_service,
+    training_changes=PLANNING_WORKFLOWS.structured_training_change_service,
     database_manager=database_manager,
     database_lock=DB_LOCK,
     workout_library_service=PLANNING_DATA.workout_library,
     library_plan_tools=COACH_PLANNING_TOOLS.library_plan_tool_service,
     sync_tools=COACH_COMMAND_TOOLS.sync_tool_service,
-    adaptive_preview=adaptive_replan_preview_service,
+    adaptive_preview=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
     adaptive_apply=COACH_PLANNING_TOOLS.adaptive_apply_service,
     training_plan_service=PLANNING_DATA.training_plan,
     history_undo=history_undo_service,
@@ -1474,9 +1382,9 @@ PUBLIC_STATE = PublicStateAssembly(
     intervals_sync_lock=lambda: INTERVALS_SYNC_LOCK,
     workout_library_sync_running=lambda: workout_library_sync_running,
     state_version_service=state_version_service,
-    daily_planning_context_service=lambda: daily_planning_context_service(),
-    adaptive_preview_followup_service=lambda: adaptive_preview_followup_service(),
-    adaptive_replan_preview_service=adaptive_replan_preview_service,
+    daily_planning_context_service=PLANNING_WORKFLOWS.daily_planning_context_service,
+    adaptive_preview_followup_service=lambda: AdaptivePreviewFollowupService(PLANNING_WORKFLOWS.adaptive_replan_preview_service(), LOGGER),
+    adaptive_replan_preview_service=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
     morning_checkin_state_service=morning_checkin_state_service,
     coach_quick_actions_service=coach_quick_actions_service,
     provider_state_service=provider_state_service,

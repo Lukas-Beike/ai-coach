@@ -231,7 +231,7 @@ class ServerCoachTests(ServerTestCase):
             "sport": "Ride", "name": "Endurance", "description": "- 45m Z2", "duration_minutes": 45,
         })
 
-        state = server.structured_training_state_service().read()
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
 
         planned_ref = next(item for item in state["planned_units"] if item["local_id"] == planned["id"])
         template_ref = next(item for item in state["training_templates"] if item["local_id"] == template["id"])
@@ -804,7 +804,7 @@ class ServerCoachTests(ServerTestCase):
             "description": "- 30m 60% Pace locker",
             "moving_time": 1800,
         }])[0]
-        planned = server.local_plan_creation_service().save([{
+        planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Run",
             "name": "Locker Lauf",

@@ -806,7 +806,7 @@ class ServerHttpTests(ServerTestCase):
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Ride", "name": "Old", "description": "- 30m 60% easy",
         })
-        state = server.structured_training_state_service().read()
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
         intent = {
             "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],

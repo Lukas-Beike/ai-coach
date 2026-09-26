@@ -79,7 +79,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             )
 
     def seed(self, wrong_sport=False):
-        entry = server.local_plan_creation_service().save([{
+        entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": "2026-09-09", "name": "Lockerer 10-km-Lauf",
             "sport": "WeightTraining" if wrong_sport else "Run",
             "description": "Locker laufen" if wrong_sport else "- 75m Z1 HR",
@@ -96,7 +96,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
 
     def selection(self, local_id):
         return next({"library_workout_id": item["local_id"], "expected_payload_hash": item["expected_payload_hash"]}
-                    for item in server.structured_training_state_service().read(include_inactive=True)["planned_units"] if item["local_id"] == local_id)
+                    for item in server.PLANNING_WORKFLOWS.structured_training_state_service().read(include_inactive=True)["planned_units"] if item["local_id"] == local_id)
 
     def test_invalid_imported_template_cannot_replace_valid_coach_prescription(self):
         workout = {"date": "2026-09-09", "sport": "Ride", "name": "Easy endurance ride",
@@ -111,7 +111,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             "list",
             return_value=[invalid],
         ):
-            saved = server.local_plan_creation_service().save([workout])[0]
+            saved = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([workout])[0]
         self.assertEqual(saved["description"], workout["description"])
         self.assertEqual(saved["source"], "coach")
 
@@ -124,7 +124,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             "list",
             return_value=[valid],
         ):
-            reused = server.local_plan_creation_service().save([{**workout, "date": "2026-09-10"}])[0]
+            reused = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{**workout, "date": "2026-09-10"}])[0]
         self.assertEqual(reused["description"], valid["description"])
         self.assertEqual(reused["target"], "AUTO")
         self.assertEqual(reused["source"], "library")
@@ -271,7 +271,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
     def test_multi_unit_repair_reads_calendar_twice_and_checks_all_final_results(self):
         ids = []
         for offset in range(3):
-            entry = server.local_plan_creation_service().save([{
+            entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
                 "date": (date(2026, 9, 9) + timedelta(days=offset)).isoformat(),
                 "name": f"Synthetic run {offset}", "sport": "Run",
                 "description": "- 75m Z1 HR", "duration_minutes": 75,
@@ -334,7 +334,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(current["workout_doc"], self.remote["existing"]["workout_doc"])
 
     def test_adaptive_swim_uses_pace_and_clears_old_load_before_sync(self):
-        entry = server.local_plan_creation_service().save([{
+        entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": "2026-09-09", "name": "Synthetic swim", "sport": "Swim",
             "description": "- 60m Z3 Pace", "duration_minutes": 60,
         }])[0]
@@ -342,12 +342,12 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             "id": "swim-event", **parsed_workout_fixture(3600, sport="Swim", kind="pace", units="pace_zone", value=3), "icu_intensity": 90,
         })
         checkins = server.ATHLETE_DATA.checkin()
-        with patch.object(server, "checkin_service", return_value=checkins), patch.object(
+        with patch.object(server.ATHLETE_DATA, "checkin", return_value=checkins), patch.object(
             checkins, "context", return_value={"today": {"available_minutes": 30}}
         ), patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={}), patch.object(
             calendar_external, "list_events", return_value=[]
         ):
-            preview = server.adaptive_replan_preview_service().preview()
+            preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         self.assertEqual(server.illness_pause_sync_service().apply(preview["id"])["updated"], 1)
         current = server.PLANNING_DATA.planned_unit().list()[0]
         self.assertEqual(current["sport"], "Swim")
@@ -435,19 +435,19 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
     def test_selected_archived_unit_removes_only_its_identified_remote_copies(self):
         local_id = self.seed()
         server.PLANNING_DATA.planned_unit().update(local_id, {"action": "archive"})
-        self.assertFalse(server.structured_training_state_service().read()["planned_units"])
+        self.assertFalse(server.PLANNING_WORKFLOWS.structured_training_state_service().read()["planned_units"])
         self.assertTrue(self.repair(local_id)["ok"])
         self.assertEqual(set(self.remote), {"race"})
         self.assertFalse(any(kind == "upsert" for kind, _ in self.mutations))
 
     def approve_illness_pause(self):
         checkins = server.ATHLETE_DATA.checkin()
-        with patch.object(server, "checkin_service", return_value=checkins), patch.object(
+        with patch.object(server.ATHLETE_DATA, "checkin", return_value=checkins), patch.object(
             checkins, "context", return_value={"today": {"illness": "Synthetic illness"}}
         ), patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={}), patch.object(
             calendar_external, "list_events", return_value=[]
         ):
-            preview = server.adaptive_replan_preview_service().preview()
+            preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         self.assertEqual(preview["changes"][0]["after"]["duration_minutes"], 0)
         self.assertEqual(server.illness_pause_sync_service().apply(preview["id"])["updated"], 1)
         self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
@@ -503,7 +503,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
     def test_replacement_and_archived_predecessor_can_be_reconciled_in_either_order(self):
         old_id = self.seed()
         server.PLANNING_DATA.planned_unit().update(old_id, {"action": "archive"})
-        new_id = server.local_plan_creation_service().save([{
+        new_id = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": "2026-09-09", "name": "Lockerer 10-km-Lauf", "sport": "Run",
             "description": "- 75m Z1 HR", "duration_minutes": 75,
         }])[0]["id"]
@@ -550,10 +550,10 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                     }, local_id=local_id)
                     server.PLANNING_DATA.planned_unit().insert(db, entry)
             server.PLANNING_REVISION_SERVICE.bump(db)
-        first = server.structured_training_state_service().read(include_inactive=True)
+        first = server.PLANNING_WORKFLOWS.structured_training_state_service().read(include_inactive=True)
         self.assertEqual(len(first["planned_units"]), 366)
         self.assertTrue(first["planned_units_page"]["has_more"])
-        second = server.structured_training_state_service().read(include_inactive=True, cursor=first["planned_units_page"]["next_cursor"])
+        second = server.PLANNING_WORKFLOWS.structured_training_state_service().read(include_inactive=True, cursor=first["planned_units_page"]["next_cursor"])
         combined = first["planned_units"] + second["planned_units"]
         self.assertEqual(len(combined), 732)
         self.assertEqual({item["local_id"] for item in combined}, expected)
@@ -561,19 +561,19 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertFalse(second["planned_units_page"]["has_more"])
         self.assertIsNone(second["planned_units_page"]["next_cursor"])
 
-        active = server.structured_training_state_service().read()
+        active = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
         self.assertEqual(len(active["planned_units"]), 366)
         self.assertFalse(active["planned_units_page"]["has_more"])
         cursor = first["planned_units_page"]["next_cursor"]
         with self.assertRaises(server.AppError):
-            server.structured_training_state_service().read(cursor=cursor)
+            server.PLANNING_WORKFLOWS.structured_training_state_service().read(cursor=cursor)
         server.PLANNING_DATA.planned_unit().update(active["planned_units"][0]["local_id"], {"name": "Changed after page one"})
         with self.assertRaises(server.AppError) as caught:
-            server.structured_training_state_service().read(include_inactive=True, cursor=cursor)
+            server.PLANNING_WORKFLOWS.structured_training_state_service().read(include_inactive=True, cursor=cursor)
         self.assertEqual(caught.exception.reason, "planning_revision_conflict")
         for malformed in ("invalid", api_pagination.encode_page_cursor(["not-a-state-cursor"])):
             with self.assertRaises(server.AppError):
-                server.structured_training_state_service().read(cursor=malformed)
+                server.PLANNING_WORKFLOWS.structured_training_state_service().read(cursor=malformed)
 
     def test_coach_repair_requires_remote_authorization_and_selected_scope(self):
         local_id = self.seed()
@@ -592,7 +592,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
 
     def test_coach_repair_rejects_incomplete_period_before_queueing(self):
         first = self.seed()
-        second = server.local_plan_creation_service().save([{
+        second = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": "2026-09-10", "sport": "Run", "name": "Archived predecessor",
             "description": "- 30m Z1 HR", "duration_minutes": 30,
         }])[0]

@@ -167,7 +167,7 @@ class CoachReviewTests(unittest.TestCase):
 
     def test_plan_sport_survives_storage_and_provider_projection(self):
         sports = ["Run", "Swim", "WeightTraining", "VirtualRide", "Ride"]
-        entries = server.local_plan_creation_service().save([self.workout(i, sport) for i, sport in enumerate(sports)])
+        entries = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout(i, sport) for i, sport in enumerate(sports)])
         self.assertEqual([entry["sport"] for entry in entries], sports)
         self.assertEqual([entry["type"] for entry in entries], sports)
         self.assertEqual([entry["sport"] for entry in sorted(server.PLANNING_DATA.planned_unit().list(), key=lambda x:x["date"])], sports)
@@ -319,9 +319,9 @@ class CoachReviewTests(unittest.TestCase):
 
     def test_adaptive_apply_after_day_change_preserves_now_past_unit(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        planned = server.local_plan_creation_service().save([{**self.workout(), "date": tomorrow, "description": "- 60m 60%", "duration_minutes": 60}])[0]
+        planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{**self.workout(), "date": tomorrow, "description": "- 60m 60%", "duration_minutes": 60}])[0]
         server.ATHLETE_DATA.checkin().save({"soreness": 8})
-        preview = server.adaptive_replan_preview_service().preview()
+        preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         self.assertTrue(preview["changes"])
         advanced = server.ATHLETE_CLOCK.now() + timedelta(days=2)
         with patch.object(server.ATHLETE_CLOCK, "now", return_value=advanced):

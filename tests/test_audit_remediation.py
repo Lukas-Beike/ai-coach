@@ -267,7 +267,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
         def preview(_):
             return self.call("preview_adaptive_replan", scope=["adaptive_replan"])
         def apply(_):
-            latest = server.adaptive_replan_preview_service().latest_preview()
+            latest = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().latest_preview()
             return self.call("apply_adaptive_replan", {"adjustment_id": latest["id"]}, scope=["adaptive_replan:" + latest["id"]])
         first, _ = self.turn("Show a preview, do not apply it.", [preview, apply, {"output_text": "Preview ready."}])
         self.assertEqual(first["command_receipts"][1]["result"]["reason"], "adaptive_approval_required")

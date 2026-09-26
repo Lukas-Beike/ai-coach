@@ -169,7 +169,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(state["progress"], {"completed": 1, "total": 1})
 
     def test_replacement_follow_up_sync_accepts_complete_plan_size(self):
-        planned = server.local_plan_creation_service().save([
+        planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([
             {"date": (date.today() + timedelta(days=index + 1)).isoformat(), "sport": "Run",
              "name": "Synthetic replacement run", "description": "- 30m 60% Synthetic easy session", "duration_minutes": 30}
             for index in range(planning_library.LIBRARY_BULK_MAX_ENTRIES + 1)
@@ -460,7 +460,7 @@ class ServerSyncTests(ServerTestCase):
 
     def test_illness_pause_can_sync_sick_events_after_confirmation(self):
         server.ATHLETE_DATA.checkin().save({"illness": "Erkältung"})
-        preview = server.adaptive_replan_preview_service().preview()
+        preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         calls = []
 
         class FakeIntervalsClient:

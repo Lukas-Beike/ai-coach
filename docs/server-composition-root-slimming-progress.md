@@ -1492,3 +1492,28 @@ mocked providers; no live account or runtime data was used.
   52 top-level functions.
 - Changed files: `server.py`, new HTTP assembly, E2E fixture, direct HTTP test
   callers and architecture assertions, inventory generator/output, and this log.
+
+## S6 boundary before implementation: remaining planning workflows
+
+- S5 leaves planning workflow factories in `server.py` for calendar conflicts,
+  local workout/plan creation, daily planning context, structured planning
+  state/changes/replacement, and adaptive preview. They are called by
+  `PlanningDataAssembly`, privacy/Coach/HTTP/sync assemblies and direct planning,
+  weather/calendar, sync, workout-repair, Coach-language, and audit tests.
+  `tests/test_server_weather_calendar.py` patches the adaptive-preview root
+  factory; migrate that patch to the new planning owner. The route/Coach/domain
+  services that consume them must keep receiving fresh factories, not eagerly
+  built service instances.
+- Proposed narrow owner: `PlanningWorkflowAssembly` in
+  `backend/planning/workflows_assembly.py`. It will own only planning reads,
+  previews, and local plan mutations and receive the current manager, planning
+  and athlete service factories, repositories, external-calendar/weather/morning
+  readers, event publisher, clocks/IDs, and the one Coach artifact-reference
+  callback needed by the planning-state projection. It will not own Coach
+  authorization, sync scheduling, provider clients, or HTTP route composition.
+- Preserve identities: `PLANNING_REVISION_SERVICE`, planning repositories,
+  key-value/event buffers, shared manager factory, athlete-local clock,
+  existing provider weather/calendar services, and the cached morning-body
+  battery service. Preserve preview/local mutation transaction boundaries,
+  current service freshness, and deferred callbacks held by callers. Only the
+  existing callback test seam moves from `server` to `PLANNING_WORKFLOWS`.

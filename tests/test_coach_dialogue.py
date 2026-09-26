@@ -80,7 +80,7 @@ class DialogueHarness:
         return receipt, transport.background_request if kwargs.get("background_job") else transport.request
 
     def state(self):
-        return server.structured_training_state_service().read()
+        return server.PLANNING_WORKFLOWS.structured_training_state_service().read()
 
 
 class CoachDialogueTests(DialogueHarness, unittest.TestCase):
@@ -267,7 +267,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             self.assertEqual(server.ATHLETE_DATA.profile().get(), before)
 
     def test_sync_invalid_id_repair_clears_error_and_queues_only_selected_unit(self):
-        units = server.local_plan_creation_service().save([self.workout("2026-09-09"), self.workout("2026-09-11")])
+        units = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-09"), self.workout("2026-09-11")])
         entry = next(item for item in server.planning_authority_service().pending_plan_push_entries() if item["library_workout_id"] == units[0]["id"])
         scope = ["intervals_sync", f"planned_unit:{units[0]['id']}"]
         self.turn("Freitag bitte lockerer", [{"output_text": "Die lokale Planung ist gespeichert."}])
@@ -287,7 +287,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual([item["library_workout_id"] for item in json.loads(job["payload"])["entries"]], [units[0]["id"]])
 
     def test_selected_sync_validates_hash_before_changing_state(self):
-        unit = server.local_plan_creation_service().save([self.workout()])[0]
+        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])[0]
         before = self.state()
         result, _ = self.turn("Diese Einheit übertragen", [lambda _: self.call("start_intervals_plan_sync", {
             "entries": [{"library_workout_id": unit["id"], "expected_payload_hash": "0" * 64}]},
@@ -298,7 +298,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["sync_job_ids"], [])
 
     def test_sync_conflict_resolution_queues_hash_of_validated_updated_payload(self):
-        unit = server.local_plan_creation_service().save([self.workout()])[0]
+        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])[0]
         with server.database_manager().unit_of_work() as db:
             row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (unit["id"],)).fetchone()
             payload = json.loads(row["payload"])
@@ -330,7 +330,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                                               ("garmin", "refresh", False, "garmin_refresh")):
             payload = {"reason": "Synthetic retry", "days": 7}
             if remote:
-                server.local_plan_creation_service().save([self.workout()])
+                server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
                 payload = {"reason": "Synthetic retry", "entries": server.planning_authority_service().pending_plan_push_entries()}
             job = server.SYNC_JOB_QUEUE.service().enqueue(
                 provider, kind, payload, requested_by="coach"
@@ -440,7 +440,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             validate_request(request, {1}, 1)
 
     def test_screenshot_followup_moves_and_adds_atomically_without_literal_name(self):
-        existing = server.local_plan_creation_service().save([self.workout()], plan_name="September")[0]
+        existing = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()], plan_name="September")[0]
         def question(_):
             current = server.COACH_CONVERSATION.message_service().list()[-1]["id"]
             return self.call("clarify_coach_request", {"source_message_ids": [current],
@@ -463,7 +463,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertIsNone(json.loads(server.key_value_service().get("coach_pending_request")))
 
     def test_failed_addition_rolls_back_move_and_revision(self):
-        existing = server.local_plan_creation_service().save([self.workout()])[0]
+        existing = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])[0]
         before = self.state()
         def action(_):
             return self.call("apply_training_patch", {"changes": [{"local_id": existing["id"], "action": "update", "date": "2026-09-08",
@@ -476,7 +476,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertNotEqual(result["message"]["content"], "Gespeichert.")
 
     def test_stale_hash_rolls_back_whole_patch(self):
-        existing = server.local_plan_creation_service().save([self.workout()])[0]
+        existing = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])[0]
         before = self.state()
         result, _ = self.turn("Dann morgen", [lambda _: self.call("apply_training_patch", {
             "changes": [{"local_id": existing["id"], "date": "2026-09-08", "action": "update", "expected_payload_hash": "0" * 64}],
@@ -486,7 +486,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(self.state(), before)
 
     def test_bounded_giro_rebuild_preserves_later_units_and_plan_constraints(self):
-        entries = server.local_plan_creation_service().save([self.workout(), self.workout("2026-10-05", "Nach dem Giro")], plan_name="Alter Plan")
+        entries = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout(), self.workout("2026-10-05", "Nach dem Giro")], plan_name="Alter Plan")
         before = self.state()
         def rebuild(_):
             response = self.call("replace_training_plan", {"expected_revision": before["planning_revision"], "payload": {
@@ -505,7 +505,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertIn("Zweimal Oberkörper pro Woche", new_plan["constraints"])
 
     def test_out_of_period_change_is_rejected(self):
-        existing = server.local_plan_creation_service().save([self.workout("2026-10-05")])[0]
+        existing = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-10-05")])[0]
         before = self.state()
         result, _ = self.turn("Bis zum Giro", [lambda _: self.call("apply_training_patch", {
             "changes": [{"local_id": existing["id"], "action": "delete", "expected_payload_hash": before["planned_units"][0]["expected_payload_hash"]}],
@@ -728,7 +728,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertIsNotNone(json.loads(server.key_value_service().get("coach_pending_request")))
 
     def test_two_matching_units_can_be_disambiguated_by_question(self):
-        server.local_plan_creation_service().save([self.workout("2026-09-08"), self.workout("2026-09-11")])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-08"), self.workout("2026-09-11")])
         before = self.state()
         def question(_):
             return self.call("clarify_coach_request", {"source_message_ids": [server.COACH_CONVERSATION.message_service().list()[-1]["id"]],
@@ -772,7 +772,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(len(json.loads(job["payload"])["entries"]), 1)
 
     def test_sync_followup_can_read_job_and_inspect_duplicates(self):
-        server.local_plan_creation_service().save([self.workout("2026-09-08")])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-08")])
         def inspect(payload):
             output = json.loads(payload["input"][0]["output"])
             return self.call("get_sync_job", {"job_id": output["sync_job_id"]})
@@ -790,7 +790,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         )
 
     def test_sync_followup_failure_distinguishes_coach_interruption_and_keeps_job(self):
-        server.local_plan_creation_service().save([self.workout("2026-09-08")])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-08")])
         def broken(_):
             raise server.AppError(503, "Synthetic model unavailable", reason="provider_unavailable")
         with patch.object(
@@ -829,14 +829,14 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["status"], "failed")
 
     def test_all_pending_sync_is_not_narrowed_to_model_entries(self):
-        server.local_plan_creation_service().save([self.workout("2026-09-08"), self.workout("2026-09-09")])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-08"), self.workout("2026-09-09")])
         result, _ = self.turn("Alle offenen Einheiten übertragen", [lambda _: self.call("start_intervals_plan_sync", {"entries": []},
             ["intervals_sync", "local_plan"], target="intervals", remote_write=True, sync_scope="all_pending"), {"output_text": "Alle beauftragt."}])
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["command_receipts"][0]["result"]["entries"], 2)
 
     def test_selected_existing_planned_unit_sync_accepts_planned_unit_scope(self):
-        planned = server.local_plan_creation_service().save([self.workout("2026-09-08")])[0]
+        planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-08")])[0]
         entry = server.planning_authority_service().pending_plan_push_entries()[0]
         result, _ = self.turn("Nur diese Einheit übertragen", [lambda _: self.call(
             "start_intervals_plan_sync", {"entries": [entry]},
@@ -1073,7 +1073,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(self.state(), before)
 
     def test_failed_local_step_blocks_following_all_pending_push(self):
-        server.local_plan_creation_service().save([self.workout()])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
         result, _ = self.turn("Plan ändern und alles übertragen", [lambda _: self.call("apply_training_patch", {
             "workouts": [self.workout()], "expected_revision": -1}, ["local_plan"],
             {"start": "2026-09-09", "end": "2026-09-09"}),
@@ -1083,7 +1083,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["sync_job_ids"], [])
 
     def test_archived_plan_cannot_be_replaced_as_current_plan(self):
-        server.local_plan_creation_service().save([self.workout()], plan_name="Archived")
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()], plan_name="Archived")
         plan = server.PLANNING_DATA.training_plan().list()[0]
         with server.database_manager().unit_of_work() as db:
             db.execute("UPDATE training_plans SET status='archived' WHERE id=?", (plan["id"],))

@@ -42,7 +42,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertTrue(any(row["content"] == first["message"]["content"] for row in dialogue["messages"]))
 
     def test_rate_limit_retries_response_after_sync_without_requeuing(self):
-        server.local_plan_creation_service().save([self.workout()])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
         def sync(_):
             return {**self.call("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"],
                                 target="intervals", remote_write=True, sync_scope="all_pending"), "id": "resp_sync"}
@@ -117,7 +117,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(model.call_args.args[0]["previous_response_id"], "resp_tool")
 
     def test_failed_answer_keeps_observed_sync_status(self):
-        server.local_plan_creation_service().save([self.workout()])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
         job = server.SYNC_JOB_QUEUE.service().enqueue(
             "intervals",
             "plan_push",
@@ -134,7 +134,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
     def test_workout_repair_finishes_in_same_turn_preserving_identity_and_distance(self):
         original = {**self.workout("2026-09-14", "Optionaler Recovery Run"), "sport": "Run",
                     "description": "- 6km Z1 HR", "target": "HR", "duration_minutes": 40}
-        unit = server.local_plan_creation_service().save([original])[0]
+        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([original])[0]
         before = self.state()
         args = {"expected_revision": before["planning_revision"], "changes": [{
             "local_id": unit["id"], "expected_payload_hash": before["planned_units"][0]["expected_payload_hash"],
