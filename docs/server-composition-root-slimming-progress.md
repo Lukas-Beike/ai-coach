@@ -1223,3 +1223,62 @@ mocked providers; no live account or runtime data was used.
 - Measured `server.py`: 2,004 physical / 1,767 nonblank lines, 198 AST imports,
   83 top-level functions. The Docker build remains unavailable because the
   local engine pipe is absent.
+
+## S4d2 completion
+
+- Coach planning mutations/artifacts, dispatcher routing, and sync/athlete/profile
+  command tools now have separate owners in `backend/coach/`. The only remaining
+  root factories in the planning-tool path connect those assemblies to the
+  upcoming structured execution and HTTP owners; S4d is complete.
+
+## S4e1 boundary before implementation: structured tool-round assembly
+
+- The narrow owner is a `CoachStructuredToolRoundAssembly` in
+  `backend/coach/structured_tool_round_assembly.py`. This slice will move
+  structured tool execution, failure projection, round journaling, replay,
+  preparation, and round-service construction. It
+  will leave response transport/recovery, top-level structured/chat turns, job
+  submission/cancellation, and background runners for later S4e sub-slices.
+- `coach_structured_tool_round_service` is called from the structured turn;
+  its support factories feed that round. `coach_planning_command_service` is
+  called by `PlanningCommandsPostRoutes` and directly by its five planning
+  command tests. `coach_structured_turn_service` and
+  `coach_structured_outcome_service` also have direct behavior-test callers.
+  No test patches these root factory names. Tests patch the concrete owners in
+  `backend.coach.tool_execution_service`, `tool_failures`, `tool_round_journal`,
+  `tool_replay`, `outcomes`, and `tool_preparation`; retain those constructor
+  lookup seams and move direct callers to the assembly owner.
+- Preserve the current manager and `DB_LOCK`, key-value and sync repositories,
+  proposal/tool command owners, active planning authority, job-store identity,
+  Coach allowlists and sync-period constants. Round construction currently
+  eagerly constructs its support services at round-service creation while
+  retaining a database-manager callback for transactional work; retain that
+  timing and the command route's fresh per-request planning-command service.
+- The owner is limited to structured tool execution and its round. Response
+  retries/recovery and the complete structured turn remain separate concerns;
+  this prevents one Coach assembly from absorbing chat, background jobs, and
+  HTTP construction.
+
+
+## S4e1 complete: structured tool-round assembly
+
+- `CoachStructuredToolRoundAssembly` now owns tool execution, failure
+  projection, journaling, replay, preparation, and round-service construction.
+  The structured turn receives the shared assembly's service; its lower-level
+  factories are no longer composed in `server.py`.
+- Reviewed callers and seams: the structured turn is the round-service caller;
+  planning-command construction remains in `server.py` for
+  `PlanningCommandsPostRoutes` and its five direct test calls. Outcome
+  projection remains with structured-turn composition. Existing concrete
+  service constructors remain the test patch targets. The assembly resolves
+  the manager, lock, repositories, command services, job store, tool allowlists,
+  context, response, and limits through the same explicit owners and retains
+  the round's eager support-service construction timing.
+- Changed files: `server.py`, new structured tool-round assembly and focused
+  test, extraction inventory owner mapping/report, and this progress log.
+- Checks passed: focused assembly, planning-command, turn-outcome, architecture,
+  and structured-tool behavior coverage (111 tests); the broader Coach matrix
+  (534 tests); inventory `--check`, compileall, and `git diff --check`.
+- `server.py`: 1,965 physical / 1,738 nonblank lines, 194 AST imports,
+  77 top-level functions. Docker remains unavailable because the local engine
+  pipe is absent.

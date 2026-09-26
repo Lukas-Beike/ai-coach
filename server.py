@@ -189,8 +189,6 @@ from backend.planning import training_plans as planning_training_plans
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.public_state import PublicStateDependencies, PublicStateService
 from backend.sync import scheduler as sync_scheduler_runtime
-from backend.coach.tool_replay import CoachStructuredToolReplayService
-from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.coach import context as coach_context_module
 from backend.coach.context import CoachQuickActionsService
 from backend.coach.context_assembly import CoachContextAssembly
@@ -208,16 +206,14 @@ from backend.coach.proposal_assembly import CoachProposalAssembly
 from backend.coach.planning_tools_assembly import CoachPlanningToolsAssembly
 from backend.coach.tool_dispatch_assembly import CoachToolDispatchAssembly
 from backend.coach.command_tools_assembly import CoachCommandToolsAssembly
+from backend.coach.structured_tool_round_assembly import CoachStructuredToolRoundAssembly
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.turn_opening import CoachTurnOpeningService
+from backend.coach.turn_outcome import CoachStructuredOutcomeService
 from backend.coach.dialogue import CoachDialogueReadService, dialogue_tools
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.coach.clarification import CoachClarificationService
-from backend.coach.turn_outcome import CoachStructuredOutcomeService
-from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
-from backend.coach.tool_failures import CoachStructuredToolFailureService
-from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
 from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.coach.final_receipt import CoachFinalReceiptService
@@ -226,7 +222,6 @@ from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach import structured_tool_round
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
-    CoachStructuredToolRoundService,
 )
 from backend.coach.structured_turn import CoachStructuredTurnDependencies, CoachStructuredTurnService
 from backend.coach.chat_turn import CoachChatTurnService
@@ -1436,46 +1431,40 @@ COACH_TOOL_DISPATCH = CoachToolDispatchAssembly(
 )
 
 
-def coach_structured_tool_execution_service() -> CoachStructuredToolExecutionService:
-    """Compose the concrete owners used for structured Coach tool execution."""
-    return CoachStructuredToolExecutionService(
-        database_manager(),
-        DB_LOCK,
-        KEY_VALUE_REPOSITORY,
-        coach_clarification_service(),
-        COACH_PLANNING_TOOLS.training_patch_service(),
-        SYNC_PERSISTENCE.state_repository(),
-        COACH_PROPOSALS.creation_service(),
-        COACH_TOOL_DISPATCH.service(),
-    )
-
-
-def coach_structured_tool_failure_service() -> CoachStructuredToolFailureService:
-    """Compose structured tool failure projection from safe diagnostics."""
-    return CoachStructuredToolFailureService(
-        ROOT,
-        LOGGER,
-        frozenset(tool["name"] for tool in COACH_DIALOGUE_TOOLS),
-    )
-
-
-def coach_structured_tool_round_journal() -> CoachStructuredToolRoundJournal:
-    """Compose the round journal with its durable Coach job-store owner."""
-    return CoachStructuredToolRoundJournal(coach_job_store())
+COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
+    database_manager=lambda: database_manager(),
+    database_lock=DB_LOCK,
+    key_value_repository=KEY_VALUE_REPOSITORY,
+    root=ROOT,
+    logger=LOGGER,
+    tool_names=lambda: (tool["name"] for tool in COACH_DIALOGUE_TOOLS),
+    read_only_tools=lambda: STRUCTURED_READ_ONLY_TOOLS,
+    sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+    all_sync_days=ALL_SYNC_DAYS,
+    clarification_service=lambda: coach_clarification_service(),
+    training_patch_service=lambda: COACH_PLANNING_TOOLS.training_patch_service(),
+    sync_state_repository=lambda: SYNC_PERSISTENCE.state_repository(),
+    proposal_creation_service=lambda: COACH_PROPOSALS.creation_service(),
+    tool_dispatch_service=lambda: COACH_TOOL_DISPATCH.service(),
+    job_store=lambda: coach_job_store(),
+    dialogue_action_service=lambda: coach_dialogue_action_service(),
+    planning_authority_service=lambda: planning_authority_service(),
+    training_context_service=lambda: COACH_CONTEXT.training_context_service(),
+    response_service=lambda: coach_structured_response_service(),
+    tool_round_limits=lambda: CoachStructuredToolRoundLimits(
+        max_rounds=structured_tool_round.COACH_TOOL_MAX_ROUNDS,
+        background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
+        default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+        long_plan_max_output_tokens=coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
+    ),
+)
 
 
 def coach_planning_command_service() -> CoachPlanningCommandService:
-    """Compose the durable, session-bound local planning command owner."""
+    """Compose the session-bound planning command endpoint owner."""
     return CoachPlanningCommandService(
         database_manager(), DB_LOCK, coach_command_receipt_service(),
         COACH_TOOL_DISPATCH.service(), coach_turn_failure_service(), runtime_clock.utc_now,
-    )
-
-
-def coach_structured_tool_replay_service() -> CoachStructuredToolReplayService:
-    """Compose structured tool replay lookup with the active DB and allowlist."""
-    return CoachStructuredToolReplayService(
-        database_manager(), DB_LOCK, frozenset(STRUCTURED_READ_ONLY_TOOLS)
     )
 
 
@@ -1484,18 +1473,6 @@ def coach_structured_outcome_service() -> CoachStructuredOutcomeService:
     return CoachStructuredOutcomeService(
         database_manager(), DB_LOCK, KEY_VALUE_REPOSITORY,
         frozenset(STRUCTURED_READ_ONLY_TOOLS),
-    )
-
-
-def coach_structured_tool_preparation_service() -> CoachStructuredToolPreparationService:
-    """Compose structured tool preparation with current Coach state owners."""
-    return CoachStructuredToolPreparationService(
-        coach_dialogue_action_service(),
-        SYNC_PERSISTENCE.state_repository(),
-        planning_authority_service(),
-        frozenset(STRUCTURED_READ_ONLY_TOOLS),
-        SYNC_PERIOD_DEFAULTS,
-        ALL_SYNC_DAYS,
     )
 
 
@@ -1519,22 +1496,6 @@ def coach_structured_response_service() -> CoachStructuredResponseService:
     )
 
 
-def coach_structured_tool_round_service() -> CoachStructuredToolRoundService:
-    """Compose the concrete owners of tool transactions and provider follow-up."""
-    return CoachStructuredToolRoundService(
-        database_manager, DB_LOCK,
-        coach_structured_tool_replay_service(), coach_structured_tool_preparation_service(),
-        coach_structured_tool_execution_service(), coach_structured_tool_failure_service(),
-        coach_structured_tool_round_journal(), coach_job_store(), COACH_CONTEXT.training_context_service(),
-        coach_structured_response_service(), CoachStructuredToolRoundLimits(
-            max_rounds=structured_tool_round.COACH_TOOL_MAX_ROUNDS,
-            background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
-            default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
-            long_plan_max_output_tokens=coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
-        ),
-    )
-
-
 def coach_final_receipt_service() -> CoachFinalReceiptService:
     """Compose the atomic final Coach receipt owner."""
     return CoachFinalReceiptService(
@@ -1551,7 +1512,7 @@ def coach_structured_turn_service() -> CoachStructuredTurnService:
         dialogue=coach_dialogue_read_service(),
         payload=COACH_CONTEXT.request_payload_service(),
         response=coach_structured_response_service(),
-        rounds=coach_structured_tool_round_service(),
+        rounds=COACH_TOOL_ROUNDS.service(),
         outcome=coach_structured_outcome_service(),
         final_receipt=coach_final_receipt_service(),
         failure=coach_turn_failure_service(),
