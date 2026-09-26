@@ -165,7 +165,7 @@ class ServerCoachTests(ServerTestCase):
         with self.assertRaises(server.AppError) as missing:
             server.activity_read_service().detail(
                 "activity-3",
-                garmin_snapshot=server.garmin_payload_service().snapshot(),
+                garmin_snapshot=server.GARMIN_ASSEMBLY.payload_service().snapshot(),
                 profile=server.profile_service().get(),
                 today=server.ATHLETE_CLOCK.now().date(),
             )
@@ -688,9 +688,9 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(
             server.sync_state_repository().latest_snapshot(), intervals_snapshot
         )
-        self.assertEqual(server.garmin_payload_service().snapshot(), garmin_snapshot)
+        self.assertEqual(server.GARMIN_ASSEMBLY.payload_service().snapshot(), garmin_snapshot)
         self.assertEqual(json.dumps(server.sync_state_repository().latest_snapshot(), ensure_ascii=False, sort_keys=True, separators=(",", ":")), intervals_before)
-        self.assertEqual(json.dumps(server.garmin_payload_service().snapshot(), ensure_ascii=False, sort_keys=True, separators=(",", ":")), garmin_before)
+        self.assertEqual(json.dumps(server.GARMIN_ASSEMBLY.payload_service().snapshot(), ensure_ascii=False, sort_keys=True, separators=(",", ":")), garmin_before)
         self.assertNotIn("provider_detail", context)
         self.assertNotIn("vendor_payload", context)
 

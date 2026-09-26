@@ -12,6 +12,7 @@ from backend.activities.duplicates import filter_garmin_activities, garmin_activ
 from backend.performance import activity_validation, current_metrics as performance_current_metrics, garmin_metrics as performance_garmin_metrics, garmin_projection, load as performance_load, max_hr as performance_max_hr, morning_battery as performance_morning_battery, planning_recovery as performance_planning_recovery
 from backend.performance.morning_battery_service import MORNING_BATTERY_HISTORY_KEY
 from backend.planning import context as planning_context
+from backend.providers import garmin as garmin_provider
 from backend.providers import intervals_client as intervals_client_module
 from backend.sync.intervals import IntervalsSnapshotReader
 from backend.sync.performance import PerformanceRefreshService
@@ -80,7 +81,7 @@ class ServerPerformanceTests(ServerTestCase):
             "activities": [{"activityId": 1, "activityName": "Should not be sent"}],
             "race_predictions": {"5k": 1310},
         }))
-        result = server.garmin_projection_service().coach_context()
+        result = server.GARMIN_ASSEMBLY.projection_service().coach_context()
         self.assertEqual(result["recovery"]["sleep"]["calendarDate"], "2026-08-29")
         self.assertEqual(result["recovery"]["hrv"]["lastNightAvg"], 57)
         self.assertEqual(result["recovery"]["readiness"]["score"], 78)
@@ -94,7 +95,7 @@ class ServerPerformanceTests(ServerTestCase):
             "readiness": {"trainingReadiness": {"calendarDate": "2026-08-29", "trainingReadinessScore": 78}},
         }))
 
-        result = server.garmin_projection_service().coach_context()
+        result = server.GARMIN_ASSEMBLY.projection_service().coach_context()
 
         self.assertEqual(result["recovery"]["sleep"]["sleepScore"], 82)
         self.assertEqual(result["recovery"]["readiness"]["trainingReadinessScore"], 78)
@@ -142,7 +143,7 @@ class ServerPerformanceTests(ServerTestCase):
         metrics = performance_current_metrics.current_performance_metrics(
             snapshot,
             server.profile_service().get(),
-            _garmin_metrics(server.garmin_payload_service().snapshot()),
+            _garmin_metrics(server.GARMIN_ASSEMBLY.payload_service().snapshot()),
         )
         self.assertEqual(metrics["running_vo2max_ml_kg_min"]["value"], 55)
         self.assertEqual(metrics["running_vo2max_ml_kg_min"]["source"], "Garmin Connect")
@@ -223,7 +224,7 @@ class ServerPerformanceTests(ServerTestCase):
         metrics = performance_current_metrics.current_performance_metrics(
             snapshot,
             server.profile_service().get(),
-            _garmin_metrics(server.garmin_payload_service().snapshot()),
+            _garmin_metrics(server.GARMIN_ASSEMBLY.payload_service().snapshot()),
         )
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 302)
         self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Garmin Connect")
@@ -348,8 +349,8 @@ class ServerPerformanceTests(ServerTestCase):
 
         config = replace(server.CONFIG, garmin_email="test@example.invalid", garmin_password="test")
         with patch.object(server, "CONFIG", config), \
-                patch.object(server.GarminClientFactory, "available", return_value=True), \
-                patch.object(server.GarminClientFactory, "create", side_effect=FakeGarmin):
+                patch.object(garmin_provider.GarminClientFactory, "available", return_value=True), \
+                patch.object(garmin_provider.GarminClientFactory, "create", side_effect=FakeGarmin):
             first = server.morning_body_battery_service().sync(date(2026, 9, 4))
             second = server.morning_body_battery_service().sync(date(2026, 9, 4))
 
@@ -357,7 +358,7 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(second["status"], "already_loaded")
         self.assertEqual(FakeGarmin.sleep_calls, ["2026-09-04"])
         self.assertEqual(FakeGarmin.body_battery_calls, [("2026-09-03", "2026-09-04")])
-        self.assertEqual(server.garmin_projection_service().public_state()["morning_body_battery"]["morning"]["value"], 78)
+        self.assertEqual(server.GARMIN_ASSEMBLY.projection_service().public_state()["morning_body_battery"]["morning"]["value"], 78)
         self.assertEqual(
             weather_history.decode_history(
                 server.key_value_service().get(MORNING_BATTERY_HISTORY_KEY)

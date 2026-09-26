@@ -16,6 +16,7 @@ from backend.http_api.rate_limit import RateLimiter
 from backend.performance import context as performance_context
 from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import history as performance_history
+from backend.providers import garmin as garmin_provider
 from backend.providers.garmin import (
     GarminCollectionOptions,
     collect_garmin_data,
@@ -229,17 +230,17 @@ class ProviderReviewTests(unittest.TestCase):
                                "errors": [{"source": source, "message": "synthetic outage"}],
                                "provider_sync": {"pagination": {"activities": {"complete": source != "activities"}}}}
                     with patch.object(
-                        server.GarminClientFactory, "available", return_value=True
+                        garmin_provider.GarminClientFactory, "available", return_value=True
                     ), patch.object(
-                        server.GarminClientFactory, "create", return_value=client
+                        garmin_provider.GarminClientFactory, "create", return_value=client
                     ), patch.object(
                         garmin_service, "collect_garmin_data", return_value=payload
                     ):
-                        result = server.garmin_sync_service().sync(
+                        result = server.GARMIN_ASSEMBLY.sync_service().sync(
                             days=2,
                             end_date=date(2026, 8, 30) if historical else None,
                         )
-                    saved = server.garmin_payload_service().snapshot()
+                    saved = server.GARMIN_ASSEMBLY.payload_service().snapshot()
                     self.assertEqual(saved[source], previous[source])
                     self.assertEqual(saved["source_freshness"][source]["fetched_at"], previous["source_freshness"][source]["fetched_at"])
                     self.assertEqual(saved["source_freshness"][source]["freshness"], "stale")
@@ -260,16 +261,16 @@ class ProviderReviewTests(unittest.TestCase):
                            "provider_sync": {"pagination": {"activities": {"complete": True}}}}
                 client = Mock()
                 client.login.return_value = (False, None)
-                with patch.object(server.GarminClientFactory, "available", return_value=True), \
-                        patch.object(server.GarminClientFactory, "create", return_value=client), \
+                with patch.object(garmin_provider.GarminClientFactory, "available", return_value=True), \
+                        patch.object(garmin_provider.GarminClientFactory, "create", return_value=client), \
                         patch.object(garmin_sync.GarminFixtureLoader, "path", return_value=Path("synthetic.json") if fixture else None), \
                         patch.object(garmin_sync.GarminFixtureLoader, "load", return_value=payload), \
                         patch.object(garmin_service, "collect_garmin_data", return_value=payload):
-                    result = server.garmin_sync_service().sync(days=2)
+                    result = server.GARMIN_ASSEMBLY.sync_service().sync(days=2)
                 self.assertEqual(result["status"], "ok")
-                self.assertEqual(server.garmin_payload_service().snapshot()["activities"], [original])
-                self.assertEqual(server.garmin_projection_service().public_state()["activities"], 0)
-                self.assertEqual(server.garmin_payload_service().snapshot()["activity_matches"], [{"garmin_activity_id": 123, "intervals_activity_id": "canonical"}])
+                self.assertEqual(server.GARMIN_ASSEMBLY.payload_service().snapshot()["activities"], [original])
+                self.assertEqual(server.GARMIN_ASSEMBLY.projection_service().public_state()["activities"], 0)
+                self.assertEqual(server.GARMIN_ASSEMBLY.payload_service().snapshot()["activity_matches"], [{"garmin_activity_id": 123, "intervals_activity_id": "canonical"}])
                 self.assertEqual(server.sync_state_repository().cursor("garmin", "data")["cursor"], payload["end"])
                 context = server.coach_training_context_service().build()
                 self.assertNotIn("garmin_specific", context)
@@ -298,7 +299,7 @@ class ProviderReviewTests(unittest.TestCase):
             server.sync_state_repository().save_snapshot({"synced_at": second["synced_at"], "athlete": {}, "recent_wellness": [], "recent_activities": []})
             public = performance_context.current_performance_context(
                 server.sync_state_repository().latest_snapshot(),
-                server.garmin_payload_service().snapshot(),
+                server.GARMIN_ASSEMBLY.payload_service().snapshot(),
                 server.profile_service().get(),
                 server.ATHLETE_CLOCK.now().date(),
             )
@@ -311,8 +312,8 @@ class ProviderReviewTests(unittest.TestCase):
             readiness = public["recovery"]["source_freshness"]["readiness"]
             self.assertEqual(readiness["freshness"], "stale")
             self.assertEqual(readiness["observed_at"], "2026-09-01")
-            self.assertEqual(server.garmin_projection_service().public_state()["source_freshness"]["readiness"]["fetched_at"], first["synced_at"])
-            coach = server.garmin_projection_service().coach_context(include_performance=True)
+            self.assertEqual(server.GARMIN_ASSEMBLY.projection_service().public_state()["source_freshness"]["readiness"]["fetched_at"], first["synced_at"])
+            coach = server.GARMIN_ASSEMBLY.projection_service().coach_context(include_performance=True)
             self.assertEqual(coach["performance"]["thresholds"]["cycling_ftp_watts"]["freshness"], "stale")
             context = server.coach_training_context_service().build()
             self.assertIn('"freshness":"stale"', context)

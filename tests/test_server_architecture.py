@@ -2065,9 +2065,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     sync_public_state_service sync_state_repository performance_refresh_service
     intervals_snapshot_reader performance_refresh_followup_service
     sync_job_outcome_service daily_sync_marker_service intervals_snapshot_service
-    intervals_sync_service garmin_fixture_loader garmin_client_factory
-    garmin_payload_service garmin_sync_state_service garmin_remote_reader
-    garmin_sync_service garmin_projection_service full_provider_resync_service
+    intervals_sync_service full_provider_resync_service
     public_weather_state_service
     morning_body_battery_service external_calendar_reader
     external_calendar_sync_service calendar_conflict_service

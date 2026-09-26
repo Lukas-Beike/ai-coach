@@ -80,7 +80,7 @@ def _current_performance_context(snapshot=None):
     effective_snapshot = snapshot if snapshot is not None else server.sync_state_repository().latest_snapshot()
     return performance_context.current_performance_context(
         effective_snapshot,
-        server.garmin_payload_service().snapshot(),
+        server.GARMIN_ASSEMBLY.payload_service().snapshot(),
         server.profile_service().get(),
         server.ATHLETE_CLOCK.now().date(),
     )

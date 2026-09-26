@@ -596,7 +596,7 @@ class ServerHttpTests(ServerTestCase):
             {"source": "body_battery", "message": "optional request unavailable"},
         ]))
 
-        self.assertIsNone(server.garmin_projection_service().public_state()["last_error"])
+        self.assertIsNone(server.GARMIN_ASSEMBLY.projection_service().public_state()["last_error"])
 
     def test_provider_authentication_errors_do_not_use_the_session_status(self):
         provider_error = server.AppError(401, "Gemini-SchlÃ¼ssel ungÃ¼ltig.", reason="authentication_or_permission")

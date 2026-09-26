@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
+from backend.providers import garmin as garmin_provider
 from backend.providers import garmin_morning, intervals_client as intervals_client_module
 
 from backend.performance import garmin_metrics as performance_garmin_metrics
@@ -40,7 +41,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             fixture.write_text(json.dumps({"sleep": [{"calendarDate": "2026-08-29", "sleepScore": 82}]}), encoding="utf-8")
             config = replace(server.CONFIG, garmin_fixture_path=str(fixture))
             with patch.object(server, "CONFIG", config):
-                payload = server.garmin_fixture_loader().load(2)
+                payload = server.GARMIN_ASSEMBLY.fixture_loader().load(2)
         self.assertEqual(payload["sleep"][0]["calendarDate"], server.ATHLETE_CLOCK.now().date().isoformat())
 
     def test_static_garmin_fixture_preserves_relative_sleep_dates(self):
@@ -52,7 +53,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             ]}), encoding="utf-8")
             config = replace(server.CONFIG, garmin_fixture_path=str(fixture))
             with patch.object(server, "CONFIG", config):
-                payload = server.garmin_fixture_loader().load(2)
+                payload = server.GARMIN_ASSEMBLY.fixture_loader().load(2)
         today = server.ATHLETE_CLOCK.now().date()
         self.assertEqual([record["calendarDate"] for record in payload["sleep"]], [
             (today - timedelta(days=1)).isoformat(),
@@ -68,13 +69,13 @@ class DiagnosticFollowupTests(unittest.TestCase):
             self.assertEqual(first["status"], "not_available_today")
             self.assertEqual(service.sync(day)["status"], "retry_wait")
             self.assertEqual(fetch.call_count, 1)
-            snapshot = server.garmin_payload_service().snapshot()
+            snapshot = server.GARMIN_ASSEMBLY.payload_service().snapshot()
             snapshot["morning_body_battery"]["attempted_at"] = (datetime.now(timezone.utc) - timedelta(minutes=16)).isoformat()
             server.key_value_service().set("garmin_snapshot", json.dumps(snapshot))
             ready = {"sleep_date": day.isoformat(), "status": "ready", "attempted_at": runtime_clock.utc_now(), "morning": {"value": 78}, "before_sleep": {"value": 30}}
             with patch.object(performance_morning_battery, "morning_body_battery_record", return_value=ready):
                 self.assertEqual(service.sync(day)["status"], "ready")
-            self.assertEqual(server.garmin_payload_service().snapshot()["morning_body_battery"]["attempts"], 2)
+            self.assertEqual(server.GARMIN_ASSEMBLY.payload_service().snapshot()["morning_body_battery"]["attempts"], 2)
             self.assertEqual(service.sync(day)["status"], "already_loaded")
             self.assertEqual(fetch.call_count, 2)
 
@@ -104,7 +105,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             Mock(acquire=Mock(return_value=False)),
         ):
             self.assertEqual(service.sync(server.ATHLETE_CLOCK.now().date())["status"], "already_running")
-        self.assertEqual(server.garmin_payload_service().snapshot(), snapshot)
+        self.assertEqual(server.GARMIN_ASSEMBLY.payload_service().snapshot(), snapshot)
 
     def test_morning_remote_calls_use_the_current_operation_context(self):
         day = server.ATHLETE_CLOCK.now().date()
@@ -114,7 +115,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             kwargs["external_call"]("garmin", "synthetic", lambda: None, {})
             return {}, []
 
-        with patch.object(server.GarminClientFactory, "create", return_value=object()), \
+        with patch.object(garmin_provider.GarminClientFactory, "create", return_value=object()), \
                 patch.object(garmin_morning, "fetch_morning_body_battery", side_effect=fetch), \
                 patch.object(server.provider_http, "external_call", return_value=None) as external_call:
             token = sync_observation.OPERATION_CONTEXT.set(context)
@@ -155,8 +156,8 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertEqual(metric["measurement_status"], "earlier")
         self.assertEqual(metric["measurement_age_days"], 26)
         self.assertIn("keine neue Messung", metric["note"])
-        self.assertEqual(server.garmin_projection_service().public_state()["source_freshness"]["weight"]["measurement_age_days"], 26)
-        self.assertEqual(server.garmin_projection_service().coach_context()["source_freshness"]["weight"]["measurement_status"], "earlier")
+        self.assertEqual(server.GARMIN_ASSEMBLY.projection_service().public_state()["source_freshness"]["weight"]["measurement_age_days"], 26)
+        self.assertEqual(server.GARMIN_ASSEMBLY.projection_service().coach_context()["source_freshness"]["weight"]["measurement_status"], "earlier")
         self.assertEqual(json.dumps(snapshot, sort_keys=True), original)
         self.assertEqual(server.key_value_service().get("garmin_snapshot"), original)
 

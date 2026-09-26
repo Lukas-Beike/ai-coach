@@ -69,7 +69,7 @@ from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 from backend.runtime import clock as runtime_clock
 from backend.sync.assembly import ProviderSyncAssembly
-from backend.sync import garmin as garmin_sync
+from backend.sync.garmin_assembly import GarminAssembly
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
     INTERVALS_RESYNC_GATE,
@@ -108,7 +108,6 @@ from backend.providers import openai as openai_provider
 from backend.providers import state as provider_state
 from backend.providers import weather as weather_provider
 from backend.providers.transport_assembly import ProviderTransportAssembly
-from backend.providers.garmin import GarminClientFactory
 from backend.http_api import server as http_server
 from backend.http_api.handler import HttpRequestHandlerDependencies, create_request_handler
 from backend.http_api.bootstrap_state import (
@@ -197,14 +196,8 @@ from backend.sync.performance import (
 from backend.sync.garmin_service import (
     GARMIN_AUTOMATIC_SYNC_DAYS,
     GarminMorningRemoteReader,
-    GarminRemoteReader,
-    GarminSyncCoordination,
-    GarminSyncLifecycleState,
-    GarminSyncService,
-    GarminSyncSource,
     shared_garmin_sync_lock,
 )
-from backend.sync.garmin_projection_service import GarminProjectionService
 from backend.sync.full_resync import (
     FullProviderResyncService,
     FullResyncOperationJournal,
@@ -598,7 +591,7 @@ def coach_activity_read_tool_service() -> CoachActivityReadToolService:
     """Compose the read-only activity tools from their owning services."""
     return CoachActivityReadToolService(
         activity_read_service(),
-        garmin_payload_service(),
+        GARMIN_ASSEMBLY.payload_service(),
         profile_service(),
         lambda: ATHLETE_CLOCK.now().date(),
     )
@@ -634,9 +627,9 @@ def public_performance_state_service() -> PublicPerformanceStateService:
     """Compose the read-only performance projection."""
     return PublicPerformanceStateService(
         sync_state_repository(),
-        garmin_payload_service(),
+        GARMIN_ASSEMBLY.payload_service(),
         profile_service(),
-        garmin_projection_service(),
+        GARMIN_ASSEMBLY.projection_service(),
         lambda: ATHLETE_CLOCK.now().date(),
     )
 
@@ -654,7 +647,7 @@ def sync_public_state_service() -> SyncPublicStateService:
         KEY_VALUE_REPOSITORY,
         PROVIDER_SYNC.freshness_service(),
         profile_service(),
-        garmin_sync_state_service(),
+        GARMIN_ASSEMBLY.sync_state_service(),
         runtime_maintenance.MAINTENANCE_GATE,
         sync_job_queue_service(),
         state_version_service(),
@@ -793,110 +786,6 @@ def intervals_sync_service() -> IntervalsSyncService:
     )
 
 
-def garmin_fixture_loader() -> garmin_sync.GarminFixtureLoader:
-    """Compose fixture loading from the current runtime configuration."""
-    return garmin_sync.GarminFixtureLoader(
-        CONFIG,
-        ROOT,
-        ATHLETE_CLOCK.now,
-        runtime_clock.utc_now,
-        SYNC_EARLIEST_DATE,
-        ALL_SYNC_DAYS,
-    )
-
-
-def garmin_client_factory() -> GarminClientFactory:
-    """Compose the optional Garmin SDK boundary."""
-    return GarminClientFactory()
-
-
-def garmin_payload_service() -> garmin_sync.GarminPayloadService:
-    """Compose Garmin snapshot reads and payload preparation."""
-    return garmin_sync.GarminPayloadService(
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        sync_state_repository(),
-        lambda: ATHLETE_CLOCK.now().date(),
-    )
-
-
-def garmin_sync_state_service() -> garmin_sync.GarminSyncStateService:
-    """Compose Garmin sync state and payload persistence."""
-    return garmin_sync.GarminSyncStateService(
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        sync_state_repository(),
-        daily_sync_marker_service(),
-        REDACTOR,
-        runtime_clock.utc_now,
-        lambda: datetime.now(timezone.utc),
-    )
-
-
-def garmin_remote_reader() -> GarminRemoteReader:
-    """Compose authenticated Garmin SDK reads."""
-    return GarminRemoteReader(
-        CONFIG,
-        garmin_client_factory(),
-        garmin_sync_state_service(),
-        DIAGNOSTIC_CAPTURE,
-        REDACTOR.redact_text,
-        LOGGER,
-        runtime_clock.utc_now,
-        lambda: ATHLETE_CLOCK.now().date(),
-        SYNC_EARLIEST_DATE,
-        SYNC_CHUNK_DAYS,
-        ALL_SYNC_DAYS,
-    )
-
-
-def garmin_sync_service() -> GarminSyncService:
-    """Compose the complete Garmin synchronization use case."""
-    state_service = garmin_sync_state_service()
-    return GarminSyncService(
-        GarminSyncSource(
-            garmin_fixture_loader(),
-            garmin_remote_reader(),
-            SYNC_EARLIEST_DATE,
-            lambda: ATHLETE_CLOCK.now().date(),
-        ),
-        garmin_payload_service(),
-        state_service,
-        SyncOperationStateWriter(
-            database_manager(),
-            KEY_VALUE_REPOSITORY,
-            runtime_events.STATE_EVENT_BUFFER,
-            REDACTOR.redact_text,
-        ),
-        PROVIDER_SYNC.operation_observer(),
-        GarminSyncCoordination(
-            shared_garmin_sync_lock(),
-            GARMIN_RESYNC_GATE,
-            wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
-        ),
-        GarminSyncLifecycleState(
-            database_manager(), KEY_VALUE_REPOSITORY, runtime_clock.utc_now, LOGGER
-        ),
-    )
-
-
-def garmin_projection_service() -> GarminProjectionService:
-    """Compose the read-only Garmin public and Coach projections."""
-    return GarminProjectionService(
-        CONFIG,
-        garmin_payload_service(),
-        garmin_sync_service(),
-        garmin_sync_state_service(),
-        sync_state_repository(),
-        morning_body_battery_service(),
-        garmin_client_factory(),
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        REDACTOR,
-        ATHLETE_CLOCK.now,
-    )
-
-
 def full_provider_resync_service() -> FullProviderResyncService:
     """Compose complete provider reset orchestration."""
     observer = PROVIDER_SYNC.operation_observer()
@@ -904,7 +793,7 @@ def full_provider_resync_service() -> FullProviderResyncService:
         FullResyncProviderExecution(
             CONFIG,
             intervals_sync_service(),
-            garmin_sync_service(),
+            GARMIN_ASSEMBLY.sync_service(),
             competition_sync_service(),
             INTERVALS_RESYNC_GATE,
             GARMIN_RESYNC_GATE,
@@ -936,10 +825,10 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
         config_id,
         MorningBatteryStore(manager, KEY_VALUE_REPOSITORY),
         MorningBatterySource(
-            garmin_fixture_loader(),
+            GARMIN_ASSEMBLY.fixture_loader(),
             GarminMorningRemoteReader(
                 CONFIG,
-                garmin_client_factory(),
+                GARMIN_ASSEMBLY.client_factory(),
                 profile_service(),
                 ATHLETE_CLOCK,
                 DIAGNOSTIC_CAPTURE,
@@ -1243,9 +1132,9 @@ def sync_job_executor() -> SyncJobExecutor:
         ),
         garmin_jobs=GarminSyncJobOwner(
             historical_sync=historical_sync,
-            garmin_sync_service=garmin_sync_service(),
+            garmin_sync_service=GARMIN_ASSEMBLY.sync_service(),
             morning_body_battery_service=morning_body_battery_service(),
-            garmin_fixture_loader=garmin_fixture_loader(),
+            garmin_fixture_loader=GARMIN_ASSEMBLY.fixture_loader(),
             all_sync_days=ALL_SYNC_DAYS,
         ),
         calendar_weather_jobs=CalendarWeatherSyncJobOwner(
@@ -1552,6 +1441,29 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     runtime_clock.utc_now,
 )
 
+GARMIN_ASSEMBLY = GarminAssembly(
+    config=lambda: CONFIG,
+    root=ROOT,
+    database_manager=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    sync_state_repository=sync_state_repository,
+    daily_sync_marker_service=daily_sync_marker_service,
+    redactor=REDACTOR,
+    logger=LOGGER,
+    diagnostic_capture=DIAGNOSTIC_CAPTURE,
+    athlete_clock=ATHLETE_CLOCK,
+    utc_now=runtime_clock.utc_now,
+    datetime_now=lambda: datetime.now(timezone.utc),
+    earliest_date=SYNC_EARLIEST_DATE,
+    sync_chunk_days=SYNC_CHUNK_DAYS,
+    all_sync_days=ALL_SYNC_DAYS,
+    resync_gate=GARMIN_RESYNC_GATE,
+    operation_observer=PROVIDER_SYNC.operation_observer,
+    event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    lock_wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
+    morning_body_battery_service=morning_body_battery_service,
+)
+
 PROVIDER_TRANSPORT = ProviderTransportAssembly(
     app_version=APP_VERSION,
     max_response_bytes=provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
@@ -1808,7 +1720,7 @@ def coach_attachment_context_service() -> CoachAttachmentContextService:
 def manual_morning_checkin_service() -> ManualMorningCheckinService:
     """Compose the fresh-sleep gate for explicit morning Coach requests."""
     return ManualMorningCheckinService(
-        garmin_sync_service(), garmin_payload_service(), morning_body_battery_service(),
+        GARMIN_ASSEMBLY.sync_service(), GARMIN_ASSEMBLY.payload_service(), morning_body_battery_service(),
         lambda: ATHLETE_CLOCK.now().date(), LOGGER,
     )
 
@@ -1934,8 +1846,8 @@ def coach_structured_context_service() -> CoachStructuredContextService:
         ),
         CoachPerformanceContextReader(
             profile_service(),
-            garmin_payload_service(),
-            garmin_projection_service(),
+            GARMIN_ASSEMBLY.payload_service(),
+            GARMIN_ASSEMBLY.projection_service(),
             lambda: ATHLETE_CLOCK.now().date(),
         ),
     )
@@ -2199,8 +2111,8 @@ def public_bootstrap_service() -> PublicBootstrapService:
             external_calendar_reader=external_calendar_reader,
             profile_service=profile_service,
             provider_freshness_service=PROVIDER_SYNC.freshness_service,
-            garmin_sync_state_service=garmin_sync_state_service,
-            garmin_sync_service=garmin_sync_service,
+            garmin_sync_state_service=GARMIN_ASSEMBLY.sync_state_service,
+            garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
             sync_job_queue_service=sync_job_queue_service,
             state_version_service=state_version_service,
             coach_message_service=coach_message_service,
@@ -2212,7 +2124,7 @@ def public_bootstrap_service() -> PublicBootstrapService:
             external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
             planned_calendar_history_days=PLANNED_CALENDAR_HISTORY_DAYS,
             planned_calendar_future_days=PLANNED_CALENDAR_FUTURE_DAYS,
-            garmin_projection_service=garmin_projection_service,
+            garmin_projection_service=GARMIN_ASSEMBLY.projection_service,
             diagnostic_capture=DIAGNOSTIC_CAPTURE,
             intervals_public_state=intervals_state.public_state,
             intervals_sync_lock=INTERVALS_SYNC_LOCK,
@@ -2310,12 +2222,12 @@ def public_state_service() -> PublicStateService:
                 public_performance=public_performance_state_service(),
                 sync_state=sync_state_repository(),
                 provider_freshness=PROVIDER_SYNC.freshness_service(),
-                garmin_sync_state=garmin_sync_state_service(),
+                garmin_sync_state=GARMIN_ASSEMBLY.sync_state_service(),
                 sync_public_state=sync_public_state_service(),
                 intervals_sync_lock=INTERVALS_SYNC_LOCK,
                 workout_library_sync_running=workout_library_sync_running,
                 workout_library_sync_state=workout_library_sync_state_service(),
-                garmin_sync=garmin_sync_service(),
+                garmin_sync=GARMIN_ASSEMBLY.sync_service(),
                 provider_resync=full_provider_resync_service(),
                 planning_preview=adaptive_replan_preview_service(),
                 morning_checkin=morning_checkin_state_service(),
@@ -2356,15 +2268,15 @@ def diagnostic_report_service() -> DiagnosticReportService:
         app_version=APP_VERSION,
         utc_now=runtime_clock.utc_now,
         sync_state=sync_state_repository(),
-        garmin_projection=garmin_projection_service(),
-        garmin_client_factory=garmin_client_factory(),
-        garmin_fixture_loader=garmin_fixture_loader(),
+        garmin_projection=GARMIN_ASSEMBLY.projection_service(),
+        garmin_client_factory=GARMIN_ASSEMBLY.client_factory(),
+        garmin_fixture_loader=GARMIN_ASSEMBLY.fixture_loader(),
         provider_state=provider_state_service(),
         coach_history=coach_diagnostic_history_service(),
         redactor=REDACTOR,
         provider_freshness=PROVIDER_SYNC.freshness_service(),
         profile=profile_service(),
-        garmin_sync_state=garmin_sync_state_service(),
+        garmin_sync_state=GARMIN_ASSEMBLY.sync_state_service(),
         external_calendar_sync=external_calendar_sync_service(),
         external_calendar_reader=external_calendar_reader(),
         morning_checkin=morning_checkin_state_service(),
@@ -2630,7 +2542,7 @@ def daily_sync_scheduler() -> DailySyncScheduler:
         profile_service(),
         sync_job_queue_service(),
         daily_sync_marker_service(),
-        garmin_sync_service(),
+        GARMIN_ASSEMBLY.sync_service(),
         database_manager(),
         KEY_VALUE_REPOSITORY,
         DB_LOCK,
@@ -2652,7 +2564,7 @@ def startup_sync_scheduler() -> StartupSyncScheduler:
     return StartupSyncScheduler(
         profile_service(),
         sync_job_queue_service(),
-        garmin_sync_service(),
+        GARMIN_ASSEMBLY.sync_service(),
         sync_state_repository(),
         config=StartupSyncSchedulerConfig(
             calendar_enabled=bool(CONFIG.calendar_ical_url),

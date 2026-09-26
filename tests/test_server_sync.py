@@ -22,6 +22,7 @@ from backend.providers import intervals_client as intervals_client_module
 from backend.sync.intervals import IntervalsSnapshotReader, IntervalsSyncService
 from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
 from backend.sync.library import WorkoutLibraryRefreshService, WorkoutLibrarySyncService
+from backend.sync import garmin_service
 from backend.sync.performance import PerformanceRefreshFollowupService
 from backend.sync.selected import SelectedWorkoutSyncService
 from server_test_support import _current_performance_context, _garmin_metrics, server, ServerTestCase
@@ -527,7 +528,7 @@ class ServerSyncTests(ServerTestCase):
         metrics = performance_current_metrics.current_performance_metrics(
             snapshot,
             server.profile_service().get(),
-            _garmin_metrics(server.garmin_payload_service().snapshot()),
+            _garmin_metrics(server.GARMIN_ASSEMBLY.payload_service().snapshot()),
         )
         self.assertEqual(metrics["cycling_max_hr_bpm"]["value"], 188)
         self.assertEqual(metrics["cycling_max_hr_bpm"]["source"], "Intervals.icu")
@@ -1020,7 +1021,7 @@ class ServerSyncTests(ServerTestCase):
                 for item in server.PROVIDER_SYNC.freshness_service().current(
                     profile=server.profile_service().get(),
                     garmin_has_core_error=bool(
-                        server.garmin_sync_state_service().core_error_entries()
+                        server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()
                     ),
                     garmin_tokenstore_exists=Path(server.CONFIG.garmin_tokenstore).exists(),
                 )
@@ -1329,7 +1330,7 @@ class ServerSyncTests(ServerTestCase):
         server.key_value_service().set("garmin_snapshot", json.dumps({"old": True}))
         config = replace(server.CONFIG, garmin_fixture_path="fixture.json")
         with patch.object(server, "CONFIG", config), patch.object(
-            server.GarminSyncService,
+            garmin_service.GarminSyncService,
             "sync",
             side_effect=RuntimeError("provider unavailable"),
         ):
@@ -1372,7 +1373,7 @@ class ServerSyncTests(ServerTestCase):
                 result = server.full_provider_resync_service().resync("garmin")
         self.assertEqual(result["status"], "ok")
         self.assertNotEqual(server.key_value_service().get("garmin_snapshot"), json.dumps({"old": True}))
-        self.assertEqual(server.garmin_payload_service().snapshot().get("source"), "fixture")
+        self.assertEqual(server.GARMIN_ASSEMBLY.payload_service().snapshot().get("source"), "fixture")
 
     def test_all_time_snapshot_does_not_truncate_activity_history(self):
         snapshot = planning_context.compact_snapshot(
@@ -1711,8 +1712,8 @@ class ServerSyncTests(ServerTestCase):
         config = replace(server.CONFIG, garmin_fixture_path="missing-garmin-fixture.json")
         with patch.object(server, "CONFIG", config):
             with self.assertRaises(server.AppError):
-                server.garmin_sync_service().sync()
-        state = server.garmin_projection_service().public_state()
+                server.GARMIN_ASSEMBLY.sync_service().sync()
+        state = server.GARMIN_ASSEMBLY.projection_service().public_state()
         self.assertTrue(state["last_error"])
 
     def test_selected_library_sync_is_exact_and_reports_per_object(self):

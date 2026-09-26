@@ -193,3 +193,58 @@ mocked providers; no live account or runtime data was used.
   statements, 165 top-level functions.
 - Docker image build remains unavailable because the local Docker engine pipe
   is absent. No live provider was contacted.
+
+## S2a2c boundary before implementation: Garmin services
+
+- `garmin_fixture_loader`, `garmin_client_factory`, `garmin_payload_service`,
+  `garmin_sync_state_service`, `garmin_remote_reader`, `garmin_sync_service`,
+  and `garmin_projection_service` are the Garmin-owned composition group in
+  `server.py`. Their callers span the sync/Coach/HTTP setup plus provider,
+  performance, diagnostics, HTTP, Coach, and fixture tests. Tests directly call
+  these factories but do not patch the factory names; they patch the concrete
+  Garmin service/provider methods at their owning modules. `tests/server_test_support.py`
+  also reads payload snapshots through the root factory.
+- Preserve the active manager on every manager-backed service; pass through the
+  existing key-value repository, sync-state repository, daily marker service,
+  provider operation observer, event buffer, Garmin sync lock, and resync gate.
+  The Garmin projection receives the performance-owned morning body-battery
+  service as a specific lazy dependency. The existing morning battery cache,
+  source, and orchestration remain performance-owned and are not folded into
+  this assembly.
+- Proposed interface: `GarminAssembly` in `backend/sync/garmin_assembly.py`,
+  with the seven corresponding named methods. It owns Garmin-specific factory
+  composition only. Config and manager are supplied as late providers because
+  tests/runtime can replace them; date/clock, diagnostic, and marker callbacks
+  retain current evaluation timing. Constructors stay lazy: assembly creation
+  and service construction do not invoke Garmin SDK/network operations.
+
+## S2a2c: Garmin service assembly
+
+- Completed in `backend/sync/garmin_assembly.py`. The root now creates one
+  `GarminAssembly` with seven Garmin-owned factory methods. Manager and config
+  stay late-resolved; the manager-backed services retain the active manager,
+  key-value repository, state repository, marker service, shared Garmin lock,
+  resync gate, operation observer, and event buffer. The existing morning
+  body-battery cache and construction remain performance-owned; the projection
+  receives its specific factory as a lazy dependency.
+- Moved all root/test callers to `GARMIN_ASSEMBLY`. The complete patch-target
+  search found tests patching `GarminClientFactory` and `GarminSyncService`
+  through old root imports; those patches now target their provider and sync
+  owner modules, and Garmin assembly resolves the classes through those same
+  modules. No fixture factory aliases remain.
+- Focused checks passed: architecture, providers, sync, performance, provider
+  review, diagnostics, Coach, HTTP, and sync executor (372 tests, 1 SQLCipher
+  skip, 110.756 seconds). Inventory check, compileall, and diff check passed.
+  The required Docker build was attempted but the local Docker engine pipe is
+  unavailable. No live provider or application data was used.
+- Measured `server.py`: 2,625 physical / 2,274 nonblank lines, 215 import
+  statements, 156 top-level functions.
+- Changed files: `backend/sync/garmin_assembly.py`, `server.py`, regenerated
+  `docs/server-extraction-inventory.md`, this progress record, and Garmin
+  factory consumers/patch targets in `tests/server_test_support.py`,
+  `tests/test_diagnostic_followups.py`, `tests/test_provider_review.py`,
+  `tests/test_server_architecture.py`, `tests/test_server_coach.py`,
+  `tests/test_server_http.py`, `tests/test_server_performance.py`,
+  `tests/test_server_providers.py`, and `tests/test_server_sync.py`.
+- Remaining risk: SQLCipher integration and image build still require the
+  application Docker runtime, unavailable on this host.
