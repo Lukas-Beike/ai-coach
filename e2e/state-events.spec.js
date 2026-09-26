@@ -31,11 +31,11 @@ test("short-lived status connections back off while logs and diagnostics stay us
   }
   const result = await page.evaluate(async () => {
     await loadLogs();
-    const capture = await AppApi.request("/api/diagnostics/capture", { method: "POST", body: '{"enabled":true}' });
-    return { logs: document.querySelector("#logsOutput").textContent, capture: capture.active };
+    const diagnostics = await AppApi.request("/api/diagnostics");
+    return { logs: document.querySelector("#logsOutput").textContent, diagnostics: Boolean(diagnostics.generated_at) };
   });
   expect(result.logs).not.toContain("NetworkError");
-  expect(result.capture).toBe(true);
+  expect(result.diagnostics).toBe(true);
   // Only a sustained connection restores the initial retry interval.
   await page.evaluate(() => window.testEventSources.at(-1).onopen());
   await page.clock.runFor(30000);

@@ -342,30 +342,46 @@ class DiagnosticCapture:
         *,
         max_entries: int = DIAGNOSTIC_CAPTURE_MAX_ENTRIES,
         entries_key: str = DIAGNOSTIC_CAPTURE_ENTRIES_KEY,
+        batch_size: int = 10,
     ) -> None:
         self._get_kv = get_kv
         self._set_kv = set_kv
         self._redactor = redactor
         self._max_entries = max_entries
         self._entries_key = entries_key
+        self._batch_size = max(1, batch_size)
+        self._entries_cache: list[dict[str, Any]] | None = None
+        self._dirty_count = 0
         self._lock = threading.RLock()
 
-    def _entries(self) -> list[dict[str, Any]]:
+    def _load_entries(self) -> list[dict[str, Any]]:
+        if self._entries_cache is not None:
+            return self._entries_cache
         try:
-            entries = json.loads(self._get_kv(self._entries_key) or "[]")
+            raw = json.loads(self._get_kv(self._entries_key) or "[]")
         except (TypeError, ValueError):
-            return []
-        if not isinstance(entries, list):
-            return []
-        return [
+            raw = []
+        if not isinstance(raw, list):
+            raw = []
+        self._entries_cache = [
             self._redactor.sanitize_log_value(entry)
-            for entry in entries
+            for entry in raw
             if isinstance(entry, dict)
         ][-self._max_entries:]
+        return self._entries_cache
+
+    def flush(self) -> None:
+        with self._lock:
+            if self._dirty_count > 0 and self._entries_cache is not None:
+                self._set_kv(
+                    self._entries_key,
+                    json.dumps(self._entries_cache, ensure_ascii=False, separators=(",", ":")),
+                )
+                self._dirty_count = 0
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            entries = self._entries()
+            entries = self._load_entries()
             return {
                 "active": True,
                 "entries": len(entries),
@@ -374,18 +390,21 @@ class DiagnosticCapture:
 
     def entries(self) -> list[dict[str, Any]]:
         with self._lock:
-            return self._entries()
+            entries = self._load_entries()
+            self.flush()
+            return list(entries)
 
     def capture(self, event: str, details: dict[str, Any]) -> None:
         """Persist bounded technical metadata without response or athlete content."""
         with self._lock:
-            entries = self._entries()
+            entries = self._load_entries()
             entries.append({
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "event": self._redactor.sanitize_log_value(str(event)[:80]),
                 "details": self._redactor.sanitize_log_value(details),
             })
-            self._set_kv(
-                self._entries_key,
-                json.dumps(entries[-self._max_entries:], ensure_ascii=False, separators=(",", ":")),
-            )
+            if len(entries) > self._max_entries:
+                del entries[:-self._max_entries]
+            self._dirty_count += 1
+            if self._dirty_count >= min(self._batch_size, self._max_entries):
+                self.flush()

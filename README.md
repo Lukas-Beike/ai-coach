@@ -136,7 +136,7 @@ Intervals Coach adheres to a clean-slate installation and maintenance model:
 - **Zero-Downtime Maintenance Mode**: Process-level maintenance gate that prevents concurrent writes and ensures transaction safety during database restoration.
 - **Pre-Restore Rollback Copies**: Automated creation of a safety copy of the existing database before executing any database restore or replacement.
 - **Redacted Operational Logging**: Structured server logs that correlate technical operation IDs while stripping authentication headers, tokens, and athlete text.
-- **Temporary Diagnostic Capture**: Time-limited (1-hour) technical diagnostic logger recording API response shapes and error traces without capturing athlete content.
+- **Always-on Technical Diagnostics**: Bounded technical diagnostic logger (up to 1,500 entries) recording API response shapes and error traces without capturing athlete content, credentials, or tokens.
 
 ---
 
