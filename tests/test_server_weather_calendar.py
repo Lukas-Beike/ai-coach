@@ -701,11 +701,11 @@ class ServerWeatherCalendarTests(ServerTestCase):
             [{"id": "synthetic-event", **parsed_workout_fixture()}],
         ]) as upsert:
             with self.assertRaises(server.AppError):
-                server.planned_calendar_sync_service().sync_entry(entry["id"])
+                server.PLANNED_CALENDAR_SYNC.sync_service().sync_entry(entry["id"])
             failed = server.planned_unit_service().list()[0]
             self.assertEqual(failed["sync_status"], "sync_error")
             self.assertEqual(failed["remote_event_id"], "synthetic-event")
-            server.planned_calendar_sync_service().sync_entry(entry["id"])
+            server.PLANNED_CALENDAR_SYNC.sync_service().sync_entry(entry["id"])
             self.assertEqual(server.planned_unit_service().list()[0]["sync_status"], "synced")
             self.assertEqual(upsert.call_args_list[0].args[0][0]["external_id"], upsert.call_args_list[1].args[0][0]["external_id"])
 

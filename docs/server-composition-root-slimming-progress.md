@@ -618,3 +618,50 @@ mocked providers; no live account or runtime data was used.
 - Measured `server.py`: 2,419 physical / 2,092 nonblank lines, 214 AST import
   statements, 137 top-level functions. Docker/SQLCipher integration remains
   unavailable on this host.
+
+## S2g boundary before implementation: planned-calendar sync and repair
+
+- `planned_calendar_sync_service()` and
+  `planned_calendar_repair_service()` form the planned-calendar push/repair
+  boundary. The only production factory consumer is
+  `selected_workout_sync_service()`; direct service callers are in
+  `tests/test_server_weather_calendar.py` and `tests/test_workout_repair.py`.
+  Domain behavior tests construct the services directly in
+  `tests/test_sync_planned_calendar.py`. No e2e fixture references these root
+  factories, and no test directly patches either constructor.
+- Preserve fresh service/writer creation; active CONFIG and database manager;
+  the shared planning revision service and redactor; current provider transport
+  lookup; UTC clock; late athlete-local date; and configured future repair
+  window. Keep the existing per-unit synchronization guard owned by
+  `backend/sync/planned_calendar.py`. The selected-workout factory continues to
+  receive the library-sync service from its existing owner.
+- Proposed owner/interface: `PlannedCalendarSyncAssembly` in
+  `backend/sync/planned_calendar_assembly.py`, exposing only
+  `sync_service()` and `repair_service()`. It will accept explicit providers for
+  config, manager, transport, state writer, UTC time, and athlete date, plus the
+  future-day setting. The provider-client callback must resolve the active
+  transport method when invoked, preserving current test patch and lazy provider
+  lookup behavior.
+
+## S2g: planned-calendar sync and repair assembly
+
+- Completed in `backend/sync/planned_calendar_assembly.py` as
+  `PlannedCalendarSyncAssembly`, exposing only `sync_service()` and
+  `repair_service()`. Removed both root factories; selected-workout sync now
+  composes these operations from the assembly. Migrated direct server test
+  callers and removed the old architecture allowlist entries.
+- Preserved fresh services and sync-state writers, active config/database
+  manager/provider transport, the shared planned-unit revision service and
+  redactor through the existing writer, UTC clock, late athlete-local date,
+  repair future-day setting, and the per-unit guard owned by the service module.
+  Provider transport lookup stays deferred until the sync use case asks for a
+  client.
+- Added lazy-dependency and fresh-writer assembly tests. Planned-calendar and
+  selected-sync unit tests passed: 39 tests. The affected guarded integration
+  run exposed four stale test patches to the removed `server.calendar_external`
+  name; moved them to `backend.calendar.external` and reran all workout-repair
+  tests: 27 passed. The other affected server sync, weather/calendar, and
+  architecture tests passed in that guarded run. Inventory check, compileall,
+  and diff check passed.
+- Measured `server.py`: 2,400 physical / 2,077 nonblank lines, 214 AST import
+  statements, 135 top-level functions. No Docker or SQLCipher dependency change.

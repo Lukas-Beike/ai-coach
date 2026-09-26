@@ -9,6 +9,7 @@ import threading
 from unittest.mock import patch
 
 from backend.http_api import pagination as api_pagination
+from backend.calendar import external as calendar_external
 from backend.coach.authorization import require_coach_scope
 from backend.planning import library as planning_library
 from backend.planning import library_service as planning_library_service
@@ -344,7 +345,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         with patch.object(server, "checkin_service", return_value=checkins), patch.object(
             checkins, "context", return_value={"today": {"available_minutes": 30}}
         ), patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={}), patch.object(
-            server.calendar_external, "list_events", return_value=[]
+            calendar_external, "list_events", return_value=[]
         ):
             preview = server.adaptive_replan_preview_service().preview()
         self.assertEqual(server.illness_pause_sync_service().apply(preview["id"])["updated"], 1)
@@ -374,7 +375,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             thread.start()
             self.assertTrue(polled.wait(2), "Provider I/O blocks database polling")
             with self.assertRaises(server.AppError) as caught:
-                server.planned_calendar_sync_service().sync_entry(local_id)
+                server.PLANNED_CALENDAR_SYNC.sync_service().sync_entry(local_id)
             self.assertEqual(caught.exception.reason, "planned_unit_sync_running")
             return self.upsert(payloads)
 
@@ -444,7 +445,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         with patch.object(server, "checkin_service", return_value=checkins), patch.object(
             checkins, "context", return_value={"today": {"illness": "Synthetic illness"}}
         ), patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={}), patch.object(
-            server.calendar_external, "list_events", return_value=[]
+            calendar_external, "list_events", return_value=[]
         ):
             preview = server.adaptive_replan_preview_service().preview()
         self.assertEqual(preview["changes"][0]["after"]["duration_minutes"], 0)

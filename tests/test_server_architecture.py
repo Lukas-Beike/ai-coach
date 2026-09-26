@@ -2070,8 +2070,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     checkin_service profile_service coach_profile_update_service
     change_history_service history_undo_service competition_service
     training_plan_service
-    planned_unit_service planned_unit_sync_state_writer planned_calendar_sync_service
-    planned_calendar_repair_service remote_planned_unit_reconciler
+    planned_unit_service planned_unit_sync_state_writer remote_planned_unit_reconciler
     workout_library_sync_state_service planning_authority_service
     workout_library_remote_reconciler workout_library_refresh_service
     workout_library_sync_service selected_workout_sync_service

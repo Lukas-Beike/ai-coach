@@ -173,10 +173,7 @@ from backend.sync.plan_selection import StructuredPlanSyncService
 from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
 from backend.sync.planned_units import RemotePlannedUnitReconciler
-from backend.sync.planned_calendar import (
-    PlannedCalendarRepairService,
-    PlannedCalendarSyncService,
-)
+from backend.sync.planned_calendar_assembly import PlannedCalendarSyncAssembly
 from backend.sync.library import (
     WorkoutLibraryRefreshService,
     WorkoutLibraryRemoteReconciler,
@@ -757,31 +754,6 @@ def planned_unit_sync_state_writer() -> PlannedUnitSyncStateWriter:
     return PlannedUnitSyncStateWriter(PLANNING_REVISION_SERVICE, REDACTOR)
 
 
-def planned_calendar_sync_service() -> PlannedCalendarSyncService:
-    """Compose the normal single-unit Intervals calendar push."""
-    return PlannedCalendarSyncService(
-        CONFIG,
-        database_manager(),
-        PROVIDER_TRANSPORT.intervals_client,
-        planned_unit_sync_state_writer(),
-        runtime_clock.utc_now,
-        lambda: ATHLETE_CLOCK.now().date(),
-    )
-
-
-def planned_calendar_repair_service() -> PlannedCalendarRepairService:
-    """Compose the exact-identity planned calendar repair use case."""
-    return PlannedCalendarRepairService(
-        CONFIG,
-        database_manager(),
-        PROVIDER_TRANSPORT.intervals_client,
-        planned_unit_sync_state_writer(),
-        runtime_clock.utc_now,
-        lambda: ATHLETE_CLOCK.now().date(),
-        PLANNED_CALENDAR_FUTURE_DAYS,
-    )
-
-
 def remote_planned_unit_reconciler() -> RemotePlannedUnitReconciler:
     """Compose remote planned-unit reconciliation."""
     return RemotePlannedUnitReconciler(
@@ -843,8 +815,8 @@ def selected_workout_sync_service() -> SelectedWorkoutSyncService:
         CONFIG,
         database_manager(),
         workout_library_sync_service(),
-        planned_calendar_sync_service(),
-        planned_calendar_repair_service(),
+        PLANNED_CALENDAR_SYNC.sync_service(),
+        PLANNED_CALENDAR_SYNC.repair_service(),
         REDACTOR.redact_text,
         lock=INTERVALS_SYNC_LOCK,
         wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
@@ -1255,6 +1227,15 @@ PROVIDER_TRANSPORT = ProviderTransportAssembly(
     opener=lambda: provider_http.urlopen,
     config=lambda: CONFIG,
     athlete_now=ATHLETE_CLOCK.now,
+)
+PLANNED_CALENDAR_SYNC = PlannedCalendarSyncAssembly(
+    config=lambda: CONFIG,
+    database_manager=database_manager,
+    intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
+    state_writer=planned_unit_sync_state_writer,
+    utc_now=runtime_clock.utc_now,
+    today=lambda: ATHLETE_CLOCK.now().date(),
+    future_days=PLANNED_CALENDAR_FUTURE_DAYS,
 )
 WEATHER_ASSEMBLY = WeatherAssembly(
     database_manager=database_manager,
