@@ -383,3 +383,43 @@ mocked providers; no live account or runtime data was used.
   No live provider or application data was used.
 - Remaining risk: image and SQLCipher integration checks need the application
   Docker runtime.
+
+## S2b4 boundary before implementation: daily and startup schedulers
+
+- `daily_sync_loop_service`, `daily_sync_scheduler`, and
+  `startup_sync_scheduler` are the remaining sync-scheduling factories. The
+  daily loop constructs a fresh daily scheduler, morning battery service, and
+  stop event; the daily scheduler is also called directly by the audit test.
+  `main()` constructs the startup scheduler, schedules it after workers start,
+  creates the daily loop, and then starts its thread. No e2e fixture references
+  these factories.
+- Preserve late config reads at each scheduler construction, the active
+  manager, profile, queue and marker services, Garmin sync service, sync-state
+  repository, DB lock, provider gate, and maintenance gate. Tests patch the
+  root marker factory and the startup/loop factory names in `main()`; move the
+  marker patch to its constructor lookup and the lifecycle patches to the
+  scheduler assembly methods. Keep `main()`'s startup and shutdown order in the
+  root.
+- Proposed interface: `SyncSchedulerAssembly` in
+  `backend/sync/scheduler_assembly.py`, exposing only `daily_scheduler()`,
+  `startup_scheduler()`, and `daily_loop()`. It stores the explicit domain
+  factories and a late config provider; construction starts no loop or worker.
+
+## S2b4: scheduler assembly
+
+- Completed in `backend/sync/scheduler_assembly.py` as `SyncSchedulerAssembly`
+  with the planned three operations. Scheduler construction reads current
+  config on each request; all existing scheduler dependencies remain explicit.
+  The assembly starts no worker or thread. `main()` retains startup ordering,
+  starts the daily loop thread, and owns shutdown.
+- Moved the audit test's marker-constructor patch to `DailySyncMarkerService`
+  and lifecycle factory patches to `SYNC_SCHEDULERS`. Added no global lookup,
+  locator, or compatibility wrapper.
+- Focused sync, architecture, and audit checks passed: 145 tests, 1
+  SQLCipher-dependent skip. Inventory check, compileall, and diff check passed.
+- Measured `server.py`: 2,552 physical / 2,209 nonblank lines, 216 AST import
+  statements, 149 top-level functions.
+- Docker build was attempted but the local Docker engine pipe is unavailable.
+  No live provider or application data was used.
+- Remaining risk: image and SQLCipher integration checks need the application
+  Docker runtime.

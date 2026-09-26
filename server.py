@@ -72,6 +72,7 @@ from backend.sync.assembly import ProviderSyncAssembly
 from backend.sync.queue_assembly import SyncJobQueueAssembly
 from backend.sync.execution_assembly import SyncJobExecutionAssembly
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
+from backend.sync.scheduler_assembly import SyncSchedulerAssembly
 from backend.sync.garmin_assembly import GarminAssembly
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
@@ -234,14 +235,7 @@ from backend.planning.training_plan_artifact_service import TrainingPlanArtifact
 from backend.planning import training_plans as planning_training_plans
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.public_state import PublicStateDependencies, PublicStateService
-from backend.sync.scheduler import (
-    AUTO_UPDATE_LABEL,
-    DailySyncScheduler,
-    DailySyncSchedulerConfig,
-    DailySyncLoop,
-    StartupSyncScheduler,
-    StartupSyncSchedulerConfig,
-)
+from backend.sync import scheduler as sync_scheduler_runtime
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.athlete_record_tools import CoachAthleteRecordToolService
 from backend.coach.library_plan_tools import CoachLibraryPlanToolService
@@ -1468,6 +1462,30 @@ SYNC_JOB_WORKER_ASSEMBLY = SyncJobWorkerAssembly(
 )
 
 
+SYNC_SCHEDULERS = SyncSchedulerAssembly(
+    config=lambda: CONFIG,
+    profile_service=profile_service,
+    queue_service=SYNC_JOB_QUEUE.service,
+    daily_sync_marker_service=daily_sync_marker_service,
+    garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
+    database_manager=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    database_lock=DB_LOCK,
+    sync_state_repository=sync_state_repository,
+    intervals_resync_gate=INTERVALS_RESYNC_GATE,
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    morning_body_battery_service=morning_body_battery_service,
+    sleep=time.sleep,
+    logger=LOGGER,
+    garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
+    auto_update_label=sync_scheduler_runtime.AUTO_UPDATE_LABEL,
+    sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+    all_sync_days=ALL_SYNC_DAYS,
+    sync_chunk_days=SYNC_CHUNK_DAYS,
+    sync_earliest_date=SYNC_EARLIEST_DATE,
+)
+
+
 def gemini_json_client() -> gemini_provider.GeminiJsonClient:
     """Compose the Gemini JSON adapter from the active runtime settings."""
     return gemini_provider.GeminiJsonClient(
@@ -2487,57 +2505,6 @@ def request_handler_class() -> type[BaseHTTPRequestHandler]:
     )
 
 
-def daily_sync_loop_service() -> DailySyncLoop:
-    return DailySyncLoop(
-        daily_sync_scheduler(),
-        morning_body_battery_service(),
-        sleep=time.sleep,
-        logger=LOGGER,
-        stop_event=threading.Event(),
-    )
-
-
-def daily_sync_scheduler() -> DailySyncScheduler:
-    return DailySyncScheduler(
-        profile_service(),
-        SYNC_JOB_QUEUE.service(),
-        daily_sync_marker_service(),
-        GARMIN_ASSEMBLY.sync_service(),
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        DB_LOCK,
-        sync_state_repository(),
-        INTERVALS_RESYNC_GATE,
-        runtime_maintenance.MAINTENANCE_GATE,
-        config=DailySyncSchedulerConfig(
-            calendar_url_enabled=bool(CONFIG.calendar_ical_url),
-            intervals_key_enabled=bool(CONFIG.intervals_api_key),
-            garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
-            auto_update_label=AUTO_UPDATE_LABEL,
-            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-            all_sync_days=ALL_SYNC_DAYS,
-        ),
-    )
-
-
-def startup_sync_scheduler() -> StartupSyncScheduler:
-    return StartupSyncScheduler(
-        profile_service(),
-        SYNC_JOB_QUEUE.service(),
-        GARMIN_ASSEMBLY.sync_service(),
-        sync_state_repository(),
-        config=StartupSyncSchedulerConfig(
-            calendar_enabled=bool(CONFIG.calendar_ical_url),
-            intervals_enabled=bool(CONFIG.intervals_api_key),
-            garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
-            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-            all_sync_days=ALL_SYNC_DAYS,
-            sync_chunk_days=SYNC_CHUNK_DAYS,
-            sync_earliest_date=SYNC_EARLIEST_DATE,
-        ),
-    )
-
-
 def main() -> None:
     observability.configure_logging(LOGGER, DATA_DIR, LOG_PATH, REDACTOR)
     configuration_error = app_config.security_configuration_error(CONFIG, sqlcipher_available=SQLCIPHER_AVAILABLE)
@@ -2549,7 +2516,7 @@ def main() -> None:
     server = http_server.CoachHTTPServer(("0.0.0.0", CONFIG.port), request_handler_class())
     server.allow_reuse_address = True
     sync_worker: sync_worker_runtime.SyncJobWorker | None = None
-    daily_loop: DailySyncLoop | None = None
+    daily_loop: sync_scheduler_runtime.DailySyncLoop | None = None
     daily_thread: threading.Thread | None = None
     try:
         SYNC_JOB_QUEUE.service().resume_interrupted()
@@ -2557,8 +2524,8 @@ def main() -> None:
         sync_worker = sync_job_worker()
         sync_worker.start()
         COACH_JOB_WORKER.start(coach_job_store, coach_background_job_runner, runtime_maintenance.MAINTENANCE_GATE)
-        startup_sync_scheduler().schedule()
-        daily_loop = daily_sync_loop_service()
+        SYNC_SCHEDULERS.startup_scheduler().schedule()
+        daily_loop = SYNC_SCHEDULERS.daily_loop()
         daily_thread = threading.Thread(target=daily_loop.run, daemon=True)
         daily_thread.start()
         LOGGER.info(f"{APP_NAME} listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})

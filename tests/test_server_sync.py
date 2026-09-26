@@ -83,8 +83,8 @@ class ServerSyncTests(ServerTestCase):
             server.COACH_JOB_WORKER, "join"
         ) as coach_join, patch.object(sync_worker_runtime.SyncJobWorker, "stop") as sync_stop, patch.object(
             sync_worker_runtime.SyncJobWorker, "join"
-        ) as sync_join, patch.object(server, "startup_sync_scheduler") as startup_scheduler, patch.object(
-            server, "daily_sync_loop_service"
+        ) as sync_join, patch.object(server.SYNC_SCHEDULERS, "startup_scheduler") as startup_scheduler, patch.object(
+            server.SYNC_SCHEDULERS, "daily_loop"
         ) as daily_loop_factory, patch.object(server.threading, "Thread") as thread_factory:
             startup_scheduler.return_value.schedule.side_effect = lambda: order.append("startup-sync")
             daily_loop = Mock()

@@ -2118,8 +2118,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     recent_log_entries_service coach_diagnostic_history_service diagnostic_report_service
     privacy_archive_export_service database_backup_service export_stream_transport
     database_restore_validation_service database_restore_service readiness_service
-    request_handler_class daily_sync_loop_service daily_sync_scheduler
-    startup_sync_scheduler main
+    request_handler_class main
 """.split())
 
 # These functions intentionally retain the small amount of root control flow
