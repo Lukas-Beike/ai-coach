@@ -100,3 +100,31 @@ test('identical context cannot hide a relocated hunk', async () => {
 test('a clean follow-up still requires all Codex threads to be resolved', async () => {
   assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:31:54Z', unresolved: true }), true);
 });
+
+test('a Codex usage limit comment skips the review requirement', async () => {
+  const outputs = {};
+  const usageLimitBot = 'chatgpt-codex-connector[bot]';
+  const github = {
+    rest: {
+      pulls: {
+        list: async () => [pr],
+        listReviews: async () => [],
+        listReviewComments: async () => [],
+      },
+      checks: { listForRef: async () => [] },
+      issues: { listComments: async () => [{
+        user: { login: usageLimitBot }, created_at: '2026-09-25T13:16:06Z',
+        body: 'You have reached your Codex usage limits for code reviews. You can see your limits in the [Codex usage dashboard](https://chatgpt.com/codex/cloud/settings/usage).',
+      }] },
+      reactions: { listForIssue: async () => [] },
+      repos: { getCommit: async () => ({ data: { sha: head } }), compareCommits: async () => ({ data: { files: [] } }) },
+    },
+    paginate: async (method, args) => method(args),
+    request: async () => ({ data: '' }),
+    graphql: async () => ({ repository: { pullRequest: { reviewThreads: { nodes: [] } } } }),
+  };
+  await discover(github, {
+    repo: { owner: 'example', repo: 'coach' }, eventName: 'push', ref: 'refs/heads/develop', payload: {},
+  }, { setOutput: (name, value) => { outputs[name] = value; } }, { env: {} });
+  assert.equal(JSON.parse(outputs.pull_requests).include[0].reviewRequired, false);
+});

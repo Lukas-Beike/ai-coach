@@ -145,6 +145,17 @@ jobs:
                 reaction.content === '+1' && Date.parse(reaction.created_at) >= summaryUpdatedAt)
                 ? completedCodeReview.match(/`([0-9a-f]{7,40})`/)?.[1] || null : null;
             };
+            const hasCodexUsageLimit = async (pullRequest, after = 0) => {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: pullRequest.number, per_page: 100,
+              });
+              return comments.some((comment) => (
+                codexBotLogins.has(comment.user?.login) &&
+                (after === 0 || Date.parse(comment.created_at || '') >= after) &&
+                /(?:usage limits for code reviews|reached (?:your )?Codex usage limits)/i.test(comment.body || '')
+              ));
+            };
             const unchangedReviewedDiff = async (pullRequest, reviewedCommit) => {
               if (!reviewedCommit) return false;
               try {
@@ -199,7 +210,9 @@ jobs:
               });
               if (codexReviews.length === 0) {
                 const cleanReview = await hasCompletedCleanReaction(pullRequest);
-                return await unchangedReviewedDiff(pullRequest, cleanReview) ? 'none' : 'initial';
+                if (await unchangedReviewedDiff(pullRequest, cleanReview)) return 'none';
+                if (await hasCodexUsageLimit(pullRequest)) return 'none';
+                return 'initial';
               }
               const latestReview = [...codexReviews]
                 .sort((left, right) => Date.parse(right.submitted_at) - Date.parse(left.submitted_at))[0];
@@ -212,7 +225,10 @@ jobs:
                 comment.pull_request_review_id === latestReview.id &&
                 /\[P1\]/i.test(comment.body || '')
               ));
-              if (latestReviewHasP1 && !cleanFollowUp) return 'p1';
+              if (latestReviewHasP1 && !cleanFollowUp) {
+                if (await hasCodexUsageLimit(pullRequest, Date.parse(latestReview.submitted_at))) return 'none';
+                return 'p1';
+              }
               const unresolvedReviewIds = await getUnresolvedCodexReviewIds(pullRequest);
               return unresolvedReviewIds.size > 0 ? 'unresolved' : 'none';
             };
@@ -306,7 +322,17 @@ jobs:
               });
               if (['develop', 'main'].includes(response.data.base.ref) && response.data.draft !== true) {
                 const headSha = response.data.head.sha;
-                const reviewRequirement = await getReviewRequirement(response.data);
+                let reviewRequirement = await getReviewRequirement(response.data);
+                if (['initial', 'p1'].includes(reviewRequirement)) {
+                  const commentTime = Date.parse(context.payload.comment.created_at || '');
+                  for (let attempt = 0; attempt < 3; attempt++) {
+                    await new Promise((resolve) => setTimeout(resolve, 3000));
+                    if (await hasCodexUsageLimit(response.data, commentTime - 1000)) {
+                      reviewRequirement = 'none';
+                      break;
+                    }
+                  }
+                }
                 const reviewAllowed = ['initial', 'p1'].includes(reviewRequirement);
                 if (reviewAllowed) {
                   const now = new Date().toISOString();
@@ -712,6 +738,27 @@ jobs:
               pull_number: Number(process.env.PR_NUMBER),
             });
             const headSha = pullRequest.data.head.sha;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER),
+              per_page: 100,
+            });
+            const codexBotLogins = new Set(['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector']);
+            const usageLimitReached = comments.some((comment) => (
+              codexBotLogins.has(comment.user?.login) &&
+              /(?:usage limits for code reviews|reached (?:your )?Codex usage limits)/i.test(comment.body || '')
+            ));
+            const title = process.env.REVIEW_REQUIRED === 'true'
+              ? 'Explicit Codex review required'
+              : (usageLimitReached
+                ? 'Codex review skipped (usage limit reached)'
+                : 'No additional Codex review required');
+            const summary = process.env.REVIEW_REQUIRED === 'true'
+              ? `Comment @codex review on PR #${pullRequest.data.number}. A review is required initially or because the previous Codex review had a P1 finding.`
+              : (usageLimitReached
+                ? `Codex usage limit reached for code reviews; skipping the review check for PR #${pullRequest.data.number}.`
+                : 'The previous Codex review had no P1 finding. Fix the existing findings and close their comments; do not request another review.');
             await github.rest.checks.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -721,12 +768,5 @@ jobs:
               conclusion: process.env.REVIEW_REQUIRED === 'true' ? 'failure' : 'success',
               started_at: new Date().toISOString(),
               completed_at: new Date().toISOString(),
-              output: {
-                title: process.env.REVIEW_REQUIRED === 'true'
-                  ? 'Explicit Codex review required'
-                  : 'No additional Codex review required',
-                summary: process.env.REVIEW_REQUIRED === 'true'
-                  ? `Comment @codex review on PR #${pullRequest.data.number}. A review is required initially or because the previous Codex review had a P1 finding.`
-                  : 'The previous Codex review had no P1 finding. Fix the existing findings and close their comments; do not request another review.',
-              },
+              output: { title, summary },
             });

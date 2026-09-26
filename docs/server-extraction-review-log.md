@@ -338,7 +338,7 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 
 - Review: **PASS** — `APP_VERSION` bleibt bewusst als exakt formatierte
   Zuweisung in `server.py`. `.github/scripts/release_source.py`, das
-  Codex-Review-Gate und `.github/workflows/weekly-release.yml` lesen oder
+  Codex-Review-Gate und `.github/workflows/daily-release.yml` lesen oder
   ändern genau diesen Pfad und dieses Format; eine spätere Verlagerung muss
   diese drei Verbraucher samt ihren Vertragstests atomar migrieren.
 - `PUBLIC_DIR`, Asset-Mapping, `VERSIONED_STATIC_ASSETS` und `send_static`

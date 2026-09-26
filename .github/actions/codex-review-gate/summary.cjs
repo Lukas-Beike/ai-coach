@@ -1,6 +1,12 @@
 'use strict';
 
 const COMMIT_PATTERN = /`([0-9a-f]{7,40})`/i;
+const USAGE_LIMIT_PATTERN = /(?:usage limits for code reviews|reached (?:your )?Codex usage limits)/i;
+
+function isCodexUsageLimitComment(body) {
+  return USAGE_LIMIT_PATTERN.test(String(body || ''));
+}
+
 const RELATIVE_TIME_PATTERN = /<relative-time\b[^>]*\bdatetime=["']([^"']+)["']/i;
 
 function parseCodeReviewSummary(body) {
@@ -56,6 +62,7 @@ function isAtOrAfterTimestamp(value, minimum) {
 module.exports = {
   commitMatchesHead,
   isAtOrAfterTimestamp,
+  isCodexUsageLimitComment,
   parseCodeReviewSummary,
   timestampAtSecond,
 };

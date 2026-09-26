@@ -80,7 +80,7 @@ private VPN; it must not be exposed directly to the public internet.
   SQLCipher support.
 - `public/service-worker.js`: PWA cache and notification handling.
 - `.github/workflows/`: convention validation, tests/container publishing,
-  Dependabot auto-merge, and weekly releases.
+  Dependabot auto-merge, and daily releases.
 - `Dockerfile`: non-root container image with a writable persistent `/data`
   mount. `data/` is runtime-only and must never be included in an image.
 - `.env.example`: configuration template. The real `.env` is local-only.
@@ -116,7 +116,7 @@ status. Treat all of it as durable athlete data.
   `OPENAI_MODEL` is also surfaced by the current implementation; do not
   silently change or hardcode a different model policy.
 - `APP_VERSION` in `server.py` must match the GitHub release tag. If a release
-  needs a version update, the weekly release workflow opens a PR; it must not
+  needs a version update, the daily release workflow opens a PR; it must not
   push directly to protected `main`. The container publishing workflow must
   reject mismatches.
 - OpenAI credentials and external request payloads must remain out of logs.
