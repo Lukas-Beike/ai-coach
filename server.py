@@ -1,6 +1,5 @@
 from __future__ import annotations
 from backend.coach import attachments as coach_attachments
-from backend.coach.profile_update import CoachProfileUpdateService
 from backend.coach import limits as coach_limits
 from backend.coach import streams as coach_streams
 
@@ -190,7 +189,6 @@ from backend.planning import training_plans as planning_training_plans
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.public_state import PublicStateDependencies, PublicStateService
 from backend.sync import scheduler as sync_scheduler_runtime
-from backend.coach.athlete_record_tools import CoachAthleteRecordToolService
 from backend.coach.tool_replay import CoachStructuredToolReplayService
 from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.coach import context as coach_context_module
@@ -198,7 +196,6 @@ from backend.coach.context import CoachQuickActionsService
 from backend.coach.context_assembly import CoachContextAssembly
 from backend.coach.read_tools_assembly import CoachReadToolsAssembly
 from backend.coach.request_payload import CoachRequestPayloadService
-from backend.coach.sync_tools import CoachSyncToolService
 from backend.coach.conversation import (
     CoachAttachmentContextService,
     GeminiConversationResponseService,
@@ -210,6 +207,7 @@ from backend.coach.conversation_gate import CoachConversationGate
 from backend.coach.proposal_assembly import CoachProposalAssembly
 from backend.coach.planning_tools_assembly import CoachPlanningToolsAssembly
 from backend.coach.tool_dispatch_assembly import CoachToolDispatchAssembly
+from backend.coach.command_tools_assembly import CoachCommandToolsAssembly
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.turn_opening import CoachTurnOpeningService
 from backend.coach.dialogue import CoachDialogueReadService, dialogue_tools
@@ -431,18 +429,6 @@ def plan_repair_manifest_service() -> PlanRepairManifestService:
     return PlanRepairManifestService(database_manager(), planning_authority_service())
 
 
-def coach_sync_tool_service() -> CoachSyncToolService:
-    """Compose concrete sync commands for structured Coach tool execution."""
-    return CoachSyncToolService(
-        SYNC_JOB_QUEUE.service(), planning_authority_service(),
-        sync_conflict_command_service(), structured_plan_sync_service(),
-        plan_repair_manifest_service(), plan_push_command_service(),
-        provider_refresh_command_service(),
-        duplicate_activity=duplicate_activity_service(),
-        intervals_client_factory=intervals_client,
-    )
-
-
 def nutrition_service() -> NutritionService:
     """Compose nutrition and calorie tracking for the active database manager."""
     return NutritionService(
@@ -464,16 +450,6 @@ def intervals_nutrition_sync_service() -> IntervalsNutritionSyncService:
         config=CONFIG,
         api_client=api_client,
         nutrition_service=nutrition_service(),
-    )
-
-
-def coach_athlete_record_tool_service() -> CoachAthleteRecordToolService:
-    """Compose concrete local services for Coach athlete-record mutations."""
-    return CoachAthleteRecordToolService(
-        ATHLETE_DATA.checkin(),
-        ATHLETE_DATA.activity_feedback(),
-        PLANNING_DATA.competition(),
-        nutrition_service(),
     )
 
 
@@ -641,11 +617,6 @@ BACKUP_ASSEMBLY = BackupAssembly(
     coach_wake_event=COACH_JOB_WORKER.wake_event,
     redact=REDACTOR.redact_text,
 )
-
-
-def coach_profile_update_service() -> CoachProfileUpdateService:
-    """Compose the scoped transactional Coach profile update owner."""
-    return CoachProfileUpdateService(ATHLETE_DATA.profile(), database_manager(), DB_LOCK)
 
 
 def change_history_service() -> ChangeHistoryService:
@@ -1427,10 +1398,28 @@ COACH_PLANNING_TOOLS = CoachPlanningToolsAssembly(
 )
 
 
+COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
+    sync_job_queue=lambda: SYNC_JOB_QUEUE.service(),
+    planning_authority=lambda: planning_authority_service(),
+    sync_conflict_commands=lambda: sync_conflict_command_service(),
+    structured_plan_sync=lambda: structured_plan_sync_service(),
+    plan_repair_manifest=lambda: plan_repair_manifest_service(),
+    plan_push_command=lambda: plan_push_command_service(),
+    provider_refresh_command=lambda: provider_refresh_command_service(),
+    checkin_service=lambda: ATHLETE_DATA.checkin(),
+    activity_feedback_service=lambda: ATHLETE_DATA.activity_feedback(),
+    competition_service=lambda: PLANNING_DATA.competition(),
+    nutrition_service=lambda: nutrition_service(),
+    profile_service=lambda: ATHLETE_DATA.profile(),
+    database_manager=lambda: database_manager(),
+    database_lock=DB_LOCK,
+)
+
+
 COACH_TOOL_DISPATCH = CoachToolDispatchAssembly(
     read_tools=COACH_READ_TOOLS.read_service,
-    profile_update=coach_profile_update_service,
-    athlete_records=coach_athlete_record_tool_service,
+    profile_update=COACH_COMMAND_TOOLS.profile_update_service,
+    athlete_records=COACH_COMMAND_TOOLS.athlete_record_tool_service,
     training_plan_artifacts=COACH_PLANNING_TOOLS.training_plan_artifact_service,
     training_plan_replacement=structured_training_plan_replacement_service,
     training_changes=structured_training_change_service,
@@ -1438,7 +1427,7 @@ COACH_TOOL_DISPATCH = CoachToolDispatchAssembly(
     database_lock=DB_LOCK,
     workout_library_service=PLANNING_DATA.workout_library,
     library_plan_tools=COACH_PLANNING_TOOLS.library_plan_tool_service,
-    sync_tools=coach_sync_tool_service,
+    sync_tools=COACH_COMMAND_TOOLS.sync_tool_service,
     adaptive_preview=adaptive_replan_preview_service,
     adaptive_apply=COACH_PLANNING_TOOLS.adaptive_apply_service,
     training_plan_service=PLANNING_DATA.training_plan,

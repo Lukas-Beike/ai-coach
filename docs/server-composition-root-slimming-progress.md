@@ -1181,3 +1181,45 @@ mocked providers; no live account or runtime data was used.
   tests, inventory owner mapping and generated report, and this progress log.
 - Measured `server.py`: 2,013 physical / 1,772 nonblank lines, 200 AST imports,
   86 top-level functions. No behavior regression found in the executed matrix.
+
+## S4d2c boundary before implementation: Coach command tool factories
+
+- The narrow owner is `CoachCommandToolsAssembly` in
+  `backend/coach/command_tools_assembly.py`, exposing fresh factories for sync,
+  athlete-record, and profile-update tool services. It owns no domain use cases
+  or dispatcher routing; `CoachToolDispatchAssembly` remains the router owner.
+- All three factories are currently used only as deferred callbacks by
+  `coach_tool_dispatch_service`. The sync tool is invoked only for sync tool
+  names; athlete-record and profile factories are invoked only at their matching
+  dispatch branches. Moving callbacks must preserve the same lazy lookup time.
+- Shared owner identities are `SYNC_JOB_QUEUE`, planning/sync command factories,
+  `ATHLETE_DATA` check-in/activity-feedback/profile services,
+  `PLANNING_DATA.competition`, the current `database_manager`, and `DB_LOCK`.
+  Nutrition remains a fresh service from its existing root factory. The assembly
+  receives those exact factories/owners explicitly and must not recreate state.
+- No tests directly invoke or patch these three root factory names; coverage
+  comes through dispatcher behavior in Coach dialogue/review/tool coverage,
+  planning, sync, and HTTP tests. Test seams remain their concrete service
+  constructors and the shared owner methods. No fixture-specific dependency is
+  involved.
+
+
+## S4d2c: Coach command tool factories
+
+- Added `CoachCommandToolsAssembly` in
+  `backend/coach/command_tools_assembly.py` for Coach sync, athlete-record, and
+  profile-update tool factories. Removed their three `server.py` factories and
+  passed the assembly methods to the dispatcher as deferred callbacks.
+- The expanded Coach/planning/sync/HTTP/frontend/architecture matrix passed:
+  479 tests after fixing late binding. That run exposed two dialogue regressions
+  because the assembly had captured bound owner methods at module import. The
+  root now passes explicit lambdas so the same owner methods and factory seams
+  resolve when a tool service is created. Both affected dialogue tests passed
+  after the fix. Final targeted assembly, regression, and architecture checks
+  passed: 51 tests. Compileall, inventory `--check`, and `git diff --check`
+  passed.
+- Changed files: `server.py`, new Coach command-tools assembly and focused
+  tests, extraction inventory owner map/report, and this progress log.
+- Measured `server.py`: 2,004 physical / 1,767 nonblank lines, 198 AST imports,
+  83 top-level functions. The Docker build remains unavailable because the
+  local engine pipe is absent.
