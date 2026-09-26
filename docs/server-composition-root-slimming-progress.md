@@ -1387,3 +1387,55 @@ mocked providers; no live account or runtime data was used.
 - `server.py`: 1,898 physical / 1,667 nonblank lines, 182 AST imports,
   63 top-level functions. Docker build was attempted and remains unavailable:
   the Docker engine named pipe is missing.
+
+
+## S5a boundary before implementation: public-state assembly
+
+- The narrow owner will be `PublicStateAssembly` in
+  `backend/http_api/public_state_assembly.py`. It will own the public bootstrap,
+  plan/state preludes and projections, public performance/feedback/weather, and
+  sync-status projection factories. `state_version_service` and provider/domain
+  use cases stay with their current owners and enter this assembly as explicit
+  callbacks or named domain assemblies.
+- Callers are `PublicGetRoutes`, `PlanningGetRoutes`, `AthleteGetRoutes`, and
+  `SyncGetRoutes`, plus backup/Coach compositions and direct behavior tests.
+  Tests call bootstrap/state/plan/weather/sync factories in diagnostics,
+  database, Coach, sync, HTTP, and weather/calendar suites. No current test
+  patches these root factory names. The E2E fixture changes response transport,
+  database initialization, and handler construction; it does not override these
+  public-state factories.
+- Preserve lazy factory use by routes, fresh service construction, current
+  configuration and owner lookups, the exact manager/lock/repository/queue,
+  provider, Garmin, calendar and event owners, and athlete-local clock callbacks.
+  `public_state_service` currently constructs its local/weather/calendar owners
+  under the shared reentrant DB lock; retain that boundary and timing.
+- The assembly stores explicit providers for mutable root config/resources and
+  calls them when the corresponding service factory is invoked. It must not
+  capture test-substituted configuration at module import or create services
+  eagerly. Direct tests will call `server.PUBLIC_STATE` methods at the owning
+  lookup site after the old root factories are removed.
+
+## S5a complete: public-state assembly
+
+- Added `PublicStateAssembly` in `backend/http_api/public_state_assembly.py` for
+  public bootstrap, state, plan, weather, performance/feedback, calendar
+  projections, and sync-status projections. Removed those factories/imports from
+  `server.py`; route and service callers now use `PUBLIC_STATE` methods. Inputs
+  remain explicit providers so substituted root resources/configuration resolve
+  at factory-use time, and the state factory retains the shared reentrant DB
+  lock and existing construction timing.
+- Migrated direct test callers and removed the stale diagnostic test patch target
+  from `server` to `backend.activities.feedback.ActivityFeedbackService`.
+  Added focused lazy construction and shared-identity coverage. Updated
+  extraction owner mapping and regenerated its report.
+- Checks passed: public-state assembly (3), architecture (48), weather/calendar
+  (44), HTTP (67), database (45, three skipped), sync (80), diagnostic
+  follow-ups (14), audit remediation (17, one skipped), plus prior Coach matrix
+  and runtime/provider checks recorded for S4e3. Inventory `--check`, compileall,
+  and `git diff --check` passed. Docker build was attempted; Docker Engine's
+  `docker_engine` named pipe is unavailable.
+- `server.py`: 1,761 physical / 1,528 nonblank lines, 175 AST imports,
+  53 top-level functions.
+- Changed files: `server.py`, `backend/http_api/public_state_assembly.py`,
+  focused/direct-caller and architecture tests, extraction inventory generator
+  and output, and this progress log.

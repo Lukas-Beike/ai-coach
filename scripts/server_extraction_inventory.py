@@ -222,6 +222,7 @@ def _explicit_owner(name: str) -> str | None:
             "COACH_TOOL_ROUNDS": "backend/coach/structured_tool_round_assembly",
             "COACH_TURNS": "backend/coach/turn_assembly",
             "COACH_BACKGROUND_JOBS": "backend/coach/background_jobs_assembly",
+            "PUBLIC_STATE": "backend/http_api/public_state_assembly",
             "EXTERNAL_CALENDAR": COMPOSITION_ROOT,
             "AppError": ERRORS_MODULE,
             "public_app_error_status": ERRORS_MODULE,

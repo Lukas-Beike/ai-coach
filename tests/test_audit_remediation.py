@@ -106,7 +106,7 @@ class AuditRemediationTests(unittest.TestCase):
             return {"query": query, "forecast": {}, "fetched_at": runtime_clock.utc_now()}
         def read():
             try:
-                server.public_weather_state_service().state()
+                server.PUBLIC_STATE.weather_state_service().state()
             except Exception as error:
                 failures.append(type(error).__name__)
         def erase():

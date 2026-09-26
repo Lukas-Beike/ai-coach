@@ -372,11 +372,11 @@ class ServerSyncTests(ServerTestCase):
         server.key_value_service().set("sync_operation_message", "Daten werden gelesen…")
         with patch.object(server, "state_version_service") as versions:
             versions.return_value.versions.return_value = {"activities": "v1"}
-            status = server.sync_public_state_service().state()
+            status = server.PUBLIC_STATE.sync_public_state_service().state()
         self.assertEqual(status["operation_id"], "operation-test")
         self.assertEqual(status["phase"], "fetching")
         self.assertEqual(status["progress"], 35)
-        bootstrap = server.public_bootstrap_service().read()
+        bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(bootstrap["sync"]["progress"], 35)
         self.assertEqual(bootstrap["sync"]["message"], "Daten werden gelesen…")
 
@@ -454,7 +454,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertNotIn('[:10]', daily_scheduler)
 
     def test_sync_status_exposes_non_sensitive_maintenance_state(self):
-        status = server.sync_public_state_service().state()
+        status = server.PUBLIC_STATE.sync_public_state_service().state()
         self.assertEqual(set(status["maintenance"]), {"active", "running_operations"})
         self.assertFalse(status["maintenance"]["active"])
 

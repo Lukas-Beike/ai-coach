@@ -352,7 +352,7 @@ class ServerCoachTests(ServerTestCase):
             "activity_name": "Morgenlauf", "activity_date": "2026-08-30T07:00:00", "notes": "Linkes Knie ungewohnt empfindlich",
         })
         self.assertEqual(result["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich")
-        activity = server.public_state_service().read(local_only=True)["activities"][0]
+        activity = server.PUBLIC_STATE.state_service().read(local_only=True)["activities"][0]
         self.assertEqual(activity["activity_feedback"]["activity_id"], "activity-1")
         self.assertEqual(activity["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich")
         context = server.COACH_CONTEXT.structured_context_service().build()

@@ -239,7 +239,7 @@ class ServerDatabaseTests(ServerTestCase):
         backend = server.sqlite_backend if server.CONFIG.app_password else server.sqlite3
         real_connect = backend.connect
         with patch.object(backend, "connect", wraps=real_connect) as connect:
-            server.public_state_service().read(local_only=True)
+            server.PUBLIC_STATE.state_service().read(local_only=True)
         self.assertEqual(connect.call_count, 2)
 
     def test_public_state_resolves_database_manager_under_database_lock(self):
@@ -255,7 +255,7 @@ class ServerDatabaseTests(ServerTestCase):
         with patch.object(server, "DB_LOCK", database_lock), patch.object(
             server, "database_manager", side_effect=resolve_manager
         ):
-            server.public_state_service()
+            server.PUBLIC_STATE.state_service()
         self.assertTrue(calls)
 
     def test_public_state_resolves_active_manager_after_weather_restore(self):
@@ -737,7 +737,7 @@ class ServerDatabaseTests(ServerTestCase):
 
     def test_bootstrap_reuses_one_database_connection_for_local_reads(self):
         with patch.object(server.sqlite3, "connect", wraps=sqlite3.connect) as connect:
-            server.public_bootstrap_service().read()
+            server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(connect.call_count, 1)
 
     def test_bootstrap_resolves_database_manager_inside_shared_lock(self):
@@ -749,7 +749,7 @@ class ServerDatabaseTests(ServerTestCase):
             return real_manager()
 
         with patch.object(server, "database_manager", side_effect=manager_factory):
-            server.public_bootstrap_service().read()
+            server.PUBLIC_STATE.bootstrap_service().read()
 
         self.assertTrue(lock_states)
         self.assertTrue(all(lock_states))

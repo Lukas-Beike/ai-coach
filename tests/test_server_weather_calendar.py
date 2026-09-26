@@ -128,7 +128,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             server.WEATHER_ASSEMBLY.service().state([], force=True)
             server.ATHLETE_DATA.profile().save({"weather_location": "Emsdetten"})
             server.initialise_database()
-            calendar = server.public_plan_state_service().read(local_only=True)
+            calendar = server.PUBLIC_STATE.plan_state_service().read(local_only=True)
         self.assertEqual(fetch.call_count, 2)
         history = calendar["weather"]["days"]
         self.assertEqual(len(history), 1)
@@ -164,7 +164,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
     def test_local_weather_state_does_not_fetch_without_complete_plan_state(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=AssertionError("weather must stay local")):
-            weather = server.public_weather_state_service().state(local_only=True)
+            weather = server.PUBLIC_STATE.weather_state_service().state(local_only=True)
         self.assertTrue(weather["configured"])
         self.assertTrue(weather["loading"])
 
@@ -538,7 +538,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={"days": []}),
             patch.object(server.ATHLETE_CLOCK, "now", return_value=datetime(2026, 8, 26, 12, 0)),
         ):
-            result = server.public_plan_state_service().read(local_only=True)
+            result = server.PUBLIC_STATE.plan_state_service().read(local_only=True)
 
         self.assertEqual(result["planned"][0]["compliance"]["status"], "completed")
         self.assertEqual(result["training_calendar"][0]["compliance"]["actual_activity"]["icu_rpe"], 8)

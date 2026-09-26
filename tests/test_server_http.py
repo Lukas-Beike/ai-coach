@@ -125,7 +125,7 @@ class ServerHttpTests(ServerTestCase):
     def test_local_public_state_does_not_fetch_weather(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=AssertionError("weather must stay local")):
-            state = server.public_state_service().read(local_only=True)
+            state = server.PUBLIC_STATE.state_service().read(local_only=True)
         self.assertTrue(state["configured"]["weather"])
         self.assertTrue(state["weather"]["loading"])
 
@@ -258,7 +258,7 @@ class ServerHttpTests(ServerTestCase):
         server.ATHLETE_DATA.checkin().save(
             {"checkin_date": "2026-08-30", "motivation": 8}
         )
-        state = server.public_state_service().read(local_only=True)
+        state = server.PUBLIC_STATE.state_service().read(local_only=True)
         self.assertEqual(state["checkins"][0]["checkin_date"], "2026-08-30")
         self.assertEqual(state["checkins"][0]["motivation"], 8)
 
@@ -266,8 +266,8 @@ class ServerHttpTests(ServerTestCase):
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="")
 
         with patch.object(server, "CONFIG", config):
-            bootstrap = server.public_bootstrap_service().read()
-            state = server.public_state_service().read(local_only=True)
+            bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
+            state = server.PUBLIC_STATE.state_service().read(local_only=True)
 
         for result in (bootstrap, state):
             self.assertEqual(result["ai_provider"]["selected"], "")
@@ -279,7 +279,7 @@ class ServerHttpTests(ServerTestCase):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
         server.SYNC_PERSISTENCE.state_repository().save_snapshot({"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [{"name": "Locker", "start_date_local": f"{today}T08:00:00"}]})
         server.ATHLETE_DATA.checkin().save({"checkin_date": today, "motivation": 8})
-        state = server.public_state_service().read(local_only=True)
+        state = server.PUBLIC_STATE.state_service().read(local_only=True)
         self.assertEqual(state["daily_planning_context"][0]["date"], today)
         self.assertEqual(state["daily_planning_context"][0]["checkin"]["motivation"], 8)
 
@@ -357,7 +357,7 @@ class ServerHttpTests(ServerTestCase):
         })
         for index in range(500):
             server.COACH_CONVERSATION.message_service().add("user", f"message {index}")
-        bootstrap = server.public_bootstrap_service().read()
+        bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(
             list(bootstrap),
             [
@@ -389,7 +389,7 @@ class ServerHttpTests(ServerTestCase):
         with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "request", side_effect=AssertionError("network")), patch.object(
             server.provider_http, "external_call", side_effect=AssertionError("network")
         ):
-            bootstrap = server.public_bootstrap_service().read()
+            bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(bootstrap["schema_version"], 3)
         self.assertIn(bootstrap["provider_states"]["intervals"]["status"], {"not_configured", "loading", "ready", "stale", "degraded", "error"})
 
@@ -578,7 +578,7 @@ class ServerHttpTests(ServerTestCase):
             "synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [],
             "provider_sync": {"calendar_window": {"start": (today - timedelta(days=10)).isoformat(), "end": (today + timedelta(days=20)).isoformat()}},
         })
-        state = server.public_state_service().read(local_only=True)
+        state = server.PUBLIC_STATE.state_service().read(local_only=True)
         self.assertEqual(state["planning_view"]["provider_window"]["end"], (today + timedelta(days=20)).isoformat())
         self.assertNotIn("public_calendar", state)
 
@@ -917,7 +917,7 @@ class ServerHttpTests(ServerTestCase):
         server.PLANNING_DATA.planned_unit().create({"date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "Intervalle", "description": "- 30m Z2", "duration_minutes": 30})
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [{"name": "Morgenlauf"}], "recent_wellness": [], "upcoming_calendar": []}
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
-        state = server.public_state_service().read()
+        state = server.PUBLIC_STATE.state_service().read()
         self.assertEqual(state["app"]["name"], "Intervals Coach")
         self.assertEqual(state["app"]["version"], server.APP_VERSION)
         self.assertEqual(state["activities"][0]["name"], "Morgenlauf")
@@ -983,7 +983,7 @@ class ServerHttpTests(ServerTestCase):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
             server.key_value_service().set("last_library_sync_at", "2026-08-31T08:00:00+00:00")
-            state = server.public_state_service().read(local_only=True)["intervals"]
+            state = server.PUBLIC_STATE.state_service().read(local_only=True)["intervals"]
         self.assertEqual(state["state"], "connected")
         self.assertIsNone(state["last_sync_at"])
         self.assertEqual(state["library_sync"]["last_sync_at"], "2026-08-31T08:00:00+00:00")
@@ -993,7 +993,7 @@ class ServerHttpTests(ServerTestCase):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
             server.key_value_service().set("last_library_sync_error", "Intervals.icu weist die Anfrage zurück (422): Invalid workout type")
-            state = server.public_state_service().read(local_only=True)["intervals"]
+            state = server.PUBLIC_STATE.state_service().read(local_only=True)["intervals"]
         self.assertEqual(state["state"], "error")
         self.assertIn("422", state["last_error"])
 
@@ -1356,8 +1356,8 @@ class ServerHttpTests(ServerTestCase):
                 self.lock.release()
 
         for state_reader in (
-            lambda: server.public_bootstrap_service().read(),
-            lambda: server.public_state_service().read(),
+            lambda: server.PUBLIC_STATE.bootstrap_service().read(),
+            lambda: server.PUBLIC_STATE.state_service().read(),
         ):
             for update in (False, True):
                 with self.subTest(state=state_reader.__name__, update=update):

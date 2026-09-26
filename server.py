@@ -95,10 +95,6 @@ from backend.providers.transport_assembly import ProviderTransportAssembly
 from backend.providers.model_assembly import ModelTransportAssembly
 from backend.http_api import server as http_server
 from backend.http_api.handler import HttpRequestHandlerDependencies, create_request_handler
-from backend.http_api.bootstrap_state import (
-    PublicBootstrapDependencies,
-    PublicBootstrapService,
-)
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
 from backend.http_api.coach_actions_post import CoachActionsPostRoutes
@@ -119,18 +115,8 @@ from backend.http_api.auth import (
     SessionAuthService,
     get_session_auth_service,
 )
-from backend.http_api.public_performance import (
-    PublicFeedbackStateService,
-    PublicPerformanceStateService,
-)
-from backend.http_api.public_weather import PublicWeatherStateService
-from backend.http_api.state_prelude import (
-    CalendarWindowRange,
-    PublicStateLocalPrelude,
-    PublicStateWeatherPrelude,
-)
-from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 from backend.http_api.state_versions import StateVersionService
+from backend.http_api.public_state_assembly import PublicStateAssembly
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.post_dispatch import (
@@ -150,7 +136,6 @@ from backend.http_api.nutrition import (
 )
 from backend.nutrition.service import NutritionService
 from backend.nutrition.sync import IntervalsNutritionSyncService
-from backend.sync.status import SyncPublicStateService
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
 from backend.sync.commands import ProviderRefreshCommandService
@@ -186,8 +171,6 @@ from backend.planning.revision import PlanningRevisionService
 from backend.planning import season as planning_season
 from backend.planning.state_service import StructuredTrainingStateService
 from backend.planning import training_plans as planning_training_plans
-from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
-from backend.http_api.public_state import PublicStateDependencies, PublicStateService
 from backend.sync import scheduler as sync_scheduler_runtime
 from backend.coach import context as coach_context_module
 from backend.coach.context import CoachQuickActionsService
@@ -443,41 +426,12 @@ def state_version_service() -> StateVersionService:
     )
 
 
-def public_performance_state_service() -> PublicPerformanceStateService:
-    """Compose the read-only performance projection."""
-    return PublicPerformanceStateService(
-        SYNC_PERSISTENCE.state_repository(),
-        GARMIN_ASSEMBLY.payload_service(),
-        ATHLETE_DATA.profile(),
-        GARMIN_ASSEMBLY.projection_service(),
-        lambda: ATHLETE_CLOCK.now().date(),
-    )
 
 
-def public_feedback_state_service() -> PublicFeedbackStateService:
-    """Compose the read-only feedback projection."""
-    return PublicFeedbackStateService(ATHLETE_DATA.checkin(), ATHLETE_DATA.activity_feedback())
 
 
-def sync_public_state_service() -> SyncPublicStateService:
-    """Compose the public sync-status projection."""
-    return SyncPublicStateService(
-        CONFIG,
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        PROVIDER_SYNC.freshness_service(),
-        ATHLETE_DATA.profile(),
-        GARMIN_ASSEMBLY.sync_state_service(),
-        runtime_maintenance.MAINTENANCE_GATE,
-        SYNC_JOB_QUEUE.service(),
-        state_version_service(),
-        INTERVALS_SYNC_LOCK,
-    )
 
 
-def public_weather_state_service() -> PublicWeatherStateService:
-    """Compose the public weather endpoint projection."""
-    return PublicWeatherStateService(WEATHER_ASSEMBLY.service())
 
 
 def morning_body_battery_service() -> MorningBodyBatteryService:
@@ -1481,151 +1435,60 @@ def coach_planning_command_service() -> CoachPlanningCommandService:
 
 
 
-def public_bootstrap_service() -> PublicBootstrapService:
-    """Compose the local bootstrap read from its owning backend services."""
-    return PublicBootstrapService(
-        PublicBootstrapDependencies(
-            database_manager=database_manager,
-            database_lock=DB_LOCK,
-            config=CONFIG,
-            app_name=APP_NAME,
-            app_version=APP_VERSION,
-            key_values=KEY_VALUE_REPOSITORY,
-            sync_state_repository=SYNC_PERSISTENCE.state_repository,
-            planned_unit_service=PLANNING_DATA.planned_unit,
-            competition_service=PLANNING_DATA.competition,
-            external_calendar_reader=EXTERNAL_CALENDAR.reader,
-            profile_service=ATHLETE_DATA.profile,
-            provider_freshness_service=PROVIDER_SYNC.freshness_service,
-            garmin_sync_state_service=GARMIN_ASSEMBLY.sync_state_service,
-            garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
-            sync_job_queue_service=SYNC_JOB_QUEUE.service,
-            state_version_service=state_version_service,
-            coach_message_service=COACH_CONVERSATION.message_service,
-            training_plan_service=PLANNING_DATA.training_plan,
-            local_calendar_events=calendar_local.local_calendar_events,
-            planning_state=planning_season.planning_state,
-            adaptive_replan_preview_service=adaptive_replan_preview_service,
-            external_calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
-            external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
-            planned_calendar_history_days=PLANNED_CALENDAR_HISTORY_DAYS,
-            planned_calendar_future_days=PLANNED_CALENDAR_FUTURE_DAYS,
-            garmin_projection_service=GARMIN_ASSEMBLY.projection_service,
-            diagnostic_capture=DIAGNOSTIC_CAPTURE,
-            intervals_public_state=intervals_state.public_state,
-            intervals_sync_lock=INTERVALS_SYNC_LOCK,
-            workout_library_sync_running=workout_library_sync_running,
-            workout_library_sync_state_service=WORKOUT_LIBRARY_SYNC.sync_state_service,
-            full_provider_resync_service=PROVIDER_RESYNC.full_resync_service,
-            sync_public_state_service=sync_public_state_service,
-            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-            all_sync_days=ALL_SYNC_DAYS,
-            settings=SETTINGS,
-            local_date=lambda: ATHLETE_CLOCK.now().date(),
-            morning_checkin_state_service=morning_checkin_state_service,
-            coach_quick_actions_service=coach_quick_actions_service,
-            provider_state_service=provider_state_service,
-        )
-    )
 
 
-def public_plan_state_service() -> PublicPlanStateService:
-    """Compose the public planning projection from its concrete read owners."""
-    return PublicPlanStateService(PublicPlanDependencies(
-        sync_state=SYNC_PERSISTENCE.state_repository(),
-        planned_units=PLANNING_DATA.planned_unit(),
-        activity_feedback=ATHLETE_DATA.activity_feedback(),
-        weather=WEATHER_ASSEMBLY.service(),
-        adaptive_followup=adaptive_preview_followup_service(),
-        database_manager_factory=database_manager,
-        db_lock=DB_LOCK,
-        key_values=KEY_VALUE_REPOSITORY,
-        training_plans=PLANNING_DATA.training_plan(),
-        external_calendar=EXTERNAL_CALENDAR.reader(),
-        external_calendar_sync=EXTERNAL_CALENDAR.sync_service(),
-        daily_context=daily_planning_context_service(),
-        checkins=ATHLETE_DATA.checkin(),
-        competitions=PLANNING_DATA.competition(),
-        adaptive_preview=adaptive_replan_preview_service(),
-        coach_quick_actions=coach_quick_actions_service(),
-        today=lambda: ATHLETE_CLOCK.now().date(),
-        external_calendar_configured=bool(CONFIG.calendar_ical_url),
-        external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
-        default_workout_name=PLANNED_WORKOUT_LABEL,
-    ))
 
 
-def public_state_local_prelude_service() -> PublicStateLocalPrelude:
-    """Compose the local bootstrap read with its existing transaction owner."""
-    return PublicStateLocalPrelude(
-        SYNC_PERSISTENCE.state_repository(), ATHLETE_DATA.activity_feedback(),
-        PLANNING_DATA.planned_unit(), WEATHER_ASSEMBLY.service(), database_manager(),
-        DB_LOCK, lambda: ATHLETE_CLOCK.now().date(),
-        CalendarWindowRange(PLANNED_CALENDAR_HISTORY_DAYS, PLANNED_CALENDAR_FUTURE_DAYS),
-    )
 
 
-def public_state_weather_prelude_service() -> PublicStateWeatherPrelude:
-    """Compose weather refresh after the local bootstrap lock is released."""
-    return PublicStateWeatherPrelude(WEATHER_ASSEMBLY.service(), adaptive_preview_followup_service())
 
 
-def public_state_calendar_projection_service() -> PublicStateCalendarProjection:
-    """Compose the calendar portion of the public bootstrap projection."""
-    return PublicStateCalendarProjection(
-        ATHLETE_DATA.checkin(),
-        PLANNING_DATA.competition(),
-        EXTERNAL_CALENDAR.reader(),
-        EXTERNAL_CALENDAR.sync_service(),
-        daily_planning_context_service(),
-        external_calendar_configured=bool(CONFIG.calendar_ical_url),
-        external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
-        default_workout_name=PLANNED_WORKOUT_LABEL,
-        today=lambda: ATHLETE_CLOCK.now().date(),
-    )
 
 
-def public_state_service() -> PublicStateService:
-    """Compose the public state projection from concrete backend owners."""
-    with DB_LOCK:
-        return PublicStateService(
-            PublicStateDependencies(
-                local_prelude=public_state_local_prelude_service(),
-                weather_prelude=public_state_weather_prelude_service(),
-                calendar_projection=public_state_calendar_projection_service(),
-                database_manager=database_manager,
-                database_lock=DB_LOCK,
-                key_values=KEY_VALUE_REPOSITORY,
-                app_name=APP_NAME,
-                app_version=APP_VERSION,
-                config=CONFIG,
-                settings=SETTINGS,
-                coach_messages=COACH_CONVERSATION.message_service(),
-                training_plans=PLANNING_DATA.training_plan(),
-                workout_library=PLANNING_DATA.workout_library(),
-                profile=ATHLETE_DATA.profile(),
-                public_feedback=public_feedback_state_service(),
-                public_performance=public_performance_state_service(),
-                sync_state=SYNC_PERSISTENCE.state_repository(),
-                provider_freshness=PROVIDER_SYNC.freshness_service(),
-                garmin_sync_state=GARMIN_ASSEMBLY.sync_state_service(),
-                sync_public_state=sync_public_state_service(),
-                intervals_sync_lock=INTERVALS_SYNC_LOCK,
-                workout_library_sync_running=workout_library_sync_running,
-                workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service(),
-                garmin_sync=GARMIN_ASSEMBLY.sync_service(),
-                provider_resync=PROVIDER_RESYNC.full_resync_service(),
-                planning_preview=adaptive_replan_preview_service(),
-                morning_checkin=morning_checkin_state_service(),
-                coach_quick_actions=coach_quick_actions_service(),
-                provider_state=provider_state_service(),
-                sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-                all_sync_days=ALL_SYNC_DAYS,
-                calendar_history_days=PLANNED_CALENDAR_HISTORY_DAYS,
-                calendar_future_days=PLANNED_CALENDAR_FUTURE_DAYS,
-                local_now=ATHLETE_CLOCK.now,
-            )
-        )
+
+
+PUBLIC_STATE = PublicStateAssembly(
+    database_manager=lambda: database_manager(),
+    database_lock=lambda: DB_LOCK,
+    config=lambda: CONFIG,
+    settings=lambda: SETTINGS,
+    maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
+    app_name=APP_NAME,
+    app_version=APP_VERSION,
+    key_values=lambda: KEY_VALUE_REPOSITORY,
+    sync_persistence=lambda: SYNC_PERSISTENCE,
+    planning_data=lambda: PLANNING_DATA,
+    athlete_data=lambda: ATHLETE_DATA,
+    external_calendar=lambda: EXTERNAL_CALENDAR,
+    provider_sync=lambda: PROVIDER_SYNC,
+    garmin=lambda: GARMIN_ASSEMBLY,
+    sync_job_queue=lambda: SYNC_JOB_QUEUE,
+    weather=lambda: WEATHER_ASSEMBLY,
+    workout_library_sync=lambda: WORKOUT_LIBRARY_SYNC,
+    provider_resync=lambda: PROVIDER_RESYNC,
+    coach_conversation=lambda: COACH_CONVERSATION,
+    calendar_local=lambda: calendar_local,
+    planning_season=lambda: planning_season,
+    intervals_state=lambda: intervals_state,
+    diagnostic_capture=lambda: DIAGNOSTIC_CAPTURE,
+    intervals_sync_lock=lambda: INTERVALS_SYNC_LOCK,
+    workout_library_sync_running=lambda: workout_library_sync_running,
+    state_version_service=state_version_service,
+    daily_planning_context_service=lambda: daily_planning_context_service(),
+    adaptive_preview_followup_service=lambda: adaptive_preview_followup_service(),
+    adaptive_replan_preview_service=adaptive_replan_preview_service,
+    morning_checkin_state_service=morning_checkin_state_service,
+    coach_quick_actions_service=coach_quick_actions_service,
+    provider_state_service=provider_state_service,
+    local_date=lambda: ATHLETE_CLOCK.now().date(),
+    local_now=lambda: ATHLETE_CLOCK.now,
+    external_calendar_window_days=lambda: calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
+    calendar_history_days=lambda: PLANNED_CALENDAR_HISTORY_DAYS,
+    calendar_future_days=lambda: PLANNED_CALENDAR_FUTURE_DAYS,
+    sync_period_defaults=lambda: SYNC_PERIOD_DEFAULTS,
+    all_sync_days=lambda: ALL_SYNC_DAYS,
+    planned_workout_label=lambda: PLANNED_WORKOUT_LABEL,
+)
 
 
 def recent_log_entries_service() -> RecentLogEntriesService:
@@ -1707,20 +1570,20 @@ PUBLIC_GET_ROUTES = PublicGetRoutes(
     runtime_maintenance.MAINTENANCE_GATE,
     readiness_service,
     session_auth_service,
-    public_bootstrap_service,
+    PUBLIC_STATE.bootstrap_service,
 )
 PLANNING_GET_ROUTES = PlanningGetRoutes(
     session_auth_service,
-    public_plan_state_service,
-    public_weather_state_service,
+    PUBLIC_STATE.plan_state_service,
+    PUBLIC_STATE.weather_state_service,
     library_page_service,
 )
 ATHLETE_GET_ROUTES = AthleteGetRoutes(
     session_auth_service,
-    public_performance_state_service,
+    PUBLIC_STATE.performance_state_service,
     ATHLETE_DATA.profile,
     PLANNING_DATA.competition,
-    public_feedback_state_service,
+    PUBLIC_STATE.feedback_state_service,
     COACH_CONTEXT.preview_service,
     SETTINGS,
 )
@@ -1732,7 +1595,7 @@ DIAGNOSTICS_GET_ROUTES = DiagnosticsGetRoutes(
 SYNC_GET_ROUTES = SyncGetRoutes(
     session_auth_service,
     SYNC_JOB_QUEUE.service,
-    sync_public_state_service,
+    PUBLIC_STATE.sync_public_state_service,
     ATHLETE_DATA.activity_read,
     lambda: ATHLETE_CLOCK.now().date(),
     ALL_SYNC_DAYS,

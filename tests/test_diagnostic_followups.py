@@ -14,6 +14,7 @@ from backend.providers import garmin_morning, intervals_client as intervals_clie
 
 from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import morning_battery as performance_morning_battery
+from backend.activities.feedback import ActivityFeedbackService
 from backend.sync import garmin as garmin_sync
 from backend.sync import observation as sync_observation
 from backend.sync.garmin_service import GarminSyncService
@@ -30,7 +31,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
     def test_yesterdays_ready_status_is_not_todays_success(self):
         server.key_value_service().set("morning_checkin_status", "ready")
         server.key_value_service().set("morning_checkin_date", "2026-09-06")
-        result = server.public_bootstrap_service().read()["morning_checkin"]
+        result = server.PUBLIC_STATE.bootstrap_service().read()["morning_checkin"]
         self.assertEqual(result["status"], "waiting")
         self.assertFalse(result["current_for_today"])
         self.assertEqual(server.diagnostic_report_service().report()["morning_checkin"], result)
@@ -225,7 +226,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
     def test_failed_tool_is_diagnosable_without_detail_capture_and_without_content(self):
         private = "synthetic-private-content-never-export"
         with patch.object(
-            server.ActivityFeedbackService,
+            ActivityFeedbackService,
             "save_coach",
             side_effect=RuntimeError(private),
         ):

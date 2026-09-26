@@ -2061,10 +2061,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     plan_repair_manifest_service coach_sync_tool_service nutrition_service
     intervals_nutrition_sync_service coach_athlete_record_tool_service
     state_version_service
-    public_performance_state_service public_feedback_state_service
-    sync_public_state_service
 
-    public_weather_state_service
     morning_body_battery_service calendar_conflict_service
     activity_feedback_service activity_read_service duplicate_activity_service
     checkin_service profile_service coach_profile_update_service
@@ -2096,9 +2093,6 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     coach_planning_command_service coach_structured_tool_replay_service
     coach_structured_tool_preparation_service
     coach_structured_tool_round_service
-    public_bootstrap_service public_plan_state_service
-    public_state_local_prelude_service public_state_weather_prelude_service
-    public_state_calendar_projection_service public_state_service
     recent_log_entries_service coach_diagnostic_history_service diagnostic_report_service
     export_stream_transport readiness_service
     request_handler_class main
@@ -2112,7 +2106,6 @@ SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
         "database_manager",
         "sync_job_worker",
         "initialise_database",
-        "public_state_service",
         "main",
     }
 )
@@ -3108,7 +3101,7 @@ class ServerArchitectureTests(unittest.TestCase):
                 "runtime_maintenance.MAINTENANCE_GATE",
                 "readiness_service",
                 "session_auth_service",
-                "public_bootstrap_service",
+                "PUBLIC_STATE.bootstrap_service",
             ],
         )
 
@@ -3122,8 +3115,8 @@ class ServerArchitectureTests(unittest.TestCase):
             "PLANNING_GET_ROUTES",
             [
                 "session_auth_service",
-                "public_plan_state_service",
-                "public_weather_state_service",
+                "PUBLIC_STATE.plan_state_service",
+                "PUBLIC_STATE.weather_state_service",
                 "library_page_service",
             ],
         )
@@ -3138,10 +3131,10 @@ class ServerArchitectureTests(unittest.TestCase):
             "ATHLETE_GET_ROUTES",
             [
                 "session_auth_service",
-                "public_performance_state_service",
+                "PUBLIC_STATE.performance_state_service",
                 "ATHLETE_DATA.profile",
                 "PLANNING_DATA.competition",
-                "public_feedback_state_service",
+                "PUBLIC_STATE.feedback_state_service",
                 "COACH_CONTEXT.preview_service",
                 "SETTINGS",
             ],
@@ -3158,7 +3151,7 @@ class ServerArchitectureTests(unittest.TestCase):
             [
                 "session_auth_service",
                 "SYNC_JOB_QUEUE.service",
-                "sync_public_state_service",
+                "PUBLIC_STATE.sync_public_state_service",
                 "ATHLETE_DATA.activity_read",
                 "lambda: ATHLETE_CLOCK.now().date()",
                 "ALL_SYNC_DAYS",
