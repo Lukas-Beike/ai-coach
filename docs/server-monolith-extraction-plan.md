@@ -962,6 +962,25 @@ Abhängigkeit: alle vorigen Phasen.
   Provider-Patches liegen bei den Provider-Modulen; verbliebene Konfigurations-,
   Datenbank- und Service-Fabrik-Patches testen isolierte Composition-Root-
   Integrationen.
+- [x] Den Cache und die Konfigurationssignatur des Session-Auth-Services nach
+  `backend/http_api/auth.py` verlagern. `server.py` behÃ¤lt die konkrete
+  Konstruktion aus aktivem DB-Manager, Lock und Sicherheitskonfiguration.
+- [x] Den gemeinsamen `RateLimiter`-Zustand neben dem Session-Auth-Service
+  unter `backend/http_api/auth.py` besitzen lassen; `server.py` verdrahtet
+  dieselbe Instanz in den Service.
+- [x] Den gecachten `ProviderStateService` an `backend/providers/state.py`
+  binden. Die Cache-Ersetzung folgt dort dem aktiven Manager, Repository und
+  Lock; `server.py` behält nur die konkrete Service-Komposition.
+- [x] Den `ProviderRefreshTracker`-Cache nach `backend/sync/refresh.py`
+  verlagern und an Datenbankmanager, Event-Puffer sowie Retry- und Retention-
+  Konfiguration binden.
+- [x] Den JSON-HTTP-Client-Cache an `backend/providers/http.py` binden und bei
+  Wechsel des Provider-State-Services einen transportseitigen Client erzeugen.
+- [x] Den WeatherService-Cache an `backend/weather/service.py` binden und beim
+  Wechsel des Datenbankmanagers den Service dort ersetzen.
+- [x] Den Morgen-Body-Battery-Service-Cache an
+  `backend/performance/morning_battery_service.py` binden und bei Wechsel des
+  Managers oder der Garmin-Konfiguration ersetzen.
 - [x] Inventar neu erzeugen und mit `--check` abgleichen; alle verbleibenden
   Top-Level-Funktionen und ihre statischen Aufrufer prüfen. Es gibt keine
   unzugeordneten P0-Symbole oder unaufgerufenen server-Funktionen.
@@ -1054,7 +1073,7 @@ für interne Testimports. Jeder abgeschlossene PR bleibt start- und testfähig.
 Bei einer Regression wird der betreffende Code-PR gezielt zurückgenommen;
 es gibt keine Datenmigration und keine Rücknahme durch Löschen von Nutzerdaten.
 
-## 8. Abschlussstand
+## 8. Historischer Abschluss und aktueller Auditstatus
 
 Der erneute Audit hat den frueheren Abschluss widerlegt: Die 184-zeilige
 `RequestHandler`-Implementierung war noch in `server.py`, und die alte
@@ -1062,11 +1081,22 @@ Architekturpruefung begrenzte nur Namen. Der Handler ist jetzt unter
 `backend/http_api/handler.py`; seine Komplexitaet bleibt auf der Klassenebene
 und wird von Sonar sowie Architekturtests geprueft.
 
-P11 auditiert die verbleibenden Fabrikkoerper statt eine pauschale LOC-Grenze
-zu setzen. Eine AST-Regel beschraenkt Kontrollfluss auf explizite Resource- und
-Startup-Faelle und verbietet direkte SQL-, Provider- und Datei-Lese/Schreib-
-Aufrufe im Composition Root. Die profilabhaengige Uhr gehoert jetzt
-`backend/athlete/clock.py`. Die verbleibenden Zeilen sind gepruefte
-Instanziierung des Service-Graphen, Konfiguration, gemeinsame Prozessressourcen
-und Startup/Shutdown. P0-P11 sind abgeschlossen: P10 wurde in PR #818 und
-P11 in PR #819 nach erfolgreicher Validierung in `develop` integriert.
+PRs #818 and #819 completed the RequestHandler and athlete-clock migrations.
+The later audit reopened P10/P11 because the earlier checklist did not account
+for function bodies and the size of the composition graph. That audit and its
+remaining ownership work are now complete through PRs #830–#836.
+
+At the closeout revision, `server.py` has 2,756 physical lines and 171
+top-level definitions. The generated inventory has no unassigned P0 symbols;
+all remaining definitions are in the composition-root allowlist, with a
+maximum function size of 46 lines. The architecture suite verifies that
+composition bodies do not perform domain or provider I/O, the backend does not
+reach into `server.py`, import cycles are absent, and extracted symbols are not
+redefined in the root. Runtime service caches now live with their owning
+backend modules. The remaining root code is configuration, concrete dependency
+wiring, shared process resources, and startup/shutdown lifecycle.
+
+P10/P11 are closed against Section 1 and the regenerated inventory. The
+2,756-line count is recorded as context, not used as a separate size gate;
+composition code remains in the composition root where it expresses real
+dependency wiring.

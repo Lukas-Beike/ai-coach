@@ -338,7 +338,7 @@ fest. Worker-Zusammenfassungen und isolierte grüne Tests sind keine Freigabe.
 
 - Review: **PASS** — `APP_VERSION` bleibt bewusst als exakt formatierte
   Zuweisung in `server.py`. `.github/scripts/release_source.py`, das
-  Codex-Review-Gate und `.github/workflows/weekly-release.yml` lesen oder
+  Codex-Review-Gate und `.github/workflows/daily-release.yml` lesen oder
   ändern genau diesen Pfad und dieses Format; eine spätere Verlagerung muss
   diese drei Verbraucher samt ihren Vertragstests atomar migrieren.
 - `PUBLIC_DIR`, Asset-Mapping, `VERSIONED_STATIC_ASSETS` und `send_static`
@@ -8044,3 +8044,174 @@ den betroffenen Code erneut reviewen und Inventar/Checkliste aktualisieren.
 - Required test, CodeQL, Sonar, quality, syntax, SBOM, and five-project browser checks passed for PR #819. The only failure was the explicit Codex review gate; it was bypassed as user-authorized without posting an `@codex` request.
 - Final `server.py`: 2,809 physical lines and 2,433 nonblank lines, down from the previously recorded 2,589 nonblank lines. Remaining code is audited configuration, dependency construction, shared process resources, and startup/shutdown wiring; no LOC target was imposed.
 - Final validation: Python 3.14 full suite 2,802 tests (11 skipped), 40 architecture tests, 51 local desktop browser tests, five CI viewport projects, Docker build, syntax compilation, inventory `--check`, and `git diff --check` passed.
+
+## P11 follow-up — database manager cache ownership (local review)
+
+- Moved database-manager cache state and signature-based replacement into
+  `backend/db/manager.py`. The composition root passes concrete constructor
+  dependencies; the backend does not call a factory or callback from
+  `server.py`. Root-owned provider caches are still invalidated by the root
+  when the database signature changes.
+- The independent review found and fixed three issues: the first extraction
+  draft passed a server callback into the cache; a closed manager could leave
+  new leases waiting forever; and workout-text tests relied on configuration
+  left by another test module. Cache construction now takes direct dependency
+  values, closed leases fail promptly, and those tests use temporary isolated
+  application state. A regression test also verifies that unavailable SQLCipher
+  closes a stale manager before the startup error is raised.
+- `server.py`: 2,807 physical lines, down from 2,809. Backend Python source is
+  46,122 lines, up from 46,068 due to the cohesive cache owner.
+- Validation: native full suite **2,804 tests passed, 12 skipped**; focused
+  database and architecture tests passed; workout-text tests passed; syntax,
+  inventory `--check`, and `git diff --check` passed. Docker build could not
+  start because the local Docker Engine named pipe was unavailable.
+- Rebased onto `develop` commit `d0e4d32`, including the server test split from
+  `5a0ab70`. The manager cleanup moved into `server_test_support.py`, manager
+  regressions now live in `test_server_database.py`, and workout-text tests use
+  the shared `ServerTestCase`; no imports of the removed `test_server.py`
+  remain.
+- The PR SonarCloud analysis found one duplicated closed-manager error literal;
+  it is now a single module constant. The focused database, architecture, and
+  inventory checks pass after that correction.
+- This is a focused P11 ownership follow-up; it does not claim completion of
+  any remaining composition-graph audit work.
+
+## P11 Coach tool-dispatch composition -- local review
+
+- Replaced four callbacks that existed only to construct backend Coach tool
+  adapters with concrete adapter instances in coach_tool_dispatch_service().
+  CoachToolDispatchService now stores those instances directly. The underlying
+  database-backed use-case factories remain lazy and are still invoked only
+  after their adapter authorizes and routes a matching tool, preserving the
+  current resource and authorization order.
+- Independently reviewed dispatcher routing, adapter state, and service-factory
+  call sites. The adapters only store their dependencies; no database, provider,
+  or other I/O runs during construction. No actionable findings remained.
+- The server composition function count and physical line count are unchanged;
+  this removes deferred server callbacks from the tool-dispatch graph, not a
+  business definition. P11 remains open pending the broader audit.
+- Validation before rebase: full suite **2,802 passed, 12 skipped**; architecture
+  tests **40 passed**; focused Coach dispatch/adapter tests **43 passed**;
+  Python compilation, inventory check, and git diff check passed. The local
+  environment did not have ruff.
+
+## P12 Garmin morning recovery composition — local review
+
+- Moved Garmin morning recovery configuration, profile-timezone lookup, provider fetch, and redacted operation transport out of `server.py` into `GarminMorningRemoteReader` under `backend/sync/garmin_service.py`.
+- `MorningBatterySource` now receives a typed remote-reader dependency. The shared service cache remains in the composition root and is recomposed when its bound configuration object changes, preserving shared identity for sync workers and routes.
+- Independent review found no actionable correctness, privacy, security, or ownership findings. The generated server inventory assigns the reader to `backend/sync/garmin_service.py`; `server.py` is 10 lines smaller.
+- Validation before rebase: full suite passed (2,806 tests, 12 skipped); focused Garmin/provider/performance/diagnostic/architecture suites, `compileall`, inventory `--check`, and `git diff --check` passed. Docker build could not run because the local Docker engine pipe is unavailable.
+- Rebased on the current `develop`; its database-manager cache extraction remains intact. The rebase required combining that cache owner with the new Garmin composition tracking.
+
+## P13 Athlete clock profile dependency — local review
+
+- Removed the clock's callback into `server.py`. `AthleteLocalClock` now receives a typed profile reader, composed from `ProfileService` and `DatabaseManagerCache`; the cache keeps manager replacement from closing an active profile read.
+- Independent review found and fixed the manager replacement race with a regression test. It also found that the generated inventory treated `ATHLETE_PROFILE_SERVICE` as unassigned; the explicit composition-root owner mapping is now recorded and the generated document is current. No remaining actionable correctness, security, privacy, or ownership findings.
+- Validation: split full suite **2,811 tests passed, 12 skipped**; focused clock, manager, and architecture suites **53 passed**; `compileall`, `py_compile`, inventory `--check`, and `git diff --check` passed. Docker was not run; this change does not alter dependencies, deployment, or startup behavior.
+- The task branch is based directly on `develop` `6dec5f3`, the current target. The test-suite split from commit `5a0ab70` is in that base; validation uses unittest discovery and does not reference the removed `test_server.py`.
+
+## P14 Session-auth cache ownership — local review
+
+- Moved the cached `SessionAuthService` instance and its manager/configuration signature from `server.py` to `SessionAuthServiceCache` in `backend/http_api/auth.py`. The composition root still resolves the current manager while holding `DB_LOCK` and supplies the concrete security configuration and rate limiter.
+- Independently reviewed cache replacement and synchronization: the cache remains a singleton, serializes resolution with the same reentrant DB lock, and replaces the service when the manager, configuration, or SQLCipher availability changes. No authentication, session, cookie, CSRF, or rate-limit behavior changed; importing the module performs no runtime I/O.
+- Added cache replacement and architecture ownership regressions. The generated inventory now assigns the cache class and singleton to `backend/http_api/auth.py`. `server.py` is 2,791 physical lines, down eight lines.
+- Validation: full native suite **2,813 tests passed, 12 skipped**; focused session-cache, database, and architecture suites passed; `compileall`, inventory `--check`, and `git diff --check` passed. The 12 native skips include SQLCipher-dependent cases unavailable on Windows; this change does not alter database or deployment behavior.
+
+## P15 HTTP rate-limiter state ownership — local review
+
+- Moved the process-wide `RateLimiter` instance into `backend/http_api/auth.py`, beside the session service cache. `server.py` imports that exact instance and passes it into the cache; existing handler and fixture consumers still share the same limiter.
+- Independently reviewed module initialization and callers: the owner import is inert, no second limiter is created, and rate-limit policy, bucket cleanup, session auth, and HTTP behavior are unchanged. The architecture regression verifies both ownership and the composition-root import.
+- Regenerated the server inventory and updated the P11 ownership checklist. `server.py` no longer constructs or owns rate-limit state.
+- Validation: full native suite **2,815 tests passed, 12 skipped**; focused session-cache, provider, HTTP, and architecture suites passed; compilation, inventory `--check`, and `git diff --check` passed. SQLCipher-only tests remain skipped by the native Windows environment.
+
+## P16 Provider-state cache ownership — local review
+
+- Moved the `ProviderStateService` cache and replacement signature into `backend/providers/state.py`. The cache binds instances to the active database manager, repository, and synchronization lock; `server.py` now only supplies those concrete dependencies.
+- Removed provider-state cache invalidation from `reset_provider_runtime()`. A manager or lock change causes the owner cache to construct a service for the new dependencies. Updated the HTTP concurrency test to exercise this lookup path without patching removed server state.
+- Independently reviewed manager replacement, cache synchronization, and provider-state consumers. Existing usage, status, and rate-limit persistence transactions remain in `ProviderStateService`; no I/O was added to cache construction. Architecture tests prohibit reintroducing the cache into `server.py`.
+- Validation: full native suite **2,816 tests passed, 12 skipped**; focused database (44, 3 skipped), HTTP (67), provider (48), and architecture (44) suites passed; Python compilation, inventory `--check`, and `git diff --check` passed. SQLCipher-only tests remain skipped by the native Windows environment.
+
+## P17 Provider-refresh tracker cache ownership — local review
+
+- Moved `ProviderRefreshTracker` cache ownership and replacement into `backend/sync/refresh.py`. Its cache binds the tracker to the active manager, state-event buffer, retention limits, and retry limits; `server.py` now supplies these concrete dependencies.
+- Removed the tracker singleton and its manager-change reset from `server.py`. The owning cache serializes construction and replaces the tracker when its persistence or sync configuration changes.
+- Independently reviewed tracker consumers and lifecycle: refresh-history writes, retry classification, and state-event publication remain in the existing backend service and are unchanged. The architecture test now requires the server factory to delegate to the backend cache.
+- SonarCloud flagged a duplicated inventory path literal introduced by the ownership mapping. Reused the existing `SYNC_REFRESH` constant; the inventory consistency and architecture checks pass after the fix.
+- Validation: full native suite **2,817 tests passed, 12 skipped**; focused database (44, 3 skipped), provider (48), and architecture (45) suites passed; Python compilation, inventory `--check`, and `git diff --check` passed. SQLCipher-only tests remain skipped by the native Windows environment.
+
+## P18 Provider HTTP client cache ownership — merged review
+
+- Moved the shared JSON HTTP client cache into `backend/providers/http.py`.
+  The cache replaces its client when provider-state ownership changes, while
+  `server.py` supplies the active transport dependencies.
+- Independently reviewed cache lifecycle, concurrency, database-manager
+  replacement, and provider callers. Added coverage for reuse with the same
+  provider-state service and replacement after manager change; no actionable
+  findings remained.
+- PR #834 was squash-merged on 2026-09-25 as
+  `addfe6f473bb420035419b6014b94df342e590cb`. The Codex review service reported
+  that its usage limit prevented a review; the independent review was clean,
+  all other checks passed, and the user-authorized Codex-only bypass was used.
+- Validation: full native suite **2,818 tests passed, 12 skipped**; focused
+  database (44, 3 skipped) and architecture (46) suites passed; Python
+  compilation, inventory `--check`, and `git diff --check` passed.
+
+## P19 Weather service cache ownership — local review
+
+- Moved the cached `WeatherService` and manager-bound replacement into
+  `backend/weather/service.py`. `server.py` now supplies the current manager
+  and concrete service dependencies; its provider-runtime reset no longer owns
+  weather state.
+- Added architecture ownership coverage and extended the database-manager
+  replacement integration test to assert reuse before replacement. The
+  independent review verified service identity, manager reset behavior, and
+  restore/reset callers; no actionable runtime findings remained. It found and
+  fixed a duplicated inventory path literal and restored method separation.
+- `server.py` is three lines smaller. The inventory assigns the singleton and
+  cache class to the weather owner module.
+- Validation: full native suite **2,819 tests passed, 12 skipped**; focused
+  database (44, 3 skipped), weather (44), and architecture (47) suites passed;
+  Python compilation, inventory `--check`, and `git diff --check` passed.
+- PR #835 was squash-merged on 2026-09-25 as
+  `67ba67f3f71c955991505b43a74b174fe38ddd0f`. The Codex usage limit prevented
+  its review; the independent review was clean, all other checks passed, and
+  the user-authorized Codex-only bypass was used.
+
+## P20 Morning Body Battery service cache ownership — local review
+
+- Moved the morning recovery service cache into
+  `backend/performance/morning_battery_service.py`, binding replacement to
+  both the active database manager and Garmin configuration identity.
+  `server.py` now composes service dependencies without owning cache globals.
+- Removed `reset_provider_runtime()` after its final cache responsibility
+  moved. Independent review verified manager replacement, configuration
+  replacement, and that the injected Garmin fixture/remote constructors remain
+  side-effect free; no actionable findings remained.
+- `server.py` is 32 lines smaller. The generated inventory assigns the cache
+  to the performance service module.
+- Validation: full native suite **2,820 tests passed, 12 skipped**; focused
+  provider (48), database (44, 3 skipped), and architecture (48) suites passed;
+  Python compilation, inventory `--check`, and `git diff --check` passed.
+- PR #836 was squash-merged on 2026-09-25 as
+  `e3dc00da25932c32b0606a13dab2cf24f8efb24f`. The Codex usage limit prevented
+  its review; independent review was clean, all other checks passed, and the
+  user-authorized Codex-only bypass was used.
+
+## P10/P11 server extraction — final audit closeout
+
+- PRs #818–#836 complete the reopened HTTP, composition-root, and runtime-cache
+  ownership work. The generated inventory reports zero unassigned P0 symbols;
+  all remaining server definitions are composition-root entries. The
+  architecture suite constrains composition control flow, rejects domain/I/O
+  work in those bodies, checks backend import direction and cycles, and guards
+  against reintroducing extracted definitions in `server.py`.
+- Final `server.py`: 2,756 physical lines, 171 top-level definitions, and a
+  46-line longest definition. These are concrete dependency factories and
+  process lifecycle wiring; no domain workflow remains in the root. The line
+  count is not a separate acceptance threshold.
+- Final validation on PR #836: **2,820 tests passed, 12 skipped**; focused
+  provider, database, and architecture suites passed; compilation, inventory
+  `--check`, CodeQL, SonarCloud, Conventional Commit validation, and diff checks
+  passed. The explicit Codex review was blocked by account usage limits; the
+  independent review was clear and the user-authorized sole-blocker bypass was
+  applied. PR #836 is merged with no review threads.

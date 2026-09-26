@@ -18,12 +18,47 @@ from backend.errors import AppError
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.responses import session_cookies
 
+RATE_LIMITER = RateLimiter()
 SESSION_COOKIE = "ic_session"
 CSRF_COOKIE = "ic_csrf"
 SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 SESSION_TOUCH_INTERVAL_SECONDS = 5 * 60
 SESSION_CLEANUP_INTERVAL_SECONDS = 15 * 60
 SESSION_CLEANUP_BATCH_SIZE = 100
+
+
+class SessionAuthServiceCache:
+    """Keep the composed auth service bound to the active persistence config."""
+
+    def __init__(self) -> None:
+        self._service: SessionAuthService | None = None
+        self._signature: tuple[DatabaseManager, Config, bool] | None = None
+
+    def get(
+        self,
+        database_manager: DatabaseManager,
+        database_lock: threading.RLock,
+        config: Config,
+        sqlcipher_available: bool,
+        rate_limiter: RateLimiter,
+    ) -> SessionAuthService:
+        with database_lock:
+            signature = (database_manager, config, sqlcipher_available)
+            if self._service is None or self._signature != signature:
+                self._service = SessionAuthService(
+                    database_manager,
+                    database_lock,
+                    config,
+                    sqlcipher_available,
+                    rate_limiter,
+                )
+                self._signature = signature
+            return self._service
+
+
+SESSION_AUTH_SERVICE_CACHE = SessionAuthServiceCache()
+
+
 class SessionAuthService:
     """Own persistent session behavior and its in-memory synchronization state."""
 

@@ -62,6 +62,12 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.streams", ("ChatStreamRegistry",)),
     ("backend.coach.job_store", ("CoachJobStore",)),
     ("backend.http_api.auth", ("SessionAuthService",)),
+    ("backend.http_api.auth", ("SessionAuthServiceCache",)),
+    ("backend.providers.state", ("ProviderStateServiceCache",)),
+    ("backend.sync.refresh", ("ProviderRefreshTrackerCache",)),
+    ("backend.providers.http", ("JsonHttpClientCache",)),
+    ("backend.weather.service", ("WeatherServiceCache",)),
+    ("backend.performance.morning_battery_service", ("MorningBodyBatteryServiceCache",)),
     ("backend.coach.conversation", ("CoachConversationHistoryService",)),
     ("backend.http_api.post_dispatch", ("HttpAuthenticatedPostRoutes", "HttpPostDispatcher")),
     ("backend.http_api.response_transport", ("HttpResponseTransport",)),
@@ -2119,20 +2125,15 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     startup_sync_scheduler main
 """.split())
 
-# These functions intentionally contain control flow for resource caching,
-# schema initialization, and process lifecycle. All other root functions are
-# direct dependency construction or stateless time/configuration helpers.
+# These functions intentionally retain the small amount of root control flow
+# for schema initialization and process lifecycle. Runtime caches bind their
+# services to explicit dependencies in the owning backend modules.
 SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
     {
         "database_manager",
         "session_auth_service",
-        "provider_state_service",
-        "provider_refresh_tracker",
-        "weather_service",
-        "morning_body_battery_service",
         "sync_job_worker",
         "initialise_database",
-        "provider_http_client",
         "public_state_service",
         "main",
     }
@@ -2571,6 +2572,230 @@ class ServerArchitectureTests(unittest.TestCase):
             "New server.py functions belong in a backend owner module.",
         )
         self.assertEqual(set(), classes)
+
+    def test_morning_battery_source_uses_backend_garmin_reader_instance(self) -> None:
+        tree = _parse(SERVER_PATH)
+        factory = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "morning_body_battery_service"
+        )
+        source = next(
+            node
+            for node in ast.walk(factory)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "MorningBatterySource"
+        )
+
+        self.assertIsInstance(source.args[1], ast.Call)
+        self.assertIsInstance(source.args[1].func, ast.Name)
+        self.assertEqual(source.args[1].func.id, "GarminMorningRemoteReader")
+        self.assertNotIn("fetch_morning_body_battery", ast.unparse(factory))
+        self.assertNotIn("provider_http.external_call", ast.unparse(factory))
+        reader = (BACKEND_ROOT / "sync" / "garmin_service.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("class GarminMorningRemoteReader:", reader)
+
+    def test_athlete_clock_receives_profile_service_without_server_callback(self) -> None:
+        tree = _parse(SERVER_PATH)
+        assignment = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "ATHLETE_CLOCK"
+                for target in node.targets
+            )
+        )
+
+        self.assertIsInstance(assignment.value, ast.Call)
+        self.assertEqual(ast.unparse(assignment.value.func), "AthleteLocalClock")
+        self.assertEqual(
+            [ast.unparse(argument) for argument in assignment.value.args],
+            ["ATHLETE_PROFILE_SERVICE"],
+        )
+
+    def test_session_auth_cache_state_is_owned_by_http_api_auth(self) -> None:
+        auth_tree = _parse(BACKEND_ROOT / "http_api" / "auth.py")
+        self.assertTrue(any(
+            isinstance(node, ast.ClassDef) and node.name == "SessionAuthServiceCache"
+            for node in auth_tree.body
+        ))
+        self.assertTrue(any(
+            isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "RATE_LIMITER"
+                for target in node.targets
+            )
+            and ast.unparse(node.value) == "RateLimiter()"
+            for node in auth_tree.body
+        ))
+        server_tree = _parse(SERVER_PATH)
+        server_assignments = {
+            target.id
+            for node in server_tree.body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            if isinstance(target, ast.Name)
+        }
+        self.assertTrue(
+            {
+                "SESSION_AUTH_SERVICE",
+                "SESSION_AUTH_SIGNATURE",
+                "RATE_LIMITER",
+            }.isdisjoint(server_assignments)
+        )
+        self.assertTrue(any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "backend.http_api.auth"
+            and any(alias.name == "RATE_LIMITER" for alias in node.names)
+            for node in server_tree.body
+        ))
+
+    def test_provider_state_service_cache_is_owned_by_provider_state(self) -> None:
+        state_tree = _parse(BACKEND_ROOT / "providers" / "state.py")
+        self.assertTrue(any(
+            isinstance(node, ast.ClassDef) and node.name == "ProviderStateServiceCache"
+            for node in state_tree.body
+        ))
+        server_tree = _parse(SERVER_PATH)
+        server_assignments = {
+            target.id
+            for node in server_tree.body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            if isinstance(target, ast.Name)
+        }
+        self.assertNotIn("PROVIDER_STATE_SERVICE", server_assignments)
+        service_factory = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "provider_state_service"
+        )
+        self.assertIn(
+            "provider_state.PROVIDER_STATE_SERVICE_CACHE.get",
+            ast.unparse(service_factory),
+        )
+
+    def test_provider_refresh_tracker_cache_is_owned_by_sync_refresh(self) -> None:
+        refresh_tree = _parse(BACKEND_ROOT / "sync" / "refresh.py")
+        self.assertTrue(any(
+            isinstance(node, ast.ClassDef)
+            and node.name == "ProviderRefreshTrackerCache"
+            for node in refresh_tree.body
+        ))
+        server_tree = _parse(SERVER_PATH)
+        server_assignments = {
+            target.id
+            for node in server_tree.body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            if isinstance(target, ast.Name)
+        }
+        self.assertNotIn("PROVIDER_REFRESH_TRACKER", server_assignments)
+        service_factory = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "provider_refresh_tracker"
+        )
+        self.assertIn(
+            "sync_refresh.PROVIDER_REFRESH_TRACKER_CACHE.get",
+            ast.unparse(service_factory),
+        )
+
+    def test_provider_http_client_cache_is_owned_by_provider_transport(self) -> None:
+        transport_tree = _parse(BACKEND_ROOT / "providers" / "http.py")
+        self.assertTrue(any(
+            isinstance(node, ast.ClassDef) and node.name == "JsonHttpClientCache"
+            for node in transport_tree.body
+        ))
+        server_tree = _parse(SERVER_PATH)
+        server_assignments = {
+            target.id
+            for node in server_tree.body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            if isinstance(target, ast.Name)
+        }
+        self.assertNotIn("PROVIDER_HTTP_CLIENT", server_assignments)
+        service_factory = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "provider_http_client"
+        )
+        self.assertIn(
+            "provider_http.JSON_HTTP_CLIENT_CACHE.get",
+            ast.unparse(service_factory),
+        )
+
+    def test_weather_service_cache_is_owned_by_weather_service_module(self) -> None:
+        weather_tree = _parse(BACKEND_ROOT / "weather" / "service.py")
+        self.assertTrue(any(
+            isinstance(node, ast.ClassDef) and node.name == "WeatherServiceCache"
+            for node in weather_tree.body
+        ))
+        server_tree = _parse(SERVER_PATH)
+        server_assignments = {
+            target.id
+            for node in server_tree.body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            if isinstance(target, ast.Name)
+        }
+        self.assertNotIn("WEATHER_SERVICE", server_assignments)
+        service_factory = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "weather_service"
+        )
+        self.assertIn(
+            "WEATHER_SERVICE_CACHE.get",
+            ast.unparse(service_factory),
+        )
+
+    def test_morning_battery_cache_is_owned_by_performance_service_module(self) -> None:
+        performance_tree = _parse(
+            BACKEND_ROOT / "performance" / "morning_battery_service.py"
+        )
+        self.assertTrue(any(
+            isinstance(node, ast.ClassDef)
+            and node.name == "MorningBodyBatteryServiceCache"
+            for node in performance_tree.body
+        ))
+        server_tree = _parse(SERVER_PATH)
+        server_assignments = {
+            target.id
+            for node in server_tree.body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            if isinstance(target, ast.Name)
+        }
+        self.assertNotIn("MORNING_BODY_BATTERY_SERVICE", server_assignments)
+        self.assertNotIn("MORNING_BODY_BATTERY_CONFIG_ID", server_assignments)
+        self.assertNotIn("reset_provider_runtime", {
+            node.name for node in server_tree.body
+            if isinstance(node, ast.FunctionDef)
+        })
+        service_factory = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "morning_body_battery_service"
+        )
+        self.assertIn(
+            "MORNING_BODY_BATTERY_SERVICE_CACHE.get",
+            ast.unparse(service_factory),
+        )
 
     def test_server_composition_bodies_do_not_own_domain_or_io_logic(self) -> None:
         tree = _parse(SERVER_PATH)

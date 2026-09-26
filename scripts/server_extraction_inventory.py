@@ -64,6 +64,7 @@ PERFORMANCE_PACKAGE = "performance/"
 PERFORMANCE_MORNING_BATTERY = "performance/morning_battery_service.py"
 PERFORMANCE_ACTIVITY_VALIDATION = "performance/activity_validation.py"
 WEATHER_PACKAGE = "weather/"
+WEATHER_SERVICE_MODULE = "weather/service.py"
 HISTORY_PACKAGE = "history/"
 PLANNING_PACKAGE = "planning/"
 PLANNING_COMPETITIONS = "planning/competitions.py"
@@ -205,11 +206,25 @@ def _explicit_owner(name: str) -> str | None:
             "_gemini_call_names": COACH_CONVERSATION,
             "utc_now": RUNTIME_PACKAGE,
             "ATHLETE_CLOCK": "backend/athlete/clock.py",
+            "ATHLETE_PROFILE_SERVICE": COMPOSITION_ROOT,
             "AppError": ERRORS_MODULE,
             "public_app_error_status": ERRORS_MODULE,
             "ClientDisconnected": ERRORS_MODULE,
             "security_configuration_error": CONFIG_MODULE,
             "database_manager": DB_MANAGER,
+            "SESSION_AUTH_SERVICE_CACHE": HTTP_AUTH,
+            "SessionAuthServiceCache": HTTP_AUTH,
+            "RATE_LIMITER": HTTP_AUTH,
+            "PROVIDER_STATE_SERVICE_CACHE": "providers/state.py",
+            "ProviderStateServiceCache": "providers/state.py",
+            "PROVIDER_REFRESH_TRACKER_CACHE": SYNC_REFRESH,
+            "ProviderRefreshTrackerCache": SYNC_REFRESH,
+            "JSON_HTTP_CLIENT_CACHE": PROVIDER_HTTP,
+            "JsonHttpClientCache": PROVIDER_HTTP,
+            "WEATHER_SERVICE_CACHE": WEATHER_SERVICE_MODULE,
+            "WeatherServiceCache": WEATHER_SERVICE_MODULE,
+            "MORNING_BODY_BATTERY_SERVICE_CACHE": PERFORMANCE_MORNING_BATTERY,
+            "MorningBodyBatteryServiceCache": PERFORMANCE_MORNING_BATTERY,
             "key_value_service": COMPOSITION_ROOT,
             "initialise_database": "db/bootstrap.py",
             "checkin_service": COMPOSITION_ROOT,
@@ -364,8 +379,7 @@ def _explicit_owner(name: str) -> str | None:
             "DEFAULT_TIMEZONE": CONFIG_MODULE,
             "ATHLETE_RECORD_HANDLERS": COACH_TOOL_EXECUTION,
             "DB_LOCK": DB_MANAGER,
-            "DATABASE_MANAGER": DB_MANAGER,
-            "DATABASE_MANAGER_SIGNATURE": DB_MANAGER,
+            "DATABASE_MANAGER_CACHE": DB_MANAGER,
             "TRAINING_PLAN_REPOSITORY": COMPOSITION_ROOT,
             "PLANNING_STATE_REPOSITORY": COMPOSITION_ROOT,
             "PLANNING_REVISION_SERVICE": COMPOSITION_ROOT,
@@ -401,8 +415,6 @@ def _explicit_owner(name: str) -> str | None:
             "STATE_EVENT_NEXT_ID": RUNTIME_EVENTS,
             "MAINTENANCE_GATE": RUNTIME_MAINTENANCE,
             "ACTIVITY_FEEDBACK_REPOSITORY": COMPOSITION_ROOT,
-            "WEATHER_SERVICE": COMPOSITION_ROOT,
-            "MORNING_BODY_BATTERY_SERVICE": COMPOSITION_ROOT,
             "WEATHER_ADAPTIVE_MAX_MINUTES": "planning/adaptive.py",
             "_configure_cipher": DB_MANAGER,
             "RATE_LIMIT_CLEANUP_INTERVAL_SECONDS": HTTP_AUTH,
@@ -874,7 +886,6 @@ def _explicit_owner(name: str) -> str | None:
             "selected_workout_sync_service": COMPOSITION_ROOT,
             "sync_job_executor": COMPOSITION_ROOT,
             "sync_job_worker": COMPOSITION_ROOT,
-            "PROVIDER_REFRESH_TRACKER": COMPOSITION_ROOT,
             "SYNC_JOB_RE": HTTP_API_PACKAGE,
             "SYNC_JOB_RESOLVE_RE": HTTP_API_PACKAGE,
             "DAILY_AUTO_UPDATE_LABEL": SYNC_SCHEDULER,

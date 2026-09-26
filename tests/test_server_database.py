@@ -33,6 +33,18 @@ from server_test_support import create_test_session, server, ServerTestCase
 
 class ServerDatabaseTests(ServerTestCase):
 
+    def test_unavailable_sqlcipher_closes_manager_for_changed_secure_configuration(self):
+        manager = server.database_manager()
+        configured = replace(server.CONFIG, app_password="synthetic-encrypted-key")
+        with patch.object(server, "CONFIG", configured), patch.object(
+            server, "SQLCIPHER_AVAILABLE", False
+        ), self.assertRaisesRegex(RuntimeError, "SQLCipher"):
+            server.database_manager()
+
+        with self.assertRaisesRegex(RuntimeError, "database manager is closed"):
+            with manager.unit_of_work():
+                pass
+
     def test_database_uses_exact_current_schema(self):
         server.initialise_database()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -44,21 +56,25 @@ class ServerDatabaseTests(ServerTestCase):
     def test_provider_state_service_is_recreated_with_database_manager(self):
         first = server.provider_state_service()
         first_http_client = server.provider_http_client()
+        self.assertIs(server.provider_http_client(), first_http_client)
         first_refresh_tracker = server.provider_refresh_tracker()
         first_weather_service = server.weather_service()
-        server.database_manager().close()
-        server.DATABASE_MANAGER = None
-        server.DATABASE_MANAGER_SIGNATURE = None
+        self.assertIs(server.weather_service(), first_weather_service)
+        first_morning_service = server.morning_body_battery_service()
+        self.assertIs(server.morning_body_battery_service(), first_morning_service)
+        server.DATABASE_MANAGER_CACHE.reset()
 
         second = server.provider_state_service()
         second_http_client = server.provider_http_client()
         second_refresh_tracker = server.provider_refresh_tracker()
         second_weather_service = server.weather_service()
+        second_morning_service = server.morning_body_battery_service()
 
         self.assertIsNot(second, first)
         self.assertIsNot(second_http_client, first_http_client)
         self.assertIsNot(second_refresh_tracker, first_refresh_tracker)
         self.assertIsNot(second_weather_service, first_weather_service)
+        self.assertIsNot(second_morning_service, first_morning_service)
         self.assertIs(second_http_client.provider_state, second)
         second.record_status(
             "openai", state="ok", reason="ok", message="OpenAI ist verfügbar.", http_status=200
@@ -82,10 +98,8 @@ class ServerDatabaseTests(ServerTestCase):
                 ):
                     with self.assertRaises(RuntimeError):
                         server.initialise_database()
-                    server.database_manager().close()
             finally:
-                server.DATABASE_MANAGER = None
-                server.DATABASE_MANAGER_SIGNATURE = None
+                server.DATABASE_MANAGER_CACHE.reset()
 
             connection = sqlite3.connect(database_path)
             try:
@@ -396,9 +410,7 @@ class ServerDatabaseTests(ServerTestCase):
                             self.assertIn("workouts", payload)
                             self.assertIs(connection.sock, keep_alive_socket)
                         finally:
-                            switched_manager.close()
-                            server.DATABASE_MANAGER = None
-                            server.DATABASE_MANAGER_SIGNATURE = None
+                            server.DATABASE_MANAGER_CACHE.reset()
         finally:
             connection.close()
             httpd.shutdown()
@@ -843,9 +855,7 @@ class ServerDatabaseTests(ServerTestCase):
             operation_id="operation-background-manager-refresh",
         )
 
-        first_manager.close()
-        server.DATABASE_MANAGER = None
-        server.DATABASE_MANAGER_SIGNATURE = None
+        server.DATABASE_MANAGER_CACHE.reset()
         second_manager = server.database_manager()
 
         self.assertIsNot(first_manager, second_manager)

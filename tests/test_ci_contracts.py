@@ -17,7 +17,7 @@ SPEC.loader.exec_module(release_source)
 
 class WorkflowSourceTests(unittest.TestCase):
     def test_daily_release_limits_default_token_permissions(self):
-        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/weekly-release.yml").read_text(encoding="utf-8")
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml").read_text(encoding="utf-8")
         self.assertIn("permissions:\n  contents: read", workflow)
 
     def test_executed_source_is_bound_to_the_workflow_event(self):
@@ -34,14 +34,14 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn("github.ref == 'refs/heads/main' && inputs.publish_container == true", workflow)
 
     def test_release_pr_dispatch_selects_its_own_branch_without_source_override(self):
-        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/weekly-release.yml").read_text(encoding="utf-8")
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml").read_text(encoding="utf-8")
         dispatch = workflow.split("trigger_release_test() {", 1)[1].split("ensure_release_test() {", 1)[0]
         self.assertIn('--ref "$source_ref"', dispatch)
         self.assertIn('--field "publish_container=false"', dispatch)
         self.assertNotIn('--field "source_ref=', dispatch)
 
     def test_main_push_test_can_create_the_release_after_promotion_merge(self):
-        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/weekly-release.yml").read_text(encoding="utf-8")
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml").read_text(encoding="utf-8")
         create_release = workflow.split("  create-release:", 1)[1].split("    runs-on:", 1)[0]
         self.assertNotIn("workflow_dispatch", create_release)
         self.assertNotIn("chore/release-promotion-", create_release)
@@ -154,6 +154,8 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("check-name: ${{ matrix.checkName }}", workflow)
         self.assertIn("skipCodexReview: false", workflow)
         self.assertIn("name: process.env.CHECK_NAME", workflow)
+        self.assertIn("hasCodexUsageLimit", workflow)
+        self.assertIn("Codex review skipped (usage limit reached)", workflow)
         self.assertNotIn("openai/codex-action", workflow)
         self.assertNotIn("openai-api-key", workflow)
 
@@ -163,6 +165,8 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("reactions.listForIssue", action)
         self.assertIn("codex-pull-request-review-summary", action)
         self.assertIn("parseCodeReviewSummary", action)
+        self.assertIn("isCodexUsageLimitComment", action)
+        self.assertIn("Codex review skipped (usage limit reached)", action)
         self.assertNotIn("commitMatchesHead", action)
         self.assertNotIn("repos.compareCommits", action)
         self.assertNotIn("commitBelongsToHead", action)
@@ -298,6 +302,15 @@ class ReleaseSourceTests(unittest.TestCase):
         self.git("checkout", "--detach", source)
         release_source.verify(self.root, source, "1.7.2")
 
+    def test_resolve_rejects_invalid_source_reference(self):
+        for invalid in ["-o", "--output", "develop;rm", "foo..bar", "refs/heads/.."]:
+            with self.assertRaisesRegex(ValueError, "valid source reference"):
+                release_source.resolve(self.root, invalid)
+
+    def test_verify_rejects_invalid_sha(self):
+        with self.assertRaisesRegex(ValueError, "differs"):
+            release_source.verify(self.root, "invalid-sha", "1.7.2")
+
     def test_tag_version_must_match_application(self):
         self.git("tag", "9.0.0")
         with self.assertRaisesRegex(ValueError, "APP_VERSION"):
@@ -319,7 +332,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             Path(__file__).resolve().parents[1]
             / ".github"
             / "workflows"
-            / "weekly-release.yml"
+            / "daily-release.yml"
         ).read_text(encoding="utf-8")
         release_counting = workflow.split(
             'if [[ -n "$latest_tag" ]]', 1

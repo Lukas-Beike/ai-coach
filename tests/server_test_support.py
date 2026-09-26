@@ -115,10 +115,7 @@ class ServerTestCase(unittest.TestCase):
 
     @classmethod
     def _restore_test_config(cls):
-        if server.DATABASE_MANAGER:
-            server.DATABASE_MANAGER.close()
-        server.DATABASE_MANAGER = None
-        server.DATABASE_MANAGER_SIGNATURE = None
+        server.DATABASE_MANAGER_CACHE.reset()
         server.CONFIG = cls._original_config
         server.DATA_DIR = cls._original_data_dir
         server.DB_PATH = cls._original_db_path

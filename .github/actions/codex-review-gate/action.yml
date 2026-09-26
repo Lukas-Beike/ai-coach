@@ -47,6 +47,7 @@ runs:
         script: |
           const {
             isAtOrAfterTimestamp,
+            isCodexUsageLimitComment,
             parseCodeReviewSummary,
           } = require(`${process.env.ACTION_PATH}/summary.cjs`);
           const prNumber = Number(process.env.PR_NUMBER);
@@ -151,6 +152,20 @@ runs:
             }
 
             return { current, latest: summaries[0] };
+          };
+
+          const getCodexUsageLimit = async (minimumCreatedAt = 0) => {
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            return comments.find((comment) => (
+              botLogins.has(comment.user?.login) &&
+              (minimumCreatedAt === 0 || isAtOrAfterTimestamp(comment.created_at, minimumCreatedAt)) &&
+              isCodexUsageLimitComment(comment.body)
+            ));
           };
 
           const getCleanReactions = async (minimumCreatedAt) => {
@@ -403,6 +418,22 @@ runs:
                   core.info(`Codex completed without findings; clean reaction ${cleanReactions[0].id} observed.`);
                   return;
                 }
+              }
+
+              const usageLimitComment = await getCodexUsageLimit(minimumArtifactTime) ||
+                (minimumArtifactTime > 0 ? await getCodexUsageLimit(0) : undefined);
+              if (usageLimitComment) {
+                await updateCheck(
+                  checkRunId,
+                  'completed',
+                  'success',
+                  'Codex review skipped (usage limit reached)',
+                  `Codex usage limit reached for code reviews; skipping the review check for PR #${prNumber}.`,
+                );
+                core.info(
+                  `Codex usage limit reached in comment ${usageLimitComment.id}; skipping review check on PR #${prNumber}.`,
+                );
+                return;
               }
 
               if (summary.current && summaryStatus !== 'completed') {

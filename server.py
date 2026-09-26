@@ -63,6 +63,7 @@ from backend.performance.morning_battery_service import (
     MorningBatterySource,
     MorningBatteryStore,
     MorningBodyBatteryService,
+    MORNING_BODY_BATTERY_SERVICE_CACHE,
 )
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
@@ -89,12 +90,13 @@ from backend.weather.service import (
     WeatherCacheStore,
     WeatherRefreshJournal,
     WeatherService,
+    WEATHER_SERVICE_CACHE,
 )
 from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
 from backend.db.key_value import KeyValueService
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, NutritionRepository, PlanAdjustmentRepository, PlanningStateRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
-from backend.db.manager import DatabaseManager
+from backend.db.manager import DatabaseManager, DatabaseManagerCache
 from backend.db.schema import configure_cipher, database_schema_is_current
 from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config
 from backend.providers.intervals import IntervalsApiClient
@@ -107,7 +109,6 @@ from backend.providers import state as provider_state
 from backend.providers import weather as weather_provider
 from backend.providers import intervals_client as intervals_client_module
 from backend.providers.garmin import GarminClientFactory
-from backend.providers import garmin_morning
 from backend.http_api import server as http_server
 from backend.http_api.handler import HttpRequestHandlerDependencies, create_request_handler
 from backend.http_api.bootstrap_state import (
@@ -130,9 +131,12 @@ from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.diagnostics_post import DiagnosticsCapturePostRoutes
 from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
-from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
-from backend.http_api.auth import SessionAuthService
+from backend.http_api.auth import (
+    RATE_LIMITER,
+    SESSION_AUTH_SERVICE_CACHE,
+    SessionAuthService,
+)
 from backend.http_api.public_performance import (
     PublicFeedbackStateService,
     PublicPerformanceStateService,
@@ -173,6 +177,7 @@ from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_selection import StructuredPlanSyncService
 from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync import refresh as sync_refresh
 from backend.sync.refresh import ProviderRefreshTracker
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
 from backend.sync.planned_units import RemotePlannedUnitReconciler
@@ -195,6 +200,7 @@ from backend.sync.performance import (
 )
 from backend.sync.garmin_service import (
     GARMIN_AUTOMATIC_SYNC_DAYS,
+    GarminMorningRemoteReader,
     GarminRemoteReader,
     GarminSyncCoordination,
     GarminSyncLifecycleState,
@@ -380,7 +386,7 @@ OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
 SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
-APP_VERSION = "1.11.13"
+APP_VERSION = "1.11.14"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -398,7 +404,6 @@ INTERVALS_SYNC_WAIT_SECONDS = 120
 DB_LOCK = threading.RLock()
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: SyncJobWorker | None = None
-RATE_LIMITER = RateLimiter()
 
 
 CONFIG = load_config(ROOT, DATA_DIR)
@@ -429,15 +434,7 @@ ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(utc_now)
 SNAPSHOT_REPOSITORY = SnapshotRepository()
 
 
-DATABASE_MANAGER: DatabaseManager | None = None
-DATABASE_MANAGER_SIGNATURE: tuple[str, str, bool] | None = None
-SESSION_AUTH_SERVICE: SessionAuthService | None = None
-SESSION_AUTH_SIGNATURE: tuple[Any, Config, bool] | None = None
-PROVIDER_STATE_SERVICE: provider_state.ProviderStateService | None = None
-PROVIDER_HTTP_CLIENT: provider_http.JsonHttpClient | None = None
-PROVIDER_REFRESH_TRACKER: ProviderRefreshTracker | None = None
-WEATHER_SERVICE: WeatherService | None = None
-MORNING_BODY_BATTERY_SERVICE: MorningBodyBatteryService | None = None
+DATABASE_MANAGER_CACHE = DatabaseManagerCache()
 
 PROVIDER_REFRESH_RETRY_BASE_SECONDS = 15 * 60
 PROVIDER_REFRESH_RETRY_MAX_SECONDS = 6 * 60 * 60
@@ -445,88 +442,60 @@ SYNC_JOB_RETRY_BASE_SECONDS = 15 * 60
 SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
 SYNC_JOB_POLL_SECONDS = 1.0
 GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
+
+
 def database_manager() -> DatabaseManager:
     """Return the manager for the active path and secure configuration."""
-    global DATABASE_MANAGER, DATABASE_MANAGER_SIGNATURE, PROVIDER_HTTP_CLIENT, PROVIDER_REFRESH_TRACKER, PROVIDER_STATE_SERVICE, WEATHER_SERVICE, MORNING_BODY_BATTERY_SERVICE
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     signature = (str(DB_PATH.resolve()), CONFIG.app_password, SQLCIPHER_AVAILABLE)
-    if DATABASE_MANAGER is not None and DATABASE_MANAGER_SIGNATURE != signature:
-        DATABASE_MANAGER.close()
-        DATABASE_MANAGER = None
-        DATABASE_MANAGER_SIGNATURE = None
-        PROVIDER_HTTP_CLIENT = None
-        PROVIDER_REFRESH_TRACKER = None
-        PROVIDER_STATE_SERVICE = None
-        WEATHER_SERVICE = None
-        MORNING_BODY_BATTERY_SERVICE = None
-    if DATABASE_MANAGER is None:
-        PROVIDER_HTTP_CLIENT = None
-        PROVIDER_REFRESH_TRACKER = None
-        PROVIDER_STATE_SERVICE = None
-        WEATHER_SERVICE = None
-        MORNING_BODY_BATTERY_SERVICE = None
-        if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
-            raise RuntimeError("SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich.")
-        DATABASE_MANAGER = DatabaseManager(
-            DB_PATH,
-            sqlite_backend if CONFIG.app_password else sqlite3,
-            password=CONFIG.app_password,
-            configure=configure_cipher,
-            row_factory=database_row_factory,
-            reader_count=4,
-            timeout=20,
-            persist_connections=bool(CONFIG.app_password),
-        )
-        DATABASE_MANAGER_SIGNATURE = signature
-    return DATABASE_MANAGER
+    if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
+        DATABASE_MANAGER_CACHE.reset()
+        raise RuntimeError("SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich.")
+    return DATABASE_MANAGER_CACHE.get(
+        signature,
+        DB_PATH,
+        sqlite_backend if CONFIG.app_password else sqlite3,
+        password=CONFIG.app_password,
+        configure=configure_cipher,
+        row_factory=database_row_factory,
+        reader_count=4,
+        timeout=20,
+        persist_connections=bool(CONFIG.app_password),
+    )
 
 
 def session_auth_service() -> SessionAuthService:
     """Compose the HTTP session owner from the active persistence and security configuration."""
-    global SESSION_AUTH_SERVICE, SESSION_AUTH_SIGNATURE
     with DB_LOCK:
-        manager = database_manager()
-        signature = (manager, CONFIG, SQLCIPHER_AVAILABLE)
-        if SESSION_AUTH_SERVICE is None or SESSION_AUTH_SIGNATURE != signature:
-            SESSION_AUTH_SERVICE = SessionAuthService(
-                manager, DB_LOCK, CONFIG, SQLCIPHER_AVAILABLE, RATE_LIMITER
-            )
-            SESSION_AUTH_SIGNATURE = signature
-        return SESSION_AUTH_SERVICE
+        return SESSION_AUTH_SERVICE_CACHE.get(
+            database_manager(), DB_LOCK, CONFIG, SQLCIPHER_AVAILABLE, RATE_LIMITER
+        )
 
 
 def provider_state_service() -> provider_state.ProviderStateService:
     """Return provider observability state bound to the active database manager."""
-    global PROVIDER_STATE_SERVICE
-    manager = database_manager()
-    if PROVIDER_STATE_SERVICE is None:
-        PROVIDER_STATE_SERVICE = provider_state.ProviderStateService(
-            manager,
-            KEY_VALUE_REPOSITORY,
-            DB_LOCK,
-            utc_now,
-            lambda: ATHLETE_CLOCK.now().date(),
-            LOGGER,
-        )
-    return PROVIDER_STATE_SERVICE
+    return provider_state.PROVIDER_STATE_SERVICE_CACHE.get(
+        database_manager(),
+        KEY_VALUE_REPOSITORY,
+        DB_LOCK,
+        utc_now,
+        lambda: ATHLETE_CLOCK.now().date(),
+        LOGGER,
+    )
 
 
 def provider_refresh_tracker() -> ProviderRefreshTracker:
     """Return refresh history orchestration bound to the active database manager."""
-    global PROVIDER_REFRESH_TRACKER
-    manager = database_manager()
-    if PROVIDER_REFRESH_TRACKER is None:
-        PROVIDER_REFRESH_TRACKER = ProviderRefreshTracker(
-            manager,
-            runtime_events.STATE_EVENT_BUFFER,
-            lambda: datetime.now(timezone.utc),
-            lambda: uuid.uuid4().hex,
-            retention_days=sync_freshness.PROVIDER_REFRESH_RETENTION_DAYS,
-            max_rows=sync_freshness.PROVIDER_REFRESH_MAX_ROWS,
-            retry_base_seconds=PROVIDER_REFRESH_RETRY_BASE_SECONDS,
-            retry_max_seconds=PROVIDER_REFRESH_RETRY_MAX_SECONDS,
-        )
-    return PROVIDER_REFRESH_TRACKER
+    return sync_refresh.PROVIDER_REFRESH_TRACKER_CACHE.get(
+        database_manager(),
+        runtime_events.STATE_EVENT_BUFFER,
+        lambda: datetime.now(timezone.utc),
+        lambda: uuid.uuid4().hex,
+        retention_days=sync_freshness.PROVIDER_REFRESH_RETENTION_DAYS,
+        max_rows=sync_freshness.PROVIDER_REFRESH_MAX_ROWS,
+        retry_base_seconds=PROVIDER_REFRESH_RETRY_BASE_SECONDS,
+        retry_max_seconds=PROVIDER_REFRESH_RETRY_MAX_SECONDS,
+    )
 
 
 def sync_operation_observer() -> sync_observation.SyncOperationObserver:
@@ -985,25 +954,23 @@ def full_provider_resync_service() -> FullProviderResyncService:
 
 def weather_service() -> WeatherService:
     """Return weather orchestration bound to the active runtime resources."""
-    global WEATHER_SERVICE
     manager = database_manager()
-    if WEATHER_SERVICE is None:
-        WEATHER_SERVICE = WeatherService(
-            WeatherCacheStore(manager, KEY_VALUE_REPOSITORY, profile_service()),
-            lambda: weather_provider.WeatherClient(
-                provider_http_client().request, utc_now, LOGGER
-            ),
-            WeatherRefreshJournal(
-                provider_refresh_tracker(),
-                sync_observation.OPERATION_CONTEXT,
-                lambda: uuid.uuid4().hex,
-                LOGGER,
-            ),
-            runtime_maintenance.MAINTENANCE_GATE,
-            lambda: datetime.now(timezone.utc),
-            lambda: ATHLETE_CLOCK.now().date(),
-        )
-    return WEATHER_SERVICE
+    return WEATHER_SERVICE_CACHE.get(
+        manager,
+        WeatherCacheStore(manager, KEY_VALUE_REPOSITORY, profile_service()),
+        lambda: weather_provider.WeatherClient(
+            provider_http_client().request, utc_now, LOGGER
+        ),
+        WeatherRefreshJournal(
+            provider_refresh_tracker(),
+            sync_observation.OPERATION_CONTEXT,
+            lambda: uuid.uuid4().hex,
+            LOGGER,
+        ),
+        runtime_maintenance.MAINTENANCE_GATE,
+        lambda: datetime.now(timezone.utc),
+        lambda: ATHLETE_CLOCK.now().date(),
+    )
 
 
 def weather_sync_service() -> WeatherSyncService:
@@ -1024,53 +991,34 @@ def public_weather_state_service() -> PublicWeatherStateService:
 
 def morning_body_battery_service() -> MorningBodyBatteryService:
     """Compose morning recovery orchestration from concrete runtime resources."""
-    global MORNING_BODY_BATTERY_SERVICE
     manager = database_manager()
-    if MORNING_BODY_BATTERY_SERVICE is None:
-        client_factory = garmin_client_factory()
-        source = MorningBatterySource(
+    config_id = id(CONFIG)
+    return MORNING_BODY_BATTERY_SERVICE_CACHE.get(
+        manager,
+        config_id,
+        MorningBatteryStore(manager, KEY_VALUE_REPOSITORY),
+        MorningBatterySource(
             garmin_fixture_loader(),
-            lambda: bool(
-                client_factory.available()
-                and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())
-            ),
-            lambda checkin_date: garmin_morning.fetch_morning_body_battery(
-                client_factory.create(
-                    CONFIG.garmin_email or None, CONFIG.garmin_password or None
-                ),
-                checkin_date,
-                tokenstore=CONFIG.garmin_tokenstore,
-                email_configured=bool(CONFIG.garmin_email),
-                tokenstore_exists=Path(CONFIG.garmin_tokenstore).exists(),
-                profile_timezone=timezone_name(profile_service().get().get("timezone")),
-                fallback_zone=ATHLETE_CLOCK.now().tzinfo or timezone.utc,
-                external_call=lambda service, operation, callback, details: provider_http.external_call(
-                    service,
-                    operation,
-                    callback,
-                    details,
-                    logger=LOGGER,
-                    diagnostic_capture=DIAGNOSTIC_CAPTURE,
-                    operation_context=sync_observation.operation_context(),
-                ),
-                sleep_bounds=performance_morning_battery.sleep_bounds,
+            GarminMorningRemoteReader(
+                CONFIG,
+                garmin_client_factory(),
+                profile_service(),
+                ATHLETE_CLOCK,
+                DIAGNOSTIC_CAPTURE,
+                LOGGER,
             ),
             observability.safe_diagnostic_error,
-        )
-        MORNING_BODY_BATTERY_SERVICE = MorningBodyBatteryService(
-            MorningBatteryStore(manager, KEY_VALUE_REPOSITORY),
-            source,
-            MorningBatteryExecutionGate(
-                shared_garmin_sync_lock(),
-                runtime_maintenance.MAINTENANCE_GATE,
-                GARMIN_RESYNC_GATE,
-                GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
-            ),
-            MorningBatteryClock(lambda: datetime.now(timezone.utc), ATHLETE_CLOCK.now),
-            MorningBatteryEvents(runtime_events.STATE_EVENT_BUFFER.publish, LOGGER),
-            MorningBatteryRetryPolicy(),
-        )
-    return MORNING_BODY_BATTERY_SERVICE
+        ),
+        MorningBatteryExecutionGate(
+            shared_garmin_sync_lock(),
+            runtime_maintenance.MAINTENANCE_GATE,
+            GARMIN_RESYNC_GATE,
+            GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
+        ),
+        MorningBatteryClock(lambda: datetime.now(timezone.utc), ATHLETE_CLOCK.now),
+        MorningBatteryEvents(runtime_events.STATE_EVENT_BUFFER.publish, LOGGER),
+        MorningBatteryRetryPolicy(),
+    )
 
 
 def external_calendar_reader() -> calendar_external.ExternalCalendarReader:
@@ -1148,7 +1096,10 @@ def profile_service() -> ProfileService:
     )
 
 
-ATHLETE_CLOCK = AthleteLocalClock(lambda: profile_service().get().get("timezone"))
+ATHLETE_PROFILE_SERVICE = ProfileService(
+    DATABASE_MANAGER_CACHE, PROFILE_REPOSITORY, KEY_VALUE_REPOSITORY
+)
+ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
 
 def coach_profile_update_service() -> CoachProfileUpdateService:
@@ -1664,22 +1615,18 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
 
 def provider_http_client() -> provider_http.JsonHttpClient:
     """Return the observed JSON client bound to the active provider state."""
-    global PROVIDER_HTTP_CLIENT
-    state = provider_state_service()
-    if PROVIDER_HTTP_CLIENT is None or PROVIDER_HTTP_CLIENT.provider_state is not state:
-        PROVIDER_HTTP_CLIENT = provider_http.JsonHttpClient(
-            APP_VERSION,
-            provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
-            LOGGER,
-            DIAGNOSTIC_CAPTURE,
-            state,
-            REDACTOR.redact_text,
-            partial(observability.safe_response_headers, redact=REDACTOR.redact_text),
-            utc_now,
-            sync_observation.operation_context,
-            opener=provider_http.urlopen,
-        )
-    return PROVIDER_HTTP_CLIENT
+    return provider_http.JSON_HTTP_CLIENT_CACHE.get(
+        APP_VERSION,
+        provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
+        LOGGER,
+        DIAGNOSTIC_CAPTURE,
+        provider_state_service(),
+        REDACTOR.redact_text,
+        partial(observability.safe_response_headers, redact=REDACTOR.redact_text),
+        utc_now,
+        sync_observation.operation_context,
+        opener=provider_http.urlopen,
+    )
 
 
 def intervals_client(config: Config | None = None) -> intervals_client_module.IntervalsClient:
@@ -2101,17 +2048,17 @@ def coach_tool_dispatch_service() -> CoachToolDispatchService:
         coach_read_tool_service,
         coach_profile_update_service,
         coach_athlete_record_tool_service,
-        lambda: CoachPlanArtifactToolService(training_plan_artifact_service),
-        lambda: CoachPlanningChangeToolService(
+        CoachPlanArtifactToolService(training_plan_artifact_service),
+        CoachPlanningChangeToolService(
             structured_training_plan_replacement_service,
             structured_training_change_service,
         ),
-        lambda: TrainingTemplateToolService(
+        TrainingTemplateToolService(
             database_manager, DB_LOCK, workout_library_service
         ),
         coach_library_plan_tool_service,
         coach_sync_tool_service,
-        lambda: CoachPlanningActionToolService(
+        CoachPlanningActionToolService(
             adaptive_replan_preview_service,
             coach_adaptive_apply_service,
             training_plan_service,

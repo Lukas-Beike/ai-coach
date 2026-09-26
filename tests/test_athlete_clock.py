@@ -4,11 +4,19 @@ from datetime import datetime, timedelta, timezone
 from backend.athlete.clock import AthleteLocalClock
 
 
+class Profile:
+    def __init__(self, timezone_name: str):
+        self.timezone_name = timezone_name
+
+    def get(self) -> dict[str, str]:
+        return {"timezone": self.timezone_name}
+
+
 class AthleteLocalClockTests(unittest.TestCase):
     def test_uses_timezone_from_current_profile(self):
-        profile = {"timezone": "America/Los_Angeles"}
+        profile = Profile("America/Los_Angeles")
         clock = AthleteLocalClock(
-            lambda: profile["timezone"],
+            profile,
             lambda zone=None: datetime(2026, 1, 15, 12, tzinfo=zone),
         )
 
@@ -16,10 +24,12 @@ class AthleteLocalClockTests(unittest.TestCase):
 
         self.assertEqual(result.tzinfo.key, "America/Los_Angeles")
         self.assertEqual(result.utcoffset(), timedelta(hours=-8))
+        profile.timezone_name = "UTC"
+        self.assertEqual(clock.now().tzinfo.key, "UTC")
 
     def test_invalid_profile_timezone_uses_existing_default(self):
         clock = AthleteLocalClock(
-            lambda: "not/a-timezone",
+            Profile("not/a-timezone"),
             lambda zone=None: datetime(2026, 1, 15, 12, tzinfo=zone),
         )
 
@@ -31,7 +41,10 @@ class AthleteLocalClockTests(unittest.TestCase):
                 raise RuntimeError("timezone database unavailable")
             return datetime(2026, 1, 15, 12, tzinfo=timezone.utc)
 
-        clock = AthleteLocalClock(lambda: "Europe/Berlin", failing_clock)
+        clock = AthleteLocalClock(
+            Profile("Europe/Berlin"),
+            failing_clock,
+        )
 
         self.assertEqual(clock.now(), datetime(2026, 1, 15, 12, tzinfo=timezone.utc).astimezone())
 

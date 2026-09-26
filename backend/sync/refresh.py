@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
@@ -221,3 +222,50 @@ class ProviderRefreshTracker:
         if "network" in reason or isinstance(error, TimeoutError):
             return "network_error"
         return "provider_error"
+
+
+class ProviderRefreshTrackerCache:
+    """Keep refresh history bound to the active database and event stream."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._tracker: ProviderRefreshTracker | None = None
+        self._signature: tuple[Any, ...] | None = None
+
+    def get(
+        self,
+        database_manager: Any,
+        event_buffer: Any,
+        now: Callable[[], datetime],
+        uuid_factory: Callable[[], Any],
+        *,
+        retention_days: int,
+        max_rows: int,
+        retry_base_seconds: int,
+        retry_max_seconds: int,
+    ) -> ProviderRefreshTracker:
+        signature = (
+            database_manager,
+            event_buffer,
+            retention_days,
+            max_rows,
+            retry_base_seconds,
+            retry_max_seconds,
+        )
+        with self._lock:
+            if self._tracker is None or self._signature != signature:
+                self._tracker = ProviderRefreshTracker(
+                    database_manager,
+                    event_buffer,
+                    now,
+                    uuid_factory,
+                    retention_days=retention_days,
+                    max_rows=max_rows,
+                    retry_base_seconds=retry_base_seconds,
+                    retry_max_seconds=retry_max_seconds,
+                )
+                self._signature = signature
+            return self._tracker
+
+
+PROVIDER_REFRESH_TRACKER_CACHE = ProviderRefreshTrackerCache()

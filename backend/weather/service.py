@@ -249,3 +249,38 @@ class WeatherService:
         self._cache_store.store_failure(failure)
         self._refresh_journal.finish(refresh_id, "error", "failed", error=error)
         self._refresh_journal.log_failure(error)
+
+
+class WeatherServiceCache:
+    """Keep weather orchestration bound to the active database manager."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._manager: Any = None
+        self._service: WeatherService | None = None
+
+    def get(
+        self,
+        manager: Any,
+        cache_store: WeatherCacheStore,
+        client_factory: Callable[[], Any],
+        refresh_journal: WeatherRefreshJournal,
+        maintenance_gate: Any,
+        now: Callable[[], datetime],
+        today: Callable[[], date],
+    ) -> WeatherService:
+        with self._lock:
+            if self._service is None or self._manager is not manager:
+                self._service = WeatherService(
+                    cache_store,
+                    client_factory,
+                    refresh_journal,
+                    maintenance_gate,
+                    now,
+                    today,
+                )
+                self._manager = manager
+            return self._service
+
+
+WEATHER_SERVICE_CACHE = WeatherServiceCache()

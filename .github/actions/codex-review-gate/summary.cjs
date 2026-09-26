@@ -1,5 +1,14 @@
 'use strict';
 
+const COMMIT_PATTERN = /`([0-9a-f]{7,40})`/i;
+const USAGE_LIMIT_PATTERN = /(?:usage limits for code reviews|reached (?:your )?Codex usage limits)/i;
+
+function isCodexUsageLimitComment(body) {
+  return USAGE_LIMIT_PATTERN.test(String(body || ''));
+}
+
+const RELATIVE_TIME_PATTERN = /<relative-time\b[^>]*\bdatetime=["']([^"']+)["']/i;
+
 function parseCodeReviewSummary(body) {
   const row = String(body || '')
     .split(/\r?\n/)
@@ -16,12 +25,12 @@ function parseCodeReviewSummary(body) {
 
   const statusCell = cells[reviewCell + 1];
   const commitCell = cells[reviewCell + 2];
-  const commit = commitCell.match(/`([0-9a-f]{7,40})`/i)?.[1]?.toLowerCase();
+  const commit = COMMIT_PATTERN.exec(commitCell)?.[1]?.toLowerCase();
   if (!commit) {
     return undefined;
   }
 
-  const completedAtText = statusCell.match(/<relative-time\b[^>]*\bdatetime=["']([^"']+)["']/i)?.[1];
+  const completedAtText = RELATIVE_TIME_PATTERN.exec(statusCell)?.[1];
   return {
     commit,
     status: /\*\*Completed\*\*/i.test(statusCell) ? 'completed' : 'pending',
@@ -53,6 +62,7 @@ function isAtOrAfterTimestamp(value, minimum) {
 module.exports = {
   commitMatchesHead,
   isAtOrAfterTimestamp,
+  isCodexUsageLimitComment,
   parseCodeReviewSummary,
   timestampAtSecond,
 };

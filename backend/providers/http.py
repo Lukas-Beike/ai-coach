@@ -749,3 +749,46 @@ def external_call(
         "response": observability.diagnostic_capture_response(result),
     })
     return result
+
+
+class JsonHttpClientCache:
+    """Keep the shared transport bound to the active provider-state service."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._client: JsonHttpClient | None = None
+        self._provider_state: Any = None
+
+    def get(
+        self,
+        app_version: str,
+        max_response_bytes: int,
+        logger: Any,
+        diagnostic_capture: Any,
+        provider_state: Any,
+        redact_text: Any,
+        safe_response_headers: Any,
+        now: Any,
+        operation_context: Callable[[], Mapping[str, Any] | None],
+        *,
+        opener: Any = urlopen,
+    ) -> JsonHttpClient:
+        with self._lock:
+            if self._client is None or self._provider_state is not provider_state:
+                self._client = JsonHttpClient(
+                    app_version,
+                    max_response_bytes,
+                    logger,
+                    diagnostic_capture,
+                    provider_state,
+                    redact_text,
+                    safe_response_headers,
+                    now,
+                    operation_context,
+                    opener=opener,
+                )
+                self._provider_state = provider_state
+            return self._client
+
+
+JSON_HTTP_CLIENT_CACHE = JsonHttpClientCache()

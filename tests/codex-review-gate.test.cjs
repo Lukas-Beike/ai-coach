@@ -7,6 +7,7 @@ const test = require('node:test');
 const {
   commitMatchesHead,
   isAtOrAfterTimestamp,
+  isCodexUsageLimitComment,
   parseCodeReviewSummary,
 } = require('../.github/actions/codex-review-gate/summary.cjs');
 
@@ -43,6 +44,15 @@ test('rejects missing and ambiguous commit references', () => {
   assert.equal(parseCodeReviewSummary('| **Code Review** | **Completed** | no sha | automatic |'), undefined);
   assert.equal(commitMatchesHead('abcdef0123456789abcdef0123456789abcdef01', 'abcdef0123456789abcdef0123456789abcdef01'), true);
   assert.equal(commitMatchesHead('abcdef0', 'not-a-full-sha'), false);
+});
+
+test('detects subscription usage limit comments', () => {
+  const quotaComment = 'You have reached your Codex usage limits for code reviews. You can see your limits in the [Codex usage dashboard](https://chatgpt.com/codex/cloud/settings/usage).\nTo continue using code reviews, you can upgrade your account or add credits to your account and enable them for code reviews in your [settings](https://chatgpt.com/codex/cloud/settings/code-review).';
+  assert.equal(isCodexUsageLimitComment(quotaComment), true);
+  assert.equal(isCodexUsageLimitComment('You have reached your Codex usage limits'), true);
+  assert.equal(isCodexUsageLimitComment('Some other comment'), false);
+  assert.equal(isCodexUsageLimitComment(''), false);
+  assert.equal(isCodexUsageLimitComment(undefined), false);
 });
 
 test('compares reaction timestamps at GitHub second precision', () => {

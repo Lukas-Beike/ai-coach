@@ -131,6 +131,12 @@ class Harness:
             raise self.remote_payload
         return self.remote_payload
 
+    def configured(self) -> bool:
+        return self.is_remote_configured
+
+    def fetch(self, requested_date: date) -> tuple[object, object]:
+        return self.fetch_remote(requested_date)
+
     def safe_error(self, exc: Exception) -> str:
         self.safe_errors.append(exc)
         return "sanitized fake error"
@@ -145,8 +151,7 @@ class Harness:
             MorningBatteryStore(self, self),
             MorningBatterySource(
                 fixture_loader,
-                lambda: self.is_remote_configured,
-                self.fetch_remote,
+                self,
                 self.safe_error,
             ),
             MorningBatteryExecutionGate(
