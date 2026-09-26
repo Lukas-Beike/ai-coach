@@ -34,7 +34,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         result = server.PUBLIC_STATE.bootstrap_service().read()["morning_checkin"]
         self.assertEqual(result["status"], "waiting")
         self.assertFalse(result["current_for_today"])
-        self.assertEqual(server.diagnostic_report_service().report()["morning_checkin"], result)
+        self.assertEqual(server.DIAGNOSTICS_ASSEMBLY.report_service().report()["morning_checkin"], result)
 
     def test_static_garmin_fixture_sleep_is_normalized_to_simulated_today(self):
         with tempfile.TemporaryDirectory() as temp_root:
@@ -232,7 +232,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         ):
             result, _ = self.turn(private, [lambda _: self.call("save_activity_feedback", {"payload": {"activity_id": "synthetic", "notes": private}}, ["activity_feedback"])])
         self.assertEqual(result["status"], "failed")
-        history = server.diagnostic_report_service().report()["coach_commands"]
+        history = server.DIAGNOSTICS_ASSEMBLY.report_service().report()["coach_commands"]
         self.assertEqual(history[0]["error"]["type"], "RuntimeError")
         self.assertTrue(history[0]["error"]["frames"])
         self.assertNotIn(private, json.dumps(history))
@@ -245,7 +245,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             {"status": "incomplete", "output_text": "Synthetic unfinished answer"},
         ])
         self.assertEqual(result["status"], "partial")
-        history = server.coach_diagnostic_history_service().history()
+        history = server.DIAGNOSTICS_ASSEMBLY.coach_history_service().history()
         self.assertEqual(history[0]["response_status"], "incomplete")
         self.assertEqual(history[0]["steps"][0]["error"]["status"], 404)
         self.assertEqual(history[0]["steps"][0]["tool"], "save_activity_feedback")

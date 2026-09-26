@@ -451,10 +451,10 @@ class ServerProvidersTests(ServerTestCase):
         server.LOGGER.error("failed request with sk-test-secret-value")
         for handler in server.LOGGER.handlers:
             handler.flush()
-        report_text = json.dumps(server.diagnostic_report_service().report())
+        report_text = json.dumps(server.DIAGNOSTICS_ASSEMBLY.report_service().report())
         self.assertNotIn("sk-test-secret-value", report_text)
-        self.assertIn("logs", server.diagnostic_report_service().report())
-        self.assertIn("openai", server.diagnostic_report_service().report())
+        self.assertIn("logs", server.DIAGNOSTICS_ASSEMBLY.report_service().report())
+        self.assertIn("openai", server.DIAGNOSTICS_ASSEMBLY.report_service().report())
 
     def test_redaction_covers_garmin_email_encoded_url_and_structural_credentials(self):
         email = "Athlete.Redaction@example.invalid"
@@ -508,7 +508,7 @@ class ServerProvidersTests(ServerTestCase):
 
             server.key_value_service().set("last_garmin_error", json.dumps([{"source": "login", "message": f"{email} {calendar_url}"}]))
             state = server.GARMIN_ASSEMBLY.projection_service().public_state()
-            report = json.dumps(server.diagnostic_report_service().report(), ensure_ascii=False)
+            report = json.dumps(server.DIAGNOSTICS_ASSEMBLY.report_service().report(), ensure_ascii=False)
         self.assertNotIn(email, json.dumps(state, ensure_ascii=False))
         self.assertNotIn(calendar_url, report)
         self.assertIn("calendar.example.invalid", report)
@@ -543,7 +543,7 @@ class ServerProvidersTests(ServerTestCase):
             server.PROVIDER_TRANSPORT.json_http_client().request("POST", "https://intervals.icu/api/v1/athlete/0", payload={"body_marker": "do-not-log-request-body"}, service="intervals")
         for handler in server.LOGGER.handlers:
             handler.flush()
-        log_text = json.dumps(server.recent_log_entries_service().list(), ensure_ascii=False)
+        log_text = json.dumps(server.DIAGNOSTICS_ASSEMBLY.recent_log_entries_service().list(), ensure_ascii=False)
         self.assertNotIn("do-not-log-request-body", log_text)
         self.assertNotIn("do-not-log-response-body", log_text)
 
@@ -562,7 +562,7 @@ class ServerProvidersTests(ServerTestCase):
             diagnostic_capture=server.DIAGNOSTIC_CAPTURE,
             operation_context=sync_observation.operation_context(),
         )
-        report = server.diagnostic_report_service().report()
+        report = server.DIAGNOSTICS_ASSEMBLY.report_service().report()
         report_text = json.dumps(report, ensure_ascii=False)
         self.assertIn("bodyBattery", report_text)
         self.assertNotIn("must-not-appear", report_text)
@@ -582,7 +582,7 @@ class ServerProvidersTests(ServerTestCase):
             diagnostic_capture=server.DIAGNOSTIC_CAPTURE,
             operation_context=sync_observation.operation_context(),
         )
-        self.assertNotIn("not captured", json.dumps(server.diagnostic_report_service().report(), ensure_ascii=False))
+        self.assertNotIn("not captured", json.dumps(server.DIAGNOSTICS_ASSEMBLY.report_service().report(), ensure_ascii=False))
 
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
         server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
@@ -593,7 +593,7 @@ class ServerProvidersTests(ServerTestCase):
                 server.PROVIDER_TRANSPORT.json_http_client().request("GET", "https://intervals.icu/api/v1/athlete/0")
         for handler in server.LOGGER.handlers:
             handler.flush()
-        entries = server.recent_log_entries_service().list()
+        entries = server.DIAGNOSTICS_ASSEMBLY.recent_log_entries_service().list()
         self.assertTrue(any(entry.get("event") == "upstream_network_error" for entry in entries))
 
     def test_external_http_calls_log_start_and_completion_without_payload(self):
@@ -618,7 +618,7 @@ class ServerProvidersTests(ServerTestCase):
             )
         for handler in server.LOGGER.handlers:
             handler.flush()
-        entries = server.recent_log_entries_service().list()
+        entries = server.DIAGNOSTICS_ASSEMBLY.recent_log_entries_service().list()
         started = [entry for entry in entries if entry.get("event") == "external_request_started"][-1]
         completed = [entry for entry in entries if entry.get("event") == "external_request_completed"][-1]
         self.assertEqual(result["activities"], [1, 2])
@@ -753,7 +753,7 @@ class ServerProvidersTests(ServerTestCase):
         request = urlopen.call_args.args[0]
         self.assertTrue(json.loads(request.data)["stream"])
         self.assertEqual(request.get_header("Accept"), "text/event-stream")
-        self.assertNotIn("Hallo", json.dumps(server.recent_log_entries_service().list(), ensure_ascii=False))
+        self.assertNotIn("Hallo", json.dumps(server.DIAGNOSTICS_ASSEMBLY.recent_log_entries_service().list(), ensure_ascii=False))
         self.assertEqual(server.provider_state_service().summary("openai")["total_tokens"], 6)
 
     def test_responses_stream_request_preserves_response_too_large_contract_and_byte_count(self):
@@ -828,7 +828,7 @@ class ServerProvidersTests(ServerTestCase):
             server.provider_state_service().summary("openai")["status"]["reason"],
             "provider_timeout",
         )
-        failures = [entry for entry in server.recent_log_entries_service().list() if entry.get("event") == "external_request_failed"]
+        failures = [entry for entry in server.DIAGNOSTICS_ASSEMBLY.recent_log_entries_service().list() if entry.get("event") == "external_request_failed"]
         self.assertEqual(failures[-1]["context"]["reason"], "provider_timeout")
 
     def test_openai_stream_client_uses_runtime_state_and_diagnostics(self):
@@ -950,7 +950,7 @@ class ServerProvidersTests(ServerTestCase):
         )
         for handler in server.LOGGER.handlers:
             handler.flush()
-        entries = server.recent_log_entries_service().list()
+        entries = server.DIAGNOSTICS_ASSEMBLY.recent_log_entries_service().list()
         completed = [entry for entry in entries if entry.get("event") == "external_call_completed"][-1]
         self.assertEqual(result[0]["sleepScore"], 80)
         self.assertEqual(completed["context"]["service"], "garmin")
@@ -1028,7 +1028,7 @@ class ServerProvidersTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             count = db.execute("SELECT COUNT(*) AS count FROM provider_refresh_history").fetchone()["count"]
         self.assertEqual(count, sync_freshness.PROVIDER_REFRESH_MAX_ROWS)
-        report = server.diagnostic_report_service().report()
+        report = server.DIAGNOSTICS_ASSEMBLY.report_service().report()
         self.assertIn("provider_freshness", report)
         self.assertNotIn("operation-", json.dumps(report))
 

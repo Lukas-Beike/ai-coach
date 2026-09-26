@@ -105,7 +105,7 @@ class CoachResponseFailureTests(unittest.TestCase):
             ],
             "queued",
         )
-        history = server.coach_diagnostic_history_service().history()
+        history = server.DIAGNOSTICS_ASSEMBLY.coach_history_service().history()
         self.assertEqual(history[0]["error"]["provider_error_code"], "server_error")
         status = server.provider_state_service().summary("openai")["status"]
         self.assertEqual(status["provider_error_code"], "server_error")

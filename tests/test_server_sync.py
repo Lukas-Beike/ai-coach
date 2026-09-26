@@ -1707,7 +1707,7 @@ class ServerSyncTests(ServerTestCase):
             )
         for handler in server.LOGGER.handlers:
             handler.flush()
-        entries = server.recent_log_entries_service().list(200)
+        entries = server.DIAGNOSTICS_ASSEMBLY.recent_log_entries_service().list(200)
         correlated = [entry for entry in entries if entry.get("context", {}).get("operation_id") == operation_id]
         events = {entry.get("event") for entry in correlated}
         self.assertTrue({"operation_started", "operation_completed", "operation_count"}.issubset(events))

@@ -3349,8 +3349,8 @@ class ServerArchitectureTests(unittest.TestCase):
             "DIAGNOSTICS_GET_ROUTES",
             [
                 "session_auth_service",
-                "recent_log_entries_service",
-                "diagnostic_report_service",
+                "DIAGNOSTICS_ASSEMBLY.recent_log_entries_service",
+                "DIAGNOSTICS_ASSEMBLY.report_service",
             ],
         )
         self._assert_get_route_owned("_handle_diagnostics_get", "PRIVACY_GET_ROUTES")

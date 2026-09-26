@@ -634,7 +634,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertTrue(result["command_receipts"][1]["result"]["ok"])
         self.assertEqual(result["message"]["content"], "Plan gespeichert.")
         self.assertEqual([unit["date"] for unit in self.state()["planned_units"]], ["2026-09-12"])
-        history = server.coach_diagnostic_history_service().history()
+        history = server.DIAGNOSTICS_ASSEMBLY.coach_history_service().history()
         self.assertEqual(history[0]["steps"][0]["error"]["validation_reason"], "request_provenance")
 
     def test_plan_replacement_does_not_resolve_invalid_patch_for_other_period(self):

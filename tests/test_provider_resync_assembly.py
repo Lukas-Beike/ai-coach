@@ -1,4 +1,4 @@
-﻿"""Tests for competition and provider resync composition."""
+"""Tests for competition and provider resync composition."""
 
 import logging
 import unittest

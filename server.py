@@ -16,12 +16,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 from backend.db import row_factory as database_row_factory
-from backend.diagnostics.history import CoachDiagnosticHistoryService
-from backend.diagnostics.logs import RecentLogEntriesService
-from backend.diagnostics.report import (
-    DiagnosticReportDependencies,
-    DiagnosticReportService,
-)
+from backend.diagnostics.assembly import DiagnosticsAssembly
 from backend.errors import (
     INTERNAL_SERVER_ERROR,
     AppError,
@@ -1275,53 +1270,33 @@ PUBLIC_STATE = PublicStateAssembly(
     planned_workout_label=lambda: PLANNED_WORKOUT_LABEL,
 )
 
-
-def recent_log_entries_service() -> RecentLogEntriesService:
-    return RecentLogEntriesService(LOG_PATH, REDACTOR, runtime_clock.utc_now)
-
-
-def coach_diagnostic_history_service() -> CoachDiagnosticHistoryService:
-    return CoachDiagnosticHistoryService(
-        database=database_manager().unit_of_work,
-        db_lock=DB_LOCK,
-        redact=REDACTOR.sanitize_log_value,
-        receipt_parser=command_receipt,
-        allowed_tools={tool["name"] for tool in COACH_DIALOGUE_TOOLS},
-    )
-
-
-def diagnostic_report_service() -> DiagnosticReportService:
-    """Compose the privacy-safe diagnostics report from its owning services."""
-    return DiagnosticReportService(DiagnosticReportDependencies(
-        database_manager=database_manager(),
-        db_lock=DB_LOCK,
-        key_values=KEY_VALUE_REPOSITORY,
-        config=CONFIG,
-        settings=SETTINGS,
-        app_name=APP_NAME,
-        app_version=APP_VERSION,
-        utc_now=runtime_clock.utc_now,
-        sync_state=SYNC_PERSISTENCE.state_repository(),
-        garmin_projection=GARMIN_ASSEMBLY.projection_service(),
-        garmin_client_factory=GARMIN_ASSEMBLY.client_factory(),
-        garmin_fixture_loader=GARMIN_ASSEMBLY.fixture_loader(),
-        provider_state=provider_state_service(),
-        coach_history=coach_diagnostic_history_service(),
-        redactor=REDACTOR,
-        provider_freshness=PROVIDER_SYNC.freshness_service(),
-        profile=ATHLETE_DATA.profile(),
-        garmin_sync_state=GARMIN_ASSEMBLY.sync_state_service(),
-        external_calendar_sync=EXTERNAL_CALENDAR.sync_service(),
-        external_calendar_reader=EXTERNAL_CALENDAR.reader(),
-        morning_checkin=morning_checkin_state_service(),
-        workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service(),
-        recent_logs=recent_log_entries_service(),
-        diagnostic_capture=DIAGNOSTIC_CAPTURE,
-    ))
-
-
-
-
+DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
+    database_manager=database_manager,
+    database_lock=DB_LOCK,
+    key_values=KEY_VALUE_REPOSITORY,
+    config=lambda: CONFIG,
+    settings=SETTINGS,
+    app_name=APP_NAME,
+    app_version=APP_VERSION,
+    utc_now=runtime_clock.utc_now,
+    sync_state=SYNC_PERSISTENCE.state_repository,
+    garmin_projection=GARMIN_ASSEMBLY.projection_service,
+    garmin_client_factory=GARMIN_ASSEMBLY.client_factory,
+    garmin_fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
+    provider_state=provider_state_service,
+    redactor=REDACTOR,
+    provider_freshness=PROVIDER_SYNC.freshness_service,
+    profile=ATHLETE_DATA.profile,
+    garmin_sync_state=GARMIN_ASSEMBLY.sync_state_service,
+    external_calendar_sync=EXTERNAL_CALENDAR.sync_service,
+    external_calendar_reader=EXTERNAL_CALENDAR.reader,
+    morning_checkin=morning_checkin_state_service,
+    workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
+    diagnostic_capture=DIAGNOSTIC_CAPTURE,
+    log_path=lambda: LOG_PATH,
+    receipt_parser=command_receipt,
+    allowed_tools=lambda: (tool["name"] for tool in COACH_DIALOGUE_TOOLS),
+)
 
 
 def export_stream_transport() -> ExportStreamTransport:
@@ -1381,8 +1356,8 @@ HTTP_API = HttpApiAssembly(
     checkin_service=ATHLETE_DATA.checkin,
     coach_context_preview_service=COACH_CONTEXT.preview_service,
     settings=SETTINGS,
-    recent_log_entries_service=recent_log_entries_service,
-    diagnostic_report_service=diagnostic_report_service,
+    recent_log_entries_service=DIAGNOSTICS_ASSEMBLY.recent_log_entries_service,
+    diagnostic_report_service=DIAGNOSTICS_ASSEMBLY.report_service,
     sync_job_queue_service=SYNC_JOB_QUEUE.service,
     athlete_clock=ATHLETE_CLOCK,
     local_today=lambda: ATHLETE_CLOCK.now().date(),

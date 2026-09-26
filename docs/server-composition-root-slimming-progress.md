@@ -1577,3 +1577,22 @@ were public bootstrap and sync state projections.
   and 32 top-level definitions. It remains above the practical target; S6
   continues with remaining root wiring and factories. Inventory totals do not
   establish completion.
+
+## S6 complete: diagnostics report composition
+
+- Caller trace: HTTP diagnostics routes receive fresh log/report factories;
+  Coach diagnostics tests and provider/sync diagnostics assertions call the
+  root factories directly. There were no fixture patches for these factories.
+- `DiagnosticsAssembly` in `backend/diagnostics/assembly.py` owns the report,
+  Coach receipt-history, and recent-log factories. It accepts explicit manager,
+  lock, repository, current config, provider projections, redactor, log-path
+  factory, receipt parser, and tool-name factory. It keeps every factory lazy
+  and fresh. `LOG_PATH` remains late-bound to preserve tests and runtime path
+  substitutions; redaction and receipt behavior retain their existing owners.
+- HTTP assembly now receives diagnostics factory methods directly. Integration
+  tests call `server.DIAGNOSTICS_ASSEMBLY`; no forwarding aliases remain.
+- Focused results: diagnostics assembly 2, report 2, diagnostics followups 14,
+  providers 50, and architecture 46 tests passed. `compileall` and
+  `git diff --check` passed.
+- Root size after this slice: 1,439 physical / 1,248 nonblank lines, 123
+  imports, and 29 top-level definitions. S6 remains active.
