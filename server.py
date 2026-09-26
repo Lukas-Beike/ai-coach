@@ -174,13 +174,8 @@ from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
 from backend.sync.planned_units import RemotePlannedUnitReconciler
 from backend.sync.planned_calendar_assembly import PlannedCalendarSyncAssembly
-from backend.sync.library import (
-    WorkoutLibraryRefreshService,
-    WorkoutLibraryRemoteReconciler,
-    WorkoutLibrarySyncService,
-    WorkoutLibrarySyncStateService,
-    workout_library_sync_running,
-)
+from backend.sync.library import workout_library_sync_running
+from backend.sync.library_assembly import WorkoutLibrarySyncAssembly
 from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync.garmin_service import (
     GARMIN_AUTOMATIC_SYNC_DAYS,
@@ -765,47 +760,13 @@ def remote_planned_unit_reconciler() -> RemotePlannedUnitReconciler:
     )
 
 
-def workout_library_sync_state_service() -> WorkoutLibrarySyncStateService:
-    """Compose workout-library synchronization persistence and projections."""
-    return WorkoutLibrarySyncStateService(
-        database_manager(), REDACTOR, KEY_VALUE_REPOSITORY, runtime_clock.utc_now
-    )
-
-
 def planning_authority_service() -> PlanningAuthorityService:
     """Compose explicit local-authority decisions before provider sync."""
     return PlanningAuthorityService(
         database_manager(),
-        workout_library_sync_state_service(),
+        WORKOUT_LIBRARY_SYNC.sync_state_service(),
         PLANNING_REVISION_SERVICE,
         runtime_clock.utc_now,
-    )
-
-
-def workout_library_remote_reconciler() -> WorkoutLibraryRemoteReconciler:
-    """Compose local reconciliation for already-read remote templates."""
-    return WorkoutLibraryRemoteReconciler(database_manager(), runtime_clock.utc_now, uuid.uuid4)
-
-
-def workout_library_refresh_service() -> WorkoutLibraryRefreshService:
-    """Compose the read-only initial workout-library refresh."""
-    return WorkoutLibraryRefreshService(
-        CONFIG,
-        database_manager(),
-        PROVIDER_TRANSPORT.intervals_client,
-        workout_library_remote_reconciler(),
-        workout_library_service(),
-        workout_library_sync_state_service(),
-        KEY_VALUE_REPOSITORY,
-        runtime_events.STATE_EVENT_BUFFER,
-        runtime_clock.utc_now,
-    )
-
-
-def workout_library_sync_service() -> WorkoutLibrarySyncService:
-    """Compose the explicit single-entry workout-library synchronization use case."""
-    return WorkoutLibrarySyncService(
-        CONFIG, PROVIDER_TRANSPORT.intervals_client, workout_library_sync_state_service()
     )
 
 
@@ -814,7 +775,7 @@ def selected_workout_sync_service() -> SelectedWorkoutSyncService:
     return SelectedWorkoutSyncService(
         CONFIG,
         database_manager(),
-        workout_library_sync_service(),
+        WORKOUT_LIBRARY_SYNC.sync_service(),
         PLANNED_CALENDAR_SYNC.sync_service(),
         PLANNED_CALENDAR_SYNC.repair_service(),
         REDACTOR.redact_text,
@@ -1192,7 +1153,7 @@ INTERVALS_SYNC = IntervalsSyncAssembly(
     intervals_sync_lock=INTERVALS_SYNC_LOCK,
     sync_job_queue=SYNC_JOB_QUEUE.service,
     remote_planned_unit_reconciler=remote_planned_unit_reconciler,
-    workout_library_refresh_service=workout_library_refresh_service,
+    workout_library_refresh_service=lambda: WORKOUT_LIBRARY_SYNC.refresh_service(),
     workout_library_service=workout_library_service,
     sync_period_defaults=SYNC_PERIOD_DEFAULTS,
     all_sync_days=ALL_SYNC_DAYS,
@@ -1236,6 +1197,17 @@ PLANNED_CALENDAR_SYNC = PlannedCalendarSyncAssembly(
     utc_now=runtime_clock.utc_now,
     today=lambda: ATHLETE_CLOCK.now().date(),
     future_days=PLANNED_CALENDAR_FUTURE_DAYS,
+)
+WORKOUT_LIBRARY_SYNC = WorkoutLibrarySyncAssembly(
+    config=lambda: CONFIG,
+    database_manager=database_manager,
+    intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
+    workout_library_service=workout_library_service,
+    key_values=KEY_VALUE_REPOSITORY,
+    event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    redactor=REDACTOR,
+    utc_now=runtime_clock.utc_now,
+    uuid_factory=uuid.uuid4,
 )
 WEATHER_ASSEMBLY = WeatherAssembly(
     database_manager=database_manager,
@@ -1955,7 +1927,7 @@ def public_bootstrap_service() -> PublicBootstrapService:
             intervals_public_state=intervals_state.public_state,
             intervals_sync_lock=INTERVALS_SYNC_LOCK,
             workout_library_sync_running=workout_library_sync_running,
-            workout_library_sync_state_service=workout_library_sync_state_service,
+            workout_library_sync_state_service=WORKOUT_LIBRARY_SYNC.sync_state_service,
             full_provider_resync_service=PROVIDER_RESYNC.full_resync_service,
             sync_public_state_service=sync_public_state_service,
             sync_period_defaults=SYNC_PERIOD_DEFAULTS,
@@ -2052,7 +2024,7 @@ def public_state_service() -> PublicStateService:
                 sync_public_state=sync_public_state_service(),
                 intervals_sync_lock=INTERVALS_SYNC_LOCK,
                 workout_library_sync_running=workout_library_sync_running,
-                workout_library_sync_state=workout_library_sync_state_service(),
+                workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service(),
                 garmin_sync=GARMIN_ASSEMBLY.sync_service(),
                 provider_resync=PROVIDER_RESYNC.full_resync_service(),
                 planning_preview=adaptive_replan_preview_service(),
@@ -2106,7 +2078,7 @@ def diagnostic_report_service() -> DiagnosticReportService:
         external_calendar_sync=EXTERNAL_CALENDAR.sync_service(),
         external_calendar_reader=EXTERNAL_CALENDAR.reader(),
         morning_checkin=morning_checkin_state_service(),
-        workout_library_sync_state=workout_library_sync_state_service(),
+        workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service(),
         recent_logs=recent_log_entries_service(),
         diagnostic_capture=DIAGNOSTIC_CAPTURE,
     ))

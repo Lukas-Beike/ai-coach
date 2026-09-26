@@ -576,13 +576,13 @@ class ServerPlanningTests(ServerTestCase):
             )
 
     def test_library_is_cached_and_included_in_coach_context(self):
-        imported = server.workout_library_remote_reconciler().reconcile([{
+        imported = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": 42, "name": "Locker Rad", "type": "Ride",
             "description": "- 45m Z2", "moving_time": 2700,
         }])[0]
         self.assertEqual(uuid.UUID(imported["id"]).version, 4)
         self.assertEqual(imported["external_id"], "42")
-        updated = server.workout_library_remote_reconciler().reconcile([{
+        updated = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": 42, "name": "Locker Rad aktualisiert", "type": "Ride",
             "description": "- 45m Z2", "moving_time": 2700,
         }])[0]
@@ -727,13 +727,13 @@ class ServerPlanningTests(ServerTestCase):
                 patch.object(intervals_client_module.IntervalsClient, "create_library_workouts", return_value=[{"id": "synthetic-remote", "type": "Ride"}]) as create, \
                 patch.object(intervals_client_module.IntervalsClient, "update_library_workout", return_value={"id": "synthetic-remote", **parsed_workout_fixture()}) as update:
             with self.assertRaises(server.AppError) as raised:
-                server.workout_library_sync_service().sync_entry(entry["id"])
+                server.WORKOUT_LIBRARY_SYNC.sync_service().sync_entry(entry["id"])
             self.assertEqual(raised.exception.reason, "intervals_workout_verification_failed")
             failed = server.workout_library_service().list()[0]
             self.assertEqual(failed["sync_status"], "sync_error")
             self.assertEqual(failed["external_id"], "synthetic-remote")
             self.assertEqual(failed["description"], "- 30m 85%")
-            synced = server.workout_library_sync_service().sync_entry(entry["id"])
+            synced = server.WORKOUT_LIBRARY_SYNC.sync_service().sync_entry(entry["id"])
             self.assertEqual(synced["sync_status"], "synced")
             create.assert_called_once()
             self.assertEqual(update.call_args.args[0], "synthetic-remote")
@@ -763,7 +763,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(planned["sync_status"], "local")
 
     def test_saved_library_plan_can_be_applied_locally_as_a_batch(self):
-        server.workout_library_remote_reconciler().reconcile([{
+        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": 42, "name": "Locker Rad", "type": "Ride",
             "description": "- 45m Z2", "moving_time": 2700,
         }])
@@ -779,7 +779,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(len(server.planned_unit_service().list()), 1)
 
     def test_library_plan_rejects_duplicate_source_on_same_date(self):
-        server.workout_library_remote_reconciler().reconcile([{
+        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": 46, "name": "Locker Rad", "type": "Ride",
             "description": "- 30m Z2", "moving_time": 1800,
         }])
@@ -794,7 +794,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(len(server.workout_library_service().list()), 1)
 
     def test_library_plan_is_local_only(self):
-        server.workout_library_remote_reconciler().reconcile([{
+        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": 44, "name": "Intervall", "type": "Ride",
             "description": "4x\n- 5m 105%\n- 5m 55%", "moving_time": 2400,
         }])
@@ -1527,7 +1527,7 @@ class ServerPlanningTests(ServerTestCase):
             intervals_client_module.IntervalsClient, "get_workout_library", side_effect=get_library
         ) as get_workout_library:
             with self.assertRaises(server.AppError) as raised:
-                server.workout_library_refresh_service().refresh(
+                server.WORKOUT_LIBRARY_SYNC.refresh_service().refresh(
                     "cancellable", cancel_event=cancel_event
                 )
         self.assertEqual(raised.exception.reason, "chat_cancelled")
@@ -1572,7 +1572,7 @@ class ServerPlanningTests(ServerTestCase):
         client = RecordedIntervalsClient(recorder)
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            result = server.workout_library_refresh_service().refresh("read-only")
+            result = server.WORKOUT_LIBRARY_SYNC.refresh_service().refresh("read-only")
         self.assertEqual(result["local_synced"], 0)
         self.assertEqual(recorder.mutations, [])
 

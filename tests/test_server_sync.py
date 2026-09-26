@@ -616,7 +616,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual({item["id"] for item in snapshot["recent_activities"]}, {"old", "new"})
 
     def test_synced_library_template_must_be_archived_instead_of_deleted(self):
-        entry = server.workout_library_remote_reconciler().reconcile([{"id": "remote-1", "name": "Remote Vorlage", "type": "Ride", "description": "Easy ride"}])[0]
+        entry = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{"id": "remote-1", "name": "Remote Vorlage", "type": "Ride", "description": "Easy ride"}])[0]
         with self.assertRaises(server.AppError) as error:
             server.workout_library_service().update(entry["id"], {"action": "delete"})
         self.assertEqual(error.exception.status, 409)
@@ -642,7 +642,7 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             intervals_client_module.IntervalsClient, "get_workout_library", return_value=[remote]
         ), patch.object(intervals_client_module.IntervalsClient, "create_library_workouts") as create:
-            synced = server.workout_library_sync_service().sync_entry(entry["id"])
+            synced = server.WORKOUT_LIBRARY_SYNC.sync_service().sync_entry(entry["id"])
         self.assertEqual(synced["external_id"], "remote-recovered")
         create.assert_not_called()
         self.assertEqual(server.workout_library_service().list()[0]["sync_status"], "synced")
@@ -1239,7 +1239,7 @@ class ServerSyncTests(ServerTestCase):
             for state in ("local", "sync_error", "remote_missing")
         ]
         for entry, state in zip(entries[1:], ("sync_error", "remote_missing")):
-            server.workout_library_sync_state_service().update(
+            server.WORKOUT_LIBRARY_SYNC.sync_state_service().update(
                 entry["id"], state, "fake failure"
             )
         client = RecordedIntervalsClient(recorder)
@@ -1252,7 +1252,7 @@ class ServerSyncTests(ServerTestCase):
 
     def test_full_intervals_resync_preserves_local_library_and_never_remote_data(self):
         server.athlete_context_service().save({}, [{"name": "Old local race", "event_date": (date.today() + timedelta(days=30)).isoformat()}])
-        server.workout_library_remote_reconciler().reconcile([{
+        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": "old-workout", "name": "Local template", "type": "Ride",
             "description": "- 30m Z2", "moving_time": 1800,
         }])

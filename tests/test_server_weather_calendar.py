@@ -736,7 +736,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(set(result["provider_sync"]["pagination"]), {"activities"})
 
     def test_library_plan_ignores_stale_provider_calendar_until_imported(self):
-        server.workout_library_remote_reconciler().reconcile([{
+        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": 43, "name": "Tempo", "type": "Ride",
             "description": "- 30m 85%", "moving_time": 1800,
         }])
@@ -802,7 +802,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
         with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client):
-            result = server.workout_library_sync_service().plan_remote(
+            result = server.WORKOUT_LIBRARY_SYNC.sync_service().plan_remote(
                 "remote-workout-1",
                 {"name": "Planned", "type": "Ride"},
                 (date.today() + timedelta(days=1)).isoformat(),

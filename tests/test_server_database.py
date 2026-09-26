@@ -426,7 +426,7 @@ class ServerDatabaseTests(ServerTestCase):
             httpd.server_close()
 
     def test_privacy_export_contains_archived_and_provider_state_without_sessions_or_credentials(self):
-        archived = server.workout_library_remote_reconciler().reconcile([{
+        archived = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": "remote-template-1", "name": "Archived template", "type": "Ride",
             "description": "- 60m 60% local", "duration_minutes": 60,
         }])[0]

@@ -665,3 +665,49 @@ mocked providers; no live account or runtime data was used.
   and diff check passed.
 - Measured `server.py`: 2,400 physical / 2,077 nonblank lines, 214 AST import
   statements, 135 top-level functions. No Docker or SQLCipher dependency change.
+
+## S2h boundary before implementation: workout-library provider sync
+
+- `workout_library_sync_state_service()`,
+  `workout_library_remote_reconciler()`, `workout_library_refresh_service()`,
+  and `workout_library_sync_service()` form the provider-facing workout-library
+  sync group. Consumers include Intervals snapshot sync, selected-workout sync,
+  planning authority, public state and diagnostics, plus provider, planning,
+  Coach, database, HTTP, and sync tests. No e2e fixture or `tests/support.py`
+  patches these root factories. No tests patch their constructors through
+  `server`; class patches already target `backend.sync.library`.
+- Preserve fresh services, current CONFIG/database manager and Intervals
+  transport callback; fresh local remote reconciler and state service per old
+  factory call; shared key/value repository and state-event buffer; the local
+  `workout_library_service()` owner; redactor; UTC clock; and UUID source. The
+  process-wide `workout_library_sync_running()` state remains owned by
+  `backend/sync/library.py`. `planning_authority_service()` keeps its existing
+  call path through the sync-state operation.
+- Proposed owner/interface: `WorkoutLibrarySyncAssembly` in
+  `backend/sync/library_assembly.py`, exposing only `sync_state_service()`,
+  `remote_reconciler()`, `refresh_service()`, and `sync_service()`. It receives
+  explicit providers for config, manager, transport, local library service,
+  key/value repository, event buffer, redactor, UTC clock, and UUID generation.
+  Provider-client resolution remains deferred until the operation requests a
+  client; no cache or process state is added.
+
+## S2h: workout-library provider sync assembly
+
+- Completed in `backend/sync/library_assembly.py` as
+  `WorkoutLibrarySyncAssembly`, exposing sync-state service, remote reconciler,
+  read-only refresh service, and explicit sync service factories. Removed all
+  four root factories and migrated Intervals sync, planning authority, selected
+  sync, public state, diagnostics, and tests to the assembly. Local
+  `workout_library_service()` remains owned by planning.
+- Preserved fresh services and state services, active config/database manager and
+  provider transport, the same repository/event buffer/redactor/local library
+  owner/UTC clock/UUID source, and the shared library sync lock owned by
+  `backend/sync/library.py`. Intervals snapshot sync retains lazy lookup of the
+  assembly through its existing callback.
+- Assembly and sync-domain tests passed: 61 tests. The first guarded integration
+  pass found a stale bootstrap callback left after the root factory removal; it
+  now points to the assembly operation. The complete affected guarded matrix then
+  passed: 467 tests, 4 SQLCipher-dependent skips. Inventory check, compileall,
+  diff check, and root factory reference search passed.
+- Measured `server.py`: 2,372 physical / 2,057 nonblank lines, 215 AST import
+  statements, 131 top-level functions.

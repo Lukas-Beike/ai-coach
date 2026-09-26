@@ -335,7 +335,7 @@ class ServerHttpTests(ServerTestCase):
                 self.assertEqual([item["content"] for item in page["messages"]], [expected])
 
     def test_library_pagination_has_stable_type_name_id_cursor(self):
-        server.workout_library_remote_reconciler().reconcile([
+        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([
             {"id": f"template-{index}", "name": f"Template {index}", "type": "Ride", "description": "- 30m Z2"}
             for index in range(3)
         ])

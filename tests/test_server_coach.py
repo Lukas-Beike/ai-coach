@@ -796,7 +796,7 @@ class ServerCoachTests(ServerTestCase):
         wake_worker.assert_called_once()
 
     def test_coach_planning_reuses_matching_local_template(self):
-        template = server.workout_library_remote_reconciler().reconcile([{
+        template = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": "remote-template-1",
             "name": "Locker Lauf",
             "type": "Run",
