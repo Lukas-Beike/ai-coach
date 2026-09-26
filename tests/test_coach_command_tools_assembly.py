@@ -14,7 +14,8 @@ class CoachCommandToolsAssemblyTests(unittest.TestCase):
             "structured_plan_sync", "plan_repair_manifest", "plan_push_command",
             "provider_refresh_command", "checkin_service", "activity_feedback_service",
             "competition_service", "nutrition_service", "profile_service",
-            "database_manager", "database_lock",
+            "database_manager", "database_lock", "duplicate_activity",
+            "intervals_client",
         )
         dependencies = {name: Mock(name=name) for name in names}
         assembly = CoachCommandToolsAssembly(**dependencies)
@@ -23,7 +24,7 @@ class CoachCommandToolsAssemblyTests(unittest.TestCase):
     def test_factories_keep_resolution_lazy_and_preserve_shared_dependencies(self):
         assembly, deps = self.make_assembly()
         for name, dependency in deps.items():
-            if name != "database_lock":
+            if name not in {"database_lock", "intervals_client"}:
                 dependency.assert_not_called()
 
         with patch.multiple(
@@ -44,6 +45,8 @@ class CoachCommandToolsAssemblyTests(unittest.TestCase):
             deps["plan_repair_manifest"].return_value,
             deps["plan_push_command"].return_value,
             deps["provider_refresh_command"].return_value,
+            duplicate_activity=deps["duplicate_activity"].return_value,
+            intervals_client_factory=deps["intervals_client"],
         )
         constructors["CoachAthleteRecordToolService"].assert_called_once_with(
             deps["checkin_service"].return_value,
@@ -55,7 +58,7 @@ class CoachCommandToolsAssemblyTests(unittest.TestCase):
             deps["profile_service"].return_value, deps["database_manager"].return_value, deps["database_lock"]
         )
         for name, dependency in deps.items():
-            if name != "database_lock":
+            if name not in {"database_lock", "intervals_client"}:
                 self.assertEqual(dependency.call_count, 1)
 
 

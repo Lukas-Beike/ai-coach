@@ -941,6 +941,8 @@ COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
     profile_service=lambda: ATHLETE_DATA.profile(),
     database_manager=lambda: database_manager(),
     database_lock=DB_LOCK,
+    duplicate_activity=ATHLETE_DATA.duplicate_activity,
+    intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
 )
 
 

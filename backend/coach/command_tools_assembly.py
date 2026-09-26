@@ -30,6 +30,8 @@ class CoachCommandToolsAssembly:
         profile_service: Callable[[], Any],
         database_manager: Callable[[], Any],
         database_lock: Any,
+        duplicate_activity: Callable[[], Any],
+        intervals_client: Callable[[], Any],
     ) -> None:
         self._sync_job_queue = sync_job_queue
         self._planning_authority = planning_authority
@@ -45,6 +47,8 @@ class CoachCommandToolsAssembly:
         self._profile_service = profile_service
         self._database_manager = database_manager
         self._database_lock = database_lock
+        self._duplicate_activity = duplicate_activity
+        self._intervals_client = intervals_client
 
     def sync_tool_service(self) -> CoachSyncToolService:
         return CoachSyncToolService(
@@ -55,6 +59,8 @@ class CoachCommandToolsAssembly:
             self._plan_repair_manifest(),
             self._plan_push_command(),
             self._provider_refresh_command(),
+            duplicate_activity=self._duplicate_activity(),
+            intervals_client_factory=self._intervals_client,
         )
 
     def athlete_record_tool_service(self) -> CoachAthleteRecordToolService:
