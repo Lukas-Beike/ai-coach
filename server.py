@@ -74,6 +74,7 @@ from backend.sync.worker_assembly import SyncJobWorkerAssembly
 from backend.sync.scheduler_assembly import SyncSchedulerAssembly
 from backend.sync.intervals_assembly import IntervalsSyncAssembly
 from backend.sync.external_calendar_assembly import ExternalCalendarAssembly
+from backend.sync.provider_resync_assembly import ProviderResyncAssembly
 from backend.sync import external_calendar as external_calendar_runtime
 from backend.sync.persistence_assembly import SyncPersistenceAssembly
 from backend.sync.garmin_assembly import GarminAssembly
@@ -84,7 +85,6 @@ from backend.sync.gates import (
 from backend.sync import intervals_state
 from backend.sync import observation as sync_observation
 from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
-from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 from backend.weather.assembly import WeatherAssembly
 from backend.settings import SettingsService
 from backend.db.bootstrap import initialize_application_database
@@ -190,13 +190,7 @@ from backend.sync.garmin_service import (
     GarminMorningRemoteReader,
     shared_garmin_sync_lock,
 )
-from backend.sync.full_resync import (
-    FullProviderResyncService,
-    FullResyncOperationJournal,
-    FullResyncProviderExecution,
-    FullResyncStateStore,
-    PROVIDER_RESYNC_KEYS,
-)
+from backend.sync.full_resync import PROVIDER_RESYNC_KEYS
 from backend.sync import worker as sync_worker_runtime
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.planning import adaptive as planning_adaptive
@@ -451,7 +445,7 @@ def sync_command_endpoint() -> SyncCommandEndpoint:
     """Compose authenticated manual synchronization POST commands."""
     return SyncCommandEndpoint(
         SYNC_JOB_QUEUE.service(), SYNC_PERSISTENCE.state_repository(),
-        INTERVALS_SYNC.performance_service(), full_provider_resync_service(),
+        INTERVALS_SYNC.performance_service(), PROVIDER_RESYNC.full_resync_service(),
         lambda: uuid.uuid4().hex, SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS,
     )
 
@@ -607,31 +601,6 @@ def sync_public_state_service() -> SyncPublicStateService:
     )
 
 
-def full_provider_resync_service() -> FullProviderResyncService:
-    """Compose complete provider reset orchestration."""
-    observer = PROVIDER_SYNC.operation_observer()
-    return FullProviderResyncService(
-        FullResyncProviderExecution(
-            CONFIG,
-            INTERVALS_SYNC.sync_service(),
-            GARMIN_ASSEMBLY.sync_service(),
-            competition_sync_service(),
-            INTERVALS_RESYNC_GATE,
-            GARMIN_RESYNC_GATE,
-            ALL_SYNC_DAYS,
-        ),
-        FullResyncStateStore(database_manager(), KEY_VALUE_REPOSITORY),
-        FullResyncOperationJournal(
-            observer,
-            LOGGER,
-            REDACTOR.redact_text,
-            runtime_clock.utc_now,
-            time.perf_counter,
-            lambda: uuid.uuid4().hex,
-        ),
-    )
-
-
 def public_weather_state_service() -> PublicWeatherStateService:
     """Compose the public weather endpoint projection."""
     return PublicWeatherStateService(WEATHER_ASSEMBLY.service())
@@ -753,27 +722,6 @@ def history_undo_service() -> HistoryUndoService:
 def competition_service() -> CompetitionService:
     """Compose transactional local competition use cases."""
     return CompetitionService(database_manager(), COMPETITION_REPOSITORY, runtime_clock.utc_now)
-
-
-def competition_sync_reconciler() -> CompetitionSyncReconciler:
-    """Compose local competition reconciliation persistence."""
-    return CompetitionSyncReconciler(database_manager(), uuid.uuid4)
-
-
-def competition_sync_service() -> CompetitionSyncService:
-    """Compose the complete competition synchronization use case."""
-    return CompetitionSyncService(
-        CONFIG,
-        PROVIDER_TRANSPORT.intervals_client,
-        competition_sync_reconciler(),
-        competition_service(),
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        runtime_events.STATE_EVENT_BUFFER,
-        REDACTOR,
-        LOGGER,
-        runtime_clock.utc_now,
-    )
 
 
 def training_plan_service() -> planning_training_plans.TrainingPlanService:
@@ -1328,6 +1276,27 @@ WEATHER_ASSEMBLY = WeatherAssembly(
     logger=LOGGER,
 )
 
+PROVIDER_RESYNC = ProviderResyncAssembly(
+    config=lambda: CONFIG,
+    intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
+    competition_service=competition_service,
+    intervals_sync_service=INTERVALS_SYNC.sync_service,
+    garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
+    database_manager=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    redactor=REDACTOR,
+    logger=LOGGER,
+    utc_now=runtime_clock.utc_now,
+    uuid_factory=lambda: uuid.uuid4().hex,
+    monotonic=time.perf_counter,
+    operation_observer=PROVIDER_SYNC.operation_observer,
+    intervals_resync_gate=INTERVALS_RESYNC_GATE,
+    garmin_resync_gate=GARMIN_RESYNC_GATE,
+    all_sync_days=ALL_SYNC_DAYS,
+)
+
+
 SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     sync_state_repository=SYNC_PERSISTENCE.state_repository,
     queue_service=SYNC_JOB_QUEUE.service,
@@ -1339,7 +1308,7 @@ SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     intervals_sync_service=INTERVALS_SYNC.sync_service,
     performance_refresh_service=INTERVALS_SYNC.performance_service,
     selected_workout_sync_service=selected_workout_sync_service,
-    competition_sync_service=competition_sync_service,
+    competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
     operation_observer=PROVIDER_SYNC.operation_observer,
     intervals_resync_gate=INTERVALS_RESYNC_GATE,
     garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
@@ -2006,7 +1975,7 @@ def public_bootstrap_service() -> PublicBootstrapService:
             intervals_sync_lock=INTERVALS_SYNC_LOCK,
             workout_library_sync_running=workout_library_sync_running,
             workout_library_sync_state_service=workout_library_sync_state_service,
-            full_provider_resync_service=full_provider_resync_service,
+            full_provider_resync_service=PROVIDER_RESYNC.full_resync_service,
             sync_public_state_service=sync_public_state_service,
             sync_period_defaults=SYNC_PERIOD_DEFAULTS,
             all_sync_days=ALL_SYNC_DAYS,
@@ -2104,7 +2073,7 @@ def public_state_service() -> PublicStateService:
                 workout_library_sync_running=workout_library_sync_running,
                 workout_library_sync_state=workout_library_sync_state_service(),
                 garmin_sync=GARMIN_ASSEMBLY.sync_service(),
-                provider_resync=full_provider_resync_service(),
+                provider_resync=PROVIDER_RESYNC.full_resync_service(),
                 planning_preview=adaptive_replan_preview_service(),
                 morning_checkin=morning_checkin_state_service(),
                 coach_quick_actions=coach_quick_actions_service(),

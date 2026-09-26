@@ -566,3 +566,55 @@ mocked providers; no live account or runtime data was used.
   statements, 140 top-level functions.
 - Tests used temporary data and mocked providers only. Docker/SQLCipher
   integration remains unavailable on this host.
+
+## S2f boundary before implementation: competition and full-provider resync
+
+- `competition_sync_reconciler()`, `competition_sync_service()`, and
+  `full_provider_resync_service()` form one provider-resync group. The
+  competition sync service is also an executor operation; full resync composes
+  fresh Intervals, Garmin, and competition services with one observer, state
+  store, and operation journal. Callers include manual sync commands, queued
+  execution, public/Coach sync state, and provider, audit-remediation, sync,
+  planning, and Coach tests. No e2e fixture names these root factories.
+- Preserve fresh-per-call services, current CONFIG/database manager, key/value
+  repo and event buffer, provider transport callback, redactor/logger/UTC clock,
+  fresh operation observer, shared Intervals/Garmin gates, all-days setting,
+  operation journal ID/time sources, and the same Intervals/Garmin service
+  owners. Local `competition_service()` stays in planning ownership and is
+  passed as a callback. No process cache is introduced.
+- The direct constructor patch in `tests/test_server_sync.py` targets
+  `server.CompetitionSyncService` for executor dispatch; move it to the class
+  lookup in the new assembly. Existing tests otherwise call the root factories
+  directly; migrate those calls to the assembly. No test patches the full-resync
+  classes.
+- Proposed owner/interface: `ProviderResyncAssembly` in
+  `backend/sync/provider_resync_assembly.py`, exposing only
+  `competition_reconciler()`, `competition_sync_service()`, and
+  `full_resync_service()`. It stores late config/manager/service providers and
+  starts no provider I/O during construction.
+
+## S2f: competition and full-provider resync assembly
+
+- Completed in `backend/sync/provider_resync_assembly.py` as
+  `ProviderResyncAssembly`, exposing only competition reconciliation,
+  competition synchronization, and full-provider resync construction. Removed
+  the three root factories and migrated server, test, and executor lookup sites.
+- Preserved fresh use cases, the current config and database manager, shared
+  key/value repository and event buffer, current transport callback, the same
+  Intervals/Garmin service owners and gates, the operation observer, journal
+  clocks/IDs, and all-days setting. Transport lookup remains late so tests and
+  runtime transport replacement observe the current method.
+- Updated bootstrap to use the assembly directly and moved the daily-marker
+  constructor patch to `backend.sync.scheduler_assembly`. Added a callback
+  laziness regression. Focused assembly/domain tests passed: 44 tests. The wider
+  focused run found these two stale references; their isolated rerun passed: 2
+  tests. The daily competition case also passed under an external network-deny
+  guard. Inventory check, compileall, and diff check passed.
+- The first unguarded integration attempt revealed a provider callback patch
+  point regression and reached `intervals.icu`; it was interrupted. The callback
+  now resolves the current transport, and all later server integration checks
+  were run with external networking blocked and loopback allowed. No provider
+  credentials or real application data were used.
+- Measured `server.py`: 2,419 physical / 2,092 nonblank lines, 214 AST import
+  statements, 137 top-level functions. Docker/SQLCipher integration remains
+  unavailable on this host.

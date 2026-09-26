@@ -24,6 +24,7 @@ from backend.sync import intervals_assembly as intervals_assembly_module
 from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
 from backend.sync.library import WorkoutLibraryRefreshService, WorkoutLibrarySyncService
 from backend.sync import garmin_service
+from backend.sync import provider_resync_assembly as provider_resync_assembly_module
 from backend.sync.performance import PerformanceRefreshFollowupService
 from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync import queue as sync_queue
@@ -231,7 +232,7 @@ class ServerSyncTests(ServerTestCase):
         competition_service = Mock()
         competition_service.sync.return_value = {"status": "ok", "pushed": 1}
         with patch.object(intervals_assembly_module, "PerformanceRefreshService", return_value=performance_service), patch.object(
-            server, "CompetitionSyncService", return_value=competition_service
+            provider_resync_assembly_module, "CompetitionSyncService", return_value=competition_service
         ):
             self.assertEqual(server.SYNC_JOB_EXECUTION.executor().execute(performance_job)["status"], "ok")
             self.assertEqual(server.SYNC_JOB_EXECUTION.executor().execute(competition_job)["pushed"], 1)
@@ -263,7 +264,7 @@ class ServerSyncTests(ServerTestCase):
         competition_service = Mock()
         competition_service.sync.return_value = {"status": "ok"}
         with patch.object(IntervalsSyncService, "sync", return_value={"status": "ok"}) as sync, patch.object(
-            server, "CompetitionSyncService", return_value=competition_service
+            provider_resync_assembly_module, "CompetitionSyncService", return_value=competition_service
         ), patch.object(
             sync_queue.SyncJobQueueService,
             "enqueue",
@@ -1203,7 +1204,7 @@ class ServerSyncTests(ServerTestCase):
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
         ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            server.full_provider_resync_service().resync("intervals")
+            server.PROVIDER_RESYNC.full_resync_service().resync("intervals")
         self.assertEqual(recorder.mutations, [])
 
     def test_explicit_competition_sync_records_create_change_and_delete_contract(self):
@@ -1218,7 +1219,7 @@ class ServerSyncTests(ServerTestCase):
         client = RecordedIntervalsClient(recorder)
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            created = server.competition_sync_service().sync("explicit approval", push_local=True)
+            created = server.PROVIDER_RESYNC.competition_sync_service().sync("explicit approval", push_local=True)
             server.competition_service().save({
                 "competition_id": competition_id,
                 "name": "Explicit race changed",
@@ -1226,7 +1227,7 @@ class ServerSyncTests(ServerTestCase):
                 "sport": "Cycling",
             })
             server.athlete_context_service().save({}, [])
-            deleted = server.competition_sync_service().sync("explicit approval", push_local=True)
+            deleted = server.PROVIDER_RESYNC.competition_sync_service().sync("explicit approval", push_local=True)
         self.assertEqual(created["pushed"], 1)
         self.assertEqual(deleted["deleted_remote"], 1)
         self.assertEqual([call["method"] for call in recorder.mutations], ["POST", "DELETE"])
@@ -1297,7 +1298,7 @@ class ServerSyncTests(ServerTestCase):
         ), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ), patch.object(SelectedWorkoutSyncService, "sync", return_value={"workouts": 0}):
-            result = server.full_provider_resync_service().resync("intervals")
+            result = server.PROVIDER_RESYNC.full_resync_service().resync("intervals")
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(deleted, [])
@@ -1325,7 +1326,7 @@ class ServerSyncTests(ServerTestCase):
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
             with self.assertRaises(RuntimeError):
-                server.full_provider_resync_service().resync("intervals")
+                server.PROVIDER_RESYNC.full_resync_service().resync("intervals")
         self.assertEqual(
             server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["synced_at"], "old"
         )
@@ -1339,7 +1340,7 @@ class ServerSyncTests(ServerTestCase):
             side_effect=RuntimeError("provider unavailable"),
         ):
             with self.assertRaises(RuntimeError):
-                server.full_provider_resync_service().resync("garmin")
+                server.PROVIDER_RESYNC.full_resync_service().resync("garmin")
         self.assertEqual(json.loads(server.key_value_service().get("garmin_snapshot")), {"old": True})
 
     def test_full_resync_blocks_intervals_operations(self):
@@ -1374,7 +1375,7 @@ class ServerSyncTests(ServerTestCase):
             fixture.write_text(json.dumps({"activities": [], "errors": []}), encoding="utf-8")
             config = replace(server.CONFIG, garmin_fixture_path=str(fixture))
             with patch.object(server, "CONFIG", config):
-                result = server.full_provider_resync_service().resync("garmin")
+                result = server.PROVIDER_RESYNC.full_resync_service().resync("garmin")
         self.assertEqual(result["status"], "ok")
         self.assertNotEqual(server.key_value_service().get("garmin_snapshot"), json.dumps({"old": True}))
         self.assertEqual(server.GARMIN_ASSEMBLY.payload_service().snapshot().get("source"), "fixture")
@@ -1414,8 +1415,8 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            result = server.competition_sync_service().sync("test", push_local=True)
-            second = server.competition_sync_service().sync("test", push_local=True)
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
+            second = server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
 
         self.assertEqual(result["pushed"], 1)
         self.assertEqual(second["pushed"], 0)
@@ -1455,7 +1456,7 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            result = server.competition_sync_service().sync("test", push_local=True)
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
 
         self.assertEqual(result["pushed"], 0)
         self.assertEqual(result["conflicts"], 1)
@@ -1499,7 +1500,7 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            result = server.competition_sync_service().sync("test")
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test")
 
         self.assertEqual(result["imported"], 1)
         competition = server.competition_service().list()[0]
@@ -1532,7 +1533,7 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            result = server.competition_sync_service().sync("test")
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test")
 
         self.assertEqual(result["pushed"], 0)
         self.assertEqual(result["skipped"], 1)

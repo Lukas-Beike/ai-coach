@@ -1605,7 +1605,7 @@ class ServerPlanningTests(ServerTestCase):
         }])
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            result = server.competition_sync_service().sync("read-only")
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("read-only")
         competition = server.competition_service().list()[0]
         self.assertEqual(result["pushed"], 0)
         self.assertEqual(competition["name"], "Local pending change")
@@ -1654,7 +1654,7 @@ class ServerPlanningTests(ServerTestCase):
         with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            server.competition_sync_service().sync("test")
+            server.PROVIDER_RESYNC.competition_sync_service().sync("test")
             adopted = server.competition_service().resolve_conflict(competition_id, "adopt_remote")
         self.assertEqual(adopted["competition"]["name"], "Remote Race")
         self.assertEqual(adopted["competition"]["sync_state"], "synced")
@@ -1670,10 +1670,10 @@ class ServerPlanningTests(ServerTestCase):
         with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            server.competition_sync_service().sync("test")
+            server.PROVIDER_RESYNC.competition_sync_service().sync("test")
             # Explicitly choosing the local version enables a provider update.
             server.competition_service().resolve_conflict(competition_id, "keep_local")
-            result = server.competition_sync_service().sync("test", push_local=True)
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
         self.assertEqual(result["pushed"], 1)
         self.assertEqual(server.competition_service().list()[0]["sync_state"], "synced")
 
@@ -1697,9 +1697,9 @@ class ServerPlanningTests(ServerTestCase):
         with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            server.competition_sync_service().sync("test", push_local=True)
+            server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
             server.athlete_context_service().save({}, [])
-            result = server.competition_sync_service().sync("test", push_local=True)
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
 
         self.assertEqual(result["deleted_remote"], 1)
         self.assertEqual(deleted, [{"id": "888"}])

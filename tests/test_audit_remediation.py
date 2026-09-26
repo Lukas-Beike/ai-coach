@@ -25,6 +25,7 @@ from backend.planning import competitions as planning_competitions
 from backend.planning import context as planning_context
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync import garmin as garmin_sync
+from backend.sync import scheduler_assembly as sync_scheduler_assembly
 from backend.weather import cache as weather_cache
 
 server = dialogue.server
@@ -52,7 +53,7 @@ class AuditRemediationTests(unittest.TestCase):
         client = Mock()
         client.fetch_competition_events.side_effect = fetch
         with patch.object(intervals_client_module, "IntervalsClient", return_value=client):
-            server.competition_sync_service().sync()
+            server.PROVIDER_RESYNC.competition_sync_service().sync()
         current = server.competition_service().list()[0]
         self.assertEqual(current["name"], "New local name")
         self.assertEqual(current["sync_dirty"], 1)
@@ -63,9 +64,9 @@ class AuditRemediationTests(unittest.TestCase):
         client = Mock()
         client.fetch_competition_events.return_value = [remote]
         with patch.object(intervals_client_module, "IntervalsClient", return_value=client):
-            server.competition_sync_service().sync()
+            server.PROVIDER_RESYNC.competition_sync_service().sync()
             self.assertEqual(server.competition_service().list(), [])
-            server.competition_sync_service().sync(push_local=True)
+            server.PROVIDER_RESYNC.competition_sync_service().sync(push_local=True)
         self.assertEqual(server.competition_service().list(), [])
         client.bulk_delete_events.assert_called_once()
 
@@ -79,7 +80,7 @@ class AuditRemediationTests(unittest.TestCase):
                 db.execute("INSERT INTO competition_sync_tombstones VALUES ('later', '456', 'later-external', ?)", (runtime_clock.utc_now(),))
         client.bulk_delete_events.side_effect = delete
         with patch.object(intervals_client_module, "IntervalsClient", return_value=client):
-            server.competition_sync_service().sync(push_local=True)
+            server.PROVIDER_RESYNC.competition_sync_service().sync(push_local=True)
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual([row["id"] for row in db.execute("SELECT id FROM competition_sync_tombstones")], ["later"])
 
@@ -165,7 +166,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
             self.assertEqual(db.execute("SELECT status FROM provider_refresh_history ORDER BY started_at DESC LIMIT 1").fetchone()["status"], "error")
 
     def test_garmin_daily_schedule_is_independent_of_intervals(self):
-        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="", calendar_ical_url="")), patch.object(garmin_sync.GarminFixtureLoader, "path", return_value=Path("synthetic")), patch.object(server, "DailySyncMarkerService") as marker_service:
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="", calendar_ical_url="")), patch.object(garmin_sync.GarminFixtureLoader, "path", return_value=Path("synthetic")), patch.object(sync_scheduler_assembly, "DailySyncMarkerService") as marker_service:
             marker_service.return_value.is_due.return_value = True
             server.SYNC_SCHEDULERS.daily_scheduler().schedule()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:

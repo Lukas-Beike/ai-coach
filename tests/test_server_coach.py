@@ -915,7 +915,7 @@ class ServerCoachTests(ServerTestCase):
         with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            result = server.competition_sync_service().sync("test", push_local=True)
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
 
         self.assertEqual(result["pushed"], 1)
         self.assertEqual(pushed[0]["id"], 123)

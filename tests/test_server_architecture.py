@@ -2063,13 +2063,13 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     coach_activity_read_tool_service coach_read_tool_service state_version_service
     public_performance_state_service public_feedback_state_service
     sync_public_state_service
-    full_provider_resync_service
+
     public_weather_state_service
     morning_body_battery_service calendar_conflict_service
     activity_feedback_service activity_read_service duplicate_activity_service
     checkin_service profile_service coach_profile_update_service
     change_history_service history_undo_service competition_service
-    competition_sync_reconciler competition_sync_service training_plan_service
+    training_plan_service
     planned_unit_service planned_unit_sync_state_writer planned_calendar_sync_service
     planned_calendar_repair_service remote_planned_unit_reconciler
     workout_library_sync_state_service planning_authority_service
