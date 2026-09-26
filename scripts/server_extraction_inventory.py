@@ -209,6 +209,8 @@ def _explicit_owner(name: str) -> str | None:
             "ATHLETE_PROFILE_SERVICE": COMPOSITION_ROOT,
             "ATHLETE_DATA": "backend/athlete/assembly",
             "PLANNING_DATA": "backend/planning/assembly",
+            "PRIVACY_ASSEMBLY": "backend/privacy",
+            "BACKUP_ASSEMBLY": "backend/backup/assembly",
             "EXTERNAL_CALENDAR": COMPOSITION_ROOT,
             "AppError": ERRORS_MODULE,
             "public_app_error_status": ERRORS_MODULE,

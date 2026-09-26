@@ -2080,7 +2080,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     structured_training_plan_replacement_service adaptive_replan_apply_service
     illness_pause_sync_service coach_adaptive_apply_service
     adaptive_preview_followup_service adaptive_replan_preview_service
-    privacy_data_export_service privacy_delete_service athlete_context_service
+    athlete_context_service
     initialise_database key_value_service
     gemini_json_client audio_transcription_client gemini_stream_client
     openai_responses_client coach_conversation_provision_service
@@ -2110,8 +2110,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     public_state_local_prelude_service public_state_weather_prelude_service
     public_state_calendar_projection_service public_state_service
     recent_log_entries_service coach_diagnostic_history_service diagnostic_report_service
-    privacy_archive_export_service database_backup_service export_stream_transport
-    database_restore_validation_service database_restore_service readiness_service
+    export_stream_transport readiness_service
     request_handler_class main
 """.split())
 
@@ -3380,7 +3379,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "do_POST",
             "PRIVACY_RESTORE_POST_ROUTES",
             ("/api/privacy/restore",),
-            "PrivacyRestorePostRoutes(session_auth_service, database_restore_service, MAX_BACKUP_BYTES)",
+            "PrivacyRestorePostRoutes(session_auth_service, BACKUP_ASSEMBLY.restore_service, MAX_BACKUP_BYTES)",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "privacy_restore_post.py"
@@ -3404,13 +3403,13 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_data_post",
             "PRIVACY_DELETE_POST_ROUTES",
             ("/api/privacy/delete", "LOKALE DATEN LÖSCHEN"),
-            "PrivacyDeletePostRoutes(privacy_delete_service)",
+            "PrivacyDeletePostRoutes(PRIVACY_ASSEMBLY.delete_service)",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "privacy_delete_post.py"
         ).read_text(encoding="utf-8")
         self.assertNotIn("server", route_source.casefold())
-        self.assertNotIn("privacy_delete_service().delete()", ast.unparse(server_tree))
+        self.assertNotIn("PRIVACY_ASSEMBLY.delete_service().delete()", ast.unparse(server_tree))
 
     def test_settings_put_routes_are_owned_by_http_api_module(self) -> None:
         self._assert_write_route_owned(
@@ -3462,7 +3461,7 @@ class ServerArchitectureTests(unittest.TestCase):
             [
                 "session_auth_service",
                 "export_stream_transport",
-                "privacy_delete_service",
+                "PRIVACY_ASSEMBLY.delete_service",
             ],
         )
 

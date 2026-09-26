@@ -125,7 +125,7 @@ class ProviderReviewTests(unittest.TestCase):
 
         def erase():
             with runtime_maintenance.MAINTENANCE_GATE.operation():
-                server.privacy_delete_service().delete("LOKALE DATEN LÖSCHEN")
+                server.PRIVACY_ASSEMBLY.delete_service().delete("LOKALE DATEN LÖSCHEN")
             deleted.set()
 
         worker = threading.Thread(target=writer)
@@ -145,13 +145,13 @@ class ProviderReviewTests(unittest.TestCase):
     def test_privacy_delete_discards_queued_provider_payloads(self):
         server.SYNC_JOB_QUEUE.service().enqueue("intervals", "refresh", {"days": 7})
         server.SYNC_JOB_QUEUE.service().enqueue("garmin", "refresh", {"days": 7})
-        server.privacy_delete_service().delete("LOKALE DATEN LÖSCHEN")
+        server.PRIVACY_ASSEMBLY.delete_service().delete("LOKALE DATEN LÖSCHEN")
         self.assertIsNone(server.SYNC_JOB_QUEUE.store().claim())
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     def test_privacy_delete_discards_claimed_coach_payload_without_failure_write(self):
         job = {"_maintenance_generation": runtime_maintenance.MAINTENANCE_GATE.current_generation()}
-        server.privacy_delete_service().delete("LOKALE DATEN LÖSCHEN")
+        server.PRIVACY_ASSEMBLY.delete_service().delete("LOKALE DATEN LÖSCHEN")
         with patch("backend.coach.chat_turn.CoachChatTurnService.run") as coach, patch("backend.coach.turn_failures.CoachTurnFailureService.persist") as failure:
             server.coach_background_job_runner().run(job)
         coach.assert_not_called()
@@ -168,7 +168,7 @@ class ProviderReviewTests(unittest.TestCase):
             raise server.AppError(400, "Synthetic provider failure")
 
         def erase():
-            server.privacy_delete_service().delete("LOKALE DATEN LÖSCHEN")
+            server.PRIVACY_ASSEMBLY.delete_service().delete("LOKALE DATEN LÖSCHEN")
             deleted.set()
 
         executor = server.SYNC_JOB_EXECUTION.executor()

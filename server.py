@@ -36,12 +36,7 @@ from backend.errors import (
 from backend import config as app_config
 from backend import observability
 from backend.calendar import local as calendar_local
-from backend.privacy import (
-    PrivacyDataExportDependencies,
-    PrivacyDataExportService,
-    PrivacyDeleteDependencies,
-    PrivacyDeleteService,
-)
+from backend.privacy import PrivacyAssembly
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -292,16 +287,7 @@ from backend.http_api.requests import (
     read_body as read_request_body,
     read_json as read_request_json,
 )
-from backend.backup.export import (
-    PrivacyArchiveExportConfig,
-    PrivacyArchiveExportService,
-)
-from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
-from backend.backup.restore import DatabaseRestoreConfig, DatabaseRestoreService
-from backend.backup.restore_validation import (
-    DatabaseRestoreValidationConfig,
-    DatabaseRestoreValidationService,
-)
+from backend.backup.assembly import BackupAssembly
 
 try:
     from sqlcipher3 import dbapi2 as sqlite_backend
@@ -660,6 +646,53 @@ PLANNING_DATA = PlanningDataAssembly(
     ),
     plan_adjustment_repository=PLAN_ADJUSTMENT_REPOSITORY,
 )
+PRIVACY_ASSEMBLY = PrivacyAssembly(
+    database_manager=database_manager,
+    database_lock=lambda: DB_LOCK,
+    key_value_repository=KEY_VALUE_REPOSITORY,
+    profile_service=ATHLETE_DATA.profile,
+    workout_library_service=PLANNING_DATA.workout_library,
+    competition_service=PLANNING_DATA.competition,
+    training_plan_service=PLANNING_DATA.training_plan,
+    checkin_service=ATHLETE_DATA.checkin,
+    activity_feedback_service=ATHLETE_DATA.activity_feedback,
+    adaptive_preview_service=lambda: adaptive_replan_preview_service(),
+    external_calendar_reader=lambda: EXTERNAL_CALENDAR.reader(),
+    local_now=lambda: ATHLETE_CLOCK.now(),
+    utc_now=runtime_clock.utc_now,
+    maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
+    planning_revision_service=PLANNING_REVISION_SERVICE,
+    openai_client=lambda: openai_responses_client(),
+    logger=LOGGER,
+    data_dir=lambda: DATA_DIR,
+    database_path=lambda: DB_PATH,
+    maximum_export_bytes=MAX_PRIVACY_EXPORT_BYTES,
+    minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
+    time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
+)
+BACKUP_ASSEMBLY = BackupAssembly(
+    database_manager=database_manager,
+    database_path=lambda: DB_PATH,
+    data_dir=lambda: DATA_DIR,
+    database_lock=lambda: DB_LOCK,
+    maximum_bytes=MAX_BACKUP_BYTES,
+    minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
+    time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
+    logger=LOGGER,
+    app_password=lambda: CONFIG.app_password,
+    sqlcipher_available=lambda: SQLCIPHER_AVAILABLE,
+    sqlite_backend=sqlite_backend,
+    configure_cipher=configure_cipher,
+    row_factory=database_row_factory,
+    schema_is_current=database_schema_is_current,
+    maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
+    sync_jobs=lambda: SYNC_JOB_QUEUE.service(),
+    coach_jobs=lambda: coach_job_store(),
+    coach_failures=lambda: coach_turn_failure_service(),
+    sync_wake_event=shared_sync_job_wake_event,
+    coach_wake_event=COACH_JOB_WORKER.wake_event,
+    redact=REDACTOR.redact_text,
+)
 
 
 def coach_profile_update_service() -> CoachProfileUpdateService:
@@ -871,40 +904,8 @@ def adaptive_replan_preview_service() -> AdaptiveReplanPreviewService:
     )
 
 
-def privacy_data_export_service() -> PrivacyDataExportService:
-    """Compose the local JSON privacy-data projection use case."""
-    return PrivacyDataExportService(
-        PrivacyDataExportDependencies(
-            database_manager=database_manager(),
-            database_lock=DB_LOCK,
-            key_value_repository=KEY_VALUE_REPOSITORY,
-            profile_service=ATHLETE_DATA.profile(),
-            workout_library_service=PLANNING_DATA.workout_library(),
-            competition_service=PLANNING_DATA.competition(),
-            training_plan_service=PLANNING_DATA.training_plan(),
-            checkin_service=ATHLETE_DATA.checkin(),
-            activity_feedback_service=ATHLETE_DATA.activity_feedback(),
-            adaptive_preview_service=adaptive_replan_preview_service(),
-            external_calendar_reader=EXTERNAL_CALENDAR.reader(),
-            local_now=ATHLETE_CLOCK.now,
-            utc_now=runtime_clock.utc_now,
-        )
-    )
 
 
-def privacy_delete_service() -> PrivacyDeleteService:
-    """Compose the maintenance-gated local privacy deletion use case."""
-    return PrivacyDeleteService(
-        PrivacyDeleteDependencies(
-            database_manager=database_manager(),
-            database_lock=DB_LOCK,
-            key_value_repository=KEY_VALUE_REPOSITORY,
-            maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-            planning_revision_service=PLANNING_REVISION_SERVICE,
-            openai_client=openai_responses_client(),
-            logger=LOGGER,
-        )
-    )
 
 
 def athlete_context_service() -> AthleteContextService:
@@ -1985,84 +1986,22 @@ def diagnostic_report_service() -> DiagnosticReportService:
     ))
 
 
-def privacy_archive_export_service() -> PrivacyArchiveExportService:
-    """Compose the local privacy archive use case."""
-    return PrivacyArchiveExportService(
-        database_manager(),
-        DB_LOCK,
-        KEY_VALUE_REPOSITORY,
-        ATHLETE_DATA.profile(),
-        PLANNING_DATA.competition(),
-        adaptive_replan_preview_service(),
-        PrivacyArchiveExportConfig(
-            DATA_DIR,
-            DB_PATH,
-            lambda: ATHLETE_CLOCK.now().date(),
-            runtime_clock.utc_now,
-            maximum_bytes=MAX_PRIVACY_EXPORT_BYTES,
-            minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
-            time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
-        ),
-    )
 
 
-def database_backup_service() -> DatabaseBackupService:
-    """Compose the locked, bounded database-backup resource owner."""
-    return DatabaseBackupService(
-        database_manager(),
-        DB_LOCK,
-        DatabaseBackupConfig(
-            database_path=DB_PATH,
-            data_dir=DATA_DIR,
-            maximum_bytes=MAX_BACKUP_BYTES,
-            minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
-            time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
-        ),
-        LOGGER,
-    )
 
 
 def export_stream_transport() -> ExportStreamTransport:
     """Wire backup/export use cases into their HTTP download transport."""
     return ExportStreamTransport(
-        database_backup_service,
-        privacy_archive_export_service,
+        BACKUP_ASSEMBLY.backup_service,
+        PRIVACY_ASSEMBLY.archive_export_service,
         monotonic=time.monotonic,
         time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
     )
 
 
-def database_restore_validation_service() -> DatabaseRestoreValidationService:
-    return DatabaseRestoreValidationService(
-        DatabaseRestoreValidationConfig(
-            data_dir=DATA_DIR,
-            maximum_bytes=MAX_BACKUP_BYTES,
-            app_password=CONFIG.app_password,
-            sqlcipher_available=SQLCIPHER_AVAILABLE,
-            sqlite_backend=sqlite_backend,
-            configure_cipher=configure_cipher,
-            row_factory=database_row_factory,
-            schema_is_current=database_schema_is_current,
-        )
-    )
 
 
-def database_restore_service() -> DatabaseRestoreService:
-    """Compose the validated, maintenance-bound database restore owner."""
-    return DatabaseRestoreService(
-        database_restore_validation_service(),
-        database_backup_service(),
-        database_manager,
-        DB_LOCK,
-        runtime_maintenance.MAINTENANCE_GATE,
-        SYNC_JOB_QUEUE.service(),
-        coach_job_store(),
-        coach_turn_failure_service(),
-        shared_sync_job_wake_event(),
-        COACH_JOB_WORKER.wake_event,
-        DatabaseRestoreConfig(DATA_DIR, DB_PATH),
-        REDACTOR.redact_text,
-    )
 
 
 def readiness_service() -> ReadinessService:
@@ -2136,9 +2075,10 @@ CHAT_STREAM_TRANSPORT = CoachChatStreamTransport(
     response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
 )
 TRANSCRIBE_POST_ROUTES = TranscribePostRoutes(SETTINGS, audio_transcription_client)
-PRIVACY_DELETE_POST_ROUTES = PrivacyDeletePostRoutes(privacy_delete_service)
+DIAGNOSTICS_CAPTURE_POST_ROUTES = DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)
+PRIVACY_DELETE_POST_ROUTES = PrivacyDeletePostRoutes(PRIVACY_ASSEMBLY.delete_service)
 PRIVACY_GET_ROUTES = PrivacyGetRoutes(
-    session_auth_service, export_stream_transport, privacy_delete_service
+    session_auth_service, export_stream_transport, PRIVACY_ASSEMBLY.delete_service
 )
 STATE_EVENTS_GET_ROUTES = StateEventsGetRoutes(
     session_auth_service,
@@ -2153,7 +2093,7 @@ PLANNING_COMMANDS_POST_ROUTES = PlanningCommandsPostRoutes(
 FEEDBACK_POST_ROUTES = FeedbackPostRoutes(ATHLETE_DATA.checkin)
 CHAT_CANCEL_POST_ROUTES = ChatCancelPostRoutes(coach_cancellation_service)
 PRIVACY_RESTORE_POST_ROUTES = PrivacyRestorePostRoutes(
-    session_auth_service, database_restore_service, MAX_BACKUP_BYTES
+    session_auth_service, BACKUP_ASSEMBLY.restore_service, MAX_BACKUP_BYTES
 )
 AUTH_POST_ROUTES = AuthPostRoutes(
     session_auth_service, runtime_maintenance.MAINTENANCE_GATE

@@ -155,7 +155,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         history = server.coach_message_service().list()
         self.assertNotIn(PNG, json.dumps(history))
         self.assertEqual(json.loads(history[0]["attachment_names"]), ["route.gpx", "chart.png"])
-        exported = server.privacy_data_export_service().export()["messages"]
+        exported = server.PRIVACY_ASSEMBLY.data_export_service().export()["messages"]
         self.assertEqual(json.loads(exported[0]["attachments"]), saved)
         server.coach_message_service().add("assistant", "Synthetic answer")
         server.coach_message_service().add("user", "What does the chart show?")

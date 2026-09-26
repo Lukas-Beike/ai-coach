@@ -845,3 +845,61 @@ mocked providers; no live account or runtime data was used.
 - Measured `server.py`: 2,271 physical / 1,991 nonblank lines, 210 AST imports,
   118 top-level functions. Risk remaining for S3 is the separately traced
   privacy/backup/restore assembly and its SQLCipher integration check.
+
+## S3b boundary before implementation: privacy and backup/restore
+
+- The remaining `privacy_data_export_service()`, `privacy_delete_service()`,
+  `privacy_archive_export_service()`, `database_backup_service()`,
+  `database_restore_validation_service()`, and `database_restore_service()`
+  callers are the Coach attachment export, privacy GET/DELETE/restore HTTP
+  routes, export stream transport, and audit/database/provider review tests.
+  No fixture references or tests patch these root factory names or their
+  constructors. Tests directly call the root factories and one architecture
+  assertion checks the old archive factory body; all will move to owner
+  assembly methods.
+- Preserve fresh service wrappers; current manager/path/config at each
+  operation; the same `DB_LOCK`, key-value and planning revision owners,
+  maintenance gate, sync queue, sync wake event, and Coach worker wake event.
+  `PrivacyDataExportService` keeps its bounded projection and exact exclusion
+  rules. Backup continues holding the shared DB lock through streaming. Restore
+  validation remains staged and exact-schema/SQLCipher guarded; restore keeps
+  maintenance, generation reset, interrupted Coach job recovery, worker
+  cancellation/restart, and current manager rebinding. The route continues to
+  defer restore service construction until request execution.
+- Proposed interfaces: `PrivacyAssembly` in `backend/privacy.py` exposes only
+  `data_export_service()`, `delete_service()`, and `archive_export_service()`;
+  `BackupAssembly` in `backend/backup/assembly.py` exposes only
+  `backup_service()`, `restore_validation_service()`, and
+  `restore_service()`. Both receive named, explicit late callbacks for active
+  manager and subordinate services; their constructors perform no storage,
+  file, worker, or provider operations. `export_stream_transport()` stays in
+  the HTTP/root boundary until S5 because it is an HTTP download adapter.
+
+## S3b: privacy and backup/restore assemblies
+
+- Completed `PrivacyAssembly` in `backend/privacy.py` and `BackupAssembly` in
+  `backend/backup/assembly.py`. Removed six root factories; Coach attachment
+  export, HTTP privacy routes, export streaming, fixtures/tests now call the
+  owning assembly directly. The export stream adapter remains at the root for
+  S5.
+- Preserved fresh use cases and active manager/path/config resolution. Database
+  lock and maintenance gate are late-resolved so temporary fixture patches
+  participate in the same coordination as worker decorators. Privacy exports
+  retain existing projections and limits. Restore retains the exact shared
+  queue, sync wake event, Coach worker wake event, maintenance gate, and the
+  validation, generation reset, cancellation, recovery, and manager-drain
+  behavior. Added direct identity/laziness regressions.
+- Focused guarded checks passed: privacy/backup assembly and architecture
+  (54 passed); database, audit, provider review, privacy export, HTTP export,
+  privacy GET/DELETE/restore and confirmation checks (95 passed, 5 SQLCipher
+  skips). Compile/inventory/diff checks pass. The earlier first pass exposed a
+  real late-binding defect (patched maintenance gate and athlete clock); both
+  dependencies now resolve at service creation, and the focused regressions
+  pass. Docker/SQLCipher execution is still unavailable.
+- Changed files: `server.py`, `backend/privacy.py`, new
+  `backend/backup/assembly.py` and `tests/test_privacy_backup_assemblies.py`,
+  progress/inventory owner map, and direct Coach attachment, database, privacy,
+  provider, route and architecture test callers.
+- Measured `server.py`: 2,210 physical / 1,930 nonblank lines, 207 AST imports,
+  112 top-level functions. S3 still has no dedicated privacy or backup factory
+  chain in the root; Coach and HTTP slices remain.

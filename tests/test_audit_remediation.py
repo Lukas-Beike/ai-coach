@@ -111,7 +111,7 @@ class AuditRemediationTests(unittest.TestCase):
                 failures.append(type(error).__name__)
         def erase():
             try:
-                server.privacy_delete_service().delete("LOKALE DATEN LÖSCHEN")
+                server.PRIVACY_ASSEMBLY.delete_service().delete("LOKALE DATEN LÖSCHEN")
                 deleted.set()
             except Exception as error:
                 failures.append(type(error).__name__)
@@ -214,7 +214,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
             )
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.executemany("INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)", [(str(i), str(i), json.dumps({"id": str(i), "name": "Synthetic"}), runtime_clock.utc_now()) for i in range(1001)])
-        temporary = server.privacy_archive_export_service().create_file()
+        temporary = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
         try:
             with zipfile.ZipFile(temporary) as archive:
                 self.assertEqual(len(archive.read("athlete_checkins.jsonl").splitlines()), 20)
@@ -329,9 +329,9 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
                         "intervals", "refresh", {"days": 1}
                     )
                     server.SYNC_JOB_QUEUE.store().claim()
-                    backup = server.database_backup_service().read_bytes()
+                    backup = server.BACKUP_ASSEMBLY.backup_service().read_bytes()
                     server.SYNC_JOB_QUEUE.outcome_service().update(job["id"], "completed")
-                    self.assertTrue(server.database_restore_service().restore(backup)["restored"])
+                    self.assertTrue(server.BACKUP_ASSEMBLY.restore_service().restore(backup)["restored"])
                     self.assertEqual(
                         server.SYNC_JOB_QUEUE.service().state(job["id"])["status"],
                         "queued",

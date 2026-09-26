@@ -8,11 +8,13 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from backend.activities.feedback import ActivityFeedbackService
 from backend.athlete.checkins import CheckinService
 from backend.athlete.profile import DEFAULT_PROFILE, ProfileService
+from backend.backup.export import PrivacyArchiveExportConfig, PrivacyArchiveExportService
 from backend.calendar import public_events as public_event_calendar
 from backend.calendar.external import ExternalCalendarReader
 from backend.db.manager import DatabaseManager
@@ -240,3 +242,107 @@ class PrivacyDeleteService:
                 "remote_conversation_deleted": remote_deleted,
                 "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
             }
+
+
+class PrivacyAssembly:
+    """Compose the privacy projections and maintenance-gated delete use case."""
+
+    def __init__(
+        self,
+        *,
+        database_manager: Callable[[], DatabaseManager],
+        database_lock: Callable[[], AbstractContextManager[Any]],
+        key_value_repository: KeyValueRepository,
+        profile_service: Callable[[], ProfileService],
+        workout_library_service: Callable[[], WorkoutLibraryService],
+        competition_service: Callable[[], CompetitionService],
+        training_plan_service: Callable[[], TrainingPlanService],
+        checkin_service: Callable[[], CheckinService],
+        activity_feedback_service: Callable[[], ActivityFeedbackService],
+        adaptive_preview_service: Callable[[], AdaptiveReplanPreviewService],
+        external_calendar_reader: Callable[[], ExternalCalendarReader],
+        local_now: Callable[[], datetime],
+        utc_now: Callable[[], str],
+        maintenance_gate: Callable[[], MaintenanceGate],
+        planning_revision_service: PlanningRevisionService,
+        openai_client: Callable[[], OpenAIResponsesClient],
+        logger: logging.Logger,
+        data_dir: Callable[[], Path],
+        database_path: Callable[[], Path],
+        maximum_export_bytes: int,
+        minimum_free_bytes: int,
+        time_limit_seconds: int,
+    ) -> None:
+        self._database_manager = database_manager
+        self._database_lock = database_lock
+        self._key_value_repository = key_value_repository
+        self._profile_service = profile_service
+        self._workout_library_service = workout_library_service
+        self._competition_service = competition_service
+        self._training_plan_service = training_plan_service
+        self._checkin_service = checkin_service
+        self._activity_feedback_service = activity_feedback_service
+        self._adaptive_preview_service = adaptive_preview_service
+        self._external_calendar_reader = external_calendar_reader
+        self._local_now = local_now
+        self._utc_now = utc_now
+        self._maintenance_gate = maintenance_gate
+        self._planning_revision_service = planning_revision_service
+        self._openai_client = openai_client
+        self._logger = logger
+        self._data_dir = data_dir
+        self._database_path = database_path
+        self._maximum_export_bytes = maximum_export_bytes
+        self._minimum_free_bytes = minimum_free_bytes
+        self._time_limit_seconds = time_limit_seconds
+
+    def data_export_service(self) -> PrivacyDataExportService:
+        return PrivacyDataExportService(
+            PrivacyDataExportDependencies(
+                database_manager=self._database_manager(),
+                database_lock=self._database_lock(),
+                key_value_repository=self._key_value_repository,
+                profile_service=self._profile_service(),
+                workout_library_service=self._workout_library_service(),
+                competition_service=self._competition_service(),
+                training_plan_service=self._training_plan_service(),
+                checkin_service=self._checkin_service(),
+                activity_feedback_service=self._activity_feedback_service(),
+                adaptive_preview_service=self._adaptive_preview_service(),
+                external_calendar_reader=self._external_calendar_reader(),
+                local_now=self._local_now,
+                utc_now=self._utc_now,
+            )
+        )
+
+    def delete_service(self) -> PrivacyDeleteService:
+        return PrivacyDeleteService(
+            PrivacyDeleteDependencies(
+                database_manager=self._database_manager(),
+                database_lock=self._database_lock(),
+                key_value_repository=self._key_value_repository,
+                maintenance_gate=self._maintenance_gate(),
+                planning_revision_service=self._planning_revision_service,
+                openai_client=self._openai_client(),
+                logger=self._logger,
+            )
+        )
+
+    def archive_export_service(self) -> PrivacyArchiveExportService:
+        return PrivacyArchiveExportService(
+            self._database_manager(),
+            self._database_lock(),
+            self._key_value_repository,
+            self._profile_service(),
+            self._competition_service(),
+            self._adaptive_preview_service(),
+            PrivacyArchiveExportConfig(
+                self._data_dir(),
+                self._database_path(),
+                lambda: self._local_now().date(),
+                self._utc_now,
+                maximum_bytes=self._maximum_export_bytes,
+                minimum_free_bytes=self._minimum_free_bytes,
+                time_limit_seconds=self._time_limit_seconds,
+            ),
+        )

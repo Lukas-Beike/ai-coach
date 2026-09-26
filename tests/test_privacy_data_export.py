@@ -147,7 +147,7 @@ class PrivacyDataExportServiceTests(unittest.TestCase):
         source = Path(privacy_module.__file__)
         self.assertNotIn("import server", source.read_text(encoding="utf-8"))
         self.assertFalse(hasattr(server, "privacy_export"))
-        self.assertTrue(callable(server.privacy_data_export_service))
+        self.assertTrue(callable(server.PRIVACY_ASSEMBLY.data_export_service))
 
 
 if __name__ == "__main__":

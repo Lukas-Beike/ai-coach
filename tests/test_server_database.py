@@ -444,7 +444,7 @@ class ServerDatabaseTests(ServerTestCase):
                 "INSERT INTO plan_adjustments(id, payload, status, created_at, applied_at) VALUES (?, ?, ?, ?, ?)",
                 ("adjustment-1", json.dumps({"reason": "test"}), "preview", runtime_clock.utc_now(), None),
             )
-        exported = server.privacy_data_export_service().export()
+        exported = server.PRIVACY_ASSEMBLY.data_export_service().export()
         self.assertTrue(any(item.get("name") == "Archived template" for item in exported["workout_library"]))
         self.assertEqual(exported["garmin_snapshot"]["source"], "Garmin")
         self.assertEqual(exported["weather_cache"]["query"], "Berlin")
@@ -465,7 +465,7 @@ class ServerDatabaseTests(ServerTestCase):
         server.key_value_service().set("job_running", "true")
         server.key_value_service().set("job_status", "done")
 
-        exported = server.privacy_data_export_service().export()
+        exported = server.PRIVACY_ASSEMBLY.data_export_service().export()
 
         self.assertNotIn("profile", exported["application_state"])
         self.assertNotIn("garmin_snapshot", exported["application_state"])
@@ -479,14 +479,14 @@ class ServerDatabaseTests(ServerTestCase):
     def test_privacy_json_projection_uses_composed_local_clock(self):
         fixed_local_time = datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc)
         with patch.object(server.ATHLETE_CLOCK, "now", return_value=fixed_local_time) as local_clock:
-            exported = server.privacy_data_export_service().export()
+            exported = server.PRIVACY_ASSEMBLY.data_export_service().export()
 
         self.assertEqual(exported["planning"]["season"]["as_of"], "2026-01-02")
         self.assertGreaterEqual(local_clock.call_count, 2)
 
     def test_privacy_export_zip_streams_collections_and_contains_complete_manifest(self):
         server.SYNC_PERSISTENCE.state_repository().save_snapshot({"export-test": True, "synced_at": "2026-09-01", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})
-        temporary = server.privacy_archive_export_service().create_file()
+        temporary = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
         try:
             with zipfile.ZipFile(temporary) as archive:
                 names = set(archive.namelist())
@@ -563,7 +563,7 @@ class ServerDatabaseTests(ServerTestCase):
                 getattr(transport, stream_method).assert_not_called()
 
     def test_privacy_archive_export_enforces_free_space_size_timeout_and_cleanup(self):
-        service = server.privacy_archive_export_service()
+        service = server.PRIVACY_ASSEMBLY.archive_export_service()
         with tempfile.TemporaryDirectory() as temporary:
             data_dir = Path(temporary)
             no_space_config = replace(
@@ -640,7 +640,7 @@ class ServerDatabaseTests(ServerTestCase):
     def test_privacy_delete_reports_remote_attempt_and_failure(self):
         server.key_value_service().set("openai_conversation_id", "conv-test")
         with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", side_effect=server.AppError(503, "upstream")):
-            result = server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
+            result = server.PRIVACY_ASSEMBLY.delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         self.assertTrue(result["remote_delete_attempted"])
         self.assertFalse(result["remote_conversation_deleted"])
         self.assertTrue(result["local_data_deleted"])
@@ -651,12 +651,12 @@ class ServerDatabaseTests(ServerTestCase):
         scoped_tables = {table for _category, _label, tables in privacy_module.PRIVACY_DELETE_SCOPE for table in tables}
         self.assertEqual(scoped_tables, expected_tables)
         server.key_value_service().set("openai_conversation_id", "conv-test")
-        preview = server.privacy_delete_service().preview()
+        preview = server.PRIVACY_ASSEMBLY.delete_service().preview()
         self.assertEqual({item["id"] for item in preview["categories"]}, {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE})
         self.assertEqual(preview["confirmation_text"], "LOKALE DATEN LÖSCHEN")
         self.assertTrue(preview["remote_untouched"])
         with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
-            result = server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
+            result = server.PRIVACY_ASSEMBLY.delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         self.assertTrue(result["local_data_deleted"])
         self.assertEqual(set(result["deleted_categories"]), {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE})
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -676,7 +676,7 @@ class ServerDatabaseTests(ServerTestCase):
             )
         try:
             with self.assertRaises(sqlite3.DatabaseError):
-                server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
+                server.PRIVACY_ASSEMBLY.delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         finally:
             with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                 db.execute("DROP TRIGGER synthetic_privacy_abort")
@@ -763,7 +763,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertIn("def create_file(self)", source)
         server_source = Path(server.__file__).read_text(encoding="utf-8")
         self.assertNotIn("def _privacy_export_file", server_source)
-        self.assertIn("def privacy_archive_export_service", server_source)
+        self.assertIn("class PrivacyAssembly", Path(privacy_module.__file__).read_text(encoding="utf-8"))
 
         class Rows:
             def execute(self, query):
@@ -911,8 +911,8 @@ class ServerDatabaseTests(ServerTestCase):
                         "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                         ("token", "csrf", 9999999999, "now", "now"),
                     )
-                valid_backup = server.database_backup_service().read_bytes()
-                restored = server.database_restore_service().restore(valid_backup)
+                valid_backup = server.BACKUP_ASSEMBLY.backup_service().read_bytes()
+                restored = server.BACKUP_ASSEMBLY.restore_service().restore(valid_backup)
                 self.assertEqual(restored["status"], "ok")
                 self.assertEqual(server.key_value_service().get("restore-marker"), "preserved")
                 with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -928,7 +928,7 @@ class ServerDatabaseTests(ServerTestCase):
                 finally:
                     connection.close()
                 with self.assertRaises(server.AppError) as error:
-                    server.database_restore_service().restore(incomplete_path.read_bytes())
+                    server.BACKUP_ASSEMBLY.restore_service().restore(incomplete_path.read_bytes())
                 self.assertEqual(error.exception.status, 400)
                 self.assertEqual(server.key_value_service().get("restore-marker"), "preserved")
                 self.assertEqual(list(data_dir.glob(".intervals-coach-restore-*.db")), [])
@@ -943,7 +943,7 @@ class ServerDatabaseTests(ServerTestCase):
                 finally:
                     connection.close()
                 with self.assertRaises(server.AppError) as error:
-                    server.database_restore_service().restore(unexpected_path.read_bytes())
+                    server.BACKUP_ASSEMBLY.restore_service().restore(unexpected_path.read_bytes())
                 self.assertEqual(error.exception.status, 400)
                 self.assertEqual(server.key_value_service().get("restore-marker"), "preserved")
                 self.assertEqual(list(data_dir.glob(".intervals-coach-restore-*.db")), [])
@@ -976,7 +976,7 @@ class ServerDatabaseTests(ServerTestCase):
         server.ATHLETE_DATA.profile().save({"name": "Ada"})
         self.assertTrue(server.change_history_service().list())
         with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
-            server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
+            server.PRIVACY_ASSEMBLY.delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         self.assertEqual(server.change_history_service().list(), [])
 
 
