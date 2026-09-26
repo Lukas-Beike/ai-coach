@@ -94,7 +94,7 @@ from backend.providers import weather as weather_provider
 from backend.providers.transport_assembly import ProviderTransportAssembly
 from backend.providers.model_assembly import ModelTransportAssembly
 from backend.http_api import server as http_server
-from backend.http_api.handler import HttpRequestHandlerDependencies, create_request_handler
+from backend.http_api.assembly import HttpApiAssembly, HttpHandlerConfiguration
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
 from backend.http_api.coach_actions_post import CoachActionsPostRoutes
@@ -1560,157 +1560,75 @@ def readiness_service() -> ReadinessService:
     )
 
 
-COACH_GET_ROUTES = CoachGetRoutes(
-    session_auth_service,
-    chat_history_page_service,
-    coach_command_receipt_service,
-    COACH_BACKGROUND_JOBS.job_submission_service,
-)
-PUBLIC_GET_ROUTES = PublicGetRoutes(
-    runtime_maintenance.MAINTENANCE_GATE,
-    readiness_service,
-    session_auth_service,
-    PUBLIC_STATE.bootstrap_service,
-)
-PLANNING_GET_ROUTES = PlanningGetRoutes(
-    session_auth_service,
-    PUBLIC_STATE.plan_state_service,
-    PUBLIC_STATE.weather_state_service,
-    library_page_service,
-)
-ATHLETE_GET_ROUTES = AthleteGetRoutes(
-    session_auth_service,
-    PUBLIC_STATE.performance_state_service,
-    ATHLETE_DATA.profile,
-    PLANNING_DATA.competition,
-    PUBLIC_STATE.feedback_state_service,
-    COACH_CONTEXT.preview_service,
-    SETTINGS,
-)
-DIAGNOSTICS_GET_ROUTES = DiagnosticsGetRoutes(
-    session_auth_service,
-    recent_log_entries_service,
-    diagnostic_report_service,
-)
-SYNC_GET_ROUTES = SyncGetRoutes(
-    session_auth_service,
-    SYNC_JOB_QUEUE.service,
-    PUBLIC_STATE.sync_public_state_service,
-    ATHLETE_DATA.activity_read,
-    lambda: ATHLETE_CLOCK.now().date(),
-    ALL_SYNC_DAYS,
-)
-HISTORY_GET_ROUTES = HistoryGetRoutes(session_auth_service, change_history_service)
-HISTORY_UNDO_POST_ROUTES = HistoryUndoPostRoutes(
-    history_undo_service,
-    COACH_PROPOSALS.creation_service,
-)
-COACH_ACTIONS_POST_ROUTES = CoachActionsPostRoutes(
-    COACH_PROPOSALS.confirmation_service,
-    COACH_PROPOSALS.execution_service,
-)
-CHAT_POST_ROUTES = ChatPostRoutes(
-    COACH_BACKGROUND_JOBS.job_submission_service,
-    COACH_CONVERSATION.reset_service,
-    coach_attachments.MAX_REQUEST_BYTES,
-)
-CHAT_STREAM_TRANSPORT = CoachChatStreamTransport(
-    coach_streams.CHAT_STREAM_REGISTRY,
-    COACH_BACKGROUND_JOBS.job_submission_service,
-    coach_command_receipt_service,
-    REDACTOR.redact_text,
-    LOGGER,
-    max_request_bytes=coach_attachments.MAX_REQUEST_BYTES,
-    response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-)
-TRANSCRIBE_POST_ROUTES = TranscribePostRoutes(SETTINGS, MODEL_TRANSPORT.audio_transcription_client)
-DIAGNOSTICS_CAPTURE_POST_ROUTES = DiagnosticsCapturePostRoutes(DIAGNOSTIC_CAPTURE)
-PRIVACY_DELETE_POST_ROUTES = PrivacyDeletePostRoutes(PRIVACY_ASSEMBLY.delete_service)
-PRIVACY_GET_ROUTES = PrivacyGetRoutes(
-    session_auth_service, export_stream_transport, PRIVACY_ASSEMBLY.delete_service
-)
-STATE_EVENTS_GET_ROUTES = StateEventsGetRoutes(
-    session_auth_service,
-    StateEventTransport(runtime_events.STATE_EVENT_BUFFER),
-)
-SETTINGS_PUT_ROUTES = SettingsPutRoutes(SETTINGS)
-ATHLETE_PUT_ROUTES = AthletePutRoutes(athlete_context_service, ATHLETE_DATA.profile)
-PLANNING_COMMANDS_POST_ROUTES = PlanningCommandsPostRoutes(
-    coach_planning_command_service,
-    lambda: COACH_CONVERSATION.provision_service(),
-)
-FEEDBACK_POST_ROUTES = FeedbackPostRoutes(ATHLETE_DATA.checkin)
-CHAT_CANCEL_POST_ROUTES = ChatCancelPostRoutes(COACH_BACKGROUND_JOBS.cancellation_service)
-PRIVACY_RESTORE_POST_ROUTES = PrivacyRestorePostRoutes(
-    session_auth_service, BACKUP_ASSEMBLY.restore_service, MAX_BACKUP_BYTES
-)
-AUTH_POST_ROUTES = AuthPostRoutes(
-    session_auth_service, runtime_maintenance.MAINTENANCE_GATE
-)
-NUTRITION_GET_ROUTES = NutritionGetRoutes(
-    session_auth_service, nutrition_service, ATHLETE_CLOCK.now
-)
-NUTRITION_POST_ROUTES = NutritionPostRoutes(
-    nutrition_service, intervals_nutrition_sync_service
-)
-NUTRITION_PUT_ROUTES = NutritionPutRoutes(nutrition_service)
-HTTP_ROUTE_DISPATCHER = HttpRouteDispatcher(
-    (
-        PUBLIC_GET_ROUTES,
-        PLANNING_GET_ROUTES,
-        SYNC_GET_ROUTES,
-        STATE_EVENTS_GET_ROUTES,
-        COACH_GET_ROUTES,
-        ATHLETE_GET_ROUTES,
-        HISTORY_GET_ROUTES,
-        DIAGNOSTICS_GET_ROUTES,
-        PRIVACY_GET_ROUTES,
-        NUTRITION_GET_ROUTES,
+HTTP_API = HttpApiAssembly(
+    handler_configuration=lambda: HttpHandlerConfiguration(
+        app_version=APP_VERSION,
+        logger=LOGGER,
+        session_auth_service=session_auth_service,
+        maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+        redact_text=REDACTOR.redact_text,
+        public_app_error_status=public_app_error_status,
+        internal_server_error=INTERNAL_SERVER_ERROR,
+        max_body_bytes=MAX_BODY_BYTES,
+        max_audio_body_bytes=MAX_AUDIO_BODY_BYTES,
+        voice_audio_types=audio_provider.VOICE_AUDIO_TYPES,
+        normalize_audio_type=audio_provider.normalized_audio_type,
+        public_dir=PUBLIC_DIR,
+
     ),
-    (SETTINGS_PUT_ROUTES, ATHLETE_PUT_ROUTES, NUTRITION_PUT_ROUTES),
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    readiness_service=readiness_service,
+    session_auth_service=session_auth_service,
+    chat_history_page_service=chat_history_page_service,
+    coach_command_receipt_service=coach_command_receipt_service,
+    coach_job_submission_service=COACH_BACKGROUND_JOBS.job_submission_service,
+    coach_job_cancellation_service=COACH_BACKGROUND_JOBS.cancellation_service,
+    public_bootstrap_service=PUBLIC_STATE.bootstrap_service,
+    public_plan_state_service=PUBLIC_STATE.plan_state_service,
+    public_weather_state_service=PUBLIC_STATE.weather_state_service,
+    public_performance_state_service=PUBLIC_STATE.performance_state_service,
+    public_feedback_state_service=PUBLIC_STATE.feedback_state_service,
+    public_sync_state_service=PUBLIC_STATE.sync_public_state_service,
+    library_page_service=library_page_service,
+    profile_service=ATHLETE_DATA.profile,
+    competition_service=PLANNING_DATA.competition,
+    activity_read_service=ATHLETE_DATA.activity_read,
+    checkin_service=ATHLETE_DATA.checkin,
+    coach_context_preview_service=COACH_CONTEXT.preview_service,
+    settings=SETTINGS,
+    recent_log_entries_service=recent_log_entries_service,
+    diagnostic_report_service=diagnostic_report_service,
+    diagnostic_capture=DIAGNOSTIC_CAPTURE,
+    sync_job_queue_service=SYNC_JOB_QUEUE.service,
+    athlete_clock=ATHLETE_CLOCK,
+    local_today=lambda: ATHLETE_CLOCK.now().date(),
+    all_sync_days=ALL_SYNC_DAYS,
+    change_history_service=change_history_service,
+    history_undo_service=history_undo_service,
+    proposal_creation_service=COACH_PROPOSALS.creation_service,
+    proposal_confirmation_service=COACH_PROPOSALS.confirmation_service,
+    proposal_execution_service=COACH_PROPOSALS.execution_service,
+    coach_reset_service=COACH_CONVERSATION.reset_service,
+    coach_provision_service=lambda: COACH_CONVERSATION.provision_service(),
+    max_chat_request_bytes=coach_attachments.MAX_REQUEST_BYTES,
+    chat_stream_registry=coach_streams.CHAT_STREAM_REGISTRY,
+    redact_text=REDACTOR.redact_text,
+    export_stream_transport=export_stream_transport,
+    privacy_delete_service=PRIVACY_ASSEMBLY.delete_service,
+    backup_restore_service=BACKUP_ASSEMBLY.restore_service,
+    state_event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    athlete_context_service=athlete_context_service,
+    coach_planning_command_service=coach_planning_command_service,
+    sync_command_endpoint_factory=lambda: sync_command_endpoint,
+    audio_transcription_client=MODEL_TRANSPORT.audio_transcription_client,
+    nutrition_service=nutrition_service,
+    intervals_nutrition_sync_service=intervals_nutrition_sync_service,
+    http_response_transport=HttpResponseTransport(),
+    openai_response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+    logger=LOGGER,
+    max_backup_bytes=MAX_BACKUP_BYTES,
 )
-SYNC_COMMAND_POST_ROUTE = SyncCommandPostRoute(lambda: sync_command_endpoint())
-AUTHENTICATED_POST_ROUTES = HttpAuthenticatedPostRoutes(
-    COACH_ACTIONS_POST_ROUTES,
-    CHAT_POST_ROUTES,
-    TRANSCRIBE_POST_ROUTES,
-    PLANNING_COMMANDS_POST_ROUTES,
-    FEEDBACK_POST_ROUTES,
-    CHAT_STREAM_TRANSPORT,
-    SYNC_COMMAND_POST_ROUTE,
-    HISTORY_UNDO_POST_ROUTES,
-    PRIVACY_DELETE_POST_ROUTES,
-    NUTRITION_POST_ROUTES,
-)
-HTTP_POST_DISPATCHER = HttpPostDispatcher(
-    AUTH_POST_ROUTES,
-    PRIVACY_RESTORE_POST_ROUTES,
-    CHAT_CANCEL_POST_ROUTES,
-    AUTHENTICATED_POST_ROUTES,
-)
-HTTP_RESPONSE_TRANSPORT = HttpResponseTransport()
 
-
-def request_handler_class() -> type[BaseHTTPRequestHandler]:
-    return create_request_handler(
-        HttpRequestHandlerDependencies(
-            app_version=APP_VERSION,
-            logger=LOGGER,
-            session_auth_service=session_auth_service,
-            route_dispatcher=HTTP_ROUTE_DISPATCHER,
-            post_dispatcher=HTTP_POST_DISPATCHER,
-            response_transport=HTTP_RESPONSE_TRANSPORT,
-            maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-            redact_text=REDACTOR.redact_text,
-            public_app_error_status=public_app_error_status,
-            internal_server_error=INTERNAL_SERVER_ERROR,
-            max_body_bytes=MAX_BODY_BYTES,
-            max_audio_body_bytes=MAX_AUDIO_BODY_BYTES,
-            voice_audio_types=audio_provider.VOICE_AUDIO_TYPES,
-            normalize_audio_type=audio_provider.normalized_audio_type,
-            static_asset_service=StaticAssetService(PUBLIC_DIR),
-        )
-    )
 
 
 def main() -> None:
@@ -1721,7 +1639,7 @@ def main() -> None:
         raise SystemExit(configuration_error)
     LOGGER.info(f"{APP_NAME} starting", extra={"event": "server_start", "context": {"version": APP_VERSION, "port": CONFIG.port}})
     initialise_database()
-    server = http_server.CoachHTTPServer(("0.0.0.0", CONFIG.port), request_handler_class())
+    server = http_server.CoachHTTPServer(("0.0.0.0", CONFIG.port), HTTP_API.request_handler_class())
     server.allow_reuse_address = True
     sync_worker: sync_worker_runtime.SyncJobWorker | None = None
     daily_loop: sync_scheduler_runtime.DailySyncLoop | None = None

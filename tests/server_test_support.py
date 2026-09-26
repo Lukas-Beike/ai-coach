@@ -67,7 +67,7 @@ def _transcribe_via_http_route(audio: bytes, content_type: str) -> dict[str, str
         read_audio_body=Mock(return_value=audio),
         send_json=Mock(),
     )
-    if not server.TRANSCRIBE_POST_ROUTES.handle(handler, "/api/transcribe"):
+    if not server.HTTP_API.transcribe_post_routes.handle(handler, "/api/transcribe"):
         raise AssertionError("transcription route was not handled")
     return handler.send_json.call_args.args[1]
 

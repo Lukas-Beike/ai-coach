@@ -27,8 +27,28 @@ from server_test_support import _transcribe_via_http_route, create_test_session,
 
 class ServerHttpTests(ServerTestCase):
 
+    def test_http_assembly_keeps_dispatchers_shared_and_handler_configuration_lazy(self):
+        initial = server.HTTP_API._handler_configuration()
+        updated = replace(initial, app_version="synthetic-next")
+        with patch.object(
+            server.HTTP_API,
+            "_handler_configuration",
+            side_effect=(initial, updated),
+        ) as configuration:
+            first = server.HTTP_API.request_handler_class()
+            second = server.HTTP_API.request_handler_class()
+
+        self.assertEqual(configuration.call_count, 2)
+        self.assertIsNot(first, second)
+        self.assertEqual(first.server_version, f"IntervalsCoach/{initial.app_version}")
+        self.assertEqual(second.server_version, "IntervalsCoach/synthetic-next")
+        self.assertIs(first.dependencies.route_dispatcher, server.HTTP_API.route_dispatcher)
+        self.assertIs(second.dependencies.post_dispatcher, server.HTTP_API.post_dispatcher)
+        self.assertIs(first.dependencies.response_transport, server.HTTP_API.response_transport)
+        self.assertIsNot(first.static_asset_service, second.static_asset_service)
+
     def test_weather_handler_calls_public_weather_service_after_auth(self):
-        handler = object.__new__(server.request_handler_class())
+        handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.path = "/api/weather?local=1"
         handler.send_json = Mock()
         endpoint = Mock()
@@ -36,13 +56,13 @@ class ServerHttpTests(ServerTestCase):
 
         auth = Mock()
         with patch.object(
-            server.PLANNING_GET_ROUTES, "_session_auth_service", return_value=auth
+            server.HTTP_API.planning_get_routes, "_session_auth_service", return_value=auth
         ) as auth_factory, patch.object(
-            server.PLANNING_GET_ROUTES,
+            server.HTTP_API.planning_get_routes,
             "_public_weather_state_service",
             return_value=endpoint,
         ) as factory:
-            self.assertTrue(server.PLANNING_GET_ROUTES.handle(handler, "/api/weather"))
+            self.assertTrue(server.HTTP_API.planning_get_routes.handle(handler, "/api/weather"))
 
         auth.require_auth.assert_called_once_with(handler)
         auth_factory.assert_called_once_with()
@@ -53,15 +73,15 @@ class ServerHttpTests(ServerTestCase):
         )
 
     def test_sync_post_handler_keeps_bodyless_routes_and_unknown_posts_transport_only(self):
-        handler = object.__new__(server.request_handler_class())
+        handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.read_json = Mock(return_value={"ignored": True})
         handler.send_json = Mock()
         endpoint = Mock()
         endpoint.execute.return_value = (202, {"id": "job-3"})
         with patch.object(server, "sync_command_endpoint", return_value=endpoint) as factory:
-            self.assertFalse(server.SYNC_COMMAND_POST_ROUTE.handle(handler, "/api/unknown"))
+            self.assertFalse(server.HTTP_API.sync_command_post_route.handle(handler, "/api/unknown"))
             factory.assert_not_called()
-            self.assertTrue(server.SYNC_COMMAND_POST_ROUTE.handle(handler, "/api/weather/sync"))
+            self.assertTrue(server.HTTP_API.sync_command_post_route.handle(handler, "/api/weather/sync"))
         handler.read_json.assert_not_called()
         endpoint.execute.assert_called_once_with("/api/weather/sync", None)
         handler.send_json.assert_called_once_with(202, {"id": "job-3"})
@@ -69,7 +89,7 @@ class ServerHttpTests(ServerTestCase):
     def test_plan_handler_delegates_local_and_refresh_reads_to_service(self):
         for local_only in (True, False):
             with self.subTest(local_only=local_only):
-                handler = object.__new__(server.request_handler_class())
+                handler = object.__new__(server.HTTP_API.request_handler_class())
                 handler.path = "/api/plan?local=1" if local_only else "/api/plan"
                 handler.send_json = Mock()
                 service = Mock()
@@ -77,17 +97,17 @@ class ServerHttpTests(ServerTestCase):
                 auth = Mock()
                 with (
                     patch.object(
-                        server.PLANNING_GET_ROUTES,
+                        server.HTTP_API.planning_get_routes,
                         "_session_auth_service",
                         return_value=auth,
                     ) as auth_factory,
                     patch.object(
-                        server.PLANNING_GET_ROUTES,
+                        server.HTTP_API.planning_get_routes,
                         "_public_plan_state_service",
                         return_value=service,
                     ) as service_factory,
                 ):
-                    self.assertTrue(server.PLANNING_GET_ROUTES.handle(handler, "/api/plan"))
+                    self.assertTrue(server.HTTP_API.planning_get_routes.handle(handler, "/api/plan"))
                 auth.require_auth.assert_called_once_with(handler)
                 auth_factory.assert_called_once_with()
                 service_factory.assert_called_once_with()
@@ -434,7 +454,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(sent[-1], ("reset", {"reason": "gap", "latest_event_id": 9}, 9))
 
     def test_state_events_route_requires_auth_before_starting_transport(self):
-        handler = object.__new__(server.request_handler_class())
+        handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.path = "/api/state/events?since=0"
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
@@ -925,7 +945,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(state["calendar_display"], {"past_weeks": 1, "future_weeks": 4})
 
     def test_json_response_ignores_client_disconnect(self):
-        handler = object.__new__(server.request_handler_class())
+        handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.request_id = "request-1"
         handler.command = "GET"
         handler.path = "/api/state"
@@ -935,7 +955,7 @@ class ServerHttpTests(ServerTestCase):
         handler.wfile = Mock()
         handler.log_client_disconnect = Mock()
 
-        server.request_handler_class().send_json(handler, 200, {"status": "ok"})
+        server.HTTP_API.request_handler_class().send_json(handler, 200, {"status": "ok"})
 
         handler.log_client_disconnect.assert_called_once_with()
         handler.wfile.write.assert_not_called()
@@ -944,7 +964,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertIs(response_transport.LOGGER, server.LOGGER)
 
     def test_json_response_disconnect_logs_response_metadata(self):
-        handler = object.__new__(server.request_handler_class())
+        handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.request_id = "request-2"
         handler.command = "GET"
         handler.path = "/api/activities"
@@ -954,7 +974,7 @@ class ServerHttpTests(ServerTestCase):
         handler.wfile = Mock()
 
         with patch.object(server.LOGGER, "info") as logger:
-            server.request_handler_class().send_json(handler, 200, {"activities": []})
+            server.HTTP_API.request_handler_class().send_json(handler, 200, {"activities": []})
 
         context = logger.call_args.kwargs["extra"]["context"]
         self.assertEqual(context["method"], "GET")
@@ -1034,7 +1054,7 @@ class ServerHttpTests(ServerTestCase):
             },
             "maintenance": {"active": True},
         }
-        handler = object.__new__(server.request_handler_class())
+        handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.send_json = Mock()
 
         original_manager = server.database_manager()
@@ -1047,8 +1067,8 @@ class ServerHttpTests(ServerTestCase):
 
         with patch.object(server, "database_manager", side_effect=[original_manager, switched_manager]), \
                 patch.object(ReadinessService, "state", autospec=True, side_effect=projected_state):
-            self.assertTrue(server.PUBLIC_GET_ROUTES.handle(handler, "/api/readiness"))
-            self.assertTrue(server.PUBLIC_GET_ROUTES.handle(handler, "/api/readiness"))
+            self.assertTrue(server.HTTP_API.public_get_routes.handle(handler, "/api/readiness"))
+            self.assertTrue(server.HTTP_API.public_get_routes.handle(handler, "/api/readiness"))
 
         self.assertEqual(seen_managers, [original_manager, switched_manager])
         self.assertEqual(
@@ -1057,12 +1077,12 @@ class ServerHttpTests(ServerTestCase):
         )
 
     def test_readiness_handler_returns_503_when_manager_composition_fails(self):
-        handler = object.__new__(server.request_handler_class())
+        handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.send_json = Mock()
         with tempfile.TemporaryDirectory() as data_dir, \
                 patch.object(server, "DATA_DIR", Path(data_dir)), \
                 patch.object(server, "database_manager", side_effect=OSError("mount unavailable")):
-            self.assertTrue(server.PUBLIC_GET_ROUTES.handle(handler, "/api/readiness"))
+            self.assertTrue(server.HTTP_API.public_get_routes.handle(handler, "/api/readiness"))
         status, payload = handler.send_json.call_args.args
         self.assertEqual(status, 503)
         self.assertEqual(payload["status"], "not_ready")
@@ -1252,7 +1272,7 @@ class ServerHttpTests(ServerTestCase):
         session_key = "session-stream-disconnect-test"
         operation_id = "operation-disconnect-test"
         cancel_event = threading.Event()
-        handler_class = server.request_handler_class()
+        handler_class = server.HTTP_API.request_handler_class()
         handler = handler_class.__new__(handler_class)
         handler.read_json = Mock(return_value={"message": "Bleibt bestehen", "client_turn_id": "turn-disconnect-test"})
         handler.connection = Mock()
@@ -1266,7 +1286,7 @@ class ServerHttpTests(ServerTestCase):
         with patch.object(registry, "register", return_value=(operation_id, cancel_event)), \
                 patch.object(registry, "unregister") as unregister, \
                 patch.object(registry, "events", return_value=events):
-            server.CHAT_STREAM_TRANSPORT.handle(handler, {"csrf_hash": session_key})
+            server.HTTP_API.chat_stream_transport.handle(handler, {"csrf_hash": session_key})
 
         with server.database_manager().unit_of_work() as db:
             self.assertIsNotNone(db.execute("SELECT 1 FROM coach_commands WHERE client_turn_id='turn-disconnect-test' AND status='queued'").fetchone())
@@ -1277,7 +1297,7 @@ class ServerHttpTests(ServerTestCase):
         session_key = "session-background-stream-test"
         operation_id = "operation-background-stream-test"
         cancel_event = threading.Event()
-        handler_class = server.request_handler_class()
+        handler_class = server.HTTP_API.request_handler_class()
         handler = handler_class.__new__(handler_class)
         handler.read_json = Mock(return_value={
             "message": "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
@@ -1295,7 +1315,7 @@ class ServerHttpTests(ServerTestCase):
         with patch.object(registry, "register", return_value=(operation_id, cancel_event)), patch.object(
             registry, "unregister"
         ) as unregister, patch.object(registry, "events", return_value=events):
-            server.CHAT_STREAM_TRANSPORT.handle(handler, {"csrf_hash": session_key})
+            server.HTTP_API.chat_stream_transport.handle(handler, {"csrf_hash": session_key})
 
         events = [call.args[0] for call in handler.send_sse_event.call_args_list]
         self.assertEqual(events, ["started", "delta", "delta", "completed"])

@@ -110,7 +110,7 @@ def initialise_fixture():
     stage_fixture_artifact()
 
 
-class FixtureHandler(server.request_handler_class()):
+class FixtureHandler(server.HTTP_API.request_handler_class()):
     def do_GET(self):
         if self.path == "/api/fixture/plan":
             try:
@@ -127,5 +127,5 @@ class FixtureHandler(server.request_handler_class()):
 
 
 server.initialise_database = initialise_fixture
-server.request_handler_class = lambda: FixtureHandler
+server.HTTP_API.request_handler_class = lambda: FixtureHandler
 server.main()

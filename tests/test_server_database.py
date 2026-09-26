@@ -359,7 +359,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertGreater(new_manager.unit_of_work_calls, 0)
 
     def test_composed_handler_resolves_current_auth_service_after_database_manager_change(self):
-        handler_class = server.request_handler_class()
+        handler_class = server.HTTP_API.request_handler_class()
         handler_class.protocol_version = "HTTP/1.1"
         httpd = http_server_module.CoachHTTPServer(("127.0.0.1", 0), handler_class)
         worker = threading.Thread(target=httpd.serve_forever, daemon=True)
@@ -540,7 +540,7 @@ class ServerDatabaseTests(ServerTestCase):
         }
         for path, stream_method in routes.items():
             with self.subTest(path=path):
-                handler = object.__new__(server.request_handler_class())
+                handler = object.__new__(server.HTTP_API.request_handler_class())
                 handler.path = path
                 auth = Mock()
                 transport = Mock()
@@ -620,7 +620,7 @@ class ServerDatabaseTests(ServerTestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             path = Path(temp_root) / "export.zip"
             path.write_bytes(b"x" * (STREAM_CHUNK_BYTES * 2 + 1))
-            handler = object.__new__(server.request_handler_class())
+            handler = object.__new__(server.HTTP_API.request_handler_class())
             handler.send_response = Mock()
             handler.send_header = Mock()
             handler.end_headers = Mock()

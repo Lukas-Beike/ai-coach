@@ -350,10 +350,10 @@ class ServerFrontendTests(ServerTestCase):
                 self.assertEqual(error.exception.status, 403)
 
     def test_static_handler_rejects_path_traversal_without_request_attributes(self):
-        handler = object.__new__(server.request_handler_class())
+        handler = object.__new__(server.HTTP_API.request_handler_class())
 
         with self.assertRaises(server.AppError) as error:
-            server.request_handler_class().send_static(handler, "/../server.py")
+            server.HTTP_API.request_handler_class().send_static(handler, "/../server.py")
 
         self.assertEqual(error.exception.status, 403)
 
@@ -377,7 +377,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertEqual(cached.body, b"")
         self.assertEqual(dict(cached.headers)["ETag"], headers["ETag"])
 
-        handler = object.__new__(server.request_handler_class())
+        handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.path = "/views.js?v=133"
         handler.headers = {"If-None-Match": headers["ETag"]}
         handler.send_response = Mock()
@@ -385,7 +385,7 @@ class ServerFrontendTests(ServerTestCase):
         handler.end_headers = Mock()
         handler.wfile = Mock()
 
-        server.request_handler_class().send_static(handler, "/views.js")
+        server.HTTP_API.request_handler_class().send_static(handler, "/views.js")
 
         handler.send_response.assert_called_once_with(304)
         response_headers = {call.args[0]: call.args[1] for call in handler.send_header.call_args_list}
@@ -412,7 +412,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("frame-ancestors 'none'", headers["Content-Security-Policy"])
 
     def test_static_response_disconnect_is_logged_by_handler_transport(self):
-        handler = object.__new__(server.request_handler_class())
+        handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.path = "/"
         handler.headers = {}
         handler.static_asset_service = server.StaticAssetService(server.PUBLIC_DIR)
@@ -422,7 +422,7 @@ class ServerFrontendTests(ServerTestCase):
         handler.wfile = Mock()
         handler.log_client_disconnect = Mock()
 
-        server.request_handler_class().send_static(handler, "/")
+        server.HTTP_API.request_handler_class().send_static(handler, "/")
 
         handler.log_client_disconnect.assert_called_once_with()
         handler.wfile.write.assert_not_called()

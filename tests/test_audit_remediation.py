@@ -236,7 +236,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
         startup = patch.object(server.app_config, "security_configuration_error", return_value=None)
         startup.start()
         self.addCleanup(startup.stop)
-        httpd = http_server_module.CoachHTTPServer(("127.0.0.1", 0), server.request_handler_class())
+        httpd = http_server_module.CoachHTTPServer(("127.0.0.1", 0), server.HTTP_API.request_handler_class())
         worker = threading.Thread(target=httpd.serve_forever, daemon=True)
         worker.start()
         connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)

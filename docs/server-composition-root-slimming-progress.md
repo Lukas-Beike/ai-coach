@@ -1439,3 +1439,56 @@ mocked providers; no live account or runtime data was used.
 - Changed files: `server.py`, `backend/http_api/public_state_assembly.py`,
   focused/direct-caller and architecture tests, extraction inventory generator
   and output, and this progress log.
+
+## S5b boundary before implementation: HTTP route and handler assembly
+
+- The narrow owner will be `HttpApiAssembly` in `backend/http_api/assembly.py`.
+  It will create the existing eager GET/PUT/POST route groups, route/post
+  dispatchers, shared response transport, and expose the lazy handler-class
+  factory. `server.py` will supply named providers/resources and retain lifecycle
+  ownership; the assembly will not own routes' domain behavior or imports from
+  `server.py`.
+- Current construction is eager for all route group/dispatcher/response
+  transport instances at module import; `request_handler_class()` lazily builds
+  a new handler class and `StaticAssetService` on each call. `main()` resolves
+  the handler once when creating the server. Preserve dispatcher route order,
+  auth/CSRF/maintenance flow, and all current shared route/transport identities.
+- Direct test callers/patch targets are in `tests/test_server_http.py`,
+  `test_server_database.py`, `test_server_frontend.py`,
+  `test_coach_planning_commands.py`, `test_audit_remediation.py`, and
+  `tests/server_test_support.py`; migrate them to `server.HTTP_API` at their
+  route/factory lookup. `e2e/fixture_runtime.py` subclasses the handler factory
+  and replaces `server.request_handler_class`; move both operations to the
+  assembly owner. No production consumer needs individual route globals outside
+  the dispatcher after the move.
+- The assembly receives explicit service factories, transport dependencies,
+  route-local values and handlers by name. Route class instances remain eager;
+  callbacks that currently defer DB/service work remain callbacks. Handler
+  factory resources such as logger, current maintenance gate, redactor, audio
+  normalization, and static asset path resolve at handler-class creation to
+  retain the existing test/fixture substitution timing.
+
+## S5b complete: HTTP route and handler assembly
+
+- Added `HttpApiAssembly` in `backend/http_api/assembly.py`. It eagerly creates
+  the ordered GET/PUT/POST groups, both dispatchers, shared response transport,
+  and chat stream transport; its handler-class factory remains lazy and creates
+  a fresh static asset service as before. Inputs are route-specific service
+  factories/callbacks and explicit process resources, with no backend access to
+  `server.py` or full domain-assembly registry.
+- Removed route instances, dispatchers, response transport, and
+  `request_handler_class` from the root. `main()` now uses `HTTP_API` directly.
+  Tests use the owning assembly fields, and the disposable E2E fixture subclasses
+  and replaces the handler factory on `HTTP_API`. Preserved the late-bound sync
+  command and Coach conversation provisioning callbacks, shared dispatcher and
+  transport identities, and route order/auth/CSRF/maintenance behavior.
+- Checks passed: HTTP contract tests (68), architecture tests (48), frontend
+  contract tests (22), database tests (45, three skipped), Coach planning
+  commands (6), and audit remediation (17, one skipped). Inventory generation
+  and `--check`, compileall, and `git diff --check` passed. The Docker build was
+  attempted but Docker Engine's named pipe is unavailable, so the five
+  Playwright projects could not run against the disposable container fixture.
+- `server.py`: 1,675 physical / 1,444 nonblank lines, 175 AST imports,
+  52 top-level functions.
+- Changed files: `server.py`, new HTTP assembly, E2E fixture, direct HTTP test
+  callers and architecture assertions, inventory generator/output, and this log.

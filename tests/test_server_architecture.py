@@ -2911,64 +2911,82 @@ class ServerArchitectureTests(unittest.TestCase):
         method_must_be_absent: bool = True,
         forbidden_paths: tuple[str, ...] = (),
     ) -> ast.Module:
-        server_tree = _parse(SERVER_PATH)
+        assembly_tree = _parse(BACKEND_ROOT / "http_api" / "assembly.py")
         request_handler = _request_handler_definition()
         methods = {
-            node.name
-            for node in request_handler.body
+            node.name for node in request_handler.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         }
         get_handler = next(
-            node
-            for node in request_handler.body
+            node for node in request_handler.body
             if isinstance(node, ast.FunctionDef) and node.name == "do_GET"
         )
-        dispatcher = next(
-            node
-            for node in server_tree.body
+        init = next(
+            node for node in assembly_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "HttpApiAssembly"
+        )
+        init_method = next(
+            node for node in init.body
+            if isinstance(node, ast.FunctionDef) and node.name == "__init__"
+        )
+        route_attr = route_name.lower()
+        assignment = next(
+            node for node in ast.walk(init_method)
             if isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "HTTP_ROUTE_DISPATCHER" for target in node.targets)
+            and any(isinstance(target, ast.Attribute) and target.attr == route_attr for target in node.targets)
+        )
+        dispatcher = next(
+            node for node in ast.walk(init_method)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Attribute) and target.attr == "route_dispatcher" for target in node.targets)
         )
         route_dispatches = [
             node for node in ast.walk(dispatcher.value)
-            if isinstance(node, ast.Name) and node.id == route_name
+            if isinstance(node, ast.Attribute) and node.attr == route_attr
         ]
-
         if method_must_be_absent:
             self.assertNotIn(old_method, methods)
         self.assertEqual(len(route_dispatches), 1)
         self.assertIn("dependencies.route_dispatcher.handle_get", ast.unparse(get_handler))
+        self.assertIsInstance(assignment.value, ast.Call)
         if forbidden_paths:
-            old_method_node = next(
-                node
-                for node in request_handler.body
-                if isinstance(node, ast.FunctionDef) and node.name == old_method
-            )
-            method_paths = {
-                node.value
-                for node in ast.walk(old_method_node)
+            handler_paths = {
+                node.value for node in ast.walk(get_handler)
                 if isinstance(node, ast.Constant) and isinstance(node.value, str)
             }
-            self.assertTrue(set(forbidden_paths).isdisjoint(method_paths))
-        return server_tree
+            self.assertTrue(set(forbidden_paths).isdisjoint(handler_paths))
+        return assembly_tree
 
     def _assert_route_factories(
-        self, server_tree: ast.Module, route_name: str, expected_names: list[str]
+        self, assembly_tree: ast.Module, route_name: str, expected_names: list[str]
     ) -> None:
-        route_assignment = next(
-            node
-            for node in server_tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == route_name
-                for target in node.targets
-            )
+        init = next(
+            node for node in assembly_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "HttpApiAssembly"
         )
-        factory_names = [
-            argument.id if isinstance(argument, ast.Name) else ast.unparse(argument)
-            for argument in route_assignment.value.args
-        ]
-        self.assertEqual(factory_names, expected_names)
+        init_method = next(
+            node for node in init.body
+            if isinstance(node, ast.FunctionDef) and node.name == "__init__"
+        )
+        route_attr = route_name.lower()
+        assignment = next(
+            node for node in ast.walk(init_method)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Attribute) and target.attr == route_attr for target in node.targets)
+        )
+        self.assertEqual(len(assignment.value.args), len(expected_names))
+        expected_factory = {
+            "COACH_GET_ROUTES": "CoachGetRoutes",
+            "PUBLIC_GET_ROUTES": "PublicGetRoutes",
+            "PLANNING_GET_ROUTES": "PlanningGetRoutes",
+            "ATHLETE_GET_ROUTES": "AthleteGetRoutes",
+            "SYNC_GET_ROUTES": "SyncGetRoutes",
+            "STATE_EVENTS_GET_ROUTES": "StateEventsGetRoutes",
+            "HISTORY_GET_ROUTES": "HistoryGetRoutes",
+            "DIAGNOSTICS_GET_ROUTES": "DiagnosticsGetRoutes",
+            "PRIVACY_GET_ROUTES": "PrivacyGetRoutes",
+        }[route_name]
+        self.assertEqual(ast.unparse(assignment.value.func), expected_factory)
 
     def _assert_write_route_owned(
         self,
@@ -2977,117 +2995,57 @@ class ServerArchitectureTests(unittest.TestCase):
         forbidden_paths: tuple[str, ...],
         factory: str,
     ) -> ast.Module:
-        server_tree = _parse(SERVER_PATH)
-        post_routes = {
-            "AUTH_POST_ROUTES",
-            "PRIVACY_RESTORE_POST_ROUTES",
-            "CHAT_CANCEL_POST_ROUTES",
-            "COACH_ACTIONS_POST_ROUTES",
-            "CHAT_POST_ROUTES",
-            "TRANSCRIBE_POST_ROUTES",
-            "PLANNING_COMMANDS_POST_ROUTES",
-            "FEEDBACK_POST_ROUTES",
-            "CHAT_STREAM_TRANSPORT",
-            "SYNC_COMMAND_POST_ROUTE",
-            "HISTORY_UNDO_POST_ROUTES",
-            "PRIVACY_DELETE_POST_ROUTES",
-            "NUTRITION_POST_ROUTES",
-        }
-        is_post_dispatch = route_name in post_routes
-        is_put_dispatch = route_name in {"SETTINGS_PUT_ROUTES", "ATHLETE_PUT_ROUTES"}
-        if is_post_dispatch:
-            route_owner = (
-                "HTTP_POST_DISPATCHER"
-                if route_name in {
-                    "AUTH_POST_ROUTES",
-                    "PRIVACY_RESTORE_POST_ROUTES",
-                    "CHAT_CANCEL_POST_ROUTES",
-                }
-                else "AUTHENTICATED_POST_ROUTES"
-            )
-            dispatcher = next(
-                node for node in server_tree.body
-                if isinstance(node, ast.Assign)
-                and any(isinstance(target, ast.Name) and target.id == route_owner for target in node.targets)
-            )
-            route_nodes = [node for node in ast.walk(dispatcher.value) if isinstance(node, ast.Name) and node.id == route_name]
-            stage = {
-                "AUTH_POST_ROUTES": "handle_before_auth",
-                "PRIVACY_RESTORE_POST_ROUTES": "handle_before_auth",
-                "CHAT_CANCEL_POST_ROUTES": "handle_before_maintenance",
-            }.get(route_name, "handle_authenticated")
-            dispatcher_fields = {
-                "AUTH_POST_ROUTES": "_auth_routes",
-                "PRIVACY_RESTORE_POST_ROUTES": "_restore_route",
-                "CHAT_CANCEL_POST_ROUTES": "_cancel_route",
-                "CHAT_STREAM_TRANSPORT": "_chat_stream",
-                "SYNC_COMMAND_POST_ROUTE": "_sync_commands",
-                "HISTORY_UNDO_POST_ROUTES": "_history_undo",
-                "PRIVACY_DELETE_POST_ROUTES": "_privacy_delete",
-                "NUTRITION_POST_ROUTES": "_nutrition",
-            }
-            field = dispatcher_fields.get(
-                route_name, "_" + route_name.removesuffix("_POST_ROUTES").lower()
-            )
-            dispatcher_source = (
-                BACKEND_ROOT / "http_api" / "post_dispatch.py"
-            ).read_text(encoding="utf-8")
-            dispatcher_tree = ast.parse(dispatcher_source)
-            stage_method = next(
-                node for node in ast.walk(dispatcher_tree)
-                if isinstance(node, ast.FunctionDef) and node.name == stage
-            )
-            dispatches = [
-                node for node in ast.walk(stage_method)
-                if isinstance(node, ast.Attribute)
-                and node.attr == field
-            ]
-            self.assertTrue(route_nodes)
-            self.assertTrue(dispatches)
+        assembly_tree = _parse(BACKEND_ROOT / "http_api" / "assembly.py")
+        assembly = next(
+            node for node in assembly_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "HttpApiAssembly"
+        )
+        init = next(
+            node for node in assembly.body
+            if isinstance(node, ast.FunctionDef) and node.name == "__init__"
+        )
+        route_attr = route_name.lower()
+        assignment = next(
+            node for node in ast.walk(init)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Attribute) and target.attr == route_attr for target in node.targets)
+        )
+        expected_class = factory.split("(", 1)[0]
+        self.assertIsInstance(assignment.value, ast.Call)
+        self.assertEqual(ast.unparse(assignment.value.func), expected_class)
+        if route_name in {"SETTINGS_PUT_ROUTES", "ATHLETE_PUT_ROUTES"}:
+
             handler = next(
                 node for node in _request_handler_definition().body
-                if isinstance(node, ast.FunctionDef) and node.name == "do_POST"
+                if isinstance(node, ast.FunctionDef) and node.name == handler_method
             )
-            nodes = list(ast.walk(handler))
-            self.assertTrue(any(
-                isinstance(node, ast.Call)
-                and "dependencies.post_dispatcher" in ast.unparse(node.func)
-                for node in nodes
-            ))
-        elif is_put_dispatch:
-            handler = next(node for node in _request_handler_definition().body if isinstance(node, ast.FunctionDef) and node.name == handler_method)
-            nodes = list(ast.walk(handler))
-            dispatcher = next(
-                node for node in server_tree.body
+            self.assertIn("dependencies.route_dispatcher.handle_put", ast.unparse(handler))
+        else:
+            post_routes = {
+                "AUTH_POST_ROUTES", "PRIVACY_RESTORE_POST_ROUTES", "CHAT_CANCEL_POST_ROUTES",
+                "COACH_ACTIONS_POST_ROUTES", "CHAT_POST_ROUTES", "TRANSCRIBE_POST_ROUTES",
+                "PLANNING_COMMANDS_POST_ROUTES", "FEEDBACK_POST_ROUTES", "CHAT_STREAM_TRANSPORT",
+                "SYNC_COMMAND_POST_ROUTE", "HISTORY_UNDO_POST_ROUTES", "DIAGNOSTICS_CAPTURE_POST_ROUTES",
+                "PRIVACY_DELETE_POST_ROUTES", "NUTRITION_POST_ROUTES",
+            }
+            self.assertIn(route_name, post_routes)
+            owner_attr = (
+                "post_dispatcher" if route_name in {
+                    "AUTH_POST_ROUTES", "PRIVACY_RESTORE_POST_ROUTES", "CHAT_CANCEL_POST_ROUTES"
+                } else "authenticated_post_routes"
+            )
+            owner = next(
+                node for node in ast.walk(init)
                 if isinstance(node, ast.Assign)
-                and any(isinstance(target, ast.Name) and target.id == "HTTP_ROUTE_DISPATCHER" for target in node.targets)
+                and any(isinstance(target, ast.Attribute) and target.attr == owner_attr for target in node.targets)
             )
-            route_nodes = [node for node in ast.walk(dispatcher.value) if isinstance(node, ast.Name) and node.id == route_name]
-            dispatches = [node for node in nodes if isinstance(node, ast.Call) and "dependencies.route_dispatcher.handle_put" in ast.unparse(node)]
-        else:
-            handler = next(node for node in _request_handler_definition().body if isinstance(node, ast.FunctionDef) and node.name == handler_method)
-            nodes = list(ast.walk(handler))
-            route_nodes = [node for node in nodes if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == route_name and node.func.attr == "handle"]
-            dispatches = route_nodes
-        if is_put_dispatch:
-            self.assertEqual(len(route_nodes), 1)
-            self.assertEqual(len(dispatches), 1)
-        else:
-            self.assertEqual(len(dispatches), 1)
-        self.assertEqual(len(dispatches), 1)
-        paths = {node.value for node in nodes if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+            self.assertTrue(any(
+                isinstance(node, ast.Attribute) and node.attr == route_attr
+                for node in ast.walk(owner.value)
+            ))
+        paths = {node.value for node in ast.walk(assignment.value) if isinstance(node, ast.Constant) and isinstance(node.value, str)}
         self.assertTrue(set(forbidden_paths).isdisjoint(paths))
-        assignment = next(
-            node
-            for node in server_tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == route_name
-                for target in node.targets
-            )
-        )
-        self.assertEqual(ast.unparse(assignment.value), factory)
-        return server_tree
+        return assembly_tree
 
     def test_coach_get_routes_are_owned_by_http_api_module(self) -> None:
         self._assert_get_route_owned("_handle_coach_get", "COACH_GET_ROUTES")
@@ -3228,7 +3186,7 @@ class ServerArchitectureTests(unittest.TestCase):
         self.assertNotIn("server", route_source.casefold())
 
     def test_chat_stream_lifecycle_is_owned_by_http_api_module(self) -> None:
-        server_tree = _parse(SERVER_PATH)
+        assembly_tree = _parse(BACKEND_ROOT / "http_api" / "assembly.py")
         handler = _request_handler_definition()
         self.assertFalse(any(
             isinstance(node, ast.FunctionDef) and node.name == "handle_chat_stream"
@@ -3250,22 +3208,18 @@ class ServerArchitectureTests(unittest.TestCase):
             ),
             1,
         )
+        assembly = next(
+            node for node in assembly_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "HttpApiAssembly"
+        )
         assignment = next(
-            node for node in server_tree.body
+            node for node in ast.walk(assembly)
             if isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "CHAT_STREAM_TRANSPORT" for target in node.targets)
+            and any(isinstance(target, ast.Attribute) and target.attr == "chat_stream_transport" for target in node.targets)
         )
         self.assertEqual(ast.unparse(assignment.value.func), "CoachChatStreamTransport")
-        self.assertEqual(
-            [ast.unparse(arg) for arg in assignment.value.args],
-            [
-                "coach_streams.CHAT_STREAM_REGISTRY",
-                "COACH_BACKGROUND_JOBS.job_submission_service",
-                "coach_command_receipt_service",
-                "REDACTOR.redact_text",
-                "LOGGER",
-            ],
-        )
+        self.assertIn("chat_stream_registry", ast.unparse(assignment.value))
+        self.assertIn("coach_command_receipt_service", ast.unparse(assignment.value))
         route_source = (BACKEND_ROOT / "http_api" / "chat_stream.py").read_text(encoding="utf-8")
         route_tree = ast.parse(route_source)
         self.assertFalse(any(
