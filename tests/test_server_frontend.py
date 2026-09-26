@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import call, Mock
 
 from backend.http_api import state_events_get
+from backend.http_api.static_assets import StaticAssetService
 from backend.sync.adaptive import ILLNESS_CALENDAR_CATEGORY
 from server_test_support import server, ServerTestCase
 
@@ -341,7 +342,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("globalThis.visualViewport", app_source)
 
     def test_static_files_reject_path_traversal(self):
-        static_assets = server.StaticAssetService(server.PUBLIC_DIR)
+        static_assets = StaticAssetService(server.PUBLIC_DIR)
 
         for path in ("/../server.py", "/public/../../server.py", "/..\\server.py"):
             with self.subTest(path=path):
@@ -358,7 +359,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertEqual(error.exception.status, 403)
 
     def test_static_files_reject_absolute_path(self):
-        static_assets = server.StaticAssetService(server.PUBLIC_DIR)
+        static_assets = StaticAssetService(server.PUBLIC_DIR)
 
         with self.assertRaises(server.AppError) as error:
             static_assets.render("/C:/Windows/win.ini", "/C:/Windows/win.ini", None)
@@ -366,13 +367,13 @@ class ServerFrontendTests(ServerTestCase):
         self.assertEqual(error.exception.status, 403)
 
     def test_versioned_static_assets_are_immutable_and_support_etag_revalidation(self):
-        response = server.StaticAssetService(server.PUBLIC_DIR).render("/views.js", "/views.js?v=133", None)
+        response = StaticAssetService(server.PUBLIC_DIR).render("/views.js", "/views.js?v=133", None)
         headers = dict(response.headers)
         self.assertEqual(response.status, 200)
         self.assertEqual(headers["Cache-Control"], "public, max-age=31536000, immutable")
         self.assertTrue(headers["ETag"].startswith('"'))
 
-        cached = server.StaticAssetService(server.PUBLIC_DIR).render("/views.js", "/views.js?v=133", headers["ETag"])
+        cached = StaticAssetService(server.PUBLIC_DIR).render("/views.js", "/views.js?v=133", headers["ETag"])
         self.assertEqual(cached.status, 304)
         self.assertEqual(cached.body, b"")
         self.assertEqual(dict(cached.headers)["ETag"], headers["ETag"])
@@ -397,11 +398,11 @@ class ServerFrontendTests(ServerTestCase):
     def test_html_and_service_worker_remain_revalidatable(self):
         for path in ("/", "/service-worker.js", "/manifest.webmanifest"):
             with self.subTest(path=path):
-                response = server.StaticAssetService(server.PUBLIC_DIR).render(path, path, None)
+                response = StaticAssetService(server.PUBLIC_DIR).render(path, path, None)
                 self.assertEqual(dict(response.headers)["Cache-Control"], "no-cache")
 
     def test_unknown_static_asset_falls_back_to_index_with_security_headers(self):
-        response = server.StaticAssetService(server.PUBLIC_DIR).render("/missing.js", "/missing.js", None)
+        response = StaticAssetService(server.PUBLIC_DIR).render("/missing.js", "/missing.js", None)
         headers = dict(response.headers)
         self.assertEqual(response.status, 200)
         self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
@@ -415,7 +416,7 @@ class ServerFrontendTests(ServerTestCase):
         handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.path = "/"
         handler.headers = {}
-        handler.static_asset_service = server.StaticAssetService(server.PUBLIC_DIR)
+        handler.static_asset_service = StaticAssetService(server.PUBLIC_DIR)
         handler.send_response = Mock()
         handler.send_header = Mock()
         handler.end_headers = Mock(side_effect=BrokenPipeError())

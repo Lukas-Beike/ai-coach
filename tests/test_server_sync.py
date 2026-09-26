@@ -16,6 +16,7 @@ from urllib.error import HTTPError
 
 from backend.activities.duplicates import filter_garmin_activities, garmin_activity_duplicates_intervals, intervals_cycling_activities_match, latest_wahoo_garmin_duplicate
 from backend.http_api import server as http_server_module
+from backend.http_api.static_assets import StaticAssetService
 from backend.performance import current_metrics as performance_current_metrics, garmin_observations
 from backend.planning import adaptive as planning_adaptive, competitions as planning_competitions, context as planning_context, library as planning_library
 from backend.providers import intervals_client as intervals_client_module
@@ -26,6 +27,8 @@ from backend.sync.library import WorkoutLibraryRefreshService, WorkoutLibrarySyn
 from backend.sync import garmin_service
 from backend.sync import provider_resync_assembly as provider_resync_assembly_module
 from backend.sync.performance import PerformanceRefreshFollowupService
+from backend.sync.plan_commands import PlanPushCommandService
+from backend.sync.authority import PlanningAuthorityService
 from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync import queue as sync_queue
 from backend.sync import executor as sync_executor
@@ -96,7 +99,7 @@ class ServerSyncTests(ServerTestCase):
         address, handler_class = http_server_factory.call_args.args
         self.assertEqual(address, ("0.0.0.0", server.CONFIG.port))
         self.assertTrue(issubclass(handler_class, server.BaseHTTPRequestHandler))
-        self.assertIsInstance(handler_class.static_asset_service, server.StaticAssetService)
+        self.assertIsInstance(handler_class.static_asset_service, StaticAssetService)
         self.assertEqual(handler_class.static_asset_service._targets["index.html"], server.PUBLIC_DIR / "index.html")
         thread_factory.assert_called_once_with(target=daily_loop.run, daemon=True)
         self.assertEqual(
@@ -175,7 +178,7 @@ class ServerSyncTests(ServerTestCase):
             for index in range(planning_library.LIBRARY_BULK_MAX_ENTRIES + 1)
         ])
         local_ids = [item["id"] for item in planned]
-        entries = [item for item in server.planning_authority_service().pending_plan_push_entries() if item["library_workout_id"] in local_ids]
+        entries = [item for item in server.SYNC_COMMANDS.authority().pending_plan_push_entries() if item["library_workout_id"] in local_ids]
         intent = {
             "intent": "remote_sync", "operation": "replace_training_plan", "target_system": "intervals",
             "artifact_id": None, "ambiguities": [],
@@ -184,8 +187,8 @@ class ServerSyncTests(ServerTestCase):
             "_replacement_sync_entry_ids": local_ids,
         }
 
-        with patch.object(server.PlanningAuthorityService, "mark_planning_authoritative"), patch.object(
-            server.PlanPushCommandService, "enqueue", return_value={"ok": True, "status": "queued"},
+        with patch.object(PlanningAuthorityService, "mark_planning_authoritative"), patch.object(
+            PlanPushCommandService, "enqueue", return_value={"ok": True, "status": "queued"},
         ) as enqueue:
             result = server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync", {"entries": entries}, intent=intent,
@@ -208,7 +211,7 @@ class ServerSyncTests(ServerTestCase):
         }
         entries = [{"library_workout_id": local_ids[0], "expected_payload_hash": "b" * 64}]
 
-        with patch.object(server.PlanPushCommandService, "enqueue") as enqueue, self.assertRaises(server.AppError) as error:
+        with patch.object(PlanPushCommandService, "enqueue") as enqueue, self.assertRaises(server.AppError) as error:
             server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync", {"entries": entries}, intent=intent,
                 conversation_id="conversation-created-subset", client_turn_id="turn-created-subset",
@@ -344,7 +347,7 @@ class ServerSyncTests(ServerTestCase):
                 "date": (date.today() + timedelta(days=index + 10)).isoformat(),
                 "sport": "Ride", "name": f"Changed {index}", "description": "- 20m 60% easy",
             })
-        pending = server.planning_authority_service().pending_plan_push_entries()
+        pending = server.SYNC_COMMANDS.authority().pending_plan_push_entries()
         selected = pending[:101]
         intent = {
             "intent": "remote_sync", "operation": "start_intervals_plan_sync", "target_system": "intervals",
@@ -1729,7 +1732,7 @@ class ServerSyncTests(ServerTestCase):
             WorkoutLibrarySyncService, "sync_entry",
             side_effect=[{"id": first["id"], "external_id": "remote-1"}, server.AppError(502, "provider unavailable")],
         ) as sync_entry:
-            pending = {item["library_workout_id"]: item for item in server.planning_authority_service().pending_plan_push_entries()}
+            pending = {item["library_workout_id"]: item for item in server.SYNC_COMMANDS.authority().pending_plan_push_entries()}
             result = server.SELECTED_WORKOUT_SYNC.service().sync({"entries": [pending[first["id"]], pending[second["id"]]]})
         self.assertEqual(result["status"], "partial")
         self.assertEqual(len(result["results"]), 2)

@@ -13,7 +13,6 @@ from backend.http_api.chat_post import ChatPostRoutes
 from backend.http_api.coach_actions_post import CoachActionsPostRoutes
 from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.chat_stream import CoachChatStreamTransport
-from backend.http_api.diagnostics_post import DiagnosticsCapturePostRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.route_dispatch import HttpRouteDispatcher
 from backend.http_api.handler import HttpRequestHandlerDependencies, create_request_handler
@@ -83,7 +82,6 @@ class HttpApiAssembly:
         settings: Any,
         recent_log_entries_service: Callable[[], Any],
         diagnostic_report_service: Callable[[], Any],
-        diagnostic_capture: Any,
         athlete_clock: Any,
         local_today: Callable[[], Any],
         all_sync_days: int,
@@ -132,7 +130,7 @@ class HttpApiAssembly:
         )
         self.diagnostics_get_routes = DiagnosticsGetRoutes(
             session_auth_service, recent_log_entries_service,
-            diagnostic_report_service, diagnostic_capture,
+            diagnostic_report_service,
         )
         self.sync_get_routes = SyncGetRoutes(
             session_auth_service, sync_job_queue_service,
@@ -160,7 +158,6 @@ class HttpApiAssembly:
         self.transcribe_post_routes = TranscribePostRoutes(
             settings, audio_transcription_client,
         )
-        self.diagnostics_capture_post_routes = DiagnosticsCapturePostRoutes(diagnostic_capture)
         self.privacy_delete_post_routes = PrivacyDeletePostRoutes(privacy_delete_service)
         self.privacy_get_routes = PrivacyGetRoutes(
             session_auth_service, export_stream_transport, privacy_delete_service,
@@ -205,7 +202,7 @@ class HttpApiAssembly:
             self.transcribe_post_routes, self.planning_commands_post_routes,
             self.feedback_post_routes, self.chat_stream_transport,
             self.sync_command_post_route, self.history_undo_post_routes,
-            self.diagnostics_capture_post_routes, self.privacy_delete_post_routes,
+            self.privacy_delete_post_routes,
             self.nutrition_post_routes,
         )
         self.post_dispatcher = HttpPostDispatcher(

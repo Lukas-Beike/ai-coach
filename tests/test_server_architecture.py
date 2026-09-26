@@ -2051,53 +2051,6 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_handle_openai_stream_network_error",
 )
 
-# Functions in server.py are fixed composition helpers, local clock utilities,
-# the HTTP adapter, and process lifecycle. New orchestration belongs in backend.
-ALLOWED_SERVER_FUNCTIONS = frozenset("""
-    database_manager session_auth_service provider_state_service
-    sync_job_store sync_job_queue_service sync_command_endpoint
-    provider_refresh_command_service sync_conflict_command_service
-    plan_push_command_service structured_plan_sync_service
-    plan_repair_manifest_service coach_sync_tool_service nutrition_service
-    intervals_nutrition_sync_service coach_athlete_record_tool_service
-    state_version_service
-
-    morning_body_battery_service calendar_conflict_service
-    activity_feedback_service activity_read_service duplicate_activity_service
-    checkin_service profile_service coach_profile_update_service
-    change_history_service history_undo_service competition_service
-    training_plan_service
-    planned_unit_service
-    planning_authority_service
-    sync_job_worker workout_library_service workout_library_plan_service
-    coach_library_plan_tool_service local_plan_creation_service
-    training_plan_artifact_service daily_planning_context_service
-    structured_training_state_service structured_training_change_validator
-    structured_training_change_service coach_training_patch_service
-    structured_training_plan_replacement_service adaptive_replan_apply_service
-    illness_pause_sync_service coach_adaptive_apply_service
-    adaptive_preview_followup_service adaptive_replan_preview_service
-    athlete_context_service
-    initialise_database key_value_service
-    coach_quick_actions_service
-    coach_dialogue_read_service
-    coach_dialogue_action_service coach_clarification_service
-    coach_attachment_context_service manual_morning_checkin_service
-    morning_checkin_state_service
-    gemini_request_payload_service gemini_response_normalization_service
-    gemini_conversation_response_service library_page_service
-    chat_history_page_service coach_command_receipt_service
-    coach_response_transport
-    coach_tool_dispatch_service coach_structured_tool_execution_service
-    coach_structured_tool_failure_service coach_structured_tool_round_journal
-    coach_planning_command_service coach_structured_tool_replay_service
-    coach_structured_tool_preparation_service
-    coach_structured_tool_round_service
-    recent_log_entries_service coach_diagnostic_history_service diagnostic_report_service
-    export_stream_transport readiness_service
-    request_handler_class main
-""".split())
-
 # These functions intentionally retain the small amount of root control flow
 # for schema initialization and process lifecycle. Runtime caches bind their
 # services to explicit dependencies in the owning backend modules.
@@ -2528,22 +2481,35 @@ class ServerArchitectureTests(unittest.TestCase):
             + "\n".join(violations),
         )
 
-    def test_server_top_level_functions_are_limited_to_composition_root(self) -> None:
+    def test_server_definitions_are_composition_factories_or_lifecycle(self) -> None:
         tree = _parse(SERVER_PATH)
-        functions = {
-            node.name
-            for node in tree.body
+        classes = [node.name for node in tree.body if isinstance(node, ast.ClassDef)]
+        self.assertEqual([], classes, "Application and HTTP classes belong in backend owners.")
+
+        functions = [
+            node for node in tree.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-        classes = {
-            node.name for node in tree.body if isinstance(node, ast.ClassDef)
-        }
-        self.assertEqual(
-            set(),
-            functions - ALLOWED_SERVER_FUNCTIONS,
-            "New server.py functions belong in a backend owner module.",
-        )
-        self.assertEqual(set(), classes)
+        ]
+        self.assertGreater(len(functions), 0)
+        for function in functions:
+            nested_implementation = [
+                node for node in ast.walk(function)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and node is not function
+            ]
+            self.assertEqual([], nested_implementation, f"{function.name} defines nested behavior")
+
+            if function.name in SERVER_COMPOSITION_CONTROL_FLOW:
+                continue
+            statements = [
+                node for node in function.body
+                if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str))
+            ]
+            self.assertTrue(statements, f"{function.name} must return its composed service")
+            self.assertTrue(
+                all(isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return)) for node in statements),
+                f"{function.name} must stay a straight-line composition factory",
+            )
 
     def test_morning_battery_source_uses_backend_garmin_reader_instance(self) -> None:
         tree = _parse(SERVER_PATH)

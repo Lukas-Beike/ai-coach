@@ -268,7 +268,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_sync_invalid_id_repair_clears_error_and_queues_only_selected_unit(self):
         units = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-09"), self.workout("2026-09-11")])
-        entry = next(item for item in server.planning_authority_service().pending_plan_push_entries() if item["library_workout_id"] == units[0]["id"])
+        entry = next(item for item in server.SYNC_COMMANDS.authority().pending_plan_push_entries() if item["library_workout_id"] == units[0]["id"])
         scope = ["intervals_sync", f"planned_unit:{units[0]['id']}"]
         self.turn("Freitag bitte lockerer", [{"output_text": "Die lokale Planung ist gespeichert."}])
         result, _ = self.turn("Bitte zu intervals.icu synchronisieren", [
@@ -331,7 +331,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             payload = {"reason": "Synthetic retry", "days": 7}
             if remote:
                 server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
-                payload = {"reason": "Synthetic retry", "entries": server.planning_authority_service().pending_plan_push_entries()}
+                payload = {"reason": "Synthetic retry", "entries": server.SYNC_COMMANDS.authority().pending_plan_push_entries()}
             job = server.SYNC_JOB_QUEUE.service().enqueue(
                 provider, kind, payload, requested_by="coach"
             )
@@ -837,7 +837,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_selected_existing_planned_unit_sync_accepts_planned_unit_scope(self):
         planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-08")])[0]
-        entry = server.planning_authority_service().pending_plan_push_entries()[0]
+        entry = server.SYNC_COMMANDS.authority().pending_plan_push_entries()[0]
         result, _ = self.turn("Nur diese Einheit übertragen", [lambda _: self.call(
             "start_intervals_plan_sync", {"entries": [entry]},
             ["intervals_sync", f"planned_unit:{planned['id']}"], target="intervals",

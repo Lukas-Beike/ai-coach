@@ -14,8 +14,6 @@ from datetime import date, datetime, timezone
 from functools import partial
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any
-from urllib.parse import urlparse
 
 from backend.db import row_factory as database_row_factory
 from backend.diagnostics.history import CoachDiagnosticHistoryService
@@ -40,8 +38,10 @@ from backend.athlete.checkins import (
 from backend.athlete.context import AthleteContextService
 from backend.athlete.clock import AthleteLocalClock
 from backend.athlete.assembly import AthleteDataAssembly
-from backend.athlete.profile import DEFAULT_PROFILE, normalize_profile, timezone_name
-from backend.performance import morning_battery as performance_morning_battery
+from backend.athlete.profile import (
+    DEFAULT_PROFILE,
+    normalize_profile,
+)
 from backend.performance.morning_battery_service import (
     MorningBatteryClock,
     MorningBatteryEvents,
@@ -84,7 +84,10 @@ from backend.db.manager import (
     DatabaseManager,
 )
 from backend.db.schema import configure_cipher, database_schema_is_current
-from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config
+from backend.config import (
+    DEFAULT_OPENAI_BASE_URL,
+    load_config,
+)
 from backend.providers.intervals import IntervalsApiClient
 from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
@@ -95,21 +98,6 @@ from backend.providers.transport_assembly import ProviderTransportAssembly
 from backend.providers.model_assembly import ModelTransportAssembly
 from backend.http_api import server as http_server
 from backend.http_api.assembly import HttpApiAssembly, HttpHandlerConfiguration
-from backend.http_api.athlete_get import AthleteGetRoutes
-from backend.http_api.athlete_put import AthletePutRoutes
-from backend.http_api.coach_actions_post import CoachActionsPostRoutes
-from backend.http_api.chat_post import ChatPostRoutes
-from backend.http_api.chat_stream import CoachChatStreamTransport
-from backend.http_api.transcribe_post import TranscribePostRoutes
-from backend.http_api.planning_commands_post import PlanningCommandsPostRoutes
-from backend.http_api.feedback_post import FeedbackPostRoutes
-from backend.http_api.chat_cancel_post import ChatCancelPostRoutes
-from backend.http_api.privacy_restore_post import PrivacyRestorePostRoutes
-from backend.http_api.auth_post import AuthPostRoutes
-from backend.http_api.coach_get import CoachGetRoutes
-from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
-from backend.http_api.public_get import PublicGetRoutes
-from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.auth import (
     SessionAuthService,
@@ -118,31 +106,10 @@ from backend.http_api.auth import (
 from backend.http_api.state_versions import StateVersionService
 from backend.http_api.public_state_assembly import PublicStateAssembly
 from backend.http_api.sync_commands import SyncCommandEndpoint
-from backend.http_api.sync_commands_post import SyncCommandPostRoute
-from backend.http_api.post_dispatch import (
-    HttpAuthenticatedPostRoutes,
-    HttpPostDispatcher,
-)
-from backend.http_api.sync_get import SyncGetRoutes
-from backend.http_api.history_get import HistoryGetRoutes
-from backend.http_api.history_undo_post import HistoryUndoPostRoutes
-from backend.http_api.privacy_get import PrivacyGetRoutes
-from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
-from backend.http_api.settings_put import SettingsPutRoutes
-from backend.http_api.nutrition import (
-    NutritionGetRoutes,
-    NutritionPostRoutes,
-    NutritionPutRoutes,
-)
 from backend.nutrition.service import NutritionService
 from backend.nutrition.sync import IntervalsNutritionSyncService
-from backend.sync.authority import PlanningAuthorityService
+from backend.sync.command_assembly import SyncCommandAssembly
 from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
-from backend.sync.commands import ProviderRefreshCommandService
-from backend.sync.conflict_commands import SyncConflictCommandService
-from backend.sync.plan_commands import PlanPushCommandService
-from backend.sync.plan_selection import StructuredPlanSyncService
-from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.planned_calendar_assembly import PlannedCalendarSyncAssembly
 from backend.sync.planned_unit_assembly import PlannedUnitSyncAssembly
 from backend.sync.library import workout_library_sync_running
@@ -159,25 +126,16 @@ from backend.sync.worker import shared_sync_job_wake_event
 from backend.planning import adaptive as planning_adaptive
 from backend.planning.assembly import PlanningDataAssembly
 from backend.planning.workflows_assembly import PlanningWorkflowAssembly
-from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
-from backend.planning.calendar_service import CalendarConflictService
-from backend.planning import changes as planning_changes
-from backend.planning.daily_context_service import DailyPlanningContextService
 from backend.planning import competitions as planning_competitions
 from backend.planning import library as planning_library
-from backend.planning.library_plan_service import WorkoutLibraryPlanService
-from backend.planning.local_plan_creation_service import LocalTrainingPlanCreationService
-from backend.planning.replacement_service import StructuredTrainingPlanReplacementService
 from backend.planning.revision import PlanningRevisionService
 from backend.planning import season as planning_season
-from backend.planning.state_service import StructuredTrainingStateService
 from backend.planning import training_plans as planning_training_plans
 from backend.sync import scheduler as sync_scheduler_runtime
 from backend.coach import context as coach_context_module
 from backend.coach.context import CoachQuickActionsService
 from backend.coach.context_assembly import CoachContextAssembly
 from backend.coach.read_tools_assembly import CoachReadToolsAssembly
-from backend.coach.request_payload import CoachRequestPayloadService
 from backend.coach.conversation import (
     CoachAttachmentContextService,
     GeminiConversationResponseService,
@@ -212,17 +170,8 @@ from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
 from backend.http_api.library_page import LibraryPageService
 from backend.http_api.chat_page import ChatHistoryPageService
-from backend.http_api.static_assets import StaticAssetService
 from backend.http_api.export_streams import ExportStreamTransport
-from backend.http_api.state_events_transport import StateEventTransport
-from backend.http_api.state_events_get import StateEventsGetRoutes
-from backend.http_api.route_dispatch import HttpRouteDispatcher
 from backend.http_api.response_transport import HttpResponseTransport
-from backend.http_api.requests import (
-    read_audio_body as read_request_audio_body,
-    read_body as read_request_body,
-    read_json as read_request_json,
-)
 from backend.backup.assembly import BackupAssembly
 
 try:
@@ -354,43 +303,6 @@ def sync_command_endpoint() -> SyncCommandEndpoint:
         INTERVALS_SYNC.performance_service(), PROVIDER_RESYNC.full_resync_service(),
         lambda: uuid.uuid4().hex, SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS,
     )
-
-
-def provider_refresh_command_service() -> ProviderRefreshCommandService:
-    """Compose authorized Coach refresh command execution."""
-    return ProviderRefreshCommandService(
-        SYNC_JOB_QUEUE.service(), INTERVALS_SYNC.sync_service(), ALL_SYNC_DAYS
-    )
-
-
-def sync_conflict_command_service() -> SyncConflictCommandService:
-    """Compose local conflict decisions and explicitly authorized job retry."""
-    return SyncConflictCommandService(
-        database_manager(),
-        PLANNING_DATA.planned_unit(),
-        PLANNING_DATA.competition(),
-        SYNC_JOB_QUEUE.service(),
-    )
-
-
-def plan_push_command_service() -> PlanPushCommandService:
-    """Compose explicit Coach plan-push chunking and queue persistence."""
-    return PlanPushCommandService(SYNC_JOB_QUEUE.service())
-
-
-def structured_plan_sync_service() -> StructuredPlanSyncService:
-    """Compose authorized structured-plan selection and execution."""
-    return StructuredPlanSyncService(
-        database_manager(),
-        planning_authority_service(),
-        plan_push_command_service(),
-        coach_limits.COACH_TRAINING_CHANGE_LIMIT,
-    )
-
-
-def plan_repair_manifest_service() -> PlanRepairManifestService:
-    """Compose complete-period local repair manifest validation."""
-    return PlanRepairManifestService(database_manager(), planning_authority_service())
 
 
 def nutrition_service() -> NutritionService:
@@ -609,16 +521,6 @@ def history_undo_service() -> HistoryUndoService:
     )
 
 
-def planning_authority_service() -> PlanningAuthorityService:
-    """Compose explicit local-authority decisions before provider sync."""
-    return PlanningAuthorityService(
-        database_manager(),
-        WORKOUT_LIBRARY_SYNC.sync_state_service(),
-        PLANNING_REVISION_SERVICE,
-        runtime_clock.utc_now,
-    )
-
-
 def sync_job_worker() -> sync_worker_runtime.SyncJobWorker:
     """Return the one restartable persistent synchronization worker."""
     global SYNC_JOB_WORKER
@@ -682,7 +584,6 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     lambda key: key_value_service().get(key),
     lambda key, value: key_value_service().set(key, value),
     REDACTOR,
-    runtime_clock.utc_now,
 )
 
 SYNC_PERSISTENCE = SyncPersistenceAssembly(
@@ -1033,6 +934,19 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
     sync_earliest_date=SYNC_EARLIEST_DATE,
 )
 
+SYNC_COMMANDS = SyncCommandAssembly(
+    database_manager=database_manager,
+    queue_service=SYNC_JOB_QUEUE.service,
+    intervals_sync=INTERVALS_SYNC.sync_service,
+    planned_unit_service=PLANNING_DATA.planned_unit,
+    competition_service=PLANNING_DATA.competition,
+    workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
+    planning_revision=PLANNING_REVISION_SERVICE,
+    utc_now=runtime_clock.utc_now,
+    training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
+    all_sync_days=ALL_SYNC_DAYS,
+)
+
 
 
 
@@ -1199,12 +1113,12 @@ COACH_PLANNING_TOOLS = CoachPlanningToolsAssembly(
 
 COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
     sync_job_queue=lambda: SYNC_JOB_QUEUE.service(),
-    planning_authority=lambda: planning_authority_service(),
-    sync_conflict_commands=lambda: sync_conflict_command_service(),
-    structured_plan_sync=lambda: structured_plan_sync_service(),
-    plan_repair_manifest=lambda: plan_repair_manifest_service(),
-    plan_push_command=lambda: plan_push_command_service(),
-    provider_refresh_command=lambda: provider_refresh_command_service(),
+    planning_authority=SYNC_COMMANDS.authority,
+    sync_conflict_commands=SYNC_COMMANDS.conflicts,
+    structured_plan_sync=SYNC_COMMANDS.structured_plan_sync,
+    plan_repair_manifest=SYNC_COMMANDS.repair_manifest,
+    plan_push_command=SYNC_COMMANDS.plan_push,
+    provider_refresh_command=SYNC_COMMANDS.provider_refresh,
     checkin_service=lambda: ATHLETE_DATA.checkin(),
     activity_feedback_service=lambda: ATHLETE_DATA.activity_feedback(),
     competition_service=lambda: PLANNING_DATA.competition(),
@@ -1252,7 +1166,7 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
     tool_dispatch_service=lambda: COACH_TOOL_DISPATCH.service(),
     job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
     dialogue_action_service=lambda: coach_dialogue_action_service(),
-    planning_authority_service=lambda: planning_authority_service(),
+    planning_authority_service=SYNC_COMMANDS.authority,
     training_context_service=lambda: COACH_CONTEXT.training_context_service(),
     response_service=lambda: COACH_TURNS.structured_response_service(),
     tool_round_limits=lambda: CoachStructuredToolRoundLimits(
@@ -1506,7 +1420,6 @@ HTTP_API = HttpApiAssembly(
     settings=SETTINGS,
     recent_log_entries_service=recent_log_entries_service,
     diagnostic_report_service=diagnostic_report_service,
-    diagnostic_capture=DIAGNOSTIC_CAPTURE,
     sync_job_queue_service=SYNC_JOB_QUEUE.service,
     athlete_clock=ATHLETE_CLOCK,
     local_today=lambda: ATHLETE_CLOCK.now().date(),

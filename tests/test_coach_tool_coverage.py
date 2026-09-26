@@ -322,7 +322,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         local_id = self.state()["planned_units"][0]["local_id"]
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-13", "Synthetic preserved Sunday")])
-        entry = next(e for e in server.planning_authority_service().pending_plan_push_entries() if e["library_workout_id"] == local_id)
+        entry = next(e for e in server.SYNC_COMMANDS.authority().pending_plan_push_entries() if e["library_workout_id"] == local_id)
         selected = self.run_tool("start_intervals_plan_sync", {"entries": [entry]}, ["planned_unit:" + local_id, "intervals_sync"],
                                  target="intervals", remote_write=True, sync_scope="selected", message="Nur diese Einheit erneut übertragen.")
         self.assertEqual(selected["entries"], 1)

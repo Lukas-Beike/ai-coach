@@ -217,7 +217,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 server.PLANNING_DATA.planned_unit().insert(db, unit)
                 row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
                 entries.append({"library_workout_id": local_id, "expected_payload_hash": planning_library.library_payload_hash(row["payload"])})
-        server.plan_push_command_service().enqueue(entries, [], reason="Synthetic full repair", repair=True)
+        server.SYNC_COMMANDS.plan_push().enqueue(entries, [], reason="Synthetic full repair", repair=True)
         first = server.SYNC_JOB_QUEUE.store().claim()
         server.SYNC_JOB_QUEUE.outcome_service().complete(first["id"], {"ok": True})
         snapshot = {"synced_at": "synthetic-after-repair", "athlete": {}, "recent_activities": [],
@@ -251,7 +251,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
     def test_repair_queued_during_snapshot_fetch_prevents_import(self):
         local_id = self.seed()
         def fetch(**kwargs):
-            server.plan_push_command_service().enqueue([self.selection(local_id)], [], reason="Synthetic repair during fetch", repair=True)
+            server.SYNC_COMMANDS.plan_push().enqueue([self.selection(local_id)], [], reason="Synthetic repair during fetch", repair=True)
             return {"synced_at": "synthetic-fetch", "athlete": {}, "recent_activities": [],
                     "recent_wellness": [], "upcoming_calendar": []}
         with patch.object(IntervalsSnapshotReader, "fetch_snapshot", side_effect=fetch), patch.object(
@@ -357,7 +357,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             self.assertNotIn(key, current)
         parsed = parsed_workout_fixture(1800, sport="Swim", kind="pace", units="pace_zone", value=1)
         with patch.object(intervals_client_module.IntervalsClient, "upsert_calendar_events", return_value=[{"id": "swim-event", **parsed}]):
-            self.assertTrue(server.SELECTED_WORKOUT_SYNC.service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})["ok"])
+            self.assertTrue(server.SELECTED_WORKOUT_SYNC.service().sync({"entries": server.SYNC_COMMANDS.authority().pending_plan_push_entries()})["ok"])
         self.assertEqual(server.PLANNING_DATA.planned_unit().list()[0]["icu_training_load"], 20)
 
     def test_provider_io_allows_database_polling_and_excludes_same_unit_push(self):
@@ -457,12 +457,12 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         local_id = self.seed()
         self.remote.pop("duplicate")
         self.approve_illness_pause()
-        result = server.SELECTED_WORKOUT_SYNC.service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})
+        result = server.SELECTED_WORKOUT_SYNC.service().sync({"entries": server.SYNC_COMMANDS.authority().pending_plan_push_entries()})
         self.assertTrue(result["ok"], result)
         self.assertEqual(set(self.remote), {"race"})
         self.assertEqual(self.mutations, [("delete", "existing")])
         self.assertEqual(server.PLANNING_DATA.planned_unit().list(include_archived=True)[0]["id"], local_id)
-        self.assertEqual(server.planning_authority_service().pending_plan_push_entries(), [])
+        self.assertEqual(server.SYNC_COMMANDS.authority().pending_plan_push_entries(), [])
 
     def test_approved_illness_pause_repair_removes_all_identified_workout_copies(self):
         local_id = self.seed()
@@ -479,7 +479,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         for protected in ({"paired_activity_id": "completed"}, {"paired_event_id": "completed"},
                           {"start_date_local": "2026-09-06T00:00:00"}, {"category": "RACE_A"}):
             self.remote["existing"] = {**original, **protected}
-            result = server.SELECTED_WORKOUT_SYNC.service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})
+            result = server.SELECTED_WORKOUT_SYNC.service().sync({"entries": server.SYNC_COMMANDS.authority().pending_plan_push_entries()})
             self.assertFalse(result["ok"], {"protected": protected, "result": result, "mutations": self.mutations})
             self.assertEqual(self.mutations, [])
         self.remote["existing"] = original
@@ -489,7 +489,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             return self.get(path)
 
         with patch.object(intervals_client_module.IntervalsClient, "get", side_effect=restore_during_read):
-            self.assertFalse(server.SELECTED_WORKOUT_SYNC.service().sync({"entries": server.planning_authority_service().pending_plan_push_entries()})["ok"])
+            self.assertFalse(server.SELECTED_WORKOUT_SYNC.service().sync({"entries": server.SYNC_COMMANDS.authority().pending_plan_push_entries()})["ok"])
         self.assertEqual(self.mutations, [])
         self.assertFalse(server.PLANNING_DATA.planned_unit().list()[0]["archived"])
 
@@ -622,7 +622,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         revision = self.state()["planning_revision"]
         intent = {"_repair_period": {"start": "2026-09-09", "end": "2026-09-09"}, "authorization_scope": ["local_plan"]}
         with self.assertRaises(server.AppError) as caught:
-            service = server.plan_repair_manifest_service()
+            service = server.SYNC_COMMANDS.repair_manifest()
             prepared = service.prepare({"expected_revision": revision - 1}, intent)
             require_coach_scope(intent, *prepared.required_scope_groups[0])
             service.execute(prepared)

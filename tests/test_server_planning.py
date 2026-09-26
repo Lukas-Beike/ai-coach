@@ -32,7 +32,7 @@ class ServerPlanningTests(ServerTestCase):
             "description": "- 30m 60% Synthetic easy session", "duration_minutes": 30,
         })
         local_id = planned["id"]
-        entry = next(item for item in server.planning_authority_service().pending_plan_push_entries() if item["library_workout_id"] == local_id)
+        entry = next(item for item in server.SYNC_COMMANDS.authority().pending_plan_push_entries() if item["library_workout_id"] == local_id)
         intent = {
             "intent": "remote_sync",
             "operation": "start_intervals_plan_sync",
@@ -93,7 +93,7 @@ class ServerPlanningTests(ServerTestCase):
                 (competition["id"],),
             )
 
-        self.assertEqual(server.planning_authority_service().mark_competitions_authoritative(), 1)
+        self.assertEqual(server.SYNC_COMMANDS.authority().mark_competitions_authoritative(), 1)
         local_override = server.PLANNING_DATA.competition().list()[0]
         self.assertEqual(local_override["intervals_event_id"], "123")
         self.assertEqual(local_override["sync_state"], "local_override")
@@ -103,7 +103,7 @@ class ServerPlanningTests(ServerTestCase):
                 "UPDATE competitions SET sync_state='conflict', sync_conflict=? WHERE id=?",
                 (json.dumps({"type": "remote_missing"}), competition["id"]),
             )
-        server.planning_authority_service().mark_competitions_authoritative()
+        server.SYNC_COMMANDS.authority().mark_competitions_authoritative()
         recreated = server.PLANNING_DATA.competition().list()[0]
         self.assertIsNone(recreated["intervals_event_id"])
 

@@ -1517,3 +1517,21 @@ mocked providers; no live account or runtime data was used.
   battery service. Preserve preview/local mutation transaction boundaries,
   current service freshness, and deferred callbacks held by callers. Only the
   existing callback test seam moves from `server` to `PLANNING_WORKFLOWS`.
+
+## S6 boundary before implementation: sync command factories
+
+- The remaining sync command factories have callers in Coach command/tool
+  assembly, the HTTP sync endpoint, and focused Coach planning, sync, and
+  workout-repair tests. `planning_authority_service` was repeatedly created from
+  the same database manager, workout-library sync owner, planning revision, and
+  UTC clock; queue-backed command services likewise resolve the existing queue
+  and provider sync services lazily.
+- The narrow owner is `SyncCommandAssembly` in
+  `backend/sync/command_assembly.py`. It owns authority, provider refresh,
+  conflict resolution, plan push, structured selection, and repair-manifest
+  factories. HTTP's `SyncCommandEndpoint` stays at the HTTP boundary. The
+  assembly receives the existing manager, queue, sync, planning, revision, and
+  clock factories by name, with no new state or worker owner.
+- Direct test callers move to `server.SYNC_COMMANDS`; the HTTP endpoint's
+  existing root patch seam remains because the endpoint itself remains a root
+  factory. Current service freshness and queue/provider identities are retained.

@@ -297,7 +297,7 @@ class ServerCoachTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
             "_sync_all_pending": True,
         }
-        pending = {item["library_workout_id"]: item for item in server.planning_authority_service().pending_plan_push_entries()}
+        pending = {item["library_workout_id"]: item for item in server.SYNC_COMMANDS.authority().pending_plan_push_entries()}
         with self.assertRaises(server.AppError) as error:
             server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync",
@@ -306,7 +306,7 @@ class ServerCoachTests(ServerTestCase):
                 session_csrf_hash="", sync_job_ids=[],
             )
         self.assertEqual(error.exception.reason, "intent_scope_denied")
-        self.assertIn(second["id"], {item["library_workout_id"] for item in server.planning_authority_service().pending_plan_push_entries()})
+        self.assertIn(second["id"], {item["library_workout_id"] for item in server.SYNC_COMMANDS.authority().pending_plan_push_entries()})
 
     def test_coach_projection_helpers_are_dependency_light_and_bounded(self):
         from backend.coach.context import (

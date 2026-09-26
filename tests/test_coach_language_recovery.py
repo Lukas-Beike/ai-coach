@@ -121,7 +121,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         job = server.SYNC_JOB_QUEUE.service().enqueue(
             "intervals",
             "plan_push",
-            {"entries": server.planning_authority_service().pending_plan_push_entries()},
+            {"entries": server.SYNC_COMMANDS.authority().pending_plan_push_entries()},
         )
         with server.database_manager().unit_of_work() as db:
             db.execute("UPDATE sync_jobs SET status='completed' WHERE id=?", (job["id"],))
