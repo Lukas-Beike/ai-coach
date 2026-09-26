@@ -186,7 +186,7 @@ class CoachReviewTests(unittest.TestCase):
             with self.subTest(count=count):
                 self.setUp()
                 payload = {"plan_name": "Synthetic plan", "workouts": [self.workout(i) for i in range(count)]}
-                artifact = server.training_plan_artifact_service().stage(
+                artifact = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
                     {"payload": payload}, "review-conversation", "stage"
                 )
                 intent = self.intent("commit_training_plan", ["artifact:"+artifact["artifact_id"]]); intent["artifact_id"] = artifact["artifact_id"]
@@ -199,7 +199,7 @@ class CoachReviewTests(unittest.TestCase):
 
     def test_artifact_late_failure_rolls_back_entire_plan_and_revision(self):
         workouts = [self.workout(i) for i in range(56)]
-        artifact = server.training_plan_artifact_service().stage(
+        artifact = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
             {"payload": {"workouts": workouts, "plan_name": "Atomic"}},
             "review-conversation",
             "stage",
@@ -336,7 +336,7 @@ class CoachReviewTests(unittest.TestCase):
         change = next(row for row in server.change_history_service().list() if row["entity_id"] == template["id"])
         expired = self.history_preview(change["id"])["proposed_action"]
         active = self.history_preview(change["id"])["proposed_action"]
-        draft = server.training_plan_artifact_service().stage(
+        draft = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
             {"payload": {"workouts": [self.workout()]}},
             "review-conversation",
             "draft",

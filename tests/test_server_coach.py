@@ -32,7 +32,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(http_server_module.CoachHTTPServer.request_queue_size, 32)
 
     def test_structured_commit_rejects_model_artifact_outside_classified_scope(self):
-        artifact = server.training_plan_artifact_service().stage(
+        artifact = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
             {"payload": {"plan_name": "Scoped", "workouts": [{"date": "2099-01-01", "sport": "Ride", "description": "- 30m 60% Easy session", "duration_minutes": 30}]}},
             "conversation-scope",
             "turn-scope",
@@ -58,7 +58,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(denied.exception.reason, "intent_scope_denied")
 
     def test_structured_commit_does_not_rebind_foreign_draft_via_recovery_flag(self):
-        artifact = server.training_plan_artifact_service().stage(
+        artifact = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
             {"payload": {
                 "plan_name": "Foreign",
                 "workouts": [{
@@ -713,7 +713,7 @@ class ServerCoachTests(ServerTestCase):
             server.SETTINGS.save_thinking_level("extreme")
 
     def test_reset_coach_chat_discards_outstanding_plan_drafts(self):
-        artifact = server.training_plan_artifact_service().stage(
+        artifact = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
             {"payload": {"plan_name": "Reset test", "goal": "", "workouts": [{
                 "date": "2099-01-02", "sport": "Run", "name": "Reset test",
                 "description": "- 30m 60% easy", "duration_minutes": 30,

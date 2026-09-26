@@ -699,7 +699,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 validate_request({**value, "source_message_ids": ids}, {current}, current)
 
     def test_foreign_drafts_are_not_candidates(self):
-        server.training_plan_artifact_service().stage(
+        server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
             {"payload": {"workouts": [self.workout()], "plan_name": "Foreign"}},
             "foreign",
             "foreign-turn",
@@ -997,7 +997,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         server.COACH_CONVERSATION.message_service().add("user", "Ein Entwurf bitte")
         with server.database_manager().unit_of_work() as db:
             origin = server.CHAT_REPOSITORY.add(db, "user", "Synthetic draft", client_turn_id="draft-source")
-        draft = server.training_plan_artifact_service().stage(
+        draft = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
             {"payload": {"plan_name": "Synthetic", "workouts": [self.workout()]}},
             "old-conversation",
             "draft-source",

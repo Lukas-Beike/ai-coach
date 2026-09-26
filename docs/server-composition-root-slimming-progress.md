@@ -1069,3 +1069,65 @@ mocked providers; no live account or runtime data was used.
 - Measured `server.py`: 2,042 physical / 1,795 nonblank lines, 207 AST imports,
   91 top-level functions. Remaining S4 work is Coach planning-tool composition
   and structured turn/background-job wiring.
+
+## S4d2 boundary before implementation: Coach planning tools
+
+- This phase is split into reviewable sub-slices. The first narrow owner is a
+  `CoachPlanningToolsAssembly` in `backend/coach/planning_tools_assembly.py`.
+  It owns fresh construction of the Coach plan-artifact, library-plan,
+  training-patch, and adaptive-apply services. It does not own structured tool
+  rounds, receipts/jobs, routes, the dispatcher, or planning use cases.
+- The artifact factory is called lazily by `CoachPlanArtifactToolService` and
+  directly by `e2e/fixture_runtime.py` and fixture-backed tests. Training-patch
+  creation is called from structured execution; library-plan and adaptive-apply
+  creation remain deferred behind the Coach tool dispatcher/action tool.
+  Preserve factory-call timing and constructor-time versus invocation-time
+  lookup at these edges. The next S4d sub-slice will own remaining planning and
+  sync tool construction plus the dispatcher; S4e retains structured turns,
+  receipts/jobs, and background work.
+- Shared identities remain with current owners: `ATHLETE_DATA`, `PLANNING_DATA`,
+  `SYNC_JOB_QUEUE`, `COACH_PROPOSALS`, `SYNC_PERSISTENCE`, `DB_LOCK`, and
+  `PLANNING_REVISION_SERVICE`. Their owner methods/callbacks are injected
+  explicitly; no owner is recreated by this assembly. The planning tool
+  assembly only creates the same fresh per-request wrappers that the root
+  factories create today.
+- Direct test/fixture callers found: `tests/test_coach_dialogue.py`,
+  `test_coach_review.py`, `test_coach_training_patch.py`, `test_server_coach.py`,
+  `test_server_frontend.py`, `test_server_http.py`, `test_server_planning.py`,
+  and `test_server_sync.py`; `e2e/fixture_runtime.py` directly stages a plan
+  artifact. The primary patch sites are `backend.coach.*` service constructors,
+  planning/sync owner objects, and `server` configuration/process resources;
+  no discovered test patches these eight factory function names directly.
+  Migrate direct construction callers to the owning assembly while keeping
+  behavioral patches at the service or shared-owner lookup site.
+- The interface will expose explicit methods for the planning tool factories
+  and tool dispatcher. S4e retains structured turns, background jobs, durable
+  tool-round state, and lifecycle/job wiring. This split preserves the existing
+  authorization and approval boundaries and prevents the assembly from
+  becoming a universal Coach service registry.
+
+## S4d2a: Coach planning mutations and artifacts
+
+- Added `CoachPlanningToolsAssembly` in
+  `backend/coach/planning_tools_assembly.py` for local plan artifacts, library
+  planning authorization, atomic training patches, and approved adaptive apply.
+  Removed those four factories from `server.py`; the dispatcher keeps its
+  existing lazy callbacks, and direct artifact/training-patch callers now use
+  the typed assembly owner. Updated the generated extraction inventory and its
+  owner mapping.
+- Preserved the shared database lock, active database manager, local planning
+  factory identities, event buffer, repositories, athlete clock callback,
+  change limit, and fresh service construction. The artifact remains lazy behind
+  the plan-artifact tool. Adaptive application still resolves its preview and
+  illness-sync services when its deferred factory runs.
+- Focused assembly, planning, Coach dialogue/review, sync, and architecture
+  matrix passed: 368 tests. Compileall, inventory `--check`, and `git diff
+  --check` passed. Docker image build was attempted but could not connect to the
+  local Docker engine (`npipe:////./pipe/docker_engine` is unavailable).
+- Changed files: `server.py`, new planning-tools assembly and focused tests,
+  Coach/planning tests, E2E fixture runtime, extraction inventory generator and
+  generated report, and this progress log.
+- Measured `server.py`: 2,023 physical / 1,782 nonblank lines, 204 AST imports,
+  87 top-level functions. No behavior regression found in the executed matrix;
+  the Docker runtime check remains unavailable. Remaining S4 work is the
+  planning/sync tool composition and dispatcher, then structured turns/jobs.

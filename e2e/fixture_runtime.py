@@ -96,7 +96,7 @@ artifact = {}
 
 def stage_fixture_artifact():
     today = server.ATHLETE_CLOCK.now().date()
-    artifact.update(server.training_plan_artifact_service().stage({"payload": {
+    artifact.update(server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage({"payload": {
         "plan_name": "Fixture sport contract",
         "workouts": [{"date": (today + timedelta(days=index)).isoformat(), "name": f"HTTP fixture {sport}", "sport": sport, "duration_minutes": 30,
                       "description": {"Run": "- 30m Z1 HR", "WeightTraining": "Synthetic local workout",

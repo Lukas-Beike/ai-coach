@@ -806,7 +806,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(result["status"], "local")
 
     def test_outstanding_plan_drafts_remain_visible_across_provider_conversations(self):
-        draft = server.training_plan_artifact_service().stage(
+        draft = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
             {"payload": {"plan_name": "Basis", "goal": "Ausdauer", "workouts": [{
                 "date": "2099-01-01", "sport": "Ride", "name": "Basis",
                 "description": "- 30m 60% easy", "duration_minutes": 30,
@@ -1504,7 +1504,7 @@ class ServerPlanningTests(ServerTestCase):
             side_effect=RuntimeError("creation failed"),
         ):
             with self.assertRaises(RuntimeError):
-                server.coach_training_patch_service().apply(arguments, {
+                server.COACH_PLANNING_TOOLS.training_patch_service().apply(arguments, {
                     "authorization_scope": ["local_plan"],
                     "request": {"constraints": []},
                 })
