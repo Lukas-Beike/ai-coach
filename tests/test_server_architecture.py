@@ -2060,7 +2060,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     plan_push_command_service structured_plan_sync_service
     plan_repair_manifest_service coach_sync_tool_service nutrition_service
     intervals_nutrition_sync_service coach_athlete_record_tool_service
-    coach_activity_read_tool_service coach_read_tool_service state_version_service
+    state_version_service
     public_performance_state_service public_feedback_state_service
     sync_public_state_service
 
@@ -2093,8 +2093,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     chat_history_page_service coach_proposal_read_service coach_command_receipt_service
     coach_turn_opening_service coach_proposal_creation_service
     coach_proposal_confirmation_service coach_proposal_execution_service
-    coach_structured_context_service coach_training_context_service
-    coach_request_payload_service coach_context_preview_service coach_response_transport
+    coach_response_transport
     coach_tool_dispatch_service coach_structured_tool_execution_service
     coach_structured_tool_failure_service coach_structured_tool_round_journal
     coach_planning_command_service coach_structured_tool_replay_service
@@ -3148,7 +3147,7 @@ class ServerArchitectureTests(unittest.TestCase):
                 "ATHLETE_DATA.profile",
                 "PLANNING_DATA.competition",
                 "public_feedback_state_service",
-                "coach_context_preview_service",
+                "COACH_CONTEXT.preview_service",
                 "SETTINGS",
             ],
         )

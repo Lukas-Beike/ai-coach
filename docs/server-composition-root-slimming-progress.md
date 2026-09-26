@@ -990,3 +990,45 @@ mocked providers; no live account or runtime data was used.
 - Measured `server.py`: 2,116 physical / 1,850 nonblank lines, 207 AST imports,
   101 top-level functions. Remaining S4 risk is the separately traced context
   and read-tool boundary, proposal/planning tools, and structured turn/jobs.
+
+## S4c boundary before implementation: context and read tools
+
+- Use two narrow backend owners. `CoachContextAssembly` in
+  `backend/coach/context_assembly.py` exposes fresh structured-context,
+  training-context, request-payload, and context-preview factories.
+  `CoachReadToolsAssembly` in `backend/coach/read_tools_assembly.py` exposes
+  fresh activity-read and read-only tool-dispatch factories. This keeps prompt
+  projection separate from tool dispatch and leaves mutations, proposal tools,
+  and `CoachToolDispatchService` wiring for S4d.
+- Context callers are structured turns, structured tool rounds, the athlete
+  context-preview route, public consumers/tests; read-tool callers are the
+  mixed tool dispatcher and read-tool tests. Existing service classes and
+  context limits are patched in `backend.coach.context`,
+  `backend.coach.read_tools`, and their owning service modules; direct root
+  factory calls in tests will move to the two assembly owners.
+- Preserve fresh context/read-service wrappers and all existing manager-bound
+  domain service identities. Resolve each sync-state, athlete/planning,
+  weather, Garmin, local-message and workout-library dependency at the same
+  factory call as today. Keep read tools behind the deferred callable passed
+  into `CoachToolDispatchService`; constructing context assemblies must not
+  perform storage reads, provider calls, or start workers.
+
+## S4c: context and read tools
+
+- Completed `CoachContextAssembly` and `CoachReadToolsAssembly` in
+  `backend/coach/`. Removed six root factories for structured/training/request/
+  preview context and activity/general read tools. Migrated turn, tool,
+  context-preview route and test callers to the appropriate owner methods.
+- Preserved fresh context/read service construction, dynamic context limits,
+  active athlete clock reads, explicit current domain service factories, and
+  deferred read-tool creation behind `CoachToolDispatchService`. Guarded tests
+  passed: assembly, context, preview and architecture (60 passed); Coach,
+  planning, sync, HTTP, athlete, weather/calendar, provider review, frontend,
+  dialogue and proposal review matrix (457 passed, 1 SQLCipher skip).
+  Compileall, inventory check, and diff check passed. Docker remains unavailable.
+- Changed files include `server.py`, new context/read-tool assemblies and their
+  tests, progress/inventory owner map and output, and context, Coach, planning,
+  weather/calendar, provider, dialogue, and architecture test callers.
+- Measured `server.py`: 2,063 physical / 1,808 nonblank lines, 207 AST imports,
+  95 top-level functions. Remaining S4 work is proposal/planning tool assembly
+  and structured turn/background-job wiring.

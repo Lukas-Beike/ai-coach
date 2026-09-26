@@ -213,6 +213,8 @@ def _explicit_owner(name: str) -> str | None:
             "BACKUP_ASSEMBLY": "backend/backup/assembly",
             "MODEL_TRANSPORT": "backend/providers/model_assembly",
             "COACH_CONVERSATION": "backend/coach/conversation_assembly",
+            "COACH_CONTEXT": "backend/coach/context_assembly",
+            "COACH_READ_TOOLS": "backend/coach/read_tools_assembly",
             "EXTERNAL_CALENDAR": COMPOSITION_ROOT,
             "AppError": ERRORS_MODULE,
             "public_app_error_status": ERRORS_MODULE,

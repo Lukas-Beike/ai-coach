@@ -272,7 +272,7 @@ class ProviderReviewTests(unittest.TestCase):
                 self.assertEqual(server.GARMIN_ASSEMBLY.projection_service().public_state()["activities"], 0)
                 self.assertEqual(server.GARMIN_ASSEMBLY.payload_service().snapshot()["activity_matches"], [{"garmin_activity_id": 123, "intervals_activity_id": "canonical"}])
                 self.assertEqual(server.SYNC_PERSISTENCE.state_repository().cursor("garmin", "data")["cursor"], payload["end"])
-                context = server.coach_training_context_service().build()
+                context = server.COACH_CONTEXT.training_context_service().build()
                 self.assertNotIn("garmin_specific", context)
                 self.assertEqual(context.count('"id":"canonical"'), 1)
 
@@ -315,7 +315,7 @@ class ProviderReviewTests(unittest.TestCase):
             self.assertEqual(server.GARMIN_ASSEMBLY.projection_service().public_state()["source_freshness"]["readiness"]["fetched_at"], first["synced_at"])
             coach = server.GARMIN_ASSEMBLY.projection_service().coach_context(include_performance=True)
             self.assertEqual(coach["performance"]["thresholds"]["cycling_ftp_watts"]["freshness"], "stale")
-            context = server.coach_training_context_service().build()
+            context = server.COACH_CONTEXT.training_context_service().build()
             self.assertIn('"freshness":"stale"', context)
             self.assertIn('"observed_at":"2026-08-30"', context)
             self.assertEqual(second["performance_history"], history)

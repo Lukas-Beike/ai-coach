@@ -588,7 +588,7 @@ class ServerPlanningTests(ServerTestCase):
         }])[0]
         self.assertEqual(updated["id"], imported["id"])
         self.assertEqual(server.PLANNING_DATA.workout_library().list()[0]["name"], "Locker Rad aktualisiert")
-        self.assertIn("LOCAL TRAINING LIBRARY", server.coach_training_context_service().build())
+        self.assertIn("LOCAL TRAINING LIBRARY", server.COACH_CONTEXT.training_context_service().build())
 
     def test_library_update_always_sends_required_folder(self):
         client = server.PROVIDER_TRANSPORT.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
@@ -1167,19 +1167,19 @@ class ServerPlanningTests(ServerTestCase):
             "target": "easy",
             "source": "coach",
         })
-        context = server.coach_training_context_service().build()
+        context = server.COACH_CONTEXT.training_context_service().build()
         self.assertEqual(context.count("LOCAL PLANNED WORKOUTS"), 1)
         self.assertEqual(context.count('"local_planned_workouts"'), 1)
         self.assertLessEqual(len(context), coach_context.COACH_CONTEXT_TOTAL_CHAR_LIMIT)
-        structured = server.coach_structured_context_service().build()
+        structured = server.COACH_CONTEXT.structured_context_service().build()
         self.assertIn("local_planned_workouts", structured)
         self.assertIn('"projection"', context)
         self.assertNotIn("long description", context)
 
     def test_build_training_context_applies_total_budget_deterministically(self):
-        with patch.object(server.CoachStructuredContextService, "build", return_value={"source_policy": {"untrusted": "x" * 200_000}}):
-            first = server.coach_training_context_service().build()
-            second = server.coach_training_context_service().build()
+        with patch("backend.coach.context.CoachStructuredContextService.build", return_value={"source_policy": {"untrusted": "x" * 200_000}}):
+            first = server.COACH_CONTEXT.training_context_service().build()
+            second = server.COACH_CONTEXT.training_context_service().build()
         self.assertEqual(first, second)
         self.assertLessEqual(len(first), coach_context.COACH_CONTEXT_TOTAL_CHAR_LIMIT)
 
@@ -1630,7 +1630,7 @@ class ServerPlanningTests(ServerTestCase):
         )
         self.assertEqual(result["profile"]["training_background"], "Five years of cycling")
         self.assertEqual(result["competitions"][0]["priority"], "A")
-        context = server.coach_structured_context_service().build()
+        context = server.COACH_CONTEXT.structured_context_service().build()
         self.assertEqual(context["target_competitions"][0]["name"], "Münsterland Giro")
         self.assertIn("bestätigte", context["source_policy"]["durable_profile"])
 

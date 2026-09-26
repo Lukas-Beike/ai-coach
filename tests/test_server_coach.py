@@ -355,7 +355,7 @@ class ServerCoachTests(ServerTestCase):
         activity = server.public_state_service().read(local_only=True)["activities"][0]
         self.assertEqual(activity["activity_feedback"]["activity_id"], "activity-1")
         self.assertEqual(activity["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich")
-        context = server.coach_structured_context_service().build()
+        context = server.COACH_CONTEXT.structured_context_service().build()
         self.assertEqual(context["activity_feedback"]["recent"][0]["activity_name"], "Morgenlauf")
         self.assertIn("Linkes Knie", context["activity_feedback"]["recent"][0]["notes"])
 
@@ -399,7 +399,7 @@ class ServerCoachTests(ServerTestCase):
             "race_predictions": {"5k": 1320},
             "activities": [{"activityId": 1, "activityName": "Duplicate raw activity"}],
         }))
-        context = server.coach_structured_context_service().build({
+        context = server.COACH_CONTEXT.structured_context_service().build({
             "synced_at": "now", "athlete": {}, "recent_activities": [],
             "recent_wellness": [], "upcoming_calendar": [],
         })
@@ -554,7 +554,7 @@ class ServerCoachTests(ServerTestCase):
 
     def test_context_preview_exposes_context_and_last_chat_input(self):
         server.COACH_CONVERSATION.message_service().add("user", "Wie soll ich morgen trainieren?")
-        preview = server.coach_context_preview_service().preview(server.SETTINGS.selected_ai_provider())
+        preview = server.COACH_CONTEXT.preview_service().preview(server.SETTINGS.selected_ai_provider())
         self.assertIn("You are the athlete's long-term endurance coach.", preview["context_text"])
         self.assertIn("BEGIN UNTRUSTED EXTERNAL DATA", preview["context_text"])
         self.assertEqual(preview["chat_prompt"]["field"], "input")
@@ -576,8 +576,8 @@ class ServerCoachTests(ServerTestCase):
         )
 
     def test_context_budget_factories_use_backend_owned_values(self):
-        training = server.coach_training_context_service()
-        preview_limits = server.coach_context_preview_service()._limits
+        training = server.COACH_CONTEXT.training_context_service()
+        preview_limits = server.COACH_CONTEXT.preview_service()._limits
         expected = {
             "_local_planned_limit": coach_context.COACH_LOCAL_PLANNED_LIMIT,
             "_library_limit": coach_context.COACH_LIBRARY_LIMIT,
@@ -653,7 +653,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertNotIn("athlete_detail", projected)
 
     def test_coach_context_requires_performance_assessment_for_completed_activity_analysis(self):
-        context = server.coach_training_context_service().build()
+        context = server.COACH_CONTEXT.training_context_service().build()
 
         self.assertIn('"Leistungsfähigkeit und Entwicklung"', context)
         self.assertIn("VO2max", context)
@@ -685,7 +685,7 @@ class ServerCoachTests(ServerTestCase):
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(intervals_snapshot)
         server.key_value_service().set("garmin_snapshot", json.dumps(garmin_snapshot, ensure_ascii=False))
 
-        context = server.coach_training_context_service().build()
+        context = server.COACH_CONTEXT.training_context_service().build()
 
         self.assertEqual(
             server.SYNC_PERSISTENCE.state_repository().latest_snapshot(), intervals_snapshot
@@ -823,7 +823,7 @@ class ServerCoachTests(ServerTestCase):
 
     def test_saved_profile_is_included_in_coach_context(self):
         server.ATHLETE_DATA.profile().save({"name": "Ada", "goals": "Münsterland Giro", "constraints": "No hard sessions after poor sleep"})
-        context = server.coach_training_context_service().build()
+        context = server.COACH_CONTEXT.training_context_service().build()
         self.assertIn('"name":"Ada"', context)
         self.assertIn("Münsterland Giro", context)
         self.assertIn("No hard sessions after poor sleep", context)

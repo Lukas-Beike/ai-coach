@@ -2,7 +2,6 @@ from __future__ import annotations
 from backend.coach import attachments as coach_attachments
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.profile_update import CoachProfileUpdateService
-from backend.coach.read_tools import CoachReadToolService
 from backend.coach.training_template_tools import TrainingTemplateToolService
 from backend.coach import limits as coach_limits
 from backend.coach import streams as coach_streams
@@ -194,7 +193,6 @@ from backend.planning import training_plans as planning_training_plans
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.public_state import PublicStateDependencies, PublicStateService
 from backend.sync import scheduler as sync_scheduler_runtime
-from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.athlete_record_tools import CoachAthleteRecordToolService
 from backend.coach.library_plan_tools import CoachLibraryPlanToolService
 from backend.coach.planning_action_tools import CoachPlanningActionToolService
@@ -204,15 +202,9 @@ from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.coach.planning_change_tools import CoachPlanningChangeToolService
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.coach import context as coach_context_module
-from backend.coach.context import (
-    CoachContextPreviewLimits,
-    CoachContextPreviewService,
-    CoachPerformanceContextReader,
-    CoachPlanningContextReader,
-    CoachStructuredContextService,
-    CoachTrainingContextService,
-    CoachQuickActionsService,
-)
+from backend.coach.context import CoachQuickActionsService
+from backend.coach.context_assembly import CoachContextAssembly
+from backend.coach.read_tools_assembly import CoachReadToolsAssembly
 from backend.coach.request_payload import CoachRequestPayloadService
 from backend.coach.sync_tools import CoachSyncToolService
 from backend.coach.conversation import (
@@ -494,32 +486,6 @@ def coach_athlete_record_tool_service() -> CoachAthleteRecordToolService:
         ATHLETE_DATA.activity_feedback(),
         PLANNING_DATA.competition(),
         nutrition_service(),
-    )
-
-
-def coach_activity_read_tool_service() -> CoachActivityReadToolService:
-    """Compose the read-only activity tools from their owning services."""
-    return CoachActivityReadToolService(
-        ATHLETE_DATA.activity_read(),
-        GARMIN_ASSEMBLY.payload_service(),
-        ATHLETE_DATA.profile(),
-        lambda: ATHLETE_CLOCK.now().date(),
-    )
-
-
-def coach_read_tool_service() -> CoachReadToolService:
-    """Compose the read-only Coach tool dispatcher from domain service factories."""
-    return CoachReadToolService(
-        ATHLETE_DATA.profile,
-        structured_training_state_service,
-        coach_activity_read_tool_service,
-        PLANNING_DATA.workout_library,
-        PLANNING_DATA.planned_unit,
-        change_history_service,
-        PLANNING_DATA.competition,
-        PLANNING_DATA.training_plan,
-        coach_limits.COACH_TRAINING_CHANGE_LIMIT,
-        nutrition_service,
     )
 
 
@@ -1168,6 +1134,52 @@ WEATHER_ASSEMBLY = WeatherAssembly(
     logger=LOGGER,
 )
 
+COACH_CONTEXT = CoachContextAssembly(
+    sync_state_repository=SYNC_PERSISTENCE.state_repository,
+    checkin_service=ATHLETE_DATA.checkin,
+    weather_service=WEATHER_ASSEMBLY.service,
+    activity_feedback_service=ATHLETE_DATA.activity_feedback,
+    planned_unit_service=PLANNING_DATA.planned_unit,
+    daily_context_service=daily_planning_context_service,
+    external_calendar_reader=EXTERNAL_CALENDAR.reader,
+    competition_service=PLANNING_DATA.competition,
+    training_plan_service=PLANNING_DATA.training_plan,
+    adaptive_preview_service=adaptive_replan_preview_service,
+    today=lambda: ATHLETE_CLOCK.now().date(),
+    profile_service=ATHLETE_DATA.profile,
+    garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
+    garmin_projection_service=GARMIN_ASSEMBLY.projection_service,
+    local_date=lambda: ATHLETE_CLOCK.now().date(),
+    workout_library_service=PLANNING_DATA.workout_library,
+    message_service=COACH_CONVERSATION.message_service,
+    settings=SETTINGS,
+    limits=lambda: {
+        "local_planned_limit": coach_context_module.COACH_LOCAL_PLANNED_LIMIT,
+        "library_limit": coach_context_module.COACH_LIBRARY_LIMIT,
+        "library_description_limit": coach_context_module.COACH_LIBRARY_DESCRIPTION_LIMIT,
+        "section_limits": coach_context_module.COACH_CONTEXT_SECTION_LIMITS,
+        "total_char_limit": coach_context_module.COACH_CONTEXT_TOTAL_CHAR_LIMIT,
+        "activity_limit_per_sport": coach_context_module.COACH_RECENT_ACTIVITIES_PER_SPORT,
+        "planned_event_limit": coach_context_module.COACH_PLANNED_EVENT_LIMIT,
+    },
+    long_plan_max_output_tokens=lambda: coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
+    utc_now=lambda: datetime.now(timezone.utc),
+)
+COACH_READ_TOOLS = CoachReadToolsAssembly(
+    activity_read_service=ATHLETE_DATA.activity_read,
+    garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
+    profile_service=ATHLETE_DATA.profile,
+    today=lambda: ATHLETE_CLOCK.now().date(),
+    structured_training_state_service=structured_training_state_service,
+    workout_library_service=PLANNING_DATA.workout_library,
+    planned_unit_service=PLANNING_DATA.planned_unit,
+    change_history_service=change_history_service,
+    competition_service=PLANNING_DATA.competition,
+    training_plan_service=PLANNING_DATA.training_plan,
+    nutrition_service=nutrition_service,
+    training_change_limit=lambda: coach_limits.COACH_TRAINING_CHANGE_LIMIT,
+)
+
 PROVIDER_RESYNC = ProviderResyncAssembly(
     config=lambda: CONFIG,
     intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
@@ -1440,71 +1452,6 @@ def coach_proposal_execution_service() -> CoachProposalExecutionService:
     )
 
 
-def coach_structured_context_service() -> CoachStructuredContextService:
-    """Compose the authoritative, read-only Coach context builder."""
-    return CoachStructuredContextService(
-        SYNC_PERSISTENCE.state_repository(),
-        ATHLETE_DATA.checkin(),
-        WEATHER_ASSEMBLY.service(),
-        ATHLETE_DATA.activity_feedback(),
-        CoachPlanningContextReader(
-            PLANNING_DATA.planned_unit(),
-            daily_planning_context_service(),
-            EXTERNAL_CALENDAR.reader(),
-            PLANNING_DATA.competition(),
-            PLANNING_DATA.training_plan(),
-            adaptive_replan_preview_service(),
-            lambda: ATHLETE_CLOCK.now().date(),
-        ),
-        CoachPerformanceContextReader(
-            ATHLETE_DATA.profile(),
-            GARMIN_ASSEMBLY.payload_service(),
-            GARMIN_ASSEMBLY.projection_service(),
-            lambda: ATHLETE_CLOCK.now().date(),
-        ),
-    )
-
-
-def coach_training_context_service() -> CoachTrainingContextService:
-    """Compose bounded Coach prompt context from concrete read services."""
-    return CoachTrainingContextService(
-        SYNC_PERSISTENCE.state_repository(), coach_structured_context_service(), PLANNING_DATA.workout_library(),
-        local_planned_limit=coach_context_module.COACH_LOCAL_PLANNED_LIMIT,
-        library_limit=coach_context_module.COACH_LIBRARY_LIMIT,
-        library_description_limit=coach_context_module.COACH_LIBRARY_DESCRIPTION_LIMIT,
-        section_limits=coach_context_module.COACH_CONTEXT_SECTION_LIMITS,
-        total_char_limit=coach_context_module.COACH_CONTEXT_TOTAL_CHAR_LIMIT,
-        activity_limit_per_sport=coach_context_module.COACH_RECENT_ACTIVITIES_PER_SPORT,
-        planned_event_limit=coach_context_module.COACH_PLANNED_EVENT_LIMIT,
-    )
-
-
-def coach_request_payload_service() -> CoachRequestPayloadService:
-    """Compose the stateless structured Coach request builder."""
-    return CoachRequestPayloadService(
-        coach_training_context_service(), SETTINGS,
-        coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
-    )
-
-
-def coach_context_preview_service() -> CoachContextPreviewService:
-    """Compose read-only, user-inspectable Coach context preview."""
-    return CoachContextPreviewService(
-        SYNC_PERSISTENCE.state_repository(), COACH_CONVERSATION.message_service(), coach_training_context_service(),
-        coach_structured_context_service(), PLANNING_DATA.workout_library(),
-        CoachContextPreviewLimits(
-            library_limit=coach_context_module.COACH_LIBRARY_LIMIT,
-            library_description_limit=coach_context_module.COACH_LIBRARY_DESCRIPTION_LIMIT,
-            section_limits=coach_context_module.COACH_CONTEXT_SECTION_LIMITS,
-            total_char_limit=coach_context_module.COACH_CONTEXT_TOTAL_CHAR_LIMIT,
-            local_planned_limit=coach_context_module.COACH_LOCAL_PLANNED_LIMIT,
-            activity_limit_per_sport=coach_context_module.COACH_RECENT_ACTIVITIES_PER_SPORT,
-            planned_event_limit=coach_context_module.COACH_PLANNED_EVENT_LIMIT,
-        ),
-        utc_now=lambda: datetime.now(timezone.utc),
-    )
-
-
 def coach_response_transport() -> CoachResponseTransport:
     """Compose concrete OpenAI and Gemini response adapters."""
     return CoachResponseTransport(
@@ -1527,7 +1474,7 @@ COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, 
 def coach_tool_dispatch_service() -> CoachToolDispatchService:
     """Compose the concrete Coach tool owners without retaining tool logic."""
     return CoachToolDispatchService(
-        coach_read_tool_service,
+        COACH_READ_TOOLS.read_service,
         coach_profile_update_service,
         coach_athlete_record_tool_service,
         CoachPlanArtifactToolService(training_plan_artifact_service),
@@ -1639,7 +1586,7 @@ def coach_structured_tool_round_service() -> CoachStructuredToolRoundService:
         database_manager, DB_LOCK,
         coach_structured_tool_replay_service(), coach_structured_tool_preparation_service(),
         coach_structured_tool_execution_service(), coach_structured_tool_failure_service(),
-        coach_structured_tool_round_journal(), coach_job_store(), coach_training_context_service(),
+        coach_structured_tool_round_journal(), coach_job_store(), COACH_CONTEXT.training_context_service(),
         coach_structured_response_service(), CoachStructuredToolRoundLimits(
             max_rounds=structured_tool_round.COACH_TOOL_MAX_ROUNDS,
             background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
@@ -1663,7 +1610,7 @@ def coach_structured_turn_service() -> CoachStructuredTurnService:
         opening=coach_turn_opening_service(),
         attachments=coach_attachment_context_service(),
         dialogue=coach_dialogue_read_service(),
-        payload=coach_request_payload_service(),
+        payload=COACH_CONTEXT.request_payload_service(),
         response=coach_structured_response_service(),
         rounds=coach_structured_tool_round_service(),
         outcome=coach_structured_outcome_service(),
@@ -1941,7 +1888,7 @@ ATHLETE_GET_ROUTES = AthleteGetRoutes(
     ATHLETE_DATA.profile,
     PLANNING_DATA.competition,
     public_feedback_state_service,
-    coach_context_preview_service,
+    COACH_CONTEXT.preview_service,
     SETTINGS,
 )
 DIAGNOSTICS_GET_ROUTES = DiagnosticsGetRoutes(

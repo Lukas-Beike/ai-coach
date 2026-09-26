@@ -876,12 +876,12 @@ class ServerSyncTests(ServerTestCase):
             "upcoming_calendar": [],
         }
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
-        context = server.coach_training_context_service().build()
+        context = server.COACH_CONTEXT.training_context_service().build()
         self.assertIn("Ride 0", context)
         self.assertNotIn("Ride 5", context)
         self.assertNotIn("LATEST INTERVALS.ICU SNAPSHOT", context)
         self.assertEqual(context.count('"local_planned_workouts"'), 1)
-        preview = server.coach_context_preview_service().preview(server.SETTINGS.selected_ai_provider())
+        preview = server.COACH_CONTEXT.preview_service().preview(server.SETTINGS.selected_ai_provider())
         self.assertTrue(preview["snapshot_compacted"])
         self.assertFalse(preview["snapshot_truncated"])
         self.assertTrue(preview["projection"]["within_total_budget"])

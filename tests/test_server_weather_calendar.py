@@ -13,6 +13,7 @@ from backend.calendar import canonical as calendar_canonical, local as calendar_
 from backend.coach.context import CoachIntervalsContextService
 from backend.http_api.public_weather import PublicWeatherStateService
 from backend.planning import planned_units as planning_planned_units, workouts as planning_workouts
+from backend.planning import planned_unit_service as planning_planned_unit_service
 from backend.providers import calendar as calendar_provider, intervals_client as intervals_client_module, weather as weather_provider
 from backend.sync import snapshots as sync_snapshots
 from backend.sync.daily import DailySyncMarkerService
@@ -233,7 +234,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "fetched_at": "2000-01-01T00:00:00+00:00",
         }))
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=AssertionError("coach context must not refresh weather")):
-            context = server.coach_structured_context_service().build({"recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})
+            context = server.COACH_CONTEXT.structured_context_service().build({"recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})
         self.assertEqual(context["weather"]["fetched_at"], "2000-01-01T00:00:00+00:00")
 
     def test_daily_planning_context_combines_checkin_recovery_weather_and_appointments(self):
@@ -530,7 +531,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 return_value=snapshot,
             ),
             patch.object(
-                server.planning_planned_unit_service.PlannedUnitService,
+                planning_planned_unit_service.PlannedUnitService,
                 "list",
                 return_value=planned,
             ),
