@@ -92,7 +92,6 @@ from backend.providers.transport_assembly import ProviderTransportAssembly
 from backend.providers.model_assembly import ModelTransportAssembly
 from backend.http_api import server as http_server
 from backend.http_api.assembly import HttpApiAssembly, HttpHandlerConfiguration
-from backend.http_api.readiness import ReadinessService
 from backend.http_api.auth import (
     SessionAuthService,
     get_session_auth_service,
@@ -161,7 +160,6 @@ from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
 from backend.http_api.library_page import LibraryPageService
 from backend.http_api.chat_page import ChatHistoryPageService
-from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.response_transport import HttpResponseTransport
 from backend.backup.assembly import BackupAssembly
 
@@ -1299,27 +1297,6 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
 )
 
 
-def export_stream_transport() -> ExportStreamTransport:
-    """Wire backup/export use cases into their HTTP download transport."""
-    return ExportStreamTransport(
-        BACKUP_ASSEMBLY.backup_service,
-        PRIVACY_ASSEMBLY.archive_export_service,
-        monotonic=time.monotonic,
-        time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
-    )
-
-
-
-
-
-
-def readiness_service() -> ReadinessService:
-    """Compose the public readiness probe from its concrete dependencies."""
-    return ReadinessService(
-        database_manager, DB_LOCK, DATA_DIR, runtime_maintenance.MAINTENANCE_GATE
-    )
-
-
 HTTP_API = HttpApiAssembly(
     handler_configuration=lambda: HttpHandlerConfiguration(
         app_version=APP_VERSION,
@@ -1337,7 +1314,10 @@ HTTP_API = HttpApiAssembly(
 
     ),
     maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-    readiness_service=readiness_service,
+    database_manager=database_manager,
+    database_lock=lambda: DB_LOCK,
+    data_dir=lambda: DATA_DIR,
+    readiness_maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
     session_auth_service=session_auth_service,
     chat_history_page_service=chat_history_page_service,
     coach_command_receipt_service=coach_command_receipt_service,
@@ -1372,7 +1352,10 @@ HTTP_API = HttpApiAssembly(
     max_chat_request_bytes=coach_attachments.MAX_REQUEST_BYTES,
     chat_stream_registry=coach_streams.CHAT_STREAM_REGISTRY,
     redact_text=REDACTOR.redact_text,
-    export_stream_transport=export_stream_transport,
+    backup_service=BACKUP_ASSEMBLY.backup_service,
+    privacy_export_service=PRIVACY_ASSEMBLY.archive_export_service,
+    monotonic=time.monotonic,
+    export_time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
     privacy_delete_service=PRIVACY_ASSEMBLY.delete_service,
     backup_restore_service=BACKUP_ASSEMBLY.restore_service,
     state_event_buffer=runtime_events.STATE_EVENT_BUFFER,

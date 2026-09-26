@@ -1596,3 +1596,20 @@ were public bootstrap and sync state projections.
   `git diff --check` passed.
 - Root size after this slice: 1,439 physical / 1,248 nonblank lines, 123
   imports, and 29 top-level definitions. S6 remains active.
+
+## S6 complete: HTTP readiness and export transports
+
+- Caller trace: readiness and export factories were only passed to their GET
+  routes, with one backup/export integration test calling the export factory
+  directly. Both HTTP route groups already invoke these factories per request.
+- `HttpApiAssembly` now owns fresh readiness and export transport creation.
+  Manager, lock, data directory, and maintenance gate remain late-resolved for
+  readiness; backup and archive export services and monotonic time remain
+  lazy until a privacy download. The route auth and response order is unchanged.
+- Direct export test now calls `HTTP_API.export_stream_transport()`. There were
+  no readiness test patch aliases.
+- Focused results: database 45 (3 skipped), HTTP 68, architecture 46 passed;
+  compileall and diff checks passed. Inventory regenerated and `--check` passed.
+  Docker build still cannot connect to the local Docker Engine named pipe.
+- Root size after this slice: 1,422 physical / 1,239 nonblank lines, 121
+  imports, and 27 top-level definitions. S6 continues.

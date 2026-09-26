@@ -26,6 +26,8 @@ from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
 from backend.http_api.privacy_get import PrivacyGetRoutes
 from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.response_transport import HttpResponseTransport
+from backend.http_api.readiness import ReadinessService
+from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.state_events_transport import StateEventTransport
 from backend.http_api.settings_put import SettingsPutRoutes
@@ -62,7 +64,10 @@ class HttpApiAssembly:
         *,
         handler_configuration: Callable[[], HttpHandlerConfiguration],
         maintenance_gate: Any,
-        readiness_service: Callable[[], Any],
+        database_manager: Callable[[], Any],
+        database_lock: Callable[[], Any],
+        data_dir: Callable[[], Path],
+        readiness_maintenance_gate: Callable[[], Any],
         session_auth_service: Callable[[], Any],
         chat_history_page_service: Callable[[], Any],
         coach_command_receipt_service: Callable[[], Any],
@@ -96,7 +101,10 @@ class HttpApiAssembly:
         max_chat_request_bytes: int,
         chat_stream_registry: Any,
         redact_text: Callable[[str], str],
-        export_stream_transport: Any,
+        backup_service: Callable[[], Any],
+        privacy_export_service: Callable[[], Any],
+        monotonic: Callable[[], float],
+        export_time_limit_seconds: int,
         privacy_delete_service: Callable[[], Any],
         backup_restore_service: Callable[[], Any],
         state_event_buffer: Any,
@@ -120,8 +128,12 @@ class HttpApiAssembly:
             session_auth_service, chat_history_page_service,
             coach_command_receipt_service, coach_job_submission_service,
         )
+        self._database_manager = database_manager
+        self._database_lock = database_lock
+        self._data_dir = data_dir
+        self._readiness_maintenance_gate = readiness_maintenance_gate
         self.public_get_routes = PublicGetRoutes(
-            maintenance_gate, readiness_service, session_auth_service,
+            maintenance_gate, self.readiness_service, session_auth_service,
             public_bootstrap_service,
         )
         self.planning_get_routes = PlanningGetRoutes(
@@ -165,7 +177,7 @@ class HttpApiAssembly:
         )
         self.privacy_delete_post_routes = PrivacyDeletePostRoutes(privacy_delete_service)
         self.privacy_get_routes = PrivacyGetRoutes(
-            session_auth_service, export_stream_transport, privacy_delete_service,
+            session_auth_service, self.export_stream_transport, privacy_delete_service,
         )
         self.state_events_get_routes = StateEventsGetRoutes(
             session_auth_service, StateEventTransport(state_event_buffer),
@@ -223,6 +235,23 @@ class HttpApiAssembly:
         self._sync_period_defaults = sync_period_defaults
         self._all_sync_days = all_sync_days
         self._uuid_factory = uuid_factory
+        self._backup_service = backup_service
+        self._privacy_export_service = privacy_export_service
+        self._monotonic = monotonic
+        self._export_time_limit_seconds = export_time_limit_seconds
+
+    def readiness_service(self) -> ReadinessService:
+        return ReadinessService(
+            self._database_manager, self._database_lock(), self._data_dir(),
+            self._readiness_maintenance_gate(),
+        )
+
+    def export_stream_transport(self) -> ExportStreamTransport:
+        return ExportStreamTransport(
+            self._backup_service, self._privacy_export_service,
+            monotonic=self._monotonic,
+            time_limit_seconds=self._export_time_limit_seconds,
+        )
 
     def sync_command_endpoint(self) -> SyncCommandEndpoint:
         return SyncCommandEndpoint(
