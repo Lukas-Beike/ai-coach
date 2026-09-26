@@ -27,6 +27,7 @@ from backend.sync.performance import PerformanceRefreshFollowupService
 from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync import queue as sync_queue
 from backend.sync import executor as sync_executor
+from backend.sync import worker as sync_worker_runtime
 from server_test_support import _current_performance_context, _garmin_metrics, server, ServerTestCase
 from support import IntervalsRequestRecorder, parsed_workout_fixture, RecordedIntervalsClient
 
@@ -75,13 +76,13 @@ class ServerSyncTests(ServerTestCase):
         ), patch(
             "backend.coach.job_store.CoachJobStore.resume_interrupted", side_effect=lambda *_: order.append("coach-recovery")
         ), patch.object(http_server_module, "CoachHTTPServer", http_server_factory), patch.object(
-            server.SyncJobWorker, "start", side_effect=lambda _worker: order.append("sync-worker"), autospec=True
+            sync_worker_runtime.SyncJobWorker, "start", side_effect=lambda _worker: order.append("sync-worker"), autospec=True
         ), patch.object(
             server.COACH_JOB_WORKER, "start", side_effect=lambda *_: order.append("coach-worker")
         ), patch.object(server.COACH_JOB_WORKER, "stop") as coach_stop, patch.object(
             server.COACH_JOB_WORKER, "join"
-        ) as coach_join, patch.object(server.SyncJobWorker, "stop") as sync_stop, patch.object(
-            server.SyncJobWorker, "join"
+        ) as coach_join, patch.object(sync_worker_runtime.SyncJobWorker, "stop") as sync_stop, patch.object(
+            sync_worker_runtime.SyncJobWorker, "join"
         ) as sync_join, patch.object(server, "startup_sync_scheduler") as startup_scheduler, patch.object(
             server, "daily_sync_loop_service"
         ) as daily_loop_factory, patch.object(server.threading, "Thread") as thread_factory:

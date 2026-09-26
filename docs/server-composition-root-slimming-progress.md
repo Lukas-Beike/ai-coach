@@ -343,3 +343,43 @@ mocked providers; no live account or runtime data was used.
   No live provider or application data was used.
 - Remaining risk: image and SQLCipher integration checks need the application
   Docker runtime.
+
+## S2b3 boundary before implementation: sync worker construction
+
+- `sync_job_worker` is called only from `main()` after database initialization
+  and interrupted-job recovery. `server.SYNC_JOB_WORKER` is the sole
+  restartable instance and one runtime test resets that root-owned cache. Keep
+  that process-level owner and call timing in the root; move only constructor
+  wiring. Tests patch `server.SyncJobWorker.start/stop/join`; move the class
+  patches to `backend.sync.worker.SyncJobWorker`, where the assembly will
+  resolve it.
+- Worker construction must use the queue assembly's active store, the fresh
+  execution assembly's executor, the shared maintenance gate, configured poll
+  interval, and the same `shared_sync_job_wake_event()` owner used by queue and
+  outcome services. Keep creation lazy until the root requests its cached
+  worker; do not start its thread from assembly construction.
+- Proposed interface: `SyncJobWorkerAssembly` in
+  `backend/sync/worker_assembly.py`, exposing only `create()`. The root retains
+  `SYNC_JOB_WORKER` and its small get-or-create operation so startup/shutdown
+  ownership remains visible.
+
+## S2b3: sync worker assembly
+
+- Completed in `backend/sync/worker_assembly.py` as `SyncJobWorkerAssembly`
+  with one `create()` operation. Worker construction now receives the queue
+  store, executor, maintenance gate, poll interval, and shared wake-event
+  provider explicitly. `server.py` retains only the process-level
+  `SYNC_JOB_WORKER` cache and its get-or-create operation, so startup and
+  shutdown ownership remain visible and the worker still starts only after
+  storage initialization and interrupted-job recovery.
+- Migrated lifecycle test patches from `server.SyncJobWorker` to
+  `backend.sync.worker.SyncJobWorker`. The root's cached worker identity and
+  direct test reset target remain unchanged.
+- Focused checks passed: runtime plus startup ordering (14 tests) and
+  architecture (48 tests). Inventory check, compileall, and diff check passed.
+- Measured `server.py`: 2,585 physical / 2,238 nonblank lines, 215 import
+  statements, 152 top-level functions.
+- Docker build was attempted; the local Docker engine pipe remains unavailable.
+  No live provider or application data was used.
+- Remaining risk: image and SQLCipher integration checks need the application
+  Docker runtime.

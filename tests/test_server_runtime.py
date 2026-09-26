@@ -19,6 +19,7 @@ from backend.performance import morning_battery as performance_morning_battery
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync import observation as sync_observation
 from backend.sync import queue as sync_queue
+from backend.sync import worker as sync_worker_runtime
 from server_test_support import server, ServerTestCase
 
 
@@ -27,7 +28,7 @@ class ServerRuntimeTests(ServerTestCase):
     def test_worker_start_functions_do_not_repeat_recovery(self):
         with patch.object(sync_queue.SyncJobQueueService, "resume_interrupted") as sync_recovery, patch(
             "backend.coach.job_store.CoachJobStore.resume_interrupted"
-        ) as coach_recovery, patch.object(server.SyncJobWorker, "start") as sync_start, patch.object(server.threading, "Thread") as thread, patch.object(
+        ) as coach_recovery, patch.object(sync_worker_runtime.SyncJobWorker, "start") as sync_start, patch.object(server.threading, "Thread") as thread, patch.object(
             server, "SYNC_JOB_WORKER", None
         ), patch.object(server, "COACH_JOB_WORKER", CoachJobWorker()):
             server.sync_job_worker().start()

@@ -71,6 +71,7 @@ from backend.runtime import clock as runtime_clock
 from backend.sync.assembly import ProviderSyncAssembly
 from backend.sync.queue_assembly import SyncJobQueueAssembly
 from backend.sync.execution_assembly import SyncJobExecutionAssembly
+from backend.sync.worker_assembly import SyncJobWorkerAssembly
 from backend.sync.garmin_assembly import GarminAssembly
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
@@ -211,7 +212,8 @@ from backend.sync.external_calendar import (
     ExternalCalendarSyncService,
     shared_external_calendar_sync_lock,
 )
-from backend.sync.worker import SyncJobWorker, shared_sync_job_wake_event
+from backend.sync import worker as sync_worker_runtime
+from backend.sync.worker import shared_sync_job_wake_event
 from backend.planning import adaptive as planning_adaptive
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.calendar_service import CalendarConflictService
@@ -379,7 +381,7 @@ OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
 INTERVALS_SYNC_WAIT_SECONDS = 120
 COACH_CONVERSATION_GATE = CoachConversationGate()
-SYNC_JOB_WORKER: SyncJobWorker | None = None
+SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
 
 CONFIG = load_config(ROOT, DATA_DIR)
@@ -1067,17 +1069,11 @@ def selected_workout_sync_service() -> SelectedWorkoutSyncService:
     )
 
 
-def sync_job_worker() -> SyncJobWorker:
+def sync_job_worker() -> sync_worker_runtime.SyncJobWorker:
     """Return the one restartable persistent synchronization worker."""
     global SYNC_JOB_WORKER
     if SYNC_JOB_WORKER is None:
-        SYNC_JOB_WORKER = SyncJobWorker(
-            SYNC_JOB_QUEUE.store(),
-            SYNC_JOB_EXECUTION.executor(),
-            runtime_maintenance.MAINTENANCE_GATE,
-            SYNC_JOB_POLL_SECONDS,
-            wake_event=shared_sync_job_wake_event(),
-        )
+        SYNC_JOB_WORKER = SYNC_JOB_WORKER_ASSEMBLY.create()
     return SYNC_JOB_WORKER
 
 
@@ -1460,6 +1456,15 @@ SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     external_calendar_sync_service=external_calendar_sync_service,
     weather_sync_service=WEATHER_ASSEMBLY.sync_service,
     outcome_service=SYNC_JOB_QUEUE.outcome_service,
+)
+
+
+SYNC_JOB_WORKER_ASSEMBLY = SyncJobWorkerAssembly(
+    store=SYNC_JOB_QUEUE.store,
+    executor=SYNC_JOB_EXECUTION.executor,
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    poll_seconds=SYNC_JOB_POLL_SECONDS,
+    wake_event=shared_sync_job_wake_event,
 )
 
 
@@ -2543,7 +2548,7 @@ def main() -> None:
     initialise_database()
     server = http_server.CoachHTTPServer(("0.0.0.0", CONFIG.port), request_handler_class())
     server.allow_reuse_address = True
-    sync_worker: SyncJobWorker | None = None
+    sync_worker: sync_worker_runtime.SyncJobWorker | None = None
     daily_loop: DailySyncLoop | None = None
     daily_thread: threading.Thread | None = None
     try:
