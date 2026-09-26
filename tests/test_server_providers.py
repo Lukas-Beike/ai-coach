@@ -501,7 +501,7 @@ class ServerProvidersTests(ServerTestCase):
                 calendar_provider, "fetch_calendar_feed", side_effect=RuntimeError(f"calendar request failed for {email}")
             ):
                 with self.assertRaises(server.AppError) as calendar_error:
-                    server.external_calendar_sync_service().sync("test")
+                    server.EXTERNAL_CALENDAR.sync_service().sync("test")
             self.assertEqual(calendar_error.exception.reason, "provider_client_error")
             self.assertNotIn(email, str(calendar_error.exception))
 

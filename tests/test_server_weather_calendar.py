@@ -304,9 +304,9 @@ class ServerWeatherCalendarTests(ServerTestCase):
             calendar_provider, "external_calendar_url", return_value="https://calendar.example/feed.ics"
         ), patch.object(calendar_provider, "fetch_calendar_feed", return_value=b"not an ical feed"):
             with self.assertRaises(server.AppError):
-                server.external_calendar_sync_service().sync("test")
+                server.EXTERNAL_CALENDAR.sync_service().sync("test")
         self.assertEqual(
-            server.external_calendar_reader().list_events(1000)[0]["id"],
+            server.EXTERNAL_CALENDAR.reader().list_events(1000)[0]["id"],
             "good-event",
         )
 
@@ -318,7 +318,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 ("info-only", "info-only", "Informational event", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, 0, runtime_clock.utc_now()),
             )
         self.assertEqual(
-            server.external_calendar_reader().list_events(
+            server.EXTERNAL_CALENDAR.reader().list_events(
                 1000, training_relevant_only=True
             ),
             [],
@@ -357,12 +357,12 @@ class ServerWeatherCalendarTests(ServerTestCase):
         ), patch.object(
             server, "adaptive_replan_preview_service", return_value=preview_service
         ):
-            result = server.external_calendar_sync_service().sync("test")
+            result = server.EXTERNAL_CALENDAR.sync_service().sync("test")
             self.assertEqual(result["events"], 2)
             self.assertTrue(result["needs_replan"])
             self.assertEqual(result["replan_changes"], 2)
             preview_service.preview.assert_called_once_with()
-            state = server.external_calendar_reader().state(
+            state = server.EXTERNAL_CALENDAR.reader().state(
                 configured=True,
                 running=False,
                 window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
@@ -374,7 +374,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             self.assertEqual(
                 [
                     event["uid"]
-                    for event in server.external_calendar_reader().list_events(
+                    for event in server.EXTERNAL_CALENDAR.reader().list_events(
                         1000, training_relevant_only=True
                     )
                 ],
@@ -395,12 +395,12 @@ class ServerWeatherCalendarTests(ServerTestCase):
         ).encode()
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
         with patch.object(server, "CONFIG", config), patch.object(calendar_provider, "fetch_calendar_feed", return_value=payload):
-            result = server.external_calendar_sync_service().sync("test")
+            result = server.EXTERNAL_CALENDAR.sync_service().sync("test")
 
         self.assertEqual(result["window_days"], 56)
         self.assertEqual(result["events"], 1)
         self.assertEqual(
-            server.external_calendar_reader().list_events()[0]["uid"], "in-window"
+            server.EXTERNAL_CALENDAR.reader().list_events()[0]["uid"], "in-window"
         )
 
     def test_external_calendar_sync_keeps_last_successful_events_on_failure(self):
@@ -413,9 +413,9 @@ class ServerWeatherCalendarTests(ServerTestCase):
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
         with patch.object(server, "CONFIG", config), patch.object(calendar_provider, "fetch_calendar_feed", side_effect=server.AppError(502, "upstream unavailable")):
             with self.assertRaises(server.AppError):
-                server.external_calendar_sync_service().sync("test")
+                server.EXTERNAL_CALENDAR.sync_service().sync("test")
         self.assertEqual(
-            server.external_calendar_reader().list_events()[0]["id"], "event-old"
+            server.EXTERNAL_CALENDAR.reader().list_events()[0]["id"], "event-old"
         )
 
     def test_external_calendar_event_reduces_hard_or_long_local_draft_only_in_preview(self):
@@ -594,7 +594,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 ("external-irrelevant", "irrelevant", "Private note", tomorrow, tomorrow + "T12:00:00+02:00", tomorrow + "T13:00:00+02:00", 60, 0, 0, runtime_clock.utc_now()),
             )
         calendar = calendar_local.local_calendar_events(
-            [], [], server.external_calendar_reader().list_events()
+            [], [], server.EXTERNAL_CALENDAR.reader().list_events()
         )
         self.assertEqual([item["id"] for item in calendar], ["external-relevant"])
         context = server.daily_planning_context_service().build(
@@ -602,7 +602,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             [],
             {},
             [],
-            server.external_calendar_reader().list_events(
+            server.EXTERNAL_CALENDAR.reader().list_events(
                 training_relevant_only=True
             ),
         )

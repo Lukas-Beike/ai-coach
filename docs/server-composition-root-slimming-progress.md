@@ -523,3 +523,46 @@ mocked providers; no live account or runtime data was used.
 - Tests used isolated temporary managers and mocked provider requests. No
   live provider or application data was used. Docker/SQLCipher integration
   remains unavailable on this host.
+
+## S2e boundary before implementation: external-calendar synchronization
+
+- `external_calendar_reader()` and `external_calendar_sync_service()` are
+  external-calendar sync composition owned by `backend/sync/external_calendar.py`.
+  Reader consumers include planning conflict/adaptive context, Coach, HTTP,
+  diagnostics, backup/exports, and tests; the sync service also feeds the sync
+  executor and startup/public-calendar projections. Test callers are in
+  provider and weather/calendar tests. No e2e fixture references either
+  factory. The calendar sync regression patches the still-root-owned adaptive
+  preview factory, so keep that explicit callback late-bound at service
+  creation.
+- Preserve fresh readers/services, active manager lookup, shared key/value
+  repository, shared daily-marker factory, observer and state-event buffer,
+  redactor/logger, adaptive-preview callback, release version, and the singleton
+  `EXTERNAL_CALENDAR_SYNC_LOCK`. Resolve CONFIG and `ATHLETE_CLOCK.now` when
+  constructing each sync service, and preserve the reader's local-date callback.
+- Proposed owner/interface: `ExternalCalendarAssembly` in
+  `backend/sync/external_calendar_assembly.py`, exposing only `reader()` and
+  `sync_service()`. It stores explicit callbacks and resolves manager/config/
+  clock state only when a method is requested; construction performs no I/O.
+
+## S2e: external-calendar assembly
+
+- Completed in `backend/sync/external_calendar_assembly.py` as
+  `ExternalCalendarAssembly.reader()` and `.sync_service()`. The two root
+  factories were removed and all server and test callers use the assembly.
+- Preserved late manager, CONFIG, date, and athlete-clock lookup, the shared
+  marker/observer/event dependencies, the still-root-owned adaptive-preview
+  callback, release version, and singleton calendar lock. Construction remains
+  inert. Added an assembly regression for lazy dependency resolution.
+- The first focused pass found that the adaptive-preview factory callback was
+  captured too early, breaking the existing test patch. It is now late-bound at
+  service creation. The inventory also needed an explicit composition-root owner
+  for the new `EXTERNAL_CALENDAR` instance; that mapping is accurate and the
+  inventory architecture check passes.
+- Provider, weather/calendar, sync external-calendar, executor, Coach context,
+  architecture, and assembly checks passed: 168 tests. Inventory check,
+  compileall, and diff check passed.
+- Measured `server.py`: 2,450 physical / 2,119 nonblank lines, 214 AST import
+  statements, 140 top-level functions.
+- Tests used temporary data and mocked providers only. Docker/SQLCipher
+  integration remains unavailable on this host.

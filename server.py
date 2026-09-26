@@ -36,7 +36,6 @@ from backend.errors import (
 from backend import config as app_config
 from backend import observability
 from backend.activities.duplicate_service import DuplicateActivityService
-from backend.calendar import external as calendar_external
 from backend.calendar import local as calendar_local
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.read_service import ActivityReadService
@@ -74,6 +73,8 @@ from backend.sync.execution_assembly import SyncJobExecutionAssembly
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
 from backend.sync.scheduler_assembly import SyncSchedulerAssembly
 from backend.sync.intervals_assembly import IntervalsSyncAssembly
+from backend.sync.external_calendar_assembly import ExternalCalendarAssembly
+from backend.sync import external_calendar as external_calendar_runtime
 from backend.sync.persistence_assembly import SyncPersistenceAssembly
 from backend.sync.garmin_assembly import GarminAssembly
 from backend.sync.gates import (
@@ -195,10 +196,6 @@ from backend.sync.full_resync import (
     FullResyncProviderExecution,
     FullResyncStateStore,
     PROVIDER_RESYNC_KEYS,
-)
-from backend.sync.external_calendar import (
-    ExternalCalendarSyncService,
-    shared_external_calendar_sync_lock,
 )
 from backend.sync import worker as sync_worker_runtime
 from backend.sync.worker import shared_sync_job_wake_event
@@ -672,35 +669,9 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
     )
 
 
-def external_calendar_reader() -> calendar_external.ExternalCalendarReader:
-    """Compose external-calendar reads for the active database manager."""
-    return calendar_external.ExternalCalendarReader(
-        database_manager(), lambda: ATHLETE_CLOCK.now().date()
-    )
-
-
-def external_calendar_sync_service() -> ExternalCalendarSyncService:
-    """Compose the complete external-calendar synchronization use case."""
-    return ExternalCalendarSyncService(
-        CONFIG,
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        SYNC_PERSISTENCE.daily_markers(),
-        PROVIDER_SYNC.operation_observer(),
-        adaptive_replan_preview_service(),
-        runtime_events.STATE_EVENT_BUFFER,
-        LOGGER,
-        REDACTOR.redact_text,
-        ATHLETE_CLOCK.now,
-        runtime_clock.utc_now,
-        APP_VERSION,
-        lock=shared_external_calendar_sync_lock(),
-    )
-
-
 def calendar_conflict_service() -> CalendarConflictService:
     """Compose local and external planning-conflict reads."""
-    return CalendarConflictService(database_manager(), external_calendar_reader())
+    return CalendarConflictService(database_manager(), EXTERNAL_CALENDAR.reader())
 
 
 def activity_feedback_service() -> ActivityFeedbackService:
@@ -1003,7 +974,7 @@ def daily_planning_context_service() -> DailyPlanningContextService:
         database_manager(),
         KEY_VALUE_REPOSITORY,
         checkin_service(),
-        external_calendar_reader(),
+        EXTERNAL_CALENDAR.reader(),
         morning_body_battery_service(),
         activity_feedback_service(),
         lambda: ATHLETE_CLOCK.now().date(),
@@ -1119,7 +1090,7 @@ def adaptive_replan_preview_service() -> AdaptiveReplanPreviewService:
         PLAN_ADJUSTMENT_REPOSITORY,
         checkin_service(),
         planned_unit_service(),
-        external_calendar_reader(),
+        EXTERNAL_CALENDAR.reader(),
         WEATHER_ASSEMBLY.service(),
         lambda: ATHLETE_CLOCK.now().date(),
         runtime_clock.utc_now,
@@ -1145,7 +1116,7 @@ def privacy_data_export_service() -> PrivacyDataExportService:
             checkin_service=checkin_service(),
             activity_feedback_service=activity_feedback_service(),
             adaptive_preview_service=adaptive_replan_preview_service(),
-            external_calendar_reader=external_calendar_reader(),
+            external_calendar_reader=EXTERNAL_CALENDAR.reader(),
             local_now=ATHLETE_CLOCK.now,
             utc_now=runtime_clock.utc_now,
         )
@@ -1266,6 +1237,24 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
     retry_max_seconds=SYNC_JOB_RETRY_MAX_SECONDS,
 )
 
+EXTERNAL_CALENDAR = ExternalCalendarAssembly(
+    config=lambda: CONFIG,
+    database_manager=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    daily_markers=SYNC_PERSISTENCE.daily_markers,
+    operation_observer=PROVIDER_SYNC.operation_observer,
+    adaptive_preview_service=lambda: adaptive_replan_preview_service(),
+    event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    logger=LOGGER,
+    redact_text=REDACTOR.redact_text,
+    athlete_clock=lambda: ATHLETE_CLOCK,
+    local_date=lambda: ATHLETE_CLOCK.now().date(),
+    utc_now=runtime_clock.utc_now,
+    app_version=APP_VERSION,
+    sync_lock=lambda: external_calendar_runtime.shared_external_calendar_sync_lock(),
+)
+
+
 INTERVALS_SYNC = IntervalsSyncAssembly(
     config=lambda: CONFIG,
     database_manager=database_manager,
@@ -1356,7 +1345,7 @@ SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
     morning_body_battery_service=morning_body_battery_service,
     garmin_fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
-    external_calendar_sync_service=external_calendar_sync_service,
+    external_calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
     weather_sync_service=WEATHER_ASSEMBLY.sync_service,
     outcome_service=SYNC_JOB_QUEUE.outcome_service,
 )
@@ -1725,7 +1714,7 @@ def coach_structured_context_service() -> CoachStructuredContextService:
         CoachPlanningContextReader(
             planned_unit_service(),
             daily_planning_context_service(),
-            external_calendar_reader(),
+            EXTERNAL_CALENDAR.reader(),
             competition_service(),
             training_plan_service(),
             adaptive_replan_preview_service(),
@@ -1995,7 +1984,7 @@ def public_bootstrap_service() -> PublicBootstrapService:
             sync_state_repository=SYNC_PERSISTENCE.state_repository,
             planned_unit_service=planned_unit_service,
             competition_service=competition_service,
-            external_calendar_reader=external_calendar_reader,
+            external_calendar_reader=EXTERNAL_CALENDAR.reader,
             profile_service=profile_service,
             provider_freshness_service=PROVIDER_SYNC.freshness_service,
             garmin_sync_state_service=GARMIN_ASSEMBLY.sync_state_service,
@@ -2007,7 +1996,7 @@ def public_bootstrap_service() -> PublicBootstrapService:
             local_calendar_events=calendar_local.local_calendar_events,
             planning_state=planning_season.planning_state,
             adaptive_replan_preview_service=adaptive_replan_preview_service,
-            external_calendar_sync_service=external_calendar_sync_service,
+            external_calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
             external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
             planned_calendar_history_days=PLANNED_CALENDAR_HISTORY_DAYS,
             planned_calendar_future_days=PLANNED_CALENDAR_FUTURE_DAYS,
@@ -2042,8 +2031,8 @@ def public_plan_state_service() -> PublicPlanStateService:
         db_lock=DB_LOCK,
         key_values=KEY_VALUE_REPOSITORY,
         training_plans=training_plan_service(),
-        external_calendar=external_calendar_reader(),
-        external_calendar_sync=external_calendar_sync_service(),
+        external_calendar=EXTERNAL_CALENDAR.reader(),
+        external_calendar_sync=EXTERNAL_CALENDAR.sync_service(),
         daily_context=daily_planning_context_service(),
         checkins=checkin_service(),
         competitions=competition_service(),
@@ -2076,8 +2065,8 @@ def public_state_calendar_projection_service() -> PublicStateCalendarProjection:
     return PublicStateCalendarProjection(
         checkin_service(),
         competition_service(),
-        external_calendar_reader(),
-        external_calendar_sync_service(),
+        EXTERNAL_CALENDAR.reader(),
+        EXTERNAL_CALENDAR.sync_service(),
         daily_planning_context_service(),
         external_calendar_configured=bool(CONFIG.calendar_ical_url),
         external_calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
@@ -2164,8 +2153,8 @@ def diagnostic_report_service() -> DiagnosticReportService:
         provider_freshness=PROVIDER_SYNC.freshness_service(),
         profile=profile_service(),
         garmin_sync_state=GARMIN_ASSEMBLY.sync_state_service(),
-        external_calendar_sync=external_calendar_sync_service(),
-        external_calendar_reader=external_calendar_reader(),
+        external_calendar_sync=EXTERNAL_CALENDAR.sync_service(),
+        external_calendar_reader=EXTERNAL_CALENDAR.reader(),
         morning_checkin=morning_checkin_state_service(),
         workout_library_sync_state=workout_library_sync_state_service(),
         recent_logs=recent_log_entries_service(),

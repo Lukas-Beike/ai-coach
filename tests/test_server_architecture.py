@@ -2065,8 +2065,7 @@ ALLOWED_SERVER_FUNCTIONS = frozenset("""
     sync_public_state_service
     full_provider_resync_service
     public_weather_state_service
-    morning_body_battery_service external_calendar_reader
-    external_calendar_sync_service calendar_conflict_service
+    morning_body_battery_service calendar_conflict_service
     activity_feedback_service activity_read_service duplicate_activity_service
     checkin_service profile_service coach_profile_update_service
     change_history_service history_undo_service competition_service
