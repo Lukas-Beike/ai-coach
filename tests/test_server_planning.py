@@ -1552,11 +1552,11 @@ class ServerPlanningTests(ServerTestCase):
             side_effect=[RuntimeError("import failed"), {"imported": 1, "updated": 0, "conflicts": 0}],
         ) as import_units, patch.object(WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}):
             with self.assertRaises(RuntimeError):
-                server.intervals_sync_service().sync(
+                server.INTERVALS_SYNC.sync_service().sync(
                     "initial attempt", activity_days=42
                 )
             self.assertIsNone(server.key_value_service().get("planned_units_initial_import_at"))
-            server.intervals_sync_service().sync("retry", activity_days=42)
+            server.INTERVALS_SYNC.sync_service().sync("retry", activity_days=42)
 
         self.assertEqual(import_units.call_count, 2)
         self.assertEqual(server.key_value_service().get("planned_units_initial_import_at"), "retryable")

@@ -470,3 +470,56 @@ mocked providers; no live account or runtime data was used.
   statements, 147 top-level functions.
 - No live provider or application data was used. Remaining environment risk is
   SQLCipher/container-only validation, since the Docker engine is unavailable.
+
+## S2d boundary before implementation: Intervals refresh and sync pipeline
+
+- The cohesive group is `performance_refresh_service`,
+  `intervals_snapshot_reader`, `performance_refresh_followup_service`,
+  `intervals_snapshot_service`, and `intervals_sync_service`. Callers include
+  manual refresh and conflict commands, the sync-job execution assembly,
+  provider refresh, Coach/planning, HTTP/public context, and direct tests in the
+  Coach review, provider review, performance, sync, planning, weather/calendar,
+  and workout-repair modules. No e2e fixture directly names these factories.
+- Preserve fresh-per-call service objects; late CONFIG and database-manager
+  reads; fresh state-repository, marker, observer, and provider-client lookups;
+  the shared event buffer, provider gate, and `INTERVALS_SYNC_LOCK`; the current
+  provider transport; the athlete clock lookup at service creation; the same
+  queue service for follow-up work; and exact work-window constants. Snapshot
+  persistence continues to use the existing reconciliation and library service
+  factories. `full_provider_resync_service()` remains in the root for its next
+  cross-provider boundary and delegates to the new Intervals sync method.
+- The only direct root-constructor test patches are two
+  `server.PerformanceRefreshService` patches in `tests/test_server_sync.py`;
+  move them to the constructor lookup in
+  `backend.sync.intervals_assembly.PerformanceRefreshService`. Other
+  constructor patches already target the owning backend classes. Update all
+  direct root-factory callers to the assembly rather than retaining forwarding
+  names. Tests use temporary managers and mocked provider requests.
+- Proposed owner/interface: `IntervalsSyncAssembly` in
+  `backend/sync/intervals_assembly.py`, exposing only
+  `performance_service()`, `snapshot_reader()`, `performance_followup()`,
+  `snapshot_service()`, and `sync_service()`. It stores explicit callbacks for
+  cross-domain providers, reads CONFIG and the active manager on each method,
+  and starts no I/O during construction. `SyncJobExecutionAssembly` receives
+  `INTERVALS_SYNC.performance_service` and `.sync_service` directly.
+
+## S2d: Intervals sync assembly
+
+- Completed in `backend/sync/intervals_assembly.py` as `IntervalsSyncAssembly`
+  with five domain operations. The root no longer defines per-service
+  Intervals refresh and sync factories. `SyncJobExecutionAssembly` receives
+  the performance and sync methods directly; full-provider resync remains
+  separate because it crosses Garmin and competition ownership.
+- Preserved fresh service creation, late CONFIG/manager/provider/clock lookup,
+  shared sync lock, event buffer, provider gate, queue service, repositories,
+  and sync-window settings. The assembly constructor resolves no callback or
+  provider I/O.
+- Migrated direct callers and constructor patches to the actual assembly
+  lookup. Focused sync, performance, weather/calendar, planning, Coach review,
+  workout repair, architecture, and assembly checks passed: 342 tests.
+  Inventory check, compileall, and diff check passed.
+- Measured `server.py`: 2,461 physical / 2,128 nonblank lines, 214 AST import
+  statements, 142 top-level functions.
+- Tests used isolated temporary managers and mocked provider requests. No
+  live provider or application data was used. Docker/SQLCipher integration
+  remains unavailable on this host.

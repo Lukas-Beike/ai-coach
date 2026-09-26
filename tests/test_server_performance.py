@@ -46,7 +46,7 @@ class ServerPerformanceTests(ServerTestCase):
             PerformanceRefreshService, "running", return_value=True
         ), patch.object(sync_queue.SyncJobQueueService, "enqueue") as enqueue:
             self.assertIsNone(
-                server.performance_refresh_followup_service().enqueue_after_sync(
+                server.INTERVALS_SYNC.performance_followup().enqueue_after_sync(
                     "startup"
                 )
             )
@@ -611,7 +611,7 @@ class ServerPerformanceTests(ServerTestCase):
             fetch_performance_snapshot,
         ), patch.object(server, "openai_responses_client") as openai_client:
             with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")):
-                result = server.performance_refresh_service().refresh()
+                result = server.INTERVALS_SYNC.performance_service().refresh()
         self.assertEqual(result["status"], "ok")
         self.assertEqual(len(calls), 1)
         openai_client.assert_not_called()

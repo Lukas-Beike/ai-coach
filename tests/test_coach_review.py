@@ -53,7 +53,7 @@ class CoachReviewTests(unittest.TestCase):
         server.key_value_service().set("last_sync_at", "old-sync")
         server.key_value_service().set("last_sync_activity_days", str(server.ALL_SYNC_DAYS))
         previous_sync_read = threading.Event()
-        service = server.intervals_sync_service()
+        service = server.INTERVALS_SYNC.sync_service()
         original_get_value = service._status.get
         INTERVALS_SYNC_LOCK.acquire()
 

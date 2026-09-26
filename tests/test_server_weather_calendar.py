@@ -48,7 +48,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         ), patch.object(WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}), patch.object(
             PerformanceRefreshFollowupService, "enqueue_after_sync"
         ) as enqueue, patch.object(DailySyncMarkerService, "mark") as mark:
-            server.intervals_sync_service().sync(
+            server.INTERVALS_SYNC.sync_service().sync(
                 "startup historical backfill",
                 activity_days=90,
                 end_date=date(2026, 1, 1),

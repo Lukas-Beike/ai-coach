@@ -86,7 +86,7 @@ class ProviderReviewTests(unittest.TestCase):
 
         def refresh():
             try:
-                server.performance_refresh_service().refresh()
+                server.INTERVALS_SYNC.performance_service().refresh()
             except Exception as exc:
                 errors.append(exc)
 

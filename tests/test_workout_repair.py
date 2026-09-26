@@ -191,7 +191,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         def read(*args, **kwargs):
             self.assertTrue(INTERVALS_SYNC_LOCK.locked())
             attempted.append(
-                server.intervals_sync_service().sync("Synthetic automatic sync")
+                server.INTERVALS_SYNC.sync_service().sync("Synthetic automatic sync")
             )
             return deepcopy(list(self.remote.values()))
 
@@ -231,7 +231,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             for claim in (False, True):
                 if claim:
                     last = server.SYNC_JOB_QUEUE.store().claim()
-                result = server.intervals_sync_service().sync(
+                result = server.INTERVALS_SYNC.sync_service().sync(
                     "Synthetic between chunks", activity_days=42
                 )
                 self.assertEqual(result["status"], "ok")
@@ -241,7 +241,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 for entry in entries:
                     self.assertEqual(self.selection(entry["library_workout_id"]), entry)
             server.SYNC_JOB_QUEUE.outcome_service().complete(last["id"], {"ok": True})
-            server.intervals_sync_service().sync(
+            server.INTERVALS_SYNC.sync_service().sync(
                 "Synthetic after final verification", activity_days=42
             )
             imported.assert_called_once()
@@ -259,7 +259,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             RemotePlannedUnitReconciler, "reconcile"
         ) as imported:
             self.assertTrue(
-                server.intervals_sync_service()
+                server.INTERVALS_SYNC.sync_service()
                 .sync("Synthetic overlapping queue", activity_days=42)[
                     "planned_import"
                 ]["deferred_for_repair"]

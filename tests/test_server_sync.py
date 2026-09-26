@@ -20,6 +20,7 @@ from backend.performance import current_metrics as performance_current_metrics, 
 from backend.planning import adaptive as planning_adaptive, competitions as planning_competitions, context as planning_context, library as planning_library
 from backend.providers import intervals_client as intervals_client_module
 from backend.sync.intervals import IntervalsSnapshotReader, IntervalsSyncService
+from backend.sync import intervals_assembly as intervals_assembly_module
 from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
 from backend.sync.library import WorkoutLibraryRefreshService, WorkoutLibrarySyncService
 from backend.sync import garmin_service
@@ -229,7 +230,7 @@ class ServerSyncTests(ServerTestCase):
         performance_service.refresh.return_value = {"status": "ok"}
         competition_service = Mock()
         competition_service.sync.return_value = {"status": "ok", "pushed": 1}
-        with patch.object(server, "PerformanceRefreshService", return_value=performance_service), patch.object(
+        with patch.object(intervals_assembly_module, "PerformanceRefreshService", return_value=performance_service), patch.object(
             server, "CompetitionSyncService", return_value=competition_service
         ):
             self.assertEqual(server.SYNC_JOB_EXECUTION.executor().execute(performance_job)["status"], "ok")
@@ -246,7 +247,7 @@ class ServerSyncTests(ServerTestCase):
         }
         performance_service = Mock()
         performance_service.refresh.return_value = {"status": "ok"}
-        with patch.object(server, "PerformanceRefreshService", return_value=performance_service), patch.object(
+        with patch.object(intervals_assembly_module, "PerformanceRefreshService", return_value=performance_service), patch.object(
             IntervalsSyncService,
             "sync",
             side_effect=AssertionError("normalized job fell through to full sync"),
@@ -283,7 +284,7 @@ class ServerSyncTests(ServerTestCase):
             "enqueue_after_sync",
             return_value={"id": "job-performance-follow-up"},
         ) as enqueue, patch.object(PerformanceRefreshFollowupService, "wait") as wait:
-            result = server.intervals_sync_service().sync(
+            result = server.INTERVALS_SYNC.sync_service().sync(
                 "startup", activity_days=90, wait_for_performance=True
             )
         self.assertEqual(result["performance_refresh_job_id"], "job-performance-follow-up")
@@ -601,7 +602,7 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            reader = server.intervals_snapshot_reader()
+            reader = server.INTERVALS_SYNC.snapshot_reader()
             with patch.object(reader._api_client, "get", side_effect=fake_get):
                 snapshot = reader.fetch_snapshot(activity_days=90)
         activity_call = next(params for path, params in calls if path.endswith("/activities"))
@@ -830,7 +831,7 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            reader = server.intervals_snapshot_reader()
+            reader = server.INTERVALS_SYNC.snapshot_reader()
             with patch.object(reader._api_client, "get", side_effect=[
                 [{"id": "activity-1", "start_date_local": "2026-08-31T08:00:00"}],
                 [{"id": "2026-08-31"}],
@@ -953,7 +954,7 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
         ) as fetch_snapshot, patch.object(WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}), patch.object(server, "openai_responses_client") as openai_client:
-            result = server.intervals_sync_service().sync("test")
+            result = server.INTERVALS_SYNC.sync_service().sync("test")
         fetch_snapshot.assert_called_once_with(activity_days=65)
         openai_client.assert_not_called()
         self.assertEqual(result["activity_days"], 65)
@@ -968,7 +969,7 @@ class ServerSyncTests(ServerTestCase):
         ) as fetch_snapshot, patch.object(
             WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}
         ) as refresh_library:
-            server.intervals_sync_service().sync(
+            server.INTERVALS_SYNC.sync_service().sync(
                 "cancellable", activity_days=42, cancel_event=cancel_event
             )
         fetch_snapshot.assert_called_once_with(activity_days=42, cancel_event=cancel_event)
@@ -985,7 +986,7 @@ class ServerSyncTests(ServerTestCase):
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
         ), patch.object(WorkoutLibraryRefreshService, "refresh", side_effect=cancellation):
             with self.assertRaises(server.AppError) as raised:
-                server.intervals_sync_service().sync(
+                server.INTERVALS_SYNC.sync_service().sync(
                     "cancellable-library",
                     activity_days=42,
                     cancel_event=cancel_event,
@@ -1002,7 +1003,7 @@ class ServerSyncTests(ServerTestCase):
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
         ), patch.object(WorkoutLibraryRefreshService, "refresh", side_effect=cancellation):
             with self.assertRaises(server.AppError):
-                server.intervals_sync_service().sync(
+                server.INTERVALS_SYNC.sync_service().sync(
                     "cancellable-library",
                     activity_days=42,
                     cancel_event=threading.Event(),
@@ -1016,7 +1017,7 @@ class ServerSyncTests(ServerTestCase):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
             with self.assertRaises(server.AppError) as raised:
-                server.intervals_sync_service().sync(
+                server.INTERVALS_SYNC.sync_service().sync(
                     "cancelled", activity_days=42, cancel_event=cancel_event
                 )
             freshness = {
@@ -1053,7 +1054,7 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
         ), patch.object(intervals_client_module.IntervalsClient, "get_workout_library", return_value=remote) as get_library:
-            result = server.intervals_sync_service().sync("initial", activity_days=42)
+            result = server.INTERVALS_SYNC.sync_service().sync("initial", activity_days=42)
 
         get_library.assert_called_once_with()
         library = server.workout_library_service().list()
@@ -1093,8 +1094,8 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", side_effect=[first_snapshot, second_snapshot]
         ), patch.object(WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}):
-            first = server.intervals_sync_service().sync("initial", activity_days=42)
-            second = server.intervals_sync_service().sync("later", activity_days=42)
+            first = server.INTERVALS_SYNC.sync_service().sync("initial", activity_days=42)
+            second = server.INTERVALS_SYNC.sync_service().sync("later", activity_days=42)
 
         self.assertEqual(first["planned_import"]["imported"], 1)
         self.assertEqual(second["planned_import"]["imported"], 0)
@@ -1116,7 +1117,7 @@ class ServerSyncTests(ServerTestCase):
             "id": "remote-template-2", "name": "Remote Vorlage", "type": "Ride",
             "description": "- 30m Z2", "moving_time": 1800,
         }]) as get_library:
-            result = server.intervals_sync_service().sync("existing", activity_days=42)
+            result = server.INTERVALS_SYNC.sync_service().sync("existing", activity_days=42)
 
         get_library.assert_called_once_with()
         self.assertEqual(result["library"], 2)
@@ -1134,7 +1135,7 @@ class ServerSyncTests(ServerTestCase):
         ), patch.object(
             SelectedWorkoutSyncService, "sync", return_value={"status": "partial", "workouts": 1, "local_errors": ["upload failed"]}
         ) as library_sync, patch.object(WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}):
-            result = server.intervals_sync_service().sync("test", activity_days=42)
+            result = server.INTERVALS_SYNC.sync_service().sync("test", activity_days=42)
         library_sync.assert_not_called()
         self.assertEqual(result["status"], "ok")
         self.assertIsNone(result["library_error"])
@@ -1193,7 +1194,7 @@ class ServerSyncTests(ServerTestCase):
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
         ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            server.intervals_sync_service().sync("activity", activity_days=7)
+            server.INTERVALS_SYNC.sync_service().sync("activity", activity_days=7)
         self.assertEqual(recorder.mutations, [])
 
     def test_full_resync_contract_rejects_remote_mutations(self):
@@ -1245,7 +1246,7 @@ class ServerSyncTests(ServerTestCase):
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
         ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            server.intervals_sync_service().sync("read-only", activity_days=1)
+            server.INTERVALS_SYNC.sync_service().sync("read-only", activity_days=1)
         self.assertEqual(recorder.mutations, [])
 
     def test_full_intervals_resync_preserves_local_library_and_never_remote_data(self):
@@ -1639,7 +1640,7 @@ class ServerSyncTests(ServerTestCase):
         server.key_value_service().set("last_sync_at", "old-sync")
         INTERVALS_SYNC_LOCK.acquire()
         previous_snapshot_read = threading.Event()
-        service = server.intervals_sync_service()
+        service = server.INTERVALS_SYNC.sync_service()
         status = service._status
         original_get_value = status.get
 
@@ -1697,7 +1698,7 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
         ), patch.object(intervals_client_module.IntervalsClient, "get_workout_library", return_value=[]):
-            server.intervals_sync_service().sync(
+            server.INTERVALS_SYNC.sync_service().sync(
                 "manual", activity_days=1, operation_id=operation_id
             )
         for handler in server.LOGGER.handlers:

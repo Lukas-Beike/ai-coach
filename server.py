@@ -73,6 +73,7 @@ from backend.sync.queue_assembly import SyncJobQueueAssembly
 from backend.sync.execution_assembly import SyncJobExecutionAssembly
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
 from backend.sync.scheduler_assembly import SyncSchedulerAssembly
+from backend.sync.intervals_assembly import IntervalsSyncAssembly
 from backend.sync.persistence_assembly import SyncPersistenceAssembly
 from backend.sync.garmin_assembly import GarminAssembly
 from backend.sync.gates import (
@@ -82,15 +83,6 @@ from backend.sync.gates import (
 from backend.sync import intervals_state
 from backend.sync import observation as sync_observation
 from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
-from backend.sync.intervals import (
-    IntervalsSnapshotReader,
-    IntervalsSnapshotService,
-    IntervalsSyncJournal,
-    IntervalsSyncRuntime,
-    IntervalsSyncService,
-    IntervalsSyncStatus,
-    IntervalsSyncWorkflow,
-)
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 from backend.weather.assembly import WeatherAssembly
 from backend.settings import SettingsService
@@ -170,7 +162,7 @@ from backend.http_api.nutrition import (
 )
 from backend.nutrition.service import NutritionService
 from backend.nutrition.sync import IntervalsNutritionSyncService
-from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
+from backend.sync.status import SyncPublicStateService
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.adaptive import AdaptivePreviewFollowupService, IllnessPauseSyncService
 from backend.sync.commands import ProviderRefreshCommandService
@@ -192,10 +184,6 @@ from backend.sync.library import (
     workout_library_sync_running,
 )
 from backend.sync.selected import SelectedWorkoutSyncService
-from backend.sync.performance import (
-    PerformanceRefreshFollowupService,
-    PerformanceRefreshService,
-)
 from backend.sync.garmin_service import (
     GARMIN_AUTOMATIC_SYNC_DAYS,
     GarminMorningRemoteReader,
@@ -466,7 +454,7 @@ def sync_command_endpoint() -> SyncCommandEndpoint:
     """Compose authenticated manual synchronization POST commands."""
     return SyncCommandEndpoint(
         SYNC_JOB_QUEUE.service(), SYNC_PERSISTENCE.state_repository(),
-        performance_refresh_service(), full_provider_resync_service(),
+        INTERVALS_SYNC.performance_service(), full_provider_resync_service(),
         lambda: uuid.uuid4().hex, SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS,
     )
 
@@ -474,7 +462,7 @@ def sync_command_endpoint() -> SyncCommandEndpoint:
 def provider_refresh_command_service() -> ProviderRefreshCommandService:
     """Compose authorized Coach refresh command execution."""
     return ProviderRefreshCommandService(
-        SYNC_JOB_QUEUE.service(), intervals_sync_service(), ALL_SYNC_DAYS
+        SYNC_JOB_QUEUE.service(), INTERVALS_SYNC.sync_service(), ALL_SYNC_DAYS
     )
 
 
@@ -622,116 +610,13 @@ def sync_public_state_service() -> SyncPublicStateService:
     )
 
 
-def performance_refresh_service() -> PerformanceRefreshService:
-    """Compose targeted Intervals performance refresh persistence."""
-    return PerformanceRefreshService(
-        CONFIG,
-        database_manager(),
-        SYNC_PERSISTENCE.state_repository(),
-        KEY_VALUE_REPOSITORY,
-        intervals_snapshot_reader(),
-        runtime_events.STATE_EVENT_BUFFER,
-        REDACTOR.redact_text,
-        LOGGER,
-        PROVIDER_SYNC.operation_observer(),
-        INTERVALS_RESYNC_GATE,
-    )
-
-
-def intervals_snapshot_reader() -> IntervalsSnapshotReader:
-    """Compose the Intervals provider snapshot reader."""
-    api_client = IntervalsApiClient(
-        api_key=CONFIG.intervals_api_key,
-        request=PROVIDER_TRANSPORT.json_http_client().request,
-    )
-    return IntervalsSnapshotReader(
-        CONFIG,
-        api_client,
-        SYNC_PERSISTENCE.state_repository(),
-        ATHLETE_CLOCK.now,
-        runtime_clock.utc_now,
-        SYNC_EARLIEST_DATE,
-        SYNC_CHUNK_DAYS,
-        ALL_SYNC_DAYS,
-        PLANNED_CALENDAR_HISTORY_DAYS,
-        PLANNED_CALENDAR_FUTURE_DAYS,
-    )
-
-
-def performance_refresh_followup_service() -> PerformanceRefreshFollowupService:
-    """Compose performance follow-up queueing and polling."""
-    return PerformanceRefreshFollowupService(
-        CONFIG,
-        SYNC_JOB_QUEUE.service(),
-        performance_refresh_service(),
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        LOGGER,
-        wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
-        poll_seconds=SYNC_JOB_POLL_SECONDS,
-    )
-
-
-def intervals_snapshot_service() -> IntervalsSnapshotService:
-    """Compose Intervals snapshot and sync-window persistence."""
-    return IntervalsSnapshotService(
-        database_manager(),
-        KEY_VALUE_REPOSITORY,
-        SYNC_PERSISTENCE.state_repository(),
-        remote_planned_unit_reconciler(),
-        workout_library_refresh_service(),
-        workout_library_service(),
-        REDACTOR.redact_text,
-        ATHLETE_CLOCK.now,
-        SYNC_EARLIEST_DATE,
-        SYNC_CHUNK_DAYS,
-        ALL_SYNC_DAYS,
-    )
-
-
-def intervals_sync_service() -> IntervalsSyncService:
-    """Compose the complete read-only Intervals synchronization use case."""
-    status = IntervalsSyncStatus(database_manager(), KEY_VALUE_REPOSITORY)
-    return IntervalsSyncService(
-        CONFIG,
-        IntervalsSyncWorkflow(
-            intervals_snapshot_reader(),
-            intervals_snapshot_service(),
-            SYNC_PERSISTENCE.state_repository(),
-            SYNC_PERSISTENCE.daily_markers(),
-            SYNC_PERIOD_DEFAULTS,
-            ALL_SYNC_DAYS,
-        ),
-        performance_refresh_followup_service(),
-        status,
-        IntervalsSyncJournal(
-            status,
-            SyncOperationStateWriter(
-                database_manager(),
-                KEY_VALUE_REPOSITORY,
-                runtime_events.STATE_EVENT_BUFFER,
-                REDACTOR.redact_text,
-            ),
-            REDACTOR.redact_text,
-            LOGGER,
-            runtime_clock.utc_now,
-        ),
-        IntervalsSyncRuntime(
-            INTERVALS_SYNC_LOCK,
-            PROVIDER_SYNC.operation_observer(),
-            INTERVALS_RESYNC_GATE,
-            wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
-        ),
-    )
-
-
 def full_provider_resync_service() -> FullProviderResyncService:
     """Compose complete provider reset orchestration."""
     observer = PROVIDER_SYNC.operation_observer()
     return FullProviderResyncService(
         FullResyncProviderExecution(
             CONFIG,
-            intervals_sync_service(),
+            INTERVALS_SYNC.sync_service(),
             GARMIN_ASSEMBLY.sync_service(),
             competition_sync_service(),
             INTERVALS_RESYNC_GATE,
@@ -1381,6 +1266,36 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
     retry_max_seconds=SYNC_JOB_RETRY_MAX_SECONDS,
 )
 
+INTERVALS_SYNC = IntervalsSyncAssembly(
+    config=lambda: CONFIG,
+    database_manager=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    state_repository=SYNC_PERSISTENCE.state_repository,
+    daily_markers=SYNC_PERSISTENCE.daily_markers,
+    request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
+    athlete_clock=lambda: ATHLETE_CLOCK,
+    utc_now=runtime_clock.utc_now,
+    event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    redact_text=REDACTOR.redact_text,
+    logger=LOGGER,
+    operation_observer=PROVIDER_SYNC.operation_observer,
+    intervals_resync_gate=INTERVALS_RESYNC_GATE,
+    intervals_sync_lock=INTERVALS_SYNC_LOCK,
+    sync_job_queue=SYNC_JOB_QUEUE.service,
+    remote_planned_unit_reconciler=remote_planned_unit_reconciler,
+    workout_library_refresh_service=workout_library_refresh_service,
+    workout_library_service=workout_library_service,
+    sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+    all_sync_days=ALL_SYNC_DAYS,
+    sync_chunk_days=SYNC_CHUNK_DAYS,
+    sync_earliest_date=SYNC_EARLIEST_DATE,
+    calendar_history_days=PLANNED_CALENDAR_HISTORY_DAYS,
+    calendar_future_days=PLANNED_CALENDAR_FUTURE_DAYS,
+    performance_wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
+    poll_seconds=SYNC_JOB_POLL_SECONDS,
+)
+
+
 PROVIDER_TRANSPORT = ProviderTransportAssembly(
     app_version=APP_VERSION,
     max_response_bytes=provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
@@ -1432,8 +1347,8 @@ SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     all_sync_days=ALL_SYNC_DAYS,
     sync_chunk_days=SYNC_CHUNK_DAYS,
     sync_earliest_date=SYNC_EARLIEST_DATE,
-    intervals_sync_service=intervals_sync_service,
-    performance_refresh_service=performance_refresh_service,
+    intervals_sync_service=INTERVALS_SYNC.sync_service,
+    performance_refresh_service=INTERVALS_SYNC.performance_service,
     selected_workout_sync_service=selected_workout_sync_service,
     competition_sync_service=competition_sync_service,
     operation_observer=PROVIDER_SYNC.operation_observer,
