@@ -11,6 +11,7 @@ const NAV_ROUTES = Object.freeze({
   "more/coach": "settingsPanel",
   "more/privacy": "settingsPanel",
   "more/operations": "settingsPanel",
+  "more/appearance": "settingsPanel",
   "more/profile": "profilePanel",
 });
 const NAV_LINK_ROUTES = Object.freeze({
@@ -47,6 +48,6 @@ function baseRoute(route = state.route) {
 
 function moreSegmentFromRoute(route = state.route) {
   const segment = String(route || "").split("/")[1];
-  if (["profile", "connections", "coach", "privacy", "operations"].includes(segment)) return segment;
+  if (["profile", "connections", "coach", "privacy", "operations", "appearance"].includes(segment)) return segment;
   return "connections";
 }

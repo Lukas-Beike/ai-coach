@@ -3,6 +3,7 @@ const VOICE_MAX_DURATION_MS = 60_000;
 const VOICE_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 const QUICK_TEMPLATES_INACTIVITY_MS = 6 * 60 * 60 * 1000;
 const LAST_PWA_ACTIVITY_KEY = "intervals-coach-last-pwa-activity";
+const APPEARANCE_KEY = "intervals-coach-appearance";
 const SYNC_POLL_LEASE_KEY = "intervals-coach-sync-poll-lease";
 const SYNC_POLL_CHANNEL = "intervals-coach-sync-status";
 const SYNC_POLL_ACTIVE_MS = 1_500;
@@ -15,6 +16,31 @@ const mobileViewportBaselines = { portrait: 0, landscape: 0 };
 let mobileViewportInputWasFocused = false;
 
 if ("scrollRestoration" in globalThis.history) globalThis.history.scrollRestoration = "manual";
+
+function applyAppearance(appearance = "system") {
+  const selected = ["system", "light", "dark"].includes(appearance) ? appearance : "system";
+  let resolved = selected;
+  if (selected === "system") resolved = globalThis.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  document.documentElement.dataset.theme = resolved;
+  const themeColor = $("meta[name='theme-color']");
+  if (themeColor) themeColor.content = resolved === "light" ? "#ffffff" : "#0b0b0d";
+  const select = $("#appearanceSelect");
+  if (select && select.value !== selected) select.value = selected;
+  return selected;
+}
+
+function loadAppearance() {
+  let appearance = "system";
+  try { appearance = localStorage.getItem(APPEARANCE_KEY) || "system"; } catch { }
+  return applyAppearance(appearance);
+}
+
+loadAppearance();
+globalThis.matchMedia?.("(prefers-color-scheme: light)").addEventListener?.("change", () => {
+  let appearance = "system";
+  try { appearance = localStorage.getItem(APPEARANCE_KEY) || "system"; } catch { }
+  if (appearance === "system") applyAppearance(appearance);
+});
 
 function hasTouchFirstInput() {
   return Boolean(globalThis.navigator?.maxTouchPoints > 0
@@ -72,7 +98,7 @@ function scheduleMobileViewportLayout() {
 }
 
 function renderMoreSegments(segment = moreSegmentFromRoute()) {
-  const selected = ["profile", "connections", "coach", "privacy", "operations"].includes(segment) ? segment : "connections";
+  const selected = ["profile", "connections", "coach", "privacy", "operations", "appearance"].includes(segment) ? segment : "connections";
   document.querySelectorAll("[data-more-segment-panel]").forEach((panel) => {
     panel.hidden = panel.dataset.moreSegmentPanel !== selected;
   });
@@ -772,7 +798,9 @@ function chatSendLabel(controls) {
 function updateChatSendButton(button, controls) {
   if (!button) return;
   button.disabled = state.chatAttachmentsLoading || !controls.chatReady || !controls.hasDraft || !controls.inputAvailable || controls.resuming || controls.reconciling;
-  button.textContent = chatSendLabel(controls);
+  const label = chatSendLabel(controls);
+  button.setAttribute("aria-label", label);
+  button.title = label;
 }
 
 function updateChatSteerButton(button, controls) {
@@ -786,7 +814,9 @@ function updateChatCancelButton(button, controls) {
   button.hidden = !state.busy || controls.reconciling;
   const requested = Boolean(state.chatStream?.cancelRequested || state.chatRequest?.cancelRequested);
   button.disabled = (!state.chatStream && !state.chatServerOperationId) || requested;
-  button.textContent = requested ? "Wird abgebrochen…" : "Abbrechen";
+  const label = requested ? "Antwort wird gestoppt" : "Antwort stoppen";
+  button.setAttribute("aria-label", label);
+  button.title = label;
 }
 
 function updateChatControls() {
@@ -806,7 +836,10 @@ function updateChatControls() {
   updateChatSteerButton($("#steerButton"), controls);
   updateChatCancelButton($("#cancelChatButton"), controls);
   const progress = $("#chatOperationStatus");
-  if (progress) progress.hidden = !state.busy || controls.reconciling;
+  if (progress) {
+    progress.hidden = !state.busy || controls.reconciling;
+    progress.textContent = progress.hidden ? "" : coachWorkingLabel();
+  }
   updateChatQueueStatus();
 }
 function stopVoiceCapture(recorder = state.voiceRecorder) {
@@ -1643,8 +1676,6 @@ function renderActivities(activities) {
 }
 let chatStreamRenderFrame = null;
 let chatStreamStartScrollPending = false;
-let chatComposerRevealPending = false;
-
 function chatIsNearBottom() {
   return document.documentElement.scrollHeight - (globalThis.scrollY + globalThis.innerHeight) <= 48;
 }
@@ -1652,37 +1683,21 @@ function chatIsNearBottom() {
 function updateChatComposerVisibility() {
   const panel = $("#chatPanel");
   if (!panel) return;
-  const inputFocused = Boolean($("#chatForm")?.contains(document.activeElement));
-  const hidden = !panel.classList.contains("chat-empty")
-    && !chatComposerRevealPending
-    && !inputFocused
-    && !(state.chatAttachments || []).length
-    && !chatIsNearBottom();
-  panel.classList.toggle("chat-composer-hidden", hidden);
+  panel.classList.remove("chat-composer-hidden");
   const jump = $("#chatJumpToComposer");
-  if (jump) jump.hidden = !hidden || !panel.classList.contains("active");
+  if (jump) jump.hidden = chatIsNearBottom() || !$("#messages")?.childElementCount || !panel.classList.contains("active");
 }
 
 function jumpToChatComposer() {
   const input = $("#messageInput");
   if (!input) return;
   const panel = $("#chatPanel");
-  const composer = $("#chatForm");
-  chatComposerRevealPending = true;
   panel?.classList.remove("chat-composer-hidden");
   const jump = $("#chatJumpToComposer");
   if (jump) jump.hidden = true;
   input.focus({ preventScroll: true });
-  composer?.scrollIntoView({ block: "end", behavior: "auto" });
-  requestAnimationFrame(() => {
-    globalThis.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
-    input.focus({ preventScroll: true });
-    chatComposerRevealPending = false;
-    updateChatComposerVisibility();
-    panel?.classList.remove("chat-composer-hidden");
-    if (jump) jump.hidden = true;
-    scheduleMobileViewportLayout();
-  });
+  scrollChatToLatest();
+  updateChatComposerVisibility();
 }
 
 function updateChatQueueStatus() {
@@ -1709,7 +1724,9 @@ function createCoachWorkingIndicator() {
   dots.className = "working-dots";
   dots.setAttribute("aria-hidden", "true");
   dots.innerHTML = "<i></i><i></i><i></i>";
-  node.append(dots);
+  const label = document.createElement("span");
+  label.textContent = coachWorkingLabel();
+  node.append(dots, label);
   return node;
 }
 
@@ -1961,6 +1978,37 @@ function renderMessageNode(message) {
     }
   }
   appendMessageRetry(node, message);
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "message-action";
+  copy.textContent = "Kopieren";
+  copy.setAttribute("aria-label", "Nachricht kopieren");
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(String(message.content || ""));
+      toast("Nachricht kopiert");
+    } catch { toast("Nachricht konnte nicht kopiert werden", true); }
+  });
+  actions.append(copy);
+  if (message.role === "user" && !messageAttachmentLabel(message.attachment_names)) {
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "message-action";
+    edit.textContent = "Als Entwurf bearbeiten";
+    edit.addEventListener("click", () => {
+      const input = $("#messageInput");
+      if (input.value.trim() || (state.chatAttachments || []).length) return toast("Bitte zuerst den aktuellen Entwurf bearbeiten.", true);
+      input.value = String(message.content || "");
+      delete input.dataset.requestKind;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      jumpToChatComposer();
+      input.focus({ preventScroll: true });
+    });
+    actions.append(edit);
+  }
+  node.append(actions);
   return node;
 }
 
@@ -5136,6 +5184,10 @@ $("#attachmentInput").addEventListener("change", async (event) => {
 $("#chatForm").addEventListener("submit", sendMessage);
 $("#steerButton").addEventListener("click", steerCurrentChat);
 $("#cancelChatButton").addEventListener("click", cancelChat);
+$("#appearanceSelect").addEventListener("change", (event) => {
+  const appearance = applyAppearance(event.currentTarget.value);
+  try { localStorage.setItem(APPEARANCE_KEY, appearance); } catch { }
+});
 $("#quickMessageTemplates").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-message]");
   if (!button || state.busy) return;
@@ -5187,14 +5239,12 @@ $("#systemContextPreviewButton").addEventListener("click", () => {
   loadContextPreview();
 });
 $("#messageInput").addEventListener("input", (event) => {
-  const panel = $("#chatPanel");
-  const keepComposerVisible = panel?.classList.contains("active")
-    && !panel.classList.contains("chat-composer-hidden");
+  const keepLatestVisible = $("#chatPanel")?.classList.contains("active") && chatIsNearBottom();
   state.chatDraftDirty = Boolean(event.target.value.trim());
   event.target.style.height = "auto";
   event.target.style.height = `${Math.min(event.target.scrollHeight, 150)}px`;
   updateChatControls();
-  if (keepComposerVisible) {
+  if (keepLatestVisible) {
     requestAnimationFrame(() => {
       globalThis.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
       updateChatComposerVisibility();
