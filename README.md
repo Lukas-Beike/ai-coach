@@ -407,6 +407,8 @@ The Coach interacts with the athlete's data via 37 structured tools covering pla
 
 Endurance workouts synchronized to Intervals.icu must comply with the native workout builder syntax. The application validates workout text locally before attempting remote synchronization:
 
+See the [workout export examples and verification contract](docs/workout-export-format.md) for detailed provider readback rules.
+
 ### Format Specification & Examples
 
 #### Cycling Intervals (Power & Cadence Targets)
@@ -501,6 +503,8 @@ Because native Windows environments often lack compatible pre-compiled wheels fo
 4. Access `http://localhost:8090` in your browser. Inspect logs using `docker logs -f ai-coach`.
 
 ### Testing & Quality Assurance
+
+The [Coach dialogue evaluation rubric](docs/coach-dialogue-evaluation.md) and [executable tool coverage matrix](docs/coach-tool-coverage.md) describe the current conversation and tool checks.
 
 #### Native Python Unit Tests
 Run standard unit tests with temporary in-memory fixtures (mocking external providers):
