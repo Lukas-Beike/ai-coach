@@ -1695,6 +1695,9 @@ were public bootstrap and sync state projections.
   `python -m compileall -q server.py backend tests`, inventory `--check`, and
   `git diff --check`. Docker build remains unavailable because the local Docker
   Engine named pipe is absent. No browser assets changed.
+- Added an architecture regression that bounds constructor parameter counts in
+  backend assembly modules, covering the SonarCloud `python:S107` failure mode.
+  Its focused architecture run passed all 47 tests.
 - Measured `server.py`: 1,830 physical / 1,693 nonblank lines, 108 import
   statements, and eight top-level definitions. This is not the S6 exit: the
   typed interface rewrite adds substantial explicit wiring, and the remaining

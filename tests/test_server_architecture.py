@@ -2302,6 +2302,26 @@ def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
 
 
 class ServerArchitectureTests(unittest.TestCase):
+    def test_assembly_interfaces_stay_owner_scoped_and_bounded(self) -> None:
+        violations: list[str] = []
+        for path in _python_files(BACKEND_ROOT):
+            if not path.name.endswith("assembly.py"):
+                continue
+            tree = _parse(path)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == "__init__":
+                    count = len([arg for arg in node.args.args if arg.arg != "self"])
+                    count += len(node.args.kwonlyargs)
+                    if count > 5:
+                        violations.append(f"{path}:{node.lineno}: {count} constructor inputs")
+
+        self.assertEqual(
+            [],
+            violations,
+            "Assembly constructors must use typed owner groups instead of long parameter lists:\n"
+            + "\n".join(violations),
+        )
+
     def test_chat_history_http_projection_uses_coach_history_owner(self) -> None:
         source = (BACKEND_ROOT / "http_api" / "chat_page.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
