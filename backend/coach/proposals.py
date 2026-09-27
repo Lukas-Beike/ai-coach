@@ -139,13 +139,17 @@ def remote_coach_write_diff(
     arguments: dict[str, Any],
     intent: dict[str, Any],
     approval_manifest: Any = None,
+    approval_details: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
     """Project the remote effect into a compact, non-sensitive approval summary."""
     if tool == "sync_nutrition":
         return _nutrition_approval_diff(REMOTE_WRITE_LABELS[tool], approval_manifest)
     entry: dict[str, str] = {"name": REMOTE_WRITE_LABELS[tool]}
     if tool == "start_intervals_plan_sync":
-        _plan_sync_write_diff(entry, arguments, intent)
+        return _plan_sync_write_diff(entry, arguments, intent, approval_details or [])
+    if tool == "sync_competitions":
+        if approval_details:
+            return approval_details
     elif tool == "resolve_training_sync_conflict":
         entry["date"] = (
             "Synchronisationsauftrag " + str(arguments.get("job_id") or "")[:36]
@@ -193,8 +197,11 @@ def _nutrition_write_diff(
 
 
 def _plan_sync_write_diff(
-    entry: dict[str, str], arguments: dict[str, Any], intent: dict[str, Any]
-) -> None:
+    entry: dict[str, str],
+    arguments: dict[str, Any],
+    intent: dict[str, Any],
+    details: list[dict[str, str]],
+) -> list[dict[str, str]]:
     scope = str((intent.get("request") or {}).get("sync_scope") or "selected")
     entries = arguments.get("entries") or []
     count = len(entries)
@@ -218,6 +225,7 @@ def _plan_sync_write_diff(
         entry["date"] = dates[0]
         if len(dates) > 1:
             entry["date"] = f"{dates[0]} bis {dates[-1]}"
+    return details or [entry]
 
 
 def coach_action_hash(payload: Any) -> str:
@@ -352,18 +360,22 @@ class CoachProposalCreationService:
         payload["arguments"] = _approved_remote_arguments(
             tool,
             arguments,
+            intent,
             database_manager=self._database_manager,
             sync_state_repository=self._sync_state_repository,
             nutrition_service=self._nutrition_service,
         )
         approval_manifest = payload["arguments"].get("_approval_manifest")
+        approval_details = _remote_write_approval_details(
+            tool, payload["arguments"], intent, self._database_manager
+        )
         return self.create(
             {
                 "action_type": "remote_coach_write",
                 "target_system": "intervals",
                 "object_ids": {"operation": tool, "targets": targets},
                 "diff": remote_coach_write_diff(
-                    tool, arguments, intent, approval_manifest
+                    tool, arguments, intent, approval_manifest, approval_details
                 ),
                 "payload": payload,
             },
@@ -374,19 +386,240 @@ class CoachProposalCreationService:
 def _approved_remote_arguments(
     tool: str,
     arguments: dict[str, Any],
+    intent: dict[str, Any],
     *,
     database_manager: DatabaseManager,
     sync_state_repository: Any,
     nutrition_service: Callable[[], Any] | None,
 ) -> dict[str, Any]:
+    if tool == "start_intervals_plan_sync":
+        approved = dict(arguments)
+        if approved.get("repair") is True or approved.get("entries"):
+            return approved
+        identifiers = [
+            str(value)
+            for key in ("_created_sync_entry_ids", "_changed_sync_entry_ids")
+            for value in intent.get(key) or []
+        ]
+        all_pending = bool(
+            intent.get("_sync_all_pending")
+            or (intent.get("request") or {}).get("sync_scope") == "all_pending"
+        )
+        if all_pending:
+            query = (
+                "SELECT local_id, payload FROM workout_library "
+                "WHERE sync_state IN ('local', 'sync_error', 'remote_missing', 'conflict') "
+                "UNION ALL SELECT local_id, payload FROM planned_units "
+                "WHERE sync_state IN ('local', 'sync_error', 'remote_missing', 'conflict') "
+                "ORDER BY local_id LIMIT 201"
+            )
+            values: tuple[str, ...] = ()
+        elif identifiers:
+            placeholders = ",".join("?" for _ in identifiers)
+            query = (
+                "SELECT local_id, payload FROM workout_library WHERE local_id IN ("
+                + placeholders
+                + ") UNION ALL SELECT local_id, payload FROM planned_units WHERE local_id IN ("
+                + placeholders
+                + ") ORDER BY local_id LIMIT 201"
+            )
+            values = (*identifiers, *identifiers)
+        else:
+            return approved
+        with database_manager.reader() as db:
+            rows = db.execute(query, values).fetchall()
+        approved["entries"] = [
+            {
+                "library_workout_id": str(row["local_id"]),
+                "expected_payload_hash": hashlib.sha256(
+                    str(row["payload"] or "").encode("utf-8")
+                ).hexdigest(),
+            }
+            for row in rows
+        ]
+        if len(rows) > 200:
+            raise AppError(
+                409, "Der Plan enthält zu viele Sync-Einheiten für eine Freigabe."
+            )
+        return approved
     if tool == "sync_competitions":
         with database_manager.reader() as db:
-            return {**arguments, "_approval_manifest": competition_push_manifest(db)}
+            manifest = competition_push_manifest(db)
+            return {**arguments, "_approval_manifest": manifest}
     if tool == "delete_duplicate_intervals_activity":
         return _duplicate_approval_arguments(arguments, sync_state_repository)
     if tool == "sync_nutrition":
         return _nutrition_approval_arguments(arguments, nutrition_service)
     return dict(arguments)
+
+
+def _remote_write_approval_details(
+    tool: str,
+    arguments: dict[str, Any],
+    intent: dict[str, Any],
+    database_manager: DatabaseManager,
+) -> list[dict[str, str]]:
+    if tool == "start_intervals_plan_sync":
+        repair_period = intent.get("_repair_period")
+        if arguments.get("repair") is True and isinstance(repair_period, dict):
+            with database_manager.reader() as db:
+                rows = db.execute(
+                    "SELECT local_id, payload FROM planned_units "
+                    "WHERE substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) BETWEEN ? AND ? "
+                    "ORDER BY local_id LIMIT 201",
+                    (repair_period.get("start"), repair_period.get("end")),
+                ).fetchall()
+            _check_approval_row_limit(rows)
+            return _plan_workout_details(rows)
+        entries = arguments.get("entries") or []
+        identifiers = [
+            str(item.get("local_id") or item.get("library_workout_id") or "")
+            for item in entries
+            if isinstance(item, dict)
+        ]
+        if not identifiers and (
+            intent.get("_sync_all_pending")
+            or (intent.get("request") or {}).get("sync_scope") == "all_pending"
+        ):
+            query = (
+                "SELECT local_id, payload FROM workout_library "
+                "WHERE sync_state IN ('local', 'sync_error', 'remote_missing', 'conflict') "
+                "UNION ALL SELECT local_id, payload FROM planned_units "
+                "WHERE sync_state IN ('local', 'sync_error', 'remote_missing', 'conflict') "
+                "ORDER BY local_id LIMIT 201"
+            )
+            with database_manager.reader() as db:
+                rows = db.execute(query).fetchall()
+        else:
+            if not identifiers:
+                identifiers = [
+                    str(value)
+                    for key in ("_created_sync_entry_ids", "_changed_sync_entry_ids")
+                    for value in intent.get(key) or []
+                ]
+            if not identifiers:
+                return []
+            placeholders = ",".join("?" for _ in identifiers)
+            query = (
+                "SELECT local_id, payload FROM workout_library WHERE local_id IN ("
+                + placeholders
+                + ") UNION ALL SELECT local_id, payload FROM planned_units WHERE local_id IN ("
+                + placeholders
+                + ") ORDER BY local_id LIMIT 201"
+            )
+            with database_manager.reader() as db:
+                rows = db.execute(query, (*identifiers, *identifiers)).fetchall()
+        _check_approval_row_limit(rows)
+        expected_hashes = {
+            str(item.get("library_workout_id") or item.get("local_id") or ""): str(
+                item.get("expected_payload_hash") or ""
+            )
+            for item in entries
+            if isinstance(item, dict)
+        }
+        for row in rows:
+            expected_hash = expected_hashes.get(str(row["local_id"]))
+            if (
+                expected_hash
+                and hashlib.sha256(
+                    str(row["payload"] or "").encode("utf-8")
+                ).hexdigest()
+                != expected_hash
+            ):
+                raise AppError(
+                    409, "Die lokale Einheit hat sich vor der Freigabe geaendert."
+                )
+        return _plan_workout_details(rows)
+    if tool == "sync_competitions":
+        manifest = arguments.get("_approval_manifest") or []
+        with database_manager.reader() as db:
+            details = []
+            for item in manifest:
+                if item["type"] == "competition":
+                    row = db.execute(
+                        "SELECT * FROM competitions WHERE id=?",
+                        (item["id"],),
+                    ).fetchone()
+                    if row:
+                        digest = hashlib.sha256(
+                            json.dumps(
+                                dict(row),
+                                sort_keys=True,
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            ).encode("utf-8")
+                        ).hexdigest()
+                        if digest != item["sha256"]:
+                            raise AppError(
+                                409,
+                                "Der Wettkampfbestand hat sich vor der Freigabe geaendert.",
+                            )
+                        details.append(
+                            {
+                                "name": str(row["name"] or "Wettkampf")[:120],
+                                "date": str(row["event_date"] or "Datum unbekannt")[
+                                    :10
+                                ],
+                                "sport": str(row["sport"] or "")[:40],
+                                "id": str(row["id"]),
+                            }
+                        )
+                elif item["type"] == "tombstone":
+                    row = db.execute(
+                        "SELECT * FROM competition_sync_tombstones WHERE id=?",
+                        (item["id"],),
+                    ).fetchone()
+                    if not row:
+                        raise AppError(
+                            409, "Competition manifest changed before approval."
+                        )
+                    digest = hashlib.sha256(
+                        json.dumps(
+                            dict(row),
+                            sort_keys=True,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ).hexdigest()
+                    if digest != item["sha256"]:
+                        raise AppError(
+                            409, "Competition manifest changed before approval."
+                        )
+                    details.append(
+                        {
+                            "name": "Remote-Wettkampfeintrag löschen",
+                            "date": "Freigegebene Löschmarkierung",
+                            "id": str(row["intervals_event_id"] or row["id"]),
+                        }
+                    )
+        return details
+    return []
+
+
+def _check_approval_row_limit(rows: list[Any]) -> None:
+    if len(rows) > 200:
+        raise AppError(
+            409, "Der Plan enthaelt zu viele Sync-Einheiten fuer eine Freigabe."
+        )
+
+
+def _plan_workout_details(rows: list[Any]) -> list[dict[str, str]]:
+    details = []
+    for row in rows:
+        try:
+            workout = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            workout = {}
+        if isinstance(workout, dict):
+            details.append(
+                {
+                    "name": str(workout.get("name") or "Trainingseinheit")[:120],
+                    "date": str(workout.get("date") or "Datum unbekannt")[:10],
+                    "sport": str(workout.get("sport") or "")[:40],
+                    "id": str(row["local_id"]),
+                }
+            )
+    return details
 
 
 def _duplicate_approval_arguments(
@@ -655,10 +888,30 @@ class CoachProposalExecutionService:
                 )
             placeholders = ",".join("?" for _ in source_ids)
             existing = db.execute(
-                f"SELECT id FROM messages WHERE role='user' AND client_turn_id=? AND id IN ({placeholders})",
-                (client_turn_id, *source_ids),
+                "SELECT m.id, m.client_turn_id, c.conversation_id, c.receipt "
+                "FROM messages m LEFT JOIN coach_commands c "
+                "ON c.client_turn_id=m.client_turn_id "
+                f"WHERE m.role='user' AND m.id IN ({placeholders})",
+                tuple(source_ids),
             ).fetchall()
-            if len(existing) != len(set(source_ids)):
+            session_key = hashlib.sha256(
+                str(session_csrf_hash).encode("utf-8")
+            ).hexdigest()
+            valid_ids = set()
+            current_turn_ids = set()
+            for message in existing:
+                receipt = (
+                    json.loads(message["receipt"] or "{}") if message["receipt"] else {}
+                )
+                if (
+                    message["conversation_id"] == conversation_id
+                    and receipt.get("session_key") == session_key
+                ):
+                    message_id = int(message["id"])
+                    valid_ids.add(message_id)
+                    if message["client_turn_id"] == client_turn_id:
+                        current_turn_ids.add(message_id)
+            if valid_ids != set(source_ids) or not current_turn_ids:
                 raise AppError(
                     409, "Der ursprüngliche Nutzerauftrag ist nicht mehr verfügbar."
                 )

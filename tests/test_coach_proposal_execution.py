@@ -124,7 +124,7 @@ class CoachProposalExecutionTests(unittest.TestCase):
         intent = {
             "operation": "sync_competitions", "intent": "remote_sync",
             "target_system": "intervals", "authorization_scope": ["intervals_sync"],
-            "request": {"remote_write": True, "source_message_ids": [1]},
+            "request": {"remote_write": True, "source_message_ids": [1, 2]},
         }
         payload = {
             "tool": "sync_competitions", "arguments": {}, "intent": intent,
@@ -137,10 +137,20 @@ class CoachProposalExecutionTests(unittest.TestCase):
                 "VALUES (1, 'user', 'sync competitions', 'turn-1', 'now')"
             )
             db.execute(
+                "INSERT INTO messages(id, role, content, client_turn_id, created_at) "
+                "VALUES (2, 'user', 'please sync that', 'turn-0', 'earlier')"
+            )
+            db.execute(
                 "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, "
                 "status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ("command-1", "turn-1", "conversation-1", "{}", "intervals", "complete",
                  json.dumps({"session_key": session_key}), "now", "now"),
+            )
+            db.execute(
+                "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, "
+                "status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("command-0", "turn-0", "conversation-1", "{}", "intervals", "complete",
+                 json.dumps({"session_key": session_key}), "earlier", "earlier"),
             )
             db.execute(
                 "INSERT INTO coach_action_proposals "

@@ -84,8 +84,9 @@ test("approval preview renders every bound remote-write value as text", () => {
   });
   vm.runInContext(source.slice(start, end), context);
   const list = context.coachActionDiff({ diff: [{
-    name: "Nutrition", date: "2026-09-24", kcal: "450 kcal", entries: "2",
+    name: "Nutrition", date: "2026-09-24", id: "race-1", kcal: "450 kcal", entries: "2",
     carbs: "60 g", protein: "20 g", fat: "10 g", keep: "ride-1", delete: "ride-2",
   }] });
+  assert.match(list.children[0].textContent, /ID: race-1/);
   assert.match(list.children[0].textContent, /450 kcal.*2 Einträge.*60 g.*ride-1.*ride-2/);
 });

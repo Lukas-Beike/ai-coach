@@ -163,7 +163,7 @@ class CoachProposalCreationTests(unittest.TestCase):
             "request": {"remote_write": True, "source_message_ids": [7]},
         }
 
-        self._service().create_remote_write(
+        result = self._service().create_remote_write(
             "sync_competitions",
             {"reason": "approved request"},
             intent,
@@ -179,6 +179,68 @@ class CoachProposalCreationTests(unittest.TestCase):
             {("competition", "race-1"), ("tombstone", "deleted-1")},
         )
         self.assertTrue(all(len(item["sha256"]) == 64 for item in manifest))
+        self.assertEqual(
+            result["proposed_action"]["diff"],
+            [
+                {"name": "Race", "date": "2026-10-01", "sport": "Run", "id": "race-1"},
+                {"name": "Remote-Wettkampfeintrag löschen", "date": "Freigegebene Löschmarkierung", "id": "remote-1"},
+            ],
+        )
+
+    def test_plan_approval_shows_each_concrete_workout(self) -> None:
+        raw_payload = json.dumps(
+            {"name": "Tempo ride", "date": "2026-10-02", "sport": "Ride"}
+        )
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO planned_units(id, local_id, payload, created_at, updated_at) "
+                "VALUES ('unit-1', 'unit-1', ?, 'now', 'now')",
+                (raw_payload,),
+            )
+        intent = {
+            "operation": "start_intervals_plan_sync", "intent": "remote_sync",
+            "target_system": "intervals", "authorization_scope": ["intervals_sync"],
+            "request": {"remote_write": True, "source_message_ids": [7], "sync_scope": "selected"},
+        }
+        result = self._service().create_remote_write(
+            "start_intervals_plan_sync",
+            {"entries": [{"library_workout_id": "unit-1", "expected_payload_hash": hashlib.sha256(raw_payload.encode()).hexdigest()}]},
+            intent, conversation_id="conversation-1", client_turn_id="turn-1",
+            session_csrf_hash="session-1",
+        )
+        self.assertEqual(
+            result["proposed_action"]["diff"],
+            [{"name": "Tempo ride", "date": "2026-10-02", "sport": "Ride", "id": "unit-1"}],
+        )
+
+    def test_all_pending_plan_approval_freezes_and_displays_pending_entries(self) -> None:
+        raw_payload = json.dumps(
+            {"name": "Recovery run", "date": "2026-10-03", "sport": "Run"}
+        )
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO planned_units(id, local_id, payload, created_at, updated_at) "
+                "VALUES ('unit-2', 'unit-2', ?, 'now', 'now')",
+                (raw_payload,),
+            )
+        intent = {
+            "operation": "start_intervals_plan_sync", "intent": "remote_sync",
+            "target_system": "intervals", "authorization_scope": ["intervals_sync"],
+            "request": {"remote_write": True, "source_message_ids": [8], "sync_scope": "all_pending"},
+            "_sync_all_pending": True,
+        }
+        result = self._service().create_remote_write(
+            "start_intervals_plan_sync", {}, intent,
+            conversation_id="conversation-1", client_turn_id="turn-2",
+            session_csrf_hash="session-2",
+        )
+        payload = json.loads(self._rows()[0]["payload"])
+        self.assertEqual(payload["arguments"]["entries"], [
+            {"library_workout_id": "unit-2", "expected_payload_hash": hashlib.sha256(raw_payload.encode()).hexdigest()},
+        ])
+        self.assertEqual(result["proposed_action"]["diff"], [
+            {"name": "Recovery run", "date": "2026-10-03", "sport": "Run", "id": "unit-2"},
+        ])
 
     def test_nutrition_remote_write_freezes_dates_revisions_and_aggregates(self) -> None:
         nutrition = Mock()

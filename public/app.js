@@ -1750,6 +1750,7 @@ function coachActionDiff(proposal) {
     const item = document.createElement("li");
     item.textContent = [
       entry.name, entry.date, entry.sport, entry.scope, entry.units,
+      entry.id && `ID: ${entry.id}`,
       entry.kcal, entry.entries && `${entry.entries} Einträge`,
       entry.carbs, entry.protein, entry.fat,
       entry.keep && `Behalten: ${entry.keep}`,
