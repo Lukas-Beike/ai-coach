@@ -4,7 +4,12 @@ import unittest
 from unittest.mock import Mock, patch
 
 from backend.coach import local_assembly
-from backend.coach.local_assembly import CoachLocalAssembly
+from backend.coach.local_assembly import (
+    CoachLocalAssembly,
+    CoachLocalGarmin,
+    CoachLocalPlanning,
+    CoachLocalState,
+)
 
 
 class CoachLocalAssemblyTests(unittest.TestCase):
@@ -24,7 +29,21 @@ class CoachLocalAssemblyTests(unittest.TestCase):
             "morning_body_battery": Mock(name="morning_body_battery"),
             "logger": Mock(name="logger"),
         }
-        return CoachLocalAssembly(**dependencies), dependencies, manager
+        assembly = CoachLocalAssembly(dependencies=CoachLocalAssembly.Inputs(
+            state=CoachLocalState(
+                dependencies["database_manager"], dependencies["database_lock"],
+                dependencies["key_values"],
+            ),
+            planning=CoachLocalPlanning(
+                dependencies["sync_job_queue"], dependencies["local_date"],
+                dependencies["adaptive_preview"], dependencies["planned_workout_label"],
+            ),
+            garmin=CoachLocalGarmin(
+                dependencies["garmin_sync"], dependencies["garmin_payload"],
+                dependencies["morning_body_battery"], dependencies["logger"],
+            ),
+        ))
+        return assembly, dependencies, manager
 
     def test_dialogue_and_checkin_factories_keep_shared_state(self):
         assembly, deps, manager = self.make_assembly()

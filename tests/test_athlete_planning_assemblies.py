@@ -3,8 +3,17 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock
 
-from backend.athlete.assembly import AthleteDataAssembly
-from backend.planning.assembly import PlanningDataAssembly
+from backend.athlete.assembly import (
+    AthleteDataAssembly,
+    AthleteRepositories,
+    AthleteRuntime,
+)
+from backend.planning.assembly import (
+    PlanningDataAssembly,
+    PlanningMutations,
+    PlanningRepositories,
+    PlanningRuntime,
+)
 
 
 class AthleteDataAssemblyTests(unittest.TestCase):
@@ -15,19 +24,25 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         now = Mock(name="utc_now")
         today = Mock(name="local_date")
         assembly = AthleteDataAssembly(
-            database_manager=lambda: manager,
-            activity_feedback_repository=repositories[0],
-            checkin_repository=repositories[1],
-            profile_repository=repositories[3],
-            key_value_repository=Mock(name="key_values"),
-            snapshot_repository=repositories[4],
-            utc_now=now,
-            local_date=today,
-            event_buffer=event_buffer,
-            competition_repository=repositories[2],
-            normalize_profile=Mock(name="normalize_profile"),
-            normalize_competition=Mock(name="normalize_competition"),
-            uuid_factory=Mock(name="uuid_factory"),
+            dependencies=AthleteDataAssembly.Inputs(
+                database_manager=lambda: manager,
+                repositories=AthleteRepositories(
+                    activity_feedback=repositories[0],
+                    checkin=repositories[1],
+                    profile=repositories[3],
+                    key_values=Mock(name="key_values"),
+                    snapshot=repositories[4],
+                    competition=repositories[2],
+                ),
+                runtime=AthleteRuntime(
+                    utc_now=now,
+                    local_date=today,
+                    event_buffer=event_buffer,
+                    normalize_profile=Mock(name="normalize_profile"),
+                    normalize_competition=Mock(name="normalize_competition"),
+                    uuid_factory=Mock(name="uuid_factory"),
+                ),
+            )
         )
 
         feedback = assembly.activity_feedback()
@@ -53,19 +68,27 @@ class PlanningDataAssemblyTests(unittest.TestCase):
         publish = Mock(name="publish")
         competition_repository = Mock(name="competitions")
         assembly = PlanningDataAssembly(
-            database_manager=lambda: manager,
-            competition_repository=competition_repository,
-            training_plan_repository=Mock(name="training_plans"),
-            key_value_repository=Mock(name="key_values"),
-            planning_revision_service=revisions,
-            event_buffer=Mock(name="events"),
-            utc_now=Mock(name="utc_now"),
-            local_date=local_date,
-            uuid_factory=Mock(name="uuid_factory"),
-            redact=Mock(name="redact"),
-            calendar_conflict_service=conflict_factory,
-            publish_change=publish,
-            plan_adjustment_repository=Mock(name="adjustments"),
+            dependencies=PlanningDataAssembly.Inputs(
+                database_manager=lambda: manager,
+                repositories=PlanningRepositories(
+                    competition=competition_repository,
+                    training_plans=Mock(name="training_plans"),
+                    key_values=Mock(name="key_values"),
+                    plan_adjustments=Mock(name="adjustments"),
+                ),
+                runtime=PlanningRuntime(
+                    revision=revisions,
+                    event_buffer=Mock(name="events"),
+                    utc_now=Mock(name="utc_now"),
+                    local_date=local_date,
+                    uuid_factory=Mock(name="uuid_factory"),
+                    redact=Mock(name="redact"),
+                ),
+                mutations=PlanningMutations(
+                    calendar_conflict_service=conflict_factory,
+                    publish_change=publish,
+                ),
+            )
         )
 
         self.assertEqual(conflict_factory.call_count, 0)

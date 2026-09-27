@@ -29,7 +29,10 @@ class ServerHttpTests(ServerTestCase):
 
     def test_http_assembly_keeps_dispatchers_shared_and_handler_configuration_lazy(self):
         initial = server.HTTP_API._handler_configuration()
-        updated = replace(initial, app_version="synthetic-next")
+        updated = replace(
+            initial,
+            identity=replace(initial.identity, app_version="synthetic-next"),
+        )
         with patch.object(
             server.HTTP_API,
             "_handler_configuration",
@@ -40,7 +43,9 @@ class ServerHttpTests(ServerTestCase):
 
         self.assertEqual(configuration.call_count, 2)
         self.assertIsNot(first, second)
-        self.assertEqual(first.server_version, f"IntervalsCoach/{initial.app_version}")
+        self.assertEqual(
+            first.server_version, f"IntervalsCoach/{initial.identity.app_version}"
+        )
         self.assertEqual(second.server_version, "IntervalsCoach/synthetic-next")
         self.assertIs(first.dependencies.route_dispatcher, server.HTTP_API.route_dispatcher)
         self.assertIs(second.dependencies.post_dispatcher, server.HTTP_API.post_dispatcher)

@@ -4,7 +4,13 @@ import unittest
 from unittest.mock import Mock, patch
 
 from backend.coach import conversation_assembly
-from backend.coach.conversation_assembly import CoachConversationAssembly
+from backend.coach.conversation_assembly import (
+    CoachConversationAssembly,
+    ConversationPersistence,
+    ConversationProfile,
+    ConversationRuntime,
+    ConversationModelDependencies,
+)
 
 
 class CoachConversationAssemblyTests(unittest.TestCase):
@@ -27,24 +33,32 @@ class CoachConversationAssemblyTests(unittest.TestCase):
         model_transport = Mock(name="model_transport")
         default_thinking_level = Mock(name="default_thinking_level")
         assembly = CoachConversationAssembly(
-            settings=settings,
-            database_manager=manager_provider,
-            key_values=keys,
-            chat_repository=chats,
-            state_event_buffer=events,
-            database_lock=lock,
-            streams=streams,
-            conversation_lock=conversation_lock,
-            openai_client=openai_provider,
-            utc_now=utc_now,
-            uuid_factory=uuid_factory,
-            logger=logger,
-            profile_service=profile_service,
-            model_transport=model_transport,
-            default_thinking_level=default_thinking_level,
-            default_max_output_tokens=2048,
-            json_media_type="application/json",
-            max_gemini_inline_image_bytes=lambda: 4096,
+            persistence=ConversationPersistence(
+                database_manager=manager_provider,
+                key_values=keys,
+                chat_repository=chats,
+                state_event_buffer=events,
+                database_lock=lock,
+            ),
+            runtime=ConversationRuntime(
+                streams=streams,
+                conversation_lock=conversation_lock,
+                openai_client=openai_provider,
+                utc_now=utc_now,
+                uuid_factory=uuid_factory,
+                logger=logger,
+            ),
+            profile=ConversationProfile(
+                profile_service=profile_service,
+            ),
+            model=ConversationModelDependencies(
+                settings=settings,
+                model_transport=model_transport,
+                default_thinking_level=default_thinking_level,
+                default_max_output_tokens=2048,
+                json_media_type="application/json",
+                max_gemini_inline_image_bytes=lambda: 4096,
+            ),
         )
         return assembly, {
             "manager": manager,

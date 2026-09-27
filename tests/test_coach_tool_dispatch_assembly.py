@@ -4,7 +4,13 @@ import unittest
 from unittest.mock import DEFAULT, Mock, patch
 
 from backend.coach import tool_dispatch_assembly
-from backend.coach.tool_dispatch_assembly import CoachToolDispatchAssembly
+from backend.coach.tool_dispatch_assembly import (
+    CoachPlanningToolOwners,
+    CoachProposalToolOwners,
+    CoachReadToolOwners,
+    CoachSyncToolOwners,
+    CoachToolDispatchAssembly,
+)
 
 
 class CoachToolDispatchAssemblyTests(unittest.TestCase):
@@ -18,24 +24,32 @@ class CoachToolDispatchAssemblyTests(unittest.TestCase):
                 "adaptive_apply", "training_plan", "history_undo", "proposal_creation",
             )
         }
-        assembly = CoachToolDispatchAssembly(
-            read_tools=dependencies["read_tools"],
-            profile_update=dependencies["profile_update"],
-            athlete_records=dependencies["athlete_records"],
-            training_plan_artifacts=dependencies["artifacts"],
-            training_plan_replacement=dependencies["plan_replacement"],
-            training_changes=dependencies["training_changes"],
-            database_manager=dependencies["manager"],
-            database_lock=dependencies["db_lock"],
-            workout_library_service=dependencies["library"],
-            library_plan_tools=dependencies["library_plans"],
-            sync_tools=dependencies["sync_tools"],
-            adaptive_preview=dependencies["adaptive_preview"],
-            adaptive_apply=dependencies["adaptive_apply"],
-            training_plan_service=dependencies["training_plan"],
-            history_undo=dependencies["history_undo"],
-            proposal_creation=dependencies["proposal_creation"],
-        )
+        assembly = CoachToolDispatchAssembly(dependencies=CoachToolDispatchAssembly.Inputs(
+            reads=CoachReadToolOwners(
+                read_tools=dependencies["read_tools"],
+                profile_update=dependencies["profile_update"],
+                athlete_records=dependencies["athlete_records"],
+            ),
+            planning=CoachPlanningToolOwners(
+                training_plan_artifacts=dependencies["artifacts"],
+                training_plan_replacement=dependencies["plan_replacement"],
+                training_changes=dependencies["training_changes"],
+                database_manager=dependencies["manager"],
+                database_lock=dependencies["db_lock"],
+                workout_library_service=dependencies["library"],
+                training_plan_service=dependencies["training_plan"],
+            ),
+            sync=CoachSyncToolOwners(
+                library_plan_tools=dependencies["library_plans"],
+                sync_tools=dependencies["sync_tools"],
+                history_undo=dependencies["history_undo"],
+            ),
+            proposals=CoachProposalToolOwners(
+                adaptive_preview=dependencies["adaptive_preview"],
+                adaptive_apply=dependencies["adaptive_apply"],
+                proposal_creation=dependencies["proposal_creation"],
+            ),
+        ))
         return assembly, dependencies
 
     def test_assembly_is_lazy_and_preserves_deferred_factory_identities(self):

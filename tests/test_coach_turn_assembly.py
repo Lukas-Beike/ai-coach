@@ -3,7 +3,14 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock
 
-from backend.coach.turn_assembly import CoachTurnAssembly
+from backend.coach.turn_assembly import (
+    ChatEntryServices,
+    CoachTurnAssembly,
+    StructuredTurnControlServices,
+    StructuredTurnDialogueServices,
+    TurnLifecycle,
+    TurnPersistence,
+)
 
 
 class CoachTurnAssemblyTests(unittest.TestCase):
@@ -29,29 +36,41 @@ class CoachTurnAssemblyTests(unittest.TestCase):
         deps["conversation"].return_value = conversation_service
         deps["tool_dispatch"] = Mock(name="tool_dispatch")
         assembly = CoachTurnAssembly(
-            database_manager=deps["database_manager"],
-            database_lock=lock,
-            chat_repository=chat_repository,
-            key_value_repository=key_values,
-            event_buffer=events,
-            utc_now=Mock(name="utc_now"),
-            uuid_factory=Mock(name="uuid_factory"),
-            root=Mock(name="root"),
-            logger=logger,
-            settings=settings,
-            conversation_gate=conversation_gate,
-            maintenance_gate=maintenance_gate,
-            tools=lambda: tools,
-            read_only_tools=lambda: read_only_tools,
-            attachment_context_service=deps["attachments"],
-            dialogue_read_service=deps["dialogue"],
-            request_payload_service=deps["payload"],
-            response_transport=deps["transport"],
-            tool_round_service=deps["rounds"],
-            job_store=deps["jobs"],
-            turn_failure_service=deps["failure"],
-            conversation_provision_service=deps["conversation"],
-            tool_dispatch_service=deps["tool_dispatch"],
+            dependencies=CoachTurnAssembly.Inputs(
+                persistence=TurnPersistence(
+                    database_manager=deps["database_manager"],
+                    database_lock=lock,
+                    chat_repository=chat_repository,
+                    key_value_repository=key_values,
+                    event_buffer=events,
+                    utc_now=Mock(name="utc_now"),
+                    uuid_factory=Mock(name="uuid_factory"),
+                ),
+                lifecycle=TurnLifecycle(
+                    root=Mock(name="root"),
+                    logger=logger,
+                    conversation_gate=conversation_gate,
+                    maintenance_gate=maintenance_gate,
+                ),
+                chat_entry=ChatEntryServices(
+                    settings=settings,
+                    conversation_provision_service=deps["conversation"],
+                ),
+                dialogue=StructuredTurnDialogueServices(
+                    attachment_context_service=deps["attachments"],
+                    dialogue_read_service=deps["dialogue"],
+                    request_payload_service=deps["payload"],
+                    response_transport=deps["transport"],
+                    tool_round_service=deps["rounds"],
+                ),
+                controls=StructuredTurnControlServices(
+                    tools=lambda: tools,
+                    read_only_tools=lambda: read_only_tools,
+                    job_store=deps["jobs"],
+                    turn_failure_service=deps["failure"],
+                    tool_dispatch_service=deps["tool_dispatch"],
+                ),
+            )
         )
         return assembly, deps, {
             "manager": manager,

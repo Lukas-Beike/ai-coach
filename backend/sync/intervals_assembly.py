@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import logging
 import time
 import uuid
@@ -33,65 +35,101 @@ from backend.sync.state import SyncStateRepository
 from backend.sync.status import SyncOperationStateWriter
 
 
+@dataclass(frozen=True)
+class IntervalsProviderDependencies:
+    config: Callable[[], Config]
+    request: Callable[[], Callable[..., Any]]
+    athlete_clock: Callable[[], AthleteLocalClock]
+    utc_now: Callable[[], str]
+
+
+@dataclass(frozen=True)
+class IntervalsPersistenceDependencies:
+    database_manager: Callable[[], DatabaseManager]
+    key_values: KeyValueRepository
+    state_repository: Callable[[], SyncStateRepository]
+    daily_markers: Callable[[], DailySyncMarkerService]
+    event_buffer: Any
+    redact_text: Callable[[str], str]
+    logger: logging.Logger
+
+
+@dataclass(frozen=True)
+class IntervalsOperationDependencies:
+    operation_observer: Callable[[], Any]
+    resync_gate: ProviderResyncGate
+    sync_lock: Any
+    sync_job_queue: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class IntervalsLibraryDependencies:
+    remote_planned_unit_reconciler: Callable[[], Any]
+    workout_library_refresh_service: Callable[[], Any]
+    workout_library_service: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class IntervalsWindowSettings:
+    sync_period_defaults: Mapping[str, int]
+    all_sync_days: int
+    sync_chunk_days: int
+    sync_earliest_date: date
+    calendar_history_days: int
+    calendar_future_days: int
+
+
+@dataclass(frozen=True)
+class IntervalsWaitSettings:
+    performance_wait_seconds: int
+    poll_seconds: float
+
+
 class IntervalsSyncAssembly:
     """Create Intervals refresh and synchronization services on demand."""
 
-    def __init__(
-        self,
-        *,
-        config: Callable[[], Config],
-        database_manager: Callable[[], DatabaseManager],
-        key_values: KeyValueRepository,
-        state_repository: Callable[[], SyncStateRepository],
-        daily_markers: Callable[[], DailySyncMarkerService],
-        request: Callable[[], Callable[..., Any]],
-        athlete_clock: Callable[[], AthleteLocalClock],
-        utc_now: Callable[[], str],
-        event_buffer: Any,
-        redact_text: Callable[[str], str],
-        logger: logging.Logger,
-        operation_observer: Callable[[], Any],
-        intervals_resync_gate: ProviderResyncGate,
-        intervals_sync_lock: Any,
-        sync_job_queue: Callable[[], Any],
-        remote_planned_unit_reconciler: Callable[[], Any],
-        workout_library_refresh_service: Callable[[], Any],
-        workout_library_service: Callable[[], Any],
-        sync_period_defaults: Mapping[str, int],
-        all_sync_days: int,
-        sync_chunk_days: int,
-        sync_earliest_date: date,
-        calendar_history_days: int,
-        calendar_future_days: int,
-        performance_wait_seconds: int,
-        poll_seconds: float,
-    ) -> None:
-        self._config = config
-        self._database_manager = database_manager
-        self._key_values = key_values
-        self._state_repository = state_repository
-        self._daily_markers = daily_markers
-        self._request = request
-        self._athlete_clock = athlete_clock
-        self._utc_now = utc_now
-        self._event_buffer = event_buffer
-        self._redact_text = redact_text
-        self._logger = logger
-        self._operation_observer = operation_observer
-        self._intervals_resync_gate = intervals_resync_gate
-        self._intervals_sync_lock = intervals_sync_lock
-        self._sync_job_queue = sync_job_queue
-        self._remote_planned_unit_reconciler = remote_planned_unit_reconciler
-        self._workout_library_refresh_service = workout_library_refresh_service
-        self._workout_library_service = workout_library_service
-        self._sync_period_defaults = sync_period_defaults
-        self._all_sync_days = all_sync_days
-        self._sync_chunk_days = sync_chunk_days
-        self._sync_earliest_date = sync_earliest_date
-        self._calendar_history_days = calendar_history_days
-        self._calendar_future_days = calendar_future_days
-        self._performance_wait_seconds = performance_wait_seconds
-        self._poll_seconds = poll_seconds
+    @dataclass(frozen=True)
+    class Inputs:
+        provider: IntervalsProviderDependencies
+        persistence: IntervalsPersistenceDependencies
+        operations: IntervalsOperationDependencies
+        library: IntervalsLibraryDependencies
+        window: IntervalsWindowSettings
+        waits: IntervalsWaitSettings
+
+    def __init__(self, *, dependencies: "IntervalsSyncAssembly.Inputs") -> None:
+        provider = dependencies.provider
+        persistence = dependencies.persistence
+        operations = dependencies.operations
+        library = dependencies.library
+        window = dependencies.window
+        waits = dependencies.waits
+        self._config = provider.config
+        self._request = provider.request
+        self._athlete_clock = provider.athlete_clock
+        self._utc_now = provider.utc_now
+        self._database_manager = persistence.database_manager
+        self._key_values = persistence.key_values
+        self._state_repository = persistence.state_repository
+        self._daily_markers = persistence.daily_markers
+        self._event_buffer = persistence.event_buffer
+        self._redact_text = persistence.redact_text
+        self._logger = persistence.logger
+        self._operation_observer = operations.operation_observer
+        self._intervals_resync_gate = operations.resync_gate
+        self._intervals_sync_lock = operations.sync_lock
+        self._sync_job_queue = operations.sync_job_queue
+        self._remote_planned_unit_reconciler = library.remote_planned_unit_reconciler
+        self._workout_library_refresh_service = library.workout_library_refresh_service
+        self._workout_library_service = library.workout_library_service
+        self._sync_period_defaults = window.sync_period_defaults
+        self._all_sync_days = window.all_sync_days
+        self._sync_chunk_days = window.sync_chunk_days
+        self._sync_earliest_date = window.sync_earliest_date
+        self._calendar_history_days = window.calendar_history_days
+        self._calendar_future_days = window.calendar_future_days
+        self._performance_wait_seconds = waits.performance_wait_seconds
+        self._poll_seconds = waits.poll_seconds
 
     def performance_service(self) -> PerformanceRefreshService:
         """Create targeted Intervals performance refresh persistence."""

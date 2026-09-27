@@ -19,7 +19,14 @@ from backend.providers import calendar as calendar_provider, gemini as gemini_pr
 from backend.providers.transport_assembly import ProviderTransportAssembly
 from backend.sync import garmin as garmin_sync, garmin_service, observation as sync_observation
 from backend.sync import freshness as sync_freshness
-from backend.sync.execution_assembly import SyncJobExecutionAssembly
+from backend.sync.execution_assembly import (
+    CalendarWeatherJobDependencies,
+    GarminJobDependencies,
+    HistoricalSyncDependencies,
+    IntervalsJobDependencies,
+    SyncJobExecutionAssembly,
+    SyncJobStateDependencies,
+)
 from server_test_support import _transcribe_via_http_route, server, ServerTestCase
 from support import build_gemini_request_payload
 
@@ -28,47 +35,61 @@ class ServerProvidersTests(ServerTestCase):
 
     def test_sync_job_execution_assembly_keeps_factories_lazy(self):
         deferred = Mock(side_effect=AssertionError("factory resolved during assembly"))
-        assembly = SyncJobExecutionAssembly(
-            sync_state_repository=deferred,
-            queue_service=deferred,
-            local_now=deferred,
-            sync_period_defaults={},
-            all_sync_days=365,
-            sync_chunk_days=30,
-            sync_earliest_date=datetime(2020, 1, 1).date(),
-            intervals_sync_service=deferred,
-            performance_refresh_service=deferred,
-            selected_workout_sync_service=deferred,
-            competition_sync_service=deferred,
-            operation_observer=deferred,
-            intervals_resync_gate=object(),
-            garmin_sync_service=deferred,
-            morning_body_battery_service=deferred,
-            garmin_fixture_loader=deferred,
-            external_calendar_sync_service=deferred,
-            weather_sync_service=deferred,
-            outcome_service=deferred,
-        )
+        assembly = SyncJobExecutionAssembly(dependencies=SyncJobExecutionAssembly.Inputs(
+            historical=HistoricalSyncDependencies(
+                local_now=deferred,
+                sync_period_defaults={},
+                all_sync_days=365,
+                sync_chunk_days=30,
+                sync_earliest_date=datetime(2020, 1, 1).date(),
+            ),
+            state=SyncJobStateDependencies(
+                sync_state_repository=deferred,
+                queue_service=deferred,
+                outcome_service=deferred,
+            ),
+            intervals=IntervalsJobDependencies(
+                sync_service=deferred,
+                performance_refresh_service=deferred,
+                selected_workout_sync_service=deferred,
+                competition_sync_service=deferred,
+                operation_observer=deferred,
+                resync_gate=object(),
+            ),
+            garmin=GarminJobDependencies(
+                sync_service=deferred,
+                morning_body_battery_service=deferred,
+                fixture_loader=deferred,
+            ),
+            calendar_weather=CalendarWeatherJobDependencies(
+                calendar_sync_service=deferred,
+                weather_sync_service=deferred,
+            ),
+        ))
         self.assertIsNotNone(assembly)
         deferred.assert_not_called()
 
     def test_provider_transport_assembly_keeps_late_dependencies_lazy(self):
+        from backend.providers.transport_assembly import (
+            IntervalsTransportSettings,
+            ProviderHttpSettings,
+            ProviderOperationContext,
+        )
+
         calls = []
         deferred = lambda: calls.append("called")
-        assembly = ProviderTransportAssembly(
-            app_version="test",
-            max_response_bytes=1024,
-            logger=None,
-            diagnostic_capture=None,
-            provider_state=deferred,
-            redact_text=str,
-            safe_response_headers=lambda headers: headers,
-            now=lambda: "synthetic-time",
-            operation_context=lambda: None,
-            opener=deferred,
-            config=deferred,
-            athlete_now=deferred,
-        )
+        assembly = ProviderTransportAssembly(dependencies=ProviderTransportAssembly.Inputs(
+            http=ProviderHttpSettings(
+                app_version="test", max_response_bytes=1024, logger=None,
+                diagnostic_capture=None, redact_text=str,
+                safe_response_headers=lambda headers: headers, opener=deferred,
+            ),
+            operation=ProviderOperationContext(
+                provider_state=deferred, now=lambda: "synthetic-time",
+                operation_context=lambda: None,
+            ),
+            intervals=IntervalsTransportSettings(config=deferred, athlete_now=deferred),
+        ))
 
         self.assertIsNotNone(assembly)
         self.assertEqual([], calls)

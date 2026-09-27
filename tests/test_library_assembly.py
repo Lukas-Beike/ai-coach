@@ -4,7 +4,11 @@ import unittest
 from unittest.mock import Mock, patch
 
 from backend.sync import library_assembly as assembly_module
-from backend.sync.library_assembly import WorkoutLibrarySyncAssembly
+from backend.sync.library_assembly import (
+    WorkoutLibraryProvider,
+    WorkoutLibraryState,
+    WorkoutLibrarySyncAssembly,
+)
 
 
 class WorkoutLibrarySyncAssemblyTests(unittest.TestCase):
@@ -19,12 +23,16 @@ class WorkoutLibrarySyncAssemblyTests(unittest.TestCase):
         }
 
     def _assembly(self, callbacks):
-        return WorkoutLibrarySyncAssembly(
-            **callbacks,
-            key_values=Mock(),
-            event_buffer=Mock(),
-            redactor=Mock(),
-        )
+        return WorkoutLibrarySyncAssembly(dependencies=WorkoutLibrarySyncAssembly.Inputs(
+            provider=WorkoutLibraryProvider(
+                callbacks["config"], callbacks["database_manager"],
+                callbacks["intervals_client"], callbacks["workout_library_service"],
+            ),
+            state=WorkoutLibraryState(
+                Mock(), Mock(), Mock(), callbacks["utc_now"],
+            ),
+            uuid_factory=callbacks["uuid_factory"],
+        ))
 
     def test_construction_does_not_resolve_runtime_dependencies(self):
         callbacks = self._callbacks()

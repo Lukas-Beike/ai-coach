@@ -4,7 +4,11 @@ import unittest
 from unittest.mock import Mock, patch
 
 from backend.sync import selected_assembly as assembly_module
-from backend.sync.selected_assembly import SelectedWorkoutSyncAssembly
+from backend.sync.selected_assembly import (
+    SelectedWorkoutControls,
+    SelectedWorkoutProviders,
+    SelectedWorkoutSyncAssembly,
+)
 
 
 class SelectedWorkoutSyncAssemblyTests(unittest.TestCase):
@@ -18,13 +22,10 @@ class SelectedWorkoutSyncAssemblyTests(unittest.TestCase):
         }
 
     def _assembly(self, callbacks):
-        return SelectedWorkoutSyncAssembly(
-            **callbacks,
-            redactor=Mock(),
-            lock=Mock(),
-            wait_seconds=120,
-            provider_resync_gate=Mock(),
-        )
+        return SelectedWorkoutSyncAssembly(dependencies=SelectedWorkoutSyncAssembly.Inputs(
+            providers=SelectedWorkoutProviders(**callbacks),
+            controls=SelectedWorkoutControls(Mock(), Mock(), 120, Mock()),
+        ))
 
     def test_construction_does_not_resolve_subordinate_owners(self):
         callbacks = self._callbacks()
@@ -40,13 +41,10 @@ class SelectedWorkoutSyncAssemblyTests(unittest.TestCase):
         redactor = Mock()
         lock = Mock()
         gate = Mock()
-        assembly = SelectedWorkoutSyncAssembly(
-            **callbacks,
-            redactor=redactor,
-            lock=lock,
-            wait_seconds=90,
-            provider_resync_gate=gate,
-        )
+        assembly = SelectedWorkoutSyncAssembly(dependencies=SelectedWorkoutSyncAssembly.Inputs(
+            providers=SelectedWorkoutProviders(**callbacks),
+            controls=SelectedWorkoutControls(redactor, lock, 90, gate),
+        ))
 
         with patch.object(assembly_module, "SelectedWorkoutSyncService") as service_type:
             service = assembly.service()

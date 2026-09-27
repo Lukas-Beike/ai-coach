@@ -10,7 +10,12 @@ from backend.db.repositories import KeyValueRepository, ProfileRepository
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 from backend.weather import cache
-from backend.weather.assembly import WeatherAssembly
+from backend.weather.assembly import (
+    WeatherAssembly,
+    WeatherProviderRuntime,
+    WeatherStateOwners,
+    WeatherSyncRuntime,
+)
 from backend.weather.service import (
     WeatherCacheStore,
     WeatherRefreshJournal,
@@ -121,21 +126,13 @@ class WeatherServiceTests(unittest.TestCase):
             preview,
         ) = callbacks
         observer = Mock()
-        assembly = WeatherAssembly(
-            database_manager=manager,
-            key_values=Mock(),
-            profile_service=profile,
-            client_factory=client,
-            refresh_tracker=tracker,
-            operation_context=Mock(),
-            operation_id_factory=operation_id,
-            maintenance_gate=MaintenanceGate(),
-            now=now,
-            today=today,
-            adaptive_preview_service=preview,
-            observer=observer,
-            logger=Mock(),
-        )
+        assembly = WeatherAssembly(dependencies=WeatherAssembly.Inputs(
+            state=WeatherStateOwners(manager, Mock(), profile),
+            provider=WeatherProviderRuntime(client, tracker, Mock(), operation_id),
+            sync=WeatherSyncRuntime(
+                MaintenanceGate(), now, today, preview, observer, Mock()
+            ),
+        ))
 
         self.assertIsNotNone(assembly)
         for callback in (*callbacks, observer):

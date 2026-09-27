@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from backend.config import Config
@@ -20,31 +21,47 @@ from backend.sync.library import (
 )
 
 
+@dataclass(frozen=True)
+class WorkoutLibraryProvider:
+    config: Callable[[], Config]
+    database_manager: Callable[[], DatabaseManager]
+    intervals_client: Callable[[], Any]
+    workout_library_service: Callable[[], WorkoutLibraryService]
+
+
+@dataclass(frozen=True)
+class WorkoutLibraryState:
+    key_values: KeyValueRepository
+    event_buffer: StateEventBuffer
+    redactor: Redactor
+    utc_now: Callable[[], str]
+
+
 class WorkoutLibrarySyncAssembly:
     """Create independent workout-library refresh and sync use cases."""
+
+    @dataclass(frozen=True)
+    class Inputs:
+        provider: WorkoutLibraryProvider
+        state: WorkoutLibraryState
+        uuid_factory: Callable[[], uuid.UUID | str]
 
     def __init__(
         self,
         *,
-        config: Callable[[], Config],
-        database_manager: Callable[[], DatabaseManager],
-        intervals_client: Callable[[], Any],
-        workout_library_service: Callable[[], WorkoutLibraryService],
-        key_values: KeyValueRepository,
-        event_buffer: StateEventBuffer,
-        redactor: Redactor,
-        utc_now: Callable[[], str],
-        uuid_factory: Callable[[], uuid.UUID | str],
+        dependencies: "WorkoutLibrarySyncAssembly.Inputs",
     ) -> None:
-        self._config = config
-        self._database_manager = database_manager
-        self._intervals_client = intervals_client
-        self._workout_library_service = workout_library_service
-        self._key_values = key_values
-        self._event_buffer = event_buffer
-        self._redactor = redactor
-        self._utc_now = utc_now
-        self._uuid_factory = uuid_factory
+        provider = dependencies.provider
+        state = dependencies.state
+        self._config = provider.config
+        self._database_manager = provider.database_manager
+        self._intervals_client = provider.intervals_client
+        self._workout_library_service = provider.workout_library_service
+        self._key_values = state.key_values
+        self._event_buffer = state.event_buffer
+        self._redactor = state.redactor
+        self._utc_now = state.utc_now
+        self._uuid_factory = dependencies.uuid_factory
 
     def sync_state_service(self) -> WorkoutLibrarySyncStateService:
         """Create local sync-state reads and writes."""

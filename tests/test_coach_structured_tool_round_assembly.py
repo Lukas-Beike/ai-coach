@@ -3,7 +3,14 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock
 
-from backend.coach.structured_tool_round_assembly import CoachStructuredToolRoundAssembly
+from backend.coach.structured_tool_round_assembly import (
+    CoachStructuredToolRoundAssembly,
+    StructuredToolRoundContract,
+    StructuredToolRoundConversation,
+    StructuredToolRoundRuntime,
+    StructuredToolRoundServices,
+    StructuredToolRoundState,
+)
 
 
 class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
@@ -25,28 +32,38 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
         logger = Mock(name="logger")
         root = Mock(name="repository_root")
         sync_defaults = {"intervals": 30}
-        assembly = CoachStructuredToolRoundAssembly(
-            database_manager=dependencies["database_manager"],
-            database_lock=lock,
-            key_value_repository=key_values,
-            root=root,
-            logger=logger,
-            tool_names=dependencies["tool_names"],
-            read_only_tools=dependencies["read_only_tools"],
-            sync_period_defaults=sync_defaults,
-            all_sync_days=3650,
-            clarification_service=dependencies["clarification"],
-            training_patch_service=dependencies["training_patch"],
-            sync_state_repository=dependencies["sync_state"],
-            proposal_creation_service=dependencies["proposal_creation"],
-            tool_dispatch_service=dependencies["tool_dispatch"],
-            job_store=dependencies["job_store"],
-            dialogue_action_service=dependencies["dialogue_action"],
-            planning_authority_service=dependencies["planning_authority"],
-            training_context_service=dependencies["training_context"],
-            response_service=dependencies["response"],
-            tool_round_limits=dependencies["limits"],
-        )
+        assembly = CoachStructuredToolRoundAssembly(dependencies=CoachStructuredToolRoundAssembly.Inputs(
+            runtime=StructuredToolRoundRuntime(
+                database_manager=dependencies["database_manager"],
+                database_lock=lock,
+                key_value_repository=key_values,
+                root=root,
+                logger=logger,
+            ),
+            contract=StructuredToolRoundContract(
+                tool_names=dependencies["tool_names"],
+                read_only_tools=dependencies["read_only_tools"],
+                sync_period_defaults=sync_defaults,
+                all_sync_days=3650,
+                limits=dependencies["limits"],
+            ),
+            services=StructuredToolRoundServices(
+                clarification_service=dependencies["clarification"],
+                training_patch_service=dependencies["training_patch"],
+                proposal_creation_service=dependencies["proposal_creation"],
+                tool_dispatch_service=dependencies["tool_dispatch"],
+                dialogue_action_service=dependencies["dialogue_action"],
+                planning_authority_service=dependencies["planning_authority"],
+            ),
+            state=StructuredToolRoundState(
+                sync_state_repository=dependencies["sync_state"],
+                job_store=dependencies["job_store"],
+            ),
+            conversation=StructuredToolRoundConversation(
+                training_context_service=dependencies["training_context"],
+                response_service=dependencies["response"],
+            ),
+        ))
         dependencies.update({
             "lock": lock, "key_values": key_values, "root": root, "logger": logger,
             "sync_defaults": sync_defaults, "journal_jobs": journal_jobs,

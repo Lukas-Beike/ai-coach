@@ -43,90 +43,285 @@ from backend.http_api.static_assets import StaticAssetService
 
 
 @dataclass(frozen=True)
-class HttpHandlerConfiguration:
+class HttpHandlerIdentity:
     app_version: str
     logger: Any
     session_auth_service: Callable[[], Any]
     maintenance_gate: Any
+
+
+@dataclass(frozen=True)
+class HttpHandlerErrors:
     redact_text: Callable[[str], str]
     public_app_error_status: Callable[[Any], int]
     internal_server_error: str
+
+
+@dataclass(frozen=True)
+class HttpRequestBodyLimits:
     max_body_bytes: int
     max_audio_body_bytes: int
+
+
+@dataclass(frozen=True)
+class HttpAudioInput:
     voice_audio_types: Any
     normalize_audio_type: Callable[[str], str]
+
+
+@dataclass(frozen=True)
+class HttpHandlerConfiguration:
+    identity: HttpHandlerIdentity
+    errors: HttpHandlerErrors
+    body_limits: HttpRequestBodyLimits
+    audio: HttpAudioInput
     public_dir: Path
+
+
+@dataclass(frozen=True)
+class HttpCoreResources:
+    database_manager: Callable[[], Any]
+    database_lock: Callable[[], Any]
+    data_dir: Callable[[], Path]
+    readiness_maintenance_gate: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class HttpHandlerServices:
+    handler_configuration: Callable[[], HttpHandlerConfiguration]
+    maintenance_gate: Any
+    session_auth_service: Callable[[], Any]
+    settings: Any
+    redact_text: Callable[[str], str]
+    logger: Any
+
+
+@dataclass(frozen=True)
+class HttpResponseServices:
+    response_transport: HttpResponseTransport
+    logger: Any
+
+
+@dataclass(frozen=True)
+class HttpCoreServices:
+    resources: HttpCoreResources
+    handler: HttpHandlerServices
+    response: HttpResponseServices
+
+
+@dataclass(frozen=True)
+class HttpCoachReadServices:
+    conversation_history_service: Callable[[], Any]
+    proposal_read_service: Callable[[], Any]
+    chat_page_max: int
+    command_receipt_service: Callable[[], Any]
+    job_submission_service: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class HttpCoachWriteActions:
+    job_cancellation_service: Callable[[], Any]
+    context_preview_service: Callable[[], Any]
+    proposal_creation_service: Callable[[], Any]
+    proposal_confirmation_service: Callable[[], Any]
+    proposal_execution_service: Callable[[], Any]
+    reset_service: Callable[[], Any]
+    provision_service: Callable[[], Any]
+    planning_command_service: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class HttpCoachStreamSettings:
+    max_chat_request_bytes: int
+    chat_stream_registry: Any
+
+
+@dataclass(frozen=True)
+class HttpCoachWriteServices:
+    actions: HttpCoachWriteActions
+    stream: HttpCoachStreamSettings
+
+
+@dataclass(frozen=True)
+class HttpPublicServices:
+    bootstrap: Callable[[], Any]
+    plan_state: Callable[[], Any]
+    weather_state: Callable[[], Any]
+    performance_state: Callable[[], Any]
+    feedback_state: Callable[[], Any]
+    sync_state: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class HttpAthleteServices:
+    profile: Callable[[], Any]
+    competition: Callable[[], Any]
+    activity_read: Callable[[], Any]
+    checkin: Callable[[], Any]
+    context_service: Callable[[], Any]
+    clock: Any
+    local_today: Callable[[], Any]
+    state_event_buffer: Any
+
+
+@dataclass(frozen=True)
+class HttpHistoryServices:
+    change_history: Callable[[], Any]
+    undo: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class HttpDiagnosticsServices:
+    recent_logs: Callable[[], Any]
+    report: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class HttpPrivacyServices:
+    backup: Callable[[], Any]
+    export: Callable[[], Any]
+    monotonic: Callable[[], float]
+    export_time_limit_seconds: int
+    delete: Callable[[], Any]
+    restore: Callable[[], Any]
+    max_backup_bytes: int
+
+
+@dataclass(frozen=True)
+class HttpSyncServices:
+    job_queue: Callable[[], Any]
+    state_repository: Callable[[], Any]
+    performance_refresh: Callable[[], Any]
+    full_resync: Callable[[], Any]
+    period_defaults: Any
+    all_sync_days: int
+    uuid_factory: Callable[[], str]
+
+
+@dataclass(frozen=True)
+class HttpNutritionServices:
+    nutrition: Callable[[], Any]
+    intervals_sync: Callable[[], Any]
+    audio_transcription: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class HttpCoreAndTransport:
+    services: HttpCoreServices
+    openai_response_timeout_seconds: float
+
+
+@dataclass(frozen=True)
+class HttpCoachRouteServices:
+    reads: HttpCoachReadServices
+    writes: HttpCoachWriteServices
+
+
+@dataclass(frozen=True)
+class HttpReadRouteServices:
+    public: HttpPublicServices
+    athlete: HttpAthleteServices
+    history: HttpHistoryServices
+    diagnostics: HttpDiagnosticsServices
+
+
+@dataclass(frozen=True)
+class HttpDomainRouteServices:
+    privacy: HttpPrivacyServices
+    sync: HttpSyncServices
+    nutrition: HttpNutritionServices
 
 
 class HttpApiAssembly:
     """Own eager HTTP route composition and lazy request-handler creation."""
 
+    @dataclass(frozen=True)
+    class Inputs:
+        core: HttpCoreAndTransport
+        coach: HttpCoachRouteServices
+        reads: HttpReadRouteServices
+        domains: HttpDomainRouteServices
+
     def __init__(
         self,
         *,
-        handler_configuration: Callable[[], HttpHandlerConfiguration],
-        maintenance_gate: Any,
-        database_manager: Callable[[], Any],
-        database_lock: Callable[[], Any],
-        data_dir: Callable[[], Path],
-        readiness_maintenance_gate: Callable[[], Any],
-        session_auth_service: Callable[[], Any],
-        conversation_history_service: Callable[[], Any],
-        proposal_read_service: Callable[[], Any],
-        chat_page_max: int,
-        coach_command_receipt_service: Callable[[], Any],
-        coach_job_submission_service: Callable[[], Any],
-        coach_job_cancellation_service: Callable[[], Any],
-        public_bootstrap_service: Callable[[], Any],
-        public_plan_state_service: Callable[[], Any],
-        public_weather_state_service: Callable[[], Any],
-        public_performance_state_service: Callable[[], Any],
-        public_feedback_state_service: Callable[[], Any],
-        public_sync_state_service: Callable[[], Any],
-        profile_service: Callable[[], Any],
-        competition_service: Callable[[], Any],
-        activity_read_service: Callable[[], Any],
-        checkin_service: Callable[[], Any],
-        coach_context_preview_service: Callable[[], Any],
-        settings: Any,
-        recent_log_entries_service: Callable[[], Any],
-        diagnostic_report_service: Callable[[], Any],
-        athlete_clock: Any,
-        local_today: Callable[[], Any],
-        all_sync_days: int,
-        change_history_service: Callable[[], Any],
-        history_undo_service: Callable[[], Any],
-        proposal_creation_service: Callable[[], Any],
-        proposal_confirmation_service: Callable[[], Any],
-        proposal_execution_service: Callable[[], Any],
-        coach_reset_service: Callable[[], Any],
-        coach_provision_service: Callable[[], Any],
-        max_chat_request_bytes: int,
-        chat_stream_registry: Any,
-        redact_text: Callable[[str], str],
-        backup_service: Callable[[], Any],
-        privacy_export_service: Callable[[], Any],
-        monotonic: Callable[[], float],
-        export_time_limit_seconds: int,
-        privacy_delete_service: Callable[[], Any],
-        backup_restore_service: Callable[[], Any],
-        state_event_buffer: Any,
-        athlete_context_service: Callable[[], Any],
-        coach_planning_command_service: Callable[[], Any],
-        sync_job_queue_service: Callable[[], Any],
-        sync_state_repository: Callable[[], Any],
-        performance_refresh_service: Callable[[], Any],
-        full_provider_resync_service: Callable[[], Any],
-        sync_period_defaults: Any,
-        uuid_factory: Callable[[], str],
-        audio_transcription_client: Callable[[], Any],
-        nutrition_service: Callable[[], Any],
-        intervals_nutrition_sync_service: Callable[[], Any],
-        http_response_transport: HttpResponseTransport,
-        openai_response_timeout_seconds: float,
-        logger: Any,
-        max_backup_bytes: int,
+        dependencies: "HttpApiAssembly.Inputs",
     ) -> None:
+        core = dependencies.core.services
+        timeout = dependencies.core.openai_response_timeout_seconds
+        coach_reads = dependencies.coach.reads
+        coach_writes = dependencies.coach.writes.actions
+        coach_stream = dependencies.coach.writes.stream
+        public = dependencies.reads.public
+        athlete = dependencies.reads.athlete
+        history = dependencies.reads.history
+        diagnostics = dependencies.reads.diagnostics
+        privacy = dependencies.domains.privacy
+        sync = dependencies.domains.sync
+        nutrition = dependencies.domains.nutrition
+        resources = core.resources
+        handler_services = core.handler
+        handler_configuration = handler_services.handler_configuration
+        maintenance_gate = handler_services.maintenance_gate
+        database_manager = resources.database_manager
+        database_lock = resources.database_lock
+        data_dir = resources.data_dir
+        readiness_maintenance_gate = resources.readiness_maintenance_gate
+        session_auth_service = handler_services.session_auth_service
+        settings = handler_services.settings
+        redact_text = handler_services.redact_text
+        http_response_transport = core.response.response_transport
+        logger = core.response.logger
+        conversation_history_service = coach_reads.conversation_history_service
+        proposal_read_service = coach_reads.proposal_read_service
+        chat_page_max = coach_reads.chat_page_max
+        coach_command_receipt_service = coach_reads.command_receipt_service
+        coach_job_submission_service = coach_reads.job_submission_service
+        coach_job_cancellation_service = coach_writes.job_cancellation_service
+        coach_context_preview_service = coach_writes.context_preview_service
+        proposal_creation_service = coach_writes.proposal_creation_service
+        proposal_confirmation_service = coach_writes.proposal_confirmation_service
+        proposal_execution_service = coach_writes.proposal_execution_service
+        coach_reset_service = coach_writes.reset_service
+        coach_provision_service = coach_writes.provision_service
+        max_chat_request_bytes = coach_stream.max_chat_request_bytes
+        chat_stream_registry = coach_stream.chat_stream_registry
+        coach_planning_command_service = coach_writes.planning_command_service
+        public_bootstrap_service = public.bootstrap
+        public_plan_state_service = public.plan_state
+        public_weather_state_service = public.weather_state
+        public_performance_state_service = public.performance_state
+        public_feedback_state_service = public.feedback_state
+        public_sync_state_service = public.sync_state
+        profile_service = athlete.profile
+        competition_service = athlete.competition
+        activity_read_service = athlete.activity_read
+        checkin_service = athlete.checkin
+        athlete_context_service = athlete.context_service
+        athlete_clock = athlete.clock
+        local_today = athlete.local_today
+        state_event_buffer = athlete.state_event_buffer
+        change_history_service = history.change_history
+        history_undo_service = history.undo
+        recent_log_entries_service = diagnostics.recent_logs
+        diagnostic_report_service = diagnostics.report
+        backup_service = privacy.backup
+        privacy_export_service = privacy.export
+        monotonic = privacy.monotonic
+        export_time_limit_seconds = privacy.export_time_limit_seconds
+        privacy_delete_service = privacy.delete
+        backup_restore_service = privacy.restore
+        max_backup_bytes = privacy.max_backup_bytes
+        sync_job_queue_service = sync.job_queue
+        sync_state_repository = sync.state_repository
+        performance_refresh_service = sync.performance_refresh
+        full_provider_resync_service = sync.full_resync
+        sync_period_defaults = sync.period_defaults
+        all_sync_days = sync.all_sync_days
+        uuid_factory = sync.uuid_factory
+        nutrition_service = nutrition.nutrition
+        intervals_nutrition_sync_service = nutrition.intervals_sync
+        audio_transcription_client = nutrition.audio_transcription
         self._database_manager = database_manager
         self._database_lock = database_lock
         self._data_dir = data_dir
@@ -176,7 +371,7 @@ class HttpApiAssembly:
             coach_job_submission_service,
             coach_command_receipt_service, redact_text, logger,
             max_request_bytes=max_chat_request_bytes,
-            response_timeout_seconds=openai_response_timeout_seconds,
+            response_timeout_seconds=timeout,
         )
         self.transcribe_post_routes = TranscribePostRoutes(
             settings, audio_transcription_client,
@@ -282,19 +477,19 @@ class HttpApiAssembly:
     def request_handler_class(self) -> type[BaseHTTPRequestHandler]:
         handler = self._handler_configuration()
         return create_request_handler(HttpRequestHandlerDependencies(
-            app_version=handler.app_version,
-            logger=handler.logger,
-            session_auth_service=handler.session_auth_service,
+            app_version=handler.identity.app_version,
+            logger=handler.identity.logger,
+            session_auth_service=handler.identity.session_auth_service,
             route_dispatcher=self.route_dispatcher,
             post_dispatcher=self.post_dispatcher,
             response_transport=self.response_transport,
-            maintenance_gate=handler.maintenance_gate,
-            redact_text=handler.redact_text,
-            public_app_error_status=handler.public_app_error_status,
-            internal_server_error=handler.internal_server_error,
-            max_body_bytes=handler.max_body_bytes,
-            max_audio_body_bytes=handler.max_audio_body_bytes,
-            voice_audio_types=handler.voice_audio_types,
-            normalize_audio_type=handler.normalize_audio_type,
+            maintenance_gate=handler.identity.maintenance_gate,
+            redact_text=handler.errors.redact_text,
+            public_app_error_status=handler.errors.public_app_error_status,
+            internal_server_error=handler.errors.internal_server_error,
+            max_body_bytes=handler.body_limits.max_body_bytes,
+            max_audio_body_bytes=handler.body_limits.max_audio_body_bytes,
+            voice_audio_types=handler.audio.voice_audio_types,
+            normalize_audio_type=handler.audio.normalize_audio_type,
             static_asset_service=StaticAssetService(handler.public_dir),
         ))

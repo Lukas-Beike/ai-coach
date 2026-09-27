@@ -5,19 +5,24 @@ from datetime import date
 from unittest.mock import Mock, patch
 
 from backend.sync import planned_unit_assembly as assembly_module
-from backend.sync.planned_unit_assembly import PlannedUnitSyncAssembly
+from backend.sync.planned_unit_assembly import (
+    PlannedUnitOwners,
+    PlannedUnitRuntime,
+    PlannedUnitSyncAssembly,
+)
 
 
 class PlannedUnitSyncAssemblyTests(unittest.TestCase):
     def _assembly(self, callbacks):
-        return PlannedUnitSyncAssembly(
-            database_manager=callbacks["database_manager"],
-            planned_unit_service=callbacks["planned_unit_service"],
-            planning_revision_service=callbacks["planning_revision_service"],
-            redactor=callbacks["redactor"],
-            utc_now=callbacks["utc_now"],
-            today=callbacks["today"],
-        )
+        return PlannedUnitSyncAssembly(dependencies=PlannedUnitSyncAssembly.Inputs(
+            owners=PlannedUnitOwners(
+                callbacks["database_manager"], callbacks["planned_unit_service"],
+                callbacks["planning_revision_service"],
+            ),
+            runtime=PlannedUnitRuntime(
+                callbacks["redactor"], callbacks["utc_now"], callbacks["today"],
+            ),
+        ))
 
     def test_construction_defers_current_resources(self):
         callbacks = {

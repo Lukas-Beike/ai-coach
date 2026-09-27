@@ -4,7 +4,12 @@ import unittest
 from unittest.mock import Mock, patch
 
 from backend.coach import proposal_assembly
-from backend.coach.proposal_assembly import CoachProposalAssembly
+from backend.coach.proposal_assembly import (
+    CoachProposalAssembly,
+    ProposalClock,
+    ProposalExecutionOwners,
+    ProposalPersistence,
+)
 
 
 class CoachProposalAssemblyTests(unittest.TestCase):
@@ -26,17 +31,19 @@ class CoachProposalAssemblyTests(unittest.TestCase):
         dependencies["history_provider"] = Mock(return_value=dependencies["history"])
         first_gate = Mock(name="first_gate")
         dependencies["gate"].return_value = first_gate
-        assembly = CoachProposalAssembly(
-            database_manager=dependencies["manager_provider"],
-            sync_state_repository=dependencies["sync_state_provider"],
-            duplicate_activity_service=dependencies["duplicate_provider"],
-            history_undo_service=dependencies["history_provider"],
-            intervals_client_factory=dependencies["intervals"],
-            maintenance_gate=dependencies["gate"],
-            now=dependencies["now"],
-            utc_now=dependencies["utc_now"],
-            uuid_factory=dependencies["uuid"],
-        )
+        assembly = CoachProposalAssembly(dependencies=CoachProposalAssembly.Inputs(
+            persistence=ProposalPersistence(
+                dependencies["manager_provider"], dependencies["sync_state_provider"]
+            ),
+            execution=ProposalExecutionOwners(
+                dependencies["duplicate_provider"], dependencies["history_provider"],
+                dependencies["intervals"], dependencies["gate"],
+            ),
+            clock=ProposalClock(
+                utc_now=dependencies["utc_now"], now=dependencies["now"],
+                uuid_factory=dependencies["uuid"],
+            ),
+        ))
         return assembly, dependencies
 
     def test_assembly_is_lazy_and_proposal_factories_use_current_database(self):

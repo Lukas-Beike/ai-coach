@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from collections.abc import Callable
 from typing import Any
 
@@ -13,67 +15,97 @@ from backend.planning.replacement_service import StructuredTrainingPlanReplaceme
 from backend.planning.state_service import StructuredTrainingStateService
 
 
+@dataclass(frozen=True)
+class PlanningServiceOwners:
+    database_manager: Callable[[], Any]
+    planned_unit_service: Callable[[], Any]
+    workout_library_service: Callable[[], Any]
+    competition_service: Callable[[], Any]
+    training_plan_service: Callable[[], Any]
+    checkin_service: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class PlanningRepositories:
+    state_repository: Any
+    training_plan_repository: Any
+    key_values: Any
+    revision_service: Any
+    plan_adjustment_repository: Any
+
+
+@dataclass(frozen=True)
+class DailyPlanningSources:
+    activity_feedback_service: Callable[[], Any]
+    external_calendar_reader: Callable[[], Any]
+    weather_service: Callable[[], Any]
+    morning_body_battery_service: Callable[[], Any]
+    local_date: Callable[[], Any]
+    calendar_window_days: int
+    checkin_text_limit: int
+
+
+@dataclass(frozen=True)
+class PlanningRuntime:
+    sync_job_queue_service: Callable[[], Any]
+    coach_artifact_refs: Callable[[], Any]
+    utc_now: Callable[[], Any]
+    uuid_factory: Callable[[], Any]
+    event_buffer: Any
+    logger: Any
+
+
+@dataclass(frozen=True)
+class PlanningChangeLimits:
+    training_change_limit: int
+    default_illness_pause_days: int
+    weather_adaptive_max_minutes: int
+
+
 class PlanningWorkflowAssembly:
     """Compose planning reads, local mutations, and adaptive previews."""
 
-    def __init__(
-        self,
-        *,
-        database_manager: Callable[[], Any],
-        planned_unit_service: Callable[[], Any],
-        workout_library_service: Callable[[], Any],
-        competition_service: Callable[[], Any],
-        training_plan_service: Callable[[], Any],
-        checkin_service: Callable[[], Any],
-        activity_feedback_service: Callable[[], Any],
-        planning_state_repository: Any,
-        training_plan_repository: Any,
-        key_values: Any,
-        planning_revision: Any,
-        plan_adjustment_repository: Any,
-        external_calendar_reader: Callable[[], Any],
-        weather_service: Callable[[], Any],
-        morning_body_battery_service: Callable[[], Any],
-        sync_job_queue_service: Callable[[], Any],
-        coach_artifact_refs: Callable[[], Any],
-        local_date: Callable[[], Any],
-        utc_now: Callable[[], Any],
-        uuid_factory: Callable[[], Any],
-        event_buffer: Any,
-        logger: Any,
-        training_change_limit: int,
-        calendar_window_days: int,
-        checkin_text_limit: int,
-        default_illness_pause_days: int,
-        weather_adaptive_max_minutes: int,
-    ) -> None:
-        self._database_manager = database_manager
-        self._planned_unit_service = planned_unit_service
-        self._workout_library_service = workout_library_service
-        self._competition_service = competition_service
-        self._training_plan_service = training_plan_service
-        self._checkin_service = checkin_service
-        self._activity_feedback_service = activity_feedback_service
-        self._planning_state_repository = planning_state_repository
-        self._training_plan_repository = training_plan_repository
-        self._key_values = key_values
-        self._planning_revision = planning_revision
-        self._plan_adjustment_repository = plan_adjustment_repository
-        self._external_calendar_reader = external_calendar_reader
-        self._weather_service = weather_service
-        self._morning_body_battery_service = morning_body_battery_service
-        self._sync_job_queue_service = sync_job_queue_service
-        self._coach_artifact_refs = coach_artifact_refs
-        self._local_date = local_date
-        self._utc_now = utc_now
-        self._uuid_factory = uuid_factory
-        self._event_buffer = event_buffer
-        self._logger = logger
-        self._training_change_limit = training_change_limit
-        self._calendar_window_days = calendar_window_days
-        self._checkin_text_limit = checkin_text_limit
-        self._default_illness_pause_days = default_illness_pause_days
-        self._weather_adaptive_max_minutes = weather_adaptive_max_minutes
+    @dataclass(frozen=True)
+    class Inputs:
+        owners: PlanningServiceOwners
+        repositories: PlanningRepositories
+        daily_sources: DailyPlanningSources
+        runtime: PlanningRuntime
+        limits: PlanningChangeLimits
+
+    def __init__(self, *, dependencies: "PlanningWorkflowAssembly.Inputs") -> None:
+        owners = dependencies.owners
+        repositories = dependencies.repositories
+        daily = dependencies.daily_sources
+        runtime = dependencies.runtime
+        limits = dependencies.limits
+        self._database_manager = owners.database_manager
+        self._planned_unit_service = owners.planned_unit_service
+        self._workout_library_service = owners.workout_library_service
+        self._competition_service = owners.competition_service
+        self._training_plan_service = owners.training_plan_service
+        self._checkin_service = owners.checkin_service
+        self._planning_state_repository = repositories.state_repository
+        self._training_plan_repository = repositories.training_plan_repository
+        self._key_values = repositories.key_values
+        self._planning_revision = repositories.revision_service
+        self._plan_adjustment_repository = repositories.plan_adjustment_repository
+        self._activity_feedback_service = daily.activity_feedback_service
+        self._external_calendar_reader = daily.external_calendar_reader
+        self._weather_service = daily.weather_service
+        self._morning_body_battery_service = daily.morning_body_battery_service
+        self._local_date = daily.local_date
+        self._calendar_window_days = daily.calendar_window_days
+        self._checkin_text_limit = daily.checkin_text_limit
+        self._sync_job_queue_service = runtime.sync_job_queue_service
+        self._coach_artifact_refs = runtime.coach_artifact_refs
+        self._utc_now = runtime.utc_now
+        self._uuid_factory = runtime.uuid_factory
+        self._event_buffer = runtime.event_buffer
+        self._logger = runtime.logger
+        self._training_change_limit = limits.training_change_limit
+        self._default_illness_pause_days = limits.default_illness_pause_days
+        self._weather_adaptive_max_minutes = limits.weather_adaptive_max_minutes
 
     def calendar_conflict_service(self) -> CalendarConflictService:
         return CalendarConflictService(
@@ -173,5 +205,4 @@ class PlanningWorkflowAssembly:
             self._default_illness_pause_days,
             self._weather_adaptive_max_minutes,
         )
-
 

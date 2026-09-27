@@ -3,7 +3,11 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock, patch
 
-from backend.sync.command_assembly import SyncCommandAssembly
+from backend.sync.command_assembly import (
+    IllnessPauseDependencies,
+    SyncCommandAssembly,
+    SyncCommandCore,
+)
 
 
 class SyncCommandAssemblyTests(unittest.TestCase):
@@ -29,22 +33,26 @@ class SyncCommandAssemblyTests(unittest.TestCase):
         self.redactor = Mock()
         self.today = Mock()
         return SyncCommandAssembly(
-            database_manager=self.database_manager,
-            queue_service=self.queue_service,
-            intervals_sync=self.intervals_sync,
-            planned_unit_service=self.planned_unit_service,
-            competition_service=self.competition_service,
-            workout_library_sync_state=self.library_sync_state,
-            planning_revision=self.revision,
-            utc_now=self.clock,
-            training_change_limit=24,
-            all_sync_days=-1,
-            config=self.config,
-            intervals_client=self.intervals_client,
-            adaptive_replan_apply=self.adaptive_apply,
-            adaptive_replan_preview=self.adaptive_preview,
-            redactor=self.redactor,
-            today=self.today,
+            core=SyncCommandCore(
+                database_manager=self.database_manager,
+                queue_service=self.queue_service,
+                intervals_sync=self.intervals_sync,
+                planned_unit_service=self.planned_unit_service,
+                competition_service=self.competition_service,
+                workout_library_sync_state=self.library_sync_state,
+                planning_revision=self.revision,
+                utc_now=self.clock,
+                training_change_limit=24,
+                all_sync_days=-1,
+            ),
+            illness_pause=IllnessPauseDependencies(
+                config=self.config,
+                intervals_client=self.intervals_client,
+                adaptive_replan_apply=self.adaptive_apply,
+                adaptive_replan_preview=self.adaptive_preview,
+                redactor=self.redactor,
+                today=self.today,
+            ),
         )
 
     def test_authority_uses_shared_manager_library_state_revision_and_clock(self):

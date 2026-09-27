@@ -4,7 +4,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from backend.nutrition.assembly import NutritionAssembly
+from backend.nutrition.assembly import (
+    NutritionAssembly,
+    NutritionPersistence,
+    NutritionRuntime,
+)
 
 
 class NutritionAssemblyTests(unittest.TestCase):
@@ -18,14 +22,12 @@ class NutritionAssemblyTests(unittest.TestCase):
         self.config_factory = Mock(return_value=self.config)
         self.manager_factory = Mock(return_value=self.manager)
         self.request_factory = Mock(return_value=self.request)
-        return NutritionAssembly(
-            config=self.config_factory,
-            database_manager=self.manager_factory,
-            database_lock=self.lock,
-            utc_now=self.utc_now,
-            local_now=self.local_now,
-            intervals_request=self.request_factory,
-        )
+        return NutritionAssembly(dependencies=NutritionAssembly.Inputs(
+            persistence=NutritionPersistence(self.manager_factory, self.lock),
+            runtime=NutritionRuntime(
+                self.config_factory, self.utc_now, self.local_now, self.request_factory
+            ),
+        ))
 
     def test_local_service_uses_active_manager_lock_repository_clock_and_local_time(self):
         assembly = self.make_assembly()

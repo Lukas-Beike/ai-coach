@@ -4,7 +4,12 @@ import unittest
 from unittest.mock import Mock, patch
 
 from backend.coach import planning_tools_assembly
-from backend.coach.planning_tools_assembly import CoachPlanningToolsAssembly
+from backend.coach.planning_tools_assembly import (
+    CoachAdaptivePlanningDependencies,
+    CoachPlanArtifactDependencies,
+    CoachPlanningToolsAssembly,
+    CoachTrainingPatchDependencies,
+)
 
 
 class CoachPlanningToolsAssemblyTests(unittest.TestCase):
@@ -31,23 +36,29 @@ class CoachPlanningToolsAssemblyTests(unittest.TestCase):
         illness_sync = Mock(name="illness_sync")
         illness_factory = Mock(return_value=illness_sync)
         manager_factory = Mock(return_value=manager)
-        assembly = CoachPlanningToolsAssembly(
+        assembly = CoachPlanningToolsAssembly(dependencies=CoachPlanningToolsAssembly.Inputs(
             database_manager=manager_factory,
-            database_lock=lock,
-            local_plan_creation_service=local_plan_factory,
-            athlete_date=today,
-            utc_now=utc_now,
-            uuid_factory=uuid_factory,
+            artifacts=CoachPlanArtifactDependencies(
+                local_plan_creation_service=local_plan_factory,
+                athlete_date=today,
+                utc_now=utc_now,
+                uuid_factory=uuid_factory,
+            ),
             workout_library_plan_service=library_plan_factory,
-            training_change_validator=validator_factory,
-            training_change_service=changes_factory,
-            calendar_conflict_service=conflicts_factory,
-            key_value_repository=keys,
-            event_buffer=events,
-            training_change_limit=40,
-            adaptive_preview_service=preview_factory,
-            illness_pause_sync_service=illness_factory,
-        )
+            training_patch=CoachTrainingPatchDependencies(
+                database_lock=lock,
+                training_change_validator=validator_factory,
+                training_change_service=changes_factory,
+                calendar_conflict_service=conflicts_factory,
+                key_value_repository=keys,
+                event_buffer=events,
+                training_change_limit=40,
+            ),
+            adaptive=CoachAdaptivePlanningDependencies(
+                adaptive_preview_service=preview_factory,
+                illness_pause_sync_service=illness_factory,
+            ),
+        ))
         return assembly, locals()
 
     def test_assembly_is_lazy_and_preserves_domain_owner_identities(self):

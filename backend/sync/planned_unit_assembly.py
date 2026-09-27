@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 
 from backend.db import DatabaseManager
@@ -13,25 +14,39 @@ from backend.sync.planned_units import RemotePlannedUnitReconciler
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
 
 
+@dataclass(frozen=True)
+class PlannedUnitOwners:
+    database_manager: Callable[[], DatabaseManager]
+    planned_unit_service: Callable[[], PlannedUnitService]
+    planning_revision_service: PlanningRevisionService
+
+
+@dataclass(frozen=True)
+class PlannedUnitRuntime:
+    redactor: Redactor
+    utc_now: Callable[[], str]
+    today: Callable[[], date]
+
+
 class PlannedUnitSyncAssembly:
     """Create the state writer and remote-unit reconciliation use case."""
+
+    @dataclass(frozen=True)
+    class Inputs:
+        owners: PlannedUnitOwners
+        runtime: PlannedUnitRuntime
 
     def __init__(
         self,
         *,
-        database_manager: Callable[[], DatabaseManager],
-        planned_unit_service: Callable[[], PlannedUnitService],
-        planning_revision_service: PlanningRevisionService,
-        redactor: Redactor,
-        utc_now: Callable[[], str],
-        today: Callable[[], date],
+        dependencies: "PlannedUnitSyncAssembly.Inputs",
     ) -> None:
-        self._database_manager = database_manager
-        self._planned_unit_service = planned_unit_service
-        self._planning_revision_service = planning_revision_service
-        self._redactor = redactor
-        self._utc_now = utc_now
-        self._today = today
+        self._database_manager = dependencies.owners.database_manager
+        self._planned_unit_service = dependencies.owners.planned_unit_service
+        self._planning_revision_service = dependencies.owners.planning_revision_service
+        self._redactor = dependencies.runtime.redactor
+        self._utc_now = dependencies.runtime.utc_now
+        self._today = dependencies.runtime.today
 
     def state_writer(self) -> PlannedUnitSyncStateWriter:
         """Create the writer for planned-unit synchronization state."""

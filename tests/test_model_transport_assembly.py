@@ -5,7 +5,15 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from backend.providers import audio, gemini, openai
-from backend.providers.model_assembly import ModelTransportAssembly
+from backend.providers.model_assembly import (
+    AudioTranscriptionSettings,
+    ModelBackgroundPolicy,
+    ModelEndpointSettings,
+    ModelProviderDiagnostics,
+    ModelProviderOwners,
+    ModelTransportAssembly,
+    ModelTransportClock,
+)
 
 
 class ModelTransportAssemblyTests(unittest.TestCase):
@@ -21,28 +29,38 @@ class ModelTransportAssemblyTests(unittest.TestCase):
         config_provider = Mock(return_value=config)
         state_provider = Mock(return_value=provider_state)
         http_provider = Mock(return_value=http_client)
-        assembly = ModelTransportAssembly(
-            config=config_provider,
-            selected_thinking_level=settings,
-            provider_http_client=http_provider,
-            provider_state_service=state_provider,
-            diagnostic_capture=Mock(name="diagnostics"),
-            logger=Mock(name="logger"),
-            app_version="test-version",
-            gemini_base_url="https://gemini.example.invalid/v1",
-            default_openai_base_url="https://api.openai.com/v1",
-            openai_responses_path="/responses",
-            json_media_type="application/json",
-            max_audio_bytes=2048,
-            response_timeout_seconds=180,
-            background_poll_seconds=2,
-            background_max_seconds=60,
-            max_response_bytes=lambda: 4096,
-            utc_now=Mock(return_value="2026-09-26T00:00:00Z"),
-            monotonic=Mock(return_value=10.0),
-            wall_time=Mock(return_value=20.0),
-            wait=Mock(),
-        )
+        assembly = ModelTransportAssembly(dependencies=ModelTransportAssembly.Inputs(
+            providers=ModelProviderOwners(
+                config=config_provider,
+                selected_thinking_level=settings,
+                http_client=http_provider,
+                state_service=state_provider,
+            ),
+            endpoints=ModelEndpointSettings(
+                gemini_base_url="https://gemini.example.invalid/v1",
+                default_openai_base_url="https://api.openai.com/v1",
+                openai_responses_path="/responses",
+                json_media_type="application/json",
+                response_timeout_seconds=180,
+            ),
+            audio=AudioTranscriptionSettings(max_audio_bytes=2048),
+            diagnostics=ModelProviderDiagnostics(
+                diagnostic_capture=Mock(name="diagnostics"),
+                logger=Mock(name="logger"),
+                app_version="test-version",
+            ),
+            background=ModelBackgroundPolicy(
+                background_poll_seconds=2,
+                background_max_seconds=60,
+                max_response_bytes=lambda: 4096,
+            ),
+            clock=ModelTransportClock(
+                utc_now=Mock(return_value="2026-09-26T00:00:00Z"),
+                monotonic=Mock(return_value=10.0),
+                wall_time=Mock(return_value=20.0),
+                wait=Mock(),
+            ),
+        ))
         return assembly, config_provider, settings, http_provider, state_provider
 
     def test_openai_adapter_resolves_active_config_and_shared_owners_per_call(self):

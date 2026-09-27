@@ -5,7 +5,11 @@ import unittest
 from datetime import date
 from unittest.mock import Mock
 
-from backend.sync.external_calendar_assembly import ExternalCalendarAssembly
+from backend.sync.external_calendar_assembly import (
+    ExternalCalendarAssembly,
+    ExternalCalendarSyncOwners,
+    ExternalCalendarSyncRuntime,
+)
 
 
 class ExternalCalendarAssemblyTests(unittest.TestCase):
@@ -21,14 +25,26 @@ class ExternalCalendarAssemblyTests(unittest.TestCase):
             "utc_now": Mock(),
             "sync_lock": Mock(),
         }
-        ExternalCalendarAssembly(
-            **callbacks,
-            key_values=Mock(),
-            event_buffer=Mock(),
-            logger=logging.getLogger("test.external.calendar.assembly"),
-            redact_text=Mock(),
-            app_version="test",
-        )
+        ExternalCalendarAssembly(dependencies=ExternalCalendarAssembly.Inputs(
+            owners=ExternalCalendarSyncOwners(
+                config=callbacks["config"],
+                database_manager=callbacks["database_manager"],
+                key_values=Mock(),
+                daily_markers=callbacks["daily_markers"],
+                adaptive_preview_service=callbacks["adaptive_preview_service"],
+                event_buffer=Mock(),
+            ),
+            runtime=ExternalCalendarSyncRuntime(
+                operation_observer=callbacks["operation_observer"],
+                logger=logging.getLogger("test.external.calendar.assembly"),
+                redact_text=Mock(),
+                athlete_clock=callbacks["athlete_clock"],
+                local_date=callbacks["local_date"],
+                utc_now=callbacks["utc_now"],
+                app_version="test",
+                sync_lock=callbacks["sync_lock"],
+            ),
+        ))
 
         for callback in callbacks.values():
             callback.assert_not_called()

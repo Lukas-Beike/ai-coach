@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from backend.db import DatabaseManager
@@ -20,39 +21,61 @@ from backend.planning.revision import PlanningRevisionService
 from backend.planning.training_plans import TrainingPlanService
 
 
+@dataclass(frozen=True)
+class PlanningRepositories:
+    competition: CompetitionRepository
+    training_plans: TrainingPlanRepository
+    key_values: Any
+    plan_adjustments: PlanAdjustmentRepository
+
+
+@dataclass(frozen=True)
+class PlanningRuntime:
+    revision: PlanningRevisionService
+    event_buffer: Any
+    utc_now: Callable[[], str]
+    local_date: Callable[[], Any]
+    uuid_factory: Callable[[], Any]
+    redact: Callable[[str], str]
+
+
+@dataclass(frozen=True)
+class PlanningMutations:
+    calendar_conflict_service: Callable[[], CalendarConflictService]
+    publish_change: Callable[[], None]
+
+
 class PlanningDataAssembly:
     """Create fresh local planning services using the existing domain owners."""
+
+    @dataclass(frozen=True)
+    class Inputs:
+        database_manager: Callable[[], DatabaseManager]
+        repositories: PlanningRepositories
+        runtime: PlanningRuntime
+        mutations: PlanningMutations
 
     def __init__(
         self,
         *,
-        database_manager: Callable[[], DatabaseManager],
-        competition_repository: CompetitionRepository,
-        training_plan_repository: TrainingPlanRepository,
-        key_value_repository: Any,
-        planning_revision_service: PlanningRevisionService,
-        event_buffer: Any,
-        utc_now: Callable[[], str],
-        local_date: Callable[[], Any],
-        uuid_factory: Callable[[], Any],
-        redact: Callable[[str], str],
-        calendar_conflict_service: Callable[[], CalendarConflictService],
-        publish_change: Callable[[], None],
-        plan_adjustment_repository: PlanAdjustmentRepository,
+        dependencies: "PlanningDataAssembly.Inputs",
     ) -> None:
-        self._database_manager = database_manager
-        self._competition_repository = competition_repository
-        self._training_plan_repository = training_plan_repository
-        self._key_value_repository = key_value_repository
-        self._planning_revision_service = planning_revision_service
-        self._event_buffer = event_buffer
-        self._utc_now = utc_now
-        self._local_date = local_date
-        self._uuid_factory = uuid_factory
-        self._redact = redact
-        self._calendar_conflict_service = calendar_conflict_service
-        self._publish_change = publish_change
-        self._plan_adjustment_repository = plan_adjustment_repository
+        repositories = dependencies.repositories
+        runtime = dependencies.runtime
+        mutations = dependencies.mutations
+        self._database_manager = dependencies.database_manager
+        self._competition_repository = repositories.competition
+        self._training_plan_repository = repositories.training_plans
+        self._key_value_repository = repositories.key_values
+        self._planning_revision_service = runtime.revision
+        self._event_buffer = runtime.event_buffer
+        self._utc_now = runtime.utc_now
+        self._local_date = runtime.local_date
+        self._uuid_factory = runtime.uuid_factory
+        self._redact = runtime.redact
+        self._calendar_conflict_service = mutations.calendar_conflict_service
+        self._publish_change = mutations.publish_change
+        self._plan_adjustment_repository = repositories.plan_adjustments
 
     def competition(self) -> CompetitionService:
         return CompetitionService(

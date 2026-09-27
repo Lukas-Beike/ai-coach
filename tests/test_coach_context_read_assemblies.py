@@ -4,8 +4,18 @@ import unittest
 from unittest.mock import Mock, patch
 
 from backend.coach import context_assembly, read_tools_assembly
-from backend.coach.context_assembly import CoachContextAssembly
-from backend.coach.read_tools_assembly import CoachReadToolsAssembly
+from backend.coach.context_assembly import (
+    CoachContextAssembly,
+    CoachContextDialogueSources,
+    CoachContextPerformanceSources,
+    CoachContextPlanningSources,
+)
+from backend.coach.read_tools_assembly import (
+    CoachActivityReadSources,
+    CoachPlanningReadSources,
+    CoachReadToolPolicy,
+    CoachReadToolsAssembly,
+)
 
 
 class CoachContextAssemblyTests(unittest.TestCase):
@@ -30,29 +40,35 @@ class CoachContextAssemblyTests(unittest.TestCase):
             "activity_limit_per_sport": 5,
             "planned_event_limit": 25,
         }
-        assembly = CoachContextAssembly(
-            sync_state_repository=deps["sync_state"],
-            checkin_service=deps["checkins"],
-            weather_service=deps["weather"],
-            activity_feedback_service=deps["feedback"],
-            planned_unit_service=deps["planned_units"],
-            daily_context_service=deps["daily_context"],
-            external_calendar_reader=deps["calendar"],
-            competition_service=deps["competitions"],
-            training_plan_service=deps["training_plans"],
-            adaptive_preview_service=deps["adaptive_preview"],
-            today=deps["today"],
-            profile_service=deps["profile"],
-            garmin_payload_service=deps["garmin_payload"],
-            garmin_projection_service=deps["garmin_projection"],
-            local_date=deps["local_date"],
-            workout_library_service=deps["workout_library"],
-            message_service=deps["messages"],
-            settings=deps["settings"],
-            limits=deps["limits"],
-            long_plan_max_output_tokens=Mock(return_value=5000),
-            utc_now=deps["now"],
-        )
+        assembly = CoachContextAssembly(dependencies=CoachContextAssembly.Inputs(
+            performance=CoachContextPerformanceSources(
+                sync_state_repository=deps["sync_state"],
+                weather_service=deps["weather"],
+                garmin_payload_service=deps["garmin_payload"],
+                garmin_projection_service=deps["garmin_projection"],
+                activity_feedback_service=deps["feedback"],
+                today=deps["today"],
+                local_date=deps["local_date"],
+                utc_now=deps["now"],
+            ),
+            planning=CoachContextPlanningSources(
+                checkin_service=deps["checkins"],
+                planned_unit_service=deps["planned_units"],
+                daily_context_service=deps["daily_context"],
+                external_calendar_reader=deps["calendar"],
+                competition_service=deps["competitions"],
+                training_plan_service=deps["training_plans"],
+                adaptive_preview_service=deps["adaptive_preview"],
+                workout_library_service=deps["workout_library"],
+            ),
+            dialogue=CoachContextDialogueSources(
+                profile_service=deps["profile"],
+                message_service=deps["messages"],
+                settings=deps["settings"],
+                limits=deps["limits"],
+                long_plan_max_output_tokens=Mock(return_value=5000),
+            ),
+        ))
         return assembly, deps
 
     def test_construction_is_lazy_and_structured_context_uses_named_domain_owners(self):
@@ -104,22 +120,19 @@ class CoachReadToolsAssemblyTests(unittest.TestCase):
     def test_dispatch_is_lazy_and_activity_reads_reuse_the_injected_providers(self):
         deps = {name: Mock(name=name) for name in (
             "activity", "garmin", "profile", "today", "training_state", "library",
-            "planned", "history", "competitions", "training_plans", "nutrition",
+            "planned", "history", "competitions", "training_plans", "nutrition", "limit",
         )}
-        assembly = CoachReadToolsAssembly(
-            activity_read_service=deps["activity"],
-            garmin_payload_service=deps["garmin"],
-            profile_service=deps["profile"],
-            today=deps["today"],
-            structured_training_state_service=deps["training_state"],
-            workout_library_service=deps["library"],
-            planned_unit_service=deps["planned"],
-            change_history_service=deps["history"],
-            competition_service=deps["competitions"],
-            training_plan_service=deps["training_plans"],
-            nutrition_service=deps["nutrition"],
-            training_change_limit=lambda: 77,
-        )
+        deps["limit"].return_value = 77
+        assembly = CoachReadToolsAssembly(dependencies=CoachReadToolsAssembly.Inputs(
+            activity=CoachActivityReadSources(
+                deps["activity"], deps["garmin"], deps["profile"], deps["today"]
+            ),
+            planning=CoachPlanningReadSources(
+                deps["training_state"], deps["library"], deps["planned"],
+                deps["history"], deps["competitions"], deps["training_plans"],
+            ),
+            policy=CoachReadToolPolicy(deps["nutrition"], deps["limit"]),
+        ))
 
         with (
             patch.object(read_tools_assembly, "CoachReadToolService") as read_factory,

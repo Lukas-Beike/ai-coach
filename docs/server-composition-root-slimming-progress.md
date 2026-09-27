@@ -1661,3 +1661,44 @@ were public bootstrap and sync state projections.
   graph module would hide ownership. The final architecture suite passes and
   the remaining size is justified by the explicit wiring requirement in the
   plan.
+
+## S6 interface redesign: typed owner groups
+
+- Redesign boundary: keep each service assembly in its existing owning package
+  and group inputs around the service it constructs or the resource owner that
+  shares them. This applies to athlete/planning, backup/restore, Coach context,
+  local actions, planning tools, tool dispatch, structured turns and jobs,
+  history, diagnostics, nutrition, provider transports, provider sync, and
+  HTTP/public state. Assembly constructors now take one typed input value or a
+  small number of named owner groups; the root still connects these domain
+  owners in dependency order.
+- Public state inputs are divided into core resources, domain assembly owners,
+  projection owners, operational services, and calendar settings. Backup and
+  restore inputs distinguish storage, validation, and restore lifecycle.
+  Coach turn inputs distinguish persistence, lifecycle, chat entry, dialogue,
+  and control services. Intervals inputs distinguish provider, persistence,
+  operations, library, window, and wait dependencies. The groups retain their
+  concrete types and do not use dynamic lookup, `**kwargs`, or a service
+  registry.
+- Late edges retained at their consumers: current database manager and HTTP
+  handler configuration, provider HTTP/Intervals client factories, planned
+  calendar and workout-library provider clients, Coach turn response/tool
+  services, adaptive preview callbacks, and Coach proposal clock. Restore
+  receives the same database lock, queue, workers, wake events, and maintenance
+  gate. HTTP continues to share its eager dispatchers and lazily resolves
+  request-time services.
+- Direct factory/test callers now use their owner assembly methods. Patch-site
+  updates are in the affected test modules listed by the diff, including
+  `test_server_http.py` for the nested handler identity and provider/sync tests
+  for deferred client lookup. No fixture compatibility aliases were added.
+- Full validation passed: 2,876 tests, 12 SQLCipher-dependent skips;
+  `python -m compileall -q server.py backend tests`, inventory `--check`, and
+  `git diff --check`. Docker build remains unavailable because the local Docker
+  Engine named pipe is absent. No browser assets changed.
+- Measured `server.py`: 1,830 physical / 1,693 nonblank lines, 108 import
+  statements, and eight top-level definitions. This is not the S6 exit: the
+  typed interface rewrite adds substantial explicit wiring, and the remaining
+  root size still needs review against the “small number of cohesive domain
+  assemblies” criterion. Keep S6 open until that wiring is either reduced
+  through owner-local assembly boundaries or its excess is justified with the
+  final dependency map and review.

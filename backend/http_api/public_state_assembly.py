@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from collections.abc import Callable
 from typing import Any
 
@@ -24,93 +26,123 @@ from backend.http_api.state_versions import StateVersionService
 from backend.sync.status import SyncPublicStateService
 
 
+@dataclass(frozen=True)
+class PublicStateCoreInputs:
+    database_manager: Callable[[], Any]
+    database_lock: Callable[[], Any]
+    config: Callable[[], Any]
+    settings: Callable[[], Any]
+    maintenance_gate: Callable[[], Any]
+    app_name: str
+    app_version: str
+    key_values: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class PublicStateOwnerAssemblies:
+    snapshot_repository: Any
+    sync_persistence: Callable[[], Any]
+    planning_data: Callable[[], Any]
+    athlete_data: Callable[[], Any]
+    external_calendar: Callable[[], Any]
+    provider_sync: Callable[[], Any]
+    garmin: Callable[[], Any]
+    sync_job_queue: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class PublicStateProjectionOwners:
+    weather: Callable[[], Any]
+    workout_library_sync: Callable[[], Any]
+    provider_resync: Callable[[], Any]
+    coach_conversation: Callable[[], Any]
+    calendar_local: Callable[[], Any]
+    planning_season: Callable[[], Any]
+    intervals_state: Callable[[], Any]
+    diagnostic_capture: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class PublicStateOperationalServices:
+    intervals_sync_lock: Callable[[], Any]
+    workout_library_sync_running: Callable[[], Callable[[], bool]]
+    daily_planning_context_service: Callable[[], Any]
+    adaptive_preview_followup_service: Callable[[], Any]
+    adaptive_replan_preview_service: Callable[[], Any]
+    morning_checkin_state_service: Callable[[], Any]
+    coach_quick_actions_service: Callable[[], Any]
+    provider_state_service: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class PublicStateCalendarSettings:
+    local_date: Callable[[], Any]
+    local_now: Callable[[], Any]
+    external_calendar_window_days: Callable[[], int]
+    calendar_history_days: Callable[[], int]
+    calendar_future_days: Callable[[], int]
+    sync_period_defaults: Callable[[], Any]
+    all_sync_days: Callable[[], int]
+    planned_workout_label: Callable[[], str]
+
+
 class PublicStateAssembly:
     """Compose public read projections from the existing domain assemblies."""
 
-    def __init__(
-        self,
-        *,
-        database_manager: Callable[[], Any],
-        database_lock: Callable[[], Any],
-        config: Callable[[], Any],
-        settings: Callable[[], Any],
-        maintenance_gate: Callable[[], Any],
-        app_name: str,
-        app_version: str,
-        key_values: Callable[[], Any],
-        snapshot_repository: Any,
-        sync_persistence: Callable[[], Any],
-        planning_data: Callable[[], Any],
-        athlete_data: Callable[[], Any],
-        external_calendar: Callable[[], Any],
-        provider_sync: Callable[[], Any],
-        garmin: Callable[[], Any],
-        sync_job_queue: Callable[[], Any],
-        weather: Callable[[], Any],
-        workout_library_sync: Callable[[], Any],
-        provider_resync: Callable[[], Any],
-        coach_conversation: Callable[[], Any],
-        calendar_local: Callable[[], Any],
-        planning_season: Callable[[], Any],
-        intervals_state: Callable[[], Any],
-        diagnostic_capture: Callable[[], Any],
-        intervals_sync_lock: Callable[[], Any],
-        workout_library_sync_running: Callable[[], Callable[[], bool]],
-        daily_planning_context_service: Callable[[], Any],
-        adaptive_preview_followup_service: Callable[[], Any],
-        adaptive_replan_preview_service: Callable[[], Any],
-        morning_checkin_state_service: Callable[[], Any],
-        coach_quick_actions_service: Callable[[], Any],
-        provider_state_service: Callable[[], Any],
-        local_date: Callable[[], Any],
-        local_now: Callable[[], Any],
-        external_calendar_window_days: Callable[[], int],
-        calendar_history_days: Callable[[], int],
-        calendar_future_days: Callable[[], int],
-        sync_period_defaults: Callable[[], Any],
-        all_sync_days: Callable[[], int],
-        planned_workout_label: Callable[[], str],
-    ) -> None:
-        self._database_manager = database_manager
-        self._database_lock = database_lock
-        self._config = config
-        self._settings = settings
-        self._maintenance_gate = maintenance_gate
-        self._app_name = app_name
-        self._app_version = app_version
-        self._key_values = key_values
-        self._snapshot_repository = snapshot_repository
-        self._sync_persistence = sync_persistence
-        self._planning_data = planning_data
-        self._athlete_data = athlete_data
-        self._external_calendar = external_calendar
-        self._provider_sync = provider_sync
-        self._garmin = garmin
-        self._sync_job_queue = sync_job_queue
-        self._weather = weather
-        self._workout_library_sync = workout_library_sync
-        self._provider_resync = provider_resync
-        self._coach_conversation = coach_conversation
-        self._calendar_local = calendar_local
-        self._planning_season = planning_season
-        self._intervals_state = intervals_state
-        self._diagnostic_capture = diagnostic_capture
-        self._intervals_sync_lock = intervals_sync_lock
-        self._workout_library_sync_running = workout_library_sync_running
-        self._daily_planning_context_service = daily_planning_context_service
-        self._adaptive_preview_followup_service = adaptive_preview_followup_service
-        self._adaptive_replan_preview_service = adaptive_replan_preview_service
-        self._morning_checkin_state_service = morning_checkin_state_service
-        self._coach_quick_actions_service = coach_quick_actions_service
-        self._provider_state_service = provider_state_service
-        self._local_date = local_date
-        self._local_now = local_now
-        self._external_calendar_window_days = external_calendar_window_days
-        self._calendar_history_days = calendar_history_days
-        self._calendar_future_days = calendar_future_days
-        self._sync_period_defaults = sync_period_defaults
-        self._all_sync_days = all_sync_days
-        self._planned_workout_label = planned_workout_label
+    @dataclass(frozen=True)
+    class Inputs:
+        core: PublicStateCoreInputs
+        owners: PublicStateOwnerAssemblies
+        projections: PublicStateProjectionOwners
+        operations: PublicStateOperationalServices
+        calendar: PublicStateCalendarSettings
+
+    def __init__(self, *, dependencies: "PublicStateAssembly.Inputs") -> None:
+        core = dependencies.core
+        owners = dependencies.owners
+        projections = dependencies.projections
+        operations = dependencies.operations
+        calendar = dependencies.calendar
+        self._database_manager = core.database_manager
+        self._database_lock = core.database_lock
+        self._config = core.config
+        self._settings = core.settings
+        self._maintenance_gate = core.maintenance_gate
+        self._app_name = core.app_name
+        self._app_version = core.app_version
+        self._key_values = core.key_values
+        self._snapshot_repository = owners.snapshot_repository
+        self._sync_persistence = owners.sync_persistence
+        self._planning_data = owners.planning_data
+        self._athlete_data = owners.athlete_data
+        self._external_calendar = owners.external_calendar
+        self._provider_sync = owners.provider_sync
+        self._garmin = owners.garmin
+        self._sync_job_queue = owners.sync_job_queue
+        self._weather = projections.weather
+        self._workout_library_sync = projections.workout_library_sync
+        self._provider_resync = projections.provider_resync
+        self._coach_conversation = projections.coach_conversation
+        self._calendar_local = projections.calendar_local
+        self._planning_season = projections.planning_season
+        self._intervals_state = projections.intervals_state
+        self._diagnostic_capture = projections.diagnostic_capture
+        self._intervals_sync_lock = operations.intervals_sync_lock
+        self._workout_library_sync_running = operations.workout_library_sync_running
+        self._daily_planning_context_service = operations.daily_planning_context_service
+        self._adaptive_preview_followup_service = operations.adaptive_preview_followup_service
+        self._adaptive_replan_preview_service = operations.adaptive_replan_preview_service
+        self._morning_checkin_state_service = operations.morning_checkin_state_service
+        self._coach_quick_actions_service = operations.coach_quick_actions_service
+        self._provider_state_service = operations.provider_state_service
+        self._local_date = calendar.local_date
+        self._local_now = calendar.local_now
+        self._external_calendar_window_days = calendar.external_calendar_window_days
+        self._calendar_history_days = calendar.calendar_history_days
+        self._calendar_future_days = calendar.calendar_future_days
+        self._sync_period_defaults = calendar.sync_period_defaults
+        self._all_sync_days = calendar.all_sync_days
+        self._planned_workout_label = calendar.planned_workout_label
 
     def performance_state_service(self) -> PublicPerformanceStateService:
         sync = self._sync_persistence()

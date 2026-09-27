@@ -4,7 +4,14 @@ import unittest
 from unittest.mock import DEFAULT, Mock, patch
 
 from backend.coach import command_tools_assembly
-from backend.coach.command_tools_assembly import CoachCommandToolsAssembly
+from backend.coach.command_tools_assembly import (
+    CoachAthleteToolFactories,
+    CoachCommandToolsAssembly,
+    CoachProfileToolDependencies,
+    CoachSyncAuthorityTools,
+    CoachSyncMutationTools,
+    CoachSyncProvider,
+)
 
 
 class CoachCommandToolsAssemblyTests(unittest.TestCase):
@@ -18,7 +25,34 @@ class CoachCommandToolsAssemblyTests(unittest.TestCase):
             "intervals_client",
         )
         dependencies = {name: Mock(name=name) for name in names}
-        assembly = CoachCommandToolsAssembly(**dependencies)
+        assembly = CoachCommandToolsAssembly(
+            sync_authority=CoachSyncAuthorityTools(**{
+                name: dependencies[name]
+                for name in (
+                    "sync_job_queue", "planning_authority", "sync_conflict_commands",
+                    "structured_plan_sync",
+                )
+            }),
+            sync_mutations=CoachSyncMutationTools(**{
+                name: dependencies[name]
+                for name in (
+                    "plan_repair_manifest", "plan_push_command",
+                    "provider_refresh_command", "duplicate_activity",
+                )
+            }),
+            sync_provider=CoachSyncProvider(intervals_client=dependencies["intervals_client"]),
+            athlete_tools=CoachAthleteToolFactories(**{
+                name: dependencies[name]
+                for name in (
+                    "checkin_service", "activity_feedback_service",
+                    "competition_service", "nutrition_service",
+                )
+            }),
+            profile_tools=CoachProfileToolDependencies(
+                dependencies["profile_service"], dependencies["database_manager"],
+                dependencies["database_lock"],
+            ),
+        )
         return assembly, dependencies
 
     def test_factories_keep_resolution_lazy_and_preserve_shared_dependencies(self):

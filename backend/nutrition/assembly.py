@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from backend.config import Config
@@ -12,25 +13,39 @@ from backend.nutrition.sync import IntervalsNutritionSyncService
 from backend.providers.intervals import IntervalsApiClient
 
 
+@dataclass(frozen=True)
+class NutritionPersistence:
+    database_manager: Callable[[], Any]
+    database_lock: Any
+
+
+@dataclass(frozen=True)
+class NutritionRuntime:
+    config: Callable[[], Config]
+    utc_now: Callable[[], Any]
+    local_now: Callable[[], Any]
+    intervals_request: Callable[[], Callable[..., Any]]
+
+
 class NutritionAssembly:
     """Create local nutrition and explicitly requested provider-sync services."""
+
+    @dataclass(frozen=True)
+    class Inputs:
+        persistence: NutritionPersistence
+        runtime: NutritionRuntime
 
     def __init__(
         self,
         *,
-        config: Callable[[], Config],
-        database_manager: Callable[[], Any],
-        database_lock: Any,
-        utc_now: Callable[[], Any],
-        local_now: Callable[[], Any],
-        intervals_request: Callable[[], Callable[..., Any]],
+        dependencies: "NutritionAssembly.Inputs",
     ) -> None:
-        self._config = config
-        self._database_manager = database_manager
-        self._database_lock = database_lock
-        self._utc_now = utc_now
-        self._local_now = local_now
-        self._intervals_request = intervals_request
+        self._config = dependencies.runtime.config
+        self._database_manager = dependencies.persistence.database_manager
+        self._database_lock = dependencies.persistence.database_lock
+        self._utc_now = dependencies.runtime.utc_now
+        self._local_now = dependencies.runtime.local_now
+        self._intervals_request = dependencies.runtime.intervals_request
 
     def service(self) -> NutritionService:
         return NutritionService(

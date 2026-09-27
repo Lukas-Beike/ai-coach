@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 import time
 from typing import Any
 
@@ -19,61 +20,95 @@ from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.planning_commands import CoachPlanningCommandService
 
 
+@dataclass(frozen=True)
+class TurnPersistence:
+    database_manager: Callable[[], Any]
+    database_lock: Any
+    chat_repository: Any
+    key_value_repository: Any
+    event_buffer: Any
+    utc_now: Callable[[], str]
+    uuid_factory: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class TurnLifecycle:
+    root: Any
+    logger: Any
+    conversation_gate: Any
+    maintenance_gate: Any
+    receipt_clock: Callable[[], float] = time.time
+
+
+@dataclass(frozen=True)
+class ChatEntryServices:
+    settings: Any
+    conversation_provision_service: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class StructuredTurnDialogueServices:
+    attachment_context_service: Callable[[], Any]
+    dialogue_read_service: Callable[[], Any]
+    request_payload_service: Callable[[], Any]
+    response_transport: Callable[[], Any]
+    tool_round_service: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class StructuredTurnControlServices:
+    tools: Callable[[], list[dict[str, Any]]]
+    read_only_tools: Callable[[], Any]
+    job_store: Callable[[], Any]
+    turn_failure_service: Callable[[], Any]
+    tool_dispatch_service: Callable[[], Any]
+
+
 class CoachTurnAssembly:
     """Compose a structured turn and its session-bound chat entry point."""
+
+    @dataclass(frozen=True)
+    class Inputs:
+        persistence: TurnPersistence
+        lifecycle: TurnLifecycle
+        chat_entry: ChatEntryServices
+        dialogue: StructuredTurnDialogueServices
+        controls: StructuredTurnControlServices
 
     def __init__(
         self,
         *,
-        database_manager: Callable[[], Any],
-        database_lock: Any,
-        chat_repository: Any,
-        key_value_repository: Any,
-        event_buffer: Any,
-        utc_now: Callable[[], str],
-        uuid_factory: Callable[[], Any],
-        root: Any,
-        logger: Any,
-        settings: Any,
-        conversation_gate: Any,
-        maintenance_gate: Any,
-        tools: Callable[[], list[dict[str, Any]]],
-        read_only_tools: Callable[[], Any],
-        attachment_context_service: Callable[[], Any],
-        dialogue_read_service: Callable[[], Any],
-        request_payload_service: Callable[[], Any],
-        response_transport: Callable[[], Any],
-        tool_round_service: Callable[[], Any],
-        job_store: Callable[[], Any],
-        turn_failure_service: Callable[[], Any],
-        conversation_provision_service: Callable[[], Any],
-        tool_dispatch_service: Callable[[], Any],
-        receipt_clock: Callable[[], float] = time.time,
+        dependencies: "CoachTurnAssembly.Inputs",
     ) -> None:
-        self._database_manager = database_manager
-        self._database_lock = database_lock
-        self._chat_repository = chat_repository
-        self._key_value_repository = key_value_repository
-        self._event_buffer = event_buffer
-        self._utc_now = utc_now
-        self._uuid_factory = uuid_factory
-        self._root = root
-        self._logger = logger
-        self._settings = settings
-        self._conversation_gate = conversation_gate
-        self._maintenance_gate = maintenance_gate
-        self._tools = tools
-        self._read_only_tools = read_only_tools
-        self._attachment_context_service = attachment_context_service
-        self._dialogue_read_service = dialogue_read_service
-        self._request_payload_service = request_payload_service
-        self._response_transport = response_transport
-        self._tool_round_service = tool_round_service
-        self._job_store = job_store
-        self._turn_failure_service = turn_failure_service
-        self._conversation_provision_service = conversation_provision_service
-        self._tool_dispatch_service = tool_dispatch_service
-        self._receipt_clock = receipt_clock
+        persistence = dependencies.persistence
+        lifecycle = dependencies.lifecycle
+        chat_entry = dependencies.chat_entry
+        dialogue = dependencies.dialogue
+        controls = dependencies.controls
+        self._database_manager = persistence.database_manager
+        self._database_lock = persistence.database_lock
+        self._chat_repository = persistence.chat_repository
+        self._key_value_repository = persistence.key_value_repository
+        self._event_buffer = persistence.event_buffer
+        self._utc_now = persistence.utc_now
+        self._uuid_factory = persistence.uuid_factory
+        self._root = lifecycle.root
+        self._logger = lifecycle.logger
+        self._conversation_gate = lifecycle.conversation_gate
+        self._maintenance_gate = lifecycle.maintenance_gate
+        self._receipt_clock = lifecycle.receipt_clock
+        self._settings = chat_entry.settings
+        self._conversation_provision_service = chat_entry.conversation_provision_service
+        self._attachment_context_service = dialogue.attachment_context_service
+        self._dialogue_read_service = dialogue.dialogue_read_service
+        self._request_payload_service = dialogue.request_payload_service
+        self._response_transport = dialogue.response_transport
+        self._tool_round_service = dialogue.tool_round_service
+        self._tools = controls.tools
+        self._read_only_tools = controls.read_only_tools
+        self._job_store = controls.job_store
+        self._turn_failure_service = controls.turn_failure_service
+        self._tool_dispatch_service = controls.tool_dispatch_service
 
     def command_receipt_service(self) -> CoachCommandReceiptService:
         return CoachCommandReceiptService(

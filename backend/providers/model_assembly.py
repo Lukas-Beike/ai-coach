@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import time
 from collections.abc import Callable
 from typing import Any
@@ -15,57 +17,93 @@ from backend.providers import openai as openai_provider
 from backend.providers.state import ProviderStateService
 
 
+@dataclass(frozen=True)
+class ModelProviderOwners:
+    config: Callable[[], Config]
+    selected_thinking_level: Callable[[], str]
+    http_client: Callable[[], JsonHttpClient]
+    state_service: Callable[[], ProviderStateService]
+
+
+@dataclass(frozen=True)
+class ModelEndpointSettings:
+    gemini_base_url: str
+    default_openai_base_url: str
+    openai_responses_path: str
+    json_media_type: str
+    response_timeout_seconds: int
+
+
+@dataclass(frozen=True)
+class AudioTranscriptionSettings:
+    max_audio_bytes: int
+    timeout_seconds: int = 90
+    model: str = "gpt-transcribe"
+
+
+@dataclass(frozen=True)
+class ModelProviderDiagnostics:
+    diagnostic_capture: DiagnosticCapture
+    logger: Any
+    app_version: str
+
+
+@dataclass(frozen=True)
+class ModelBackgroundPolicy:
+    background_poll_seconds: int
+    background_max_seconds: int
+    max_response_bytes: Callable[[], int]
+
+
+@dataclass(frozen=True)
+class ModelTransportClock:
+    utc_now: Callable[[], str]
+    monotonic: Callable[[], float] = time.perf_counter
+    wall_time: Callable[[], float] = time.monotonic
+    wait: Callable[[float], None] = time.sleep
+
+
 class ModelTransportAssembly:
     """Create fresh model adapters over the shared provider transport owners."""
 
-    def __init__(
-        self,
-        *,
-        config: Callable[[], Config],
-        selected_thinking_level: Callable[[], str],
-        provider_http_client: Callable[[], JsonHttpClient],
-        provider_state_service: Callable[[], ProviderStateService],
-        diagnostic_capture: DiagnosticCapture,
-        logger: Any,
-        app_version: str,
-        gemini_base_url: str,
-        default_openai_base_url: str,
-        openai_responses_path: str,
-        json_media_type: str,
-        max_audio_bytes: int,
-        response_timeout_seconds: int,
-        background_poll_seconds: int,
-        background_max_seconds: int,
-        max_response_bytes: Callable[[], int],
-        utc_now: Callable[[], str],
-        audio_timeout_seconds: int = 90,
-        transcription_model: str = "gpt-transcribe",
-        monotonic: Callable[[], float] = time.perf_counter,
-        wall_time: Callable[[], float] = time.monotonic,
-        wait: Callable[[float], None] = time.sleep,
-    ) -> None:
-        self._config = config
-        self._selected_thinking_level = selected_thinking_level
-        self._provider_http_client = provider_http_client
-        self._provider_state_service = provider_state_service
-        self._diagnostic_capture = diagnostic_capture
-        self._logger = logger
-        self._app_version = app_version
-        self._gemini_base_url = gemini_base_url
-        self._default_openai_base_url = default_openai_base_url
-        self._openai_responses_path = openai_responses_path
-        self._json_media_type = json_media_type
-        self._max_audio_bytes = max_audio_bytes
-        self._response_timeout_seconds = response_timeout_seconds
-        self._background_poll_seconds = background_poll_seconds
-        self._background_max_seconds = background_max_seconds
-        self._max_response_bytes = max_response_bytes
-        self._audio_timeout_seconds = audio_timeout_seconds
-        self._transcription_model = transcription_model
-        self._monotonic = monotonic
-        self._wall_time = wall_time
-        self._wait = wait
-        self._utc_now = utc_now
+    @dataclass(frozen=True)
+    class Inputs:
+        providers: ModelProviderOwners
+        endpoints: ModelEndpointSettings
+        audio: AudioTranscriptionSettings
+        diagnostics: ModelProviderDiagnostics
+        background: ModelBackgroundPolicy
+        clock: ModelTransportClock
+
+    def __init__(self, *, dependencies: "ModelTransportAssembly.Inputs") -> None:
+        providers = dependencies.providers
+        endpoints = dependencies.endpoints
+        audio = dependencies.audio
+        diagnostics = dependencies.diagnostics
+        background = dependencies.background
+        clock = dependencies.clock
+        self._config = providers.config
+        self._selected_thinking_level = providers.selected_thinking_level
+        self._provider_http_client = providers.http_client
+        self._provider_state_service = providers.state_service
+        self._diagnostic_capture = diagnostics.diagnostic_capture
+        self._logger = diagnostics.logger
+        self._app_version = diagnostics.app_version
+        self._gemini_base_url = endpoints.gemini_base_url
+        self._default_openai_base_url = endpoints.default_openai_base_url
+        self._openai_responses_path = endpoints.openai_responses_path
+        self._json_media_type = endpoints.json_media_type
+        self._max_audio_bytes = audio.max_audio_bytes
+        self._response_timeout_seconds = endpoints.response_timeout_seconds
+        self._background_poll_seconds = background.background_poll_seconds
+        self._background_max_seconds = background.background_max_seconds
+        self._max_response_bytes = background.max_response_bytes
+        self._audio_timeout_seconds = audio.timeout_seconds
+        self._transcription_model = audio.model
+        self._monotonic = clock.monotonic
+        self._wall_time = clock.wall_time
+        self._wait = clock.wait
+        self._utc_now = clock.utc_now
 
     def gemini_json_client(self) -> gemini_provider.GeminiJsonClient:
         config = self._config()

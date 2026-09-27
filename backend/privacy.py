@@ -244,57 +244,93 @@ class PrivacyDeleteService:
             }
 
 
+@dataclass(frozen=True)
+class PrivacyAthleteSources:
+    profile_service: Callable[[], ProfileService]
+    checkin_service: Callable[[], CheckinService]
+    activity_feedback_service: Callable[[], ActivityFeedbackService]
+
+
+@dataclass(frozen=True)
+class PrivacyPlanningSources:
+    workout_library_service: Callable[[], WorkoutLibraryService]
+    competition_service: Callable[[], CompetitionService]
+    training_plan_service: Callable[[], TrainingPlanService]
+
+
+@dataclass(frozen=True)
+class PrivacyContextSources:
+    adaptive_preview_service: Callable[[], AdaptiveReplanPreviewService]
+    external_calendar_reader: Callable[[], ExternalCalendarReader]
+
+
+@dataclass(frozen=True)
+class PrivacyClock:
+    local_now: Callable[[], datetime]
+    utc_now: Callable[[], str]
+
+
+@dataclass(frozen=True)
+class PrivacyStateDependencies:
+    database_manager: Callable[[], DatabaseManager]
+    database_lock: Callable[[], AbstractContextManager[Any]]
+    key_value_repository: KeyValueRepository
+    maintenance_gate: Callable[[], MaintenanceGate]
+    planning_revision_service: PlanningRevisionService
+    openai_client: Callable[[], OpenAIResponsesClient]
+    logger: logging.Logger
+
+
+@dataclass(frozen=True)
+class PrivacyArchiveSettings:
+    data_dir: Callable[[], Path]
+    database_path: Callable[[], Path]
+    maximum_export_bytes: int
+    minimum_free_bytes: int
+    time_limit_seconds: int
+
+
 class PrivacyAssembly:
     """Compose the privacy projections and maintenance-gated delete use case."""
 
-    def __init__(
-        self,
-        *,
-        database_manager: Callable[[], DatabaseManager],
-        database_lock: Callable[[], AbstractContextManager[Any]],
-        key_value_repository: KeyValueRepository,
-        profile_service: Callable[[], ProfileService],
-        workout_library_service: Callable[[], WorkoutLibraryService],
-        competition_service: Callable[[], CompetitionService],
-        training_plan_service: Callable[[], TrainingPlanService],
-        checkin_service: Callable[[], CheckinService],
-        activity_feedback_service: Callable[[], ActivityFeedbackService],
-        adaptive_preview_service: Callable[[], AdaptiveReplanPreviewService],
-        external_calendar_reader: Callable[[], ExternalCalendarReader],
-        local_now: Callable[[], datetime],
-        utc_now: Callable[[], str],
-        maintenance_gate: Callable[[], MaintenanceGate],
-        planning_revision_service: PlanningRevisionService,
-        openai_client: Callable[[], OpenAIResponsesClient],
-        logger: logging.Logger,
-        data_dir: Callable[[], Path],
-        database_path: Callable[[], Path],
-        maximum_export_bytes: int,
-        minimum_free_bytes: int,
-        time_limit_seconds: int,
-    ) -> None:
-        self._database_manager = database_manager
-        self._database_lock = database_lock
-        self._key_value_repository = key_value_repository
-        self._profile_service = profile_service
-        self._workout_library_service = workout_library_service
-        self._competition_service = competition_service
-        self._training_plan_service = training_plan_service
-        self._checkin_service = checkin_service
-        self._activity_feedback_service = activity_feedback_service
-        self._adaptive_preview_service = adaptive_preview_service
-        self._external_calendar_reader = external_calendar_reader
-        self._local_now = local_now
-        self._utc_now = utc_now
-        self._maintenance_gate = maintenance_gate
-        self._planning_revision_service = planning_revision_service
-        self._openai_client = openai_client
-        self._logger = logger
-        self._data_dir = data_dir
-        self._database_path = database_path
-        self._maximum_export_bytes = maximum_export_bytes
-        self._minimum_free_bytes = minimum_free_bytes
-        self._time_limit_seconds = time_limit_seconds
+    @dataclass(frozen=True)
+    class Inputs:
+        athlete: PrivacyAthleteSources
+        planning: PrivacyPlanningSources
+        context: PrivacyContextSources
+        clock: PrivacyClock
+        state: PrivacyStateDependencies
+        archive: PrivacyArchiveSettings
+
+    def __init__(self, *, dependencies: "PrivacyAssembly.Inputs") -> None:
+        athlete = dependencies.athlete
+        planning = dependencies.planning
+        context = dependencies.context
+        clock = dependencies.clock
+        state = dependencies.state
+        archive = dependencies.archive
+        self._database_manager = state.database_manager
+        self._database_lock = state.database_lock
+        self._key_value_repository = state.key_value_repository
+        self._profile_service = athlete.profile_service
+        self._checkin_service = athlete.checkin_service
+        self._activity_feedback_service = athlete.activity_feedback_service
+        self._workout_library_service = planning.workout_library_service
+        self._competition_service = planning.competition_service
+        self._training_plan_service = planning.training_plan_service
+        self._adaptive_preview_service = context.adaptive_preview_service
+        self._external_calendar_reader = context.external_calendar_reader
+        self._local_now = clock.local_now
+        self._utc_now = clock.utc_now
+        self._maintenance_gate = state.maintenance_gate
+        self._planning_revision_service = state.planning_revision_service
+        self._openai_client = state.openai_client
+        self._logger = state.logger
+        self._data_dir = archive.data_dir
+        self._database_path = archive.database_path
+        self._maximum_export_bytes = archive.maximum_export_bytes
+        self._minimum_free_bytes = archive.minimum_free_bytes
+        self._time_limit_seconds = archive.time_limit_seconds
 
     def data_export_service(self) -> PrivacyDataExportService:
         return PrivacyDataExportService(

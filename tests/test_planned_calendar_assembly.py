@@ -5,20 +5,25 @@ from datetime import date
 from unittest.mock import Mock, patch
 
 from backend.sync import planned_calendar_assembly as assembly_module
-from backend.sync.planned_calendar_assembly import PlannedCalendarSyncAssembly
+from backend.sync.planned_calendar_assembly import (
+    PlannedCalendarLocalState,
+    PlannedCalendarProvider,
+    PlannedCalendarSyncAssembly,
+)
 
 
 class PlannedCalendarSyncAssemblyTests(unittest.TestCase):
     def _assembly(self, callbacks):
-        return PlannedCalendarSyncAssembly(
-            config=callbacks["config"],
-            database_manager=callbacks["database_manager"],
-            intervals_client=callbacks["intervals_client"],
-            state_writer=callbacks["state_writer"],
-            utc_now=callbacks["utc_now"],
-            today=callbacks["today"],
+        return PlannedCalendarSyncAssembly(dependencies=PlannedCalendarSyncAssembly.Inputs(
+            provider=PlannedCalendarProvider(
+                callbacks["config"], callbacks["database_manager"],
+                callbacks["intervals_client"],
+            ),
+            local_state=PlannedCalendarLocalState(
+                callbacks["state_writer"], callbacks["utc_now"], callbacks["today"],
+            ),
             future_days=35,
-        )
+        ))
 
     def test_construction_does_not_resolve_runtime_dependencies(self):
         callbacks = {

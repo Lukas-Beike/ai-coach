@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import logging
 import time
 import uuid
@@ -24,47 +26,73 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 
 
+@dataclass(frozen=True)
+class CompetitionSyncOwners:
+    config: Callable[[], Config]
+    intervals_client: Callable[[], Any]
+    competition_service: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class ResyncProviderOwners:
+    config: Callable[[], Config]
+    intervals_sync_service: Callable[[], Any]
+    garmin_sync_service: Callable[[], Any]
+    intervals_resync_gate: ProviderResyncGate
+    garmin_resync_gate: ProviderResyncGate
+    all_sync_days: int
+
+
+@dataclass(frozen=True)
+class ProviderResyncPersistence:
+    database_manager: Callable[[], DatabaseManager]
+    key_values: KeyValueRepository
+    event_buffer: StateEventBuffer
+    redactor: Any
+
+
+@dataclass(frozen=True)
+class ProviderResyncRuntime:
+    logger: logging.Logger
+    utc_now: Callable[[], str]
+    uuid_factory: Callable[[], str]
+    monotonic: Callable[[], float]
+    operation_observer: Callable[[], SyncOperationObserver]
+
+
 class ProviderResyncAssembly:
     """Create the competition sync and full provider resync use cases."""
 
-    def __init__(
-        self,
-        *,
-        config: Callable[[], Config],
-        intervals_client: Callable[[], Any],
-        competition_service: Callable[[], Any],
-        intervals_sync_service: Callable[[], Any],
-        garmin_sync_service: Callable[[], Any],
-        database_manager: Callable[[], DatabaseManager],
-        key_values: KeyValueRepository,
-        event_buffer: StateEventBuffer,
-        redactor: Any,
-        logger: logging.Logger,
-        utc_now: Callable[[], str],
-        uuid_factory: Callable[[], str],
-        monotonic: Callable[[], float],
-        operation_observer: Callable[[], SyncOperationObserver],
-        intervals_resync_gate: ProviderResyncGate,
-        garmin_resync_gate: ProviderResyncGate,
-        all_sync_days: int,
-    ) -> None:
-        self._config = config
-        self._intervals_client = intervals_client
-        self._competition_service = competition_service
-        self._intervals_sync_service = intervals_sync_service
-        self._garmin_sync_service = garmin_sync_service
-        self._database_manager = database_manager
-        self._key_values = key_values
-        self._event_buffer = event_buffer
-        self._redactor = redactor
-        self._logger = logger
-        self._utc_now = utc_now
-        self._uuid_factory = uuid_factory
-        self._monotonic = monotonic
-        self._operation_observer = operation_observer
-        self._intervals_resync_gate = intervals_resync_gate
-        self._garmin_resync_gate = garmin_resync_gate
-        self._all_sync_days = all_sync_days
+    @dataclass(frozen=True)
+    class Inputs:
+        competition: CompetitionSyncOwners
+        resync: ResyncProviderOwners
+        persistence: ProviderResyncPersistence
+        runtime: ProviderResyncRuntime
+
+    def __init__(self, *, dependencies: "ProviderResyncAssembly.Inputs") -> None:
+        competition = dependencies.competition
+        resync = dependencies.resync
+        persistence = dependencies.persistence
+        runtime = dependencies.runtime
+        self._competition_config = competition.config
+        self._intervals_client = competition.intervals_client
+        self._competition_service = competition.competition_service
+        self._resync_config = resync.config
+        self._intervals_sync_service = resync.intervals_sync_service
+        self._garmin_sync_service = resync.garmin_sync_service
+        self._intervals_resync_gate = resync.intervals_resync_gate
+        self._garmin_resync_gate = resync.garmin_resync_gate
+        self._all_sync_days = resync.all_sync_days
+        self._database_manager = persistence.database_manager
+        self._key_values = persistence.key_values
+        self._event_buffer = persistence.event_buffer
+        self._redactor = persistence.redactor
+        self._logger = runtime.logger
+        self._utc_now = runtime.utc_now
+        self._uuid_factory = runtime.uuid_factory
+        self._monotonic = runtime.monotonic
+        self._operation_observer = runtime.operation_observer
 
     def competition_reconciler(self) -> CompetitionSyncReconciler:
         """Create local persistence for remote competition reconciliation."""
@@ -73,7 +101,7 @@ class ProviderResyncAssembly:
     def competition_sync_service(self) -> CompetitionSyncService:
         """Create the authorized competition synchronization use case."""
         return CompetitionSyncService(
-            self._config(),
+            self._competition_config(),
             self._intervals_client,
             self.competition_reconciler(),
             self._competition_service(),
@@ -90,7 +118,7 @@ class ProviderResyncAssembly:
         observer = self._operation_observer()
         return FullProviderResyncService(
             FullResyncProviderExecution(
-                self._config(),
+                self._resync_config(),
                 self._intervals_sync_service(),
                 self._garmin_sync_service(),
                 self.competition_sync_service(),

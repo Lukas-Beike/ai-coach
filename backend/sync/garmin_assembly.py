@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
@@ -26,53 +28,77 @@ from backend.sync.status import SyncOperationStateWriter
 from backend.sync.state import SyncStateRepository
 
 
+@dataclass(frozen=True)
+class GarminProviderSettings:
+    config: Callable[[], Config]
+    root: Path
+    athlete_clock: Any
+    earliest_date: date
+    sync_chunk_days: int
+    all_sync_days: int
+
+
+@dataclass(frozen=True)
+class GarminPersistenceOwners:
+    database_manager: Callable[[], Any]
+    key_values: Any
+    sync_state_repository: Callable[[], SyncStateRepository]
+    daily_sync_marker_service: Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class GarminSyncTelemetry:
+    redactor: Redactor
+    logger: Any
+    diagnostic_capture: Any
+    event_buffer: Any
+
+
+@dataclass(frozen=True)
+class GarminSyncControl:
+    utc_now: Callable[[], datetime]
+    datetime_now: Callable[[], datetime]
+    resync_gate: Any
+    operation_observer: Callable[[], Any]
+    lock_wait_seconds: int
+    morning_body_battery_service: Callable[[], MorningBodyBatteryService]
+
+
 class GarminAssembly:
     """Resolve Garmin services from the active application resources."""
 
-    def __init__(
-        self,
-        *,
-        config: Callable[[], Config],
-        root: Path,
-        database_manager: Callable[[], Any],
-        key_values: Any,
-        sync_state_repository: Callable[[], SyncStateRepository],
-        daily_sync_marker_service: Callable[[], Any],
-        redactor: Redactor,
-        logger: Any,
-        diagnostic_capture: Any,
-        athlete_clock: Any,
-        utc_now: Callable[[], datetime],
-        datetime_now: Callable[[], datetime],
-        earliest_date: date,
-        sync_chunk_days: int,
-        all_sync_days: int,
-        resync_gate: Any,
-        operation_observer: Callable[[], Any],
-        event_buffer: Any,
-        lock_wait_seconds: int,
-        morning_body_battery_service: Callable[[], MorningBodyBatteryService],
-    ) -> None:
-        self._config = config
-        self._root = root
-        self._database_manager = database_manager
-        self._key_values = key_values
-        self._sync_state_repository = sync_state_repository
-        self._daily_sync_marker_service = daily_sync_marker_service
-        self._redactor = redactor
-        self._logger = logger
-        self._diagnostic_capture = diagnostic_capture
-        self._athlete_clock = athlete_clock
-        self._utc_now = utc_now
-        self._datetime_now = datetime_now
-        self._earliest_date = earliest_date
-        self._sync_chunk_days = sync_chunk_days
-        self._all_sync_days = all_sync_days
-        self._resync_gate = resync_gate
-        self._operation_observer = operation_observer
-        self._event_buffer = event_buffer
-        self._lock_wait_seconds = lock_wait_seconds
-        self._morning_body_battery_service = morning_body_battery_service
+    @dataclass(frozen=True)
+    class Inputs:
+        provider: GarminProviderSettings
+        persistence: GarminPersistenceOwners
+        telemetry: GarminSyncTelemetry
+        control: GarminSyncControl
+
+    def __init__(self, *, dependencies: "GarminAssembly.Inputs") -> None:
+        provider = dependencies.provider
+        persistence = dependencies.persistence
+        telemetry = dependencies.telemetry
+        control = dependencies.control
+        self._config = provider.config
+        self._root = provider.root
+        self._athlete_clock = provider.athlete_clock
+        self._earliest_date = provider.earliest_date
+        self._sync_chunk_days = provider.sync_chunk_days
+        self._all_sync_days = provider.all_sync_days
+        self._database_manager = persistence.database_manager
+        self._key_values = persistence.key_values
+        self._sync_state_repository = persistence.sync_state_repository
+        self._daily_sync_marker_service = persistence.daily_sync_marker_service
+        self._redactor = telemetry.redactor
+        self._logger = telemetry.logger
+        self._diagnostic_capture = telemetry.diagnostic_capture
+        self._event_buffer = telemetry.event_buffer
+        self._utc_now = control.utc_now
+        self._datetime_now = control.datetime_now
+        self._resync_gate = control.resync_gate
+        self._operation_observer = control.operation_observer
+        self._lock_wait_seconds = control.lock_wait_seconds
+        self._morning_body_battery_service = control.morning_body_battery_service
 
     def fixture_loader(self) -> garmin.GarminFixtureLoader:
         """Create a fixture reader using the current configuration and clock."""

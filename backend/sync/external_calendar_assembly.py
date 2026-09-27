@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import logging
 import threading
 from collections.abc import Callable
@@ -19,41 +21,53 @@ from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.observation import SyncOperationObserver
 
 
+@dataclass(frozen=True)
+class ExternalCalendarSyncOwners:
+    config: Callable[[], Config]
+    database_manager: Callable[[], DatabaseManager]
+    key_values: KeyValueRepository
+    daily_markers: Callable[[], DailySyncMarkerService]
+    adaptive_preview_service: Callable[[], Any]
+    event_buffer: StateEventBuffer
+
+
+@dataclass(frozen=True)
+class ExternalCalendarSyncRuntime:
+    operation_observer: Callable[[], SyncOperationObserver]
+    logger: logging.Logger
+    redact_text: Callable[[str], str]
+    athlete_clock: Callable[[], AthleteLocalClock]
+    local_date: Callable[[], date]
+    utc_now: Callable[[], str]
+    app_version: str
+    sync_lock: Callable[[], threading.Lock]
+
+
 class ExternalCalendarAssembly:
     """Create external-calendar services with current runtime dependencies."""
 
-    def __init__(
-        self,
-        *,
-        config: Callable[[], Config],
-        database_manager: Callable[[], DatabaseManager],
-        key_values: KeyValueRepository,
-        daily_markers: Callable[[], DailySyncMarkerService],
-        operation_observer: Callable[[], SyncOperationObserver],
-        adaptive_preview_service: Callable[[], Any],
-        event_buffer: StateEventBuffer,
-        logger: logging.Logger,
-        redact_text: Callable[[str], str],
-        athlete_clock: Callable[[], AthleteLocalClock],
-        local_date: Callable[[], date],
-        utc_now: Callable[[], str],
-        app_version: str,
-        sync_lock: Callable[[], threading.Lock],
-    ) -> None:
-        self._config = config
-        self._database_manager = database_manager
-        self._key_values = key_values
-        self._daily_markers = daily_markers
-        self._operation_observer = operation_observer
-        self._adaptive_preview_service = adaptive_preview_service
-        self._event_buffer = event_buffer
-        self._logger = logger
-        self._redact_text = redact_text
-        self._athlete_clock = athlete_clock
-        self._local_date = local_date
-        self._utc_now = utc_now
-        self._app_version = app_version
-        self._sync_lock = sync_lock
+    @dataclass(frozen=True)
+    class Inputs:
+        owners: ExternalCalendarSyncOwners
+        runtime: ExternalCalendarSyncRuntime
+
+    def __init__(self, *, dependencies: "ExternalCalendarAssembly.Inputs") -> None:
+        owners = dependencies.owners
+        runtime = dependencies.runtime
+        self._config = owners.config
+        self._database_manager = owners.database_manager
+        self._key_values = owners.key_values
+        self._daily_markers = owners.daily_markers
+        self._adaptive_preview_service = owners.adaptive_preview_service
+        self._event_buffer = owners.event_buffer
+        self._operation_observer = runtime.operation_observer
+        self._logger = runtime.logger
+        self._redact_text = runtime.redact_text
+        self._athlete_clock = runtime.athlete_clock
+        self._local_date = runtime.local_date
+        self._utc_now = runtime.utc_now
+        self._app_version = runtime.app_version
+        self._sync_lock = runtime.sync_lock
 
     def reader(self) -> ExternalCalendarReader:
         """Create a local external-calendar reader for the active manager."""
