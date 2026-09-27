@@ -10,6 +10,7 @@ from pathlib import Path
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import PlanningStateRepository
 from backend.errors import AppError
+from backend.planning import state_service as planning_state_service
 from backend.planning.state_service import StructuredTrainingStateService
 
 
@@ -42,7 +43,7 @@ class _TrackingManager:
 
 class StructuredTrainingStateServiceTests(unittest.TestCase):
     def test_domain_cursor_projection_does_not_depend_on_http_adapter(self):
-        source = Path(__file__).resolve().parents[1] / "backend" / "planning" / "state_service.py"
+        source = Path(planning_state_service.__file__)
         imports = {
             node.module for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
             if isinstance(node, ast.ImportFrom)
