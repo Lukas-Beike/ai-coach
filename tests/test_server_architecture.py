@@ -2305,15 +2305,25 @@ class ServerArchitectureTests(unittest.TestCase):
     def test_assembly_interfaces_stay_owner_scoped_and_bounded(self) -> None:
         violations: list[str] = []
         for path in _python_files(BACKEND_ROOT):
-            if not path.name.endswith("assembly.py"):
-                continue
             tree = _parse(path)
             for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == "__init__":
-                    count = len([arg for arg in node.args.args if arg.arg != "self"])
-                    count += len(node.args.kwonlyargs)
-                    if count > 5:
-                        violations.append(f"{path}:{node.lineno}: {count} constructor inputs")
+                if not isinstance(node, ast.ClassDef) or not node.name.endswith("Assembly"):
+                    continue
+                initializer = next(
+                    (
+                        item for item in node.body
+                        if isinstance(item, ast.FunctionDef) and item.name == "__init__"
+                    ),
+                    None,
+                )
+                if initializer is None:
+                    continue
+                count = len([arg for arg in initializer.args.args if arg.arg != "self"])
+                count += len(initializer.args.kwonlyargs)
+                if count > 5:
+                    violations.append(
+                        f"{path}:{initializer.lineno}: {node.name} has {count} constructor inputs"
+                    )
 
         self.assertEqual(
             [],

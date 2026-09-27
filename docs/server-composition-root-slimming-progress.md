@@ -1705,3 +1705,24 @@ were public bootstrap and sync state projections.
   assemblies” criterion. Keep S6 open until that wiring is either reduced
   through owner-local assembly boundaries or its excess is justified with the
   final dependency map and review.
+
+## S6 final interface review
+
+- The post-redesign caller, owner, patch-target, identity, and lazy-edge map is
+  recorded in [server-composition-root-s6-interface-map.md](server-composition-root-s6-interface-map.md).
+  It traces the 39 assembly construction sites through five cohesive ownership
+  groups and records why their dependency order remains visible in the root.
+- The remaining root-size excess is accepted against that concrete graph: the
+  root contains configuration/resource selection, named calls to the existing
+  domain assemblies, the secure database adapter, and the explicit `main()`
+  lifecycle. It contains no domain workflow or route implementation. Merging
+  the 39 owner-specific constructors into one facade would make their shared
+  identities and cyclic late edges less explicit and recreate a broad input
+  object. The practical 300–500-line guide remains exceeded, but the final
+  wiring itself is documented and reviewed.
+- A static architecture check now bounds all backend `*Assembly` constructor
+  signatures to five inputs, covering both `*_assembly.py` and `privacy.py`.
+  Focused architecture tests pass. The redesign full suite passed 2,876 tests
+  with 12 SQLCipher-dependent skips; compilation, inventory check, and diff
+  check passed. Docker image validation remains unavailable because the local
+  Docker Engine named pipe is missing.
