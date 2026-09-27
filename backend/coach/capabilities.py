@@ -53,18 +53,7 @@ def build_capability_catalog(
     for name, schema in schemas.items():
         if name not in owners:
             raise ValueError(f"Coach tool has no capability owner: {name}")
-        if name in read_only_tools:
-            effect, authorization, receipt = "read", "none", "read_only"
-        elif name in CONTROL_TOOLS:
-            effect, authorization, receipt = "control", "pending_request", "turn_state"
-        elif name in PROVIDER_READ_JOB_TOOLS:
-            effect, authorization, receipt = "provider_read_job", "request_scope", "durable_effect"
-        elif name in REMOTE_WRITE_TOOLS:
-            effect, authorization, receipt = "remote_write", "request_scope+athlete_approval", "durable_effect"
-        elif name in CONDITIONAL_REMOTE_WRITE_TOOLS:
-            effect, authorization, receipt = "conditional_remote_write", "request_scope+athlete_approval_when_remote", "durable_effect"
-        else:
-            effect, authorization, receipt = "local_write", "request_scope", "durable_effect"
+        effect, authorization, receipt = _tool_effect(name, read_only_tools)
         if receipt == "durable_effect" and name not in effect_labels:
             raise ValueError(f"Coach mutation has no receipt label: {name}")
         catalog[name] = {
@@ -74,10 +63,32 @@ def build_capability_catalog(
             "effect": effect,
             "authorization": authorization,
             "receipt": receipt,
-            "surface": (
-                "canonical_and_dialogue" if name in canonical_schemas and name in dialogue_schemas
-                else "canonical_only" if name in canonical_schemas
-                else "dialogue_only"
-            ),
+            "surface": _tool_surface(name, canonical_schemas, dialogue_schemas),
         }
     return catalog
+
+
+def _tool_effect(name: str, read_only_tools: set[str]) -> tuple[str, str, str]:
+    if name in read_only_tools:
+        return "read", "none", "read_only"
+    if name in CONTROL_TOOLS:
+        return "control", "pending_request", "turn_state"
+    if name in PROVIDER_READ_JOB_TOOLS:
+        return "provider_read_job", "request_scope", "durable_effect"
+    if name in REMOTE_WRITE_TOOLS:
+        return "remote_write", "request_scope+athlete_approval", "durable_effect"
+    if name in CONDITIONAL_REMOTE_WRITE_TOOLS:
+        return "conditional_remote_write", "request_scope+athlete_approval_when_remote", "durable_effect"
+    return "local_write", "request_scope", "durable_effect"
+
+
+def _tool_surface(
+    name: str,
+    canonical_schemas: dict[str, Any],
+    dialogue_schemas: dict[str, Any],
+) -> str:
+    in_canonical = name in canonical_schemas
+    in_dialogue = name in dialogue_schemas
+    if in_canonical and in_dialogue:
+        return "canonical_and_dialogue"
+    return "canonical_only" if in_canonical else "dialogue_only"

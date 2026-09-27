@@ -1784,7 +1784,13 @@ function coachActionButtons(proposal) {
   });
   const confirm = document.createElement("button");
   confirm.type = "button";
-  confirm.textContent = remoteWrite ? "Remote-Änderung freigeben" : undo ? "Änderung zurücknehmen" : "Garmin-Duplikat löschen";
+  if (remoteWrite) {
+    confirm.textContent = "Remote-Änderung freigeben";
+  } else if (undo) {
+    confirm.textContent = "Änderung zurücknehmen";
+  } else {
+    confirm.textContent = "Garmin-Duplikat löschen";
+  }
   confirm.addEventListener("click", () => executeCoachActionProposal(proposal, confirm));
   actions.append(later, confirm);
   return actions;

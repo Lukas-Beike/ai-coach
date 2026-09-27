@@ -20,6 +20,7 @@ from backend.activities.duplicates import (
 )
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
+from backend.sync.authority import competition_push_manifest
 from backend.history.undo_service import HistoryUndoService
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.state import SyncStateRepository
@@ -33,6 +34,7 @@ REMOTE_COACH_WRITE_TOOLS = frozenset(
     {
         "start_intervals_plan_sync",
         "sync_competitions",
+        "delete_duplicate_intervals_activity",
         "sync_nutrition",
         "resolve_training_sync_conflict",
         "apply_adaptive_replan",
@@ -125,6 +127,7 @@ def _validate_remote_coach_write(payload: dict[str, Any]) -> None:
 REMOTE_WRITE_LABELS = {
     "start_intervals_plan_sync": "Trainingseinheiten mit Intervals.icu synchronisieren",
     "sync_competitions": "Bestätigte Wettkämpfe mit Intervals.icu synchronisieren",
+    "delete_duplicate_intervals_activity": "Garmin-Duplikat mit Intervals.icu löschen",
     "sync_nutrition": "Ernährungsdaten mit Intervals.icu synchronisieren",
     "resolve_training_sync_conflict": "Fehlgeschlagenen Intervals.icu-Sync wiederholen",
     "apply_adaptive_replan": "Adaptive Änderung anwenden und Krankheitspause synchronisieren",
@@ -137,27 +140,7 @@ def remote_coach_write_diff(
     """Project the remote effect into a compact, non-sensitive approval summary."""
     entry: dict[str, str] = {"name": REMOTE_WRITE_LABELS[tool]}
     if tool == "start_intervals_plan_sync":
-        request = intent.get("request") or {}
-        entry["scope"] = str(request.get("sync_scope") or "selected")
-        entries = arguments.get("entries") or []
-        entry["units"] = f"{len(entries)} konkret ausgewählte Einheit(en)"
-        dates = sorted(
-            {
-                str(item.get("date") or "")
-                for item in entries
-                if isinstance(item, dict) and item.get("date")
-            }
-        )
-        if dates:
-            entry["date"] = (
-                dates[0] if len(dates) == 1 else f"{dates[0]} bis {dates[-1]}"
-            )
-        if entry["scope"] == "selected":
-            entry["sport"] = entry["units"]
-        elif entry["scope"] == "all_pending":
-            entry["sport"] = f"{len(entries)} derzeit ausstehende Einheit(en)"
-        else:
-            entry["sport"] = f"{len(entries)} in diesem Auftrag erstellte Einheit(en)"
+        _plan_sync_write_diff(entry, arguments, intent)
     elif tool == "sync_nutrition":
         entry["date"] = str(
             arguments.get("date")
@@ -167,11 +150,41 @@ def remote_coach_write_diff(
         entry["date"] = (
             "Synchronisationsauftrag " + str(arguments.get("job_id") or "")[:36]
         )
+    elif tool == "delete_duplicate_intervals_activity":
+        entry["date"] = (
+            "Duplikat " + str(arguments.get("duplicate_id") or "")[:36]
+        )
     elif tool == "apply_adaptive_replan":
         entry["date"] = (
             "Adaptive Vorschau " + str(arguments.get("adjustment_id") or "")[:36]
         )
     return [entry]
+
+
+def _plan_sync_write_diff(
+    entry: dict[str, str], arguments: dict[str, Any], intent: dict[str, Any]
+) -> None:
+    scope = str((intent.get("request") or {}).get("sync_scope") or "selected")
+    entries = arguments.get("entries") or []
+    count = len(entries)
+    entry["scope"] = scope
+    entry["units"] = f"{count} konkret ausgewählte Einheit(en)"
+    labels = {
+        "selected": entry["units"],
+        "all_pending": f"{count} derzeit ausstehende Einheit(en)",
+    }
+    entry["sport"] = labels.get(scope, f"{count} in diesem Auftrag erstellte Einheit(en)")
+    dates = sorted(
+        {
+            str(item["date"])
+            for item in entries
+            if isinstance(item, dict) and item.get("date")
+        }
+    )
+    if dates:
+        entry["date"] = dates[0]
+        if len(dates) > 1:
+            entry["date"] = f"{dates[0]} bis {dates[-1]}"
 
 
 def coach_action_hash(payload: Any) -> str:
@@ -301,6 +314,12 @@ class CoachProposalCreationService:
             "conversation_id": str(conversation_id)[:160],
             "client_turn_id": str(client_turn_id)[:160],
         }
+        if tool == "sync_competitions":
+            with self._database_manager.reader() as db:
+                payload["arguments"] = {
+                    **arguments,
+                    "_approval_manifest": competition_push_manifest(db),
+                }
         return self.create(
             {
                 "action_type": "remote_coach_write",

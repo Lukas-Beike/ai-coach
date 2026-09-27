@@ -279,75 +279,11 @@ class PlannedUnitService:
                     409,
                     "Für diese Planung liegt kein offener Synchronisierungskonflikt vor.",
                 )
-            try:
-                conflict = json.loads(row["sync_conflict"] or "{}")
-            except (TypeError, ValueError) as exc:
-                raise AppError(
-                    409,
-                    "Der gespeicherte Synchronisierungskonflikt ist nicht mehr gültig.",
-                ) from exc
-            if not isinstance(conflict, dict):
-                conflict = {}
-
+            conflict = self._load_conflict(row)
             if selected == "keep_local":
-                payload = planned_units.planned_conflict_payload(row)
-                payload["sync_status"] = "local"
-                db.execute(
-                    UPDATE_SQL,
-                    (json.dumps(payload, ensure_ascii=False), now, normalized_id),
-                )
+                self._keep_local_conflict(db, row, normalized_id, now)
             else:
-                remote = conflict.get("remote")
-                if not isinstance(remote, dict):
-                    # An accepted provider deletion remains as a tombstone so a
-                    # later sync cannot recreate the explicitly deleted unit.
-                    payload = planned_units.planned_conflict_payload(row)
-                    payload.update(
-                        local_deleted=True,
-                        archived=True,
-                        sync_status="remote_deleted",
-                    )
-                    db.execute(
-                        "UPDATE planned_units SET payload=?, sync_dirty=0, "
-                        "sync_state='remote_deleted', sync_error=NULL, "
-                        "sync_conflict='', updated_at=? WHERE local_id=?",
-                        (json.dumps(payload, ensure_ascii=False), now, normalized_id),
-                    )
-                else:
-                    prepared = planned_units.adopt_normalized_remote_planned_unit(
-                        remote
-                    )
-                    if not prepared:
-                        raise AppError(
-                            409, "Das Remote-Event kann nicht übernommen werden."
-                        )
-                    incoming, identity = prepared
-                    local = planned_units.planned_conflict_payload(row)
-                    for key in (
-                        "plan_id",
-                        "plan_name",
-                        "rationale",
-                        "archived",
-                        "private_calendar_adjustment",
-                    ):
-                        if local.get(key) is not None:
-                            incoming[key] = local[key]
-                    incoming.update(id=normalized_id, sync_status="synced")
-                    baseline_hash = planned_units.planned_unit_payload_hash(incoming)
-                    db.execute(
-                        "UPDATE planned_units SET external_id=?, payload=?, "
-                        "sync_dirty=0, sync_state='synced', sync_error=NULL, "
-                        "sync_conflict='', baseline_hash=?, last_synced_at=?, "
-                        "updated_at=? WHERE local_id=?",
-                        (
-                            identity,
-                            json.dumps(incoming, ensure_ascii=False),
-                            baseline_hash,
-                            now,
-                            now,
-                            normalized_id,
-                        ),
-                    )
+                self._accept_remote_conflict(db, row, normalized_id, now, conflict)
             self._planning_revision_service.bump(db)
 
         saved = next(
@@ -359,6 +295,72 @@ class PlannedUnitService:
             None,
         )
         return {"status": "resolved", "strategy": selected, "planned_unit": saved}
+
+    @staticmethod
+    def _load_conflict(row: dict[str, Any]) -> dict[str, Any]:
+        try:
+            conflict = json.loads(row["sync_conflict"] or "{}")
+        except (TypeError, ValueError) as exc:
+            raise AppError(
+                409,
+                "Der gespeicherte Synchronisierungskonflikt ist nicht mehr gültig.",
+            ) from exc
+        return conflict if isinstance(conflict, dict) else {}
+
+    @staticmethod
+    def _keep_local_conflict(
+        db: Any, row: dict[str, Any], local_id: str, now: str
+    ) -> None:
+        payload = planned_units.planned_conflict_payload(row)
+        payload["sync_status"] = "local"
+        db.execute(UPDATE_SQL, (json.dumps(payload, ensure_ascii=False), now, local_id))
+
+    @staticmethod
+    def _accept_remote_conflict(
+        db: Any,
+        row: dict[str, Any],
+        local_id: str,
+        now: str,
+        conflict: dict[str, Any],
+    ) -> None:
+        remote = conflict.get("remote")
+        if not isinstance(remote, dict):
+            payload = planned_units.planned_conflict_payload(row)
+            payload.update(
+                local_deleted=True, archived=True, sync_status="remote_deleted"
+            )
+            db.execute(
+                "UPDATE planned_units SET payload=?, sync_dirty=0, "
+                "sync_state='remote_deleted', sync_error=NULL, "
+                "sync_conflict='', updated_at=? WHERE local_id=?",
+                (json.dumps(payload, ensure_ascii=False), now, local_id),
+            )
+            return
+        prepared = planned_units.adopt_normalized_remote_planned_unit(remote)
+        if not prepared:
+            raise AppError(409, "Das Remote-Event kann nicht übernommen werden.")
+        incoming, identity = prepared
+        local = planned_units.planned_conflict_payload(row)
+        for key in (
+            "plan_id", "plan_name", "rationale", "archived", "private_calendar_adjustment"
+        ):
+            if local.get(key) is not None:
+                incoming[key] = local[key]
+        incoming.update(id=local_id, sync_status="synced")
+        baseline_hash = planned_units.planned_unit_payload_hash(incoming)
+        db.execute(
+            "UPDATE planned_units SET external_id=?, payload=?, sync_dirty=0, "
+            "sync_state='synced', sync_error=NULL, sync_conflict='', baseline_hash=?, "
+            "last_synced_at=?, updated_at=? WHERE local_id=?",
+            (
+                identity,
+                json.dumps(incoming, ensure_ascii=False),
+                baseline_hash,
+                now,
+                now,
+                local_id,
+            ),
+        )
 
     def _load_for_update(
         self, db: Any, normalized_id: str

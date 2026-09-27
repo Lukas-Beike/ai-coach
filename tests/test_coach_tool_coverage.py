@@ -351,7 +351,10 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             job = server.SYNC_JOB_QUEUE.service().enqueue(
                 provider,
                 kind,
-                {"reason": "Synthetic", **({} if remote else {"days": 7})},
+                {
+                    "reason": "Synthetic",
+                    **({"approval_manifest": []} if remote else {"days": 7}),
+                },
                 requested_by="coach",
             )
             with server.database_manager().unit_of_work() as db:

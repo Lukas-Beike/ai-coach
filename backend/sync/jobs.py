@@ -43,6 +43,7 @@ RETRYABLE_ERROR_CLASSES = frozenset(
 )
 SYNC_JOB_LIST_LIMIT = 50
 SYNC_JOB_MAX_ATTEMPTS = 3
+ISO_DAY_ERROR = "Das Datum muss ein ISO-Kalendertag sein."
 
 
 class SyncJobNotFoundError(LookupError):
@@ -184,7 +185,9 @@ def normalize_sync_job_request(
         )
     if type_value == "nutrition_sync":
         normalized_payload = _normalize_nutrition_sync_job(provider_value, values)
-    elif type_value in {"performance_refresh", "competition_push"}:
+    elif type_value == "competition_push":
+        normalized_payload = _normalize_competition_push_job(provider_value, values)
+    elif type_value == "performance_refresh":
         normalized_payload = _normalize_reason_only_job(provider_value, values)
     elif type_value == "plan_push":
         normalized_payload = _normalize_plan_push_job(provider_value, values)
@@ -201,13 +204,13 @@ def _normalize_nutrition_sync_job(provider: str, values: dict[str, Any]) -> dict
     if "date" in values:
         raw_date = values["date"]
         if not isinstance(raw_date, str):
-            raise JobValidationError("Das Datum muss ein ISO-Kalendertag sein.")
+            raise JobValidationError(ISO_DAY_ERROR)
         try:
             parsed = date.fromisoformat(raw_date)
         except ValueError as exc:
-            raise JobValidationError("Das Datum muss ein ISO-Kalendertag sein.") from exc
+            raise JobValidationError(ISO_DAY_ERROR) from exc
         if parsed.isoformat() != raw_date:
-            raise JobValidationError("Das Datum muss ein ISO-Kalendertag sein.")
+            raise JobValidationError(ISO_DAY_ERROR)
         return {"date": raw_date}
     if "pending_limit" not in values:
         raise JobValidationError("Wähle ein Datum oder ausstehende Tage.")
@@ -223,6 +226,37 @@ def _normalize_reason_only_job(provider: str, values: dict[str, Any]) -> dict[st
     if set(values) - {"reason"}:
         raise JobValidationError("Der Job enthält nicht unterstützte Felder.")
     return {"reason": str(values.get("reason") or "job").strip()[:80] or "job"}
+
+
+def _normalize_competition_push_job(provider: str, values: dict[str, Any]) -> dict[str, Any]:
+    if provider != "intervals":
+        raise JobValidationError("Dieser Job ist nur für Intervals.icu zulässig.")
+    if set(values) - {"reason", "approval_manifest"}:
+        raise JobValidationError("Der Job enthält nicht unterstützte Felder.")
+    if "approval_manifest" not in values:
+        raise JobValidationError("Der Wettkampf-Sync benötigt eine bestätigte Vorschau.")
+    normalized: dict[str, Any] = {
+        "reason": str(values.get("reason") or "job").strip()[:80] or "job"
+    }
+    manifest = values["approval_manifest"]
+    if not isinstance(manifest, list) or len(manifest) > 1000:
+        raise JobValidationError("Die Wettkampf-Freigabevorschau ist ungültig.")
+    entries = []
+    for entry in manifest:
+        if (
+            not isinstance(entry, dict)
+            or set(entry) != {"type", "id", "sha256"}
+            or entry.get("type") not in {"competition", "tombstone"}
+            or not isinstance(entry.get("id"), str)
+            or not entry["id"].strip()
+            or len(entry["id"]) > 160
+            or not isinstance(entry.get("sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])
+        ):
+            raise JobValidationError("Die Wettkampf-Freigabevorschau ist ungültig.")
+        entries.append(dict(entry))
+    normalized["approval_manifest"] = entries
+    return normalized
 
 
 def _normalize_plan_push_entry(entry: Any) -> dict[str, str]:

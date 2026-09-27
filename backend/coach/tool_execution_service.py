@@ -90,7 +90,6 @@ class CoachStructuredToolExecutionService:
             if (
                 action.get("intent") == "remote_sync"
                 and (action.get("request") or {}).get("remote_write") is True
-                and name != "delete_duplicate_intervals_activity"
             ):
                 proposal = self._proposal_creation.create_remote_write(
                     name,

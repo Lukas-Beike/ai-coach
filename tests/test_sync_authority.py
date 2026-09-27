@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository, PlanningStateRepository
 from backend.planning.revision import PlanningRevisionService
-from backend.sync.authority import PlanningAuthorityService
+from backend.sync.authority import PlanningAuthorityService, competition_push_manifest
 from backend.sync.library import WorkoutLibrarySyncStateService
 
 NOW = "2026-09-20T12:00:00+00:00"
@@ -70,6 +70,10 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
                 "CREATE TABLE competitions (id TEXT PRIMARY KEY, intervals_event_id TEXT, "
                 "sync_dirty INTEGER NOT NULL, sync_state TEXT NOT NULL, "
                 "sync_conflict TEXT NOT NULL, updated_at TEXT NOT NULL)"
+            )
+            db.execute(
+                "CREATE TABLE competition_sync_tombstones (id TEXT PRIMARY KEY, "
+                "intervals_event_id TEXT, external_id TEXT, created_at TEXT NOT NULL)"
             )
 
     def tearDown(self) -> None:
@@ -284,9 +288,11 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
         )
         self.add_competition("clean", event_id="event-5", dirty=0, state="local")
 
-        changed = self.service.mark_competitions_authoritative()
+        with self.database_manager.reader() as db:
+            approved_manifest = competition_push_manifest(db)
+        changed = self.service.mark_competitions_authoritative(approved_manifest)
 
-        self.assertEqual(changed, 4)
+        self.assertEqual(len(changed), 4)
         for competition_id in (
             "ordinary",
             "missing-state",
@@ -315,8 +321,10 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
                 "WHEN OLD.id='fail' BEGIN SELECT RAISE(ABORT, 'reject'); END"
             )
 
+        with self.database_manager.reader() as db:
+            approved_manifest = competition_push_manifest(db)
         with self.assertRaises(sqlite3.IntegrityError):
-            self.service.mark_competitions_authoritative()
+            self.service.mark_competitions_authoritative(approved_manifest)
 
         for competition_id in ("first", "fail"):
             row = self.competition(competition_id)

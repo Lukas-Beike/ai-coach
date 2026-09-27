@@ -144,6 +144,42 @@ class CoachProposalCreationTests(unittest.TestCase):
         self.assertNotIn("private", repr(result))
         self.sync_state_repository.latest_snapshot.assert_not_called()
 
+    def test_competition_remote_write_binds_dirty_rows_and_tombstones_to_approval(self) -> None:
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO competitions (id, name, event_date, sport, priority, distance, target, "
+                "course_profile, notes, created_at, updated_at) "
+                "VALUES ('race-1', 'Race', '2026-10-01', 'Run', 'A', '', '', '', '', 'now', 'now')"
+            )
+            db.execute(
+                "INSERT INTO competition_sync_tombstones (id, intervals_event_id, external_id, created_at) "
+                "VALUES ('deleted-1', 'remote-1', NULL, 'now')"
+            )
+        intent = {
+            "operation": "sync_competitions",
+            "intent": "remote_sync",
+            "target_system": "intervals",
+            "authorization_scope": ["local_competitions", "intervals_sync"],
+            "request": {"remote_write": True, "source_message_ids": [7]},
+        }
+
+        self._service().create_remote_write(
+            "sync_competitions",
+            {"reason": "approved request"},
+            intent,
+            conversation_id="conversation-1",
+            client_turn_id="turn-1",
+            session_csrf_hash="session-1",
+        )
+
+        payload = json.loads(self._rows()[0]["payload"])
+        manifest = payload["arguments"]["_approval_manifest"]
+        self.assertEqual(
+            {(item["type"], item["id"]) for item in manifest},
+            {("competition", "race-1"), ("tombstone", "deleted-1")},
+        )
+        self.assertTrue(all(len(item["sha256"]) == 64 for item in manifest))
+
     def test_distinct_session_keys_own_distinct_proposals(self) -> None:
         self._service().create(self._undo(), "session-a")
         other_id = UUID("def12345-6789-4abc-8def-0123456789ab")

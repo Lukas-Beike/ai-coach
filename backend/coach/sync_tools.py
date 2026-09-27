@@ -157,10 +157,18 @@ class CoachSyncToolService:
         if "sync_competitions" not in authorized_operations(intent) or intent.get("target_system") != "intervals":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Sync nicht.", reason="intent_scope_denied")
         require_coach_scope(intent, "local_competitions")
-        self._authority.mark_competitions_authoritative()
+        approval_manifest = arguments.get("_approval_manifest")
+        if not isinstance(approval_manifest, list):
+            raise AppError(409, "Für den Wettkampf-Sync fehlt die bestätigte Vorschau.")
+        manifest = self._authority.mark_competitions_authoritative(approval_manifest)
+        if not isinstance(manifest, list):
+            raise AppError(500, "Die bestätigte Wettkampf-Vorschau ist ungültig.")
         job = self._queue.enqueue(
             "intervals", "competition_push",
-            {"reason": str(arguments.get("reason") or "Bestätigter Coach-Auftrag")},
+            {
+                "reason": str(arguments.get("reason") or "Bestätigter Coach-Auftrag"),
+                "approval_manifest": manifest,
+            },
             requested_by="coach",
         )
         sync_job_ids.append(job["id"])

@@ -18,6 +18,7 @@ from backend.planning import adaptive_preview_service, calendar_service, local_p
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import events as runtime_events
 from backend.sync.intervals import IntervalsSnapshotReader
+from backend.sync.authority import competition_push_manifest
 from backend.sync.library import WorkoutLibraryRefreshService
 from backend.sync.planned_units import RemotePlannedUnitReconciler
 from backend.sync import queue as sync_queue
@@ -75,8 +76,10 @@ class ServerPlanningTests(ServerTestCase):
                 "refresh_current_performance", {}, intent=refresh_intent, conversation_id="conversation-jobs",
                 client_turn_id="turn-performance", session_csrf_hash="", sync_job_ids=[],
             )
+            with server.database_manager().reader() as db:
+                approval_manifest = competition_push_manifest(db)
             competition = server.COACH_TOOL_DISPATCH.service().execute(
-                "sync_competitions", {}, intent=competition_intent, conversation_id="conversation-jobs",
+                "sync_competitions", {"_approval_manifest": approval_manifest}, intent=competition_intent, conversation_id="conversation-jobs",
                 client_turn_id="turn-competition", session_csrf_hash="", sync_job_ids=[],
             )
         self.assertEqual(performance["sync_job_id"], "job-performance")
@@ -94,7 +97,12 @@ class ServerPlanningTests(ServerTestCase):
                 (competition["id"],),
             )
 
-        self.assertEqual(server.SYNC_COMMANDS.authority().mark_competitions_authoritative(), 1)
+        with server.database_manager().reader() as db:
+            approved_manifest = competition_push_manifest(db)
+        self.assertEqual(
+            len(server.SYNC_COMMANDS.authority().mark_competitions_authoritative(approved_manifest)),
+            1,
+        )
         local_override = server.PLANNING_DATA.competition().list()[0]
         self.assertEqual(local_override["intervals_event_id"], "123")
         self.assertEqual(local_override["sync_state"], "local_override")
@@ -104,7 +112,9 @@ class ServerPlanningTests(ServerTestCase):
                 "UPDATE competitions SET sync_state='conflict', sync_conflict=? WHERE id=?",
                 (json.dumps({"type": "remote_missing"}), competition["id"]),
             )
-        server.SYNC_COMMANDS.authority().mark_competitions_authoritative()
+        with server.database_manager().reader() as db:
+            approved_manifest = competition_push_manifest(db)
+        server.SYNC_COMMANDS.authority().mark_competitions_authoritative(approved_manifest)
         recreated = server.PLANNING_DATA.competition().list()[0]
         self.assertIsNone(recreated["intervals_event_id"])
 

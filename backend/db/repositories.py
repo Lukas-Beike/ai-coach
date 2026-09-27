@@ -566,12 +566,12 @@ class NutritionRepository:
         for field in ("carbs_g", "protein_g", "fat_g"):
             known = [entry[field] for entry in entries if entry.get(field) is not None]
             total_field = "total_" + field
-            snapshot[total_field] = (
-                round(sum(float(value) for value in known), 1)
-                if known
-                else 0 if not entries
-                else None
-            )
+            if known:
+                snapshot[total_field] = round(sum(float(value) for value in known), 1)
+            elif not entries:
+                snapshot[total_field] = 0
+            else:
+                snapshot[total_field] = None
         row = db.execute(
             "SELECT revision FROM nutrition_sync_dates WHERE meal_date = ?", (meal_date,)
         ).fetchone()

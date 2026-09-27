@@ -275,21 +275,47 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
     def test_performance_and_competition_jobs_are_intervals_only(self):
         for job_type in ("performance_refresh", "competition_push"):
             with self.subTest(job_type=job_type):
+                payload = {"reason": "  sync  "}
+                if job_type == "competition_push":
+                    payload["approval_manifest"] = []
+                expected = {"reason": "sync"}
+                if job_type == "competition_push":
+                    expected["approval_manifest"] = []
                 self.assertEqual(
-                    self.normalize("intervals", job_type, {"reason": "  sync  "})[
-                        "payload"
-                    ],
-                    {"reason": "sync"},
+                    self.normalize("intervals", job_type, payload)["payload"],
+                    expected,
                 )
                 self.assert_invalid(
                     "garmin", job_type, {}, "Dieser Job ist nur für Intervals.icu"
                 )
-                self.assert_invalid("intervals", job_type, {"days": 7}, "Felder")
+                invalid_payload = {"days": 7}
+                if job_type == "competition_push":
+                    invalid_payload["approval_manifest"] = []
+                self.assert_invalid("intervals", job_type, invalid_payload, "Felder")
         self.assertEqual(
             self.normalize("intervals", "performance_refresh", {"reason": " "})[
                 "payload"
             ],
             {"reason": "job"},
+        )
+
+    def test_competition_push_preserves_a_bounded_approval_manifest(self):
+        entry = {"type": "competition", "id": "race-1", "sha256": "a" * 64}
+        self.assertEqual(
+            self.normalize(
+                "intervals", "competition_push",
+                {"reason": "approved", "approval_manifest": [entry]},
+            )["payload"],
+            {"reason": "approved", "approval_manifest": [entry]},
+        )
+        self.assert_invalid(
+            "intervals", "competition_push",
+            {"approval_manifest": [{**entry, "sha256": "invalid"}]},
+            "Freigabevorschau ist ungültig",
+        )
+        self.assert_invalid(
+            "intervals", "competition_push", {"reason": "manual"},
+            "benötigt eine bestätigte Vorschau",
         )
 
     def test_plan_push_normalizes_entries_reason_and_repair(self):

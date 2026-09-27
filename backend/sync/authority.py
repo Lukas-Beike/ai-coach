@@ -2,14 +2,40 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
 from typing import Any
 
 from backend.db import DatabaseManager
+from backend.errors import AppError
 from backend.planning.planned_unit_service import UPDATE_SQL
 from backend.planning.revision import PlanningRevisionService
 from backend.sync.library import WorkoutLibrarySyncStateService
+
+
+def competition_push_manifest(db: Any) -> list[dict[str, str]]:
+    """Hash exactly the dirty competition rows and pending remote deletions."""
+    manifest = []
+    for table, key, query in (
+        (
+            "competition",
+            "id",
+            "SELECT * FROM competitions WHERE sync_dirty=1 OR sync_state='conflict' ORDER BY id",
+        ),
+        (
+            "tombstone",
+            "id",
+            "SELECT * FROM competition_sync_tombstones ORDER BY id",
+        ),
+    ):
+        for row in db.execute(query).fetchall():
+            values = dict(row)
+            digest = hashlib.sha256(
+                json.dumps(values, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            manifest.append({"type": table, key: str(values[key]), "sha256": digest})
+    return manifest
 
 
 class PlanningAuthorityService:
@@ -66,9 +92,13 @@ class PlanningAuthorityService:
                 self._planning_revision_service.bump(db)
         return changed
 
-    def mark_competitions_authoritative(self) -> int:
-        """Choose local competition values for dirty or conflicted rows."""
+    def mark_competitions_authoritative(
+        self, expected_manifest: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
+        """Choose only the competition state shown in the approved preview."""
         with self._database_manager.unit_of_work() as db:
+            if competition_push_manifest(db) != expected_manifest:
+                raise AppError(409, "Der Wettkampfbestand hat sich seit der Freigabe geändert.")
             rows = db.execute(
                 "SELECT id, sync_state, sync_conflict FROM competitions "
                 "WHERE sync_dirty=1 OR sync_state='conflict'"
@@ -87,7 +117,8 @@ class PlanningAuthorityService:
                         "sync_conflict='', updated_at=? WHERE id=?",
                         (now, row["id"]),
                     )
-        return len(rows)
+            manifest = competition_push_manifest(db)
+        return manifest
 
     @staticmethod
     def _mark_planning_row(row: dict[str, Any], now: str, db: Any) -> bool:

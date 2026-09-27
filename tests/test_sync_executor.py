@@ -213,12 +213,15 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertEqual(self.performance.calls, [((), {})])
 
         competition = self.executor.execute(
-            self.job("intervals", "competition_push", {"reason": "manual"})
+            self.job(
+                "intervals", "competition_push",
+                {"reason": "manual", "approval_manifest": []},
+            )
         )
         self.assertEqual(competition, {"status": "ok", "count": 2})
         self.assertEqual(
             self.competitions.calls[-1],
-            ((), {"reason": "manual", "push_local": True}),
+            ((), {"reason": "manual", "push_local": True, "expected_manifest": []}),
         )
 
         entry = {

@@ -20,6 +20,58 @@ from backend.db.repositories import KeyValueRepository
 from backend.providers.openai import response_text
 
 
+def _failure_message(
+    text: str,
+    question: str,
+    failures: list[dict[str, Any]],
+    effects: list[dict[str, Any]],
+) -> str:
+    if not failures or question:
+        return text
+    text = "Ein Teil des Auftrags konnte noch nicht ausgeführt werden." if effects else "Der Auftrag konnte noch nicht ausgeführt werden."
+    text += "\n" + coach_failure_lines(failures, {entry["tool"] for entry in failures})
+    if effects:
+        text += "\nGespeichert beziehungsweise beauftragt: " + "; ".join(coach_effect_label(entry) for entry in effects) + "."
+    return text
+
+
+def _queued_message(
+    text: str, question: str, queued: list[str], effects: list[dict[str, Any]]
+) -> str:
+    if not queued or question:
+        return text
+    receipt = "\n".join(queued)
+    queued_effect_count = sum(
+        1 for entry in effects
+        if (entry.get("result") or {}).get("status") == "queued"
+        and (entry.get("result") or {}).get("sync_job_id")
+    )
+    return receipt if queued_effect_count == len(effects) else (text + "\n" + receipt).strip()
+
+
+def _approval_message(
+    text: str,
+    question: str,
+    awaiting_remote_approval: bool,
+    effects: list[dict[str, Any]],
+) -> str:
+    if not awaiting_remote_approval or question:
+        return text
+    local_effects = [entry for entry in effects if not (entry.get("result") or {}).get("proposed_action")]
+    prefix = ""
+    if local_effects:
+        prefix = "Lokal gespeichert beziehungsweise ausgeführt: " + "; ".join(coach_effect_label(entry) for entry in local_effects) + ". "
+    return prefix + "Die Remote-Änderung wartet auf deine ausdrückliche Freigabe. Prüfe den Aktionsvorschlag, bevor sie ausgeführt wird."
+
+
+def _fallback_message(text: str, effects: list[dict[str, Any]]) -> str:
+    if text:
+        return text
+    if effects:
+        return "Ergebnis: " + "; ".join(coach_effect_label(entry) for entry in effects)
+    return "Die Antwort konnte nicht abgeschlossen werden. Bitte versuche es erneut."
+
+
 class CoachStructuredOutcomeService:
     """Own final text/status projection and durable pending-request updates."""
 
@@ -80,36 +132,10 @@ class CoachStructuredOutcomeService:
         missing_answer = not text or incomplete_answer
         if incomplete_answer:
             text += "\nDie Antwort wurde nicht abgeschlossen. Bitte den Coach um Fortsetzung bitten."
-        if failures and not question:
-            text = "Ein Teil des Auftrags konnte noch nicht ausgeführt werden." if effects else "Der Auftrag konnte noch nicht ausgeführt werden."
-            text += "\n" + coach_failure_lines(failures, {entry["tool"] for entry in failures})
-            if effects:
-                text += "\nGespeichert beziehungsweise beauftragt: " + "; ".join(coach_effect_label(entry) for entry in effects) + "."
-        if queued and not question:
-            receipt = "\n".join(queued)
-            queued_effect_count = sum(
-                1 for entry in effects
-                if ((entry.get("result") or {}).get("status") == "queued"
-                    and (entry.get("result") or {}).get("sync_job_id"))
-            )
-            if queued_effect_count == len(effects):
-                text = receipt
-            else:
-                text = (text + "\n" + receipt).strip()
-        if awaiting_remote_approval and not question:
-            local_effects = [
-                entry for entry in effects
-                if not (entry.get("result") or {}).get("proposed_action")
-            ]
-            prefix = (
-                "Lokal gespeichert beziehungsweise ausgeführt: "
-                + "; ".join(coach_effect_label(entry) for entry in local_effects)
-                + ". "
-                if local_effects else ""
-            )
-            text = prefix + "Die Remote-Änderung wartet auf deine ausdrückliche Freigabe. Prüfe den Aktionsvorschlag, bevor sie ausgeführt wird."
-        if not text:
-            text = "Ergebnis: " + "; ".join(coach_effect_label(entry) for entry in effects) if effects else "Die Antwort konnte nicht abgeschlossen werden. Bitte versuche es erneut."
+        text = _failure_message(text, question, failures, effects)
+        text = _queued_message(text, question, queued, effects)
+        text = _approval_message(text, question, awaiting_remote_approval, effects)
+        text = _fallback_message(text, effects)
         return text, incomplete_answer, missing_answer
 
     @staticmethod
