@@ -43,6 +43,14 @@ RETRYABLE_ERROR_CLASSES = frozenset(
 )
 SYNC_JOB_LIST_LIMIT = 50
 SYNC_JOB_MAX_ATTEMPTS = 3
+INVALID_NUTRITION_MANIFEST_ERROR = "Invalid nutrition approval manifest."
+NUTRITION_MANIFEST_FIELDS = frozenset(
+    {
+        "date", "revision", "total_kcal", "total_carbs_g", "total_protein_g",
+        "total_fat_g", "entry_count", "sha256",
+    }
+)
+SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 ISO_DAY_ERROR = "Das Datum muss ein ISO-Kalendertag sein."
 UNSUPPORTED_JOB_FIELDS_ERROR = "Der Job enth\u00e4lt nicht unterst\u00fctzte Felder."
 
@@ -204,55 +212,13 @@ def _normalize_nutrition_sync_job(provider: str, values: dict[str, Any]) -> dict
     if "approval_manifest" in values:
         if set(values) != {"approval_manifest"}:
             raise JobValidationError("An approved nutrition sync cannot include other targets.")
-        manifest = values["approval_manifest"]
-        fields = {
-            "date", "revision", "total_kcal", "total_carbs_g",
-            "total_protein_g", "total_fat_g", "entry_count", "sha256",
-        }
-        if not isinstance(manifest, list) or len(manifest) > 31:
-            raise JobValidationError("Invalid nutrition approval manifest.")
-        normalized_manifest = []
-        seen_dates: set[str] = set()
-        for entry in manifest:
-            if not isinstance(entry, dict) or set(entry) != fields:
-                raise JobValidationError("Invalid nutrition approval manifest.")
-            raw_date = entry["date"]
-            try:
-                parsed = date.fromisoformat(raw_date) if isinstance(raw_date, str) else None
-            except ValueError as exc:
-                raise JobValidationError(ISO_DAY_ERROR) from exc
-            if parsed is None or parsed.isoformat() != raw_date or raw_date in seen_dates:
-                raise JobValidationError(ISO_DAY_ERROR)
-            invalid_integer = any(
-                type(entry[key]) is not int or entry[key] < 0
-                for key in ("revision", "total_kcal", "entry_count")
+        return {
+            "approval_manifest": _normalize_nutrition_approval_manifest(
+                values["approval_manifest"]
             )
-            if invalid_integer:
-                raise JobValidationError("Invalid nutrition approval manifest.")
-            for key in ("total_carbs_g", "total_protein_g", "total_fat_g"):
-                value = entry[key]
-                if value is not None and (type(value) not in {int, float} or value < 0):
-                    raise JobValidationError("Invalid nutrition approval manifest.")
-            if not isinstance(entry["sha256"], str) or not re.fullmatch(
-                r"[0-9a-f]{64}", entry["sha256"]
-            ):
-                raise JobValidationError("Invalid nutrition approval manifest.")
-            digest_values = {key: entry[key] for key in fields if key not in {"revision", "sha256"}}
-            digest = hashlib.sha256(
-                json.dumps(
-                    digest_values,
-                    sort_keys=True,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ).encode("utf-8")
-            ).hexdigest()
-            if digest != entry["sha256"]:
-                raise JobValidationError("Nutrition approval manifest hash does not match its totals.")
-            normalized_manifest.append(dict(entry))
-            seen_dates.add(raw_date)
-        return {"approval_manifest": normalized_manifest}
+        }
     if "date" in values and "pending_limit" in values:
-        raise JobValidationError("Wähle ein Datum oder ausstehende Tage, nicht beides.")
+        raise JobValidationError("Choose a date or pending days, not both.")
     if "date" in values:
         raw_date = values["date"]
         if not isinstance(raw_date, str):
@@ -264,13 +230,64 @@ def _normalize_nutrition_sync_job(provider: str, values: dict[str, Any]) -> dict
         if parsed.isoformat() != raw_date:
             raise JobValidationError(ISO_DAY_ERROR)
         return {"date": raw_date}
-    if "pending_limit" not in values:
-        raise JobValidationError("Wähle ein Datum oder ausstehende Tage.")
-    limit = values["pending_limit"]
+    limit = values.get("pending_limit")
     if type(limit) is not int or not 1 <= limit <= 31:
-        raise JobValidationError("Die Anzahl ausstehender Tage muss zwischen 1 und 31 liegen.")
+        raise JobValidationError("The nutrition sync limit must be between 1 and 31.")
     return {"pending_limit": limit}
 
+
+def _normalize_nutrition_approval_manifest(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > 31:
+        raise JobValidationError(INVALID_NUTRITION_MANIFEST_ERROR)
+    normalized: list[dict[str, Any]] = []
+    seen_dates: set[str] = set()
+    for entry in value:
+        normalized.append(_normalize_nutrition_approval_entry(entry, seen_dates))
+    return normalized
+
+
+def _normalize_nutrition_approval_entry(
+    entry: Any, seen_dates: set[str]
+) -> dict[str, Any]:
+    if not isinstance(entry, dict) or set(entry) != NUTRITION_MANIFEST_FIELDS:
+        raise JobValidationError(INVALID_NUTRITION_MANIFEST_ERROR)
+    raw_date = entry["date"]
+    try:
+        parsed = date.fromisoformat(raw_date) if isinstance(raw_date, str) else None
+    except ValueError as exc:
+        raise JobValidationError(ISO_DAY_ERROR) from exc
+    if parsed is None or parsed.isoformat() != raw_date or raw_date in seen_dates:
+        raise JobValidationError(ISO_DAY_ERROR)
+    if any(
+        type(entry[key]) is not int or entry[key] < 0
+        for key in ("revision", "total_kcal", "entry_count")
+    ):
+        raise JobValidationError(INVALID_NUTRITION_MANIFEST_ERROR)
+    for key in ("total_carbs_g", "total_protein_g", "total_fat_g"):
+        value = entry[key]
+        if value is not None and (type(value) not in {int, float} or value < 0):
+            raise JobValidationError(INVALID_NUTRITION_MANIFEST_ERROR)
+    if not isinstance(entry["sha256"], str) or not SHA256_PATTERN.fullmatch(
+        entry["sha256"]
+    ):
+        raise JobValidationError(INVALID_NUTRITION_MANIFEST_ERROR)
+    digest_values = {
+        key: entry[key]
+        for key in NUTRITION_MANIFEST_FIELDS
+        if key not in {"revision", "sha256"}
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            digest_values,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    if digest != entry["sha256"]:
+        raise JobValidationError("Nutrition approval hash does not match its totals.")
+    seen_dates.add(raw_date)
+    return dict(entry)
 
 def _normalize_reason_only_job(provider: str, values: dict[str, Any]) -> dict[str, str]:
     if provider != "intervals":
@@ -303,7 +320,7 @@ def _normalize_competition_push_job(provider: str, values: dict[str, Any]) -> di
             or not entry["id"].strip()
             or len(entry["id"]) > 160
             or not isinstance(entry.get("sha256"), str)
-            or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])
+            or not SHA256_PATTERN.fullmatch(entry["sha256"])
         ):
             raise JobValidationError("Die Wettkampf-Freigabevorschau ist ungültig.")
         entries.append(dict(entry))
@@ -318,7 +335,7 @@ def _normalize_plan_push_entry(entry: Any) -> dict[str, str]:
     if not isinstance(entry, dict) or not re.fullmatch(r"[0-9a-f-]{36}", workout_id):
         raise JobValidationError("Jede Plan-Push-Einheit benötigt eine lokale UUID.")
     payload_hash = str(entry.get("expected_payload_hash") or "").strip().lower()
-    if not re.fullmatch(r"[0-9a-f]{64}", payload_hash):
+    if not SHA256_PATTERN.fullmatch(payload_hash):
         raise JobValidationError("Jede Plan-Push-Einheit benötigt einen aktuellen Payload-Hash.")
     return {"library_workout_id": workout_id, "expected_payload_hash": payload_hash}
 

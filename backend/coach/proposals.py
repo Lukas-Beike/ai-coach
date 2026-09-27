@@ -145,28 +145,13 @@ def remote_coach_write_diff(
     if tool == "start_intervals_plan_sync":
         _plan_sync_write_diff(entry, arguments, intent)
     elif tool == "sync_nutrition":
-        entries = approval_manifest if isinstance(approval_manifest, list) else []
-        if not entries:
+        nutrition_entries = (
+            approval_manifest if isinstance(approval_manifest, list) else []
+        )
+        if not nutrition_entries:
             entry["date"] = "Keine ausstehenden Tage"
         else:
-            return [
-                {
-                    "name": entry["name"],
-                    "date": str(item["date"]),
-                    "kcal": f"{item['total_kcal']} kcal",
-                    "entries": str(item["entry_count"]),
-                    **{
-                        field: f"{item[key]} g"
-                        for field, key in (
-                            ("carbs", "total_carbs_g"),
-                            ("protein", "total_protein_g"),
-                            ("fat", "total_fat_g"),
-                        )
-                        if item.get(key) is not None
-                    },
-                }
-                for item in entries
-            ]
+            return _nutrition_write_diff(entry["name"], nutrition_entries)
     elif tool == "resolve_training_sync_conflict":
         entry["date"] = (
             "Synchronisationsauftrag " + str(arguments.get("job_id") or "")[:36]
@@ -181,6 +166,29 @@ def remote_coach_write_diff(
             "Adaptive Vorschau " + str(arguments.get("adjustment_id") or "")[:36]
         )
     return [entry]
+
+
+def _nutrition_write_diff(
+    name: str, manifest: list[dict[str, Any]]
+) -> list[dict[str, str]]:
+    return [
+        {
+            "name": name,
+            "date": str(item["date"]),
+            "kcal": f"{item['total_kcal']} kcal",
+            "entries": str(item["entry_count"]),
+            **{
+                field: f"{item[key]} g"
+                for field, key in (
+                    ("carbs", "total_carbs_g"),
+                    ("protein", "total_protein_g"),
+                    ("fat", "total_fat_g"),
+                )
+                if item.get(key) is not None
+            },
+        }
+        for item in manifest
+    ]
 
 
 def _plan_sync_write_diff(
@@ -338,42 +346,13 @@ class CoachProposalCreationService:
             "conversation_id": str(conversation_id)[:160],
             "client_turn_id": str(client_turn_id)[:160],
         }
-        if tool == "sync_competitions":
-            with self._database_manager.reader() as db:
-                payload["arguments"] = {
-                    **arguments,
-                    "_approval_manifest": competition_push_manifest(db),
-                }
-        elif tool == "delete_duplicate_intervals_activity":
-            snapshot = self._sync_state_repository.latest_snapshot() or {}
-            duplicate = latest_wahoo_garmin_duplicate(snapshot)
-            if not duplicate:
-                raise AppError(409, "Das Wahoo-/Garmin-Duplikat ist nicht mehr aktuell.")
-            for field in ("canonical_id", "duplicate_id"):
-                requested = arguments.get(field)
-                if requested and str(requested) != str(duplicate[field]):
-                    raise AppError(409, "Das angeforderte Duplikat stimmt nicht mit der Vorschau ueberein.")
-            manifest = {
-                "canonical_id": duplicate["canonical_id"],
-                "duplicate_id": duplicate["duplicate_id"],
-                "snapshot_synced_at": duplicate.get("snapshot_synced_at"),
-                "date": duplicate.get("start_date_local"),
-            }
-            payload["arguments"] = {**arguments, "_approval_manifest": manifest}
-        elif tool == "sync_nutrition":
-            if not self._nutrition_service:
-                raise AppError(503, "Ernährungsvorschau ist nicht verfügbar.")
-            date_value = str(arguments.get("date") or "").strip()
-            limit = arguments.get("pending_limit")
-            if bool(date_value) == (limit is not None):
-                raise AppError(400, "Wähle ein Datum oder ausstehende Tage.")
-            nutrition = self._nutrition_service()
-            manifest = (
-                nutrition.approval_manifest(meal_date=date_value)
-                if date_value
-                else nutrition.approval_manifest(pending_limit=limit)
-            )
-            payload["arguments"] = {**arguments, "_approval_manifest": manifest}
+        payload["arguments"] = _approved_remote_arguments(
+            tool,
+            arguments,
+            database_manager=self._database_manager,
+            sync_state_repository=self._sync_state_repository,
+            nutrition_service=self._nutrition_service,
+        )
         approval_manifest = payload["arguments"].get("_approval_manifest")
         return self.create(
             {
@@ -387,6 +366,62 @@ class CoachProposalCreationService:
             },
             session_csrf_hash,
         )
+
+
+def _approved_remote_arguments(
+    tool: str,
+    arguments: dict[str, Any],
+    *,
+    database_manager: DatabaseManager,
+    sync_state_repository: Any,
+    nutrition_service: Callable[[], Any] | None,
+) -> dict[str, Any]:
+    if tool == "sync_competitions":
+        with database_manager.reader() as db:
+            return {**arguments, "_approval_manifest": competition_push_manifest(db)}
+    if tool == "delete_duplicate_intervals_activity":
+        return _duplicate_approval_arguments(arguments, sync_state_repository)
+    if tool == "sync_nutrition":
+        return _nutrition_approval_arguments(arguments, nutrition_service)
+    return dict(arguments)
+
+
+def _duplicate_approval_arguments(
+    arguments: dict[str, Any], sync_state_repository: Any
+) -> dict[str, Any]:
+    snapshot = sync_state_repository.latest_snapshot() or {}
+    duplicate = latest_wahoo_garmin_duplicate(snapshot)
+    if not duplicate:
+        raise AppError(409, "Das Wahoo-/Garmin-Duplikat ist nicht mehr aktuell.")
+    for field in ("canonical_id", "duplicate_id"):
+        requested = arguments.get(field)
+        if requested and str(requested) != str(duplicate[field]):
+            raise AppError(409, "Das angeforderte Duplikat stimmt nicht mit der Vorschau ueberein.")
+    manifest = {
+        "canonical_id": duplicate["canonical_id"],
+        "duplicate_id": duplicate["duplicate_id"],
+        "snapshot_synced_at": duplicate.get("snapshot_synced_at"),
+        "date": duplicate.get("start_date_local"),
+    }
+    return {**arguments, "_approval_manifest": manifest}
+
+
+def _nutrition_approval_arguments(
+    arguments: dict[str, Any], nutrition_service: Callable[[], Any] | None
+) -> dict[str, Any]:
+    if not nutrition_service:
+        raise AppError(503, "Ernährungsvorschau ist nicht verfügbar.")
+    date_value = str(arguments.get("date") or "").strip()
+    limit = arguments.get("pending_limit")
+    if bool(date_value) == (limit is not None):
+        raise AppError(400, "Wähle ein Datum oder ausstehende Tage.")
+    nutrition = nutrition_service()
+    manifest = (
+        nutrition.approval_manifest(meal_date=date_value)
+        if date_value
+        else nutrition.approval_manifest(pending_limit=limit)
+    )
+    return {**arguments, "_approval_manifest": manifest}
 
 
 class CoachProposalReadService:
