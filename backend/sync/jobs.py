@@ -44,6 +44,7 @@ RETRYABLE_ERROR_CLASSES = frozenset(
 SYNC_JOB_LIST_LIMIT = 50
 SYNC_JOB_MAX_ATTEMPTS = 3
 ISO_DAY_ERROR = "Das Datum muss ein ISO-Kalendertag sein."
+UNSUPPORTED_JOB_FIELDS_ERROR = "Der Job enth\u00e4lt nicht unterst\u00fctzte Felder."
 
 
 class SyncJobNotFoundError(LookupError):
@@ -224,7 +225,7 @@ def _normalize_reason_only_job(provider: str, values: dict[str, Any]) -> dict[st
     if provider != "intervals":
         raise JobValidationError("Dieser Job ist nur für Intervals.icu zulässig.")
     if set(values) - {"reason"}:
-        raise JobValidationError("Der Job enthält nicht unterstützte Felder.")
+        raise JobValidationError(UNSUPPORTED_JOB_FIELDS_ERROR)
     return {"reason": str(values.get("reason") or "job").strip()[:80] or "job"}
 
 
@@ -232,7 +233,7 @@ def _normalize_competition_push_job(provider: str, values: dict[str, Any]) -> di
     if provider != "intervals":
         raise JobValidationError("Dieser Job ist nur für Intervals.icu zulässig.")
     if set(values) - {"reason", "approval_manifest"}:
-        raise JobValidationError("Der Job enthält nicht unterstützte Felder.")
+        raise JobValidationError(UNSUPPORTED_JOB_FIELDS_ERROR)
     if "approval_manifest" not in values:
         raise JobValidationError("Der Wettkampf-Sync benötigt eine bestätigte Vorschau.")
     normalized: dict[str, Any] = {
@@ -295,7 +296,7 @@ def _normalize_refresh_job(
     provider_value: str, values: dict[str, Any], all_sync_days: int
 ) -> dict[str, Any]:
     if set(values) - _refresh_job_fields(provider_value):
-        raise JobValidationError("Der Job enthält nicht unterstützte Felder.")
+        raise JobValidationError(UNSUPPORTED_JOB_FIELDS_ERROR)
 
     normalized_payload: dict[str, Any] = {}
     if "days" in values:
