@@ -141,17 +141,13 @@ def remote_coach_write_diff(
     approval_manifest: Any = None,
 ) -> list[dict[str, str]]:
     """Project the remote effect into a compact, non-sensitive approval summary."""
+    if tool == "sync_nutrition":
+        return _nutrition_approval_diff(
+            REMOTE_WRITE_LABELS[tool], approval_manifest
+        )
     entry: dict[str, str] = {"name": REMOTE_WRITE_LABELS[tool]}
     if tool == "start_intervals_plan_sync":
         _plan_sync_write_diff(entry, arguments, intent)
-    elif tool == "sync_nutrition":
-        nutrition_entries = (
-            approval_manifest if isinstance(approval_manifest, list) else []
-        )
-        if not nutrition_entries:
-            entry["date"] = "Keine ausstehenden Tage"
-        else:
-            return _nutrition_write_diff(entry["name"], nutrition_entries)
     elif tool == "resolve_training_sync_conflict":
         entry["date"] = (
             "Synchronisationsauftrag " + str(arguments.get("job_id") or "")[:36]
@@ -166,6 +162,15 @@ def remote_coach_write_diff(
             "Adaptive Vorschau " + str(arguments.get("adjustment_id") or "")[:36]
         )
     return [entry]
+
+
+def _nutrition_approval_diff(
+    name: str, approval_manifest: Any
+) -> list[dict[str, str]]:
+    entries = approval_manifest if isinstance(approval_manifest, list) else []
+    if entries:
+        return _nutrition_write_diff(name, entries)
+    return [{"name": name, "date": "Keine ausstehenden Tage"}]
 
 
 def _nutrition_write_diff(
