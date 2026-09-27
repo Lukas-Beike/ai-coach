@@ -7,13 +7,13 @@ remains usable with both SQLite test doubles and SQLCipher in production.
 
 from __future__ import annotations
 
+import queue
+import threading
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-import queue
-import threading
-from typing import Any, Callable, Iterator
-
+from typing import Any
 
 DATABASE_MANAGER_CLOSED_MESSAGE = "database manager is closed"
 
@@ -61,7 +61,9 @@ class DatabaseManager:
         self._reader_slots = threading.BoundedSemaphore(self.reader_count)
 
     def _connect(self) -> Any:
-        connection = self.backend.connect(self.path, timeout=self.timeout, check_same_thread=False)
+        connection = self.backend.connect(
+            self.path, timeout=self.timeout, check_same_thread=False
+        )
         try:
             if self.password and self.configure:
                 self.configure(connection, self.password)
@@ -102,6 +104,7 @@ class DatabaseManager:
             if self.persist_connections and connection is None:
                 connection = self._connect()
                 self._writer = connection
+            assert connection is not None
             token = self._unit_of_work.set(connection)
             try:
                 yield connection

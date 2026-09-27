@@ -45,8 +45,15 @@ class CoachStructuredToolPreparationService:
         arguments = metadata["arguments"]
         action = metadata["action"]
         if (question or cancelled) and name not in self._read_only_tools:
-            raise AppError(409, "Der Auftrag wartet auf deine Antwort oder wurde abgebrochen.", reason="request_paused")
-        if name not in self._read_only_tools and name not in {"clarify_coach_request", "cancel_coach_request"}:
+            raise AppError(
+                409,
+                "Der Auftrag wartet auf deine Antwort oder wurde abgebrochen.",
+                reason="request_paused",
+            )
+        if name not in self._read_only_tools and name not in {
+            "clarify_coach_request",
+            "cancel_coach_request",
+        }:
             action = self._dialogue_action.classify(
                 name, arguments, context, allow_mutations=allow_mutations
             )
@@ -54,8 +61,15 @@ class CoachStructuredToolPreparationService:
             entry["tool"] != name and entry["tool"] not in self._read_only_tools
             for entry in unresolved_coach_steps(command_receipts)
         ):
-            raise AppError(409, "Vor der Synchronisierung muss der fehlgeschlagene lokale Schritt abgeschlossen werden.", reason="request_dependency")
-        if name == "start_provider_refresh" and action.get("target_system") == "intervals":
+            raise AppError(
+                409,
+                "Vor der Synchronisierung muss der fehlgeschlagene lokale Schritt abgeschlossen werden.",
+                reason="request_dependency",
+            )
+        if (
+            name == "start_provider_refresh"
+            and action.get("target_system") == "intervals"
+        ):
             arguments["_wait_for_completion"] = True
             arguments.setdefault(
                 "days",
@@ -64,7 +78,9 @@ class CoachStructuredToolPreparationService:
                 ),
             )
         if name == "get_sync_job":
-            action["authorization_scope"] = ["sync_job:" + str(arguments.get("job_id") or "")]
+            action["authorization_scope"] = [
+                "sync_job:" + str(arguments.get("job_id") or "")
+            ]
         if name == "start_intervals_plan_sync":
             self._prepare_plan_sync(arguments, action, command_receipts)
         return action
@@ -79,7 +95,11 @@ class CoachStructuredToolPreparationService:
         if sync_scope == "all_pending":
             entries = self._planning_authority.pending_plan_push_entries()
             if not entries:
-                raise AppError(409, "Es gibt keine ausstehenden Einheiten zum Synchronisieren.", reason="no_pending_plan_entries")
+                raise AppError(
+                    409,
+                    "Es gibt keine ausstehenden Einheiten zum Synchronisieren.",
+                    reason="no_pending_plan_entries",
+                )
             arguments["entries"] = entries
             action["_sync_all_pending"] = True
             action["authorization_scope"].extend(
@@ -88,17 +108,28 @@ class CoachStructuredToolPreparationService:
             return
         if sync_scope == "created":
             created_ids = {
-                value for entry in command_receipts if entry.get("result", {}).get("ok")
+                value
+                for entry in command_receipts
+                if entry.get("result", {}).get("ok")
                 for value in entry["result"].get("library_entry_ids", [])
             }
             if not created_ids:
-                raise AppError(409, "Die neue Planung wurde noch nicht erfolgreich gespeichert.", reason="plan_commit_required")
+                raise AppError(
+                    409,
+                    "Die neue Planung wurde noch nicht erfolgreich gespeichert.",
+                    reason="plan_commit_required",
+                )
             entries = [
-                entry for entry in self._planning_authority.pending_plan_push_entries()
+                entry
+                for entry in self._planning_authority.pending_plan_push_entries()
                 if entry["library_workout_id"] in created_ids
             ]
             if {entry["library_workout_id"] for entry in entries} != created_ids:
-                raise AppError(409, "Die neue Planung hat sich geändert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
+                raise AppError(
+                    409,
+                    "Die neue Planung hat sich geändert. Lies den aktuellen Stand erneut.",
+                    reason="planning_revision_conflict",
+                )
             arguments["entries"] = entries
             action["_created_sync_entry_ids"] = sorted(created_ids)
             action["authorization_scope"].extend(
@@ -106,4 +137,8 @@ class CoachStructuredToolPreparationService:
             )
             return
         if not arguments.get("entries") and not arguments.get("repair"):
-            raise AppError(400, "Wähle die zu synchronisierenden Einheiten aus.", reason="request_sync")
+            raise AppError(
+                400,
+                "Wähle die zu synchronisierenden Einheiten aus.",
+                reason="request_sync",
+            )
