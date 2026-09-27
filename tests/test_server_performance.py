@@ -1,4 +1,5 @@
 """Server integration tests for performance."""
+from backend.runtime import clock as runtime_clock
 
 import json
 import unittest
@@ -11,10 +12,12 @@ from backend.activities.duplicates import filter_garmin_activities, garmin_activ
 from backend.performance import activity_validation, current_metrics as performance_current_metrics, garmin_metrics as performance_garmin_metrics, garmin_projection, load as performance_load, max_hr as performance_max_hr, morning_battery as performance_morning_battery, planning_recovery as performance_planning_recovery
 from backend.performance.morning_battery_service import MORNING_BATTERY_HISTORY_KEY
 from backend.planning import context as planning_context
+from backend.providers import garmin as garmin_provider
 from backend.providers import intervals_client as intervals_client_module
 from backend.sync.intervals import IntervalsSnapshotReader
 from backend.sync.performance import PerformanceRefreshService
 from backend.weather import history as weather_history
+from backend.sync import queue as sync_queue
 from server_test_support import _current_performance_context, _garmin_metrics, server, ServerTestCase
 
 
@@ -23,10 +26,10 @@ class ServerPerformanceTests(ServerTestCase):
     def test_performance_refresh_jobs_are_deduplicated_atomically(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
-            first = server.sync_job_queue_service().enqueue(
+            first = server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals", "performance_refresh", {"reason": "first"}, requested_by="scheduler"
             )
-            second = server.sync_job_queue_service().enqueue(
+            second = server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals", "performance_refresh", {"reason": "second"}, requested_by="coach"
             )
         self.assertEqual(second["id"], first["id"])
@@ -41,9 +44,9 @@ class ServerPerformanceTests(ServerTestCase):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config), patch.object(
             PerformanceRefreshService, "running", return_value=True
-        ), patch.object(server.SyncJobQueueService, "enqueue") as enqueue:
+        ), patch.object(sync_queue.SyncJobQueueService, "enqueue") as enqueue:
             self.assertIsNone(
-                server.performance_refresh_followup_service().enqueue_after_sync(
+                server.INTERVALS_SYNC.performance_followup().enqueue_after_sync(
                     "startup"
                 )
             )
@@ -79,7 +82,7 @@ class ServerPerformanceTests(ServerTestCase):
             "activities": [{"activityId": 1, "activityName": "Should not be sent"}],
             "race_predictions": {"5k": 1310},
         }))
-        result = server.garmin_projection_service().coach_context()
+        result = server.GARMIN_ASSEMBLY.projection_service().coach_context()
         self.assertEqual(result["recovery"]["sleep"]["calendarDate"], "2026-08-29")
         self.assertEqual(result["recovery"]["hrv"]["lastNightAvg"], 57)
         self.assertEqual(result["recovery"]["readiness"]["score"], 78)
@@ -93,7 +96,7 @@ class ServerPerformanceTests(ServerTestCase):
             "readiness": {"trainingReadiness": {"calendarDate": "2026-08-29", "trainingReadinessScore": 78}},
         }))
 
-        result = server.garmin_projection_service().coach_context()
+        result = server.GARMIN_ASSEMBLY.projection_service().coach_context()
 
         self.assertEqual(result["recovery"]["sleep"]["sleepScore"], 82)
         self.assertEqual(result["recovery"]["readiness"]["trainingReadinessScore"], 78)
@@ -140,8 +143,8 @@ class ServerPerformanceTests(ServerTestCase):
         }
         metrics = performance_current_metrics.current_performance_metrics(
             snapshot,
-            server.profile_service().get(),
-            _garmin_metrics(server.garmin_payload_service().snapshot()),
+            server.ATHLETE_DATA.profile().get(),
+            _garmin_metrics(server.GARMIN_ASSEMBLY.payload_service().snapshot()),
         )
         self.assertEqual(metrics["running_vo2max_ml_kg_min"]["value"], 55)
         self.assertEqual(metrics["running_vo2max_ml_kg_min"]["source"], "Garmin Connect")
@@ -221,8 +224,8 @@ class ServerPerformanceTests(ServerTestCase):
         }
         metrics = performance_current_metrics.current_performance_metrics(
             snapshot,
-            server.profile_service().get(),
-            _garmin_metrics(server.garmin_payload_service().snapshot()),
+            server.ATHLETE_DATA.profile().get(),
+            _garmin_metrics(server.GARMIN_ASSEMBLY.payload_service().snapshot()),
         )
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 302)
         self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Garmin Connect")
@@ -291,7 +294,7 @@ class ServerPerformanceTests(ServerTestCase):
             [{"id": today, "sportInfo": [{"types": ["Ride"], "eFTP": 290}]}],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
 
         performance = _current_performance_context(snapshot)
@@ -347,8 +350,8 @@ class ServerPerformanceTests(ServerTestCase):
 
         config = replace(server.CONFIG, garmin_email="test@example.invalid", garmin_password="test")
         with patch.object(server, "CONFIG", config), \
-                patch.object(server.GarminClientFactory, "available", return_value=True), \
-                patch.object(server.GarminClientFactory, "create", side_effect=FakeGarmin):
+                patch.object(garmin_provider.GarminClientFactory, "available", return_value=True), \
+                patch.object(garmin_provider.GarminClientFactory, "create", side_effect=FakeGarmin):
             first = server.morning_body_battery_service().sync(date(2026, 9, 4))
             second = server.morning_body_battery_service().sync(date(2026, 9, 4))
 
@@ -356,7 +359,7 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(second["status"], "already_loaded")
         self.assertEqual(FakeGarmin.sleep_calls, ["2026-09-04"])
         self.assertEqual(FakeGarmin.body_battery_calls, [("2026-09-03", "2026-09-04")])
-        self.assertEqual(server.garmin_projection_service().public_state()["morning_body_battery"]["morning"]["value"], 78)
+        self.assertEqual(server.GARMIN_ASSEMBLY.projection_service().public_state()["morning_body_battery"]["morning"]["value"], 78)
         self.assertEqual(
             weather_history.decode_history(
                 server.key_value_service().get(MORNING_BATTERY_HISTORY_KEY)
@@ -399,7 +402,7 @@ class ServerPerformanceTests(ServerTestCase):
             [],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
 
         validation = _current_performance_context(snapshot)["activity_validation"]
@@ -428,7 +431,7 @@ class ServerPerformanceTests(ServerTestCase):
             [],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
 
         validation = _current_performance_context(snapshot)["activity_validation"]
@@ -534,7 +537,7 @@ class ServerPerformanceTests(ServerTestCase):
             [{"id": today, "ctLoad": 68, "atlLoad": 74, "form": -6, "readiness": 82}],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
         performance = _current_performance_context(snapshot)
         metrics = performance["metrics"]
@@ -557,7 +560,7 @@ class ServerPerformanceTests(ServerTestCase):
             ],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
 
         comparison = _current_performance_context(snapshot)["comparisons"]["cycling_eftp_30d"]
@@ -579,7 +582,7 @@ class ServerPerformanceTests(ServerTestCase):
             [{"id": today}],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
 
         metrics = _current_performance_context(snapshot)["metrics"]
@@ -587,7 +590,7 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(metrics["cycling_eftp_watts"]["value"], 309)
 
     def test_manual_body_profile_values_are_used_when_api_values_are_absent(self):
-        server.profile_service().save({"weight_kg": "71,4", "body_fat_pct": "10.5", "height_cm": "181"})
+        server.ATHLETE_DATA.profile().save({"weight_kg": "71,4", "body_fat_pct": "10.5", "height_cm": "181"})
         performance = _current_performance_context({"synced_at": "now", "athlete": {}, "recent_wellness": [], "recent_activities": []})
         self.assertEqual(performance["metrics"]["weight_kg"]["value"], 71.4)
         self.assertEqual(performance["metrics"]["body_fat_pct"]["source"], "Manuell")
@@ -606,9 +609,9 @@ class ServerPerformanceTests(ServerTestCase):
             IntervalsSnapshotReader,
             "fetch_performance_snapshot",
             fetch_performance_snapshot,
-        ), patch.object(server, "openai_responses_client") as openai_client:
+        ), patch.object(server.MODEL_TRANSPORT, "openai_responses_client") as openai_client:
             with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")):
-                result = server.performance_refresh_service().refresh()
+                result = server.INTERVALS_SYNC.performance_service().refresh()
         self.assertEqual(result["status"], "ok")
         self.assertEqual(len(calls), 1)
         openai_client.assert_not_called()
@@ -648,25 +651,25 @@ class ServerPerformanceTests(ServerTestCase):
             ],
         }
         snapshot["raw_provider_data"] = {"activities": list(snapshot["recent_activities"])}
-        server.sync_state_repository().save_snapshot(snapshot)
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
         pair = latest_wahoo_garmin_duplicate(
-            server.sync_state_repository().latest_snapshot() or {}
+            server.SYNC_PERSISTENCE.state_repository().latest_snapshot() or {}
         )
         with patch.object(intervals_client_module.IntervalsClient, "delete_activity", return_value=None) as delete:
-            result = server.duplicate_activity_service().delete(
+            result = server.ATHLETE_DATA.duplicate_activity().delete(
                 {
                     "canonical_id": pair["canonical_id"],
                     "duplicate_id": pair["duplicate_id"],
                     "snapshot_synced_at": pair["snapshot_synced_at"],
                 },
-                server.intervals_client(),
+                server.PROVIDER_TRANSPORT.intervals_client(),
             )
         delete.assert_called_once_with("i-garmin")
         self.assertEqual(result["kept_activity_id"], "i-wahoo")
         self.assertEqual(
             [
                 item["id"]
-                for item in server.sync_state_repository().latest_snapshot()[
+                for item in server.SYNC_PERSISTENCE.state_repository().latest_snapshot()[
                     "recent_activities"
                 ]
             ],

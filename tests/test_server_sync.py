@@ -1,4 +1,5 @@
 """Server integration tests for sync."""
+from backend.runtime import clock as runtime_clock
 
 import json
 import sys
@@ -15,14 +16,23 @@ from urllib.error import HTTPError
 
 from backend.activities.duplicates import filter_garmin_activities, garmin_activity_duplicates_intervals, intervals_cycling_activities_match, latest_wahoo_garmin_duplicate
 from backend.http_api import server as http_server_module
+from backend.http_api.static_assets import StaticAssetService
 from backend.performance import current_metrics as performance_current_metrics, garmin_observations
 from backend.planning import adaptive as planning_adaptive, competitions as planning_competitions, context as planning_context, library as planning_library
 from backend.providers import intervals_client as intervals_client_module
 from backend.sync.intervals import IntervalsSnapshotReader, IntervalsSyncService
+from backend.sync import intervals_assembly as intervals_assembly_module
 from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
 from backend.sync.library import WorkoutLibraryRefreshService, WorkoutLibrarySyncService
+from backend.sync import garmin_service
+from backend.sync import provider_resync_assembly as provider_resync_assembly_module
 from backend.sync.performance import PerformanceRefreshFollowupService
+from backend.sync.plan_commands import PlanPushCommandService
+from backend.sync.authority import PlanningAuthorityService
 from backend.sync.selected import SelectedWorkoutSyncService
+from backend.sync import queue as sync_queue
+from backend.sync import executor as sync_executor
+from backend.sync import worker as sync_worker_runtime
 from server_test_support import _current_performance_context, _garmin_metrics, server, ServerTestCase
 from support import IntervalsRequestRecorder, parsed_workout_fixture, RecordedIntervalsClient
 
@@ -32,7 +42,7 @@ class ServerSyncTests(ServerTestCase):
     def _prepare_remote_contract_fixture(self, include_competition=False):
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
-        server.workout_library_service().create_local_entry({
+        server.PLANNING_DATA.workout_library().create_local_entry({
             "sport": "Ride",
             "name": "Contract fixture",
             "description": "- 30m Z2",
@@ -41,7 +51,7 @@ class ServerSyncTests(ServerTestCase):
             "rationale": "Test",
         })
         if include_competition:
-            server.athlete_context_service().save({}, [{
+            server.ATHLETE_DATA.context().save({}, [{
                 "name": "Contract race",
                 "event_date": (date.today() + timedelta(days=30)).isoformat(),
                 "sport": "Cycling",
@@ -51,7 +61,7 @@ class ServerSyncTests(ServerTestCase):
     def _prepare_competition_contract_fixture(self):
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
-        server.athlete_context_service().save({}, [{
+        server.ATHLETE_DATA.context().save({}, [{
             "name": "Competition contract",
             "event_date": (date.today() + timedelta(days=30)).isoformat(),
             "sport": "Cycling",
@@ -65,21 +75,21 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server.observability, "configure_logging"), patch.object(
             server.app_config, "security_configuration_error", return_value=None
         ), patch.object(server, "initialise_database", side_effect=lambda: order.append("schema")), patch.object(
-            server.SyncJobQueueService,
+            sync_queue.SyncJobQueueService,
             "resume_interrupted",
             side_effect=lambda: order.append("sync-recovery"),
         ), patch(
             "backend.coach.job_store.CoachJobStore.resume_interrupted", side_effect=lambda *_: order.append("coach-recovery")
         ), patch.object(http_server_module, "CoachHTTPServer", http_server_factory), patch.object(
-            server.SyncJobWorker, "start", side_effect=lambda _worker: order.append("sync-worker"), autospec=True
+            sync_worker_runtime.SyncJobWorker, "start", side_effect=lambda _worker: order.append("sync-worker"), autospec=True
         ), patch.object(
             server.COACH_JOB_WORKER, "start", side_effect=lambda *_: order.append("coach-worker")
         ), patch.object(server.COACH_JOB_WORKER, "stop") as coach_stop, patch.object(
             server.COACH_JOB_WORKER, "join"
-        ) as coach_join, patch.object(server.SyncJobWorker, "stop") as sync_stop, patch.object(
-            server.SyncJobWorker, "join"
-        ) as sync_join, patch.object(server, "startup_sync_scheduler") as startup_scheduler, patch.object(
-            server, "daily_sync_loop_service"
+        ) as coach_join, patch.object(sync_worker_runtime.SyncJobWorker, "stop") as sync_stop, patch.object(
+            sync_worker_runtime.SyncJobWorker, "join"
+        ) as sync_join, patch.object(server.SYNC_SCHEDULERS, "startup_scheduler") as startup_scheduler, patch.object(
+            server.SYNC_SCHEDULERS, "daily_loop"
         ) as daily_loop_factory, patch.object(server.threading, "Thread") as thread_factory:
             startup_scheduler.return_value.schedule.side_effect = lambda: order.append("startup-sync")
             daily_loop = Mock()
@@ -89,7 +99,7 @@ class ServerSyncTests(ServerTestCase):
         address, handler_class = http_server_factory.call_args.args
         self.assertEqual(address, ("0.0.0.0", server.CONFIG.port))
         self.assertTrue(issubclass(handler_class, server.BaseHTTPRequestHandler))
-        self.assertIsInstance(handler_class.static_asset_service, server.StaticAssetService)
+        self.assertIsInstance(handler_class.static_asset_service, StaticAssetService)
         self.assertEqual(handler_class.static_asset_service._targets["index.html"], server.PUBLIC_DIR / "index.html")
         thread_factory.assert_called_once_with(target=daily_loop.run, daemon=True)
         self.assertEqual(
@@ -105,37 +115,37 @@ class ServerSyncTests(ServerTestCase):
         coach_join.assert_called_once_with(timeout=5)
 
     def test_persistent_sync_job_claim_resume_retry_and_completion(self):
-        job = server.sync_job_queue_service().enqueue(
+        job = server.SYNC_JOB_QUEUE.service().enqueue(
             "intervals", "refresh", {"days": 7}, requested_by="user"
         )
         self.assertEqual(job["status"], "queued")
         self.assertEqual(job["progress"], {"completed": 0, "total": 1})
-        claimed = server.sync_job_store().claim()
+        claimed = server.SYNC_JOB_QUEUE.store().claim()
         self.assertEqual(claimed["id"], job["id"])
         self.assertEqual(
-            server.sync_job_queue_service().state(job["id"])["status"], "running"
+            server.SYNC_JOB_QUEUE.service().state(job["id"])["status"], "running"
         )
-        self.assertEqual(server.sync_job_queue_service().resume_interrupted(), 1)
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().resume_interrupted(), 1)
         self.assertEqual(
-            server.sync_job_queue_service().state(job["id"])["status"], "queued"
+            server.SYNC_JOB_QUEUE.service().state(job["id"])["status"], "queued"
         )
-        claimed = server.sync_job_store().claim()
-        with patch.object(server.SyncJobExecutor, "execute", return_value={"status": "ok"}):
-            server.sync_job_executor().run(claimed)
-        completed = server.sync_job_queue_service().state(job["id"])
+        claimed = server.SYNC_JOB_QUEUE.store().claim()
+        with patch.object(sync_executor.SyncJobExecutor, "execute", return_value={"status": "ok"}):
+            server.SYNC_JOB_EXECUTION.executor().run(claimed)
+        completed = server.SYNC_JOB_QUEUE.service().state(job["id"])
         self.assertEqual(completed["status"], "completed")
         self.assertEqual(completed["progress"], {"completed": 1, "total": 1})
         self.assertEqual(completed["items"][0]["status"], "completed")
 
     def test_persistent_sync_job_retries_only_safe_transient_errors(self):
-        job = server.sync_job_queue_service().enqueue(
+        job = server.SYNC_JOB_QUEUE.service().enqueue(
             "weather", "refresh", {"force": True}
         )
-        claimed = server.sync_job_store().claim()
+        claimed = server.SYNC_JOB_QUEUE.store().claim()
         provider_detail = "https://athlete:secret-pass@example.invalid/private-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        with patch.object(server.SyncJobExecutor, "execute", side_effect=server.AppError(503, provider_detail, reason="network_error")):
-            server.sync_job_executor().run(claimed)
-        state = server.sync_job_queue_service().state(job["id"])
+        with patch.object(sync_executor.SyncJobExecutor, "execute", side_effect=server.AppError(503, provider_detail, reason="network_error")):
+            server.SYNC_JOB_EXECUTION.executor().run(claimed)
+        state = server.SYNC_JOB_QUEUE.service().state(job["id"])
         self.assertEqual(state["status"], "queued")
         self.assertEqual(state["error_class"], "network_error")
         self.assertEqual(state["items"][0]["status"], "queued")
@@ -145,30 +155,30 @@ class ServerSyncTests(ServerTestCase):
 
     def test_plan_push_job_preserves_all_failed_object_outcomes(self):
         local_id = str(uuid.uuid4())
-        job = server.sync_job_queue_service().enqueue(
+        job = server.SYNC_JOB_QUEUE.service().enqueue(
             "intervals",
             "plan_push",
             {"entries": [{"library_workout_id": local_id, "expected_payload_hash": "a" * 64}]},
             requested_by="coach",
             item_operations=[{"item_key": local_id, "operation": "plan_push", "payload_hash": "a" * 64}],
         )
-        claimed = server.sync_job_store().claim()
+        claimed = server.SYNC_JOB_QUEUE.store().claim()
         result = {"status": "error", "results": [{"library_workout_id": local_id, "status": "conflict", "error": "changed"}]}
-        with patch.object(server.SyncJobExecutor, "execute", return_value=result):
-            server.sync_job_executor().run(claimed)
-        state = server.sync_job_queue_service().state(job["id"])
+        with patch.object(sync_executor.SyncJobExecutor, "execute", return_value=result):
+            server.SYNC_JOB_EXECUTION.executor().run(claimed)
+        state = server.SYNC_JOB_QUEUE.service().state(job["id"])
         self.assertEqual(state["status"], "failed")
         self.assertEqual(state["items"][0]["status"], "failed")
         self.assertEqual(state["progress"], {"completed": 1, "total": 1})
 
     def test_replacement_follow_up_sync_accepts_complete_plan_size(self):
-        planned = server.local_plan_creation_service().save([
+        planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([
             {"date": (date.today() + timedelta(days=index + 1)).isoformat(), "sport": "Run",
              "name": "Synthetic replacement run", "description": "- 30m 60% Synthetic easy session", "duration_minutes": 30}
             for index in range(planning_library.LIBRARY_BULK_MAX_ENTRIES + 1)
         ])
         local_ids = [item["id"] for item in planned]
-        entries = [item for item in server.planning_authority_service().pending_plan_push_entries() if item["library_workout_id"] in local_ids]
+        entries = [item for item in server.SYNC_COMMANDS.authority().pending_plan_push_entries() if item["library_workout_id"] in local_ids]
         intent = {
             "intent": "remote_sync", "operation": "replace_training_plan", "target_system": "intervals",
             "artifact_id": None, "ambiguities": [],
@@ -177,10 +187,10 @@ class ServerSyncTests(ServerTestCase):
             "_replacement_sync_entry_ids": local_ids,
         }
 
-        with patch.object(server.PlanningAuthorityService, "mark_planning_authoritative"), patch.object(
-            server.PlanPushCommandService, "enqueue", return_value={"ok": True, "status": "queued"},
+        with patch.object(PlanningAuthorityService, "mark_planning_authoritative"), patch.object(
+            PlanPushCommandService, "enqueue", return_value={"ok": True, "status": "queued"},
         ) as enqueue:
-            result = server.coach_tool_dispatch_service().execute(
+            result = server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync", {"entries": entries}, intent=intent,
                 conversation_id="conversation-large-replacement", client_turn_id="turn-large-replacement",
                 session_csrf_hash="", sync_job_ids=[],
@@ -201,8 +211,8 @@ class ServerSyncTests(ServerTestCase):
         }
         entries = [{"library_workout_id": local_ids[0], "expected_payload_hash": "b" * 64}]
 
-        with patch.object(server.PlanPushCommandService, "enqueue") as enqueue, self.assertRaises(server.AppError) as error:
-            server.coach_tool_dispatch_service().execute(
+        with patch.object(PlanPushCommandService, "enqueue") as enqueue, self.assertRaises(server.AppError) as error:
+            server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync", {"entries": entries}, intent=intent,
                 conversation_id="conversation-created-subset", client_turn_id="turn-created-subset",
                 session_csrf_hash="", sync_job_ids=[],
@@ -224,11 +234,11 @@ class ServerSyncTests(ServerTestCase):
         performance_service.refresh.return_value = {"status": "ok"}
         competition_service = Mock()
         competition_service.sync.return_value = {"status": "ok", "pushed": 1}
-        with patch.object(server, "performance_refresh_service", return_value=performance_service), patch.object(
-            server, "competition_sync_service", return_value=competition_service
+        with patch.object(intervals_assembly_module, "PerformanceRefreshService", return_value=performance_service), patch.object(
+            provider_resync_assembly_module, "CompetitionSyncService", return_value=competition_service
         ):
-            self.assertEqual(server.sync_job_executor().execute(performance_job)["status"], "ok")
-            self.assertEqual(server.sync_job_executor().execute(competition_job)["pushed"], 1)
+            self.assertEqual(server.SYNC_JOB_EXECUTION.executor().execute(performance_job)["status"], "ok")
+            self.assertEqual(server.SYNC_JOB_EXECUTION.executor().execute(competition_job)["pushed"], 1)
         performance_service.refresh.assert_called_once_with()
         competition_service.sync.assert_called_once_with(
             reason="Coach request", push_local=True
@@ -241,12 +251,12 @@ class ServerSyncTests(ServerTestCase):
         }
         performance_service = Mock()
         performance_service.refresh.return_value = {"status": "ok"}
-        with patch.object(server, "performance_refresh_service", return_value=performance_service), patch.object(
+        with patch.object(intervals_assembly_module, "PerformanceRefreshService", return_value=performance_service), patch.object(
             IntervalsSyncService,
             "sync",
             side_effect=AssertionError("normalized job fell through to full sync"),
         ):
-            self.assertEqual(server.sync_job_executor().execute(refresh_job)["status"], "ok")
+            self.assertEqual(server.SYNC_JOB_EXECUTION.executor().execute(refresh_job)["status"], "ok")
         performance_service.refresh.assert_called_once_with()
 
     def test_intervals_job_delegates_performance_follow_up_to_common_sync_path(self):
@@ -257,13 +267,13 @@ class ServerSyncTests(ServerTestCase):
         competition_service = Mock()
         competition_service.sync.return_value = {"status": "ok"}
         with patch.object(IntervalsSyncService, "sync", return_value={"status": "ok"}) as sync, patch.object(
-            server, "competition_sync_service", return_value=competition_service
+            provider_resync_assembly_module, "CompetitionSyncService", return_value=competition_service
         ), patch.object(
-            server.SyncJobQueueService,
+            sync_queue.SyncJobQueueService,
             "enqueue",
             return_value={"id": "job-performance-follow-up"},
         ) as enqueue:
-            result = server.sync_job_executor().execute(refresh_job)
+            result = server.SYNC_JOB_EXECUTION.executor().execute(refresh_job)
         self.assertEqual(result["status"], "ok")
         sync.assert_called_once()
         enqueue.assert_not_called()
@@ -278,7 +288,7 @@ class ServerSyncTests(ServerTestCase):
             "enqueue_after_sync",
             return_value={"id": "job-performance-follow-up"},
         ) as enqueue, patch.object(PerformanceRefreshFollowupService, "wait") as wait:
-            result = server.intervals_sync_service().sync(
+            result = server.INTERVALS_SYNC.sync_service().sync(
                 "startup", activity_days=90, wait_for_performance=True
             )
         self.assertEqual(result["performance_refresh_job_id"], "job-performance-follow-up")
@@ -286,7 +296,7 @@ class ServerSyncTests(ServerTestCase):
         wait.assert_called_once_with("job-performance-follow-up", cancel_event=None)
 
     def test_apply_result_deduplicates_changed_ids_for_sync(self):
-        planned = server.planned_unit_service().create({
+        planned = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=9)).isoformat(),
             "sport": "Ride", "name": "Repeated", "description": "- 20m 60% easy",
         })
@@ -294,7 +304,7 @@ class ServerSyncTests(ServerTestCase):
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
         }
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "apply_training_changes",
             {"changes": [
                 {"local_id": planned["id"], "action": "update", "name": "First"},
@@ -306,11 +316,11 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(result["library_entry_ids"], [planned["id"]])
 
     def test_changed_batch_sync_is_limited_to_changed_entries(self):
-        changed = server.planned_unit_service().create({
+        changed = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=6)).isoformat(),
             "sport": "Ride", "name": "Changed", "description": "- 20m 60% easy",
         })
-        untouched = server.planned_unit_service().create({
+        untouched = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=7)).isoformat(),
             "sport": "Run", "name": "Untouched", "description": "- 20m 60% easy",
         })
@@ -320,8 +330,8 @@ class ServerSyncTests(ServerTestCase):
             "authorization_scope": [f"library_workout:{changed['id']}"],
             "_sync_changed_entries_only": True, "_changed_sync_entry_ids": [changed["id"]],
         }
-        with patch.object(server.SyncJobQueueService, "enqueue", return_value={"id": "job-changed"}) as enqueue:
-            result = server.coach_tool_dispatch_service().execute(
+        with patch.object(sync_queue.SyncJobQueueService, "enqueue", return_value={"id": "job-changed"}) as enqueue:
+            result = server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync", {}, intent=intent,
                 conversation_id="conversation-changed-sync", client_turn_id="turn-changed-sync",
                 session_csrf_hash="", sync_job_ids=[],
@@ -333,11 +343,11 @@ class ServerSyncTests(ServerTestCase):
 
     def test_changed_batch_sync_accepts_the_coach_change_limit(self):
         for index in range(101):
-            server.planned_unit_service().create({
+            server.PLANNING_DATA.planned_unit().create({
                 "date": (date.today() + timedelta(days=index + 10)).isoformat(),
                 "sport": "Ride", "name": f"Changed {index}", "description": "- 20m 60% easy",
             })
-        pending = server.planning_authority_service().pending_plan_push_entries()
+        pending = server.SYNC_COMMANDS.authority().pending_plan_push_entries()
         selected = pending[:101]
         intent = {
             "intent": "remote_sync", "operation": "start_intervals_plan_sync", "target_system": "intervals",
@@ -346,8 +356,8 @@ class ServerSyncTests(ServerTestCase):
             "_sync_changed_entries_only": True,
             "_changed_sync_entry_ids": [item["library_workout_id"] for item in selected],
         }
-        with patch.object(server.SyncJobQueueService, "enqueue", return_value={"id": "job-large-changed"}) as enqueue:
-            result = server.coach_tool_dispatch_service().execute(
+        with patch.object(sync_queue.SyncJobQueueService, "enqueue", return_value={"id": "job-large-changed"}) as enqueue:
+            result = server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync", {"entries": selected}, intent=intent,
                 conversation_id="conversation-large-changed", client_turn_id="turn-large-changed",
                 session_csrf_hash="", sync_job_ids=[],
@@ -363,13 +373,13 @@ class ServerSyncTests(ServerTestCase):
         server.key_value_service().set("sync_operation_phase", "fetching")
         server.key_value_service().set("sync_operation_progress", "35")
         server.key_value_service().set("sync_operation_message", "Daten werden gelesen…")
-        with patch.object(server, "state_version_service") as versions:
+        with patch.object(server.PUBLIC_STATE, "state_version_service") as versions:
             versions.return_value.versions.return_value = {"activities": "v1"}
-            status = server.sync_public_state_service().state()
+            status = server.PUBLIC_STATE.sync_public_state_service().state()
         self.assertEqual(status["operation_id"], "operation-test")
         self.assertEqual(status["phase"], "fetching")
         self.assertEqual(status["progress"], 35)
-        bootstrap = server.public_bootstrap_service().read()
+        bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(bootstrap["sync"]["progress"], 35)
         self.assertEqual(bootstrap["sync"]["message"], "Daten werden gelesen…")
 
@@ -402,14 +412,14 @@ class ServerSyncTests(ServerTestCase):
 
     def test_daily_sync_markers_are_separate_per_provider(self):
         local_day = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
-        markers = server.daily_sync_marker_service()
+        markers = server.SYNC_PERSISTENCE.daily_markers()
         markers.mark("intervals", local_day)
         self.assertFalse(markers.is_due("intervals", local_day))
         self.assertTrue(markers.is_due("intervals", local_day + timedelta(hours=1)))
         self.assertTrue(markers.is_due("garmin", local_day))
         self.assertTrue(markers.is_due("calendar", local_day))
         with patch.object(server.ATHLETE_CLOCK, "now", return_value=local_day):
-            server.sync_job_queue_service().enqueue(
+            server.SYNC_JOB_QUEUE.service().enqueue(
                 "calendar", "refresh", {}, requested_by="scheduler"
             )
         self.assertFalse(markers.is_due("calendar", local_day))
@@ -447,13 +457,13 @@ class ServerSyncTests(ServerTestCase):
         self.assertNotIn('[:10]', daily_scheduler)
 
     def test_sync_status_exposes_non_sensitive_maintenance_state(self):
-        status = server.sync_public_state_service().state()
+        status = server.PUBLIC_STATE.sync_public_state_service().state()
         self.assertEqual(set(status["maintenance"]), {"active", "running_operations"})
         self.assertFalse(status["maintenance"]["active"])
 
     def test_illness_pause_can_sync_sick_events_after_confirmation(self):
-        server.checkin_service().save({"illness": "Erkältung"})
-        preview = server.adaptive_replan_preview_service().preview()
+        server.ATHLETE_DATA.checkin().save({"illness": "Erkältung"})
+        preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         calls = []
 
         class FakeIntervalsClient:
@@ -461,10 +471,9 @@ class ServerSyncTests(ServerTestCase):
                 calls.extend(events)
                 return [{"id": index} for index, _ in enumerate(events, 1)]
 
-        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=FakeIntervalsClient()
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=FakeIntervalsClient()
         ):
-            result = server.illness_pause_sync_service().apply(preview["id"], sync_illness_to_intervals=True)
+            result = server.SYNC_COMMANDS.illness_pause().apply(preview["id"], sync_illness_to_intervals=True)
 
         self.assertEqual(result["intervals_sync"]["status"], "ok")
         self.assertEqual(result["intervals_sync"]["category"], "SICK")
@@ -479,7 +488,7 @@ class ServerSyncTests(ServerTestCase):
             [{"id": "2026-01-01", "ctl": 42, "unknown": 99}],
             [{"id": 1, "name": "Tempo", "category": "WORKOUT", "raw": "nope"}],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
         self.assertEqual(result["athlete"]["name"], "Ada")
         self.assertNotIn("secret", result["athlete"])
@@ -526,8 +535,8 @@ class ServerSyncTests(ServerTestCase):
         }
         metrics = performance_current_metrics.current_performance_metrics(
             snapshot,
-            server.profile_service().get(),
-            _garmin_metrics(server.garmin_payload_service().snapshot()),
+            server.ATHLETE_DATA.profile().get(),
+            _garmin_metrics(server.GARMIN_ASSEMBLY.payload_service().snapshot()),
         )
         self.assertEqual(metrics["cycling_max_hr_bpm"]["value"], 188)
         self.assertEqual(metrics["cycling_max_hr_bpm"]["source"], "Intervals.icu")
@@ -581,7 +590,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertIsNone(comparison)
 
     def test_existing_snapshot_uses_configured_intervals_window(self):
-        server.sync_state_repository().save_snapshot({"synced_at": "2026-08-28T08:00:00+00:00", "athlete": {}, "recent_activities": [{"id": "old"}], "recent_wellness": [], "upcoming_calendar": []})
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({"synced_at": "2026-08-28T08:00:00+00:00", "athlete": {}, "recent_activities": [{"id": "old"}], "recent_wellness": [], "upcoming_calendar": []})
         calls = []
 
         def fake_get(path, params=None):
@@ -597,7 +606,7 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            reader = server.intervals_snapshot_reader()
+            reader = server.INTERVALS_SYNC.snapshot_reader()
             with patch.object(reader._api_client, "get", side_effect=fake_get):
                 snapshot = reader.fetch_snapshot(activity_days=90)
         activity_call = next(params for path, params in calls if path.endswith("/activities"))
@@ -610,15 +619,15 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual({item["id"] for item in snapshot["recent_activities"]}, {"old", "new"})
 
     def test_synced_library_template_must_be_archived_instead_of_deleted(self):
-        entry = server.workout_library_remote_reconciler().reconcile([{"id": "remote-1", "name": "Remote Vorlage", "type": "Ride", "description": "Easy ride"}])[0]
+        entry = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{"id": "remote-1", "name": "Remote Vorlage", "type": "Ride", "description": "Easy ride"}])[0]
         with self.assertRaises(server.AppError) as error:
-            server.workout_library_service().update(entry["id"], {"action": "delete"})
+            server.PLANNING_DATA.workout_library().update(entry["id"], {"action": "delete"})
         self.assertEqual(error.exception.status, 409)
-        archived = server.workout_library_service().update(entry["id"], {"action": "archive"})
+        archived = server.PLANNING_DATA.workout_library().update(entry["id"], {"action": "archive"})
         self.assertTrue(archived["library_entry"]["archived"])
 
     def test_existing_intervals_coach_folder_is_reused(self):
-        client = server.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        client = server.PROVIDER_TRANSPORT.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
         with patch.object(client, "get", return_value=[{"id": 77, "name": "Intervals Coach", "type": "FOLDER"}]), patch.object(
             client, "post", return_value={"id": "remote-1"}
         ) as post:
@@ -629,17 +638,17 @@ class ServerSyncTests(ServerTestCase):
         )
 
     def test_library_sync_reconciles_remote_template_before_creating(self):
-        entry = server.workout_library_service().create_local_entry({
+        entry = server.PLANNING_DATA.workout_library().create_local_entry({
             "sport": "Ride", "name": "Coach Tempo", "description": "- 30m 85%", "duration_minutes": 30,
         })
         remote = {"id": "remote-recovered", "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%", **parsed_workout_fixture()}
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             intervals_client_module.IntervalsClient, "get_workout_library", return_value=[remote]
         ), patch.object(intervals_client_module.IntervalsClient, "create_library_workouts") as create:
-            synced = server.workout_library_sync_service().sync_entry(entry["id"])
+            synced = server.WORKOUT_LIBRARY_SYNC.sync_service().sync_entry(entry["id"])
         self.assertEqual(synced["external_id"], "remote-recovered")
         create.assert_not_called()
-        self.assertEqual(server.workout_library_service().list()[0]["sync_status"], "synced")
+        self.assertEqual(server.PLANNING_DATA.workout_library().list()[0]["sync_status"], "synced")
 
     def test_intervals_read_transport_injects_request_and_builds_query(self):
         from backend.providers.intervals import IntervalsReadTransport
@@ -815,7 +824,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(fake.maximum, 2)
 
     def test_intervals_collection_rejects_repeated_full_page(self):
-        client = server.intervals_client(replace(server.CONFIG, intervals_api_key="test-key"))
+        client = server.PROVIDER_TRANSPORT.intervals_client(replace(server.CONFIG, intervals_api_key="test-key"))
         page = [{"id": f"activity-{index}"} for index in range(500)]
         with patch.object(client._api, "get", side_effect=[page, page]):
             with self.assertRaises(server.AppError) as raised:
@@ -826,7 +835,7 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            reader = server.intervals_snapshot_reader()
+            reader = server.INTERVALS_SYNC.snapshot_reader()
             with patch.object(reader._api_client, "get", side_effect=[
                 [{"id": "activity-1", "start_date_local": "2026-08-31T08:00:00"}],
                 [{"id": "2026-08-31"}],
@@ -843,13 +852,13 @@ class ServerSyncTests(ServerTestCase):
     def test_plan_push_job_requires_bounded_selected_hashed_entries(self):
         local_id = str(uuid.uuid4())
         entry = {"library_workout_id": local_id, "expected_payload_hash": "a" * 64}
-        job = server.sync_job_queue_service().enqueue(
+        job = server.SYNC_JOB_QUEUE.service().enqueue(
             "intervals", "plan_push", {"entries": [entry]}, requested_by="coach"
         )
         self.assertEqual(job["type"], "plan_push")
         self.assertEqual(job["payload"], {"entries": [entry], "reason": "job"})
         with self.assertRaises(server.AppError) as too_many:
-            server.sync_job_queue_service().enqueue(
+            server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals",
                 "plan_push",
                 {"entries": [entry] * 29},
@@ -869,13 +878,13 @@ class ServerSyncTests(ServerTestCase):
             "recent_wellness": [],
             "upcoming_calendar": [],
         }
-        server.sync_state_repository().save_snapshot(snapshot)
-        context = server.coach_training_context_service().build()
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
+        context = server.COACH_CONTEXT.training_context_service().build()
         self.assertIn("Ride 0", context)
         self.assertNotIn("Ride 5", context)
         self.assertNotIn("LATEST INTERVALS.ICU SNAPSHOT", context)
         self.assertEqual(context.count('"local_planned_workouts"'), 1)
-        preview = server.coach_context_preview_service().preview(server.SETTINGS.selected_ai_provider())
+        preview = server.COACH_CONTEXT.preview_service().preview(server.SETTINGS.selected_ai_provider())
         self.assertTrue(preview["snapshot_compacted"])
         self.assertFalse(preview["snapshot_truncated"])
         self.assertTrue(preview["projection"]["within_total_budget"])
@@ -883,7 +892,7 @@ class ServerSyncTests(ServerTestCase):
     def test_sync_period_supports_all_available_data_marker(self):
         from backend.sync.windows import split_date_windows
 
-        repository = server.sync_state_repository()
+        repository = server.SYNC_PERSISTENCE.state_repository()
         self.assertEqual(
             repository.set_sync_period(
                 "intervals", -1, server.ALL_SYNC_DAYS
@@ -943,13 +952,13 @@ class ServerSyncTests(ServerTestCase):
     def test_sync_intervals_uses_saved_period_when_not_explicitly_given(self):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
         config = replace(server.CONFIG, intervals_api_key="test-key")
-        server.sync_state_repository().set_sync_period(
+        server.SYNC_PERSISTENCE.state_repository().set_sync_period(
             "intervals", 65, server.ALL_SYNC_DAYS
         )
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-        ) as fetch_snapshot, patch.object(WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}), patch.object(server, "openai_responses_client") as openai_client:
-            result = server.intervals_sync_service().sync("test")
+        ) as fetch_snapshot, patch.object(WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}), patch.object(server.MODEL_TRANSPORT, "openai_responses_client") as openai_client:
+            result = server.INTERVALS_SYNC.sync_service().sync("test")
         fetch_snapshot.assert_called_once_with(activity_days=65)
         openai_client.assert_not_called()
         self.assertEqual(result["activity_days"], 65)
@@ -964,7 +973,7 @@ class ServerSyncTests(ServerTestCase):
         ) as fetch_snapshot, patch.object(
             WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}
         ) as refresh_library:
-            server.intervals_sync_service().sync(
+            server.INTERVALS_SYNC.sync_service().sync(
                 "cancellable", activity_days=42, cancel_event=cancel_event
             )
         fetch_snapshot.assert_called_once_with(activity_days=42, cancel_event=cancel_event)
@@ -981,7 +990,7 @@ class ServerSyncTests(ServerTestCase):
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
         ), patch.object(WorkoutLibraryRefreshService, "refresh", side_effect=cancellation):
             with self.assertRaises(server.AppError) as raised:
-                server.intervals_sync_service().sync(
+                server.INTERVALS_SYNC.sync_service().sync(
                     "cancellable-library",
                     activity_days=42,
                     cancel_event=cancel_event,
@@ -998,7 +1007,7 @@ class ServerSyncTests(ServerTestCase):
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
         ), patch.object(WorkoutLibraryRefreshService, "refresh", side_effect=cancellation):
             with self.assertRaises(server.AppError):
-                server.intervals_sync_service().sync(
+                server.INTERVALS_SYNC.sync_service().sync(
                     "cancellable-library",
                     activity_days=42,
                     cancel_event=threading.Event(),
@@ -1012,15 +1021,15 @@ class ServerSyncTests(ServerTestCase):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
             with self.assertRaises(server.AppError) as raised:
-                server.intervals_sync_service().sync(
+                server.INTERVALS_SYNC.sync_service().sync(
                     "cancelled", activity_days=42, cancel_event=cancel_event
                 )
             freshness = {
                 (item["provider"], item["area"]): item
-                for item in server.provider_freshness_service().current(
-                    profile=server.profile_service().get(),
+                for item in server.PROVIDER_SYNC.freshness_service().current(
+                    profile=server.ATHLETE_DATA.profile().get(),
                     garmin_has_core_error=bool(
-                        server.garmin_sync_state_service().core_error_entries()
+                        server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()
                     ),
                     garmin_tokenstore_exists=Path(server.CONFIG.garmin_tokenstore).exists(),
                 )
@@ -1049,10 +1058,10 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
         ), patch.object(intervals_client_module.IntervalsClient, "get_workout_library", return_value=remote) as get_library:
-            result = server.intervals_sync_service().sync("initial", activity_days=42)
+            result = server.INTERVALS_SYNC.sync_service().sync("initial", activity_days=42)
 
         get_library.assert_called_once_with()
-        library = server.workout_library_service().list()
+        library = server.PLANNING_DATA.workout_library().list()
         self.assertEqual(len(library), 1)
         self.assertEqual(library[0]["external_id"], "remote-template-1")
         self.assertEqual(library[0]["name"], "Remote Vorlage")
@@ -1089,17 +1098,17 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", side_effect=[first_snapshot, second_snapshot]
         ), patch.object(WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}):
-            first = server.intervals_sync_service().sync("initial", activity_days=42)
-            second = server.intervals_sync_service().sync("later", activity_days=42)
+            first = server.INTERVALS_SYNC.sync_service().sync("initial", activity_days=42)
+            second = server.INTERVALS_SYNC.sync_service().sync("later", activity_days=42)
 
         self.assertEqual(first["planned_import"]["imported"], 1)
         self.assertEqual(second["planned_import"]["imported"], 0)
-        planned = server.planned_unit_service().list()
+        planned = server.PLANNING_DATA.planned_unit().list()
         self.assertEqual([item["name"] for item in planned], ["Initiale Planung"])
         self.assertEqual(server.key_value_service().get("planned_units_initial_import_at"), "first")
 
     def test_intervals_sync_imports_remote_templates_alongside_local_library(self):
-        local = server.workout_library_service().create_local_entry({
+        local = server.PLANNING_DATA.workout_library().create_local_entry({
             "sport": "Ride",
             "name": "Lokale Vorlage",
             "description": "- 20m 60% locker", "duration_minutes": 20,
@@ -1112,12 +1121,12 @@ class ServerSyncTests(ServerTestCase):
             "id": "remote-template-2", "name": "Remote Vorlage", "type": "Ride",
             "description": "- 30m Z2", "moving_time": 1800,
         }]) as get_library:
-            result = server.intervals_sync_service().sync("existing", activity_days=42)
+            result = server.INTERVALS_SYNC.sync_service().sync("existing", activity_days=42)
 
         get_library.assert_called_once_with()
         self.assertEqual(result["library"], 2)
         self.assertEqual(result["library_imported"], 1)
-        library = server.workout_library_service().list()
+        library = server.PLANNING_DATA.workout_library().list()
         self.assertEqual(len(library), 2)
         self.assertIn(local["id"], {item["id"] for item in library})
         self.assertEqual(next(item for item in library if item["name"] == "Remote Vorlage")["external_id"], "remote-template-2")
@@ -1130,7 +1139,7 @@ class ServerSyncTests(ServerTestCase):
         ), patch.object(
             SelectedWorkoutSyncService, "sync", return_value={"status": "partial", "workouts": 1, "local_errors": ["upload failed"]}
         ) as library_sync, patch.object(WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}):
-            result = server.intervals_sync_service().sync("test", activity_days=42)
+            result = server.INTERVALS_SYNC.sync_service().sync("test", activity_days=42)
         library_sync.assert_not_called()
         self.assertEqual(result["status"], "ok")
         self.assertIsNone(result["library_error"])
@@ -1139,77 +1148,71 @@ class ServerSyncTests(ServerTestCase):
         recorder, client = self._prepare_remote_contract_fixture()
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            server.sync_job_queue_service().enqueue(
+            server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals", "refresh", {"days": 7, "reason": "startup"}
             )
-            server.sync_job_executor().run(server.sync_job_store().claim())
+            server.SYNC_JOB_EXECUTION.executor().run(server.SYNC_JOB_QUEUE.store().claim())
         self.assertEqual(recorder.mutations, [])
 
     def test_daily_sync_contract_rejects_remote_mutations(self):
         recorder, client = self._prepare_remote_contract_fixture()
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            server.sync_job_queue_service().enqueue(
+            server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals", "refresh", {"days": 7, "reason": "daily"}
             )
-            server.sync_job_executor().run(server.sync_job_store().claim())
+            server.SYNC_JOB_EXECUTION.executor().run(server.SYNC_JOB_QUEUE.store().claim())
         self.assertEqual(recorder.mutations, [])
 
     def test_startup_sync_competition_contract_rejects_remote_mutations(self):
         recorder, client = self._prepare_competition_contract_fixture()
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            server.sync_job_queue_service().enqueue(
+            server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals", "refresh", {"days": 7, "reason": "startup"}
             )
-            server.sync_job_executor().run(server.sync_job_store().claim())
+            server.SYNC_JOB_EXECUTION.executor().run(server.SYNC_JOB_QUEUE.store().claim())
         self.assertEqual(recorder.mutations, [])
 
     def test_daily_sync_competition_contract_rejects_remote_mutations(self):
         recorder, client = self._prepare_competition_contract_fixture()
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            server.sync_job_queue_service().enqueue(
+            server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals", "refresh", {"days": 7, "reason": "daily"}
             )
-            server.sync_job_executor().run(server.sync_job_store().claim())
+            server.SYNC_JOB_EXECUTION.executor().run(server.SYNC_JOB_QUEUE.store().claim())
         self.assertEqual(recorder.mutations, [])
 
     def test_manual_activity_sync_contract_rejects_remote_mutations(self):
         recorder, client = self._prepare_remote_contract_fixture()
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            server.intervals_sync_service().sync("activity", activity_days=7)
+            server.INTERVALS_SYNC.sync_service().sync("activity", activity_days=7)
         self.assertEqual(recorder.mutations, [])
 
     def test_full_resync_contract_rejects_remote_mutations(self):
         recorder, client = self._prepare_remote_contract_fixture()
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            server.full_provider_resync_service().resync("intervals")
+            server.PROVIDER_RESYNC.full_resync_service().resync("intervals")
         self.assertEqual(recorder.mutations, [])
 
     def test_explicit_competition_sync_records_create_change_and_delete_contract(self):
         event_date = (date.today() + timedelta(days=30)).isoformat()
-        saved = server.athlete_context_service().save({}, [{
+        saved = server.ATHLETE_DATA.context().save({}, [{
             "name": "Explicit race",
             "event_date": event_date,
             "sport": "Cycling",
@@ -1217,18 +1220,17 @@ class ServerSyncTests(ServerTestCase):
         competition_id = saved["competitions"][0]["id"]
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
-        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            created = server.competition_sync_service().sync("explicit approval", push_local=True)
-            server.competition_service().save({
+            created = server.PROVIDER_RESYNC.competition_sync_service().sync("explicit approval", push_local=True)
+            server.PLANNING_DATA.competition().save({
                 "competition_id": competition_id,
                 "name": "Explicit race changed",
                 "event_date": event_date,
                 "sport": "Cycling",
             })
-            server.athlete_context_service().save({}, [])
-            deleted = server.competition_sync_service().sync("explicit approval", push_local=True)
+            server.ATHLETE_DATA.context().save({}, [])
+            deleted = server.PROVIDER_RESYNC.competition_sync_service().sync("explicit approval", push_local=True)
         self.assertEqual(created["pushed"], 1)
         self.assertEqual(deleted["deleted_remote"], 1)
         self.assertEqual([call["method"] for call in recorder.mutations], ["POST", "DELETE"])
@@ -1236,25 +1238,24 @@ class ServerSyncTests(ServerTestCase):
     def test_local_sync_error_and_remote_missing_entries_are_not_retried_by_read_sync(self):
         recorder = IntervalsRequestRecorder()
         entries = [
-            server.workout_library_service().create_local_entry({"sport": "Ride", "name": state, "description": "- 20m Z2", "duration_minutes": 20})
+            server.PLANNING_DATA.workout_library().create_local_entry({"sport": "Ride", "name": state, "description": "- 20m Z2", "duration_minutes": 20})
             for state in ("local", "sync_error", "remote_missing")
         ]
         for entry, state in zip(entries[1:], ("sync_error", "remote_missing")):
-            server.workout_library_sync_state_service().update(
+            server.WORKOUT_LIBRARY_SYNC.sync_state_service().update(
                 entry["id"], state, "fake failure"
             )
         client = RecordedIntervalsClient(recorder)
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        ), patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            server.intervals_sync_service().sync("read-only", activity_days=1)
+            server.INTERVALS_SYNC.sync_service().sync("read-only", activity_days=1)
         self.assertEqual(recorder.mutations, [])
 
     def test_full_intervals_resync_preserves_local_library_and_never_remote_data(self):
-        server.athlete_context_service().save({}, [{"name": "Old local race", "event_date": (date.today() + timedelta(days=30)).isoformat()}])
-        server.workout_library_remote_reconciler().reconcile([{
+        server.ATHLETE_DATA.context().save({}, [{"name": "Old local race", "event_date": (date.today() + timedelta(days=30)).isoformat()}])
+        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": "old-workout", "name": "Local template", "type": "Ride",
             "description": "- 30m Z2", "moving_time": 1800,
         }])
@@ -1297,28 +1298,28 @@ class ServerSyncTests(ServerTestCase):
 
         with patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=new_snapshot
-        ), patch.object(server, "intervals_client", FakeIntervalsClient), patch.object(
+        ), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ), patch.object(SelectedWorkoutSyncService, "sync", return_value={"workouts": 0}):
-            result = server.full_provider_resync_service().resync("intervals")
+            result = server.PROVIDER_RESYNC.full_resync_service().resync("intervals")
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(deleted, [])
         self.assertEqual(
-            server.sync_state_repository().latest_snapshot()["synced_at"], "new"
+            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["synced_at"], "new"
         )
         self.assertEqual(
-            {competition["name"] for competition in server.competition_service().list()},
+            {competition["name"] for competition in server.PLANNING_DATA.competition().list()},
             {"Old local race"},
         )
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM workout_library").fetchone()["count"], 1)
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM competition_sync_tombstones").fetchone()["count"], 1)
-        self.assertEqual(server.workout_library_service().list()[0]["external_id"], "old-workout")
+        self.assertEqual(server.PLANNING_DATA.workout_library().list()[0]["external_id"], "old-workout")
 
     def test_full_intervals_resync_keeps_last_snapshot_on_provider_failure(self):
         old_snapshot = {"synced_at": "old", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
-        server.sync_state_repository().save_snapshot(old_snapshot)
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(old_snapshot)
 
         with patch.object(
             IntervalsSnapshotReader,
@@ -1328,21 +1329,21 @@ class ServerSyncTests(ServerTestCase):
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
             with self.assertRaises(RuntimeError):
-                server.full_provider_resync_service().resync("intervals")
+                server.PROVIDER_RESYNC.full_resync_service().resync("intervals")
         self.assertEqual(
-            server.sync_state_repository().latest_snapshot()["synced_at"], "old"
+            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["synced_at"], "old"
         )
 
     def test_full_garmin_resync_keeps_last_snapshot_on_provider_failure(self):
         server.key_value_service().set("garmin_snapshot", json.dumps({"old": True}))
         config = replace(server.CONFIG, garmin_fixture_path="fixture.json")
         with patch.object(server, "CONFIG", config), patch.object(
-            server.GarminSyncService,
+            garmin_service.GarminSyncService,
             "sync",
             side_effect=RuntimeError("provider unavailable"),
         ):
             with self.assertRaises(RuntimeError):
-                server.full_provider_resync_service().resync("garmin")
+                server.PROVIDER_RESYNC.full_resync_service().resync("garmin")
         self.assertEqual(json.loads(server.key_value_service().get("garmin_snapshot")), {"old": True})
 
     def test_full_resync_blocks_intervals_operations(self):
@@ -1352,8 +1353,8 @@ class ServerSyncTests(ServerTestCase):
             with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")):
                 def attempt_sync():
                     try:
-                        server.sync_job_executor().execute(
-                            server.sync_job_queue_service().enqueue(
+                        server.SYNC_JOB_EXECUTION.executor().execute(
+                            server.SYNC_JOB_QUEUE.service().enqueue(
                                 "intervals",
                                 "competition_push",
                                 {"reason": "test"},
@@ -1377,24 +1378,24 @@ class ServerSyncTests(ServerTestCase):
             fixture.write_text(json.dumps({"activities": [], "errors": []}), encoding="utf-8")
             config = replace(server.CONFIG, garmin_fixture_path=str(fixture))
             with patch.object(server, "CONFIG", config):
-                result = server.full_provider_resync_service().resync("garmin")
+                result = server.PROVIDER_RESYNC.full_resync_service().resync("garmin")
         self.assertEqual(result["status"], "ok")
         self.assertNotEqual(server.key_value_service().get("garmin_snapshot"), json.dumps({"old": True}))
-        self.assertEqual(server.garmin_payload_service().snapshot().get("source"), "fixture")
+        self.assertEqual(server.GARMIN_ASSEMBLY.payload_service().snapshot().get("source"), "fixture")
 
     def test_all_time_snapshot_does_not_truncate_activity_history(self):
         snapshot = planning_context.compact_snapshot(
             {}, [{"id": str(index), "name": f"Ride {index}"} for index in range(600)],
             [{"id": f"2026-01-{index:02d}", "ctl": index} for index in range(1, 4)], [], history_days=-1,
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
         self.assertEqual(len(snapshot["recent_activities"]), 600)
         self.assertEqual(len(snapshot["recent_wellness"]), 3)
 
     def test_competition_sync_pushes_local_events_idempotently(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()
-        saved = server.athlete_context_service().save({}, [{"name": "Test Race", "event_date": event_date, "priority": "A", "sport": "Cycling"}])
+        saved = server.ATHLETE_DATA.context().save({}, [{"name": "Test Race", "event_date": event_date, "priority": "A", "sport": "Cycling"}])
         local_id = saved["competitions"][0]["id"]
         calls = {}
         remote = []
@@ -1414,11 +1415,11 @@ class ServerSyncTests(ServerTestCase):
             def bulk_delete_events(self, identifiers):
                 return 0
 
-        with patch.object(server, "intervals_client", FakeIntervalsClient), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            result = server.competition_sync_service().sync("test", push_local=True)
-            second = server.competition_sync_service().sync("test", push_local=True)
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
+            second = server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
 
         self.assertEqual(result["pushed"], 1)
         self.assertEqual(second["pushed"], 0)
@@ -1427,13 +1428,13 @@ class ServerSyncTests(ServerTestCase):
             calls["events"][0]["external_id"],
             planning_competitions.competition_external_id(local_id),
         )
-        synced = server.competition_service().list()[0]
+        synced = server.PLANNING_DATA.competition().list()[0]
         self.assertEqual(synced["intervals_event_id"], "12345")
         self.assertEqual(synced["sync_dirty"], 0)
 
     def test_competition_sync_marks_dirty_identity_match_as_conflict(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()
-        server.athlete_context_service().save({}, [{
+        server.ATHLETE_DATA.context().save({}, [{
             "name": "Existing Race", "event_date": event_date, "priority": "A", "sport": "Cycling",
         }])
         pushed = []
@@ -1455,16 +1456,16 @@ class ServerSyncTests(ServerTestCase):
             def bulk_delete_events(self, identifiers):
                 return 0
 
-        with patch.object(server, "intervals_client", FakeIntervalsClient), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            result = server.competition_sync_service().sync("test", push_local=True)
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
 
         self.assertEqual(result["pushed"], 0)
         self.assertEqual(result["conflicts"], 1)
         self.assertEqual(result["imported"], 0)
         self.assertEqual(pushed, [])
-        competition = server.competition_service().list()[0]
+        competition = server.PLANNING_DATA.competition().list()[0]
         self.assertIsNone(competition["intervals_event_id"])
         self.assertEqual(competition["sync_dirty"], 1)
         self.assertEqual(competition["sync_state"], "conflict")
@@ -1499,26 +1500,26 @@ class ServerSyncTests(ServerTestCase):
             def bulk_delete_events(self, identifiers):
                 return 0
 
-        with patch.object(server, "intervals_client", FakeIntervalsClient), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            result = server.competition_sync_service().sync("test")
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test")
 
         self.assertEqual(result["imported"], 1)
-        competition = server.competition_service().list()[0]
+        competition = server.PLANNING_DATA.competition().list()[0]
         self.assertEqual(competition["name"], "Remote Half Marathon")
         self.assertEqual(competition["event_date"], event_date)
         self.assertEqual(competition["intervals_event_id"], "777")
         self.assertEqual(competition["sync_dirty"], 0)
 
         # Saving the profile after an import must retain the provider link.
-        server.athlete_context_service().save({}, [competition])
-        saved_again = server.competition_service().list()[0]
+        server.ATHLETE_DATA.context().save({}, [competition])
+        saved_again = server.PLANNING_DATA.competition().list()[0]
         self.assertEqual(saved_again["intervals_event_id"], "777")
 
     def test_competition_sync_skips_unsupported_local_sports(self):
         event_date = (date.today() + timedelta(days=30)).isoformat()
-        server.athlete_context_service().save({}, [{"name": "Swim Race", "event_date": event_date, "sport": "Swim"}])
+        server.ATHLETE_DATA.context().save({}, [{"name": "Swim Race", "event_date": event_date, "sport": "Swim"}])
         pushed = []
 
         class FakeIntervalsClient:
@@ -1532,15 +1533,15 @@ class ServerSyncTests(ServerTestCase):
             def bulk_delete_events(self, identifiers):
                 return 0
 
-        with patch.object(server, "intervals_client", FakeIntervalsClient), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            result = server.competition_sync_service().sync("test")
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test")
 
         self.assertEqual(result["pushed"], 0)
         self.assertEqual(result["skipped"], 1)
         self.assertEqual(pushed, [])
-        self.assertEqual(server.competition_service().list()[0]["name"], "Swim Race")
+        self.assertEqual(server.PLANNING_DATA.competition().list()[0]["name"], "Swim Race")
 
     def test_current_performance_is_derived_from_intervals_snapshot(self):
         today = date.today().isoformat()
@@ -1577,7 +1578,7 @@ class ServerSyncTests(ServerTestCase):
             [{"id": today, "sportInfo": [{"types": ["Ride"], "eFTP": 274}]}],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=server.utc_now(),
+            synced_at=runtime_clock.utc_now(),
         )
 
         performance = _current_performance_context(snapshot)
@@ -1643,7 +1644,7 @@ class ServerSyncTests(ServerTestCase):
         server.key_value_service().set("last_sync_at", "old-sync")
         INTERVALS_SYNC_LOCK.acquire()
         previous_snapshot_read = threading.Event()
-        service = server.intervals_sync_service()
+        service = server.INTERVALS_SYNC.sync_service()
         status = service._status
         original_get_value = status.get
 
@@ -1686,9 +1687,9 @@ class ServerSyncTests(ServerTestCase):
             {},
             BytesIO(error_body),
         )
-        with patch.object(server.provider_http_client(), "opener", side_effect=upstream_error):
+        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", side_effect=upstream_error):
             with self.assertRaises(server.AppError) as raised:
-                server.provider_http_client().request("POST", "https://intervals.icu/api/v1/athlete/0/workouts", payload={}, service="intervals")
+                server.PROVIDER_TRANSPORT.json_http_client().request("POST", "https://intervals.icu/api/v1/athlete/0/workouts", payload={}, service="intervals")
         self.assertEqual(raised.exception.status, 502)
         self.assertIn("422", raised.exception.message)
         self.assertIn("Invalid workout type", raised.exception.message)
@@ -1701,12 +1702,12 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(server, "CONFIG", config), patch.object(
             IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
         ), patch.object(intervals_client_module.IntervalsClient, "get_workout_library", return_value=[]):
-            server.intervals_sync_service().sync(
+            server.INTERVALS_SYNC.sync_service().sync(
                 "manual", activity_days=1, operation_id=operation_id
             )
         for handler in server.LOGGER.handlers:
             handler.flush()
-        entries = server.recent_log_entries_service().list(200)
+        entries = server.DIAGNOSTICS_ASSEMBLY.recent_log_entries_service().list(200)
         correlated = [entry for entry in entries if entry.get("context", {}).get("operation_id") == operation_id]
         events = {entry.get("event") for entry in correlated}
         self.assertTrue({"operation_started", "operation_completed", "operation_count"}.issubset(events))
@@ -1719,20 +1720,20 @@ class ServerSyncTests(ServerTestCase):
         config = replace(server.CONFIG, garmin_fixture_path="missing-garmin-fixture.json")
         with patch.object(server, "CONFIG", config):
             with self.assertRaises(server.AppError):
-                server.garmin_sync_service().sync()
-        state = server.garmin_projection_service().public_state()
+                server.GARMIN_ASSEMBLY.sync_service().sync()
+        state = server.GARMIN_ASSEMBLY.projection_service().public_state()
         self.assertTrue(state["last_error"])
 
     def test_selected_library_sync_is_exact_and_reports_per_object(self):
-        first = server.workout_library_service().create_local_entry({"sport": "Ride", "name": "Remote eins", "description": "- 30m Z2", "duration_minutes": 30})
-        second = server.workout_library_service().create_local_entry({"sport": "Run", "name": "Remote zwei", "description": "- 20m 60% Easy", "duration_minutes": 20})
+        first = server.PLANNING_DATA.workout_library().create_local_entry({"sport": "Ride", "name": "Remote eins", "description": "- 30m Z2", "duration_minutes": 30})
+        second = server.PLANNING_DATA.workout_library().create_local_entry({"sport": "Run", "name": "Remote zwei", "description": "- 20m 60% Easy", "duration_minutes": 20})
         config = replace(server.CONFIG, intervals_api_key="fake-intervals-key")
         with patch.object(server, "CONFIG", config), patch.object(
             WorkoutLibrarySyncService, "sync_entry",
             side_effect=[{"id": first["id"], "external_id": "remote-1"}, server.AppError(502, "provider unavailable")],
         ) as sync_entry:
-            pending = {item["library_workout_id"]: item for item in server.planning_authority_service().pending_plan_push_entries()}
-            result = server.selected_workout_sync_service().sync({"entries": [pending[first["id"]], pending[second["id"]]]})
+            pending = {item["library_workout_id"]: item for item in server.SYNC_COMMANDS.authority().pending_plan_push_entries()}
+            result = server.SELECTED_WORKOUT_SYNC.service().sync({"entries": [pending[first["id"]], pending[second["id"]]]})
         self.assertEqual(result["status"], "partial")
         self.assertEqual(len(result["results"]), 2)
         self.assertEqual(result["results"][0]["status"], "synced")

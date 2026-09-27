@@ -16,8 +16,12 @@ class IntervalsClientTests(unittest.TestCase):
             "intervals_athlete_id": "test-athlete",
         })()
         request = Mock(return_value=[])
-        with patch.object(server, "provider_http_client", return_value=Mock(request=request)):
-            client = server.intervals_client(config)
+        with patch.object(
+            server.PROVIDER_TRANSPORT,
+            "json_http_client",
+            return_value=Mock(request=request),
+        ):
+            client = server.PROVIDER_TRANSPORT.intervals_client(config)
             self.assertIs(client.config, config)
             self.assertEqual(client.get("/health"), [])
         request.assert_called_once()

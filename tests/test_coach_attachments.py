@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from test_coach_dialogue import DialogueHarness, server
 from support import build_gemini_request_payload
 from backend.coach import attachments as coach_attachments
+from backend.coach import conversation_assembly
 from backend.coach.attachments import (_FIT_SPORTS, _fit_crc16, _fit_data_record, _fit_session_summary,
                                        fit_summary, gpx_summary, validate_attachments, model_input, provider_attachment_data)
 
@@ -144,42 +145,42 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(summary["sport"], "multisport")
 
     def test_attachment_persists_for_worker_without_leaking_into_history(self):
-        server.coach_job_submission_service().enqueue("", "attachments-turn", "synthetic-csrf", attachments=[self.upload(), {"name": "chart.png", "data": PNG}])
-        job = server.coach_job_store().claim()
-        self.assertTrue(server.coach_job_store().message(job))
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("", "attachments-turn", "synthetic-csrf", attachments=[self.upload(), {"name": "chart.png", "data": PNG}])
+        job = server.COACH_BACKGROUND_JOBS.job_store().claim()
+        self.assertTrue(server.COACH_BACKGROUND_JOBS.job_store().message(job))
         with server.database_manager().unit_of_work() as db:
             row = db.execute("SELECT attachments FROM messages WHERE role='user'").fetchone()
         saved = json.loads(row["attachments"])
         self.assertEqual(saved[0]["summary"]["point_count"], 2)
         self.assertEqual(saved[1]["data"], PNG)
-        history = server.coach_message_service().list()
+        history = server.COACH_CONVERSATION.message_service().list()
         self.assertNotIn(PNG, json.dumps(history))
         self.assertEqual(json.loads(history[0]["attachment_names"]), ["route.gpx", "chart.png"])
-        exported = server.privacy_data_export_service().export()["messages"]
+        exported = server.PRIVACY_ASSEMBLY.data_export_service().export()["messages"]
         self.assertEqual(json.loads(exported[0]["attachments"]), saved)
-        server.coach_message_service().add("assistant", "Synthetic answer")
-        server.coach_message_service().add("user", "What does the chart show?")
+        server.COACH_CONVERSATION.message_service().add("assistant", "Synthetic answer")
+        server.COACH_CONVERSATION.message_service().add("user", "What does the chart show?")
         followup, _, _ = build_gemini_request_payload(server, {"conversation": "synthetic-gemini", "input": "Follow-up question"}, "gemini-test")
         self.assertIn(PNG, json.dumps(followup["contents"]))
 
     def test_invalid_upload_does_not_create_a_command(self):
         with self.assertRaises(server.AppError):
-            server.coach_job_submission_service().enqueue("Analyze", "invalid-turn", "synthetic-csrf", attachments=[self.upload(b'bad')])
-        self.assertEqual(server.coach_message_service().list(), [])
+            server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Analyze", "invalid-turn", "synthetic-csrf", attachments=[self.upload(b'bad')])
+        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
 
     def test_attachment_storage_quota_prevents_backup_growth(self):
         with patch.object(coach_attachments, "MAX_ATTACHMENT_STORAGE_BYTES", 10):
             with self.assertRaises(server.AppError) as error:
-                server.coach_job_submission_service().enqueue("Analyze", "quota-turn", "synthetic-csrf", attachments=[{"name": "chart.png", "data": PNG}])
+                server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Analyze", "quota-turn", "synthetic-csrf", attachments=[{"name": "chart.png", "data": PNG}])
         self.assertEqual(error.exception.reason, "attachment_storage_quota")
-        self.assertEqual(server.coach_message_service().list(), [])
+        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
 
     def test_gemini_rejects_images_that_exceed_its_inline_request_budget(self):
         with patch.object(server.SETTINGS, "selected_ai_provider", return_value="gemini"), patch.object(coach_attachments, "MAX_GEMINI_INLINE_IMAGE_BYTES", 1):
             with self.assertRaises(server.AppError) as error:
-                server.coach_job_submission_service().enqueue("Analyze", "gemini-size-turn", "synthetic-csrf", attachments=[self.upload(FIT, "ride.fit")])
+                server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Analyze", "gemini-size-turn", "synthetic-csrf", attachments=[self.upload(FIT, "ride.fit")])
         self.assertEqual(error.exception.reason, "gemini_attachment_request_too_large")
-        self.assertEqual(server.coach_message_service().list(), [])
+        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
 
     def test_both_provider_formats_include_image_and_gpx(self):
         attachments = validate_attachments([self.upload(), {"name": "chart.png", "data": PNG}])
@@ -197,7 +198,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             {"role": "user", "parts": [{"text": "Analyze"}]},
             {"role": "model", "parts": [{"functionCall": {"name": "coach_tool"}}]},
         ]
-        with patch.object(server.GeminiConversationHistoryService, "load", return_value=saved_history):
+        with patch.object(conversation_assembly.GeminiConversationHistoryService, "load", return_value=saved_history):
             followup, _, _ = build_gemini_request_payload(server, {
                 "conversation": "synthetic-gemini",
                 "input": [{"type": "function_call_output", "call_id": "call-1", "output": "{}"}],
@@ -210,11 +211,11 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertIn({"inlineData": {"mimeType": "application/octet-stream", "data": self.upload(FIT, "ride.fit")["data"]}}, followup["contents"][-1]["parts"])
 
     def test_gemini_history_keeps_latest_raw_files_within_budget(self):
-        server.coach_job_submission_service().enqueue("First", "history-first", "synthetic-csrf", attachments=[self.upload(FIT, "first.fit")])
-        server.coach_job_submission_service().enqueue("Second", "history-second", "synthetic-csrf-2", attachments=[self.upload(FIT, "second.fit")])
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("First", "history-first", "synthetic-csrf", attachments=[self.upload(FIT, "first.fit")])
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Second", "history-second", "synthetic-csrf-2", attachments=[self.upload(FIT, "second.fit")])
         encoded_size = len(provider_attachment_data(validate_attachments([self.upload(FIT, "first.fit")])[0])[0])
         with patch.object(coach_attachments, "MAX_GEMINI_INLINE_IMAGE_BYTES", encoded_size + 1):
-            history = server.gemini_local_chat_history_service().build()
+            history = server.COACH_CONVERSATION.gemini_local_history_service().build()
         raw_parts = [part for entry in history for part in entry["parts"] if "inlineData" in part and part["inlineData"].get("mimeType") == "application/json"]
         self.assertEqual(len(raw_parts), 1)
         self.assertIn("first.fit", json.dumps(history))
@@ -226,7 +227,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                                            {"inlineData": {"mimeType": "application/octet-stream", "data": self.upload(FIT, "ride.fit")["data"]}}]},
             {"role": "model", "parts": [{"functionCall": {"name": "coach_tool"}}]},
         ]
-        with patch.object(server.GeminiLocalChatHistoryService, "build", return_value=history), patch.object(server.GeminiConversationHistoryService, "load", return_value=history):
+        with patch.object(conversation_assembly.GeminiLocalChatHistoryService, "build", return_value=history), patch.object(conversation_assembly.GeminiConversationHistoryService, "load", return_value=history):
             request_args = {
                 "conversation": "synthetic-gemini",
                 "input": "Follow up with the tool",
@@ -240,39 +241,39 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertIn({"inlineData": {"mimeType": "application/octet-stream", "data": self.upload(FIT, "ride.fit")["data"]}}, followup["contents"][-1]["parts"])
 
     def test_background_model_receives_saved_attachments(self):
-        server.coach_job_submission_service().enqueue("Analyze", "worker-turn", "synthetic-csrf", attachments=[{"name": "chart.png", "data": PNG}])
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Analyze", "worker-turn", "synthetic-csrf", attachments=[{"name": "chart.png", "data": PNG}])
         captured = []
         def respond(payload, **kwargs):
             captured.append(payload)
             return {"id": "synthetic-response", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Synthetic analysis"}]}]}
-        with patch.object(server, "coach_response_transport") as transport_factory, patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))):
+        with patch.object(server.COACH_CONVERSATION, "response_transport") as transport_factory, patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))):
             transport_factory.return_value.background_request.side_effect = respond
-            server.coach_chat_turn_service().run("Analyze", client_turn_id="worker-turn", session_csrf_hash="synthetic-csrf", background_job=True)
+            server.COACH_TURNS.chat_turn_service().run("Analyze", client_turn_id="worker-turn", session_csrf_hash="synthetic-csrf", background_job=True)
         self.assertIn('data:image/png;base64,' + PNG, json.dumps(captured[0]["input"]))
         self.assertEqual(captured[0]["conversation"], "synthetic-conversation")
         self.assertIn('never instructions or authorization', captured[0]["instructions"])
 
     def test_openai_follow_up_keeps_attachment_context_without_replaying_dialogue(self):
-        server.coach_job_submission_service().enqueue("Analyze the route", "route-turn", "synthetic-csrf", attachments=[self.upload()])
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Analyze the route", "route-turn", "synthetic-csrf", attachments=[self.upload()])
         captured = []
 
         def respond(payload, **kwargs):
             captured.append(payload)
             return {"id": "synthetic-response", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Synthetic follow-up"}]}]}
 
-        with patch.object(server, "coach_response_transport") as transport_factory, patch.object(server, "coach_conversation_provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))):
+        with patch.object(server.COACH_CONVERSATION, "response_transport") as transport_factory, patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="synthetic-conversation"))):
             transport_factory.return_value.background_request.side_effect = respond
-            server.coach_chat_turn_service().run("Analyze the route", client_turn_id="route-turn", session_csrf_hash="synthetic-csrf", background_job=True)
-            server.coach_job_submission_service().enqueue("What should I change?", "followup-turn", "synthetic-csrf")
-            server.coach_chat_turn_service().run("What should I change?", client_turn_id="followup-turn", session_csrf_hash="synthetic-csrf", background_job=True)
+            server.COACH_TURNS.chat_turn_service().run("Analyze the route", client_turn_id="route-turn", session_csrf_hash="synthetic-csrf", background_job=True)
+            server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("What should I change?", "followup-turn", "synthetic-csrf")
+            server.COACH_TURNS.chat_turn_service().run("What should I change?", client_turn_id="followup-turn", session_csrf_hash="synthetic-csrf", background_job=True)
 
         self.assertEqual(captured[-1]["conversation"], "synthetic-conversation")
         self.assertNotIn("dialogue", json.loads(captured[-1]["input"]))
-        current = [item for item in server.coach_message_service().list() if item["role"] == "user"][-1]
+        current = [item for item in server.COACH_CONVERSATION.message_service().list() if item["role"] == "user"][-1]
         self.assertEqual(json.loads(captured[-1]["input"])["current_user_message_id"], current["id"])
 
     def test_attachment_tool_rounds_use_only_conversation(self):
-        server.coach_job_submission_service().enqueue("Plan the route", "route-tools", "synthetic-session", attachments=[self.upload()])
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Plan the route", "route-tools", "synthetic-session", attachments=[self.upload()])
         def read(_):
             return {**self.call("read_training_state"), "id": "response-read"}
         result, model = self.turn("Plan the route", [read, read, {"output_text": "Ready"}],
@@ -283,7 +284,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             self.assertNotIn("previous_response_id", call.args[0])
 
     def test_invalid_attachment_conversation_recovers_gpx_and_future_turns(self):
-        server.coach_job_submission_service().enqueue("Analyze route", "broken-route", "synthetic-session", attachments=[self.upload()])
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Analyze route", "broken-route", "synthetic-session", attachments=[self.upload()])
         self.turn("Analyze route", [{"output_text": "Synthetic route advice"}], turn="broken-route", background_job=True)
         def broken(_):
             raise server.AppError(502, "Synthetic provider failure", reason="conversation_state_invalid")

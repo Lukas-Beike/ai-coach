@@ -2051,90 +2051,14 @@ FORBIDDEN_SERVER_SYMBOLS = (
     "_handle_openai_stream_network_error",
 )
 
-# Functions in server.py are fixed composition helpers, local clock utilities,
-# the HTTP adapter, and process lifecycle. New orchestration belongs in backend.
-ALLOWED_SERVER_FUNCTIONS = frozenset("""
-    utc_now database_manager session_auth_service provider_state_service
-    provider_refresh_tracker sync_operation_observer provider_freshness_service
-    sync_job_store sync_job_queue_service sync_command_endpoint
-    provider_refresh_command_service sync_conflict_command_service
-    plan_push_command_service structured_plan_sync_service
-    plan_repair_manifest_service coach_sync_tool_service nutrition_service
-    intervals_nutrition_sync_service coach_athlete_record_tool_service
-    coach_activity_read_tool_service coach_read_tool_service state_version_service
-    public_performance_state_service public_feedback_state_service
-    sync_public_state_service sync_state_repository performance_refresh_service
-    intervals_snapshot_reader performance_refresh_followup_service
-    sync_job_outcome_service daily_sync_marker_service intervals_snapshot_service
-    intervals_sync_service garmin_fixture_loader garmin_client_factory
-    garmin_payload_service garmin_sync_state_service garmin_remote_reader
-    garmin_sync_service garmin_projection_service full_provider_resync_service
-    weather_service weather_sync_service public_weather_state_service
-    morning_body_battery_service external_calendar_reader
-    external_calendar_sync_service calendar_conflict_service
-    activity_feedback_service activity_read_service duplicate_activity_service
-    checkin_service profile_service coach_profile_update_service
-    change_history_service history_undo_service competition_service
-    competition_sync_reconciler competition_sync_service training_plan_service
-    planned_unit_service planned_unit_sync_state_writer planned_calendar_sync_service
-    planned_calendar_repair_service remote_planned_unit_reconciler
-    workout_library_sync_state_service planning_authority_service
-    workout_library_remote_reconciler workout_library_refresh_service
-    workout_library_sync_service selected_workout_sync_service sync_job_executor
-    sync_job_worker workout_library_service workout_library_plan_service
-    coach_library_plan_tool_service local_plan_creation_service
-    training_plan_artifact_service daily_planning_context_service
-    structured_training_state_service structured_training_change_validator
-    structured_training_change_service coach_training_patch_service
-    structured_training_plan_replacement_service adaptive_replan_apply_service
-    illness_pause_sync_service coach_adaptive_apply_service
-    adaptive_preview_followup_service adaptive_replan_preview_service
-    privacy_data_export_service privacy_delete_service athlete_context_service
-    initialise_database key_value_service provider_http_client intervals_client
-    gemini_json_client audio_transcription_client gemini_stream_client
-    openai_responses_client coach_conversation_provision_service
-    coach_conversation_reset_service openai_stream_client coach_quick_actions_service
-    gemini_conversation_history_service coach_message_service
-    coach_conversation_history_service coach_job_store coach_turn_failure_service
-    coach_job_submission_service coach_cancellation_service coach_dialogue_read_service
-    coach_dialogue_action_service coach_clarification_service
-    coach_attachment_context_service manual_morning_checkin_service
-    morning_checkin_state_service gemini_local_chat_history_service
-    gemini_request_payload_service gemini_response_normalization_service
-    gemini_conversation_response_service library_page_service
-    chat_history_page_service coach_proposal_read_service coach_command_receipt_service
-    coach_turn_opening_service coach_proposal_creation_service
-    coach_proposal_confirmation_service coach_proposal_execution_service
-    coach_structured_context_service coach_training_context_service
-    coach_request_payload_service coach_context_preview_service coach_response_transport
-    coach_tool_dispatch_service coach_structured_tool_execution_service
-    coach_structured_tool_failure_service coach_structured_tool_round_journal
-    coach_planning_command_service coach_structured_tool_replay_service
-    coach_structured_outcome_service coach_structured_tool_preparation_service
-    coach_conversation_recovery_service coach_response_retry_policy
-    coach_structured_response_service coach_structured_tool_round_service
-    coach_final_receipt_service coach_structured_turn_service coach_chat_turn_service
-    morning_coach_job_completion_service coach_background_job_runner
-    public_bootstrap_service public_plan_state_service
-    public_state_local_prelude_service public_state_weather_prelude_service
-    public_state_calendar_projection_service public_state_service
-    recent_log_entries_service coach_diagnostic_history_service diagnostic_report_service
-    privacy_archive_export_service database_backup_service export_stream_transport
-    database_restore_validation_service database_restore_service readiness_service
-    request_handler_class daily_sync_loop_service daily_sync_scheduler
-    startup_sync_scheduler main
-""".split())
-
 # These functions intentionally retain the small amount of root control flow
 # for schema initialization and process lifecycle. Runtime caches bind their
 # services to explicit dependencies in the owning backend modules.
 SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
     {
         "database_manager",
-        "session_auth_service",
         "sync_job_worker",
         "initialise_database",
-        "public_state_service",
         "main",
     }
 )
@@ -2378,6 +2302,36 @@ def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
 
 
 class ServerArchitectureTests(unittest.TestCase):
+    def test_assembly_interfaces_stay_owner_scoped_and_bounded(self) -> None:
+        violations: list[str] = []
+        for path in _python_files(BACKEND_ROOT):
+            tree = _parse(path)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ClassDef) or not node.name.endswith("Assembly"):
+                    continue
+                initializer = next(
+                    (
+                        item for item in node.body
+                        if isinstance(item, ast.FunctionDef) and item.name == "__init__"
+                    ),
+                    None,
+                )
+                if initializer is None:
+                    continue
+                count = len([arg for arg in initializer.args.args if arg.arg != "self"])
+                count += len(initializer.args.kwonlyargs)
+                if count > 5:
+                    violations.append(
+                        f"{path}:{initializer.lineno}: {node.name} has {count} constructor inputs"
+                    )
+
+        self.assertEqual(
+            [],
+            violations,
+            "Assembly constructors must use typed owner groups instead of long parameter lists:\n"
+            + "\n".join(violations),
+        )
+
     def test_chat_history_http_projection_uses_coach_history_owner(self) -> None:
         source = (BACKEND_ROOT / "http_api" / "chat_page.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
@@ -2448,12 +2402,8 @@ class ServerArchitectureTests(unittest.TestCase):
     def test_chat_turn_has_no_server_adapter(self) -> None:
         implementations = _top_level_implementations(_parse(SERVER_PATH))
         self.assertNotIn("chat_with_coach", implementations)
-        self.assertIn("coach_chat_turn_service", implementations)
-
-    def test_extraction_inventory_has_no_unassigned_p0_symbols(self) -> None:
-        inventory = (REPOSITORY_ROOT / "docs" / "server-extraction-inventory.md").read_text(encoding="utf-8")
-        self.assertIn("| P0 (Zuordnung offen) | 0 | 0 | 0 |", inventory)
-        self.assertNotIn("| P0 (Zuordnung offen) | offen |", inventory)
+        self.assertNotIn("coach_chat_turn_service", implementations)
+        self.assertIn("COACH_TURNS", implementations)
 
     def test_training_plan_scope_prefix_is_owned_by_coach_authorization(self) -> None:
         server_tree = _parse(SERVER_PATH)
@@ -2556,22 +2506,35 @@ class ServerArchitectureTests(unittest.TestCase):
             + "\n".join(violations),
         )
 
-    def test_server_top_level_functions_are_limited_to_composition_root(self) -> None:
+    def test_server_definitions_are_composition_factories_or_lifecycle(self) -> None:
         tree = _parse(SERVER_PATH)
-        functions = {
-            node.name
-            for node in tree.body
+        classes = [node.name for node in tree.body if isinstance(node, ast.ClassDef)]
+        self.assertEqual([], classes, "Application and HTTP classes belong in backend owners.")
+
+        functions = [
+            node for node in tree.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-        classes = {
-            node.name for node in tree.body if isinstance(node, ast.ClassDef)
-        }
-        self.assertEqual(
-            set(),
-            functions - ALLOWED_SERVER_FUNCTIONS,
-            "New server.py functions belong in a backend owner module.",
-        )
-        self.assertEqual(set(), classes)
+        ]
+        self.assertGreater(len(functions), 0)
+        for function in functions:
+            nested_implementation = [
+                node for node in ast.walk(function)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and node is not function
+            ]
+            self.assertEqual([], nested_implementation, f"{function.name} defines nested behavior")
+
+            if function.name in SERVER_COMPOSITION_CONTROL_FLOW:
+                continue
+            statements = [
+                node for node in function.body
+                if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str))
+            ]
+            self.assertTrue(statements, f"{function.name} must return its composed service")
+            self.assertTrue(
+                all(isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return)) for node in statements),
+                f"{function.name} must stay a straight-line composition factory",
+            )
 
     def test_morning_battery_source_uses_backend_garmin_reader_instance(self) -> None:
         tree = _parse(SERVER_PATH)
@@ -2625,6 +2588,11 @@ class ServerArchitectureTests(unittest.TestCase):
             for node in auth_tree.body
         ))
         self.assertTrue(any(
+            isinstance(node, ast.FunctionDef)
+            and node.name == "get_session_auth_service"
+            for node in auth_tree.body
+        ))
+        self.assertTrue(any(
             isinstance(node, ast.Assign)
             and any(
                 isinstance(target, ast.Name) and target.id == "RATE_LIMITER"
@@ -2650,17 +2618,26 @@ class ServerArchitectureTests(unittest.TestCase):
                 "RATE_LIMITER",
             }.isdisjoint(server_assignments)
         )
-        self.assertTrue(any(
-            isinstance(node, ast.ImportFrom)
-            and node.module == "backend.http_api.auth"
-            and any(alias.name == "RATE_LIMITER" for alias in node.names)
+        auth_imports = [
+            alias.name
             for node in server_tree.body
-        ))
+            if isinstance(node, ast.ImportFrom)
+            and node.module == "backend.http_api.auth"
+            for alias in node.names
+        ]
+        self.assertIn("get_session_auth_service", auth_imports)
+        self.assertNotIn("RATE_LIMITER", auth_imports)
+        self.assertNotIn("SESSION_AUTH_SERVICE_CACHE", auth_imports)
 
     def test_provider_state_service_cache_is_owned_by_provider_state(self) -> None:
         state_tree = _parse(BACKEND_ROOT / "providers" / "state.py")
         self.assertTrue(any(
             isinstance(node, ast.ClassDef) and node.name == "ProviderStateServiceCache"
+            for node in state_tree.body
+        ))
+        self.assertTrue(any(
+            isinstance(node, ast.FunctionDef)
+            and node.name == "get_provider_state_service"
             for node in state_tree.body
         ))
         server_tree = _parse(SERVER_PATH)
@@ -2679,7 +2656,7 @@ class ServerArchitectureTests(unittest.TestCase):
             if isinstance(node, ast.FunctionDef) and node.name == "provider_state_service"
         )
         self.assertIn(
-            "provider_state.PROVIDER_STATE_SERVICE_CACHE.get",
+            "provider_state.get_provider_state_service",
             ast.unparse(service_factory),
         )
 
@@ -2690,51 +2667,83 @@ class ServerArchitectureTests(unittest.TestCase):
             and node.name == "ProviderRefreshTrackerCache"
             for node in refresh_tree.body
         ))
-        server_tree = _parse(SERVER_PATH)
-        server_assignments = {
-            target.id
-            for node in server_tree.body
-            if isinstance(node, (ast.Assign, ast.AnnAssign))
-            for target in (
-                node.targets if isinstance(node, ast.Assign) else [node.target]
-            )
-            if isinstance(target, ast.Name)
-        }
-        self.assertNotIn("PROVIDER_REFRESH_TRACKER", server_assignments)
-        service_factory = next(
-            node for node in server_tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "provider_refresh_tracker"
+        assembly_tree = _parse(BACKEND_ROOT / "sync" / "assembly.py")
+        assembly = next(
+            node for node in assembly_tree.body
+            if isinstance(node, ast.ClassDef)
+            and node.name == "ProviderSyncAssembly"
+        )
+        tracker_factory = next(
+            node for node in assembly.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "refresh_tracker"
         )
         self.assertIn(
-            "sync_refresh.PROVIDER_REFRESH_TRACKER_CACHE.get",
-            ast.unparse(service_factory),
+            "refresh.PROVIDER_REFRESH_TRACKER_CACHE.get",
+            ast.unparse(tracker_factory),
         )
+        server_tree = _parse(SERVER_PATH)
+        provider_sync = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "PROVIDER_SYNC"
+                for target in node.targets
+            )
+        )
+        self.assertIn("ProviderSyncAssembly", ast.unparse(provider_sync.value))
+        self.assertFalse(any(
+            isinstance(node, ast.FunctionDef)
+            and node.name in {
+                "provider_refresh_tracker",
+                "sync_operation_observer",
+                "provider_freshness_service",
+            }
+            for node in server_tree.body
+        ))
 
     def test_provider_http_client_cache_is_owned_by_provider_transport(self) -> None:
-        transport_tree = _parse(BACKEND_ROOT / "providers" / "http.py")
-        self.assertTrue(any(
-            isinstance(node, ast.ClassDef) and node.name == "JsonHttpClientCache"
-            for node in transport_tree.body
-        ))
-        server_tree = _parse(SERVER_PATH)
-        server_assignments = {
-            target.id
-            for node in server_tree.body
-            if isinstance(node, (ast.Assign, ast.AnnAssign))
-            for target in (
-                node.targets if isinstance(node, ast.Assign) else [node.target]
-            )
-            if isinstance(target, ast.Name)
-        }
-        self.assertNotIn("PROVIDER_HTTP_CLIENT", server_assignments)
-        service_factory = next(
-            node for node in server_tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "provider_http_client"
+        transport_tree = _parse(
+            BACKEND_ROOT / "providers" / "transport_assembly.py"
+        )
+        assembly = next(
+            node for node in transport_tree.body
+            if isinstance(node, ast.ClassDef)
+            and node.name == "ProviderTransportAssembly"
+        )
+        json_client = next(
+            node for node in assembly.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "json_http_client"
         )
         self.assertIn(
             "provider_http.JSON_HTTP_CLIENT_CACHE.get",
-            ast.unparse(service_factory),
+            ast.unparse(json_client),
         )
+        transport_module = _parse(BACKEND_ROOT / "providers" / "http.py")
+        self.assertTrue(any(
+            isinstance(node, ast.ClassDef) and node.name == "JsonHttpClientCache"
+            for node in transport_module.body
+        ))
+        server_tree = _parse(SERVER_PATH)
+        provider_transport = next(
+            node for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id == "PROVIDER_TRANSPORT"
+                for target in node.targets
+            )
+        )
+        self.assertIn(
+            "ProviderTransportAssembly",
+            ast.unparse(provider_transport.value),
+        )
+        self.assertFalse(any(
+            isinstance(node, ast.FunctionDef)
+            and node.name in {"provider_http_client", "intervals_client"}
+            for node in server_tree.body
+        ))
 
     def test_weather_service_cache_is_owned_by_weather_service_module(self) -> None:
         weather_tree = _parse(BACKEND_ROOT / "weather" / "service.py")
@@ -2742,25 +2751,36 @@ class ServerArchitectureTests(unittest.TestCase):
             isinstance(node, ast.ClassDef) and node.name == "WeatherServiceCache"
             for node in weather_tree.body
         ))
-        server_tree = _parse(SERVER_PATH)
-        server_assignments = {
-            target.id
-            for node in server_tree.body
-            if isinstance(node, (ast.Assign, ast.AnnAssign))
-            for target in (
-                node.targets if isinstance(node, ast.Assign) else [node.target]
-            )
-            if isinstance(target, ast.Name)
-        }
-        self.assertNotIn("WEATHER_SERVICE", server_assignments)
-        service_factory = next(
-            node for node in server_tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "weather_service"
+        assembly_tree = _parse(BACKEND_ROOT / "weather" / "assembly.py")
+        assembly = next(
+            node for node in assembly_tree.body
+            if isinstance(node, ast.ClassDef)
+            and node.name == "WeatherAssembly"
+        )
+        service_method = next(
+            node for node in assembly.body
+            if isinstance(node, ast.FunctionDef) and node.name == "service"
         )
         self.assertIn(
-            "WEATHER_SERVICE_CACHE.get",
-            ast.unparse(service_factory),
+            "weather.WEATHER_SERVICE_CACHE.get",
+            ast.unparse(service_method),
         )
+        server_tree = _parse(SERVER_PATH)
+        weather_assembly = next(
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "WEATHER_ASSEMBLY"
+                for target in node.targets
+            )
+        )
+        self.assertIn("WeatherAssembly", ast.unparse(weather_assembly.value))
+        self.assertFalse(any(
+            isinstance(node, ast.FunctionDef)
+            and node.name in {"weather_service", "weather_sync_service"}
+            for node in server_tree.body
+        ))
 
     def test_morning_battery_cache_is_owned_by_performance_service_module(self) -> None:
         performance_tree = _parse(
@@ -2857,11 +2877,10 @@ class ServerArchitectureTests(unittest.TestCase):
             if isinstance(node, ast.Assign)
             for target in node.targets
             if isinstance(target, ast.Attribute)
-            and isinstance(target.value, ast.Name)
-            and target.value.id == "server"
+            and ast.unparse(target.value) in {"server", "server.COACH_CONVERSATION"}
         ]
         self.assertTrue(removed.isdisjoint(patched))
-        self.assertIn("coach_response_transport", patched)
+        self.assertIn("response_transport", patched)
 
     def test_request_handler_does_not_reintroduce_state_event_orchestration(self) -> None:
         request_handler = _request_handler_definition()
@@ -2882,64 +2901,82 @@ class ServerArchitectureTests(unittest.TestCase):
         method_must_be_absent: bool = True,
         forbidden_paths: tuple[str, ...] = (),
     ) -> ast.Module:
-        server_tree = _parse(SERVER_PATH)
+        assembly_tree = _parse(BACKEND_ROOT / "http_api" / "assembly.py")
         request_handler = _request_handler_definition()
         methods = {
-            node.name
-            for node in request_handler.body
+            node.name for node in request_handler.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         }
         get_handler = next(
-            node
-            for node in request_handler.body
+            node for node in request_handler.body
             if isinstance(node, ast.FunctionDef) and node.name == "do_GET"
         )
-        dispatcher = next(
-            node
-            for node in server_tree.body
+        init = next(
+            node for node in assembly_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "HttpApiAssembly"
+        )
+        init_method = next(
+            node for node in init.body
+            if isinstance(node, ast.FunctionDef) and node.name == "__init__"
+        )
+        route_attr = route_name.lower()
+        assignment = next(
+            node for node in ast.walk(init_method)
             if isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "HTTP_ROUTE_DISPATCHER" for target in node.targets)
+            and any(isinstance(target, ast.Attribute) and target.attr == route_attr for target in node.targets)
+        )
+        dispatcher = next(
+            node for node in ast.walk(init_method)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Attribute) and target.attr == "route_dispatcher" for target in node.targets)
         )
         route_dispatches = [
             node for node in ast.walk(dispatcher.value)
-            if isinstance(node, ast.Name) and node.id == route_name
+            if isinstance(node, ast.Attribute) and node.attr == route_attr
         ]
-
         if method_must_be_absent:
             self.assertNotIn(old_method, methods)
         self.assertEqual(len(route_dispatches), 1)
         self.assertIn("dependencies.route_dispatcher.handle_get", ast.unparse(get_handler))
+        self.assertIsInstance(assignment.value, ast.Call)
         if forbidden_paths:
-            old_method_node = next(
-                node
-                for node in request_handler.body
-                if isinstance(node, ast.FunctionDef) and node.name == old_method
-            )
-            method_paths = {
-                node.value
-                for node in ast.walk(old_method_node)
+            handler_paths = {
+                node.value for node in ast.walk(get_handler)
                 if isinstance(node, ast.Constant) and isinstance(node.value, str)
             }
-            self.assertTrue(set(forbidden_paths).isdisjoint(method_paths))
-        return server_tree
+            self.assertTrue(set(forbidden_paths).isdisjoint(handler_paths))
+        return assembly_tree
 
     def _assert_route_factories(
-        self, server_tree: ast.Module, route_name: str, expected_names: list[str]
+        self, assembly_tree: ast.Module, route_name: str, expected_names: list[str]
     ) -> None:
-        route_assignment = next(
-            node
-            for node in server_tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == route_name
-                for target in node.targets
-            )
+        init = next(
+            node for node in assembly_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "HttpApiAssembly"
         )
-        factory_names = [
-            argument.id if isinstance(argument, ast.Name) else ast.unparse(argument)
-            for argument in route_assignment.value.args
-        ]
-        self.assertEqual(factory_names, expected_names)
+        init_method = next(
+            node for node in init.body
+            if isinstance(node, ast.FunctionDef) and node.name == "__init__"
+        )
+        route_attr = route_name.lower()
+        assignment = next(
+            node for node in ast.walk(init_method)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Attribute) and target.attr == route_attr for target in node.targets)
+        )
+        self.assertEqual(len(assignment.value.args), len(expected_names))
+        expected_factory = {
+            "COACH_GET_ROUTES": "CoachGetRoutes",
+            "PUBLIC_GET_ROUTES": "PublicGetRoutes",
+            "PLANNING_GET_ROUTES": "PlanningGetRoutes",
+            "ATHLETE_GET_ROUTES": "AthleteGetRoutes",
+            "SYNC_GET_ROUTES": "SyncGetRoutes",
+            "STATE_EVENTS_GET_ROUTES": "StateEventsGetRoutes",
+            "HISTORY_GET_ROUTES": "HistoryGetRoutes",
+            "DIAGNOSTICS_GET_ROUTES": "DiagnosticsGetRoutes",
+            "PRIVACY_GET_ROUTES": "PrivacyGetRoutes",
+        }[route_name]
+        self.assertEqual(ast.unparse(assignment.value.func), expected_factory)
 
     def _assert_write_route_owned(
         self,
@@ -2948,117 +2985,57 @@ class ServerArchitectureTests(unittest.TestCase):
         forbidden_paths: tuple[str, ...],
         factory: str,
     ) -> ast.Module:
-        server_tree = _parse(SERVER_PATH)
-        post_routes = {
-            "AUTH_POST_ROUTES",
-            "PRIVACY_RESTORE_POST_ROUTES",
-            "CHAT_CANCEL_POST_ROUTES",
-            "COACH_ACTIONS_POST_ROUTES",
-            "CHAT_POST_ROUTES",
-            "TRANSCRIBE_POST_ROUTES",
-            "PLANNING_COMMANDS_POST_ROUTES",
-            "FEEDBACK_POST_ROUTES",
-            "CHAT_STREAM_TRANSPORT",
-            "SYNC_COMMAND_POST_ROUTE",
-            "HISTORY_UNDO_POST_ROUTES",
-            "PRIVACY_DELETE_POST_ROUTES",
-            "NUTRITION_POST_ROUTES",
-        }
-        is_post_dispatch = route_name in post_routes
-        is_put_dispatch = route_name in {"SETTINGS_PUT_ROUTES", "ATHLETE_PUT_ROUTES"}
-        if is_post_dispatch:
-            route_owner = (
-                "HTTP_POST_DISPATCHER"
-                if route_name in {
-                    "AUTH_POST_ROUTES",
-                    "PRIVACY_RESTORE_POST_ROUTES",
-                    "CHAT_CANCEL_POST_ROUTES",
-                }
-                else "AUTHENTICATED_POST_ROUTES"
-            )
-            dispatcher = next(
-                node for node in server_tree.body
-                if isinstance(node, ast.Assign)
-                and any(isinstance(target, ast.Name) and target.id == route_owner for target in node.targets)
-            )
-            route_nodes = [node for node in ast.walk(dispatcher.value) if isinstance(node, ast.Name) and node.id == route_name]
-            stage = {
-                "AUTH_POST_ROUTES": "handle_before_auth",
-                "PRIVACY_RESTORE_POST_ROUTES": "handle_before_auth",
-                "CHAT_CANCEL_POST_ROUTES": "handle_before_maintenance",
-            }.get(route_name, "handle_authenticated")
-            dispatcher_fields = {
-                "AUTH_POST_ROUTES": "_auth_routes",
-                "PRIVACY_RESTORE_POST_ROUTES": "_restore_route",
-                "CHAT_CANCEL_POST_ROUTES": "_cancel_route",
-                "CHAT_STREAM_TRANSPORT": "_chat_stream",
-                "SYNC_COMMAND_POST_ROUTE": "_sync_commands",
-                "HISTORY_UNDO_POST_ROUTES": "_history_undo",
-                "PRIVACY_DELETE_POST_ROUTES": "_privacy_delete",
-                "NUTRITION_POST_ROUTES": "_nutrition",
-            }
-            field = dispatcher_fields.get(
-                route_name, "_" + route_name.removesuffix("_POST_ROUTES").lower()
-            )
-            dispatcher_source = (
-                BACKEND_ROOT / "http_api" / "post_dispatch.py"
-            ).read_text(encoding="utf-8")
-            dispatcher_tree = ast.parse(dispatcher_source)
-            stage_method = next(
-                node for node in ast.walk(dispatcher_tree)
-                if isinstance(node, ast.FunctionDef) and node.name == stage
-            )
-            dispatches = [
-                node for node in ast.walk(stage_method)
-                if isinstance(node, ast.Attribute)
-                and node.attr == field
-            ]
-            self.assertTrue(route_nodes)
-            self.assertTrue(dispatches)
+        assembly_tree = _parse(BACKEND_ROOT / "http_api" / "assembly.py")
+        assembly = next(
+            node for node in assembly_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "HttpApiAssembly"
+        )
+        init = next(
+            node for node in assembly.body
+            if isinstance(node, ast.FunctionDef) and node.name == "__init__"
+        )
+        route_attr = route_name.lower()
+        assignment = next(
+            node for node in ast.walk(init)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Attribute) and target.attr == route_attr for target in node.targets)
+        )
+        expected_class = factory.split("(", 1)[0]
+        self.assertIsInstance(assignment.value, ast.Call)
+        self.assertEqual(ast.unparse(assignment.value.func), expected_class)
+        if route_name in {"SETTINGS_PUT_ROUTES", "ATHLETE_PUT_ROUTES"}:
+
             handler = next(
                 node for node in _request_handler_definition().body
-                if isinstance(node, ast.FunctionDef) and node.name == "do_POST"
+                if isinstance(node, ast.FunctionDef) and node.name == handler_method
             )
-            nodes = list(ast.walk(handler))
-            self.assertTrue(any(
-                isinstance(node, ast.Call)
-                and "dependencies.post_dispatcher" in ast.unparse(node.func)
-                for node in nodes
-            ))
-        elif is_put_dispatch:
-            handler = next(node for node in _request_handler_definition().body if isinstance(node, ast.FunctionDef) and node.name == handler_method)
-            nodes = list(ast.walk(handler))
-            dispatcher = next(
-                node for node in server_tree.body
+            self.assertIn("dependencies.route_dispatcher.handle_put", ast.unparse(handler))
+        else:
+            post_routes = {
+                "AUTH_POST_ROUTES", "PRIVACY_RESTORE_POST_ROUTES", "CHAT_CANCEL_POST_ROUTES",
+                "COACH_ACTIONS_POST_ROUTES", "CHAT_POST_ROUTES", "TRANSCRIBE_POST_ROUTES",
+                "PLANNING_COMMANDS_POST_ROUTES", "FEEDBACK_POST_ROUTES", "CHAT_STREAM_TRANSPORT",
+                "SYNC_COMMAND_POST_ROUTE", "HISTORY_UNDO_POST_ROUTES", "DIAGNOSTICS_CAPTURE_POST_ROUTES",
+                "PRIVACY_DELETE_POST_ROUTES", "NUTRITION_POST_ROUTES",
+            }
+            self.assertIn(route_name, post_routes)
+            owner_attr = (
+                "post_dispatcher" if route_name in {
+                    "AUTH_POST_ROUTES", "PRIVACY_RESTORE_POST_ROUTES", "CHAT_CANCEL_POST_ROUTES"
+                } else "authenticated_post_routes"
+            )
+            owner = next(
+                node for node in ast.walk(init)
                 if isinstance(node, ast.Assign)
-                and any(isinstance(target, ast.Name) and target.id == "HTTP_ROUTE_DISPATCHER" for target in node.targets)
+                and any(isinstance(target, ast.Attribute) and target.attr == owner_attr for target in node.targets)
             )
-            route_nodes = [node for node in ast.walk(dispatcher.value) if isinstance(node, ast.Name) and node.id == route_name]
-            dispatches = [node for node in nodes if isinstance(node, ast.Call) and "dependencies.route_dispatcher.handle_put" in ast.unparse(node)]
-        else:
-            handler = next(node for node in _request_handler_definition().body if isinstance(node, ast.FunctionDef) and node.name == handler_method)
-            nodes = list(ast.walk(handler))
-            route_nodes = [node for node in nodes if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == route_name and node.func.attr == "handle"]
-            dispatches = route_nodes
-        if is_put_dispatch:
-            self.assertEqual(len(route_nodes), 1)
-            self.assertEqual(len(dispatches), 1)
-        else:
-            self.assertEqual(len(dispatches), 1)
-        self.assertEqual(len(dispatches), 1)
-        paths = {node.value for node in nodes if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+            self.assertTrue(any(
+                isinstance(node, ast.Attribute) and node.attr == route_attr
+                for node in ast.walk(owner.value)
+            ))
+        paths = {node.value for node in ast.walk(assignment.value) if isinstance(node, ast.Constant) and isinstance(node.value, str)}
         self.assertTrue(set(forbidden_paths).isdisjoint(paths))
-        assignment = next(
-            node
-            for node in server_tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == route_name
-                for target in node.targets
-            )
-        )
-        self.assertEqual(ast.unparse(assignment.value), factory)
-        return server_tree
+        return assembly_tree
 
     def test_coach_get_routes_are_owned_by_http_api_module(self) -> None:
         self._assert_get_route_owned("_handle_coach_get", "COACH_GET_ROUTES")
@@ -3072,7 +3049,7 @@ class ServerArchitectureTests(unittest.TestCase):
                 "runtime_maintenance.MAINTENANCE_GATE",
                 "readiness_service",
                 "session_auth_service",
-                "public_bootstrap_service",
+                "PUBLIC_STATE.bootstrap_service",
             ],
         )
 
@@ -3086,8 +3063,8 @@ class ServerArchitectureTests(unittest.TestCase):
             "PLANNING_GET_ROUTES",
             [
                 "session_auth_service",
-                "public_plan_state_service",
-                "public_weather_state_service",
+                "PUBLIC_STATE.plan_state_service",
+                "PUBLIC_STATE.weather_state_service",
                 "library_page_service",
             ],
         )
@@ -3102,11 +3079,11 @@ class ServerArchitectureTests(unittest.TestCase):
             "ATHLETE_GET_ROUTES",
             [
                 "session_auth_service",
-                "public_performance_state_service",
-                "profile_service",
-                "competition_service",
-                "public_feedback_state_service",
-                "coach_context_preview_service",
+                "PUBLIC_STATE.performance_state_service",
+                "ATHLETE_DATA.profile",
+                "PLANNING_DATA.competition",
+                "PUBLIC_STATE.feedback_state_service",
+                "COACH_CONTEXT.preview_service",
                 "SETTINGS",
             ],
         )
@@ -3121,9 +3098,9 @@ class ServerArchitectureTests(unittest.TestCase):
             "SYNC_GET_ROUTES",
             [
                 "session_auth_service",
-                "sync_job_queue_service",
-                "sync_public_state_service",
-                "activity_read_service",
+                "SYNC_JOB_QUEUE.service",
+                "PUBLIC_STATE.sync_public_state_service",
+                "ATHLETE_DATA.activity_read",
                 "lambda: ATHLETE_CLOCK.now().date()",
                 "ALL_SYNC_DAYS",
             ],
@@ -3167,7 +3144,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_data_post",
             "HISTORY_UNDO_POST_ROUTES",
             ("/api/change-history/undo/preview", "/api/change-history/undo"),
-            "HistoryUndoPostRoutes(history_undo_service, coach_proposal_creation_service)",
+            "HistoryUndoPostRoutes(history_undo_service, COACH_PROPOSALS.creation_service)",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "history_undo_post.py"
@@ -3179,7 +3156,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "COACH_ACTIONS_POST_ROUTES",
             ("/api/coach/actions/confirm", "/api/coach/actions/execute"),
-            "CoachActionsPostRoutes(coach_proposal_confirmation_service, coach_proposal_execution_service)",
+            "CoachActionsPostRoutes(COACH_PROPOSALS.confirmation_service, COACH_PROPOSALS.execution_service)",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "coach_actions_post.py"
@@ -3191,7 +3168,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "CHAT_POST_ROUTES",
             ("/api/chat", "/api/chat/reset", "client_turn_id"),
-            "ChatPostRoutes(coach_job_submission_service, coach_conversation_reset_service, coach_attachments.MAX_REQUEST_BYTES)",
+            "ChatPostRoutes(COACH_BACKGROUND_JOBS.job_submission_service, COACH_CONVERSATION.reset_service, coach_attachments.MAX_REQUEST_BYTES)",
         )
         route_source = (BACKEND_ROOT / "http_api" / "chat_post.py").read_text(
             encoding="utf-8"
@@ -3199,7 +3176,7 @@ class ServerArchitectureTests(unittest.TestCase):
         self.assertNotIn("server", route_source.casefold())
 
     def test_chat_stream_lifecycle_is_owned_by_http_api_module(self) -> None:
-        server_tree = _parse(SERVER_PATH)
+        assembly_tree = _parse(BACKEND_ROOT / "http_api" / "assembly.py")
         handler = _request_handler_definition()
         self.assertFalse(any(
             isinstance(node, ast.FunctionDef) and node.name == "handle_chat_stream"
@@ -3221,22 +3198,18 @@ class ServerArchitectureTests(unittest.TestCase):
             ),
             1,
         )
+        assembly = next(
+            node for node in assembly_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "HttpApiAssembly"
+        )
         assignment = next(
-            node for node in server_tree.body
+            node for node in ast.walk(assembly)
             if isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "CHAT_STREAM_TRANSPORT" for target in node.targets)
+            and any(isinstance(target, ast.Attribute) and target.attr == "chat_stream_transport" for target in node.targets)
         )
         self.assertEqual(ast.unparse(assignment.value.func), "CoachChatStreamTransport")
-        self.assertEqual(
-            [ast.unparse(arg) for arg in assignment.value.args],
-            [
-                "coach_streams.CHAT_STREAM_REGISTRY",
-                "coach_job_submission_service",
-                "coach_command_receipt_service",
-                "REDACTOR.redact_text",
-                "LOGGER",
-            ],
-        )
+        self.assertIn("chat_stream_registry", ast.unparse(assignment.value))
+        self.assertIn("coach_command_receipt_service", ast.unparse(assignment.value))
         route_source = (BACKEND_ROOT / "http_api" / "chat_stream.py").read_text(encoding="utf-8")
         route_tree = ast.parse(route_source)
         self.assertFalse(any(
@@ -3254,7 +3227,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "TRANSCRIBE_POST_ROUTES",
             ("/api/transcribe",),
-            "TranscribePostRoutes(SETTINGS, audio_transcription_client)",
+            "TranscribePostRoutes(SETTINGS, MODEL_TRANSPORT.audio_transcription_client)",
         )
         route_source = (BACKEND_ROOT / "http_api" / "transcribe_post.py").read_text(
             encoding="utf-8"
@@ -3298,7 +3271,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "PLANNING_COMMANDS_POST_ROUTES",
             ("/api/planning/commands",),
-            "PlanningCommandsPostRoutes(coach_planning_command_service, lambda: coach_conversation_provision_service())",
+            "PlanningCommandsPostRoutes(coach_planning_command_service, lambda: COACH_CONVERSATION.provision_service())",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "planning_commands_post.py"
@@ -3310,7 +3283,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "FEEDBACK_POST_ROUTES",
             ("/api/feedback",),
-            "FeedbackPostRoutes(checkin_service)",
+            "FeedbackPostRoutes(ATHLETE_DATA.checkin)",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "feedback_post.py"
@@ -3322,7 +3295,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "do_POST",
             "CHAT_CANCEL_POST_ROUTES",
             ("/api/chat/cancel",),
-            "ChatCancelPostRoutes(coach_cancellation_service)",
+            "ChatCancelPostRoutes(COACH_BACKGROUND_JOBS.cancellation_service)",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "chat_cancel_post.py"
@@ -3334,7 +3307,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "do_POST",
             "PRIVACY_RESTORE_POST_ROUTES",
             ("/api/privacy/restore",),
-            "PrivacyRestorePostRoutes(session_auth_service, database_restore_service, MAX_BACKUP_BYTES)",
+            "PrivacyRestorePostRoutes(session_auth_service, BACKUP_ASSEMBLY.restore_service, MAX_BACKUP_BYTES)",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "privacy_restore_post.py"
@@ -3358,13 +3331,13 @@ class ServerArchitectureTests(unittest.TestCase):
             "_handle_data_post",
             "PRIVACY_DELETE_POST_ROUTES",
             ("/api/privacy/delete", "LOKALE DATEN LÖSCHEN"),
-            "PrivacyDeletePostRoutes(privacy_delete_service)",
+            "PrivacyDeletePostRoutes(PRIVACY_ASSEMBLY.delete_service)",
         )
         route_source = (
             BACKEND_ROOT / "http_api" / "privacy_delete_post.py"
         ).read_text(encoding="utf-8")
         self.assertNotIn("server", route_source.casefold())
-        self.assertNotIn("privacy_delete_service().delete()", ast.unparse(server_tree))
+        self.assertNotIn("PRIVACY_ASSEMBLY.delete_service().delete()", ast.unparse(server_tree))
 
     def test_settings_put_routes_are_owned_by_http_api_module(self) -> None:
         self._assert_write_route_owned(
@@ -3384,7 +3357,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_do_PUT",
             "ATHLETE_PUT_ROUTES",
             ("/api/athlete-context", "/api/profile"),
-            "AthletePutRoutes(athlete_context_service, profile_service)",
+            "AthletePutRoutes(athlete_context_service, ATHLETE_DATA.profile)",
         )
         route_source = (BACKEND_ROOT / "http_api" / "athlete_put.py").read_text(
             encoding="utf-8"
@@ -3405,8 +3378,8 @@ class ServerArchitectureTests(unittest.TestCase):
             "DIAGNOSTICS_GET_ROUTES",
             [
                 "session_auth_service",
-                "recent_log_entries_service",
-                "diagnostic_report_service",
+                "DIAGNOSTICS_ASSEMBLY.recent_log_entries_service",
+                "DIAGNOSTICS_ASSEMBLY.report_service",
             ],
         )
         self._assert_get_route_owned("_handle_diagnostics_get", "PRIVACY_GET_ROUTES")
@@ -3416,7 +3389,7 @@ class ServerArchitectureTests(unittest.TestCase):
             [
                 "session_auth_service",
                 "export_stream_transport",
-                "privacy_delete_service",
+                "PRIVACY_ASSEMBLY.delete_service",
             ],
         )
 

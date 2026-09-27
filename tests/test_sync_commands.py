@@ -7,7 +7,7 @@ The previous orchestration lived in ``server._start_structured_provider_refresh`
 ``server._queue_structured_performance_refresh``; these helpers had no direct
 test patches. Existing integration tests patch
 ``backend.sync.intervals.IntervalsSyncService.sync`` and read queued state via
-``server.sync_job_queue_service()``. New unit tests replace those composition
+``server.SYNC_JOB_QUEUE.service()``. New unit tests replace those composition
 lookups with injected service doubles. The Coach caller appends a queued
 result's ``sync_job_id`` to its turn-local list.
 """

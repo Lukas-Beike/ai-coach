@@ -1100,3 +1100,13 @@ P10/P11 are closed against Section 1 and the regenerated inventory. The
 2,756-line count is recorded as context, not used as a separate size gate;
 composition code remains in the composition root where it expresses real
 dependency wiring.
+
+## Composition-root slimming follow-up
+
+The former closeout above records the completed domain extraction as of its
+revision. Its statement that the 2,756-line composition root had no separate
+size gate is historical and is superseded by
+`docs/server-composition-root-slimming-plan.md`, which defines the follow-up
+composition-reduction work and its 300?500-line practical goal. Completion of
+the old extraction inventory is not evidence that the newer composition plan
+is complete.
