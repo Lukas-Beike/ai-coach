@@ -44,7 +44,7 @@ generic application object would hide those owners and recreate the broad
 dependency bag rejected by the redesign. The root therefore retains the
 concrete, named connections and the explicit process lifecycle.
 
-Measured after the redesign: 1,828 physical / 1,691 nonblank lines, 107 import
+Measured after the redesign: 1,830 physical / 1,693 nonblank lines, 108 import
 statements, eight top-level definitions. This remains above the practical
 300–500-line guide. The excess is the visible concrete assembly graph and
 imports, not domain implementation or compressed formatting. S6 closes only

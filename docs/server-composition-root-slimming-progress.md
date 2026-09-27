@@ -1722,7 +1722,12 @@ were public bootstrap and sync state projections.
   wiring itself is documented and reviewed.
 - A static architecture check now bounds all backend `*Assembly` constructor
   signatures to five inputs, covering both `*_assembly.py` and `privacy.py`.
-  Focused architecture tests pass. The redesign full suite passed 2,876 tests
-  with 12 SQLCipher-dependent skips; compilation, inventory check, and diff
-  check passed. Docker image validation remains unavailable because the local
-  Docker Engine named pipe is missing.
+  Focused architecture tests pass (47 tests). The final full suite passed
+  2,877 tests with 12 SQLCipher-dependent skips; focused assembly tests passed
+  (46 tests), as did compilation, inventory check, and diff check. A first
+  final run caught that `AppError` and `BaseHTTPRequestHandler` remain direct
+  `server` module exports used by tests and the E2E fixture. Both imports were
+  restored and the affected HTTP (68), Coach dialogue (72), workout repair
+  (27), and workout text (21) suites passed before the final full run. Docker
+  image validation remains unavailable because the local Docker Engine named
+  pipe is missing.
