@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from test_coach_dialogue import DialogueHarness, server
+from backend.sync import queue as sync_queue
 
 from backend.coach.outcomes import coach_failure_lines
 from backend.coach.response_retry import CoachResponseRetryPolicy
@@ -41,7 +42,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertTrue(any(row["content"] == first["message"]["content"] for row in dialogue["messages"]))
 
     def test_rate_limit_retries_response_after_sync_without_requeuing(self):
-        server.local_plan_creation_service().save([self.workout()])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
         def sync(_):
             return {**self.call("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"],
                                 target="intervals", remote_write=True, sync_scope="all_pending"), "id": "resp_sync"}
@@ -49,9 +50,9 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
             patch("backend.coach.response_retry.time.sleep") as sleep,
             patch("backend.coach.response_retry.secrets.randbelow", return_value=0),
             patch.object(
-                server.SyncJobQueueService,
+                sync_queue.SyncJobQueueService,
                 "enqueue",
-                wraps=server.sync_job_queue_service().enqueue,
+                wraps=server.SYNC_JOB_QUEUE.service().enqueue,
             ) as enqueue,
         ):
             result, model = self.turn("Bitte den Plan nochmal übertragen", [sync, limited, {"id": "resp_final", "output_text": "Sync beauftragt."}])
@@ -61,7 +62,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(model.call_args_list[1].args[0], model.call_args_list[2].args[0])
         self.assertEqual(model.call_args.args[0]["previous_response_id"], "resp_sync")
         self.assertEqual(
-            server.sync_job_queue_service().state(result["sync_job_ids"][0])["status"],
+            server.SYNC_JOB_QUEUE.service().state(result["sync_job_ids"][0])["status"],
             "queued",
         )
         _, next_model = self.turn("Und, ist er fertig?", [{"output_text": "Ich prüfe den Auftrag."}])
@@ -103,9 +104,9 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
 
     def test_background_recovery_retries_same_tool_output_with_same_parent(self):
         turn = "synthetic-retry-recovery"
-        server.coach_job_submission_service().enqueue("Bitte fortsetzen", turn, "synthetic-session")
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Bitte fortsetzen", turn, "synthetic-session")
         outputs = [{"type": "function_call_output", "call_id": "saved", "output": '{"ok":true}'}]
-        server.coach_job_store().merge_receipt(turn, {"openai_response_id": "resp_waiting", "response_input": outputs,
+        server.COACH_BACKGROUND_JOBS.job_store().merge_receipt(turn, {"openai_response_id": "resp_waiting", "response_input": outputs,
                                                    "previous_response_id": "resp_tool"})
         with patch("backend.coach.response_retry.time.sleep"):
             result, model = self.turn("Bitte fortsetzen", [limited, {"id": "resp_final", "output_text": "Fertig."}], turn=turn, background_job=True)
@@ -116,11 +117,11 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(model.call_args.args[0]["previous_response_id"], "resp_tool")
 
     def test_failed_answer_keeps_observed_sync_status(self):
-        server.local_plan_creation_service().save([self.workout()])
-        job = server.sync_job_queue_service().enqueue(
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
+        job = server.SYNC_JOB_QUEUE.service().enqueue(
             "intervals",
             "plan_push",
-            {"entries": server.planning_authority_service().pending_plan_push_entries()},
+            {"entries": server.SYNC_COMMANDS.authority().pending_plan_push_entries()},
         )
         with server.database_manager().unit_of_work() as db:
             db.execute("UPDATE sync_jobs SET status='completed' WHERE id=?", (job["id"],))
@@ -133,7 +134,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
     def test_workout_repair_finishes_in_same_turn_preserving_identity_and_distance(self):
         original = {**self.workout("2026-09-14", "Optionaler Recovery Run"), "sport": "Run",
                     "description": "- 6km Z1 HR", "target": "HR", "duration_minutes": 40}
-        unit = server.local_plan_creation_service().save([original])[0]
+        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([original])[0]
         before = self.state()
         args = {"expected_revision": before["planning_revision"], "changes": [{
             "local_id": unit["id"], "expected_payload_hash": before["planned_units"][0]["expected_payload_hash"],

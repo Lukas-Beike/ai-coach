@@ -1,4 +1,5 @@
 """Server integration tests for planning."""
+from backend.runtime import clock as runtime_clock
 
 import json
 import threading
@@ -13,11 +14,13 @@ from backend.activities import calendar_projection as activity_calendar_projecti
 from backend.coach import context as coach_context, limits as coach_limits
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.planning import adaptive as planning_adaptive, competitions as planning_competitions, season as planning_season, workouts as planning_workouts
+from backend.planning import adaptive_preview_service, calendar_service, local_plan_creation_service
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import events as runtime_events
 from backend.sync.intervals import IntervalsSnapshotReader
 from backend.sync.library import WorkoutLibraryRefreshService
 from backend.sync.planned_units import RemotePlannedUnitReconciler
+from backend.sync import queue as sync_queue
 from server_test_support import _current_performance_context, server, ServerTestCase
 from support import IntervalsRequestRecorder, parsed_workout_fixture, RecordedIntervalsClient
 
@@ -25,12 +28,12 @@ from support import IntervalsRequestRecorder, parsed_workout_fixture, RecordedIn
 class ServerPlanningTests(ServerTestCase):
 
     def test_structured_plan_push_declares_and_uses_bounded_entries(self):
-        planned = server.planned_unit_service().create({
+        planned = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Run", "name": "Synthetic selected run",
             "description": "- 30m 60% Synthetic easy session", "duration_minutes": 30,
         })
         local_id = planned["id"]
-        entry = next(item for item in server.planning_authority_service().pending_plan_push_entries() if item["library_workout_id"] == local_id)
+        entry = next(item for item in server.SYNC_COMMANDS.authority().pending_plan_push_entries() if item["library_workout_id"] == local_id)
         intent = {
             "intent": "remote_sync",
             "operation": "start_intervals_plan_sync",
@@ -39,8 +42,8 @@ class ServerPlanningTests(ServerTestCase):
             "ambiguities": [],
             "authorization_scope": [f"library_workout:{local_id}"],
         }
-        with patch.object(server.SyncJobQueueService, "enqueue", return_value={"id": "job-plan-push"}) as enqueue:
-            result = server.coach_tool_dispatch_service().execute(
+        with patch.object(sync_queue.SyncJobQueueService, "enqueue", return_value={"id": "job-plan-push"}) as enqueue:
+            result = server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync",
                 {"entries": [entry]},
                 intent=intent,
@@ -64,15 +67,15 @@ class ServerPlanningTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_competitions"],
         }
         with patch.object(
-            server.SyncJobQueueService,
+            sync_queue.SyncJobQueueService,
             "enqueue",
             side_effect=[{"id": "job-performance"}, {"id": "job-competition"}],
         ) as enqueue:
-            performance = server.coach_tool_dispatch_service().execute(
+            performance = server.COACH_TOOL_DISPATCH.service().execute(
                 "refresh_current_performance", {}, intent=refresh_intent, conversation_id="conversation-jobs",
                 client_turn_id="turn-performance", session_csrf_hash="", sync_job_ids=[],
             )
-            competition = server.coach_tool_dispatch_service().execute(
+            competition = server.COACH_TOOL_DISPATCH.service().execute(
                 "sync_competitions", {}, intent=competition_intent, conversation_id="conversation-jobs",
                 client_turn_id="turn-competition", session_csrf_hash="", sync_job_ids=[],
             )
@@ -82,7 +85,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(enqueue.call_args_list[1].args[:2], ("intervals", "competition_push"))
 
     def test_explicit_competition_push_preserves_provider_id_for_ordinary_edits(self):
-        competition = server.competition_service().save({
+        competition = server.PLANNING_DATA.competition().save({
             "name": "Linked Race", "event_date": "2099-01-02", "sport": "Cycling",
         })["competition"]
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -91,8 +94,8 @@ class ServerPlanningTests(ServerTestCase):
                 (competition["id"],),
             )
 
-        self.assertEqual(server.planning_authority_service().mark_competitions_authoritative(), 1)
-        local_override = server.competition_service().list()[0]
+        self.assertEqual(server.SYNC_COMMANDS.authority().mark_competitions_authoritative(), 1)
+        local_override = server.PLANNING_DATA.competition().list()[0]
         self.assertEqual(local_override["intervals_event_id"], "123")
         self.assertEqual(local_override["sync_state"], "local_override")
 
@@ -101,8 +104,8 @@ class ServerPlanningTests(ServerTestCase):
                 "UPDATE competitions SET sync_state='conflict', sync_conflict=? WHERE id=?",
                 (json.dumps({"type": "remote_missing"}), competition["id"]),
             )
-        server.planning_authority_service().mark_competitions_authoritative()
-        recreated = server.competition_service().list()[0]
+        server.SYNC_COMMANDS.authority().mark_competitions_authoritative()
+        recreated = server.PLANNING_DATA.competition().list()[0]
         self.assertIsNone(recreated["intervals_event_id"])
 
     def test_apply_training_changes_rejects_unknown_create_target(self):
@@ -111,7 +114,7 @@ class ServerPlanningTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan_create"],
         }
         with self.assertRaises(server.AppError) as error:
-            server.coach_tool_dispatch_service().execute(
+            server.COACH_TOOL_DISPATCH.service().execute(
                 "apply_training_changes",
                 {"changes": [{
                     "action": "create", "date": (date.today() + timedelta(days=4)).isoformat(),
@@ -125,14 +128,14 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_mixed_create_recomputes_attached_plan_bounds(self):
         original_date = (date.today() + timedelta(days=5)).isoformat()
-        created = server.local_plan_creation_service().save([{
+        created = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": original_date, "sport": "Ride", "name": "Plan start",
             "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
             "rationale": "Base",
         }], plan_name="Bounds plan", goal="Consistency")
         plan_id = created[0]["plan_id"]
         existing_id = created[0]["id"]
-        state = server.structured_training_state_service().read()
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
         target = next(item for item in state["planned_units"] if item["local_id"] == existing_id)
         later_date = (date.today() + timedelta(days=12)).isoformat()
         intent = {
@@ -140,7 +143,7 @@ class ServerPlanningTests(ServerTestCase):
             "artifact_id": None, "ambiguities": [],
             "authorization_scope": ["local_plan_create", f"planned_unit:{existing_id}"],
         }
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "apply_training_changes",
             {"changes": [{"local_id": existing_id, "action": "update", "date": original_date,
                            "expected_payload_hash": target["expected_payload_hash"]}, {
@@ -152,49 +155,49 @@ class ServerPlanningTests(ServerTestCase):
             session_csrf_hash="", sync_job_ids=[],
         )
         self.assertEqual(result["status"], "applied")
-        plan = next(item for item in server.training_plan_service().list() if item["id"] == plan_id)
+        plan = next(item for item in server.PLANNING_DATA.training_plan().list() if item["id"] == plan_id)
         self.assertEqual(plan["start_date"], original_date)
         self.assertEqual(plan["end_date"], later_date)
 
     def test_non_date_plan_edit_does_not_overwrite_metadata_bounds(self):
         original_date = (date.today() + timedelta(days=8)).isoformat()
-        created = server.local_plan_creation_service().save([{
+        created = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": original_date, "sport": "Ride", "name": "Plan workout",
             "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
             "rationale": "Base",
         }], plan_name="Metadata plan", goal="Consistency")
         plan_id = created[0]["plan_id"]
-        server.training_plan_service().update(plan_id, {
+        server.PLANNING_DATA.training_plan().update(plan_id, {
             "start_date": "2099-01-01", "end_date": "2099-12-31",
         })
-        state = server.structured_training_state_service().read()
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
         target = next(item for item in state["planned_units"] if item["local_id"] == created[0]["id"])
         intent = {
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
             "artifact_id": None, "ambiguities": [], "authorization_scope": [f"planned_unit:{created[0]['id']}"],
         }
-        server.coach_tool_dispatch_service().execute(
+        server.COACH_TOOL_DISPATCH.service().execute(
             "apply_training_changes",
             {"changes": [{"local_id": created[0]["id"], "action": "update", "name": "Renamed",
                            "expected_payload_hash": target["expected_payload_hash"]}]},
             intent=intent, conversation_id="conversation-metadata", client_turn_id="turn-metadata",
             session_csrf_hash="", sync_job_ids=[],
         )
-        plan = next(item for item in server.training_plan_service().list() if item["id"] == plan_id)
+        plan = next(item for item in server.PLANNING_DATA.training_plan().list() if item["id"] == plan_id)
         self.assertEqual(plan["start_date"], "2099-01-01")
         self.assertEqual(plan["end_date"], "2099-12-31")
 
     def test_adaptive_replan_shortens_long_ride_on_near_term_all_day_rain(self):
         tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
-        draft = server.local_plan_creation_service().save([{
+        draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": tomorrow, "sport": "Ride", "name": "Lange Ausfahrt",
             "description": "- 240m 60% Easy endurance ride", "duration_minutes": 240, "target": "POWER",
         }])[0]
-        with patch.object(server.weather_service(), "state", return_value={"days": [{
+        with patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={"days": [{
             "date": tomorrow, "weather_code": 63, "precipitation_probability_max": 100,
             "rain_sum": 12, "showers_sum": 0, "snowfall_sum": 0,
         }]}) as weather:
-            preview = server.adaptive_replan_preview_service().preview()
+            preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         weather.assert_called_once_with(refresh=False)
         self.assertEqual(preview["changes"][0]["library_workout_id"], draft["id"])
         self.assertEqual(preview["changes"][0]["after"]["duration_minutes"], 90)
@@ -203,122 +206,122 @@ class ServerPlanningTests(ServerTestCase):
     def test_adaptive_replan_ignores_near_term_rain_for_indoor_or_later_rides(self):
         tomorrow = server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
         day_three = server.ATHLETE_CLOCK.now().date() + timedelta(days=3)
-        drafts = server.local_plan_creation_service().save([
+        drafts = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([
             {"date": tomorrow.isoformat(), "sport": "VirtualRide", "name": "Indoor lang", "description": "- 240m 60% Indoor endurance ride", "duration_minutes": 240},
             {"date": day_three.isoformat(), "sport": "Ride", "name": "Spätere Ausfahrt", "description": "- 240m 60% Outdoor endurance ride", "duration_minutes": 240},
         ])
-        with patch.object(server.weather_service(), "state", return_value={"days": [{
+        with patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={"days": [{
             "date": tomorrow.isoformat(), "weather_code": 63, "precipitation_probability_max": 100,
             "rain_sum": 12, "showers_sum": 0, "snowfall_sum": 0,
         }]}):
-            preview = server.adaptive_replan_preview_service().preview()
+            preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         self.assertEqual(preview["changes"], [])
         self.assertEqual({draft["name"] for draft in drafts}, {"Indoor lang", "Spätere Ausfahrt"})
 
     def test_planning_state_exposes_required_adaptive_update(self):
-        server.profile_service().save({"weather_location": ""})
-        with patch.object(server.AdaptiveReplanPreviewService, "latest_preview", return_value={"status": "preview", "changes": [{"date": "2026-09-01"}]}):
+        server.ATHLETE_DATA.profile().save({"weather_location": ""})
+        with patch.object(adaptive_preview_service.AdaptiveReplanPreviewService, "latest_preview", return_value={"status": "preview", "changes": [{"date": "2026-09-01"}]}):
             planning = planning_season.planning_state(
-                server.competition_service().list(),
+                server.PLANNING_DATA.competition().list(),
                 server.ATHLETE_CLOCK.now().date(),
-                server.adaptive_replan_preview_service().latest_preview(),
-                server.adaptive_replan_preview_service().status(),
+                server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().latest_preview(),
+                server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().status(),
             )
         self.assertTrue(planning["needs_replan"])
         self.assertEqual(planning["replan_changes"], 1)
 
     def test_local_feedback_is_persisted_without_provider_values(self):
         local_today = server.ATHLETE_CLOCK.now().date().isoformat()
-        result = server.checkin_service().save({
+        result = server.ATHLETE_DATA.checkin().save({
             "checkin_date": local_today, "soreness": "7", "stress": "4", "motivation": "8",
             "available_minutes": "45", "day_form": "Schwere Beine und müde", "illness": "",
             "pain": "left knee", "notes": "Short easy session preferred",
         })
         self.assertEqual(result["checkin"]["soreness"], 7)
         self.assertEqual(result["checkin"]["day_form"], "Schwere Beine und müde")
-        self.assertEqual(server.checkin_service().context()["today"]["pain"], "left knee")
+        self.assertEqual(server.ATHLETE_DATA.checkin().context()["today"]["pain"], "left knee")
         with self.assertRaises(server.AppError):
-            server.checkin_service().save({"soreness": 11})
+            server.ATHLETE_DATA.checkin().save({"soreness": 11})
 
     def test_empty_activity_feedback_removes_entry_and_input_is_bounded(self):
-        result = server.activity_feedback_service().save(
+        result = server.ATHLETE_DATA.activity_feedback().save(
             "activity-2", {"notes": "x" * 5000}
         )
         self.assertEqual(len(result["activity_feedback"]["notes"]), 4000)
-        server.activity_feedback_service().save("activity-2", {"notes": "   "})
-        self.assertEqual(server.activity_feedback_service().list(), [])
+        server.ATHLETE_DATA.activity_feedback().save("activity-2", {"notes": "   "})
+        self.assertEqual(server.ATHLETE_DATA.activity_feedback().list(), [])
 
     def test_adaptive_replan_only_changes_future_local_drafts_after_preview(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        draft = server.local_plan_creation_service().save([{
+        draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": tomorrow, "sport": "Ride", "name": "VO2 intervals",
             "description": "- 5m 115%\n- 40m 55%", "duration_minutes": 45, "target": "POWER",
         }])[0]
-        server.checkin_service().save({"illness": "Fever", "soreness": 8})
-        preview = server.adaptive_replan_preview_service().preview()
+        server.ATHLETE_DATA.checkin().save({"illness": "Fever", "soreness": 8})
+        preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         self.assertEqual(preview["illness_pause"]["recommended_pause_days"], planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS)
         self.assertEqual(preview["illness_pause"]["start_date"], server.ATHLETE_CLOCK.now().date().isoformat())
         self.assertEqual(len(preview["changes"]), 1)
-        self.assertEqual(server.planned_unit_service().list()[0]["description"], "- 5m 115%\n- 40m 55%")
-        result = server.illness_pause_sync_service().apply(preview["id"])
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list()[0]["description"], "- 5m 115%\n- 40m 55%")
+        result = server.SYNC_COMMANDS.illness_pause().apply(preview["id"])
         self.assertEqual(result["updated"], 1)
-        self.assertEqual(server.planned_unit_service().list(), [])
-        self.assertTrue(server.planned_unit_service().list(include_archived=True)[0]["archived"])
-        self.assertEqual(server.planned_unit_service().list(include_archived=True)[0]["description"], "- 5m 115%\n- 40m 55%")
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
+        self.assertTrue(server.PLANNING_DATA.planned_unit().list(include_archived=True)[0]["archived"])
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list(include_archived=True)[0]["description"], "- 5m 115%\n- 40m 55%")
         checkins = {
-            row["checkin_date"]: row for row in server.checkin_service().list(30)
+            row["checkin_date"]: row for row in server.ATHLETE_DATA.checkin().list(30)
         }
         for offset in range(planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS):
             pause_date = (server.ATHLETE_CLOCK.now().date() + timedelta(days=offset)).isoformat()
             self.assertEqual(checkins[pause_date]["illness"], "Fever")
-        repeated_preview = server.adaptive_replan_preview_service().preview()
+        repeated_preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         self.assertTrue(repeated_preview["illness_pause"]["approved"])
-        self.assertFalse(server.adaptive_replan_preview_service().status()["illness_pause_pending"])
-        self.assertEqual(server.planned_unit_service().list(include_archived=True)[0]["id"], draft["id"])
+        self.assertFalse(server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().status()["illness_pause_pending"])
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list(include_archived=True)[0]["id"], draft["id"])
 
     def test_adaptive_preview_rejects_changed_target_and_is_idempotent(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        draft = server.local_plan_creation_service().save([{
+        draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": tomorrow, "sport": "Ride", "name": "VO2 intervals",
             "description": "- 5m 115%\n- 40m 55%", "duration_minutes": 45, "target": "POWER",
         }])[0]
-        server.checkin_service().save({"illness": "Fever", "soreness": 8})
-        preview = server.adaptive_replan_preview_service().preview()
+        server.ATHLETE_DATA.checkin().save({"illness": "Fever", "soreness": 8})
+        preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         self.assertTrue(preview["changes"][0].get("source_fingerprint"))
-        server.planned_unit_service().update(draft["id"], {"action": "update", "name": "Athletenänderung"})
+        server.PLANNING_DATA.planned_unit().update(draft["id"], {"action": "update", "name": "Athletenänderung"})
 
-        result = server.illness_pause_sync_service().apply(preview["id"])
+        result = server.SYNC_COMMANDS.illness_pause().apply(preview["id"])
         self.assertEqual(result["status"], "stale")
         self.assertEqual(result["updated"], 0)
         self.assertEqual(result["stale"][0]["reason"], "changed")
-        self.assertEqual(server.planned_unit_service().list()[0]["name"], "Athletenänderung")
-        repeated = server.illness_pause_sync_service().apply(preview["id"])
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list()[0]["name"], "Athletenänderung")
+        repeated = server.SYNC_COMMANDS.illness_pause().apply(preview["id"])
         self.assertEqual(repeated["status"], "already_stale")
 
     def test_adaptive_preview_reports_missing_target_and_repeat_apply_is_safe(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        draft = server.local_plan_creation_service().save([{
+        draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": tomorrow, "sport": "Ride", "name": "VO2 intervals",
             "description": "- 5m 115%\n- 40m 55%", "duration_minutes": 45, "target": "POWER",
         }])[0]
-        server.checkin_service().save({"illness": "Fever", "soreness": 8})
-        preview = server.adaptive_replan_preview_service().preview()
-        server.planned_unit_service().update(draft["id"], {"action": "delete"})
-        result = server.illness_pause_sync_service().apply(preview["id"])
+        server.ATHLETE_DATA.checkin().save({"illness": "Fever", "soreness": 8})
+        preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
+        server.PLANNING_DATA.planned_unit().update(draft["id"], {"action": "delete"})
+        result = server.SYNC_COMMANDS.illness_pause().apply(preview["id"])
         self.assertEqual(result["status"], "stale")
         self.assertEqual(result["stale"][0]["reason"], "missing")
 
-        fresh = server.local_plan_creation_service().save([{
+        fresh = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": tomorrow, "sport": "Ride", "name": "Tempo",
             "description": "- 5m 110%\n- 40m 55%", "duration_minutes": 45, "target": "POWER",
         }])[0]
-        fresh_preview = server.adaptive_replan_preview_service().preview()
-        applied = server.illness_pause_sync_service().apply(fresh_preview["id"])
+        fresh_preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
+        applied = server.SYNC_COMMANDS.illness_pause().apply(fresh_preview["id"])
         self.assertEqual(applied["status"], "ok")
         self.assertGreaterEqual(applied["updated"], 1)
-        self.assertEqual(server.illness_pause_sync_service().apply(fresh_preview["id"])["status"], "already_applied")
-        self.assertEqual(server.planned_unit_service().list(), [])
-        self.assertIn(fresh["id"], [item["id"] for item in server.planned_unit_service().list(include_archived=True)])
+        self.assertEqual(server.SYNC_COMMANDS.illness_pause().apply(fresh_preview["id"])["status"], "already_applied")
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
+        self.assertIn(fresh["id"], [item["id"] for item in server.PLANNING_DATA.planned_unit().list(include_archived=True)])
 
     def test_planned_workouts_match_activities_and_roll_up_weekly_compliance(self):
         today = date(2026, 8, 26)
@@ -410,21 +413,21 @@ class ServerPlanningTests(ServerTestCase):
             "start_date_local": tomorrow + "T07:00:00", "type": "Ride", "name": "Remote Einheit",
             "description": "- 30m Z2", "moving_time": 1800,
         }
-        first = server.remote_planned_unit_reconciler().reconcile([event])
-        revision_after_import = server.structured_training_state_service().read()["planning_revision"]
-        second = server.remote_planned_unit_reconciler().reconcile([event])
-        self.assertEqual(server.structured_training_state_service().read()["planning_revision"], revision_after_import)
-        planned = server.planned_unit_service().list()
+        first = server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([event])
+        revision_after_import = server.PLANNING_WORKFLOWS.structured_training_state_service().read()["planning_revision"]
+        second = server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([event])
+        self.assertEqual(server.PLANNING_WORKFLOWS.structured_training_state_service().read()["planning_revision"], revision_after_import)
+        planned = server.PLANNING_DATA.planned_unit().list()
         self.assertEqual(first["imported"], 1)
         self.assertEqual(len(planned), 1)
         self.assertEqual(second["imported"], 0)
         self.assertEqual(planned[0]["remote_event_id"], "remote-event-1")
-        server.planned_unit_service().update(planned[0]["id"], {"action": "update", "name": "Lokal geändert"})
-        conflict = server.remote_planned_unit_reconciler().reconcile(
+        server.PLANNING_DATA.planned_unit().update(planned[0]["id"], {"action": "update", "name": "Lokal geändert"})
+        conflict = server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile(
             [{**event, "name": "Remote geändert"}]
         )
         self.assertEqual(conflict["conflicts"], 1)
-        self.assertEqual(server.planned_unit_service().list()[0]["sync_status"], "conflict")
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list()[0]["sync_status"], "conflict")
 
     def test_remote_pull_preserves_local_only_planned_changes(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -433,22 +436,22 @@ class ServerPlanningTests(ServerTestCase):
             "start_date_local": tomorrow + "T07:00:00", "type": "Ride", "name": "Remote Original",
             "description": "- 30m Z2", "moving_time": 1800,
         }
-        server.remote_planned_unit_reconciler().reconcile([event])
-        local = server.planned_unit_service().list()[0]
-        server.planned_unit_service().update(local["id"], {"action": "update", "name": "Lokal geändert"})
-        result = server.remote_planned_unit_reconciler().reconcile([event])
-        current = server.planned_unit_service().list()[0]
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([event])
+        local = server.PLANNING_DATA.planned_unit().list()[0]
+        server.PLANNING_DATA.planned_unit().update(local["id"], {"action": "update", "name": "Lokal geändert"})
+        result = server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([event])
+        current = server.PLANNING_DATA.planned_unit().list()[0]
         self.assertEqual(result["conflicts"], 0)
         self.assertEqual(current["name"], "Lokal geändert")
         self.assertEqual(current["sync_status"], "local")
 
     def test_remote_planned_import_and_payload_preserve_sport(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        server.remote_planned_unit_reconciler().reconcile([{
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([{
             "id": "remote-run", "category": "WORKOUT", "start_date_local": tomorrow + "T08:00:00",
             "type": "Run", "name": "Remote Lauf", "moving_time": 1800,
         }])
-        imported = server.planned_unit_service().list()[0]
+        imported = server.PLANNING_DATA.planned_unit().list()[0]
         self.assertEqual(imported["type"], "Run")
         self.assertEqual(imported["sport"], "Run")
         payload = planning_workouts.workout_event_payload("local-run", {
@@ -463,18 +466,18 @@ class ServerPlanningTests(ServerTestCase):
             "start_date_local": tomorrow + "T07:00:00", "type": "Ride", "name": "Original",
             "description": "- 30m Z2", "moving_time": 1800,
         }
-        server.remote_planned_unit_reconciler().reconcile([event])
-        local = server.planned_unit_service().list()[0]
-        server.planned_unit_service().update(local["id"], {"action": "update", "name": "Lokal"})
-        server.remote_planned_unit_reconciler().reconcile(
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([event])
+        local = server.PLANNING_DATA.planned_unit().list()[0]
+        server.PLANNING_DATA.planned_unit().update(local["id"], {"action": "update", "name": "Lokal"})
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile(
             [{**event, "name": "Remote"}]
         )
-        kept = server.planned_unit_service().resolve_conflict(local["id"], "keep_local")
+        kept = server.PLANNING_DATA.planned_unit().resolve_conflict(local["id"], "keep_local")
         self.assertEqual(kept["planned_unit"]["name"], "Lokal")
-        server.remote_planned_unit_reconciler().reconcile(
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile(
             [{**event, "name": "Remote"}]
         )
-        adopted = server.planned_unit_service().resolve_conflict(
+        adopted = server.PLANNING_DATA.planned_unit().resolve_conflict(
             local["id"], "adopt_remote"
         )
         self.assertEqual(adopted["planned_unit"]["name"], "Remote")
@@ -482,50 +485,50 @@ class ServerPlanningTests(ServerTestCase):
     def test_local_planned_workout_can_be_edited_moved_and_removed(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         day_after = (date.today() + timedelta(days=2)).isoformat()
-        local = server.planned_unit_service().create({
+        local = server.PLANNING_DATA.planned_unit().create({
             "date": tomorrow, "sport": "Ride", "name": "Locker",
             "description": "- 30m Z2", "duration_minutes": 30,
             "source": "library", "rationale": "Test",
         })
-        updated = server.planned_unit_service().update(local["id"], {
+        updated = server.PLANNING_DATA.planned_unit().update(local["id"], {
             "action": "update", "date": day_after, "name": "Verschoben",
             "description": "- 40m Z2", "duration_minutes": 40,
         })
         self.assertEqual(updated["library_entry"]["name"], "Verschoben")
         self.assertEqual(updated["library_entry"]["date"], day_after)
         self.assertEqual(updated["library_entry"]["sync_status"], "local")
-        archived = server.planned_unit_service().update(local["id"], {"action": "archive"})
+        archived = server.PLANNING_DATA.planned_unit().update(local["id"], {"action": "archive"})
         self.assertTrue(archived["library_entry"]["archived"])
-        restored = server.planned_unit_service().update(local["id"], {"action": "restore"})
+        restored = server.PLANNING_DATA.planned_unit().update(local["id"], {"action": "restore"})
         self.assertFalse(restored["library_entry"]["archived"])
-        removed = server.planned_unit_service().update(local["id"], {"action": "delete"})
+        removed = server.PLANNING_DATA.planned_unit().update(local["id"], {"action": "delete"})
         self.assertEqual(removed["status"], "deleted")
-        self.assertEqual(server.planned_unit_service().list(), [])
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
 
     def test_deleting_archived_planned_workout_records_recoverable_history(self):
-        local = server.planned_unit_service().create({
+        local = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Ride", "name": "Archived", "description": "- 30m Z2",
             "duration_minutes": 30, "source": "library", "rationale": "Test",
         })
-        server.planned_unit_service().update(local["id"], {"action": "archive"})
+        server.PLANNING_DATA.planned_unit().update(local["id"], {"action": "archive"})
 
-        server.planned_unit_service().update(local["id"], {"action": "delete"})
+        server.PLANNING_DATA.planned_unit().update(local["id"], {"action": "delete"})
 
         deletion = next(
-            item for item in server.change_history_service().list()
+            item for item in server.HISTORY.change_history_service().list()
             if item["entity_type"] == "planned_unit"
             and item["entity_id"] == local["id"]
             and item["action"] == "delete"
         )
         self.assertNotEqual(deletion["before_hash"], deletion["after_hash"])
         self.assertEqual(deletion["diff"]["fields"]["local_deleted"], {"changed": True})
-        server.history_undo_service().apply({
+        server.HISTORY.undo_service().apply({
             "change_id": deletion["id"],
             "expected_current_hash": deletion["after_hash"],
         })
         restored = next(
-            item for item in server.planned_unit_service().list(include_archived=True)
+            item for item in server.PLANNING_DATA.planned_unit().list(include_archived=True)
             if item["id"] == local["id"]
         )
         self.assertFalse(restored["archived"])
@@ -574,22 +577,22 @@ class ServerPlanningTests(ServerTestCase):
             )
 
     def test_library_is_cached_and_included_in_coach_context(self):
-        imported = server.workout_library_remote_reconciler().reconcile([{
+        imported = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": 42, "name": "Locker Rad", "type": "Ride",
             "description": "- 45m Z2", "moving_time": 2700,
         }])[0]
         self.assertEqual(uuid.UUID(imported["id"]).version, 4)
         self.assertEqual(imported["external_id"], "42")
-        updated = server.workout_library_remote_reconciler().reconcile([{
+        updated = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": 42, "name": "Locker Rad aktualisiert", "type": "Ride",
             "description": "- 45m Z2", "moving_time": 2700,
         }])[0]
         self.assertEqual(updated["id"], imported["id"])
-        self.assertEqual(server.workout_library_service().list()[0]["name"], "Locker Rad aktualisiert")
-        self.assertIn("LOCAL TRAINING LIBRARY", server.coach_training_context_service().build())
+        self.assertEqual(server.PLANNING_DATA.workout_library().list()[0]["name"], "Locker Rad aktualisiert")
+        self.assertIn("LOCAL TRAINING LIBRARY", server.COACH_CONTEXT.training_context_service().build())
 
     def test_library_update_always_sends_required_folder(self):
-        client = server.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        client = server.PROVIDER_TRANSPORT.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
         with patch.object(client, "get_or_create_workout_folder", return_value=12345) as folder, patch.object(
             client, "put", return_value={"id": "remote-1"}
         ) as put:
@@ -608,7 +611,7 @@ class ServerPlanningTests(ServerTestCase):
         })
 
     def test_unknown_workout_sport_falls_back_to_provider_other_type(self):
-        client = server.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        client = server.PROVIDER_TRANSPORT.intervals_client(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
         with patch.object(client, "get", return_value=[]), patch.object(
             client, "post", side_effect=[{"id": 12345}, {"id": "remote-1"}]
         ) as post:
@@ -642,9 +645,9 @@ class ServerPlanningTests(ServerTestCase):
             "duration_minutes": 50,
         }
         with self.assertRaises(server.AppError) as raised:
-            server.local_plan_creation_service().save([workout])
+            server.PLANNING_WORKFLOWS.local_plan_creation_service().save([workout])
         self.assertIn("Zeile 6", str(raised.exception))
-        self.assertEqual(server.planned_unit_service().list(), [])
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
 
     def test_ambiguous_quantity_bullets_require_explicit_steps_or_plain_notes(self):
         for description in (
@@ -680,7 +683,7 @@ class ServerPlanningTests(ServerTestCase):
         })
 
     def test_ambiguous_description_blocks_all_workout_export_paths_before_writes(self):
-        client = server.intervals_client()
+        client = server.PROVIDER_TRANSPORT.intervals_client()
         workout = {
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "type": "Run", "description": "- 6km Z1 HR\n- Optional bis insgesamt 8km",
@@ -706,32 +709,32 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_local_template_and_planned_edit_reject_ambiguous_extension(self):
         with self.assertRaises(server.AppError):
-            server.workout_library_service().create_template({
+            server.PLANNING_DATA.workout_library().create_template({
                 "sport": "Run", "description": "- If fresh extend to 8km", "duration_minutes": 40,
             })
-        entry = server.local_plan_creation_service().save([{
+        entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Run", "name": "Recovery", "description": "- 6km Z1 HR", "duration_minutes": 40,
         }])[0]
         with self.assertRaises(server.AppError):
-            server.planned_unit_service().update(entry["id"], {"description": "- If fresh extend to 8km"})
-        self.assertEqual(server.planned_unit_service().list()[0]["description"], "- 6km Z1 HR")
+            server.PLANNING_DATA.planned_unit().update(entry["id"], {"description": "- If fresh extend to 8km"})
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list()[0]["description"], "- 6km Z1 HR")
 
     def test_unparsed_library_export_keeps_identity_and_retries_as_update(self):
-        entry = server.workout_library_service().create_local_entry({
+        entry = server.PLANNING_DATA.workout_library().create_local_entry({
             "sport": "Ride", "name": "Synthetic", "description": "- 30m 85%", "duration_minutes": 30,
         })
         with patch.object(intervals_client_module.IntervalsClient, "get_workout_library", return_value=[]), \
                 patch.object(intervals_client_module.IntervalsClient, "create_library_workouts", return_value=[{"id": "synthetic-remote", "type": "Ride"}]) as create, \
                 patch.object(intervals_client_module.IntervalsClient, "update_library_workout", return_value={"id": "synthetic-remote", **parsed_workout_fixture()}) as update:
             with self.assertRaises(server.AppError) as raised:
-                server.workout_library_sync_service().sync_entry(entry["id"])
+                server.WORKOUT_LIBRARY_SYNC.sync_service().sync_entry(entry["id"])
             self.assertEqual(raised.exception.reason, "intervals_workout_verification_failed")
-            failed = server.workout_library_service().list()[0]
+            failed = server.PLANNING_DATA.workout_library().list()[0]
             self.assertEqual(failed["sync_status"], "sync_error")
             self.assertEqual(failed["external_id"], "synthetic-remote")
             self.assertEqual(failed["description"], "- 30m 85%")
-            synced = server.workout_library_sync_service().sync_entry(entry["id"])
+            synced = server.WORKOUT_LIBRARY_SYNC.sync_service().sync_entry(entry["id"])
             self.assertEqual(synced["sync_status"], "synced")
             create.assert_called_once()
             self.assertEqual(update.call_args.args[0], "synthetic-remote")
@@ -740,71 +743,71 @@ class ServerPlanningTests(ServerTestCase):
         day = (date.today() + timedelta(days=1)).isoformat()
         valid = {"date": day, "sport": "Ride", "name": "Synthetic", "description": "- 30m 85%", "duration_minutes": 30}
         with self.assertRaises(server.AppError):
-            server.local_plan_creation_service().save([valid, {**valid, "date": (date.today() + timedelta(days=2)).isoformat(), "duration_minutes": 65}])
-        self.assertEqual(server.planned_unit_service().list(), [])
-        entry = server.local_plan_creation_service().save([valid])[0]
+            server.PLANNING_WORKFLOWS.local_plan_creation_service().save([valid, {**valid, "date": (date.today() + timedelta(days=2)).isoformat(), "duration_minutes": 65}])
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
+        entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([valid])[0]
         with self.assertRaises(server.AppError):
-            server.planned_unit_service().update(entry["id"], {"duration_minutes": 65})
-        self.assertEqual(server.planned_unit_service().list()[0]["duration_minutes"], 30)
+            server.PLANNING_DATA.planned_unit().update(entry["id"], {"duration_minutes": 65})
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list()[0]["duration_minutes"], 30)
 
     def test_missing_library_workout_stays_local_until_approval(self):
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")):
-            entry = server.local_plan_creation_service().save([{
+            entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
                 "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
                 "name": "Coach Tempo", "description": "- 30m 85%", "duration_minutes": 30,
                 "target": "POWER", "rationale": "Schwelle",
             }])[0]
         self.assertEqual(uuid.UUID(entry["id"]).version, 4)
-        planned = server.planned_unit_service().list()[0]
+        planned = server.PLANNING_DATA.planned_unit().list()[0]
         self.assertEqual(planned["id"], entry["id"])
         self.assertIsNone(planned["external_id"])
         self.assertEqual(planned["sync_status"], "local")
 
     def test_saved_library_plan_can_be_applied_locally_as_a_batch(self):
-        server.workout_library_remote_reconciler().reconcile([{
+        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": 42, "name": "Locker Rad", "type": "Ride",
             "description": "- 45m Z2", "moving_time": 2700,
         }])
-        library = server.workout_library_service().list()[0]
+        library = server.PLANNING_DATA.workout_library().list()[0]
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        result = server.workout_library_plan_service().apply([{
+        result = server.PLANNING_WORKFLOWS.workout_library_plan_service().apply([{
             "library_workout_id": library["id"], "date": tomorrow,
         }])
         self.assertEqual(result["status"], "local")
         self.assertEqual(result["local_planned"], 1)
         self.assertEqual(result["planned"][0]["library_entry"]["date"], tomorrow)
-        self.assertEqual(len(server.workout_library_service().list()), 1)
-        self.assertEqual(len(server.planned_unit_service().list()), 1)
+        self.assertEqual(len(server.PLANNING_DATA.workout_library().list()), 1)
+        self.assertEqual(len(server.PLANNING_DATA.planned_unit().list()), 1)
 
     def test_library_plan_rejects_duplicate_source_on_same_date(self):
-        server.workout_library_remote_reconciler().reconcile([{
+        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": 46, "name": "Locker Rad", "type": "Ride",
             "description": "- 30m Z2", "moving_time": 1800,
         }])
-        library = server.workout_library_service().list()[0]
+        library = server.PLANNING_DATA.workout_library().list()[0]
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         with self.assertRaises(server.AppError) as raised:
-            server.workout_library_plan_service().apply([
+            server.PLANNING_WORKFLOWS.workout_library_plan_service().apply([
                 {"library_workout_id": library["id"], "date": tomorrow},
                 {"library_workout_id": library["id"], "date": tomorrow},
             ])
         self.assertEqual(raised.exception.status, 409)
-        self.assertEqual(len(server.workout_library_service().list()), 1)
+        self.assertEqual(len(server.PLANNING_DATA.workout_library().list()), 1)
 
     def test_library_plan_is_local_only(self):
-        server.workout_library_remote_reconciler().reconcile([{
+        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": 44, "name": "Intervall", "type": "Ride",
             "description": "4x\n- 5m 105%\n- 5m 55%", "moving_time": 2400,
         }])
-        library = server.workout_library_service().list()[0]
+        library = server.PLANNING_DATA.workout_library().list()[0]
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        result = server.workout_library_plan_service().apply([{
+        result = server.PLANNING_WORKFLOWS.workout_library_plan_service().apply([{
             "library_workout_id": library["id"], "date": tomorrow,
         }])
         self.assertEqual(result["status"], "local")
 
     def test_outstanding_plan_drafts_remain_visible_across_provider_conversations(self):
-        draft = server.training_plan_artifact_service().stage(
+        draft = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
             {"payload": {"plan_name": "Basis", "goal": "Ausdauer", "workouts": [{
                 "date": "2099-01-01", "sport": "Ride", "name": "Basis",
                 "description": "- 30m 60% easy", "duration_minutes": 30,
@@ -815,7 +818,7 @@ class ServerPlanningTests(ServerTestCase):
 
         with server.database_manager().unit_of_work() as db:
             server.CHAT_REPOSITORY.add(db, "user", "Synthetic draft request", client_turn_id="gemini-draft")
-        refs = server.coach_dialogue_read_service().artifact_refs()
+        refs = server.COACH_CONVERSATION.dialogue_read_service().artifact_refs()
 
         self.assertIn(draft["artifact_id"], [item["id"] for item in refs])
 
@@ -823,12 +826,12 @@ class ServerPlanningTests(ServerTestCase):
         for count in (29, coach_limits.COACH_TRAINING_CHANGE_LIMIT):
             with self.subTest(count=count):
                 self.setUp()
-                planned = [server.planned_unit_service().create({
+                planned = [server.PLANNING_DATA.planned_unit().create({
                     "date": (date(2098, 1, 1) + timedelta(days=index)).isoformat(),
                     "sport": "Ride", "name": f"Original {index}",
                     "description": "- 30m 60%", "duration_minutes": 30, "target": "AUTO",
                 }) for index in range(count)]
-                result = server.structured_training_change_service().apply({
+                result = server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
                     "changes": [
                         {"local_id": item["id"], "action": "update", "name": f"Changed {index}"}
                         for index, item in enumerate(planned)
@@ -836,7 +839,7 @@ class ServerPlanningTests(ServerTestCase):
                 })
                 self.assertEqual(len(result["changes"]), count)
                 self.assertEqual(
-                    [item["name"] for item in server.planned_unit_service().list(1000, include_archived=True)],
+                    [item["name"] for item in server.PLANNING_DATA.planned_unit().list(1000, include_archived=True)],
                     [f"Changed {index}" for index in range(count)],
                 )
                 with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -845,12 +848,12 @@ class ServerPlanningTests(ServerTestCase):
     def test_structured_training_changes_move_and_create_in_one_atomic_batch(self):
         wednesday = (date.today() + timedelta(days=20)).isoformat()
         tuesday = (date.today() + timedelta(days=19)).isoformat()
-        upper_body = server.planned_unit_service().create({
+        upper_body = server.PLANNING_DATA.planned_unit().create({
             "date": wednesday, "sport": "WeightTraining", "name": "Oberkörper Einheit",
             "description": "Krafttraining", "duration_minutes": 45, "target": "AUTO",
         })
         with patch.object(runtime_events.STATE_EVENT_BUFFER, "publish") as publish:
-            result = server.structured_training_change_service().apply({
+            result = server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
                 "changes": [
                     {"local_id": upper_body["id"], "action": "update", "date": tuesday},
                     {"action": "create", "date": wednesday, "sport": "Run", "name": "Lockerer Lauf",
@@ -862,14 +865,14 @@ class ServerPlanningTests(ServerTestCase):
             for call in publish.call_args_list
         ))
         self.assertEqual(result["status"], "applied")
-        planned = {item["name"]: item for item in server.planned_unit_service().list()}
+        planned = {item["name"]: item for item in server.PLANNING_DATA.planned_unit().list()}
         self.assertEqual(planned["Oberkörper Einheit"]["date"], tuesday)
         self.assertEqual(planned["Lockerer Lauf"]["date"], wednesday)
         self.assertEqual(len(result["changes"]), 2)
 
     def test_structured_training_create_strips_protected_identity_fields(self):
         workout_date = (date.today() + timedelta(days=21)).isoformat()
-        result = server.structured_training_change_service().apply({
+        result = server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
             "changes": [{
                 "action": "create", "date": workout_date, "sport": "Run", "name": "Clean Run",
                 "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
@@ -879,7 +882,7 @@ class ServerPlanningTests(ServerTestCase):
                 "local_deleted": True, "sync_state": "synced",
             }],
         })
-        created = next(item for item in server.planned_unit_service().list() if item["name"] == "Clean Run")
+        created = next(item for item in server.PLANNING_DATA.planned_unit().list() if item["name"] == "Clean Run")
         self.assertEqual(result["status"], "applied")
         self.assertNotEqual(created["id"], "foreign-id")
         self.assertIsNone(created.get("external_id"))
@@ -891,7 +894,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_structured_training_create_requires_all_workout_fields(self):
         with self.assertRaises(server.AppError) as raised:
-            server.structured_training_change_service().apply({
+            server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
                 "changes": [{
                     "action": "create", "date": (date.today() + timedelta(days=22)).isoformat(),
                     "sport": "Run", "name": "Missing rationale", "description": "- 30m 60% easy",
@@ -901,28 +904,28 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(raised.exception.reason, "invalid_change")
 
     def test_structured_training_allows_repeated_updates_for_same_unit(self):
-        workout = server.planned_unit_service().create({
+        workout = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=23)).isoformat(), "sport": "Run",
             "name": "Repeated update", "description": "- 30m 60% easy", "duration_minutes": 30,
             "target": "AUTO",
         })
-        result = server.structured_training_change_service().apply({
+        result = server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
             "changes": [
                 {"local_id": workout["id"], "action": "update", "name": "First update"},
                 {"local_id": workout["id"], "action": "update", "name": "Second update"},
             ],
         })
         self.assertEqual(result["status"], "applied")
-        self.assertEqual(server.planned_unit_service().list()[0]["name"], "Second update")
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list()[0]["name"], "Second update")
 
     def test_structured_training_folds_repeated_updates_before_create_date_check(self):
         original_date = date.today() + timedelta(days=24)
         moved_date = original_date + timedelta(days=1)
-        workout = server.planned_unit_service().create({
+        workout = server.PLANNING_DATA.planned_unit().create({
             "date": original_date.isoformat(), "sport": "Run", "name": "Move then create",
             "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
         })
-        result = server.structured_training_change_service().apply({
+        result = server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
             "changes": [
                 {"local_id": workout["id"], "action": "update", "name": "Renamed"},
                 {"local_id": workout["id"], "action": "update", "date": moved_date.isoformat()},
@@ -931,16 +934,16 @@ class ServerPlanningTests(ServerTestCase):
             ],
         })
         self.assertEqual(result["status"], "applied")
-        current = {item["id"]: item for item in server.planned_unit_service().list()}
+        current = {item["id"]: item for item in server.PLANNING_DATA.planned_unit().list()}
         self.assertEqual(current[workout["id"]]["date"], moved_date.isoformat())
 
     def test_structured_training_folds_inactive_repeated_changes_before_create_date_check(self):
         original_date = date.today() + timedelta(days=26)
-        workout = server.planned_unit_service().create({
+        workout = server.PLANNING_DATA.planned_unit().create({
             "date": original_date.isoformat(), "sport": "Run", "name": "Archive then update",
             "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
         })
-        result = server.structured_training_change_service().apply({
+        result = server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
             "changes": [
                 {"local_id": workout["id"], "action": "archive"},
                 {"local_id": workout["id"], "action": "update", "name": "Still archived"},
@@ -949,24 +952,24 @@ class ServerPlanningTests(ServerTestCase):
             ],
         })
         self.assertEqual(result["status"], "applied")
-        current = {item["id"]: item for item in server.planned_unit_service().list(include_archived=True)}
+        current = {item["id"]: item for item in server.PLANNING_DATA.planned_unit().list(include_archived=True)}
         self.assertTrue(current[workout["id"]]["archived"])
         self.assertEqual(sum(item["date"] == original_date.isoformat() and not item.get("archived") for item in current.values()), 1)
 
     def test_structured_training_restore_rechecks_original_calendar_date(self):
-        workout = server.planned_unit_service().create({
+        workout = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=25)).isoformat(), "sport": "Run",
             "name": "Restore conflict", "description": "- 30m 60% easy", "duration_minutes": 30,
             "target": "AUTO",
         })
-        server.planned_unit_service().update(workout["id"], {"action": "archive"})
+        server.PLANNING_DATA.planned_unit().update(workout["id"], {"action": "archive"})
         with patch.object(
-            server.CalendarConflictService,
+            calendar_service.CalendarConflictService,
             "conflicts",
             return_value=[{"name": "Occupied"}],
         ) as conflicts:
             with self.assertRaises(server.AppError) as raised:
-                server.structured_training_change_service().apply({
+                server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
                     "changes": [{"local_id": workout["id"], "action": "restore"}],
                 })
         self.assertEqual(raised.exception.reason, "plan_date_conflict")
@@ -977,14 +980,14 @@ class ServerPlanningTests(ServerTestCase):
         plan_name = "Mixed Create Plan"
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
-                db, plan_id, plan_name, "Build", "2099-01-01", "2099-01-31", "planned", server.utc_now(),
+                db, plan_id, plan_name, "Build", "2099-01-01", "2099-01-31", "planned", runtime_clock.utc_now(),
             )
-        existing = server.planned_unit_service().create({
+        existing = server.PLANNING_DATA.planned_unit().create({
             "date": "2099-01-01", "sport": "Run", "name": "Existing plan unit",
             "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
             "plan_id": plan_id, "plan_name": plan_name,
         })
-        result = server.structured_training_change_service().apply({
+        result = server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
             "changes": [
                 {"local_id": existing["id"], "action": "update", "name": "Updated"},
                 {"action": "create", "date": "2099-01-02", "sport": "Run", "name": "Added plan unit",
@@ -992,7 +995,7 @@ class ServerPlanningTests(ServerTestCase):
             ],
         })
         created_id = next(item["local_id"] for item in result["changes"] if item["local_id"] != existing["id"])
-        created = next(item for item in server.planned_unit_service().list() if item["id"] == created_id)
+        created = next(item for item in server.PLANNING_DATA.planned_unit().list() if item["id"] == created_id)
         self.assertEqual(created["plan_id"], plan_id)
         self.assertEqual(created["plan_name"], plan_name)
 
@@ -1000,14 +1003,14 @@ class ServerPlanningTests(ServerTestCase):
         plan_id = "explicit-standalone-plan"
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
-                db, plan_id, "Explicit standalone", "Build", "2099-03-01", "2099-03-31", "planned", server.utc_now(),
+                db, plan_id, "Explicit standalone", "Build", "2099-03-01", "2099-03-31", "planned", runtime_clock.utc_now(),
             )
-        existing = server.planned_unit_service().create({
+        existing = server.PLANNING_DATA.planned_unit().create({
             "date": "2099-03-01", "sport": "Run", "name": "Plan reference",
             "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
             "plan_id": plan_id, "plan_name": "Explicit standalone",
         })
-        result = server.structured_training_change_service().apply({
+        result = server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
             "changes": [
                 {"local_id": existing["id"], "action": "update", "name": "Updated"},
                 {"action": "create", "date": "2099-03-02", "sport": "Run", "name": "Standalone walk",
@@ -1016,21 +1019,21 @@ class ServerPlanningTests(ServerTestCase):
             ],
         })
         created_id = next(item["local_id"] for item in result["changes"] if item["local_id"] != existing["id"])
-        created = next(item for item in server.planned_unit_service().list() if item["id"] == created_id)
+        created = next(item for item in server.PLANNING_DATA.planned_unit().list() if item["id"] == created_id)
         self.assertNotIn("plan_id", created)
 
     def test_named_plan_scope_assigns_create_without_unit_reference(self):
         plan_id = "named-create-plan"
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
-                db, plan_id, "Named create", "Build", "2099-04-01", "2099-04-30", "planned", server.utc_now(),
+                db, plan_id, "Named create", "Build", "2099-04-01", "2099-04-30", "planned", runtime_clock.utc_now(),
             )
         intent = {
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
             "artifact_id": None, "ambiguities": [],
             "authorization_scope": ["local_plan_create", f"training_plan:{plan_id}"],
         }
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "apply_training_changes",
             {"changes": [{"action": "create", "date": "2099-04-02", "sport": "Run",
                           "name": "Plan addition", "description": "- 20m 60% easy", "duration_minutes": 20,
@@ -1038,20 +1041,20 @@ class ServerPlanningTests(ServerTestCase):
             intent=intent, conversation_id="conversation-plan-create", client_turn_id="turn-plan-create",
             session_csrf_hash="", sync_job_ids=[],
         )
-        created = next(item for item in server.planned_unit_service().list() if item["id"] == result["library_entry_ids"][0])
+        created = next(item for item in server.PLANNING_DATA.planned_unit().list() if item["id"] == result["library_entry_ids"][0])
         self.assertEqual(created["plan_id"], plan_id)
 
     def test_standalone_create_does_not_recompute_referenced_plan_bounds(self):
         plan_id = "standalone-bounds-plan"
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
-                db, plan_id, "Standalone bounds", "Build", "2099-05-01", "2099-05-31", "planned", server.utc_now(),
+                db, plan_id, "Standalone bounds", "Build", "2099-05-01", "2099-05-31", "planned", runtime_clock.utc_now(),
             )
-        existing = server.planned_unit_service().create({
+        existing = server.PLANNING_DATA.planned_unit().create({
             "date": "2099-05-10", "sport": "Run", "name": "Plan unit", "description": "- 30m 60% easy",
             "duration_minutes": 30, "target": "AUTO", "plan_id": plan_id, "plan_name": "Standalone bounds",
         })
-        server.structured_training_change_service().apply({"changes": [
+        server.PLANNING_WORKFLOWS.structured_training_change_service().apply({"changes": [
             {"local_id": existing["id"], "action": "update", "name": "Renamed plan unit"},
             {"action": "create", "date": "2099-06-10", "sport": "Run", "name": "Standalone",
              "description": "- 20m 60% easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test",
@@ -1066,17 +1069,17 @@ class ServerPlanningTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             for index, plan_id in enumerate(plan_ids):
                 server.TRAINING_PLAN_REPOSITORY.create(
-                    db, plan_id, f"Mixed {index}", "Build", "2099-06-01", "2099-06-30", "planned", server.utc_now(),
+                    db, plan_id, f"Mixed {index}", "Build", "2099-06-01", "2099-06-30", "planned", runtime_clock.utc_now(),
                 )
         units = [
-            server.planned_unit_service().create({
+            server.PLANNING_DATA.planned_unit().create({
                 "date": f"2099-06-{10 + index:02d}", "sport": "Run", "name": f"Plan {index}",
                 "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
                 "plan_id": plan_id, "plan_name": f"Mixed {index}",
             })
             for index, plan_id in enumerate(plan_ids)
         ]
-        server.structured_training_change_service().apply({"changes": [
+        server.PLANNING_WORKFLOWS.structured_training_change_service().apply({"changes": [
             {"local_id": units[0]["id"], "action": "update", "date": "2099-06-15"},
             {"local_id": units[1]["id"], "action": "update", "date": "2099-06-16"},
         ]})
@@ -1090,14 +1093,14 @@ class ServerPlanningTests(ServerTestCase):
         plan_id = "membership-boundary-plan"
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
-                db, plan_id, "Membership Boundary", "Build", "2099-02-01", "2099-02-28", "planned", server.utc_now(),
+                db, plan_id, "Membership Boundary", "Build", "2099-02-01", "2099-02-28", "planned", runtime_clock.utc_now(),
             )
-        planned = server.planned_unit_service().create({
+        planned = server.PLANNING_DATA.planned_unit().create({
             "date": "2099-02-01", "sport": "Run", "name": "Planned reference",
             "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
             "plan_id": plan_id, "plan_name": "Membership Boundary",
         })
-        replacement = server.structured_training_change_service().apply({
+        replacement = server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
             "changes": [
                 {"local_id": planned["id"], "action": "archive"},
                 {"action": "create", "date": "2099-02-02", "sport": "Run", "name": "Plan replacement",
@@ -1105,14 +1108,14 @@ class ServerPlanningTests(ServerTestCase):
             ],
         })
         replacement_id = next(item["local_id"] for item in replacement["changes"] if item["local_id"] != planned["id"])
-        replacement_unit = next(item for item in server.planned_unit_service().list(include_archived=True) if item["id"] == replacement_id)
+        replacement_unit = next(item for item in server.PLANNING_DATA.planned_unit().list(include_archived=True) if item["id"] == replacement_id)
         self.assertEqual(replacement_unit["plan_id"], plan_id)
 
-        standalone = server.planned_unit_service().create({
+        standalone = server.PLANNING_DATA.planned_unit().create({
             "date": "2099-02-03", "sport": "Run", "name": "Standalone reference",
             "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
         })
-        mixed = server.structured_training_change_service().apply({
+        mixed = server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
             "changes": [
                 {"local_id": replacement_id, "action": "update", "name": "Plan update"},
                 {"local_id": standalone["id"], "action": "update", "name": "Standalone update"},
@@ -1121,17 +1124,17 @@ class ServerPlanningTests(ServerTestCase):
             ],
         })
         mixed_id = next(item["local_id"] for item in mixed["changes"] if item["local_id"] not in {replacement_id, standalone["id"]})
-        mixed_unit = next(item for item in server.planned_unit_service().list() if item["id"] == mixed_id)
+        mixed_unit = next(item for item in server.PLANNING_DATA.planned_unit().list() if item["id"] == mixed_id)
         self.assertNotIn("plan_id", mixed_unit)
 
     def test_structured_training_change_batch_rolls_back_after_old_boundary(self):
-        planned = [server.planned_unit_service().create({
+        planned = [server.PLANNING_DATA.planned_unit().create({
             "date": (date(2099, 1, 1) + timedelta(days=index)).isoformat(),
             "sport": "Ride", "name": f"Original {index}",
             "description": "- 30m 60%", "duration_minutes": 30, "target": "AUTO",
         }) for index in range(28)]
         with self.assertRaises(server.AppError) as raised:
-            server.structured_training_change_service().apply({
+            server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
                 "changes": [
                     *[
                         {"local_id": item["id"], "action": "update", "name": f"Changed {index}"}
@@ -1142,13 +1145,13 @@ class ServerPlanningTests(ServerTestCase):
             })
         self.assertEqual(raised.exception.status, 404)
         self.assertEqual(
-            [item["name"] for item in server.planned_unit_service().list(100, include_archived=True)],
+            [item["name"] for item in server.PLANNING_DATA.planned_unit().list(100, include_archived=True)],
             [f"Original {index}" for index in range(28)],
         )
 
     def test_structured_training_changes_reject_more_than_complete_plan_limit(self):
         with self.assertRaises(server.AppError) as raised:
-            server.structured_training_change_service().apply({
+            server.PLANNING_WORKFLOWS.structured_training_change_service().apply({
                 "changes": [{"local_id": str(uuid.uuid4()), "action": "delete"}]
                 * (coach_limits.COACH_TRAINING_CHANGE_LIMIT + 1),
             })
@@ -1156,7 +1159,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_build_training_context_serializes_local_plans_once_and_reports_projection_budget(self):
         today = server.ATHLETE_CLOCK.now().date()
-        server.planned_unit_service().create({
+        server.PLANNING_DATA.planned_unit().create({
             "date": (today + timedelta(days=1)).isoformat(),
             "sport": "Ride",
             "name": "Local plan fixture",
@@ -1165,24 +1168,24 @@ class ServerPlanningTests(ServerTestCase):
             "target": "easy",
             "source": "coach",
         })
-        context = server.coach_training_context_service().build()
+        context = server.COACH_CONTEXT.training_context_service().build()
         self.assertEqual(context.count("LOCAL PLANNED WORKOUTS"), 1)
         self.assertEqual(context.count('"local_planned_workouts"'), 1)
         self.assertLessEqual(len(context), coach_context.COACH_CONTEXT_TOTAL_CHAR_LIMIT)
-        structured = server.coach_structured_context_service().build()
+        structured = server.COACH_CONTEXT.structured_context_service().build()
         self.assertIn("local_planned_workouts", structured)
         self.assertIn('"projection"', context)
         self.assertNotIn("long description", context)
 
     def test_build_training_context_applies_total_budget_deterministically(self):
-        with patch.object(server.CoachStructuredContextService, "build", return_value={"source_policy": {"untrusted": "x" * 200_000}}):
-            first = server.coach_training_context_service().build()
-            second = server.coach_training_context_service().build()
+        with patch("backend.coach.context.CoachStructuredContextService.build", return_value={"source_policy": {"untrusted": "x" * 200_000}}):
+            first = server.COACH_CONTEXT.training_context_service().build()
+            second = server.COACH_CONTEXT.training_context_service().build()
         self.assertEqual(first, second)
         self.assertLessEqual(len(first), coach_context.COACH_CONTEXT_TOTAL_CHAR_LIMIT)
 
     def test_complete_plan_replace_ignores_archived_units_in_date_conflicts(self):
-        archived = server.planned_unit_service().create({
+        archived = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=2)).isoformat(),
             "sport": "Ride", "name": "Archived", "description": "- 30m 60% easy",
         })
@@ -1191,13 +1194,13 @@ class ServerPlanningTests(ServerTestCase):
             payload = json.loads(row["payload"])
             payload.update({"archived": True, "local_deleted": True})
             db.execute("UPDATE planned_units SET payload=? WHERE local_id=?", (json.dumps(payload), archived["id"]))
-        state = server.structured_training_state_service().read()
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
         intent = {
             "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
             "follow_up_operations": [],
         }
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "replace_training_plan",
             {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Replacement", "goal": "", "workouts": [
                 {"date": archived["date"], "sport": "Ride", "name": "New", "description": "- 40m 60% easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
@@ -1208,54 +1211,54 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(result["status"], "replaced")
 
     def test_training_plan_metadata_changes_advance_planning_revision(self):
-        plan_entry = server.local_plan_creation_service().save([{
+        plan_entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Ride", "name": "Metadata", "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
         }], plan_name="Metadata Plan")[0]
-        plan = next(item for item in server.training_plan_service().list() if item["id"] == plan_entry["plan_id"])
-        before = server.structured_training_state_service().read()["planning_revision"]
-        server.training_plan_service().update(plan["id"], {"action": "update", "name": "Renamed Plan"})
-        self.assertEqual(server.structured_training_state_service().read()["planning_revision"], before + 1)
+        plan = next(item for item in server.PLANNING_DATA.training_plan().list() if item["id"] == plan_entry["plan_id"])
+        before = server.PLANNING_WORKFLOWS.structured_training_state_service().read()["planning_revision"]
+        server.PLANNING_DATA.training_plan().update(plan["id"], {"action": "update", "name": "Renamed Plan"})
+        self.assertEqual(server.PLANNING_WORKFLOWS.structured_training_state_service().read()["planning_revision"], before + 1)
 
     def test_training_plan_metadata_undo_advances_planning_revision(self):
-        plan_entry = server.local_plan_creation_service().save([{
+        plan_entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Ride", "name": "Metadata", "description": "- 30m 60% easy",
             "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
         }], plan_name="Metadata Plan")[0]
-        plan = next(item for item in server.training_plan_service().list() if item["id"] == plan_entry["plan_id"])
-        server.training_plan_service().update(plan["id"], {"action": "update", "name": "Renamed Plan"})
+        plan = next(item for item in server.PLANNING_DATA.training_plan().list() if item["id"] == plan_entry["plan_id"])
+        server.PLANNING_DATA.training_plan().update(plan["id"], {"action": "update", "name": "Renamed Plan"})
         metadata_change = next(
-            item for item in server.change_history_service().list()
+            item for item in server.HISTORY.change_history_service().list()
             if item["entity_type"] == "training_plan"
             and item["entity_id"] == plan["id"]
             and item["action"] == "update"
         )
-        before_undo = server.structured_training_state_service().read()["planning_revision"]
+        before_undo = server.PLANNING_WORKFLOWS.structured_training_state_service().read()["planning_revision"]
 
-        server.history_undo_service().apply({
+        server.HISTORY.undo_service().apply({
             "change_id": metadata_change["id"],
             "expected_current_hash": metadata_change["after_hash"],
         })
 
-        self.assertEqual(server.structured_training_state_service().read()["planning_revision"], before_undo + 1)
-        restored = next(item for item in server.training_plan_service().list() if item["id"] == plan["id"])
+        self.assertEqual(server.PLANNING_WORKFLOWS.structured_training_state_service().read()["planning_revision"], before_undo + 1)
+        restored = next(item for item in server.PLANNING_DATA.training_plan().list() if item["id"] == plan["id"])
         self.assertEqual(restored["name"], "Metadata Plan")
 
     def test_history_capacity_covers_one_complete_plan_replacement(self):
         self.assertGreaterEqual(change_history.MAX_ROWS, coach_limits.COACH_TRAINING_CHANGE_LIMIT * 2)
 
     def test_complete_plan_replacement_rejects_oversized_history_atomically(self):
-        old = server.local_plan_creation_service().save([{
+        old = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Ride", "name": "Old", "description": "- 30m 60% easy",
             "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
         }], plan_name="Old Plan")[0]
-        old_plan = next(plan for plan in server.training_plan_service().list() if plan["id"] == old["plan_id"])
-        state = server.structured_training_state_service().read()
+        old_plan = next(plan for plan in server.PLANNING_DATA.training_plan().list() if plan["id"] == old["plan_id"])
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
 
         with patch.object(change_history, "MAX_ROWS", 3), self.assertRaises(server.AppError) as error:
-            server.structured_training_plan_replacement_service().replace({
+            server.PLANNING_WORKFLOWS.structured_training_plan_replacement_service().replace({
                 "expected_revision": state["planning_revision"],
                 "payload": {"plan_name": "Replacement", "goal": "", "workouts": [{
                     "date": (date.today() + timedelta(days=2)).isoformat(),
@@ -1265,23 +1268,23 @@ class ServerPlanningTests(ServerTestCase):
             })
 
         self.assertEqual(error.exception.reason, "change_history_limit")
-        active = server.planned_unit_service().list()
+        active = server.PLANNING_DATA.planned_unit().list()
         self.assertEqual([item["id"] for item in active], [old["id"]])
-        unchanged_plan = next(plan for plan in server.training_plan_service().list() if plan["id"] == old_plan["id"])
+        unchanged_plan = next(plan for plan in server.PLANNING_DATA.training_plan().list() if plan["id"] == old_plan["id"])
         self.assertEqual(unchanged_plan["status"], "planned")
 
     def test_complete_plan_replace_archives_selected_plan_without_future_units(self):
         past_plan_id = str(uuid.uuid4())
         past = (date.today() - timedelta(days=10)).isoformat()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            server.TRAINING_PLAN_REPOSITORY.create(db, past_plan_id, "Past Plan", "", past, past, "planned", server.utc_now())
-        state = server.structured_training_state_service().read()
+            server.TRAINING_PLAN_REPOSITORY.create(db, past_plan_id, "Past Plan", "", past, past, "planned", runtime_clock.utc_now())
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
         intent = {
             "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
             "artifact_id": None, "ambiguities": [], "authorization_scope": [f"training_plan:{past_plan_id}"],
             "follow_up_operations": [],
         }
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "replace_training_plan",
             {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Past Plan", "goal": "", "workouts": [
                 {"date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "New", "description": "- 40m 60% easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
@@ -1290,7 +1293,7 @@ class ServerPlanningTests(ServerTestCase):
             session_csrf_hash="", sync_job_ids=[],
         )
         self.assertEqual(result["status"], "replaced")
-        self.assertEqual(next(plan for plan in server.training_plan_service().list() if plan["id"] == past_plan_id)["status"], "archived")
+        self.assertEqual(next(plan for plan in server.PLANNING_DATA.training_plan().list() if plan["id"] == past_plan_id)["status"], "archived")
 
     def test_broad_plan_replace_archives_future_plan_metadata_without_active_units(self):
         empty_plan_id = str(uuid.uuid4())
@@ -1298,11 +1301,11 @@ class ServerPlanningTests(ServerTestCase):
         ends = (date.today() + timedelta(days=7)).isoformat()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
-                db, empty_plan_id, "Empty Future Plan", "", starts, ends, "planned", server.utc_now(),
+                db, empty_plan_id, "Empty Future Plan", "", starts, ends, "planned", runtime_clock.utc_now(),
             )
-        state = server.structured_training_state_service().read()
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
 
-        result = server.structured_training_plan_replacement_service().replace({
+        result = server.PLANNING_WORKFLOWS.structured_training_plan_replacement_service().replace({
             "expected_revision": state["planning_revision"],
             "payload": {"plan_name": "Replacement", "goal": "", "workouts": [{
                 "date": (date.today() + timedelta(days=2)).isoformat(),
@@ -1312,10 +1315,10 @@ class ServerPlanningTests(ServerTestCase):
         })
 
         self.assertEqual(result["status"], "replaced")
-        old_plan = next(plan for plan in server.training_plan_service().list() if plan["id"] == empty_plan_id)
+        old_plan = next(plan for plan in server.PLANNING_DATA.training_plan().list() if plan["id"] == empty_plan_id)
         self.assertEqual(old_plan["status"], "archived")
         metadata_history = next(
-            item for item in server.change_history_service().list()
+            item for item in server.HISTORY.change_history_service().list()
             if item["entity_type"] == "training_plan"
             and item["entity_id"] == empty_plan_id
             and item["action"] == "update"
@@ -1324,13 +1327,13 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_broad_plan_replace_preserves_imported_provider_units(self):
         remote_date = (date.today() + timedelta(days=2)).isoformat()
-        server.remote_planned_unit_reconciler().reconcile([{
+        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([{
             "id": "remote-future-workout", "category": "WORKOUT", "type": "Ride",
             "name": "Provider workout", "start_date_local": remote_date + "T07:00:00",
             "moving_time": 1800,
         }])
-        state = server.structured_training_state_service().read()
-        result = server.structured_training_plan_replacement_service().replace({
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
+        result = server.PLANNING_WORKFLOWS.structured_training_plan_replacement_service().replace({
             "expected_revision": state["planning_revision"],
             "payload": {"plan_name": "Coach replacement", "goal": "", "workouts": [{
                 "date": (date.today() + timedelta(days=1)).isoformat(),
@@ -1339,23 +1342,23 @@ class ServerPlanningTests(ServerTestCase):
             }]},
         })
         self.assertEqual(result["status"], "replaced")
-        imported = next(item for item in server.planned_unit_service().list(include_archived=True) if item.get("remote_event_id") == "remote-future-workout")
+        imported = next(item for item in server.PLANNING_DATA.planned_unit().list(include_archived=True) if item.get("remote_event_id") == "remote-future-workout")
         self.assertFalse(imported.get("local_deleted", False))
         self.assertFalse(imported.get("archived", False))
 
     def test_planned_unit_undo_rejects_a_new_date_conflict(self):
-        old = server.planned_unit_service().create({
+        old = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "start_date_local": (date.today() + timedelta(days=1)).isoformat() + "T07:30:00",
             "sport": "Ride", "name": "Old", "description": "- 30m 60% easy",
         })
-        state = server.structured_training_state_service().read()
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
         intent = {
             "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
             "follow_up_operations": [],
         }
-        server.coach_tool_dispatch_service().execute(
+        server.COACH_TOOL_DISPATCH.service().execute(
             "replace_training_plan",
             {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Conflict Replacement", "goal": "", "workouts": [
                 {"date": old["date"], "sport": "Ride", "name": "New", "description": "- 40m 60% easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
@@ -1364,26 +1367,26 @@ class ServerPlanningTests(ServerTestCase):
             session_csrf_hash="", sync_job_ids=[],
         )
         deleted_history = next(
-            item for item in server.change_history_service().list()
+            item for item in server.HISTORY.change_history_service().list()
             if item["entity_type"] == "planned_unit" and item["entity_id"] == old["id"] and item["action"] == "delete"
         )
         with self.assertRaises(server.AppError) as error:
-            server.history_undo_service().apply({"change_id": deleted_history["id"], "expected_current_hash": deleted_history["after_hash"]})
+            server.HISTORY.undo_service().apply({"change_id": deleted_history["id"], "expected_current_hash": deleted_history["after_hash"]})
         self.assertEqual(error.exception.reason, "plan_date_conflict")
 
     def test_structured_training_reads_expose_complete_bounded_plan(self):
         for index in range(coach_limits.COACH_TRAINING_CHANGE_LIMIT):
-            server.planned_unit_service().create({
+            server.PLANNING_DATA.planned_unit().create({
                 "date": (date(2098, 1, 1) + timedelta(days=index)).isoformat(),
                 "sport": "Ride", "name": f"Session {index}", "description": "- 30m 60% easy",
             })
         intent = {"intent": "local_action", "operation": "read_training_state", "target_system": "local", "authorization_scope": []}
-        state = server.coach_tool_dispatch_service().execute(
+        state = server.COACH_TOOL_DISPATCH.service().execute(
             "read_training_state", {}, intent=intent, conversation_id="read-plan", client_turn_id="read-plan",
             session_csrf_hash="", sync_job_ids=[],
         )
         self.assertEqual(len(state["planned_units"]), coach_limits.COACH_TRAINING_CHANGE_LIMIT)
-        listed = server.coach_tool_dispatch_service().execute(
+        listed = server.COACH_TOOL_DISPATCH.service().execute(
             "list_planned_workouts", {"limit": coach_limits.COACH_TRAINING_CHANGE_LIMIT}, intent=intent,
             conversation_id="read-plan", client_turn_id="read-plan", session_csrf_hash="", sync_job_ids=[],
         )
@@ -1394,16 +1397,16 @@ class ServerPlanningTests(ServerTestCase):
             "backend.planning.state_service.STRUCTURED_TRAINING_STATE_PAGE_LIMIT",
             2,
         ):
-            archived = server.planned_unit_service().create({
+            archived = server.PLANNING_DATA.planned_unit().create({
                 "date": (date.today() + timedelta(days=1)).isoformat(),
                 "sport": "Ride", "name": "Archived", "description": "- 30m 60% easy",
             })
-            server.planned_unit_service().update(archived["id"], {"action": "archive"})
-            active = [server.planned_unit_service().create({
+            server.PLANNING_DATA.planned_unit().update(archived["id"], {"action": "archive"})
+            active = [server.PLANNING_DATA.planned_unit().create({
                 "date": (date.today() + timedelta(days=index)).isoformat(),
                 "sport": "Ride", "name": f"Active {index}", "description": "- 30m 60% easy",
             }) for index in (2, 3)]
-            state = server.structured_training_state_service().read()
+            state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
         self.assertEqual([item["local_id"] for item in state["planned_units"]], [item["id"] for item in active])
 
     def test_structured_training_state_rejects_cursor_from_changed_revision(self):
@@ -1411,25 +1414,25 @@ class ServerPlanningTests(ServerTestCase):
             "backend.planning.state_service.STRUCTURED_TRAINING_STATE_PAGE_LIMIT",
             1,
         ):
-            server.planned_unit_service().create({
+            server.PLANNING_DATA.planned_unit().create({
                 "date": (date.today() + timedelta(days=1)).isoformat(),
                 "sport": "Ride", "name": "First", "description": "- 30m 60% easy",
             })
-            server.planned_unit_service().create({
+            server.PLANNING_DATA.planned_unit().create({
                 "date": (date.today() + timedelta(days=2)).isoformat(),
                 "sport": "Ride", "name": "Second", "description": "- 30m 60% easy",
             })
-            first_page = server.structured_training_state_service().read()
-            server.planned_unit_service().create({
+            first_page = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
+            server.PLANNING_DATA.planned_unit().create({
                 "date": (date.today() + timedelta(days=3)).isoformat(),
                 "sport": "Ride", "name": "Changed", "description": "- 30m 60% easy",
             })
             with self.assertRaises(server.AppError) as raised:
-                server.structured_training_state_service().read(cursor=first_page["planned_units_page"]["next_cursor"])
+                server.PLANNING_WORKFLOWS.structured_training_state_service().read(cursor=first_page["planned_units_page"]["next_cursor"])
         self.assertEqual(raised.exception.reason, "planning_revision_conflict")
 
     def test_bulk_training_changes_require_revision_and_hashes(self):
-        planned = server.planned_unit_service().create({
+        planned = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Ride", "name": "Bulk target", "description": "- 30m 60% easy",
         })
@@ -1438,7 +1441,7 @@ class ServerPlanningTests(ServerTestCase):
             "authorization_scope": ["local_plan"], "bulk_change": True,
         }
         with self.assertRaises(server.AppError) as raised:
-            server.coach_tool_dispatch_service().execute(
+            server.COACH_TOOL_DISPATCH.service().execute(
                 "apply_training_changes", {"changes": [{"local_id": planned["id"], "action": "update"}]},
                 intent=intent, conversation_id="bulk-required", client_turn_id="bulk-required",
                 session_csrf_hash="", sync_job_ids=[],
@@ -1448,19 +1451,19 @@ class ServerPlanningTests(ServerTestCase):
     def test_bulk_training_changes_validate_final_schedule_before_writes(self):
         first_date = date.today() + timedelta(days=1)
         second_date = date.today() + timedelta(days=2)
-        first = server.planned_unit_service().create({
+        first = server.PLANNING_DATA.planned_unit().create({
             "date": first_date.isoformat(), "sport": "Ride", "name": "First", "description": "- 30m 60% easy",
         })
-        second = server.planned_unit_service().create({
+        second = server.PLANNING_DATA.planned_unit().create({
             "date": second_date.isoformat(), "sport": "Ride", "name": "Second", "description": "- 30m 60% easy",
         })
-        state = server.structured_training_state_service().read()
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
         refs = {item["local_id"]: item for item in state["planned_units"]}
         intent = {
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
             "authorization_scope": ["local_plan"], "bulk_change": True,
         }
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "apply_training_changes", {
                 "expected_revision": state["planning_revision"],
                 "changes": [
@@ -1472,19 +1475,19 @@ class ServerPlanningTests(ServerTestCase):
             session_csrf_hash="", sync_job_ids=[],
         )
         self.assertEqual(result["status"], "applied")
-        current = {item["id"]: item["date"] for item in server.planned_unit_service().list()}
+        current = {item["id"]: item["date"] for item in server.PLANNING_DATA.planned_unit().list()}
         self.assertEqual(current[first["id"]], second_date.isoformat())
         self.assertEqual(current[second["id"]], first_date.isoformat())
 
     def test_training_patch_rolls_back_existing_updates_when_creation_fails(self):
-        existing = server.planned_unit_service().create({
+        existing = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=4)).isoformat(),
             "sport": "Ride", "name": "Before", "description": "- 30m 60% easy",
         })
-        revision = server.structured_training_state_service().read()["planning_revision"]
+        revision = server.PLANNING_WORKFLOWS.structured_training_state_service().read()["planning_revision"]
         expected_hash = next(
             item["expected_payload_hash"]
-            for item in server.structured_training_state_service().read()["planned_units"]
+            for item in server.PLANNING_WORKFLOWS.structured_training_state_service().read()["planned_units"]
             if item["local_id"] == existing["id"]
         )
         arguments = {
@@ -1497,19 +1500,19 @@ class ServerPlanningTests(ServerTestCase):
             }],
         }
         with patch.object(
-            server.LocalTrainingPlanCreationService,
+            local_plan_creation_service.LocalTrainingPlanCreationService,
             "save",
             side_effect=RuntimeError("creation failed"),
         ):
             with self.assertRaises(RuntimeError):
-                server.coach_training_patch_service().apply(arguments, {
+                server.COACH_PLANNING_TOOLS.training_patch_service().apply(arguments, {
                     "authorization_scope": ["local_plan"],
                     "request": {"constraints": []},
                 })
-        current = {item["id"]: item for item in server.planned_unit_service().list()}
+        current = {item["id"]: item for item in server.PLANNING_DATA.planned_unit().list()}
         self.assertEqual(current[existing["id"]]["name"], "Before")
         self.assertEqual(len(current), 1)
-        self.assertEqual(server.structured_training_state_service().read()["planning_revision"], revision)
+        self.assertEqual(server.PLANNING_WORKFLOWS.structured_training_state_service().read()["planning_revision"], revision)
 
     def test_workout_library_refresh_forwards_cancellation(self):
         cancel_event = threading.Event()
@@ -1525,7 +1528,7 @@ class ServerPlanningTests(ServerTestCase):
             intervals_client_module.IntervalsClient, "get_workout_library", side_effect=get_library
         ) as get_workout_library:
             with self.assertRaises(server.AppError) as raised:
-                server.workout_library_refresh_service().refresh(
+                server.WORKOUT_LIBRARY_SYNC.refresh_service().refresh(
                     "cancellable", cancel_event=cancel_event
                 )
         self.assertEqual(raised.exception.reason, "chat_cancelled")
@@ -1550,17 +1553,17 @@ class ServerPlanningTests(ServerTestCase):
             side_effect=[RuntimeError("import failed"), {"imported": 1, "updated": 0, "conflicts": 0}],
         ) as import_units, patch.object(WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}):
             with self.assertRaises(RuntimeError):
-                server.intervals_sync_service().sync(
+                server.INTERVALS_SYNC.sync_service().sync(
                     "initial attempt", activity_days=42
                 )
             self.assertIsNone(server.key_value_service().get("planned_units_initial_import_at"))
-            server.intervals_sync_service().sync("retry", activity_days=42)
+            server.INTERVALS_SYNC.sync_service().sync("retry", activity_days=42)
 
         self.assertEqual(import_units.call_count, 2)
         self.assertEqual(server.key_value_service().get("planned_units_initial_import_at"), "retryable")
 
     def test_library_refresh_is_read_only_even_with_pending_local_entries(self):
-        server.workout_library_service().create_local_entry({
+        server.PLANNING_DATA.workout_library().create_local_entry({
             "sport": "Ride",
             "name": "Read-only refresh",
             "description": "- 20m Z2",
@@ -1568,16 +1571,15 @@ class ServerPlanningTests(ServerTestCase):
         })
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
-        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            result = server.workout_library_refresh_service().refresh("read-only")
+            result = server.WORKOUT_LIBRARY_SYNC.refresh_service().refresh("read-only")
         self.assertEqual(result["local_synced"], 0)
         self.assertEqual(recorder.mutations, [])
 
     def test_read_competition_pull_keeps_dirty_local_changes_as_conflict(self):
         event_date = (date.today() + timedelta(days=33)).isoformat()
-        saved = server.athlete_context_service().save({}, [{
+        saved = server.ATHLETE_DATA.context().save({}, [{
             "name": "Remote original",
             "event_date": event_date,
             "sport": "Cycling",
@@ -1588,7 +1590,7 @@ class ServerPlanningTests(ServerTestCase):
                 "UPDATE competitions SET intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced' WHERE id=?",
                 ("123", planning_competitions.competition_external_id(competition_id), competition_id),
             )
-        server.competition_service().save({
+        server.PLANNING_DATA.competition().save({
             "competition_id": competition_id,
             "name": "Local pending change",
             "event_date": event_date,
@@ -1602,11 +1604,10 @@ class ServerPlanningTests(ServerTestCase):
             "type": "Ride",
             "name": "Remote original",
         }])
-        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
-            server, "intervals_client", return_value=client
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
-            result = server.competition_sync_service().sync("read-only")
-        competition = server.competition_service().list()[0]
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("read-only")
+        competition = server.PLANNING_DATA.competition().list()[0]
         self.assertEqual(result["pushed"], 0)
         self.assertEqual(competition["name"], "Local pending change")
         self.assertEqual(competition["sync_dirty"], 1)
@@ -1615,7 +1616,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_structured_athlete_context_persists_competitions(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()
-        result = server.athlete_context_service().save(
+        result = server.ATHLETE_DATA.context().save(
             {"name": "Ada", "training_background": "Five years of cycling", "typical_weekly_volume": "8 hours"},
             [{
                 "name": "Münsterland Giro",
@@ -1630,13 +1631,13 @@ class ServerPlanningTests(ServerTestCase):
         )
         self.assertEqual(result["profile"]["training_background"], "Five years of cycling")
         self.assertEqual(result["competitions"][0]["priority"], "A")
-        context = server.coach_structured_context_service().build()
+        context = server.COACH_CONTEXT.structured_context_service().build()
         self.assertEqual(context["target_competitions"][0]["name"], "Münsterland Giro")
         self.assertIn("bestätigte", context["source_policy"]["durable_profile"])
 
     def test_competition_conflict_can_adopt_remote_or_keep_local(self):
         event_date = (date.today() + timedelta(days=61)).isoformat()
-        saved = server.athlete_context_service().save({}, [{"name": "Remote Race", "event_date": event_date, "sport": "Cycling"}])
+        saved = server.ATHLETE_DATA.context().save({}, [{"name": "Remote Race", "event_date": event_date, "sport": "Cycling"}])
         competition_id = saved["competitions"][0]["id"]
 
         class FakeIntervalsClient:
@@ -1651,35 +1652,35 @@ class ServerPlanningTests(ServerTestCase):
                 return 0
 
         client = FakeIntervalsClient()
-        with patch.object(server, "intervals_client", return_value=client), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            server.competition_sync_service().sync("test")
-            adopted = server.competition_service().resolve_conflict(competition_id, "adopt_remote")
+            server.PROVIDER_RESYNC.competition_sync_service().sync("test")
+            adopted = server.PLANNING_DATA.competition().resolve_conflict(competition_id, "adopt_remote")
         self.assertEqual(adopted["competition"]["name"], "Remote Race")
         self.assertEqual(adopted["competition"]["sync_state"], "synced")
         self.assertEqual(adopted["competition"]["sync_dirty"], 0)
 
-        saved = server.competition_service().save({
+        saved = server.PLANNING_DATA.competition().save({
             "competition_id": competition_id, "name": "Remote Race", "event_date": event_date,
             "sport": "Cycling", "priority": "B",
         })
         self.assertEqual(saved["competition"]["sync_state"], "local")
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute("UPDATE competitions SET intervals_event_id=NULL, sync_dirty=1, sync_state='local', sync_conflict='' WHERE id=?", (competition_id,))
-        with patch.object(server, "intervals_client", return_value=client), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", return_value=client), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            server.competition_sync_service().sync("test")
+            server.PROVIDER_RESYNC.competition_sync_service().sync("test")
             # Explicitly choosing the local version enables a provider update.
-            server.competition_service().resolve_conflict(competition_id, "keep_local")
-            result = server.competition_sync_service().sync("test", push_local=True)
+            server.PLANNING_DATA.competition().resolve_conflict(competition_id, "keep_local")
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
         self.assertEqual(result["pushed"], 1)
-        self.assertEqual(server.competition_service().list()[0]["sync_state"], "synced")
+        self.assertEqual(server.PLANNING_DATA.competition().list()[0]["sync_state"], "synced")
 
     def test_competition_removal_creates_remote_delete_tombstone(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()
-        saved = server.athlete_context_service().save({}, [{"name": "Delete Race", "event_date": event_date}])
+        saved = server.ATHLETE_DATA.context().save({}, [{"name": "Delete Race", "event_date": event_date}])
         local_id = saved["competitions"][0]["id"]
         deleted = []
 
@@ -1694,16 +1695,16 @@ class ServerPlanningTests(ServerTestCase):
                 deleted.extend(identifiers)
                 return len(identifiers)
 
-        with patch.object(server, "intervals_client", FakeIntervalsClient), patch.object(
+        with patch.object(server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            server.competition_sync_service().sync("test", push_local=True)
-            server.athlete_context_service().save({}, [])
-            result = server.competition_sync_service().sync("test", push_local=True)
+            server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
+            server.ATHLETE_DATA.context().save({}, [])
+            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test", push_local=True)
 
         self.assertEqual(result["deleted_remote"], 1)
         self.assertEqual(deleted, [{"id": "888"}])
-        self.assertEqual(server.competition_service().list(), [])
+        self.assertEqual(server.PLANNING_DATA.competition().list(), [])
         self.assertNotEqual(local_id, "")
 
     def test_current_performance_includes_health_and_training_comparisons(self):
@@ -1736,9 +1737,9 @@ class ServerPlanningTests(ServerTestCase):
         self.assertNotIn('id="planningSummary"', markup)
 
     def test_change_history_records_safe_diff_and_explicit_undo(self):
-        server.profile_service().save({"name": "Ada", "weight_kg": "71"})
-        server.profile_service().save({"name": "Bea", "weight_kg": "72"})
-        history = server.change_history_service().list()
+        server.ATHLETE_DATA.profile().save({"name": "Ada", "weight_kg": "71"})
+        server.ATHLETE_DATA.profile().save({"name": "Bea", "weight_kg": "72"})
+        history = server.HISTORY.change_history_service().list()
         latest = next(item for item in history if item["entity_type"] == "profile")
         self.assertEqual(latest["action"], "update")
         self.assertEqual(latest["diff"]["fields"]["name"], {"changed": True})
@@ -1748,22 +1749,22 @@ class ServerPlanningTests(ServerTestCase):
         self.assertNotIn('"after"', json.dumps(latest))
         self.assertNotIn("prompt", json.dumps(latest).casefold())
         preview = self.history_preview(latest["id"])
-        confirmed = server.coach_proposal_confirmation_service().confirm(preview["proposed_action"]["id"], "session-csrf-hash")
-        result = server.coach_proposal_execution_service().execute(confirmed["action_token"], "session-csrf-hash", confirmed["proposed_action"]["payload_hash"])
+        confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(preview["proposed_action"]["id"], "session-csrf-hash")
+        result = server.COACH_PROPOSALS.execution_service().execute(confirmed["action_token"], "session-csrf-hash", confirmed["proposed_action"]["payload_hash"])
         self.assertTrue(result["remote_untouched"])
-        self.assertEqual(server.profile_service().get()["name"], "Ada")
+        self.assertEqual(server.ATHLETE_DATA.profile().get()["name"], "Ada")
         with self.assertRaises(server.AppError) as replay:
-            server.history_undo_service().preview(latest["id"])
+            server.HISTORY.undo_service().preview(latest["id"])
         self.assertEqual(replay.exception.status, 409)
 
     def test_deleted_local_library_entry_can_be_undone_without_provider_write(self):
-        entry = server.workout_library_service().create_local_entry({"name": "Easy", "sport": "Ride", "duration_minutes": 30, "description": "- 30m 60%"})
-        created = next(item for item in server.change_history_service().list() if item["entity_id"] == entry["id"] and item["action"] == "create")
+        entry = server.PLANNING_DATA.workout_library().create_local_entry({"name": "Easy", "sport": "Ride", "duration_minutes": 30, "description": "- 30m 60%"})
+        created = next(item for item in server.HISTORY.change_history_service().list() if item["entity_id"] == entry["id"] and item["action"] == "create")
         preview = self.history_preview(created["id"])
-        confirmed = server.coach_proposal_confirmation_service().confirm(preview["proposed_action"]["id"], "session-csrf-hash")
-        result = server.coach_proposal_execution_service().execute(confirmed["action_token"], "session-csrf-hash", confirmed["proposed_action"]["payload_hash"])
+        confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(preview["proposed_action"]["id"], "session-csrf-hash")
+        result = server.COACH_PROPOSALS.execution_service().execute(confirmed["action_token"], "session-csrf-hash", confirmed["proposed_action"]["payload_hash"])
         self.assertEqual(result["status"], "undone")
-        self.assertFalse(server.workout_library_service().list(include_archived=True))
+        self.assertFalse(server.PLANNING_DATA.workout_library().list(include_archived=True))
 
 
 if __name__ == "__main__":

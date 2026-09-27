@@ -35,7 +35,7 @@ class WorkoutTextTests(ServerTestCase):
             "(261–273 W), dazwischen 6 min bei 50–60 % FTP. 10 min Ausrollen.", 65,
         )
         self.assert_invalid(workout, "missing_workout_steps")
-        client = server.intervals_client()
+        client = server.PROVIDER_TRANSPORT.intervals_client()
         with patch.object(client, "get_or_create_workout_folder") as folder, \
                 patch.object(client, "post") as post, patch.object(client, "put") as put:
             for operation in (
@@ -200,7 +200,7 @@ class WorkoutTextTests(ServerTestCase):
 
     def test_library_exports_preserve_target_and_local_duration(self):
         workout = self.workout("- 30m Z2 HR", 30, target="HR", moving_time=3600)
-        client = server.intervals_client()
+        client = server.PROVIDER_TRANSPORT.intervals_client()
         with patch.object(client, "get_or_create_workout_folder", return_value=1), \
                 patch.object(client, "post", return_value={"id": "synthetic"}) as post, \
                 patch.object(client, "put", return_value={"id": "synthetic"}) as put:

@@ -79,6 +79,22 @@ class CoachPlanningActionToolService:
             change_id = str(arguments.get("change_id") or "").strip()
             require_coach_scope(intent, f"change:{change_id}")
             preview = self._history_undo_service().preview(change_id)
+            if arguments.get("apply"):
+                payload = {
+                    "change_id": change_id,
+                    "expected_current_hash": (
+                        preview.get("proposal", {}).get("payload", {}).get("expected_current_hash")
+                        or preview.get("undo_target_hash")
+                        or ""
+                    ),
+                }
+                result = self._history_undo_service().apply(payload)
+                return {
+                    "ok": True,
+                    "status": "applied",
+                    "change": preview.get("change"),
+                    **result,
+                }
             proposal = self._proposal_creation_service().create(
                 preview.pop("proposal"), session_csrf_hash
             )

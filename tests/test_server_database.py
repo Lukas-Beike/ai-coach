@@ -1,4 +1,6 @@
 """Server integration tests for database."""
+from backend.providers import openai as openai_provider
+from backend.runtime import clock as runtime_clock
 
 import http.client
 import json
@@ -17,6 +19,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from backend.db.manager import DATABASE_LOCK, DATABASE_MANAGER_CACHE
 from backend import privacy as privacy_module
 from backend.coach import limits as coach_limits
 from backend.db.schema import configure_cipher, CURRENT_DATABASE_INDEXES, CURRENT_DATABASE_SCHEMA, database_index_names, database_schema_is_current, database_table_names
@@ -28,10 +31,16 @@ from backend.http_api.response_transport import STREAM_CHUNK_BYTES
 from backend.providers import gemini as gemini_provider
 from backend.runtime import maintenance as runtime_maintenance
 from backend.weather import cache as weather_cache
+from backend.sync import queue as sync_queue
 from server_test_support import create_test_session, server, ServerTestCase
 
 
 class ServerDatabaseTests(ServerTestCase):
+
+    def test_shared_database_resources_have_one_backend_owner(self):
+        self.assertIs(server.DB_LOCK, DATABASE_LOCK)
+        self.assertFalse(hasattr(server, "DATABASE_MANAGER_CACHE"))
+        self.assertIs(server.database_manager(), DATABASE_MANAGER_CACHE.manager)
 
     def test_unavailable_sqlcipher_closes_manager_for_changed_secure_configuration(self):
         manager = server.database_manager()
@@ -55,19 +64,19 @@ class ServerDatabaseTests(ServerTestCase):
 
     def test_provider_state_service_is_recreated_with_database_manager(self):
         first = server.provider_state_service()
-        first_http_client = server.provider_http_client()
-        self.assertIs(server.provider_http_client(), first_http_client)
-        first_refresh_tracker = server.provider_refresh_tracker()
-        first_weather_service = server.weather_service()
-        self.assertIs(server.weather_service(), first_weather_service)
+        first_http_client = server.PROVIDER_TRANSPORT.json_http_client()
+        self.assertIs(server.PROVIDER_TRANSPORT.json_http_client(), first_http_client)
+        first_refresh_tracker = server.PROVIDER_SYNC.refresh_tracker()
+        first_weather_service = server.WEATHER_ASSEMBLY.service()
+        self.assertIs(server.WEATHER_ASSEMBLY.service(), first_weather_service)
         first_morning_service = server.morning_body_battery_service()
         self.assertIs(server.morning_body_battery_service(), first_morning_service)
-        server.DATABASE_MANAGER_CACHE.reset()
+        DATABASE_MANAGER_CACHE.reset()
 
         second = server.provider_state_service()
-        second_http_client = server.provider_http_client()
-        second_refresh_tracker = server.provider_refresh_tracker()
-        second_weather_service = server.weather_service()
+        second_http_client = server.PROVIDER_TRANSPORT.json_http_client()
+        second_refresh_tracker = server.PROVIDER_SYNC.refresh_tracker()
+        second_weather_service = server.WEATHER_ASSEMBLY.service()
         second_morning_service = server.morning_body_battery_service()
 
         self.assertIsNot(second, first)
@@ -99,7 +108,7 @@ class ServerDatabaseTests(ServerTestCase):
                     with self.assertRaises(RuntimeError):
                         server.initialise_database()
             finally:
-                server.DATABASE_MANAGER_CACHE.reset()
+                DATABASE_MANAGER_CACHE.reset()
 
             connection = sqlite3.connect(database_path)
             try:
@@ -113,7 +122,7 @@ class ServerDatabaseTests(ServerTestCase):
             self.assertEqual(tables, {"unexpected_records"})
 
     def test_database_initialization_does_not_recover_jobs(self):
-        with patch.object(server.SyncJobQueueService, "resume_interrupted") as sync_recovery, patch(
+        with patch.object(sync_queue.SyncJobQueueService, "resume_interrupted") as sync_recovery, patch(
             "backend.coach.job_store.CoachJobStore.resume_interrupted"
         ) as coach_recovery:
             server.initialise_database()
@@ -163,7 +172,7 @@ class ServerDatabaseTests(ServerTestCase):
             self.assertEqual(repository.get(db), payload)
 
     def test_competition_repository_preserves_order_and_full_row_lookup_contract(self):
-        saved = server.competition_service().save({
+        saved = server.PLANNING_DATA.competition().save({
             "name": "Repository race",
             "event_date": "2026-09-20",
             "sport": "Run",
@@ -230,7 +239,7 @@ class ServerDatabaseTests(ServerTestCase):
         backend = server.sqlite_backend if server.CONFIG.app_password else server.sqlite3
         real_connect = backend.connect
         with patch.object(backend, "connect", wraps=real_connect) as connect:
-            server.public_state_service().read(local_only=True)
+            server.PUBLIC_STATE.state_service().read(local_only=True)
         self.assertEqual(connect.call_count, 2)
 
     def test_public_state_resolves_database_manager_under_database_lock(self):
@@ -246,7 +255,7 @@ class ServerDatabaseTests(ServerTestCase):
         with patch.object(server, "DB_LOCK", database_lock), patch.object(
             server, "database_manager", side_effect=resolve_manager
         ):
-            server.public_state_service()
+            server.PUBLIC_STATE.state_service()
         self.assertTrue(calls)
 
     def test_public_state_resolves_active_manager_after_weather_restore(self):
@@ -350,7 +359,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertGreater(new_manager.unit_of_work_calls, 0)
 
     def test_composed_handler_resolves_current_auth_service_after_database_manager_change(self):
-        handler_class = server.request_handler_class()
+        handler_class = server.HTTP_API.request_handler_class()
         handler_class.protocol_version = "HTTP/1.1"
         httpd = http_server_module.CoachHTTPServer(("127.0.0.1", 0), handler_class)
         worker = threading.Thread(target=httpd.serve_forever, daemon=True)
@@ -410,7 +419,7 @@ class ServerDatabaseTests(ServerTestCase):
                             self.assertIn("workouts", payload)
                             self.assertIs(connection.sock, keep_alive_socket)
                         finally:
-                            server.DATABASE_MANAGER_CACHE.reset()
+                            DATABASE_MANAGER_CACHE.reset()
         finally:
             connection.close()
             httpd.shutdown()
@@ -418,11 +427,11 @@ class ServerDatabaseTests(ServerTestCase):
             httpd.server_close()
 
     def test_privacy_export_contains_archived_and_provider_state_without_sessions_or_credentials(self):
-        archived = server.workout_library_remote_reconciler().reconcile([{
+        archived = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([{
             "id": "remote-template-1", "name": "Archived template", "type": "Ride",
             "description": "- 60m 60% local", "duration_minutes": 60,
         }])[0]
-        server.workout_library_service().update(archived["id"], {"action": "archive"})
+        server.PLANNING_DATA.workout_library().update(archived["id"], {"action": "archive"})
         server.key_value_service().set("garmin_snapshot", json.dumps({"source": "Garmin", "days": []}))
         server.key_value_service().set(weather_cache.CACHE_KEY, json.dumps({"query": "Berlin", "forecast": {}}))
         server.key_value_service().set("calendar_display", json.dumps({"past_weeks": 2, "future_weeks": 6}))
@@ -430,13 +439,13 @@ class ServerDatabaseTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO competition_sync_tombstones(intervals_event_id, external_id, created_at) VALUES (?, ?, ?)",
-                ("event-1", "external-1", server.utc_now()),
+                ("event-1", "external-1", runtime_clock.utc_now()),
             )
             db.execute(
                 "INSERT INTO plan_adjustments(id, payload, status, created_at, applied_at) VALUES (?, ?, ?, ?, ?)",
-                ("adjustment-1", json.dumps({"reason": "test"}), "preview", server.utc_now(), None),
+                ("adjustment-1", json.dumps({"reason": "test"}), "preview", runtime_clock.utc_now(), None),
             )
-        exported = server.privacy_data_export_service().export()
+        exported = server.PRIVACY_ASSEMBLY.data_export_service().export()
         self.assertTrue(any(item.get("name") == "Archived template" for item in exported["workout_library"]))
         self.assertEqual(exported["garmin_snapshot"]["source"], "Garmin")
         self.assertEqual(exported["weather_cache"]["query"], "Berlin")
@@ -457,7 +466,7 @@ class ServerDatabaseTests(ServerTestCase):
         server.key_value_service().set("job_running", "true")
         server.key_value_service().set("job_status", "done")
 
-        exported = server.privacy_data_export_service().export()
+        exported = server.PRIVACY_ASSEMBLY.data_export_service().export()
 
         self.assertNotIn("profile", exported["application_state"])
         self.assertNotIn("garmin_snapshot", exported["application_state"])
@@ -471,14 +480,14 @@ class ServerDatabaseTests(ServerTestCase):
     def test_privacy_json_projection_uses_composed_local_clock(self):
         fixed_local_time = datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc)
         with patch.object(server.ATHLETE_CLOCK, "now", return_value=fixed_local_time) as local_clock:
-            exported = server.privacy_data_export_service().export()
+            exported = server.PRIVACY_ASSEMBLY.data_export_service().export()
 
         self.assertEqual(exported["planning"]["season"]["as_of"], "2026-01-02")
         self.assertGreaterEqual(local_clock.call_count, 2)
 
     def test_privacy_export_zip_streams_collections_and_contains_complete_manifest(self):
-        server.sync_state_repository().save_snapshot({"export-test": True, "synced_at": "2026-09-01", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})
-        temporary = server.privacy_archive_export_service().create_file()
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({"export-test": True, "synced_at": "2026-09-01", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})
+        temporary = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
         try:
             with zipfile.ZipFile(temporary) as archive:
                 names = set(archive.namelist())
@@ -518,7 +527,7 @@ class ServerDatabaseTests(ServerTestCase):
                     path.unlink()
 
         handler = ExportHandler()
-        server.export_stream_transport().stream_privacy_export(handler)
+        server.HTTP_API.export_stream_transport().stream_privacy_export(handler)
         self.assertTrue(handler.payload.startswith(b"PK"))
         self.assertFalse(handler.path.exists())
 
@@ -531,7 +540,7 @@ class ServerDatabaseTests(ServerTestCase):
         }
         for path, stream_method in routes.items():
             with self.subTest(path=path):
-                handler = object.__new__(server.request_handler_class())
+                handler = object.__new__(server.HTTP_API.request_handler_class())
                 handler.path = path
                 auth = Mock()
                 transport = Mock()
@@ -555,7 +564,7 @@ class ServerDatabaseTests(ServerTestCase):
                 getattr(transport, stream_method).assert_not_called()
 
     def test_privacy_archive_export_enforces_free_space_size_timeout_and_cleanup(self):
-        service = server.privacy_archive_export_service()
+        service = server.PRIVACY_ASSEMBLY.archive_export_service()
         with tempfile.TemporaryDirectory() as temporary:
             data_dir = Path(temporary)
             no_space_config = replace(
@@ -611,7 +620,7 @@ class ServerDatabaseTests(ServerTestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             path = Path(temp_root) / "export.zip"
             path.write_bytes(b"x" * (STREAM_CHUNK_BYTES * 2 + 1))
-            handler = object.__new__(server.request_handler_class())
+            handler = object.__new__(server.HTTP_API.request_handler_class())
             handler.send_response = Mock()
             handler.send_header = Mock()
             handler.end_headers = Mock()
@@ -631,8 +640,8 @@ class ServerDatabaseTests(ServerTestCase):
 
     def test_privacy_delete_reports_remote_attempt_and_failure(self):
         server.key_value_service().set("openai_conversation_id", "conv-test")
-        with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", side_effect=server.AppError(503, "upstream")):
-            result = server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
+        with patch.object(openai_provider.OpenAIResponsesClient, "delete_conversation", side_effect=server.AppError(503, "upstream")):
+            result = server.PRIVACY_ASSEMBLY.delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         self.assertTrue(result["remote_delete_attempted"])
         self.assertFalse(result["remote_conversation_deleted"])
         self.assertTrue(result["local_data_deleted"])
@@ -643,12 +652,12 @@ class ServerDatabaseTests(ServerTestCase):
         scoped_tables = {table for _category, _label, tables in privacy_module.PRIVACY_DELETE_SCOPE for table in tables}
         self.assertEqual(scoped_tables, expected_tables)
         server.key_value_service().set("openai_conversation_id", "conv-test")
-        preview = server.privacy_delete_service().preview()
+        preview = server.PRIVACY_ASSEMBLY.delete_service().preview()
         self.assertEqual({item["id"] for item in preview["categories"]}, {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE})
         self.assertEqual(preview["confirmation_text"], "LOKALE DATEN LÖSCHEN")
         self.assertTrue(preview["remote_untouched"])
-        with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
-            result = server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
+        with patch.object(openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
+            result = server.PRIVACY_ASSEMBLY.delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         self.assertTrue(result["local_data_deleted"])
         self.assertEqual(set(result["deleted_categories"]), {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE})
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -656,8 +665,8 @@ class ServerDatabaseTests(ServerTestCase):
                 self.assertEqual(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"], 0)
 
     def test_privacy_delete_rolls_back_earlier_table_deletes_on_sql_failure(self):
-        server.coach_message_service().add("user", "Synthetic private message")
-        server.sync_state_repository().save_snapshot({
+        server.COACH_CONVERSATION.message_service().add("user", "Synthetic private message")
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot({
             "synced_at": "synthetic", "recent_activities": [], "recent_wellness": [],
             "upcoming_calendar": [],
         })
@@ -668,7 +677,7 @@ class ServerDatabaseTests(ServerTestCase):
             )
         try:
             with self.assertRaises(sqlite3.DatabaseError):
-                server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
+                server.PRIVACY_ASSEMBLY.delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
         finally:
             with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                 db.execute("DROP TRIGGER synthetic_privacy_abort")
@@ -678,13 +687,13 @@ class ServerDatabaseTests(ServerTestCase):
 
     def test_chat_history_cursor_and_generation_share_database_unit_of_work(self):
         added = [
-            server.coach_message_service().add("user", f"cursor message {index}")
+            server.COACH_CONVERSATION.message_service().add("user", f"cursor message {index}")
             for index in range(5)
         ]
         server.key_value_service().set("chat_generation", "synthetic-generation")
         manager = server.database_manager()
         page_service = ChatHistoryPageService(
-            server.coach_conversation_history_service(),
+            server.COACH_CONVERSATION.history_service(),
             Mock(current=Mock(return_value=[])),
             maximum=server.CHAT_PAGE_MAX,
         )
@@ -728,7 +737,7 @@ class ServerDatabaseTests(ServerTestCase):
 
     def test_bootstrap_reuses_one_database_connection_for_local_reads(self):
         with patch.object(server.sqlite3, "connect", wraps=sqlite3.connect) as connect:
-            server.public_bootstrap_service().read()
+            server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(connect.call_count, 1)
 
     def test_bootstrap_resolves_database_manager_inside_shared_lock(self):
@@ -740,7 +749,7 @@ class ServerDatabaseTests(ServerTestCase):
             return real_manager()
 
         with patch.object(server, "database_manager", side_effect=manager_factory):
-            server.public_bootstrap_service().read()
+            server.PUBLIC_STATE.bootstrap_service().read()
 
         self.assertTrue(lock_states)
         self.assertTrue(all(lock_states))
@@ -755,7 +764,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertIn("def create_file(self)", source)
         server_source = Path(server.__file__).read_text(encoding="utf-8")
         self.assertNotIn("def _privacy_export_file", server_source)
-        self.assertIn("def privacy_archive_export_service", server_source)
+        self.assertIn("class PrivacyAssembly", Path(privacy_module.__file__).read_text(encoding="utf-8"))
 
         class Rows:
             def execute(self, query):
@@ -819,19 +828,19 @@ class ServerDatabaseTests(ServerTestCase):
                     self.assertNotEqual(row["csrf_hash"], csrf)
 
     def test_local_library_template_can_be_edited_archived_restored_and_deleted(self):
-        entry = server.workout_library_service().create_local_entry({
+        entry = server.PLANNING_DATA.workout_library().create_local_entry({
             "sport": "Ride", "name": "Lokale Vorlage", "description": "- 45m 60% Easy ride", "duration_minutes": 45,
         })
-        updated = server.workout_library_service().update(entry["id"], {"action": "update", "name": "Neue Vorlage", "description": "- 45m 55% Recovery ride"})
+        updated = server.PLANNING_DATA.workout_library().update(entry["id"], {"action": "update", "name": "Neue Vorlage", "description": "- 45m 55% Recovery ride"})
         self.assertEqual(updated["library_entry"]["name"], "Neue Vorlage")
-        self.assertEqual(server.workout_library_service().list()[0]["name"], "Neue Vorlage")
-        server.workout_library_service().update(entry["id"], {"action": "archive"})
-        self.assertEqual(server.workout_library_service().list(), [])
-        self.assertTrue(server.workout_library_service().list(include_archived=True)[0]["archived"])
-        server.workout_library_service().update(entry["id"], {"action": "restore"})
-        self.assertEqual(len(server.workout_library_service().list()), 1)
-        server.workout_library_service().update(entry["id"], {"action": "delete"})
-        self.assertEqual(server.workout_library_service().list(include_archived=True), [])
+        self.assertEqual(server.PLANNING_DATA.workout_library().list()[0]["name"], "Neue Vorlage")
+        server.PLANNING_DATA.workout_library().update(entry["id"], {"action": "archive"})
+        self.assertEqual(server.PLANNING_DATA.workout_library().list(), [])
+        self.assertTrue(server.PLANNING_DATA.workout_library().list(include_archived=True)[0]["archived"])
+        server.PLANNING_DATA.workout_library().update(entry["id"], {"action": "restore"})
+        self.assertEqual(len(server.PLANNING_DATA.workout_library().list()), 1)
+        server.PLANNING_DATA.workout_library().update(entry["id"], {"action": "delete"})
+        self.assertEqual(server.PLANNING_DATA.workout_library().list(include_archived=True), [])
 
     def test_gemini_function_schemas_keep_openai_nullable_fields_as_json_schema(self):
         schema = {"type": "object", "properties": {"notes": {"type": ["string", "null"]}}}
@@ -848,14 +857,14 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertEqual(changes["maxItems"], coach_limits.COACH_TRAINING_CHANGE_LIMIT)
 
     def test_background_submission_resolves_current_database_manager_per_call(self):
-        service = server.coach_job_submission_service()
+        service = server.COACH_BACKGROUND_JOBS.job_submission_service()
         first_manager = server.database_manager()
         first = service.enqueue(
             "Eine lange Planung bitte", "turn-background-manager-refresh", "csrf-background-manager-refresh",
             operation_id="operation-background-manager-refresh",
         )
 
-        server.DATABASE_MANAGER_CACHE.reset()
+        DATABASE_MANAGER_CACHE.reset()
         second_manager = server.database_manager()
 
         self.assertIsNot(first_manager, second_manager)
@@ -875,18 +884,18 @@ class ServerDatabaseTests(ServerTestCase):
         with auth.session_lock, server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-                (auth.session_token_hash("session-background-bound"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
+                (auth.session_token_hash("session-background-bound"), csrf_hash, time.time() + 3600, runtime_clock.utc_now(), runtime_clock.utc_now()),
             )
-        server.coach_job_submission_service().enqueue(
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",
             "turn-background-bound",
             csrf_hash,
             operation_id="operation-background-bound",
         )
-        job = server.coach_job_store().claim()
+        job = server.COACH_BACKGROUND_JOBS.job_store().claim()
         seen = {}
         with patch("backend.coach.chat_turn.CoachChatTurnService.run", side_effect=lambda *args, **kwargs: seen.update(kwargs) or {}):
-            server.coach_background_job_runner().run(job)
+            server.COACH_BACKGROUND_JOBS.background_job_runner().run(job)
         self.assertEqual(seen["session_csrf_hash"], csrf_hash)
 
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher ist in dieser Testumgebung nicht verfügbar.")
@@ -903,8 +912,8 @@ class ServerDatabaseTests(ServerTestCase):
                         "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                         ("token", "csrf", 9999999999, "now", "now"),
                     )
-                valid_backup = server.database_backup_service().read_bytes()
-                restored = server.database_restore_service().restore(valid_backup)
+                valid_backup = server.BACKUP_ASSEMBLY.backup_service().read_bytes()
+                restored = server.BACKUP_ASSEMBLY.restore_service().restore(valid_backup)
                 self.assertEqual(restored["status"], "ok")
                 self.assertEqual(server.key_value_service().get("restore-marker"), "preserved")
                 with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -920,7 +929,7 @@ class ServerDatabaseTests(ServerTestCase):
                 finally:
                     connection.close()
                 with self.assertRaises(server.AppError) as error:
-                    server.database_restore_service().restore(incomplete_path.read_bytes())
+                    server.BACKUP_ASSEMBLY.restore_service().restore(incomplete_path.read_bytes())
                 self.assertEqual(error.exception.status, 400)
                 self.assertEqual(server.key_value_service().get("restore-marker"), "preserved")
                 self.assertEqual(list(data_dir.glob(".intervals-coach-restore-*.db")), [])
@@ -935,7 +944,7 @@ class ServerDatabaseTests(ServerTestCase):
                 finally:
                     connection.close()
                 with self.assertRaises(server.AppError) as error:
-                    server.database_restore_service().restore(unexpected_path.read_bytes())
+                    server.BACKUP_ASSEMBLY.restore_service().restore(unexpected_path.read_bytes())
                 self.assertEqual(error.exception.status, 400)
                 self.assertEqual(server.key_value_service().get("restore-marker"), "preserved")
                 self.assertEqual(list(data_dir.glob(".intervals-coach-restore-*.db")), [])
@@ -965,11 +974,11 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertTrue(readiness["maintenance"]["active"])
 
     def test_privacy_delete_removes_change_history(self):
-        server.profile_service().save({"name": "Ada"})
-        self.assertTrue(server.change_history_service().list())
-        with patch.object(server.openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
-            server.privacy_delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
-        self.assertEqual(server.change_history_service().list(), [])
+        server.ATHLETE_DATA.profile().save({"name": "Ada"})
+        self.assertTrue(server.HISTORY.change_history_service().list())
+        with patch.object(openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True):
+            server.PRIVACY_ASSEMBLY.delete_service().delete(privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT)
+        self.assertEqual(server.HISTORY.change_history_service().list(), [])
 
 
 if __name__ == "__main__":

@@ -59,6 +59,23 @@ class SessionAuthServiceCache:
 SESSION_AUTH_SERVICE_CACHE = SessionAuthServiceCache()
 
 
+def get_session_auth_service(
+    database_manager: DatabaseManager,
+    database_lock: threading.RLock,
+    config: Config,
+    sqlcipher_available: bool,
+) -> SessionAuthService:
+    """Return the auth service owned by the current persistence config."""
+    with database_lock:
+        return SESSION_AUTH_SERVICE_CACHE.get(
+            database_manager,
+            database_lock,
+            config,
+            sqlcipher_available,
+            RATE_LIMITER,
+        )
+
+
 class SessionAuthService:
     """Own persistent session behavior and its in-memory synchronization state."""
 

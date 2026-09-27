@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import call, Mock
 
 from backend.http_api import state_events_get
+from backend.http_api.static_assets import StaticAssetService
 from backend.sync.adaptive import ILLNESS_CALENDAR_CATEGORY
 from server_test_support import server, ServerTestCase
 
@@ -13,18 +14,18 @@ from server_test_support import server, ServerTestCase
 class ServerFrontendTests(ServerTestCase):
 
     def test_structured_coach_deletes_local_planned_unit_without_ui_preview(self):
-        planned = server.planned_unit_service().create({
+        planned = server.PLANNING_DATA.planned_unit().create({
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Ride", "name": "Remove me", "description": "- 20m 60% easy",
         })
-        state = server.structured_training_state_service().read()
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
         target = next(item for item in state["planned_units"] if item["local_id"] == planned["id"])
         intent = {
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
         }
 
-        result = server.coach_tool_dispatch_service().execute(
+        result = server.COACH_TOOL_DISPATCH.service().execute(
             "apply_training_changes",
             {"expected_revision": state["planning_revision"], "changes": [{
                 "local_id": planned["id"], "action": "delete",
@@ -36,7 +37,7 @@ class ServerFrontendTests(ServerTestCase):
 
         self.assertEqual(result["status"], "applied")
         self.assertEqual(result["changes"][0]["status"], "deleted")
-        self.assertEqual(server.planned_unit_service().list(), [])
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
 
     def test_frontend_loads_domain_areas_instead_of_monolithic_state(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
@@ -120,8 +121,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('/views.js?v=217', index)
         self.assertIn('/forms.js?v=217', index)
         self.assertIn('/components.js?v=217', index)
-        self.assertIn('/app.js?v=220', index)
-        self.assertIn('intervals-coach-v220', service_worker)
+        self.assertIn('/app.js?v=223', index)
+        self.assertIn('intervals-coach-v223', service_worker)
         self.assertIn('"/navigation.js?v=217"', service_worker)
         self.assertIn('"/state.js?v=217"', service_worker)
         self.assertIn('"/views.js?v=217"', service_worker)
@@ -129,9 +130,13 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"/components.js?v=217"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
-        self.assertIn('id="diagnosticCaptureToggle"', index)
-        self.assertIn('function setDiagnosticCapture(', app)
-        self.assertIn('/api/diagnostics/capture', app)
+        self.assertIn('id="logsDownloadButton"', index)
+        self.assertIn('function downloadServerLogs(', app)
+        self.assertIn('/api/logs/download', app)
+        self.assertIn('fetch("/api/diagnostics"', app)
+        self.assertIn('const blob = await response.blob();', app)
+        self.assertNotIn('JSON.stringify(report, null, 2)', app)
+        self.assertNotIn('diagnosticCaptureToggle', index + app)
         self.assertIn('function executeCoachActionProposal(', app)
         self.assertIn('function renderConnectivityStatus(online = navigator.onLine)', app)
         self.assertIn('globalThis.addEventListener("offline"', app)
@@ -154,7 +159,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
         self.assertLess(index.index('/forms.js?v=217'), index.index('/components.js?v=217'))
-        self.assertLess(index.index('/components.js?v=217'), index.index('/app.js?v=220'))
+        self.assertLess(index.index('/components.js?v=217'), index.index('/app.js?v=223'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn(
@@ -337,7 +342,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("globalThis.visualViewport", app_source)
 
     def test_static_files_reject_path_traversal(self):
-        static_assets = server.StaticAssetService(server.PUBLIC_DIR)
+        static_assets = StaticAssetService(server.PUBLIC_DIR)
 
         for path in ("/../server.py", "/public/../../server.py", "/..\\server.py"):
             with self.subTest(path=path):
@@ -346,15 +351,15 @@ class ServerFrontendTests(ServerTestCase):
                 self.assertEqual(error.exception.status, 403)
 
     def test_static_handler_rejects_path_traversal_without_request_attributes(self):
-        handler = object.__new__(server.request_handler_class())
+        handler = object.__new__(server.HTTP_API.request_handler_class())
 
         with self.assertRaises(server.AppError) as error:
-            server.request_handler_class().send_static(handler, "/../server.py")
+            server.HTTP_API.request_handler_class().send_static(handler, "/../server.py")
 
         self.assertEqual(error.exception.status, 403)
 
     def test_static_files_reject_absolute_path(self):
-        static_assets = server.StaticAssetService(server.PUBLIC_DIR)
+        static_assets = StaticAssetService(server.PUBLIC_DIR)
 
         with self.assertRaises(server.AppError) as error:
             static_assets.render("/C:/Windows/win.ini", "/C:/Windows/win.ini", None)
@@ -362,18 +367,18 @@ class ServerFrontendTests(ServerTestCase):
         self.assertEqual(error.exception.status, 403)
 
     def test_versioned_static_assets_are_immutable_and_support_etag_revalidation(self):
-        response = server.StaticAssetService(server.PUBLIC_DIR).render("/views.js", "/views.js?v=133", None)
+        response = StaticAssetService(server.PUBLIC_DIR).render("/views.js", "/views.js?v=133", None)
         headers = dict(response.headers)
         self.assertEqual(response.status, 200)
         self.assertEqual(headers["Cache-Control"], "public, max-age=31536000, immutable")
         self.assertTrue(headers["ETag"].startswith('"'))
 
-        cached = server.StaticAssetService(server.PUBLIC_DIR).render("/views.js", "/views.js?v=133", headers["ETag"])
+        cached = StaticAssetService(server.PUBLIC_DIR).render("/views.js", "/views.js?v=133", headers["ETag"])
         self.assertEqual(cached.status, 304)
         self.assertEqual(cached.body, b"")
         self.assertEqual(dict(cached.headers)["ETag"], headers["ETag"])
 
-        handler = object.__new__(server.request_handler_class())
+        handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.path = "/views.js?v=133"
         handler.headers = {"If-None-Match": headers["ETag"]}
         handler.send_response = Mock()
@@ -381,7 +386,7 @@ class ServerFrontendTests(ServerTestCase):
         handler.end_headers = Mock()
         handler.wfile = Mock()
 
-        server.request_handler_class().send_static(handler, "/views.js")
+        server.HTTP_API.request_handler_class().send_static(handler, "/views.js")
 
         handler.send_response.assert_called_once_with(304)
         response_headers = {call.args[0]: call.args[1] for call in handler.send_header.call_args_list}
@@ -393,11 +398,11 @@ class ServerFrontendTests(ServerTestCase):
     def test_html_and_service_worker_remain_revalidatable(self):
         for path in ("/", "/service-worker.js", "/manifest.webmanifest"):
             with self.subTest(path=path):
-                response = server.StaticAssetService(server.PUBLIC_DIR).render(path, path, None)
+                response = StaticAssetService(server.PUBLIC_DIR).render(path, path, None)
                 self.assertEqual(dict(response.headers)["Cache-Control"], "no-cache")
 
     def test_unknown_static_asset_falls_back_to_index_with_security_headers(self):
-        response = server.StaticAssetService(server.PUBLIC_DIR).render("/missing.js", "/missing.js", None)
+        response = StaticAssetService(server.PUBLIC_DIR).render("/missing.js", "/missing.js", None)
         headers = dict(response.headers)
         self.assertEqual(response.status, 200)
         self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
@@ -408,17 +413,17 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("frame-ancestors 'none'", headers["Content-Security-Policy"])
 
     def test_static_response_disconnect_is_logged_by_handler_transport(self):
-        handler = object.__new__(server.request_handler_class())
+        handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.path = "/"
         handler.headers = {}
-        handler.static_asset_service = server.StaticAssetService(server.PUBLIC_DIR)
+        handler.static_asset_service = StaticAssetService(server.PUBLIC_DIR)
         handler.send_response = Mock()
         handler.send_header = Mock()
         handler.end_headers = Mock(side_effect=BrokenPipeError())
         handler.wfile = Mock()
         handler.log_client_disconnect = Mock()
 
-        server.request_handler_class().send_static(handler, "/")
+        server.HTTP_API.request_handler_class().send_static(handler, "/")
 
         handler.log_client_disconnect.assert_called_once_with()
         handler.wfile.write.assert_not_called()
@@ -432,9 +437,9 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"/forms.js?v=217"', source)
         self.assertIn('"/components.js?v=217"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=220"', source)
+        self.assertIn('"/app.js?v=223"', source)
         self.assertIn('"/icon.svg?v=217"', source)
-        self.assertIn('"/styles.css?v=217"', source)
+        self.assertIn('"/styles.css?v=223"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)

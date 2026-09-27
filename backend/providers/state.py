@@ -257,3 +257,17 @@ class ProviderStateServiceCache:
 
 
 PROVIDER_STATE_SERVICE_CACHE = ProviderStateServiceCache()
+
+
+def get_provider_state_service(
+    manager: Any,
+    repository: Any,
+    lock: Any,
+    now: Callable[[], Any],
+    today: Callable[[], Any],
+    logger: Any | None = None,
+) -> ProviderStateService:
+    """Return provider state bound to the current persistence resources."""
+    return PROVIDER_STATE_SERVICE_CACHE.get(
+        manager, repository, lock, now, today, logger
+    )

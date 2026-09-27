@@ -11,7 +11,6 @@ from backend.http_api.chat_cancel_post import ChatCancelPostRoutes
 from backend.http_api.chat_post import ChatPostRoutes
 from backend.http_api.chat_stream import CoachChatStreamTransport
 from backend.http_api.coach_actions_post import CoachActionsPostRoutes
-from backend.http_api.diagnostics_post import DiagnosticsCapturePostRoutes
 from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.nutrition import NutritionPostRoutes
@@ -34,7 +33,6 @@ class HttpAuthenticatedPostRoutes:
     chat_stream: CoachChatStreamTransport
     sync_commands: SyncCommandPostRoute
     history_undo: HistoryUndoPostRoutes
-    diagnostics_capture: DiagnosticsCapturePostRoutes
     privacy_delete: PrivacyDeletePostRoutes
     nutrition: NutritionPostRoutes
 
@@ -60,7 +58,6 @@ class HttpPostDispatcher:
         self._chat_stream = authenticated_routes.chat_stream
         self._sync_commands = authenticated_routes.sync_commands
         self._history_undo = authenticated_routes.history_undo
-        self._diagnostics_capture = authenticated_routes.diagnostics_capture
         self._privacy_delete = authenticated_routes.privacy_delete
         self._nutrition = authenticated_routes.nutrition
 
@@ -93,8 +90,6 @@ class HttpPostDispatcher:
         if self._sync_commands.handle(handler, path):
             return
         if self._history_undo.handle(handler, path, session):
-            return
-        if self._diagnostics_capture.handle(handler, path):
             return
         if self._privacy_delete.handle(handler, path):
             return

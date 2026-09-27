@@ -13,14 +13,13 @@ import re
 import sys
 import threading
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, TextIO
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
 
 from backend.config import Config
-from backend.errors import AppError
 
 REDACTED_PATH = "[REDACTED_PATH]"
 REDACTED_URL_QUERY_KEYS = frozenset({
@@ -37,11 +36,8 @@ OPENAI_RESPONSE_ERROR_CODES = frozenset({
     "failed_to_download_image", "image_file_not_found",
 })
 
-DIAGNOSTIC_CAPTURE_DURATION_SECONDS = 60 * 60
 DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 1500
-DIAGNOSTIC_CAPTURE_STATE_KEY = "diagnostic_capture_state"
 DIAGNOSTIC_CAPTURE_ENTRIES_KEY = "diagnostic_capture_entries"
-DIAGNOSTIC_CAPTURE_VALIDATION_ERROR = "Die Diagnoseaufzeichnung erwartet enabled=true oder enabled=false."
 
 
 def _secret_variants(value: Any) -> set[str]:
@@ -335,126 +331,80 @@ def safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
     return result
 
 
-def _utc_datetime(clock: Callable[[], datetime | str]) -> datetime:
-    value = clock()
-    if isinstance(value, datetime):
-        current = value
-    else:
-        current = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    if current.tzinfo is None:
-        return current.replace(tzinfo=timezone.utc)
-    return current.astimezone(timezone.utc)
-
-
 class DiagnosticCapture:
-    """Own user-enabled, bounded diagnostic capture state and synchronization."""
+    """Keep a bounded, privacy-safe record of technical diagnostic metadata."""
 
     def __init__(
         self,
         get_kv: Callable[[str], str | None],
         set_kv: Callable[[str, str], None],
         redactor: Redactor,
-        clock: Callable[[], datetime | str],
         *,
-        duration_seconds: int = DIAGNOSTIC_CAPTURE_DURATION_SECONDS,
         max_entries: int = DIAGNOSTIC_CAPTURE_MAX_ENTRIES,
-        state_key: str = DIAGNOSTIC_CAPTURE_STATE_KEY,
         entries_key: str = DIAGNOSTIC_CAPTURE_ENTRIES_KEY,
+        batch_size: int = 10,
     ) -> None:
         self._get_kv = get_kv
         self._set_kv = set_kv
         self._redactor = redactor
-        self._clock = clock
-        self._duration_seconds = duration_seconds
         self._max_entries = max_entries
-        self._state_key = state_key
         self._entries_key = entries_key
+        self._batch_size = max(1, batch_size)
+        self._entries_cache: list[dict[str, Any]] | None = None
+        self._dirty_count = 0
         self._lock = threading.RLock()
 
-    def _state(self) -> dict[str, Any]:
+    def _load_entries(self) -> list[dict[str, Any]]:
+        if self._entries_cache is not None:
+            return self._entries_cache
         try:
-            value = json.loads(self._get_kv(self._state_key) or "{}")
+            raw = json.loads(self._get_kv(self._entries_key) or "[]")
         except (TypeError, ValueError):
-            value = {}
-        return value if isinstance(value, dict) else {}
-
-    def _entries(self) -> list[dict[str, Any]]:
-        try:
-            entries = json.loads(self._get_kv(self._entries_key) or "[]")
-        except (TypeError, ValueError):
-            return []
-        if not isinstance(entries, list):
-            return []
-        return [
+            raw = []
+        if not isinstance(raw, list):
+            raw = []
+        self._entries_cache = [
             self._redactor.sanitize_log_value(entry)
-            for entry in entries
+            for entry in raw
             if isinstance(entry, dict)
         ][-self._max_entries:]
+        return self._entries_cache
 
-    def _active(self, state: dict[str, Any], now: datetime) -> bool:
-        expires_at = str(state.get("expires_at") or "")
-        try:
-            expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-            if expiry.tzinfo is None:
-                return False
-            return expiry.astimezone(timezone.utc) > now
-        except (TypeError, ValueError):
-            return False
+    def flush(self) -> None:
+        with self._lock:
+            if self._dirty_count > 0 and self._entries_cache is not None:
+                self._set_kv(
+                    self._entries_key,
+                    json.dumps(self._entries_cache, ensure_ascii=False, separators=(",", ":")),
+                )
+                self._dirty_count = 0
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            state = self._state()
-            now = _utc_datetime(self._clock)
-            active = self._active(state, now)
-            if not active and state:
-                self._set_kv(self._state_key, "")
-            expires_at = str(state.get("expires_at") or "")
-            entries = self._entries()
+            entries = self._load_entries()
             return {
-                "active": active,
-                "started_at": state.get("started_at") if active else None,
-                "expires_at": expires_at if active else None,
+                "active": True,
                 "entries": len(entries),
                 "maximum_entries": self._max_entries,
             }
 
     def entries(self) -> list[dict[str, Any]]:
         with self._lock:
-            return self._entries()
-
-    def set_enabled(self, enabled: Any) -> dict[str, Any]:
-        """Enable a one-hour, user-initiated technical capture or stop it early."""
-        if enabled is not True and enabled is not False:
-            raise AppError(400, DIAGNOSTIC_CAPTURE_VALIDATION_ERROR)
-        with self._lock:
-            if enabled:
-                now = _utc_datetime(self._clock)
-                expires_at = (now + timedelta(seconds=self._duration_seconds)).isoformat()
-                self._set_kv(
-                    self._state_key,
-                    json.dumps({"started_at": now.isoformat(), "expires_at": expires_at}, separators=(",", ":")),
-                )
-                self._set_kv(self._entries_key, "[]")
-            else:
-                self._set_kv(self._state_key, "")
-            return self.status()
+            entries = self._load_entries()
+            self.flush()
+            return list(entries)
 
     def capture(self, event: str, details: dict[str, Any]) -> None:
-        """Persist bounded metadata only while the athlete enabled capture."""
+        """Persist bounded technical metadata without response or athlete content."""
         with self._lock:
-            state = self._state()
-            now = _utc_datetime(self._clock)
-            if not self._active(state, now):
-                if state:
-                    self._set_kv(self._state_key, "")
-                return
-            entries = self._entries()
+            entries = self._load_entries()
             entries.append({
-                "timestamp": now.isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "event": self._redactor.sanitize_log_value(str(event)[:80]),
                 "details": self._redactor.sanitize_log_value(details),
             })
-            self._set_kv(
-                self._entries_key,
-                json.dumps(entries[-self._max_entries:], ensure_ascii=False, separators=(",", ":")),
-            )
+            if len(entries) > self._max_entries:
+                del entries[:-self._max_entries]
+            self._dirty_count += 1
+            if self._dirty_count >= min(self._batch_size, self._max_entries):
+                self.flush()

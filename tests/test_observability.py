@@ -7,13 +7,12 @@ import sys
 import tempfile
 import threading
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 import backend
 from backend.config import Config
-from backend.errors import AppError
 from backend.observability import (
     DiagnosticCapture,
     JsonLogFormatter,
@@ -66,14 +65,6 @@ class _KeyValueStore:
     def set(self, key: str, value: str) -> None:
         with self.lock:
             self.values[key] = value
-
-
-class _Clock:
-    def __init__(self, value: datetime):
-        self.value = value
-
-    def __call__(self) -> datetime:
-        return self.value
 
 
 class ObservabilityTests(unittest.TestCase):
@@ -318,52 +309,32 @@ class ObservabilityTests(unittest.TestCase):
         self.assertNotIn("provider_error_code", safe_diagnostic_error(error))
         self.assertNotIn("reason", safe_diagnostic_error(error))
 
-    def test_diagnostic_capture_requires_exact_bool_and_expires_state(self):
+    def test_diagnostic_capture_is_always_active_and_redacts_entries(self):
         store = _KeyValueStore()
-        clock = _Clock(datetime(2026, 9, 15, 12, tzinfo=timezone.utc))
-        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), clock, duration_seconds=60, max_entries=2)
-        with self.assertRaisesRegex(AppError, "Die Diagnoseaufzeichnung erwartet enabled=true oder enabled=false"):
-            capture.set_enabled(1)
-        self.assertFalse(capture.status()["active"])
-        enabled = capture.set_enabled(True)
-        self.assertTrue(enabled["active"])
-        self.assertEqual(enabled["entries"], 0)
+        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), max_entries=2)
+        self.assertTrue(capture.status()["active"])
         capture.capture("synthetic-event", {"secret": "synthetic-openai-value", "shape": {"type": "string"}})
         self.assertEqual(capture.status()["entries"], 1)
-        clock.value += timedelta(seconds=61)
-        self.assertFalse(capture.status()["active"])
-        self.assertEqual(store.get("diagnostic_capture_state"), "")
-        self.assertEqual(capture.entries(), [{"timestamp": "2026-09-15T12:00:00+00:00", "event": "synthetic-event", "details": {"secret": "[REDACTED]", "shape": {"type": "string"}}}])
+        entry = capture.entries()[0]
+        self.assertEqual(entry["event"], "synthetic-event")
+        self.assertEqual(entry["details"], {"secret": "[REDACTED]", "shape": {"type": "string"}})
 
-    def test_diagnostic_capture_rejects_naive_expiry_and_cleans_state(self):
+    def test_diagnostic_capture_is_bounded_and_keeps_recording(self):
         store = _KeyValueStore()
-        clock = _Clock(datetime(2026, 9, 15, 12, tzinfo=timezone.utc))
-        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), clock)
-        store.set("diagnostic_capture_state", '{"started_at":"2026-09-15T11:00:00","expires_at":"2026-09-15T13:00:00"}')
-        self.assertFalse(capture.status()["active"])
-        self.assertEqual(store.get("diagnostic_capture_state"), "")
-
-    def test_diagnostic_capture_bounds_and_disable(self):
-        store = _KeyValueStore()
-        clock = _Clock(datetime(2026, 9, 15, 12, tzinfo=timezone.utc))
-        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), clock, max_entries=2)
-        capture.set_enabled(True)
+        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), max_entries=2)
         for index in range(4):
             capture.capture("event", {"index": index, "token": "synthetic-openai-value"})
         entries = capture.entries()
         self.assertEqual(len(entries), 2)
         self.assertEqual([entry["details"]["index"] for entry in entries], [2, 3])
         self.assertTrue(all("synthetic-openai-value" not in json.dumps(entry) for entry in entries))
-        capture.set_enabled(False)
-        capture.capture("ignored", {"value": "not stored"})
-        self.assertFalse(capture.status()["active"])
-        self.assertEqual(len(capture.entries()), 2)
+        capture.capture("still-recording", {"value": "technical"})
+        self.assertTrue(capture.status()["active"])
+        self.assertEqual(capture.entries()[-1]["event"], "still-recording")
 
     def test_diagnostic_capture_concurrent_writes_do_not_lose_updates(self):
         store = _KeyValueStore()
-        clock = _Clock(datetime(2026, 9, 15, 12, tzinfo=timezone.utc))
-        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), clock, max_entries=32)
-        capture.set_enabled(True)
+        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), max_entries=32)
         barrier = threading.Barrier(8)
 
         def write(index: int) -> None:

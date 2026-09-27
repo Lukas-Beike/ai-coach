@@ -13,7 +13,6 @@ class DiagnosticsGetRoutesTests(unittest.TestCase):
         self.auth = Mock()
         self.logs = Mock()
         self.report = Mock()
-        self.capture = Mock()
         self.factories = {
             "auth": Mock(return_value=self.auth),
             "logs": Mock(return_value=self.logs),
@@ -23,17 +22,14 @@ class DiagnosticsGetRoutesTests(unittest.TestCase):
             self.factories["auth"],
             self.factories["logs"],
             self.factories["report"],
-            self.capture,
         )
 
     def test_routes_preserve_their_payloads(self) -> None:
         self.logs.list.return_value = ["recent"]
         self.report.report.return_value = {"status": "ok"}
-        self.capture.status.return_value = {"enabled": False}
         cases = (
             ("/api/logs", {"entries": ["recent"]}),
             ("/api/diagnostics", {"status": "ok"}),
-            ("/api/diagnostics/capture", {"enabled": False}),
         )
         for path, payload in cases:
             with self.subTest(path=path):
@@ -56,13 +52,28 @@ class DiagnosticsGetRoutesTests(unittest.TestCase):
                 self.assertTrue(self.routes.handle(self.handler, "/api/logs"))
                 self.logs.list.assert_called_once_with(expected_limit)
 
+    def test_logs_download_sends_attachment_after_authentication(self) -> None:
+        self.handler.path = "/api/logs/download"
+        self.logs.download.return_value = b'{"event":"safe"}\n'
+
+        self.assertTrue(self.routes.handle(self.handler, "/api/logs/download"))
+
+        self.auth.require_auth.assert_called_once_with(self.handler)
+        self.logs.download.assert_called_once_with()
+        self.handler.send_bytes.assert_called_once_with(
+            200,
+            b'{"event":"safe"}\n',
+            "application/x-ndjson; charset=utf-8",
+            {"Content-Disposition": 'attachment; filename="intervals-coach-server-logs.jsonl"'},
+        )
+
     def test_auth_failure_precedes_every_service_and_capture_action(self) -> None:
         denied = PermissionError("unauthorized")
         self.auth.require_auth.side_effect = denied
         for path in (
             "/api/logs",
+            "/api/logs/download",
             "/api/diagnostics",
-            "/api/diagnostics/capture",
         ):
             with self.subTest(path=path):
                 with self.assertRaises(PermissionError) as caught:
@@ -70,14 +81,12 @@ class DiagnosticsGetRoutesTests(unittest.TestCase):
                 self.assertIs(caught.exception, denied)
         self.factories["logs"].assert_not_called()
         self.factories["report"].assert_not_called()
-        self.capture.status.assert_not_called()
         self.handler.send_json.assert_not_called()
 
     def test_unknown_route_does_not_resolve_factories_or_capture(self) -> None:
         self.assertFalse(self.routes.handle(self.handler, "/api/diagnostics/unknown"))
         for factory in self.factories.values():
             factory.assert_not_called()
-        self.capture.status.assert_not_called()
         self.handler.send_json.assert_not_called()
 
     def test_keep_alive_requests_resolve_auth_service_for_each_request(self) -> None:

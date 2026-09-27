@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
+from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.performance import context as performance_context
 from backend.performance import garmin_metrics as performance_garmin_metrics
 from support import create_test_session, reset_application_state
@@ -66,7 +67,7 @@ def _transcribe_via_http_route(audio: bytes, content_type: str) -> dict[str, str
         read_audio_body=Mock(return_value=audio),
         send_json=Mock(),
     )
-    if not server.TRANSCRIBE_POST_ROUTES.handle(handler, "/api/transcribe"):
+    if not server.HTTP_API.transcribe_post_routes.handle(handler, "/api/transcribe"):
         raise AssertionError("transcription route was not handled")
     return handler.send_json.call_args.args[1]
 
@@ -76,11 +77,11 @@ def _garmin_metrics(snapshot):
     )
 
 def _current_performance_context(snapshot=None):
-    effective_snapshot = snapshot if snapshot is not None else server.sync_state_repository().latest_snapshot()
+    effective_snapshot = snapshot if snapshot is not None else server.SYNC_PERSISTENCE.state_repository().latest_snapshot()
     return performance_context.current_performance_context(
         effective_snapshot,
-        server.garmin_payload_service().snapshot(),
-        server.profile_service().get(),
+        server.GARMIN_ASSEMBLY.payload_service().snapshot(),
+        server.ATHLETE_DATA.profile().get(),
         server.ATHLETE_CLOCK.now().date(),
     )
 
@@ -115,7 +116,7 @@ class ServerTestCase(unittest.TestCase):
 
     @classmethod
     def _restore_test_config(cls):
-        server.DATABASE_MANAGER_CACHE.reset()
+        DATABASE_MANAGER_CACHE.reset()
         server.CONFIG = cls._original_config
         server.DATA_DIR = cls._original_data_dir
         server.DB_PATH = cls._original_db_path
@@ -134,8 +135,8 @@ class ServerTestCase(unittest.TestCase):
 
     @staticmethod
     def history_preview(change_id, session_csrf_hash="session-csrf-hash"):
-        preview = server.history_undo_service().preview(change_id)
-        proposal = server.coach_proposal_creation_service().create(
+        preview = server.HISTORY.undo_service().preview(change_id)
+        proposal = server.COACH_PROPOSALS.creation_service().create(
             preview.pop("proposal"), session_csrf_hash
         )
         return {**preview, "proposed_action": proposal["proposed_action"]}

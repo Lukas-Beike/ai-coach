@@ -19,6 +19,7 @@ os.environ.update({
 })
 sys.path.insert(0, "/app")
 import server
+from backend.http_api import auth as http_auth
 
 
 def blocked_provider(*args, **kwargs):
@@ -33,11 +34,11 @@ class FixtureConversationProvisionService:
         return "fixture-conversation"
 
 
-server.coach_conversation_provision_service = FixtureConversationProvisionService
+server.COACH_CONVERSATION.provision_service = FixtureConversationProvisionService
 # Browser scenarios deliberately poll and reload the single disposable fixture
 # far more aggressively than one athlete does. Rate limiting has dedicated unit
 # coverage; disable it here to keep unrelated UI scenarios order-independent.
-server.RATE_LIMITER.allow = lambda key, limit, window_seconds: (True, 0)
+http_auth.RATE_LIMITER.allow = lambda key, limit, window_seconds: (True, 0)
 
 
 def fixture_coach_response(payload, **kwargs):
@@ -88,14 +89,14 @@ class FixtureResponseTransport:
         )
 
 
-server.coach_response_transport = FixtureResponseTransport
+server.COACH_CONVERSATION.response_transport = FixtureResponseTransport
 initialise = server.initialise_database
 artifact = {}
 
 
 def stage_fixture_artifact():
     today = server.ATHLETE_CLOCK.now().date()
-    artifact.update(server.training_plan_artifact_service().stage({"payload": {
+    artifact.update(server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage({"payload": {
         "plan_name": "Fixture sport contract",
         "workouts": [{"date": (today + timedelta(days=index)).isoformat(), "name": f"HTTP fixture {sport}", "sport": sport, "duration_minutes": 30,
                       "description": {"Run": "- 30m Z1 HR", "WeightTraining": "Synthetic local workout",
@@ -109,7 +110,7 @@ def initialise_fixture():
     stage_fixture_artifact()
 
 
-class FixtureHandler(server.request_handler_class()):
+class FixtureHandler(server.HTTP_API.request_handler_class()):
     def do_GET(self):
         if self.path == "/api/fixture/plan":
             try:
@@ -126,5 +127,5 @@ class FixtureHandler(server.request_handler_class()):
 
 
 server.initialise_database = initialise_fixture
-server.request_handler_class = lambda: FixtureHandler
+server.HTTP_API.request_handler_class = lambda: FixtureHandler
 server.main()

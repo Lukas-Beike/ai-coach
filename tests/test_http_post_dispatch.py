@@ -14,7 +14,7 @@ from backend.http_api.post_dispatch import (
 
 class HttpPostDispatcherTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.routes = [Mock() for _ in range(14)]
+        self.routes = [Mock() for _ in range(13)]
         for route in self.routes:
             route.handle.return_value = False
         authenticated_routes = HttpAuthenticatedPostRoutes(*self.routes[3:])

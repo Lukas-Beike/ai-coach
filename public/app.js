@@ -1219,6 +1219,7 @@ function renderCoachOverview(data) {
 function renderCoachReceipts() {
   const root = $("#coachReceipts");
   if (!root) return;
+  root.hidden = true;
   root.replaceChildren();
   (state.coachReceipts || []).slice(-3).reverse().forEach((receipt) => root.append(createActionReceipt(receipt)));
 }
@@ -1246,6 +1247,7 @@ const COACH_RECEIPT_LABELS = {
   sync_competitions: "Wettkampfsynchronisierung beauftragt",
   resolve_training_sync_conflict: "Synchronisierungsentscheidung gespeichert",
   start_intervals_plan_sync: "Intervals-Synchronisierung beauftragt",
+  delete_duplicate_intervals_activity: "Garmin-Duplikat gelöscht",
 };
 const SYNC_JOB_RECEIPT_LABELS = {
   queued: "Synchronisierung beauftragt", running: "Synchronisierung läuft",
@@ -1686,19 +1688,8 @@ function jumpToChatComposer() {
 function updateChatQueueStatus() {
   const status = $("#chatQueueStatus");
   if (!status) return;
-  const count = state.chatQueue.length;
-  if (!state.busy || !count) {
-    status.hidden = true;
-    status.textContent = "";
-    return;
-  }
-  const steering = state.chatQueue.filter((entry) => entry.mode === "steer").length;
-  const queued = count - steering;
-  const details = [];
-  if (steering) details.push(`${steering} Steuerung${steering === 1 ? "" : "en"}`);
-  if (queued) details.push(`${queued} Nachricht${queued === 1 ? "" : "en"} in der Warteschlange`);
-  status.hidden = false;
-  status.textContent = `${details.join(" · ")} · wird nach der aktuellen Antwort verarbeitet`;
+  status.hidden = true;
+  status.textContent = "";
 }
 
 function coachWorkingLabel() {
@@ -1846,10 +1837,6 @@ function createPendingMessage(entry) {
   const node = document.createElement("div");
   node.className = "message user pending";
   node.textContent = entry.message;
-  const label = document.createElement("span");
-  label.className = "pending-label";
-  label.textContent = entry.mode === "steer" ? "Steuerung · als Nächstes" : "Warteschlange · danach";
-  node.append(label);
   return node;
 }
 
@@ -3837,6 +3824,29 @@ async function loadLogs() {
   finally { button.disabled = false; }
 }
 
+async function downloadServerLogs() {
+  const button = $("#logsDownloadButton");
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/logs/download", { credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) {
+      let message = "Server-Logs konnten nicht heruntergeladen werden.";
+      try { message = (await response.json()).error || message; } catch (_) { /* keep safe fallback */ }
+      throw new Error(message);
+    }
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `intervals-coach-server-logs-${todayIso()}.jsonl`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast("Server-Logs heruntergeladen");
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+}
+
 function render(data) {
   const firstRender = !state.data;
   state.data = data;
@@ -4934,51 +4944,35 @@ async function downloadDiagnostics() {
   button.disabled = true;
   button.textContent = "Wird vorbereitet…";
   try {
-    const report = await api("/api/diagnostics");
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+    const response = await fetch("/api/diagnostics", { credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) {
+      if (response.status === 401) showLogin();
+      let payload = {};
+      try { payload = await response.json(); } catch (_) { /* use the safe fallback */ }
+      throw globalThis.AppApi.responseError(
+        response,
+        typeof payload.error === "string" ? payload.error : `Anfrage fehlgeschlagen (${response.status})`,
+        payload.reason || "http_error",
+      );
+    }
+    renderConnectivityStatus(true);
+    const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
     link.download = `intervals-coach-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.append(link);
     link.click();
-    URL.revokeObjectURL(url);
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Diagnose heruntergeladen");
   } catch (error) { toast(error.message, true); }
   finally { button.disabled = false; button.textContent = "Diagnose herunterladen"; }
 }
 
 function renderDiagnosticCapture(capture = {}) {
-  const toggle = $("#diagnosticCaptureToggle");
   const status = $("#diagnosticCaptureStatus");
-  if (!toggle || !status) return;
-  const active = Boolean(capture.active);
-  toggle.checked = active;
-  if (active) {
-    const entries = Number(capture.entries || 0);
-    status.textContent = `Aktiv bis ${formatTime(capture.expires_at)} · ${entries} technische Einträge gespeichert. Es werden nur Antwortformen und technische Metadaten gespeichert; keine Antwortinhalte, Athletendaten, Zugangsdaten oder Tokens.`;
-  } else {
-    status.textContent = "Aus. Antwortinhalte und Athletendaten werden nicht aufgezeichnet.";
-  }
-}
-
-async function setDiagnosticCapture(event) {
-  const toggle = event.currentTarget;
-  const previous = !toggle.checked;
-  toggle.disabled = true;
-  try {
-    const capture = await api("/api/diagnostics/capture", {
-      method: "POST",
-      body: JSON.stringify({ enabled: toggle.checked }),
-    });
-    if (state.data) state.data.diagnostic_capture = capture;
-    renderDiagnosticCapture(capture);
-    toast(capture.active ? "Erweiterte technische Diagnose ist für eine Stunde aktiv" : "Erweiterte technische Diagnose beendet");
-  } catch (error) {
-    toggle.checked = previous;
-    toast(error.message, true);
-  } finally {
-    toggle.disabled = false;
-  }
+  if (status) status.textContent = `Erweiterte technische Diagnose ist immer aktiv · ${Number(capture.entries || 0)} technische Einträge gespeichert.`;
 }
 
 async function downloadPrivacyExport() {
@@ -5177,8 +5171,8 @@ $("#aiProviderSelect").addEventListener("change", saveAiProvider);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
-$("#diagnosticCaptureToggle").addEventListener("change", setDiagnosticCapture);
 $("#logsRefreshButton").addEventListener("click", loadLogs);
+$("#logsDownloadButton").addEventListener("click", downloadServerLogs);
 $("#openaiChatResetButton").addEventListener("click", resetCoachChat);
 $("#chatResetButton").addEventListener("click", resetCoachChat);
 $("#privacyExportButton").addEventListener("click", downloadPrivacyExport);

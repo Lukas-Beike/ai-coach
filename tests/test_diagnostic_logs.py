@@ -87,6 +87,21 @@ class RecentLogEntriesServiceTests(unittest.TestCase):
             }],
         )
 
+    def test_download_includes_rotated_logs_in_order_and_redacts_secrets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "app.log"
+            log_path.write_text('{"message":"current"}\n', encoding="utf-8")
+            log_path.with_name("app.log.1").write_text(
+                '{"message":"rotated sk-test-secret-value"}\n', encoding="utf-8"
+            )
+            service = RecentLogEntriesService(log_path, _redactor(), lambda: "fixed-time")
+
+            lines = service.download().decode("utf-8").splitlines()
+
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(json.loads(lines[0]), {"message": "rotated [REDACTED]"})
+        self.assertEqual(json.loads(lines[1]), {"message": "current"})
+
 
 if __name__ == "__main__":
     unittest.main()

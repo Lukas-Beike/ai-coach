@@ -17,7 +17,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
 
     def test_one_batch_creates_workout_and_advances_revision_once(self):
         before = self.state()["planning_revision"]
-        result = server.coach_training_patch_service().apply(
+        result = server.COACH_PLANNING_TOOLS.training_patch_service().apply(
             {"expected_revision": before, "changes": [], "workouts": [self.workout()]},
             self.action("local_plan"),
         )
@@ -29,7 +29,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
     def test_stale_revision_does_not_create_workout(self):
         before = self.state()
         with self.assertRaises(server.AppError) as error:
-            server.coach_training_patch_service().apply(
+            server.COACH_PLANNING_TOOLS.training_patch_service().apply(
                 {"expected_revision": before["planning_revision"] - 1,
                  "changes": [], "workouts": [self.workout()]},
                 self.action("local_plan"),
@@ -41,7 +41,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
     def test_duplicate_calendar_day_rolls_back_plan_and_revision(self):
         before = self.state()["planning_revision"]
         with self.assertRaises(server.AppError) as error:
-            server.coach_training_patch_service().apply(
+            server.COACH_PLANNING_TOOLS.training_patch_service().apply(
                 {"expected_revision": before, "changes": [],
                  "workouts": [self.workout(name="One"), self.workout(name="Two")],
                  "plan_name": "Synthetic conflicting plan"},
@@ -55,7 +55,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
     def test_approved_constraints_are_attached_to_created_plan(self):
         action = self.action("local_plan")
         action["request"]["constraints"] = ["Synthetic no hard session on Friday"]
-        server.coach_training_patch_service().apply(
+        server.COACH_PLANNING_TOOLS.training_patch_service().apply(
             {"expected_revision": self.state()["planning_revision"],
              "changes": [], "workouts": [self.workout()]},
             action,
@@ -69,7 +69,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
 
     def test_addition_requires_local_plan_scope(self):
         with self.assertRaises(server.AppError) as error:
-            server.coach_training_patch_service().apply(
+            server.COACH_PLANNING_TOOLS.training_patch_service().apply(
                 {"expected_revision": self.state()["planning_revision"],
                  "changes": [], "workouts": [self.workout()]},
                 self.action(),
@@ -78,7 +78,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(self.state()["planned_units"], [])
 
     def test_empty_or_oversized_batch_is_rejected_before_write(self):
-        service = server.coach_training_patch_service()
+        service = server.COACH_PLANNING_TOOLS.training_patch_service()
         for arguments in (
             {"changes": [], "workouts": []},
             {"changes": [], "workouts": [self.workout()] * (coach_limits.COACH_TRAINING_CHANGE_LIMIT + 1)},
