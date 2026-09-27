@@ -42,6 +42,36 @@ async function controlled(page) {
   });
 }
 
+test("appearance choice updates the theme and survives reload on this device", async ({ page }) => {
+  await ready(page);
+  await page.getByRole("link", { name: "Mehr", exact: true }).click();
+  await page.locator("#settingsPanel").getByRole("link", { name: "Darstellung", exact: true }).click();
+  await page.locator("#appearanceSelect").selectOption("light");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect.poll(() => page.locator('meta[name="theme-color"]').getAttribute("content")).toBe("#ffffff");
+  await page.reload();
+  await expect(page.locator("#appearanceSelect")).toHaveValue("light");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+});
+
+test("a prior user message can be copied or edited as a regular draft", async ({ page }) => {
+  await ready(page);
+  await page.evaluate(() => {
+    state.data.messages = [{ id: 9001, role: "user", content: "Review this interval session" }];
+    renderMessages(state.data.messages);
+    $("#messageInput").dataset.requestKind = "morning";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (text) => { window.__copiedMessage = text; } },
+    });
+  });
+  await page.getByRole("button", { name: "Nachricht kopieren" }).click();
+  await expect.poll(() => page.evaluate(() => window.__copiedMessage)).toBe("Review this interval session");
+  await page.getByRole("button", { name: "Als Entwurf bearbeiten" }).click();
+  await expect(page.locator("#messageInput")).toHaveValue("Review this interval session");
+  expect(await page.locator("#messageInput").evaluate((input) => input.dataset.requestKind || null)).toBe(null);
+});
+
 test("chat reset detaches a delayed status poll without releasing its successor", async ({ page }) => {
   await ready(page);
   await expect(page.locator("#openaiChatResetButton")).toHaveCount(1);
@@ -83,7 +113,7 @@ test("history barriers preserve optimistic and completed messages through naviga
   await page.locator("#messageInput").fill("Fixture Run plan");
   await page.locator("#sendButton").click();
   await page.evaluate(() => __contract.histories.shift()([]));
-  await expect(page.locator(".message.user")).toHaveText("Fixture Run plan");
+  await expect(page.locator(".message.user")).toContainText("Fixture Run plan");
   await page.evaluate(() => { void load("/api/bootstrap?local=1", ["chat"]); });
   await expect.poll(() => page.evaluate(() => __contract.histories.length)).toBe(1);
   await page.getByRole("link", { name: "Geplant", exact: true }).click();
@@ -97,7 +127,7 @@ test("history barriers preserve optimistic and completed messages through naviga
   await page.getByRole("link", { name: "Coach", exact: true }).click();
   await expect(page.locator(".message.user")).toHaveCount(1);
   await expect(page.locator(".message.assistant")).toHaveCount(1);
-  await expect(page.locator(".message.assistant")).toHaveText("Run plan saved");
+  await expect(page.locator(".message.assistant")).toContainText("Run plan saved");
 });
 
 test("a completed answer accepts an immediate follow-up without showing a queue", async ({ page }) => {
@@ -108,7 +138,7 @@ test("a completed answer accepts an immediate follow-up without showing a queue"
   await page.evaluate(() => {
     __contract.push("completed", { message: { id: 201, content: "First answer", client_turn_id: __contract.turn }, proposed_actions: [], command_receipts: [] });
   });
-  await expect(page.locator(".message.assistant")).toHaveText("First answer");
+  await expect(page.locator(".message.assistant")).toContainText("First answer");
   await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
 
   await page.locator("#messageInput").fill("Immediate follow-up");

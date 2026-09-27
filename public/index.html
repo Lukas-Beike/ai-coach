@@ -9,8 +9,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-    <link rel="stylesheet" href="/styles.css?v=223">
+  <script src="/appearance.js?v=218"></script>
+  <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=225">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -52,7 +53,7 @@
           <div><strong>Deine Planung braucht eine Anpassung</strong><small>Bitte den Coach, die nächsten Einheiten zu prüfen.</small></div>
           <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Coach fragen</button>
         </div>
-        <div id="chatOperationStatus" class="chat-operation-status" hidden><button type="button" id="cancelChatButton" class="secondary-button" hidden>Abbrechen</button></div>
+        <div id="chatOperationStatus" class="sr-only" aria-live="polite" hidden></div>
         <div id="messages" class="messages" aria-live="polite" aria-atomic="false"></div>
         <section id="coachActionReview" class="coach-action-review" aria-labelledby="coachActionReviewTitle" hidden>
           <div class="coach-action-review-heading">
@@ -78,10 +79,11 @@
             <button type="button" id="attachmentButton" class="secondary-button attachment-button" aria-label="GPX- oder FIT-Dateien oder Bilder anhängen" title="Datei anhängen">+</button>
             <button type="button" id="voiceButton" class="voice-button" aria-label="Spracheingabe starten" title="Spracheingabe starten"><svg class="nav-icon" aria-hidden="true"><use href="#icon-microphone"></use></svg></button>
             <button type="button" id="steerButton" class="secondary-button steer-button" hidden>Steuern</button>
-            <button type="submit" id="sendButton">Senden</button>
+            <button type="button" id="cancelChatButton" class="composer-stop-button" hidden aria-label="Antwort stoppen" title="Antwort stoppen"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-stop"></use></svg></button>
+            <button type="submit" id="sendButton" aria-label="Senden" title="Senden"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m0 0 6 6m-6-6-6 6"></path></svg></button>
           </div>
         </form>
-        <button type="button" id="chatJumpToComposer" class="chat-jump" hidden aria-label="Zum Ende des Chats springen" title="Zum Ende des Chats springen">
+        <button type="button" id="chatJumpToComposer" class="chat-jump" hidden aria-label="Zu den neuesten Nachrichten springen" title="Zu den neuesten Nachrichten springen">
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14m0 0 5-5m-5 5-5-5"></path></svg>
         </button>
         <p id="voiceStatus" class="voice-status" aria-live="polite" hidden></p>
@@ -161,6 +163,7 @@
           <div><span class="eyebrow">MEHR · ATHLETENPROFIL</span><h2>Athletenprofil <span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2></div>
         </div>
         <nav class="more-segment-nav" aria-label="Mehr-Bereiche">
+          <a href="#more/appearance" data-more-segment="appearance">Darstellung</a>
           <a href="#more/profile" data-more-segment="profile" aria-current="page">Athletenprofil</a>
           <a href="#more/connections" data-more-segment="connections">Anbindungen</a>
           <a href="#more/coach" data-more-segment="coach">Coach &amp; Modell</a>
@@ -209,12 +212,23 @@
           <div><span class="eyebrow">MEHR</span><h2>Bereiche &amp; Einstellungen</h2><p class="settings-app-version">Version <span id="settingsAppVersion">wird geladen…</span></p></div>
         </div>
         <nav class="more-segment-nav" aria-label="Mehr-Bereiche">
+          <a href="#more/appearance" data-more-segment="appearance">Darstellung</a>
           <a href="#more/profile" data-more-segment="profile">Athletenprofil</a>
           <a href="#more/connections" data-more-segment="connections" aria-current="page">Anbindungen</a>
           <a href="#more/coach" data-more-segment="coach">Coach &amp; Modell</a>
           <a href="#more/privacy" data-more-segment="privacy">Daten &amp; Datenschutz</a>
           <a href="#more/operations" data-more-segment="operations">Betrieb &amp; Diagnose</a>
         </nav>
+        <section class="settings-section appearance-settings" data-more-segment-panel="appearance" aria-labelledby="appearanceTitle">
+          <div><h3 id="appearanceTitle">Darstellung</h3><p>Wähle, wie Intervals Coach auf diesem Gerät angezeigt wird.</p></div>
+          <label for="appearanceSelect">Farbschema
+            <select id="appearanceSelect">
+              <option value="system">System</option>
+              <option value="light">Hell</option>
+              <option value="dark">Dunkel</option>
+            </select>
+          </label>
+        </section>
         <details class="settings-section collapsible-section" data-more-segment-panel="connections">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
           <section id="connectionsSyncProgress" class="connections-sync-progress" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></section>
@@ -358,11 +372,11 @@
     </form>
   </dialog>
   <script src="/api.js?v=217" defer></script>
-  <script src="/navigation.js?v=217" defer></script>
+  <script src="/navigation.js?v=218" defer></script>
   <script src="/state.js?v=217" defer></script>
   <script src="/views.js?v=217" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/app.js?v=223" defer></script>
+  <script src="/app.js?v=225" defer></script>
 </body>
 </html>

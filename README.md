@@ -125,6 +125,8 @@ Intervals Coach adheres to a clean-slate installation and maintenance model:
 - **Resilient Offline App Shell**: Pre-cached application shell allowing view navigation and inspection of previously loaded training data during network drops.
 - **Auto-Reconnecting SSE Streaming**: Server-Sent Events stream with exponential backoff (capping at 30 seconds) ensuring smooth recovery after connection drops.
 - **Touch-Friendly Collapsible Views**: Ergonomic mobile interface featuring collapsible profile headers, compact calendar cards, and thumb-friendly bottom navigation.
+- **Light and Dark Appearance**: Choose the system setting, light mode, or dark mode under More → Appearance; the choice is stored on this device.
+- **Chat Controls**: Keep the composer available while reading older messages, jump to the latest reply, stop a response, copy messages, and edit a prior user prompt as a new draft.
 - **Accessible Keyboard Shortcuts**: Desktop navigation supporting Enter-to-send, Shift+Enter for line breaks, Esc for modal dismissal, and ARIA live announcements.
 
 ### Privacy, Security & Data Management

@@ -620,7 +620,7 @@ test.describe("critical browser states", () => {
     await expect(page.locator(".message.assistant.streaming")).toContainText("Teilantwort bleibt sichtbar");
     await expect(page.locator("#coachWorking")).toHaveAttribute("aria-label", "Verbindung unterbrochen · die Antwort wird im Hintergrund fertiggestellt…");
     await expect(page.locator("#chatForm")).toHaveClass(/is-recovering/);
-    await expect(page.locator("#sendButton")).toHaveText("Coach antwortet…");
+    await expect(page.locator("#sendButton")).toHaveAttribute("aria-label", "Coach antwortet…");
     await expect(page.locator("#sendButton")).toBeDisabled();
     await expect.poll(() => page.evaluate(() => window.__chatTest.historyResolvers.length)).toBe(1);
     await page.evaluate(() => window.__chatTest.releaseHistory());
