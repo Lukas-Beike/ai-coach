@@ -79,6 +79,20 @@ class CoachStructuredToolExecutionService:
                         )
                     )
                 return result
+            if (
+                action.get("intent") == "remote_sync"
+                and (action.get("request") or {}).get("remote_write") is True
+                and name != "delete_duplicate_intervals_activity"
+            ):
+                proposal = self._proposal_creation.create_remote_write(
+                    name,
+                    arguments,
+                    action,
+                    conversation_id=conversation_id,
+                    client_turn_id=client_turn_id,
+                    session_csrf_hash=session_csrf_hash,
+                )
+                return {**proposal, "ok": True, "status": "approval_required"}
             return self._tool_dispatch.execute(
                 name,
                 arguments,

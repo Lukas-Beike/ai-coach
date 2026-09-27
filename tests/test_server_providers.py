@@ -53,6 +53,7 @@ class ServerProvidersTests(ServerTestCase):
                 performance_refresh_service=deferred,
                 selected_workout_sync_service=deferred,
                 competition_sync_service=deferred,
+                nutrition_sync_service=deferred,
                 operation_observer=deferred,
                 resync_gate=object(),
             ),

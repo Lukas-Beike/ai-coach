@@ -61,6 +61,19 @@ class RecordingFixtureLoader:
         return self.fixture_path
 
 
+class MockNutritionSync:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def sync_day(self, day):
+        self.calls.append(("day", day))
+        return {"date": day, "pending": False}
+
+    def sync_pending(self, limit):
+        self.calls.append(("pending", limit))
+        return {"synced_dates": ["2026-09-24"], "pending_dates": [], "failed_dates": {}}
+
+
 class RecordingObserver:
     def __init__(self) -> None:
         self.calls: list[tuple[Any, ...]] = []
@@ -131,6 +144,7 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.queue = RecordingQueue()
         self.morning = RecordingService()
         self.fixture = RecordingFixtureLoader()
+        self.nutrition = MockNutritionSync()
         self.executor = self.make_executor()
 
     def make_executor(self) -> SyncJobExecutor:
@@ -145,6 +159,7 @@ class SyncJobExecutorTests(unittest.TestCase):
         )
         return SyncJobExecutor(
             provider_dispatcher=SyncJobProviderDispatcher(
+                nutrition_sync_service=self.nutrition,
                 intervals_jobs=IntervalsSyncJobOwner(
                     historical_sync=historical_sync,
                     intervals_sync_service=self.intervals,
@@ -218,6 +233,20 @@ class SyncJobExecutorTests(unittest.TestCase):
             self.selected.calls,
             [(({"entries": [entry], "repair": True},), {})],
         )
+
+    def test_dispatches_explicit_nutrition_sync_jobs(self) -> None:
+        daily = self.executor.execute(
+            self.job("intervals", "nutrition_sync", {"date": "2026-09-24"})
+        )
+        pending = self.executor.execute(
+            self.job("intervals", "nutrition_sync", {"pending_limit": 7})
+        )
+        self.assertEqual(daily, {"status": "completed", "date": "2026-09-24", "pending": False})
+        self.assertEqual(pending, {
+            "status": "completed", "synced_dates": ["2026-09-24"],
+            "pending_dates": [], "failed_dates": [],
+        })
+        self.assertEqual(self.nutrition.calls, [("day", "2026-09-24"), ("pending", 7)])
 
     def test_intervals_sync_observes_competitions_inside_provider_gate(self) -> None:
         self.competitions.during_call = lambda: self.assertEqual(self.gate.active, 1)

@@ -62,7 +62,7 @@ class CoachProposalToolOwners:
 
 
 class CoachToolDispatchAssembly:
-    """Create fresh routing services while retaining deferred tool factories."""
+    """Own one stateless dispatcher; factories keep manager-bound services fresh."""
 
     @dataclass(frozen=True)
     class Inputs:
@@ -92,26 +92,29 @@ class CoachToolDispatchAssembly:
         self._adaptive_preview = proposals.adaptive_preview
         self._adaptive_apply = proposals.adaptive_apply
         self._proposal_creation = proposals.proposal_creation
+        self._service: CoachToolDispatchService | None = None
 
     def service(self) -> CoachToolDispatchService:
-        return CoachToolDispatchService(
-            self._read_tools,
-            self._profile_update,
-            self._athlete_records,
-            CoachPlanArtifactToolService(self._training_plan_artifacts),
-            CoachPlanningChangeToolService(
-                self._training_plan_replacement, self._training_changes
-            ),
-            TrainingTemplateToolService(
-                self._database_manager, self._database_lock, self._workout_library_service
-            ),
-            self._library_plan_tools,
-            self._sync_tools,
-            CoachPlanningActionToolService(
-                self._adaptive_preview,
-                self._adaptive_apply,
-                self._training_plan_service,
-                self._history_undo,
-                self._proposal_creation,
-            ),
-        )
+        if self._service is None:
+            self._service = CoachToolDispatchService(
+                self._read_tools,
+                self._profile_update,
+                self._athlete_records,
+                CoachPlanArtifactToolService(self._training_plan_artifacts),
+                CoachPlanningChangeToolService(
+                    self._training_plan_replacement, self._training_changes
+                ),
+                TrainingTemplateToolService(
+                    self._database_manager, self._database_lock, self._workout_library_service
+                ),
+                self._library_plan_tools,
+                self._sync_tools,
+                CoachPlanningActionToolService(
+                    self._adaptive_preview,
+                    self._adaptive_apply,
+                    self._training_plan_service,
+                    self._history_undo,
+                    self._proposal_creation,
+                ),
+            )
+        return self._service

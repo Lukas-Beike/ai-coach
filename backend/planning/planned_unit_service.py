@@ -314,14 +314,24 @@ class PlannedUnitService:
                         (json.dumps(payload, ensure_ascii=False), now, normalized_id),
                     )
                 else:
-                    prepared = planned_units.remote_planned_unit_payload(
-                        remote, today=self._today()
+                    prepared = planned_units.adopt_normalized_remote_planned_unit(
+                        remote
                     )
                     if not prepared:
                         raise AppError(
                             409, "Das Remote-Event kann nicht übernommen werden."
                         )
-                    incoming, _, identity = prepared
+                    incoming, identity = prepared
+                    local = planned_units.planned_conflict_payload(row)
+                    for key in (
+                        "plan_id",
+                        "plan_name",
+                        "rationale",
+                        "archived",
+                        "private_calendar_adjustment",
+                    ):
+                        if local.get(key) is not None:
+                            incoming[key] = local[key]
                     incoming.update(id=normalized_id, sync_status="synced")
                     baseline_hash = planned_units.planned_unit_payload_hash(incoming)
                     db.execute(

@@ -34,7 +34,9 @@ class CoachAthleteRecordToolService:
     def execute(
         self, name: str, arguments: dict[str, Any], intent: dict[str, Any]
     ) -> dict[str, Any] | None:
-        if name in {"save_nutrition_entry", "delete_nutrition_entry"}:
+        if name in {
+            "save_nutrition_entry", "update_nutrition_entry", "delete_nutrition_entry"
+        }:
             return self._execute_nutrition(name, arguments, intent)
         if name == "save_checkin":
             self._authorize(
@@ -111,7 +113,7 @@ class CoachAthleteRecordToolService:
         operation = name
         message = (
             "Die strukturierte Coach-Autorisierung erlaubt diesen Ernährungseintrag nicht."
-            if name == "save_nutrition_entry"
+            if name in {"save_nutrition_entry", "update_nutrition_entry"}
             else "Die strukturierte Coach-Autorisierung erlaubt das Löschen dieses Eintrags nicht."
         )
         self._authorize(intent, operation, message)
@@ -121,6 +123,13 @@ class CoachAthleteRecordToolService:
         if name == "save_nutrition_entry":
             payload = structured_action_payload(arguments)
             return {"ok": True, "entry": self._nutrition.log_meal(payload)}
+        if name == "update_nutrition_entry":
+            return {
+                "ok": True,
+                "entry": self._nutrition.correct_meal(
+                    str(arguments.get("id") or ""), arguments.get("changes")
+                ),
+            }
         entry_id = str(arguments.get("id") or arguments.get("entry_id") or "").strip()
         return {"ok": True, **self._nutrition.delete_meal(entry_id)}
 

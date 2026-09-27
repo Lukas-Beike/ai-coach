@@ -43,6 +43,7 @@ REQUIRED_VARIANTS = {
     "start_intervals_plan_sync": {"selected", "created", "all_pending"},
     "resolve_training_sync_conflict": {"keep_local", "adopt_remote", "retry_push", "retry_read"},
     "apply_adaptive_replan": {"local", "intervals"},
+    "sync_nutrition": {"date", "pending"},
 }
 
 
@@ -71,6 +72,8 @@ def variants(name, arguments, result):
         return {"retry_push" if result["job"]["type"] in {"plan_push", "competition_push"} else "retry_read"}
     if name == "apply_adaptive_replan":
         return {"intervals" if arguments.get("sync_illness_to_intervals") else "local"}
+    if name == "sync_nutrition":
+        return {"date" if arguments.get("date") else "pending"}
     return {"success"}
 
 
@@ -462,6 +465,26 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 documented.update(name.strip().strip("`") + ":" + value.strip().strip("`") for value in variants_text.split(","))
         self.assertEqual(documented, declared)
 
+    def test_capability_catalog_covers_each_schema_dispatch_owner_and_effect_policy(self):
+        catalog = server.COACH_TOOL_CAPABILITIES
+        dialogue_names = {tool["name"] for tool in server.COACH_DIALOGUE_TOOLS}
+        canonical_names = {tool["name"] for tool in server.COACH_STRUCTURED_TOOLS}
+        self.assertEqual(set(catalog), dialogue_names | canonical_names)
+        self.assertTrue(all(item["schema"]["name"] == name for name, item in catalog.items()))
+        self.assertTrue(all(item["owner"] and item["receipt"] for item in catalog.values()))
+        for name in server.STRUCTURED_READ_ONLY_TOOLS:
+            self.assertEqual(catalog[name]["effect"], "read")
+            self.assertEqual(catalog[name]["authorization"], "none")
+        for name in ("start_intervals_plan_sync", "sync_competitions", "sync_nutrition"):
+            self.assertEqual(catalog[name]["effect"], "remote_write")
+            self.assertEqual(catalog[name]["authorization"], "request_scope+athlete_approval")
+        self.assertEqual(catalog["apply_adaptive_replan"]["effect"], "conditional_remote_write")
+        self.assertEqual(catalog["resolve_training_sync_conflict"]["effect"], "conditional_remote_write")
+        self.assertEqual(catalog["start_provider_refresh"]["effect"], "provider_read_job")
+        self.assertEqual(catalog["apply_training_patch"]["surface"], "dialogue_only")
+        self.assertIn("apply_training_changes", server.COACH_CANONICAL_TOOL_NAMES)
+        self.assertEqual(catalog["apply_training_changes"]["surface"], "canonical_only")
+
     @covers("save_nutrition_entry:success", "read_nutrition:success", "delete_nutrition_entry:success")
     def test_nutrition_entries_can_be_saved_read_and_deleted(self):
         saved = self.run_tool(
@@ -482,6 +505,51 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(deleted["deleted_id"], entry_id)
         self.assertEqual(server.NUTRITION_ASSEMBLY.service().get_day_summary("2026-09-07")["entry_count"], 0)
 
+    @covers("update_nutrition_entry:success", "sync_nutrition:date", "sync_nutrition:pending")
+    def test_nutrition_correction_preserves_fields_and_sync_is_explicitly_queued(self):
+        entry = self.run_tool(
+            "save_nutrition_entry",
+            {"payload": {"meal_date": "2026-09-08", "meal_type": "lunch",
+                          "description": "Synthetic rice bowl", "kcal": 700,
+                          "carbs_g": 90, "protein_g": 25, "fat_g": 18}},
+            ["local_nutrition"], message="Speichere mein Mittagessen lokal.",
+        )["entry"]
+        self.run_tool("read_nutrition", {"date": "2026-09-08"})
+        corrected = self.run_tool(
+            "update_nutrition_entry", {"id": entry["id"], "changes": {"kcal": 600}},
+            ["local_nutrition"], message="Korrigiere die Kalorien auf 600.",
+        )["entry"]
+        self.assertEqual(corrected["id"], entry["id"])
+        self.assertEqual(corrected["kcal"], 600)
+        self.assertEqual(corrected["description"], "Synthetic rice bowl")
+        self.assertEqual(corrected["carbs_g"], 90)
+        self.assertEqual(corrected["protein_g"], 25)
+        reread = self.run_tool("read_nutrition", {"date": "2026-09-08"})
+        self.assertEqual(reread["entries"][0]["id"], entry["id"])
+        self.assertEqual(reread["entries"][0]["kcal"], 600)
+        date_job = self.run_tool(
+            "sync_nutrition", {"date": "2026-09-08"}, ["local_nutrition", "intervals_sync"],
+            message="Synchronisiere die Ernährung für den 8. September.",
+            target="intervals", remote_write=True,
+        )
+        pending_job = self.run_tool(
+            "sync_nutrition", {"pending_limit": 2}, ["local_nutrition", "intervals_sync"],
+            message="Synchronisiere die zwei ältesten ausstehenden Ernährungstage.",
+            target="intervals", remote_write=True,
+        )
+        self.assertEqual(date_job["status"], "queued")
+        self.assertEqual(pending_job["status"], "queued")
+        with server.database_manager().reader() as db:
+            jobs = db.execute(
+                "SELECT type, payload FROM sync_jobs WHERE id IN (?, ?)",
+                (date_job["sync_job_id"], pending_job["sync_job_id"]),
+            ).fetchall()
+        self.assertEqual({row["type"] for row in jobs}, {"nutrition_sync"})
+        self.assertEqual({row["payload"] for row in jobs}, {
+            json.dumps({"date": "2026-09-08"}, separators=(",", ":")),
+            json.dumps({"pending_limit": 2}, separators=(",", ":")),
+        })
+
     def test_every_mutating_tool_rejects_missing_user_authorization_without_effect(self):
         exceptions = server.STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}
         for tool in server.COACH_DIALOGUE_TOOLS:
@@ -501,6 +569,54 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             result, _ = self.turn(message, [{"output_text": "Synthetische Beratung ohne Werkzeugaufruf."}])
             self.assertEqual(result["command_receipts"], [])
             self.assertEqual(self.athlete_state(), before)
+
+    def test_model_misreading_negated_sync_cannot_queue_before_athlete_approval(self):
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
+        before_jobs = server.SYNC_JOB_QUEUE.service().list()
+        self.auto_approve_remote_proposals = False
+
+        receipt, _ = self.turn("Nicht zu Intervals übertragen.", [
+            lambda _: self.call(
+                "start_intervals_plan_sync", {}, ["intervals_sync", "local_plan"],
+                target="intervals", remote_write=True, sync_scope="all_pending",
+            ),
+            {"output_text": "Die geplante Synchronisierung braucht deine Freigabe."},
+        ])
+
+        result = receipt["command_receipts"][0]["result"]
+        self.assertEqual(result["status"], "approval_required")
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), before_jobs)
+        proposals = server.COACH_PROPOSALS.read_service().current("synthetic-session")
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(proposals[0]["action_type"], "remote_coach_write")
+
+    def test_all_pending_approval_does_not_expand_to_units_added_after_preview(self):
+        first = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])[0]
+        self.auto_approve_remote_proposals = False
+        receipt, _ = self.turn("Alle offenen Einheiten synchronisieren.", [
+            lambda _: self.call(
+                "start_intervals_plan_sync", {}, ["intervals_sync", "local_plan"],
+                target="intervals", remote_write=True, sync_scope="all_pending",
+            ),
+            {"output_text": "Prüfe die Freigabe."},
+        ])
+        proposal = receipt["command_receipts"][0]["result"]["proposed_action"]
+        self.assertTrue(any(first["id"] in value for value in proposal["object_ids"].get("targets", [])))
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([
+            self.workout("2026-09-11", "Added after approval preview")
+        ])
+        confirmation = server.COACH_PROPOSALS.confirmation_service().confirm(
+            proposal["id"], "synthetic-session"
+        )
+
+        with self.assertRaises(server.AppError) as rejected:
+            server.COACH_PROPOSALS.execution_service().execute(
+                confirmation["action_token"], "synthetic-session",
+                confirmation["proposed_action"]["payload_hash"],
+            )
+
+        self.assertEqual(rejected.exception.reason, "intent_scope_denied")
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     def test_friday_correction_retry_and_sync_keep_sunday_unchanged(self):
         units = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-11", "Synthetic Friday strength"),
@@ -608,10 +724,21 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         for name, args, scope, kwargs in cases:
             with self.subTest(tool=name):
                 before = self.athlete_state()
+                previous_auto_approval = self.auto_approve_remote_proposals
+                if kwargs.get("remote_write"):
+                    self.auto_approve_remote_proposals = False
                 result, _ = self.turn("Synthetischer Auftrag mit ungültigem Argument.", [lambda _, n=name, a=args, s=scope, k=kwargs: self.call(n, a, s, **k),
                                                                                         {"output_text": "Nicht ausgeführt."}])
-                self.assertEqual(result["status"], "failed")
-                self.assertEqual(self.athlete_state(), before)
+                self.auto_approve_remote_proposals = previous_auto_approval
+                if kwargs.get("remote_write"):
+                    self.assertEqual(result["command_receipts"][0]["result"]["status"], "approval_required")
+                    after = self.athlete_state()
+                    before.pop("coach_action_proposals")
+                    after.pop("coach_action_proposals")
+                    self.assertEqual(after, before)
+                else:
+                    self.assertEqual(result["status"], "failed")
+                    self.assertEqual(self.athlete_state(), before)
 
     def test_adaptive_proposal_cannot_approve_itself_in_the_same_turn(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{**self.workout(), "duration_minutes": 90}])

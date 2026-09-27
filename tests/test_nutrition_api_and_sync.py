@@ -20,6 +20,8 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.auth = Mock()
         self.nutrition_service = Mock()
         self.sync_service = Mock()
+        self.sync_job_queue = Mock()
+        self.sync_job_queue.enqueue.return_value = {"id": "nutrition-job-1"}
         self.local_now = lambda: datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
 
         self.get_routes = NutritionGetRoutes(
@@ -29,7 +31,7 @@ class NutritionHttpApiTests(unittest.TestCase):
         )
         self.post_routes = NutritionPostRoutes(
             nutrition_service=lambda: self.nutrition_service,
-            nutrition_sync_service=lambda: self.sync_service,
+            sync_job_queue=lambda: self.sync_job_queue,
         )
         self.put_routes = NutritionPutRoutes(
             nutrition_service=lambda: self.nutrition_service,
@@ -109,7 +111,20 @@ class NutritionHttpApiTests(unittest.TestCase):
         session = {"csrf_hash": "abc"}
         handled = self.post_routes.handle(self.handler, "/api/nutrition/sync")
         self.assertTrue(handled)
-        self.sync_service.sync_day.assert_called_once_with("2026-09-24")
+        self.sync_job_queue.enqueue.assert_called_once_with(
+            "intervals", "nutrition_sync", {"date": "2026-09-24"}, requested_by="http_api"
+        )
+        self.handler.send_json.assert_called_once_with(202, {
+            "ok": True, "status": "queued", "sync_job_id": "nutrition-job-1",
+        })
+
+    def test_post_sync_pending_route_queues_bounded_provider_job(self) -> None:
+        self.handler.headers = {"Content-Length": "11"}
+        self.handler.read_json.return_value = {"limit": 3}
+        self.post_routes.handle(self.handler, "/api/nutrition/sync")
+        self.sync_job_queue.enqueue.assert_called_once_with(
+            "intervals", "nutrition_sync", {"pending_limit": 3}, requested_by="http_api"
+        )
 
     def test_put_entry_route(self) -> None:
         self.handler.read_json.return_value = {
@@ -183,6 +198,10 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
         result = IntervalsNutritionSyncService(config, api, nutrition).sync_day("2026-09-24")
         self.assertTrue(result["ok"])
         self.assertTrue(result["pending"])
+        self.assertEqual(api.put.call_args.args[1], {
+            "id": "2026-09-24", "kcalConsumed": 500,
+            "carbs": 0, "protein": 0, "fat": 0,
+        })
         nutrition.mark_date_synced.assert_called_once_with("2026-09-24", 7)
 
     def test_sync_pending_processes_all_dates(self) -> None:
@@ -196,6 +215,7 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
             {"date": "2026-09-23", "total_kcal": 1800, "total_carbs_g": 0, "total_protein_g": 0, "total_fat_g": 0, "sync_revision": 1},
             {"date": "2026-09-24", "total_kcal": 2100, "total_carbs_g": 0, "total_protein_g": 0, "total_fat_g": 0, "sync_revision": 2},
         ]
+        mock_nutrition.mark_date_synced.return_value = True
 
         sync_service = IntervalsNutritionSyncService(
             config=mock_config,
@@ -207,6 +227,24 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
         self.assertTrue(res["ok"])
         self.assertEqual(res["synced_dates"], ["2026-09-23", "2026-09-24"])
         self.assertEqual(mock_api.put.call_count, 2)
+
+    def test_sync_pending_keeps_revision_races_out_of_synced_dates(self) -> None:
+        config = Mock(spec=Config)
+        config.intervals_athlete_id = "i12345"
+        nutrition = Mock()
+        nutrition.list_unsynced_dates.return_value = ["2026-09-24"]
+        nutrition.get_sync_snapshot.return_value = {
+            "date": "2026-09-24", "total_kcal": 0, "total_carbs_g": 0,
+            "total_protein_g": 0, "total_fat_g": 0, "entry_count": 0,
+            "sync_revision": 8,
+        }
+        nutrition.mark_date_synced.return_value = False
+
+        result = IntervalsNutritionSyncService(config, Mock(), nutrition).sync_pending()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["synced_dates"], [])
+        self.assertEqual(result["pending_dates"], ["2026-09-24"])
 
 
 if __name__ == "__main__":

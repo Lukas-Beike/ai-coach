@@ -54,29 +54,69 @@ class PlannedUnitSyncStateWriter:
         remote_event: dict[str, Any] | None,
         *,
         now: str,
+        expected_payload: str | None = None,
     ) -> bool:
         row = db.execute(
-            "SELECT payload FROM planned_units WHERE local_id = ?", (local_id,)
+            "SELECT payload, sync_conflict FROM planned_units WHERE local_id = ?",
+            (local_id,),
         ).fetchone()
-        if not row:
+        current = _load_payload(row) if row else None
+        changed = expected_payload is not None and (
+            row is None or row["payload"] != expected_payload
+        )
+        if row is None and not changed:
             return False
-        payload = _load_payload(row)
+        if row is None:
+            # The user deleted the unit while its create/update was in flight.
+            # Keep a local tombstone so the next explicit sync can remove the
+            # remote event instead of orphaning it.
+            payload = _load_payload({"payload": expected_payload})
+            payload.update(local_deleted=True, archived=True)
+        else:
+            payload = current or {}
         payload["sync_status"] = state
-        synced = state == "synced"
-        remote_external_id = _apply_remote_event(payload, state, remote_event)
+        remote_external_id = _apply_remote_event(
+            payload, state if not changed else "identity", remote_event
+        )
+        baseline_payload = _load_payload({"payload": expected_payload}) if changed else payload
+        if changed and state == "synced":
+            _apply_remote_event(baseline_payload, state, remote_event)
+        persisted_state = "local" if changed and state == "synced" else state
+        if changed:
+            payload["sync_status"] = persisted_state
+        if row is None:
+            db.execute(
+                "INSERT INTO planned_units(id, local_id, external_id, payload, sync_dirty, "
+                "sync_state, sync_error, sync_conflict, baseline_hash, last_synced_at, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?, '', ?, ?, ?, ?)",
+                (
+                    local_id,
+                    local_id,
+                    remote_external_id or None,
+                    json.dumps(payload, ensure_ascii=False),
+                    persisted_state,
+                    self._redactor.redact_text(str(error))[:1000] if error else None,
+                    planned_unit_payload_hash(baseline_payload) if state == "synced" else None,
+                    now if state == "synced" else None,
+                    now,
+                    now,
+                ),
+            )
+            self._revision_service.bump(db)
+            return True
         db.execute(
             "UPDATE planned_units SET payload=?, sync_dirty=?, sync_state=?, sync_error=?, "
             "sync_conflict=?, external_id=COALESCE(?, external_id), baseline_hash=COALESCE(?, baseline_hash), "
             "last_synced_at=COALESCE(?, last_synced_at), updated_at=? WHERE local_id=?",
             (
                 json.dumps(payload, ensure_ascii=False),
-                0 if state in {"synced", "remote_missing"} else 1,
-                state,
+                1 if changed else 0 if state in {"synced", "remote_missing"} else 1,
+                persisted_state,
                 self._redactor.redact_text(str(error))[:1000] if error else None,
-                "" if state != "conflict" else None,
+                row["sync_conflict"] if changed else None if state == "conflict" else "",
                 remote_external_id or None,
-                planned_unit_payload_hash(payload) if synced else None,
-                now if synced else None,
+                planned_unit_payload_hash(baseline_payload) if state == "synced" else None,
+                now if state == "synced" else None,
                 now,
                 local_id,
             ),

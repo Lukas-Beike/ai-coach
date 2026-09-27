@@ -634,7 +634,7 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertEqual(self.calendar_conflicts.calls, [])
 
     def test_resolve_conflict_adopts_normalized_remote_and_metadata(self):
-        remote = {
+        provider_event = {
             "id": "remote-42",
             "external_id": "provider-workout-42",
             "category": "WORKOUT",
@@ -644,6 +644,9 @@ class PlannedUnitServiceTests(unittest.TestCase):
             "description": "- 30m Z2",
             "moving_time": 1800,
         }
+        remote = planned_units.remote_planned_unit_payload(
+            provider_event, today=TODAY
+        )[0]
         local_id = self.make_conflict({"remote": remote})
 
         result = self.service.resolve_conflict(local_id, "adopt_remote")
@@ -652,6 +655,7 @@ class PlannedUnitServiceTests(unittest.TestCase):
         payload = json.loads(planned[0]["payload"])
         self.assertEqual(result["strategy"], "adopt_remote")
         self.assertEqual(result["planned_unit"]["id"], local_id)
+        self.assertEqual(result["planned_unit"]["remote_event_id"], "remote-42")
         self.assertEqual(result["planned_unit"]["name"], "Remote Fahrt")
         self.assertEqual(payload["sync_status"], "synced")
         self.assertEqual(planned[0]["external_id"], "provider-workout-42")

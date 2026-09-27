@@ -271,10 +271,12 @@ class SyncJobProviderDispatcher:
         self,
         *,
         intervals_jobs: IntervalsSyncJobOwner,
+        nutrition_sync_service: Any,
         garmin_jobs: GarminSyncJobOwner,
         calendar_weather_jobs: CalendarWeatherSyncJobOwner,
     ) -> None:
         self._intervals_jobs = intervals_jobs
+        self._nutrition_sync_service = nutrition_sync_service
         self._garmin_jobs = garmin_jobs
         self._calendar_weather_jobs = calendar_weather_jobs
 
@@ -285,6 +287,21 @@ class SyncJobProviderDispatcher:
         provider = envelope["provider"]
         job_type = envelope["type"]
         reason = str(payload.get("reason") or "Persistenter Providerjob")
+        if provider == "intervals" and job_type == "nutrition_sync":
+            if "date" in payload:
+                result = self._nutrition_sync_service.sync_day(payload["date"])
+                return {
+                    "status": "partial" if result.get("pending") else "completed",
+                    "date": result["date"],
+                    "pending": result.get("pending", False),
+                }
+            result = self._nutrition_sync_service.sync_pending(payload["pending_limit"])
+            return {
+                "status": "partial" if result.get("pending_dates") or result.get("failed_dates") else "completed",
+                "synced_dates": result["synced_dates"],
+                "pending_dates": result.get("pending_dates", []),
+                "failed_dates": sorted(result.get("failed_dates", {})),
+            }
         if provider == "intervals":
             specific = self._intervals_jobs.execute_specific(
                 job, payload, reason, job_type

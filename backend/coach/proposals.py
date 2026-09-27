@@ -9,6 +9,7 @@ import re
 import secrets
 import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -24,7 +25,13 @@ from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.state import SyncStateRepository
 
 
-COACH_ACTION_TYPES = {"undo_change", "delete_duplicate_intervals_activity"}
+COACH_ACTION_TYPES = {
+    "undo_change", "delete_duplicate_intervals_activity", "remote_coach_write",
+}
+REMOTE_COACH_WRITE_TOOLS = frozenset({
+    "start_intervals_plan_sync", "sync_competitions", "sync_nutrition",
+    "resolve_training_sync_conflict", "apply_adaptive_replan",
+})
 COACH_ACTION_TTL_SECONDS = 600
 LOGGER = logging.getLogger("intervals_coach")
 
@@ -54,10 +61,80 @@ def validated_coach_action_preview_input(
         or not isinstance(payload, dict)
     ):
         raise AppError(400, "Die Aktionsvorschau benötigt Objekt-IDs, Diff und Payload.")
-    expected_target = "intervals" if action_type == "delete_duplicate_intervals_activity" else "local"
+    expected_target = "intervals" if action_type in {
+        "delete_duplicate_intervals_activity", "remote_coach_write",
+    } else "local"
     if target_system != expected_target or not diff:
         raise AppError(400, "Die geschuetzte Aktion benoetigt das passende Ziel und einen sichtbaren Diff.")
+    if action_type == "remote_coach_write":
+        _validate_remote_coach_write(payload)
     return action_type, target_system, object_ids, diff, payload
+
+
+def _validate_remote_coach_write(payload: dict[str, Any]) -> None:
+    tool = payload.get("tool")
+    arguments = payload.get("arguments")
+    intent = payload.get("intent")
+    request = intent.get("request") if isinstance(intent, dict) else None
+    scope = intent.get("authorization_scope") if isinstance(intent, dict) else None
+    scope_ok = isinstance(scope, list) and "intervals_sync" in scope
+    source_ids = request.get("source_message_ids") if isinstance(request, dict) else None
+    source_ids_ok = (
+        isinstance(source_ids, list)
+        and 1 <= len(source_ids) <= 24
+        and all(type(value) is int and value > 0 for value in source_ids)
+        and len(source_ids) == len(set(source_ids))
+    )
+    if (
+        tool not in REMOTE_COACH_WRITE_TOOLS
+        or not isinstance(arguments, dict)
+        or not isinstance(intent, dict)
+        or intent.get("operation") != tool
+        or intent.get("target_system") != "intervals"
+        or not isinstance(request, dict)
+        or request.get("remote_write") is not True
+        or not source_ids_ok
+        or not scope_ok
+    ):
+        raise AppError(400, "Die Coach-Aktion ist keine gültige Intervals.icu-Änderung.")
+
+
+REMOTE_WRITE_LABELS = {
+    "start_intervals_plan_sync": "Trainingseinheiten mit Intervals.icu synchronisieren",
+    "sync_competitions": "Bestätigte Wettkämpfe mit Intervals.icu synchronisieren",
+    "sync_nutrition": "Ernährungsdaten mit Intervals.icu synchronisieren",
+    "resolve_training_sync_conflict": "Fehlgeschlagenen Intervals.icu-Sync wiederholen",
+    "apply_adaptive_replan": "Adaptive Änderung anwenden und Krankheitspause synchronisieren",
+}
+
+
+def remote_coach_write_diff(tool: str, arguments: dict[str, Any], intent: dict[str, Any]) -> list[dict[str, str]]:
+    """Project the remote effect into a compact, non-sensitive approval summary."""
+    entry: dict[str, str] = {"name": REMOTE_WRITE_LABELS[tool]}
+    if tool == "start_intervals_plan_sync":
+        request = intent.get("request") or {}
+        entry["scope"] = str(request.get("sync_scope") or "selected")
+        entries = arguments.get("entries") or []
+        entry["units"] = f"{len(entries)} konkret ausgewählte Einheit(en)"
+        dates = sorted({
+            str(item.get("date") or "") for item in entries
+            if isinstance(item, dict) and item.get("date")
+        })
+        if dates:
+            entry["date"] = dates[0] if len(dates) == 1 else f"{dates[0]} bis {dates[-1]}"
+        if entry["scope"] == "selected":
+            entry["sport"] = entry["units"]
+        elif entry["scope"] == "all_pending":
+            entry["sport"] = f"{len(entries)} derzeit ausstehende Einheit(en)"
+        else:
+            entry["sport"] = f"{len(entries)} in diesem Auftrag erstellte Einheit(en)"
+    elif tool == "sync_nutrition":
+        entry["date"] = str(arguments.get("date") or f"{arguments.get('pending_limit')} ausstehende Tage")
+    elif tool == "resolve_training_sync_conflict":
+        entry["date"] = "Synchronisationsauftrag " + str(arguments.get("job_id") or "")[:36]
+    elif tool == "apply_adaptive_replan":
+        entry["date"] = "Adaptive Vorschau " + str(arguments.get("adjustment_id") or "")[:36]
+    return [entry]
 
 
 def coach_action_hash(payload: Any) -> str:
@@ -151,8 +228,44 @@ class CoachProposalCreationService:
             result = {
                 "status": "preview",
                 "proposed_action": coach_action_view(dict(row)),
-            }
+        }
         return result
+
+    def create_remote_write(
+        self,
+        tool: str,
+        arguments: dict[str, Any],
+        intent: dict[str, Any],
+        *,
+        conversation_id: str,
+        client_turn_id: str,
+        session_csrf_hash: str,
+    ) -> dict[str, Any]:
+        """Prepare an independently approved Coach remote-write request."""
+        if not conversation_id or not client_turn_id or not session_csrf_hash:
+            raise AppError(403, "Die Remote-Aktion ist nicht an eine Coach-Sitzung gebunden.")
+        request = intent.get("request") if isinstance(intent, dict) else None
+        source_ids = request.get("source_message_ids") if isinstance(request, dict) else None
+        if not isinstance(source_ids, list) or not source_ids:
+            raise AppError(403, "Die Remote-Aktion hat keinen gültigen Nutzerauftrag.")
+        targets = sorted(
+            value for value in intent.get("authorization_scope", [])
+            if isinstance(value, str)
+        )
+        payload = {
+            "tool": tool,
+            "arguments": arguments,
+            "intent": intent,
+            "conversation_id": str(conversation_id)[:160],
+            "client_turn_id": str(client_turn_id)[:160],
+        }
+        return self.create({
+            "action_type": "remote_coach_write",
+            "target_system": "intervals",
+            "object_ids": {"operation": tool, "targets": targets},
+            "diff": remote_coach_write_diff(tool, arguments, intent),
+            "payload": payload,
+        }, session_csrf_hash)
 
 
 class CoachProposalReadService:
@@ -224,6 +337,21 @@ class CoachProposalConfirmationService:
             }
         return result
 
+    def cancel(self, proposal_id: Any, session_csrf_hash: str) -> dict[str, Any]:
+        """Revoke an unexecuted approval proposal owned by this session."""
+        normalized_id = str(proposal_id or "").strip()
+        if not re.fullmatch(r"[0-9a-f-]{36}", normalized_id):
+            raise AppError(400, "Ungültige Aktionsvorschau.")
+        with self._database_manager.unit_of_work() as db:
+            changed = db.execute(
+                "UPDATE coach_action_proposals SET status='cancelled', action_token_hash=NULL "
+                "WHERE id=? AND session_csrf_hash=? AND status IN ('preview', 'ready')",
+                (normalized_id, str(session_csrf_hash)),
+            ).rowcount
+            if changed != 1:
+                raise AppError(409, "Die Aktionsvorschau ist nicht mehr offen.")
+        return {"status": "cancelled", "proposal_id": normalized_id}
+
 
 class CoachProposalExecutionService:
     """Consume a confirmed, session-bound token before dispatching its action."""
@@ -235,6 +363,7 @@ class CoachProposalExecutionService:
         history_undo_service: HistoryUndoService,
         intervals_client_factory: Callable[[], Any],
         maintenance_gate: MaintenanceGate,
+        tool_dispatch_service: Callable[[], Any] | None = None,
         *,
         now: Callable[[], float] = time.time,
         utc_now: Callable[[], str] = _utc_now,
@@ -244,6 +373,7 @@ class CoachProposalExecutionService:
         self._history_undo_service = history_undo_service
         self._intervals_client_factory = intervals_client_factory
         self._maintenance_gate = maintenance_gate
+        self._tool_dispatch_service = tool_dispatch_service
         self._now = now
         self._utc_now = utc_now
 
@@ -291,6 +421,8 @@ class CoachProposalExecutionService:
             }
         elif action_type == "undo_change":
             result = self._history_undo_service.apply(payload)
+        elif action_type == "remote_coach_write":
+            result = self._execute_remote_coach_write(payload, session_csrf_hash)
         else:
             raise AppError(400, "Unbekannte Coach-Aktion.")
         LOGGER.info(
@@ -304,4 +436,59 @@ class CoachProposalExecutionService:
                 },
             },
         )
+        return result
+
+    def _execute_remote_coach_write(
+        self, payload: dict[str, Any], session_csrf_hash: str
+    ) -> dict[str, Any]:
+        if not self._tool_dispatch_service:
+            raise AppError(503, "Die Coach-Aktionsausführung ist nicht verfügbar.")
+        tool = payload.get("tool")
+        arguments = payload.get("arguments")
+        intent = payload.get("intent")
+        if (
+            tool not in REMOTE_COACH_WRITE_TOOLS
+            or not isinstance(arguments, dict)
+            or not isinstance(intent, dict)
+        ):
+            raise AppError(409, "Der freigegebene Coach-Auftrag ist ungültig.")
+        _validate_remote_coach_write(payload)
+        request = intent["request"]
+        source_ids = request.get("source_message_ids") or []
+        client_turn_id = str(payload.get("client_turn_id") or "")
+        conversation_id = str(payload.get("conversation_id") or "")
+        if not client_turn_id or not conversation_id:
+            raise AppError(409, "Der freigegebene Coach-Auftrag ist nicht mehr gültig.")
+        with self._database_manager.unit_of_work() as db:
+            bound = db.execute(
+                "SELECT conversation_id, receipt FROM coach_commands WHERE client_turn_id=?",
+                (client_turn_id,),
+            ).fetchone()
+            receipt = json.loads(bound["receipt"] or "{}") if bound else {}
+            if (
+                not bound
+                or bound["conversation_id"] != conversation_id
+                or receipt.get("session_key")
+                != hashlib.sha256(str(session_csrf_hash).encode("utf-8")).hexdigest()
+            ):
+                raise AppError(409, "Der freigegebene Coach-Auftrag gehört nicht mehr zu dieser Sitzung.")
+            placeholders = ",".join("?" for _ in source_ids)
+            existing = db.execute(
+                f"SELECT id FROM messages WHERE role='user' AND client_turn_id=? AND id IN ({placeholders})",
+                (client_turn_id, *source_ids),
+            ).fetchall()
+            if len(existing) != len(set(source_ids)):
+                raise AppError(409, "Der ursprüngliche Nutzerauftrag ist nicht mehr verfügbar.")
+        sync_job_ids: list[str] = []
+        result = self._tool_dispatch_service().execute(
+            tool,
+            arguments,
+            intent=intent,
+            conversation_id=conversation_id,
+            client_turn_id=client_turn_id,
+            session_csrf_hash=session_csrf_hash,
+            sync_job_ids=sync_job_ids,
+        )
+        if sync_job_ids:
+            result["sync_job_ids"] = sync_job_ids
         return result

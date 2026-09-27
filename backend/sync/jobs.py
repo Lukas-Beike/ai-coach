@@ -21,6 +21,7 @@ JOB_TYPES = frozenset(
         "performance_refresh",
         "plan_push",
         "competition_push",
+        "nutrition_sync",
         "historical_backfill",
     }
 )
@@ -181,13 +182,39 @@ def normalize_sync_job_request(
         raise JobValidationError(
             "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig."
         )
-    if type_value in {"performance_refresh", "competition_push"}:
+    if type_value == "nutrition_sync":
+        normalized_payload = _normalize_nutrition_sync_job(provider_value, values)
+    elif type_value in {"performance_refresh", "competition_push"}:
         normalized_payload = _normalize_reason_only_job(provider_value, values)
     elif type_value == "plan_push":
         normalized_payload = _normalize_plan_push_job(provider_value, values)
     else:
         normalized_payload = _normalize_refresh_job(provider_value, values, all_sync_days)
     return {"provider": provider_value, "type": type_value, "payload": normalized_payload}
+
+
+def _normalize_nutrition_sync_job(provider: str, values: dict[str, Any]) -> dict[str, Any]:
+    if provider != "intervals" or set(values) - {"date", "pending_limit"}:
+        raise JobValidationError("Ungültiger Ernährungssynchronisierungsauftrag.")
+    if "date" in values and "pending_limit" in values:
+        raise JobValidationError("Wähle ein Datum oder ausstehende Tage, nicht beides.")
+    if "date" in values:
+        raw_date = values["date"]
+        if not isinstance(raw_date, str):
+            raise JobValidationError("Das Datum muss ein ISO-Kalendertag sein.")
+        try:
+            parsed = date.fromisoformat(raw_date)
+        except ValueError as exc:
+            raise JobValidationError("Das Datum muss ein ISO-Kalendertag sein.") from exc
+        if parsed.isoformat() != raw_date:
+            raise JobValidationError("Das Datum muss ein ISO-Kalendertag sein.")
+        return {"date": raw_date}
+    if "pending_limit" not in values:
+        raise JobValidationError("Wähle ein Datum oder ausstehende Tage.")
+    limit = values["pending_limit"]
+    if type(limit) is not int or not 1 <= limit <= 31:
+        raise JobValidationError("Die Anzahl ausstehender Tage muss zwischen 1 und 31 liegen.")
+    return {"pending_limit": limit}
 
 
 def _normalize_reason_only_job(provider: str, values: dict[str, Any]) -> dict[str, str]:

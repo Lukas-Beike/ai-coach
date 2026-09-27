@@ -181,7 +181,7 @@ class SessionAuthService:
             f"login:{self.client_ip(handler)}", 5, 900
         )
         if not allowed:
-            raise AppError(429, f"Zu viele Anmeldeversuche. Erneut versuchen in etwa {retry_after} Sekunden.")
+            raise AppError(429, f"Zu viele Anmeldeversuche. Erneut versuchen in etwa {retry_after} Sekunden.", reason="rate_limited", retry_after=retry_after)
         if not hmac.compare_digest(str(password).encode("utf-8"), self._config.app_password.encode("utf-8")):
             raise AppError(401, "Ungültiges Passwort.")
         token = secrets.token_urlsafe(32)
@@ -220,7 +220,7 @@ class SessionAuthService:
             f"api:{self.client_ip(handler)}", 180, 60
         )
         if not allowed:
-            raise AppError(429, f"Zu viele Anfragen. Erneut versuchen in etwa {retry_after} Sekunden.")
+            raise AppError(429, f"Zu viele Anfragen. Erneut versuchen in etwa {retry_after} Sekunden.", reason="rate_limited", retry_after=retry_after)
         return session
 
     def require_csrf(self, handler: Any, session: dict[str, Any]) -> None:

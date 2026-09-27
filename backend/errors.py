@@ -1,5 +1,8 @@
 """Application errors and safe provider error mapping."""
 
+from collections.abc import Callable
+import re
+
 
 INTERVALS_API_KEY_ERROR = "INTERVALS_API_KEY ist nicht konfiguriert."
 OPENAI_API_KEY_ERROR = "OPENAI_API_KEY ist nicht konfiguriert."
@@ -20,11 +23,29 @@ PLANNED_CALENDAR_RECHECK_ERROR = "Die Planung wurde waehrend der Reparatur geaen
 
 
 class AppError(Exception):
-    def __init__(self, status: int, message: str, *, reason: str | None = None):
+    def __init__(
+        self, status: int, message: str, *, reason: str | None = None,
+        retry_after: int | None = None,
+    ):
         super().__init__(message)
         self.status = status
         self.message = message
         self.reason = reason
+        self.retry_after = retry_after
+
+
+def public_error_payload(error: AppError, redact: Callable[[str], str]) -> dict[str, object]:
+    """Build the shared, redacted HTTP error envelope."""
+    reason = error.reason or "request_failed"
+    if not re.fullmatch(r"[a-z0-9_]{1,80}", reason):
+        reason = "request_failed"
+    payload: dict[str, object] = {
+        "error": redact(error.message)[:1000],
+        "reason": reason,
+    }
+    if type(error.retry_after) is int:
+        payload["retry_after"] = max(0, error.retry_after)
+    return payload
 
 
 def public_app_error_status(error: AppError) -> int:

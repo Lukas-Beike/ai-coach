@@ -28,6 +28,26 @@ from backend.sync.jobs import (
 
 
 class SyncJobContractTests(unittest.TestCase):
+    def test_nutrition_sync_job_payload_is_bounded_and_unambiguous(self):
+        self.assertEqual(
+            normalize_sync_job_request("intervals", "nutrition_sync", {"date": "2026-09-24"}, all_sync_days=30),
+            {"provider": "intervals", "type": "nutrition_sync", "payload": {"date": "2026-09-24"}},
+        )
+        self.assertEqual(
+            normalize_sync_job_request("intervals", "nutrition_sync", {"pending_limit": 31}, all_sync_days=30)["payload"],
+            {"pending_limit": 31},
+        )
+        for provider, payload in (
+            ("garmin", {"date": "2026-09-24"}),
+            ("intervals", {"date": "2026-02-30"}),
+            ("intervals", {"date": "2026-09-24", "pending_limit": 1}),
+            ("intervals", {"pending_limit": 32}),
+            ("intervals", {"pending_limit": True}),
+            ("intervals", {"unexpected": "value"}),
+        ):
+            with self.subTest(provider=provider, payload=payload), self.assertRaises(JobValidationError):
+                normalize_sync_job_request(provider, "nutrition_sync", payload, all_sync_days=30)
+
     def test_request_contract_normalizes_provider_and_type(self):
         result = validate_job_request(" Garmin ", " REFRESH ", {"days": 30})
         self.assertEqual(

@@ -320,7 +320,6 @@ class HttpApiAssembly:
         all_sync_days = sync.all_sync_days
         uuid_factory = sync.uuid_factory
         nutrition_service = nutrition.nutrition
-        intervals_nutrition_sync_service = nutrition.intervals_sync
         audio_transcription_client = nutrition.audio_transcription
         self._database_manager = database_manager
         self._database_lock = database_lock
@@ -399,7 +398,7 @@ class HttpApiAssembly:
             session_auth_service, nutrition_service, athlete_clock.now,
         )
         self.nutrition_post_routes = NutritionPostRoutes(
-            nutrition_service, intervals_nutrition_sync_service,
+            nutrition_service, sync_job_queue_service,
         )
         self.nutrition_put_routes = NutritionPutRoutes(nutrition_service)
         self.route_dispatcher = HttpRouteDispatcher(

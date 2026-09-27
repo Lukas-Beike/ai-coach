@@ -32,6 +32,7 @@ class ProposalExecutionOwners:
     history_undo_service: Callable[[], HistoryUndoService]
     intervals_client_factory: Callable[[], Any]
     maintenance_gate: Callable[[], Any]
+    tool_dispatch_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ class CoachProposalAssembly:
         self._history_undo_service = execution.history_undo_service
         self._intervals_client_factory = execution.intervals_client_factory
         self._maintenance_gate = execution.maintenance_gate
+        self._tool_dispatch_service = execution.tool_dispatch_service
         self._now = clock.now
         self._utc_now = clock.utc_now
         self._uuid_factory = clock.uuid_factory
@@ -90,6 +92,7 @@ class CoachProposalAssembly:
             self._history_undo_service(),
             self._intervals_client_factory,
             self._maintenance_gate(),
+            tool_dispatch_service=self._tool_dispatch_service,
             now=self._now,
             utc_now=self._utc_now,
         )

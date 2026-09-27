@@ -213,16 +213,19 @@ class StructuredToolPreparationTests(unittest.TestCase):
             ),
         )
 
-    def test_all_pending_discards_explicit_entries_without_reading_manifest(self) -> None:
+    def test_all_pending_captures_a_concrete_manifest_for_approval(self) -> None:
         action = {"authorization_scope": [], "request": {"sync_scope": "all_pending"}}
         self.dialogue_action.classify.return_value = action
+        manifest = [{"library_workout_id": "current", "expected_payload_hash": "hash"}]
+        self.planning_authority.pending_plan_push_entries.return_value = manifest
         arguments = {"entries": [{"library_workout_id": "stale"}]}
         self.service.prepare(
             self.metadata("start_intervals_plan_sync", arguments), [],
             question="", cancelled=False, context={}, allow_mutations=True,
         )
-        self.assertNotIn("entries", arguments)
-        self.planning_authority.pending_plan_push_entries.assert_not_called()
+        self.assertEqual(arguments["entries"], manifest)
+        self.assertTrue(action["_sync_all_pending"])
+        self.planning_authority.pending_plan_push_entries.assert_called_once_with()
 
     def test_selected_sync_requires_entries_unless_repairing(self) -> None:
         action = {"authorization_scope": [], "request": {"sync_scope": "selected"}}

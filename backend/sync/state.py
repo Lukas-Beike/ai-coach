@@ -78,6 +78,13 @@ class SyncStateRepository:
         with self._database_manager.unit_of_work() as db:
             return latest_snapshot(db, self._snapshot_repository)
 
+    def latest_metadata(self, db: Any | None = None) -> dict[str, Any]:
+        """Read the scalar markers committed with the provider snapshot."""
+        if db is not None:
+            return self._snapshot_repository.latest_metadata(db)
+        with self._database_manager.reader() as connection:
+            return self._snapshot_repository.latest_metadata(connection)
+
     def save_snapshot(
         self,
         snapshot: dict[str, Any],

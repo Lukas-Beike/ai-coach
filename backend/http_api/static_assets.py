@@ -19,6 +19,7 @@ ASSET_STATE_JS = "state.js"
 ASSET_VIEWS_JS = "views.js"
 ASSET_FORMS_JS = "forms.js"
 ASSET_COMPONENTS_JS = "components.js"
+ASSET_COACH_JS = "coach.js"
 ASSET_STYLES_CSS = "styles.css"
 ASSET_SERVICE_WORKER_JS = "service-worker.js"
 ASSET_MANIFEST = "manifest.webmanifest"
@@ -34,6 +35,7 @@ STATIC_TARGETS = (
     ASSET_VIEWS_JS,
     ASSET_FORMS_JS,
     ASSET_COMPONENTS_JS,
+    ASSET_COACH_JS,
     ASSET_STYLES_CSS,
     ASSET_SERVICE_WORKER_JS,
     ASSET_MANIFEST,
@@ -49,6 +51,7 @@ VERSIONED_STATIC_ASSETS = frozenset(
         ASSET_VIEWS_JS,
         ASSET_FORMS_JS,
         ASSET_COMPONENTS_JS,
+        ASSET_COACH_JS,
         ASSET_APP_JS,
         ASSET_STYLES_CSS,
         ASSET_LOGO,

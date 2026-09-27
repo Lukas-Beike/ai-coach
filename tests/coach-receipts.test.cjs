@@ -48,3 +48,17 @@ test("synchronization progress does not create chat cards", () => {
   ]);
   assert.deepEqual(cards, []);
 });
+
+test("an approved remote write is identified as remote in its action receipt", () => {
+  const start = source.indexOf("function coachActionReceipt(");
+  const end = source.indexOf("\nasync function executeCoachActionProposal", start);
+  assert.ok(start >= 0 && end > start);
+  const context = vm.createContext({});
+  vm.runInContext(source.slice(start, end), context);
+  const receipt = context.coachActionReceipt(
+    { action_type: "remote_coach_write" },
+    { sync_job_id: "sync-1" },
+  );
+  assert.equal(receipt.remoteWrite, true);
+  assert.equal(receipt.title, "Remote-Änderung freigegeben");
+});

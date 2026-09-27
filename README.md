@@ -12,7 +12,7 @@ Intervals Coach is intentionally standalone and designed for operation on a trus
 
 - **Single-Athlete Authority**: Built specifically for one athlete. There are no multi-tenant abstractions, user role hierarchies, or hosted cloud dependencies.
 - **Local Source of Truth**: The local SQLCipher database is the authoritative source for future planned units, training goals, workout templates, and athlete feedback. Intervals.icu remains the authoritative record of completed historical activities.
-- **Explicit Action Gate**: Conversational coaching operates with strict boundaries. While the Coach can analyze, draft, and propose training changes, mutating local workouts or synchronizing changes to Intervals.icu requires explicit athlete confirmation in the dialogue.
+- **Explicit Action Gate**: Local Coach actions follow the athlete's direct request. Intervals.icu writes show a separate, session-bound preview that the athlete must approve before a job is queued; the preview expires and rechecks its target before execution.
 - **Untrusted External Content**: Data received from Intervals.icu, Garmin Connect, Open-Meteo, and external iCalendar feeds is strictly treated as untrusted data, never as system instructions.
 - **Zero Cloud Telemetry**: Biometric data, activity recordings, API keys, database keys, and athlete conversations never leave the host server, except when sending sanitized coaching prompts to the user's selected AI provider.
 - **Standard-Library Foundation**: The backend runs on Python's native `http.server` without heavyweight web frameworks. Application logic is modularized under `backend/`, keeping `server.py` strictly as a composition root.
@@ -168,7 +168,7 @@ Intervals Coach adheres to a clean-slate installation and maintenance model:
 |  +-------------------------------------------------------------------------------------+  |
 |  | backend/ Domain Layer                                                               |  |
 |  |   - backend.http_api  : Request routing, JSON/multipart parsing, session cookies     |  |
-|  |   - backend.coach     : AI turn queue, context builder, 37 tool dispatchers, SSE    |  |
+|  |   - backend.coach     : AI turn queue, context builder, 39 Coach tools, SSE          |  |
 |  |   - backend.sync      : Background scheduler, Intervals.icu, Garmin, Weather, ICS   |  |
 |  |   - backend.activities: Activity matching, duplicate detection, feedback tracking   |  |
 |  |   - backend.planning  : Workout units, templates, atomic changesets, revision locks |  |
@@ -180,9 +180,9 @@ Intervals Coach adheres to a clean-slate installation and maintenance model:
 |                                              v                                            |
 |  +-------------------------------------------------------------------------------------+  |
 |  | Persistent Storage Mount (/data)                                                    |  |
-|  |   - coach.db (SQLCipher AES-256 Encrypted Database)                                 |  |
-|  |   - garmin_tokens (Encrypted Garmin OAuth Session Store)                            |  |
-|  |   - backups/ (Local Database Snapshots and Pre-Restore Copies)                      |  |
+|  |   - intervals-coach.db (SQLCipher encrypted database)                               |  |
+|  |   - garmin_tokens (Garmin OAuth token store)                                        |  |
+|  |   - intervals-coach.db.pre-restore-<timestamp>-<id> (restore safety copies)          |  |
 |  +-------------------------------------------------------------------------------------+  |
 +-------------------------------------------------------------------------------------------+
        |                                |                             |
@@ -371,7 +371,7 @@ Garmin Connect enforces Multi-Factor Authentication (MFA). Complete the initial 
 - **On-Demand Refreshes**: Triggered immediately whenever the athlete clicks **Synchronisieren** in the More tab or when requested by the Coach.
 
 ### Priority Queue & Durable Job Processing
-Every conversational request, activity sync, and background task is enqueued in the SQLite `background_jobs` table.
+Conversational turns are persisted in `coach_commands`; provider synchronization and background work use durable jobs in `sync_jobs`.
 - **Streaming Handshake**: When an HTTP turn starts, Server-Sent Events (SSE) immediately return the durable job UUID.
 - **Decoupled Execution**: If the athlete locks their phone or loses cellular connection, the server continues execution uninterrupted.
 - **Recovery on Reconnect**: Upon reconnection or app reload, the PWA polls the durable job result using its UUID, rendering the completed answer without re-executing actions.
@@ -394,10 +394,11 @@ To optimize API token consumption and response latency, Intervals Coach uses a s
 - **Dialogue Pruning**: Multi-turn dialogue history is maintained locally; remote conversation chains are pruned between distinct command sessions.
 
 ### Tool Execution & Reversible Changesets
-The Coach interacts with the athlete's data via 37 structured tools covering plan inspection, template management, profile editing, and provider synchronization:
+The Coach interacts with the athlete's data via 39 structured tools covering plan inspection, template management, profile editing, nutrition correction, and provider synchronization:
 - **Transaction Locks**: All database updates share SQLite transaction locks to guarantee that conversational actions and background syncs never collide.
 - **Revision Control**: Plan modifications require passing the current planning revision and object hash, preventing overwrite collisions if edits occur concurrently.
-- **Receipt Verification**: Tool invocations produce structured receipts in the chat UI, explicitly delineating saved local modifications, queued sync jobs, and rejected parameters.
+- **Remote Approval**: Intervals.icu changes remain proposals until the athlete approves their visible scope. A changed or stale workout manifest fails closed, and approval is bound to the current session and originating Coach turn.
+- **Receipt Verification**: Tool invocations produce structured receipts in the chat UI, distinguishing saved local modifications, pending approval, queued sync jobs, and rejected parameters.
 
 ### Multimodal Capabilities
 - **Voice Transcription**: Push-to-talk voice recording captures audio directly in the PWA. Audio is streamed to `/audio/transcriptions` (OpenAI Whisper or Gemini) in memory and inserted into the message box. Raw audio is never persisted.
@@ -453,14 +454,14 @@ Cooldown
 ## Data Integrity, Privacy, Backups & Maintenance
 
 ### SQLCipher Encryption
-All persistent application state is stored in `/data/coach.db` encrypted with AES-256 via SQLCipher. The database key is derived from `APP_PASSWORD`. The application will refuse to start without SQLCipher libraries present.
+All persistent application state is stored in `/data/intervals-coach.db` encrypted with AES-256 via SQLCipher. The database key is derived from `APP_PASSWORD`. The application will refuse to start without SQLCipher libraries present.
 
 ### Maintenance Mode & Database Restoration
 When a database restore is initiated:
 1. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 2. Active background sync jobs and Coach turns are allowed to finish gracefully.
-3. An automated pre-restore safety copy of the active database is saved in `/data/backups/pre_restore_backup.db`.
-4. The replacement database is validated for schema version integrity, table structures, and foreign-key constraints.
+3. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`.
+4. The replacement database must match the current schema and pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed.
 5. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss.
 
 ### Privacy Export & Data Purge

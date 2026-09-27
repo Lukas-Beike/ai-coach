@@ -45,11 +45,11 @@ class IntervalsNutritionSyncService:
             "id": meal_date,
             "kcalConsumed": summary["total_kcal"],
         }
-        if summary.get("total_carbs_g") is not None and summary["total_carbs_g"] > 0:
+        if summary.get("total_carbs_g") is not None:
             payload["carbs"] = summary["total_carbs_g"]
-        if summary.get("total_protein_g") is not None and summary["total_protein_g"] > 0:
+        if summary.get("total_protein_g") is not None:
             payload["protein"] = summary["total_protein_g"]
-        if summary.get("total_fat_g") is not None and summary["total_fat_g"] > 0:
+        if summary.get("total_fat_g") is not None:
             payload["fat"] = summary["total_fat_g"]
 
         endpoint = f"/athlete/{athlete}/wellness/{meal_date}"
@@ -85,18 +85,20 @@ class IntervalsNutritionSyncService:
             raise AppError(400, "Das Sync-Limit muss zwischen 1 und 31 Tagen liegen.")
         unsynced_dates = self._nutrition_service.list_unsynced_dates(limit=limit)
         synced: list[str] = []
+        pending: list[str] = []
         errors: dict[str, str] = {}
 
         for d in unsynced_dates:
             try:
-                self.sync_day(d)
-                synced.append(d)
+                result = self.sync_day(d)
+                (pending if result["pending"] else synced).append(d)
             except Exception as exc:
                 errors[d] = str(exc)
 
         return {
-            "ok": len(errors) == 0,
+            "ok": len(errors) == 0 and len(pending) == 0,
             "synced_dates": synced,
+            "pending_dates": pending,
             "failed_dates": errors,
             "total_pending": len(unsynced_dates),
         }

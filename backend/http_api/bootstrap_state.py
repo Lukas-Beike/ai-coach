@@ -82,7 +82,9 @@ class PublicBootstrapService:
                 garmin_tokenstore_exists=Path(deps.config.garmin_tokenstore).exists(),
             )
             jobs = deps.sync_job_queue_service().list()
-            state_version_values = deps.state_version_service().versions()
+            state_version_values = deps.state_version_service().versions(
+                deps.sync_state_repository().latest_metadata(db)
+            )
             return {
                 "schema_version": 3,
                 "state_versions": state_version_values,
@@ -147,7 +149,9 @@ class PublicBootstrapService:
                     "garmin": deps.full_provider_resync_service().state("garmin", db),
                 },
                 "sync": deps.sync_public_state_service().browser_state(
-                    freshness=freshness, jobs=jobs
+                    freshness=freshness,
+                    jobs=jobs,
+                    state_versions=state_version_values,
                 ),
                 "running_jobs": [job for job in jobs if job.get("status") in {"queued", "running"}],
                 "library_sync": {"last_sync_at": deps.key_values.get(db, "last_library_sync_at"), "last_error": deps.key_values.get(db, "last_library_sync_error") or None, "state": deps.workout_library_sync_state_service().summary()},

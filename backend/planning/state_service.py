@@ -8,7 +8,7 @@ from datetime import date
 from typing import Any
 
 from backend.errors import AppError
-from backend.http_api.pagination import (
+from backend.pagination import (
     api_page_limit,
     decode_page_cursor,
     encode_page_cursor,

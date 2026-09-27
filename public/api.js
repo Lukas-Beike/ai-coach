@@ -3,13 +3,14 @@
     return document.cookie.split("; ").find((part) => part.startsWith(`${name}=`))?.split("=").slice(1).join("=") || "";
   }
 
-  function responseError(response, message, reason) {
+  function responseError(response, message, reason, payloadRetryAfter = null) {
     const value = response.headers.get("Retry-After");
     let retryAfter = null;
     if (value != null) {
       const seconds = /^\d+$/.test(value) ? Number(value) : Math.ceil((Date.parse(value) - Date.now()) / 1000);
       if (Number.isFinite(seconds)) retryAfter = Math.max(0, seconds);
     }
+    if (retryAfter == null && Number.isFinite(payloadRetryAfter)) retryAfter = Math.max(0, payloadRetryAfter);
     const retryMessage = retryAfter != null ? ` Bitte in ${retryAfter} Sekunden erneut versuchen.` : "";
     const error = new Error(`${message}${retryMessage}`);
     error.status = response.status;
@@ -25,7 +26,7 @@
       throw responseError(response, response.ok ? "Ungültige Serverantwort: JSON erwartet. Bitte den gespeicherten Stand prüfen." : `Anfrage fehlgeschlagen (${response.status})`, "invalid_json");
     }
     if (!response.ok) {
-      throw responseError(response, typeof payload?.error === "string" ? payload.error : `Anfrage fehlgeschlagen (${response.status})`, payload?.reason || "http_error");
+      throw responseError(response, typeof payload?.error === "string" ? payload.error : `Anfrage fehlgeschlagen (${response.status})`, payload?.reason || "http_error", payload?.retry_after);
     }
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw responseError(response, "Ungültige Serverantwort: Objekt erwartet.", "invalid_shape");
     return payload;

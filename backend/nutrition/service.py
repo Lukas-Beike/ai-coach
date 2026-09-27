@@ -77,6 +77,31 @@ class NutritionService:
             raise AppError(404, ENTRY_NOT_FOUND)
         return updated
 
+    def correct_meal(self, entry_id: str, changes: Any) -> dict[str, Any]:
+        """Apply a partial correction while preserving every omitted meal field."""
+        clean_id = str(entry_id or "").strip()
+        if not clean_id:
+            raise AppError(400, INVALID_ENTRY_ID)
+        editable = {
+            "meal_date", "date", "logged_at", "meal_time", "meal_type",
+            "description", "kcal", "calories", "carbs_g", "carbs",
+            "carbohydrates", "protein_g", "protein", "fat_g", "fat",
+        }
+        if not isinstance(changes, dict) or not changes or set(changes) - editable:
+            raise AppError(400, "Korrektur muss mindestens ein gültiges Ernährungsfeld enthalten.")
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            existing = self._nutrition_repository.get(db, clean_id)
+            if not existing:
+                raise AppError(404, ENTRY_NOT_FOUND)
+            merged = {**existing, **changes}
+            entry = normalize_nutrition_entry(merged, local_now_factory=self._local_now)
+            entry["id"] = clean_id
+            entry["source"] = existing["source"]
+            updated = self._nutrition_repository.update(db, clean_id, entry)
+        if not updated:
+            raise AppError(404, ENTRY_NOT_FOUND)
+        return updated
+
     def delete_meal(self, entry_id: str) -> dict[str, Any]:
         """Delete an existing meal entry by ID."""
         clean_id = str(entry_id or "").strip()

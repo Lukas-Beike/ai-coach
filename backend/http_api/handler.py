@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from backend.errors import AppError
+from backend.errors import AppError, public_error_payload
 from backend.http_api.requests import (
     read_audio_body as read_request_audio_body,
     read_body as read_request_body,
@@ -94,7 +94,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     extra={"event": "http_app_error", "context": {"method": "GET", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
-            self.send_json(self.dependencies.public_app_error_status(exc), {"error": self.dependencies.redact_text(exc.message)[:1000]})
+            self.send_json(self.dependencies.public_app_error_status(exc), public_error_payload(exc, self.dependencies.redact_text))
         except Exception:
             self.dependencies.logger.exception(
                 "Unhandled GET error",
@@ -124,7 +124,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
             status = self.dependencies.public_app_error_status(exc)
             headers = {"WWW-Authenticate": "Session"} if status == 401 else None
-            self.send_json(status, {"error": self.dependencies.redact_text(exc.message)[:1000]}, headers)
+            self.send_json(status, public_error_payload(exc, self.dependencies.redact_text), headers)
         except Exception:
             self.dependencies.logger.exception(
                 "Unhandled POST error",
@@ -144,7 +144,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             with self.dependencies.maintenance_gate.operation():
                 self._do_PUT()
         except AppError as exc:
-            self.send_json(self.dependencies.public_app_error_status(exc), {"error": self.dependencies.redact_text(exc.message)[:1000]})
+            self.send_json(self.dependencies.public_app_error_status(exc), public_error_payload(exc, self.dependencies.redact_text))
 
     def _do_PUT(self) -> None:
         self.request_id = uuid.uuid4().hex[:12]
@@ -160,7 +160,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     extra={"event": "http_app_error", "context": {"method": "PUT", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
-            self.send_json(self.dependencies.public_app_error_status(exc), {"error": self.dependencies.redact_text(exc.message)[:1000]})
+            self.send_json(self.dependencies.public_app_error_status(exc), public_error_payload(exc, self.dependencies.redact_text))
         except Exception:
             self.dependencies.logger.exception(
                 "Unhandled PUT error",

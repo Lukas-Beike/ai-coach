@@ -158,6 +158,32 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.assertEqual(updated["kcal"], 450)
         self.assertEqual(updated["protein_g"], 35.0)
 
+    def test_correct_meal_preserves_omitted_fields_and_marks_old_and_new_days_pending(self) -> None:
+        saved = self.service.log_meal({
+            "meal_date": "2026-09-24", "logged_at": "2026-09-24T12:15:00",
+            "meal_type": "lunch", "description": "Bowl", "kcal": 500,
+            "carbs_g": 60, "protein_g": 20, "fat_g": 10, "source": "photo",
+        })
+        old_day = self.service.get_sync_snapshot("2026-09-24")
+        self.assertTrue(self.service.mark_date_synced("2026-09-24", old_day["sync_revision"]))
+
+        corrected = self.service.correct_meal(saved["id"], {"kcal": 600, "meal_date": "2026-09-25"})
+
+        self.assertEqual(corrected["id"], saved["id"])
+        self.assertEqual(corrected["kcal"], 600)
+        self.assertEqual(corrected["meal_date"], "2026-09-25")
+        self.assertEqual(corrected["logged_at"], "2026-09-24T12:15:00")
+        self.assertEqual(corrected["description"], "Bowl")
+        self.assertEqual((corrected["carbs_g"], corrected["protein_g"], corrected["fat_g"]), (60, 20, 10))
+        self.assertEqual(corrected["source"], "photo")
+        self.assertEqual(self.service.list_unsynced_dates(), ["2026-09-24", "2026-09-25"])
+
+    def test_correct_meal_rejects_empty_invalid_or_missing_target(self) -> None:
+        saved = self.service.log_meal({"description": "Tea", "kcal": 5})
+        for entry_id, changes in ((saved["id"], {}), (saved["id"], {"kcal": -1}), ("missing", {"kcal": 5})):
+            with self.subTest(entry_id=entry_id, changes=changes), self.assertRaises(AppError):
+                self.service.correct_meal(entry_id, changes)
+
     def test_delete_meal(self) -> None:
         saved = self.service.log_meal({
             "meal_date": "2026-09-24",

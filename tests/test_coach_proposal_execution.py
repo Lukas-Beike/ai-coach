@@ -118,6 +118,93 @@ class CoachProposalExecutionTests(unittest.TestCase):
         self.client_factory.assert_called_once_with()
         self.undo_service.apply.assert_not_called()
 
+    def test_remote_approval_is_bound_to_the_original_turn_and_dispatches_once(self) -> None:
+        token = "remote-token-" + "x" * 32
+        session_key = hashlib.sha256(b"owner-session").hexdigest()
+        intent = {
+            "operation": "sync_competitions", "intent": "remote_sync",
+            "target_system": "intervals", "authorization_scope": ["intervals_sync"],
+            "request": {"remote_write": True, "source_message_ids": [1]},
+        }
+        payload = {
+            "tool": "sync_competitions", "arguments": {}, "intent": intent,
+            "conversation_id": "conversation-1", "client_turn_id": "turn-1",
+        }
+        payload_hash = coach_action_hash(payload)
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO messages(id, role, content, client_turn_id, created_at) "
+                "VALUES (1, 'user', 'sync competitions', 'turn-1', 'now')"
+            )
+            db.execute(
+                "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, "
+                "status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("command-1", "turn-1", "conversation-1", "{}", "intervals", "complete",
+                 json.dumps({"session_key": session_key}), "now", "now"),
+            )
+            db.execute(
+                "INSERT INTO coach_action_proposals "
+                "(id, session_csrf_hash, action_type, target_system, object_ids, diff, payload, "
+                "payload_hash, status, expires_at, created_at, action_token_hash) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?)",
+                ("remote-proposal", "owner-session", "remote_coach_write", "intervals", "{}", "[]",
+                 json.dumps(payload), payload_hash, 200.0, "now",
+                 hashlib.sha256(token.encode()).hexdigest()),
+            )
+        dispatcher = Mock()
+        dispatcher.execute.return_value = {"ok": True, "status": "queued"}
+        self.service._tool_dispatch_service = lambda: dispatcher
+
+        result = self.service.execute(token, "owner-session", payload_hash)
+
+        self.assertEqual(result["status"], "queued")
+        dispatcher.execute.assert_called_once()
+        self.assertEqual(self.row()["status"], "used")
+        with self.assertRaises(AppError):
+            self.service.execute(token, "owner-session", payload_hash)
+        dispatcher.execute.assert_called_once()
+
+    def test_remote_approval_rejects_foreign_conversation_and_foreign_turn_source(self) -> None:
+        token = "remote-token-" + "x" * 32
+        session_key = hashlib.sha256(b"owner-session").hexdigest()
+        intent = {
+            "operation": "sync_competitions", "intent": "remote_sync",
+            "target_system": "intervals", "authorization_scope": ["intervals_sync"],
+            "request": {"remote_write": True, "source_message_ids": [1]},
+        }
+        payload = {
+            "tool": "sync_competitions", "arguments": {}, "intent": intent,
+            "conversation_id": "wrong-conversation", "client_turn_id": "turn-foreign",
+        }
+        payload_hash = coach_action_hash(payload)
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO messages(id, role, content, client_turn_id, created_at) "
+                "VALUES (1, 'user', 'unrelated', 'other-turn', 'now')"
+            )
+            db.execute(
+                "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, "
+                "status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("command-foreign", "turn-foreign", "different-conversation", "{}", "intervals", "complete",
+                 json.dumps({"session_key": session_key}), "now", "now"),
+            )
+            db.execute(
+                "INSERT INTO coach_action_proposals "
+                "(id, session_csrf_hash, action_type, target_system, object_ids, diff, payload, "
+                "payload_hash, status, expires_at, created_at, action_token_hash) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?)",
+                ("remote-proposal", "owner-session", "remote_coach_write", "intervals", "{}", "[]",
+                 json.dumps(payload), payload_hash, 200.0, "now",
+                 hashlib.sha256(token.encode()).hexdigest()),
+            )
+        dispatcher = Mock()
+        self.service._tool_dispatch_service = lambda: dispatcher
+
+        with self.assertRaises(AppError):
+            self.service.execute(token, "owner-session", payload_hash)
+
+        dispatcher.execute.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,7 @@ from backend.sync.queue import SyncJobQueueService
 
 COACH_SYNC_TOOL_NAMES = frozenset({
     "start_intervals_plan_sync", "get_sync_job", "sync_competitions",
+    "sync_nutrition",
     "resolve_training_sync_conflict", "start_provider_refresh", "refresh_current_performance",
     "delete_duplicate_intervals_activity",
 })
@@ -67,6 +68,8 @@ class CoachSyncToolService:
             return {"ok": True, "job": self._queue.state(job_id)}
         if name == "sync_competitions":
             return self._sync_competitions(arguments, intent, sync_job_ids)
+        if name == "sync_nutrition":
+            return self._sync_nutrition(arguments, intent, sync_job_ids)
         if name == "resolve_training_sync_conflict":
             return self._resolve_conflict(arguments, intent, sync_job_ids)
         if name == "start_provider_refresh":
@@ -76,6 +79,30 @@ class CoachSyncToolService:
         if name == "delete_duplicate_intervals_activity":
             return self._delete_duplicate_activity(arguments, intent)
         return None
+
+    def _sync_nutrition(
+        self, arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str]
+    ) -> dict[str, Any]:
+        if (
+            "sync_nutrition" not in authorized_operations(intent)
+            or intent.get("target_system") != "intervals"
+        ):
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+        require_coach_scope(intent, "local_nutrition", "intervals_sync")
+        date_value = str(arguments.get("date") or "").strip()
+        limit = arguments.get("pending_limit")
+        if bool(date_value) == (limit is not None):
+            raise AppError(
+                400,
+                "Wähle ein Datum oder eine Anzahl ausstehender Tage.",
+                reason="invalid_job_request",
+            )
+        payload = {"date": date_value} if date_value else {"pending_limit": limit}
+        job = self._queue.enqueue(
+            "intervals", "nutrition_sync", payload, requested_by="coach"
+        )
+        sync_job_ids.append(job["id"])
+        return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
 
     def _start_provider_refresh(
         self, arguments: dict[str, Any], intent: dict[str, Any],

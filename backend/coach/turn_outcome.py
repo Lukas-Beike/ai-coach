@@ -49,7 +49,9 @@ class CoachStructuredOutcomeService:
         failures = unresolved_coach_steps(command_receipts)
         mark_resolved_receipts(command_receipts, failures)
         effects = effects_from_receipts(command_receipts, self._internal_tools)
-        text, incomplete_answer, missing_answer = self._text(response, question, failures, effects)
+        text, incomplete_answer, missing_answer = self._text(
+            response, question, failures, effects, command_receipts
+        )
         self._persist_pending(
             command_receipts, effects, failures=failures, incomplete_answer=incomplete_answer,
             question=question, cancelled=cancelled, allow_mutations=allow_mutations,
@@ -65,8 +67,15 @@ class CoachStructuredOutcomeService:
     def _text(
         response: dict[str, Any], question: str,
         failures: list[dict[str, Any]], effects: list[dict[str, Any]],
+        command_receipts: list[dict[str, Any]],
     ) -> tuple[str, bool, bool]:
         text = question or response_text(response)
+        queued = CoachStructuredOutcomeService._queued_jobs(effects, command_receipts)
+        awaiting_remote_approval = any(
+            ((entry.get("result") or {}).get("proposed_action") or {}).get("action_type")
+            == "remote_coach_write"
+            for entry in command_receipts
+        )
         incomplete_answer = response.get("status") == "incomplete"
         missing_answer = not text or incomplete_answer
         if incomplete_answer:
@@ -76,9 +85,55 @@ class CoachStructuredOutcomeService:
             text += "\n" + coach_failure_lines(failures, {entry["tool"] for entry in failures})
             if effects:
                 text += "\nGespeichert beziehungsweise beauftragt: " + "; ".join(coach_effect_label(entry) for entry in effects) + "."
+        if queued and not question:
+            receipt = "\n".join(queued)
+            queued_effect_count = sum(
+                1 for entry in effects
+                if ((entry.get("result") or {}).get("status") == "queued"
+                    and (entry.get("result") or {}).get("sync_job_id"))
+            )
+            if queued_effect_count == len(effects):
+                text = receipt
+            else:
+                text = (text + "\n" + receipt).strip()
+        if awaiting_remote_approval and not question:
+            local_effects = [
+                entry for entry in effects
+                if not (entry.get("result") or {}).get("proposed_action")
+            ]
+            prefix = (
+                "Lokal gespeichert beziehungsweise ausgeführt: "
+                + "; ".join(coach_effect_label(entry) for entry in local_effects)
+                + ". "
+                if local_effects else ""
+            )
+            text = prefix + "Die Remote-Änderung wartet auf deine ausdrückliche Freigabe. Prüfe den Aktionsvorschlag, bevor sie ausgeführt wird."
         if not text:
             text = "Ergebnis: " + "; ".join(coach_effect_label(entry) for entry in effects) if effects else "Die Antwort konnte nicht abgeschlossen werden. Bitte versuche es erneut."
         return text, incomplete_answer, missing_answer
+
+    @staticmethod
+    def _queued_jobs(
+        effects: list[dict[str, Any]], command_receipts: list[dict[str, Any]]
+    ) -> list[str]:
+        jobs: dict[str, str] = {}
+        # Read-only job inspections are excluded from ``effects``. Fold their
+        # durable observations too, so a later terminal status supersedes the
+        # original queue receipt for the same job.
+        for entry in command_receipts:
+            result = entry.get("result") or {}
+            observed = result.get("job")
+            if isinstance(observed, dict) and observed.get("id"):
+                jobs[str(observed["id"])] = str(observed.get("status") or "unknown")
+        for entry in effects:
+            result = entry.get("result") or {}
+            if result.get("status") == "queued" and result.get("sync_job_id"):
+                jobs.setdefault(str(result["sync_job_id"]), "queued")
+        return [
+            f"Synchronisationsauftrag {job_id}: {status}. Remote-Abschluss ist "
+            f"{'bestätigt' if status == 'completed' else 'noch nicht bestätigt'}."
+            for job_id, status in jobs.items()
+        ]
 
     def _persist_pending(
         self,

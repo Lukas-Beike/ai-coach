@@ -77,7 +77,14 @@ class CoachStructuredToolPreparationService:
     ) -> None:
         sync_scope = action["request"]["sync_scope"]
         if sync_scope == "all_pending":
-            arguments.pop("entries", None)
+            entries = self._planning_authority.pending_plan_push_entries()
+            if not entries:
+                raise AppError(409, "Es gibt keine ausstehenden Einheiten zum Synchronisieren.", reason="no_pending_plan_entries")
+            arguments["entries"] = entries
+            action["_sync_all_pending"] = True
+            action["authorization_scope"].extend(
+                f"planned_unit:{entry['library_workout_id']}" for entry in entries
+            )
             return
         if sync_scope == "created":
             created_ids = {

@@ -1,4 +1,5 @@
 import json
+import ast
 import sqlite3
 import tempfile
 import unittest
@@ -40,6 +41,14 @@ class _TrackingManager:
 
 
 class StructuredTrainingStateServiceTests(unittest.TestCase):
+    def test_domain_cursor_projection_does_not_depend_on_http_adapter(self):
+        source = Path(__file__).resolve().parents[1] / "backend" / "planning" / "state_service.py"
+        imports = {
+            node.module for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
+            if isinstance(node, ast.ImportFrom)
+        }
+        self.assertNotIn("backend.http_api.pagination", imports)
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.manager = DatabaseManager(

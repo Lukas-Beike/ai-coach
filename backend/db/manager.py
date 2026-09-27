@@ -55,6 +55,10 @@ class DatabaseManager:
         self._unit_of_work: ContextVar[Any | None] = ContextVar(
             f"database_manager_uow_{id(self)}", default=None
         )
+        self._reader_context: ContextVar[Any | None] = ContextVar(
+            f"database_manager_reader_{id(self)}", default=None
+        )
+        self._reader_slots = threading.BoundedSemaphore(self.reader_count)
 
     def _connect(self) -> Any:
         connection = self.backend.connect(self.path, timeout=self.timeout, check_same_thread=False)
@@ -119,23 +123,34 @@ class DatabaseManager:
             # that transaction and reuse its keyed SQLCipher connection.
             yield current
             return
+        current = self._reader_context.get()
+        if current is not None:
+            yield current
+            return
         with self._lease():
+            if not self._reader_slots.acquire(timeout=self.timeout):
+                raise TimeoutError("database reader limit reached")
             try:
-                connection = self._readers.get_nowait()
-            except queue.Empty:
-                connection = self._connect()
-            try:
-                yield connection
-            finally:
-                with self._state:
-                    draining = self._draining or self._closed
-                if draining or not self.persist_connections:
-                    connection.close()
-                else:
-                    try:
-                        self._readers.put_nowait(connection)
-                    except queue.Full:
+                try:
+                    connection = self._readers.get_nowait()
+                except queue.Empty:
+                    connection = self._connect()
+                token = self._reader_context.set(connection)
+                try:
+                    yield connection
+                finally:
+                    self._reader_context.reset(token)
+                    with self._state:
+                        draining = self._draining or self._closed
+                    if draining or not self.persist_connections:
                         connection.close()
+                    else:
+                        try:
+                            self._readers.put_nowait(connection)
+                        except queue.Full:
+                            connection.close()
+            finally:
+                self._reader_slots.release()
 
     def _close_connections(self) -> None:
         if self._writer is not None:
