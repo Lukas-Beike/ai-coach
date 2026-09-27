@@ -20,9 +20,9 @@ from backend.activities.duplicates import (
 )
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
-from backend.sync.authority import competition_push_manifest
 from backend.history.undo_service import HistoryUndoService
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.authority import competition_push_manifest
 from backend.sync.state import SyncStateRepository
 
 COACH_ACTION_TYPES = {
@@ -142,9 +142,7 @@ def remote_coach_write_diff(
 ) -> list[dict[str, str]]:
     """Project the remote effect into a compact, non-sensitive approval summary."""
     if tool == "sync_nutrition":
-        return _nutrition_approval_diff(
-            REMOTE_WRITE_LABELS[tool], approval_manifest
-        )
+        return _nutrition_approval_diff(REMOTE_WRITE_LABELS[tool], approval_manifest)
     entry: dict[str, str] = {"name": REMOTE_WRITE_LABELS[tool]}
     if tool == "start_intervals_plan_sync":
         _plan_sync_write_diff(entry, arguments, intent)
@@ -164,9 +162,7 @@ def remote_coach_write_diff(
     return [entry]
 
 
-def _nutrition_approval_diff(
-    name: str, approval_manifest: Any
-) -> list[dict[str, str]]:
+def _nutrition_approval_diff(name: str, approval_manifest: Any) -> list[dict[str, str]]:
     entries = approval_manifest if isinstance(approval_manifest, list) else []
     if entries:
         return _nutrition_write_diff(name, entries)
@@ -208,7 +204,9 @@ def _plan_sync_write_diff(
         "selected": entry["units"],
         "all_pending": f"{count} derzeit ausstehende Einheit(en)",
     }
-    entry["sport"] = labels.get(scope, f"{count} in diesem Auftrag erstellte Einheit(en)")
+    entry["sport"] = labels.get(
+        scope, f"{count} in diesem Auftrag erstellte Einheit(en)"
+    )
     dates = sorted(
         {
             str(item["date"])
@@ -344,7 +342,7 @@ class CoachProposalCreationService:
             for value in intent.get("authorization_scope", [])
             if isinstance(value, str)
         )
-        payload = {
+        payload: dict[str, Any] = {
             "tool": tool,
             "arguments": dict(arguments),
             "intent": intent,
@@ -401,7 +399,9 @@ def _duplicate_approval_arguments(
     for field in ("canonical_id", "duplicate_id"):
         requested = arguments.get(field)
         if requested and str(requested) != str(duplicate[field]):
-            raise AppError(409, "Das angeforderte Duplikat stimmt nicht mit der Vorschau ueberein.")
+            raise AppError(
+                409, "Das angeforderte Duplikat stimmt nicht mit der Vorschau ueberein."
+            )
     manifest = {
         "canonical_id": duplicate["canonical_id"],
         "duplicate_id": duplicate["duplicate_id"],
