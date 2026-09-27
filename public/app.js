@@ -1992,13 +1992,14 @@ function renderMessageNode(message) {
     } catch { toast("Nachricht konnte nicht kopiert werden", true); }
   });
   actions.append(copy);
-  if (message.role === "user" && !message.attachment_names) {
+  if (message.role === "user" && !messageAttachmentLabel(message.attachment_names)) {
     const edit = document.createElement("button");
     edit.type = "button";
     edit.className = "message-action";
     edit.textContent = "Als Entwurf bearbeiten";
     edit.addEventListener("click", () => {
       const input = $("#messageInput");
+      if (input.value.trim() || (state.chatAttachments || []).length) return toast("Bitte zuerst den aktuellen Entwurf bearbeiten.", true);
       input.value = String(message.content || "");
       delete input.dataset.requestKind;
       input.dispatchEvent(new Event("input", { bubbles: true }));

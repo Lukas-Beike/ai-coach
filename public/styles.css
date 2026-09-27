@@ -1092,6 +1092,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 :root[data-theme="light"] .coach-adaptive-planning-notice .secondary-button { color: var(--danger-ink); }
 :root[data-theme="light"] .coach-adaptive-planning-notice .secondary-button { background: rgba(180, 35, 24, .08); }
 :root[data-theme="light"] .provider-attention-banner { color: var(--danger-ink); }
+:root[data-theme="light"] .metric-grid small.metric-garmin { color: #005a9c; }
+:root[data-theme="light"] .metric-grid small.metric-intervals { color: #a52d23; }
+:root[data-theme="light"] .metric-grid small.metric-manual { color: #126b38; }
 
 @media (min-width: 1100px) {
   #settingsPanel > .appearance-settings { grid-column: 2; }
