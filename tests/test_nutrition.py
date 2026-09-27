@@ -201,6 +201,18 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
             with self.subTest(entry_id=entry_id, changes=changes), self.assertRaises(AppError):
                 self.service.correct_meal(entry_id, changes)
 
+    def test_correct_meal_aliases_override_stored_canonical_fields(self) -> None:
+        saved = self.service.log_meal({
+            "meal_date": "2026-09-24", "logged_at": "2026-09-24T12:15:00",
+            "description": "Lunch", "kcal": 500, "carbs_g": 60,
+        })
+        corrected = self.service.correct_meal(saved["id"], {
+            "meal_time": "13:30", "calories": 600, "carbohydrates": 70,
+        })
+        self.assertEqual(corrected["logged_at"], "2026-09-24T13:30")
+        self.assertEqual(corrected["kcal"], 600)
+        self.assertEqual(corrected["carbs_g"], 70)
+
     def test_delete_meal(self) -> None:
         saved = self.service.log_meal({
             "meal_date": "2026-09-24",

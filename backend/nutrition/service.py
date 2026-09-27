@@ -133,7 +133,19 @@ class NutritionService:
             existing = self._nutrition_repository.get(db, clean_id)
             if not existing:
                 raise AppError(404, ENTRY_NOT_FOUND)
-            merged = {**existing, **changes}
+            aliases = {
+                "date": "meal_date",
+                "meal_time": "logged_at",
+                "calories": "kcal",
+                "carbs": "carbs_g",
+                "carbohydrates": "carbs_g",
+                "protein": "protein_g",
+                "fat": "fat_g",
+            }
+            canonical_changes = {
+                aliases.get(key, key): value for key, value in changes.items()
+            }
+            merged = {**existing, **canonical_changes}
             entry = normalize_nutrition_entry(merged, local_now_factory=self._local_now)
             entry["id"] = clean_id
             entry["source"] = existing["source"]

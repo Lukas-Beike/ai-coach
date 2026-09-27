@@ -57,8 +57,35 @@ test("an approved remote write is identified as remote in its action receipt", (
   vm.runInContext(source.slice(start, end), context);
   const receipt = context.coachActionReceipt(
     { action_type: "remote_coach_write" },
-    { sync_job_id: "sync-1" },
+    { status: "queued", sync_job_id: "sync-1" },
   );
   assert.equal(receipt.remoteWrite, true);
-  assert.equal(receipt.title, "Remote-Änderung freigegeben");
+  assert.equal(receipt.title, "Remote-Änderung eingereiht");
+  assert.match(receipt.message, /Ergebnis steht noch aus/);
+});
+
+test("a completed remote write receipt uses completion wording", () => {
+  const start = source.indexOf("function coachActionReceipt(");
+  const end = source.indexOf("\nasync function executeCoachActionProposal", start);
+  const context = vm.createContext({});
+  vm.runInContext(source.slice(start, end), context);
+  const receipt = context.coachActionReceipt(
+    { action_type: "remote_coach_write" },
+    { status: "deleted" },
+  );
+  assert.equal(receipt.title, "Remote-Änderung ausgeführt");
+});
+
+test("approval preview renders every bound remote-write value as text", () => {
+  const start = source.indexOf("function coachActionDiff(");
+  const end = source.indexOf("\nfunction coachActionButtons", start);
+  const context = vm.createContext({
+    document: { createElement: () => ({ textContent: "", children: [], append(node) { this.children.push(node); } }) },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  const list = context.coachActionDiff({ diff: [{
+    name: "Nutrition", date: "2026-09-24", kcal: "450 kcal", entries: "2",
+    carbs: "60 g", protein: "20 g", fat: "10 g", keep: "ride-1", delete: "ride-2",
+  }] });
+  assert.match(list.children[0].textContent, /450 kcal.*2 Einträge.*60 g.*ride-1.*ride-2/);
 });

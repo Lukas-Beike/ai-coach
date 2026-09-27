@@ -1748,7 +1748,13 @@ function coachActionDiff(proposal) {
   const entries = document.createElement("ul");
   for (const entry of Array.isArray(proposal.diff) ? proposal.diff : []) {
     const item = document.createElement("li");
-    item.textContent = [entry.name, entry.date, entry.sport, entry.scope].filter(Boolean).join(" · ");
+    item.textContent = [
+      entry.name, entry.date, entry.sport, entry.scope, entry.units,
+      entry.kcal, entry.entries && `${entry.entries} Einträge`,
+      entry.carbs, entry.protein, entry.fat,
+      entry.keep && `Behalten: ${entry.keep}`,
+      entry.delete && `Löschen: ${entry.delete}`,
+    ].filter(Boolean).join(" · ");
     entries.append(item);
   }
   return entries;
@@ -1839,8 +1845,12 @@ function coachActionReceipt(proposal, result) {
     title = "Duplikat gelöscht";
     details = ["Wahoo bleibt die kanonische Radaufzeichnung"];
   } else if (remoteWrite) {
-    message = "Die freigegebene Remote-Änderung wurde ausgeführt.";
-    title = "Remote-Änderung freigegeben";
+    const queued = ["queued", "running"].includes(result.status)
+      || Boolean(result.sync_job_id || result.sync_job_ids?.length);
+    message = queued
+      ? "Die freigegebene Änderung ist eingereiht; das Ergebnis steht noch aus."
+      : "Die freigegebene Remote-Änderung wurde ausgeführt.";
+    title = queued ? "Remote-Änderung eingereiht" : "Remote-Änderung ausgeführt";
   } else if (result.local_planned) {
     message = `${result.local_planned} Einheit(en) lokal geplant.`;
   }
