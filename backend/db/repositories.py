@@ -555,12 +555,15 @@ class NutritionRepository:
         ).fetchall()
         return [str(row["meal_date"]) for row in rows]
 
-    def day_sync_snapshot(self, db: Any, meal_date: str) -> dict[str, Any]:
-        db.execute(
-            "INSERT OR IGNORE INTO nutrition_sync_dates(meal_date, revision, sync_state, updated_at) "
-            "VALUES (?, 1, 'pending', ?)",
-            (meal_date, self._now()),
-        )
+    def day_sync_snapshot(
+        self, db: Any, meal_date: str, *, create_if_missing: bool = True
+    ) -> dict[str, Any]:
+        if create_if_missing:
+            db.execute(
+                "INSERT OR IGNORE INTO nutrition_sync_dates(meal_date, revision, sync_state, updated_at) "
+                "VALUES (?, 1, 'pending', ?)",
+                (meal_date, self._now()),
+            )
         snapshot = self.day_summary(db, meal_date)
         entries = snapshot["entries"]
         for field in ("carbs_g", "protein_g", "fat_g"):

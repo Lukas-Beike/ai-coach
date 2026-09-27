@@ -12,6 +12,7 @@ from backend.http_api.nutrition import (
     NutritionPutRoutes,
 )
 from backend.nutrition.sync import IntervalsNutritionSyncService
+from backend.nutrition.service import nutrition_approval_item
 
 
 class NutritionHttpApiTests(unittest.TestCase):
@@ -147,6 +148,43 @@ class NutritionHttpApiTests(unittest.TestCase):
 
 
 class IntervalsNutritionSyncServiceTests(unittest.TestCase):
+    def test_approved_sync_rejects_changed_manifest_before_provider_write(self) -> None:
+        config = Mock(spec=Config)
+        config.intervals_athlete_id = "i12345"
+        api = Mock()
+        nutrition = Mock()
+        nutrition.approval_manifest.return_value = [{
+            "date": "2026-09-24", "revision": 5, "total_kcal": 2200,
+            "total_carbs_g": 250.0, "total_protein_g": 130.0, "total_fat_g": 65.0,
+            "entry_count": 3, "sha256": "a" * 64,
+        }]
+        approval = [{**nutrition.approval_manifest.return_value[0]}]
+        approval[0]["revision"] = 4
+
+        with self.assertRaises(AppError):
+            IntervalsNutritionSyncService(config, api, nutrition).sync_approved(approval)
+        api.put.assert_not_called()
+        nutrition.get_sync_snapshot.assert_not_called()
+
+    def test_approved_sync_dispatches_only_frozen_dates(self) -> None:
+        config = Mock(spec=Config)
+        config.intervals_athlete_id = "i12345"
+        api = Mock()
+        nutrition = Mock()
+        snapshot = {
+            "date": "2026-09-24", "total_kcal": 2200, "total_carbs_g": 250.0,
+            "total_protein_g": 130.0, "total_fat_g": 65.0, "entry_count": 3,
+            "sync_revision": 4,
+        }
+        manifest = [nutrition_approval_item(snapshot)]
+        nutrition.approval_manifest.return_value = manifest
+        nutrition.get_sync_snapshot.return_value = snapshot
+        nutrition.mark_date_synced.return_value = True
+        result = IntervalsNutritionSyncService(config, api, nutrition).sync_approved(manifest)
+        self.assertEqual(result["synced_dates"], ["2026-09-24"])
+        nutrition.approval_manifest.assert_called_once_with(dates=["2026-09-24"])
+        self.assertEqual(api.put.call_count, 1)
+
     def test_sync_day_calls_intervals_api_and_marks_synced(self) -> None:
         mock_config = Mock(spec=Config)
         mock_config.intervals_athlete_id = "i12345"

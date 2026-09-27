@@ -18,9 +18,11 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         self.plan_repair = Mock()
         self.plan_push = Mock()
         self.provider_refresh = Mock()
+        self.nutrition = Mock()
         self.service = CoachSyncToolService(
             self.queue, self.authority, self.conflicts,
             self.plan_sync, self.plan_repair, self.plan_push, self.provider_refresh,
+            nutrition_service=self.nutrition,
         )
 
     def test_provider_refresh_checks_scope_and_preserves_cancel_and_job_tracking(self):
@@ -180,7 +182,10 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         }
         result = service.execute(
             "delete_duplicate_intervals_activity",
-            {"duplicate_id": "garmin-1", "canonical_id": "wahoo-1"},
+            {"duplicate_id": "garmin-1", "canonical_id": "wahoo-1", "_approval_manifest": {
+                "canonical_id": "wahoo-1", "duplicate_id": "garmin-1",
+                "snapshot_synced_at": "2026-09-26T12:00:00Z", "date": "2026-09-26T10:00:00",
+            }},
             intent=intent,
             sync_job_ids=[],
         )

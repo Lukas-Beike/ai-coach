@@ -6,7 +6,6 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from backend.activities.duplicates import latest_wahoo_garmin_duplicate
 from backend.coach.authorization import authorized_operations, require_coach_scope
 from backend.errors import STRUCTURED_AUTHORIZATION_ERROR, AppError
 from backend.sync.authority import PlanningAuthorityService
@@ -39,6 +38,7 @@ class CoachSyncToolService:
         provider_refresh: ProviderRefreshCommandService,
         duplicate_activity: Any | None = None,
         intervals_client_factory: Callable[[], Any] | None = None,
+        nutrition_service: Any | None = None,
     ) -> None:
         self._queue = queue
         self._authority = authority
@@ -49,6 +49,7 @@ class CoachSyncToolService:
         self._provider_refresh = provider_refresh
         self._duplicate_activity = duplicate_activity
         self._intervals_client_factory = intervals_client_factory
+        self._nutrition_service = nutrition_service
 
     def execute(
         self,
@@ -89,21 +90,27 @@ class CoachSyncToolService:
         ):
             raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         require_coach_scope(intent, "local_nutrition", "intervals_sync")
+        manifest = arguments.get("_approval_manifest")
+        if not isinstance(manifest, list) or self._nutrition_service is None:
+            raise AppError(409, "Die freigegebene Ern\u00e4hrungsvorschau fehlt.")
+        dates = [entry.get("date") for entry in manifest if isinstance(entry, dict)]
+        if len(dates) != len(manifest):
+            raise AppError(409, "Die freigegebene Ern\u00e4hrungsvorschau ist ung\u00fcltig.")
         date_value = str(arguments.get("date") or "").strip()
         limit = arguments.get("pending_limit")
         if bool(date_value) == (limit is not None):
-            raise AppError(
-                400,
-                "Wähle ein Datum oder eine Anzahl ausstehender Tage.",
-                reason="invalid_job_request",
-            )
-        payload = {"date": date_value} if date_value else {"pending_limit": limit}
+            raise AppError(400, "W\u00e4hle ein Datum oder ausstehende Tage.", reason="invalid_job_request")
+        if date_value and dates != [date_value]:
+            raise AppError(409, "Das freigegebene Ern\u00e4hrungsdatum hat sich ge\u00e4ndert.")
+        if limit is not None and (type(limit) is not int or len(dates) > limit):
+            raise AppError(409, "Der freigegebene Ern\u00e4hrungszeitraum ist ung\u00fcltig.")
+        if self._nutrition_service.approval_manifest(dates=dates) != manifest:
+            raise AppError(409, "Die Ern\u00e4hrungsdaten haben sich seit der Freigabe ge\u00e4ndert.")
         job = self._queue.enqueue(
-            "intervals", "nutrition_sync", payload, requested_by="coach"
+            "intervals", "nutrition_sync", {"approval_manifest": manifest}, requested_by="coach"
         )
         sync_job_ids.append(job["id"])
         return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
-
     def _start_provider_refresh(
         self, arguments: dict[str, Any], intent: dict[str, Any],
         sync_job_ids: list[str], cancel_event: threading.Event | None,
@@ -205,14 +212,18 @@ class CoachSyncToolService:
         require_coach_scope(intent, "intervals_sync")
         if not self._duplicate_activity or not self._intervals_client_factory:
             raise AppError(500, "Duplikat-Bereinigung ist nicht verfuegbar.")
-        snapshot = self._duplicate_activity._latest_snapshot() or {}
-        duplicate = latest_wahoo_garmin_duplicate(snapshot)
-        if not duplicate:
-            return {"ok": False, "status": "no_duplicate_found", "message": "Kein Wahoo-/Garmin-Duplikat vorhanden."}
-        payload = {
-            "canonical_id": str(arguments.get("canonical_id") or duplicate["canonical_id"]),
-            "duplicate_id": str(arguments.get("duplicate_id") or duplicate["duplicate_id"]),
-            "snapshot_synced_at": duplicate.get("snapshot_synced_at"),
-        }
-        result = self._duplicate_activity.delete(payload, self._intervals_client_factory())
+        manifest = arguments.get("_approval_manifest")
+        if not isinstance(manifest, dict):
+            raise AppError(409, "Die freigegebene Duplikatvorschau fehlt.")
+        for field in ("canonical_id", "duplicate_id"):
+            requested = arguments.get(field)
+            if requested and str(requested) != str(manifest.get(field) or ""):
+                raise AppError(409, "Die freigegebene Duplikatvorschau stimmt nicht ueberein.")
+        result = self._duplicate_activity.delete(
+            {
+                field: manifest[field]
+                for field in ("canonical_id", "duplicate_id", "snapshot_synced_at")
+            },
+            self._intervals_client_factory(),
+        )
         return {"ok": True, **result}

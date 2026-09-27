@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import unittest
+import hashlib
+import json
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from inspect import signature
@@ -72,6 +74,10 @@ class MockNutritionSync:
     def sync_pending(self, limit):
         self.calls.append(("pending", limit))
         return {"synced_dates": ["2026-09-24"], "pending_dates": [], "failed_dates": {}}
+
+    def sync_approved(self, manifest):
+        self.calls.append(("approved", manifest))
+        return {"synced_dates": [item["date"] for item in manifest], "pending_dates": [], "failed_dates": {}}
 
 
 class RecordingObserver:
@@ -250,6 +256,24 @@ class SyncJobExecutorTests(unittest.TestCase):
             "pending_dates": [], "failed_dates": [],
         })
         self.assertEqual(self.nutrition.calls, [("day", "2026-09-24"), ("pending", 7)])
+
+        approved = [{
+            "date": "2026-09-24", "revision": 2, "total_kcal": 1200,
+            "total_carbs_g": 120.0, "total_protein_g": 60.0,
+            "total_fat_g": 40.0, "entry_count": 2,
+        }]
+        approved[0]["sha256"] = hashlib.sha256(json.dumps(
+            {key: value for key, value in approved[0].items() if key != "revision"},
+            sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        result = self.executor.execute(
+            self.job("intervals", "nutrition_sync", {"approval_manifest": approved})
+        )
+        self.assertEqual(result, {
+            "status": "completed", "synced_dates": ["2026-09-24"],
+            "pending_dates": [], "failed_dates": [],
+        })
+        self.assertEqual(self.nutrition.calls[-1], ("approved", approved))
 
     def test_intervals_sync_observes_competitions_inside_provider_gate(self) -> None:
         self.competitions.during_call = lambda: self.assertEqual(self.gate.active, 1)

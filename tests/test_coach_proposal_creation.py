@@ -180,6 +180,32 @@ class CoachProposalCreationTests(unittest.TestCase):
         )
         self.assertTrue(all(len(item["sha256"]) == 64 for item in manifest))
 
+    def test_nutrition_remote_write_freezes_dates_revisions_and_aggregates(self) -> None:
+        nutrition = Mock()
+        manifest = [{
+            "date": "2026-09-24", "revision": 4, "total_kcal": 2200,
+            "total_carbs_g": 250.0, "total_protein_g": 130.0, "total_fat_g": 65.0,
+            "entry_count": 3, "sha256": "a" * 64,
+        }]
+        nutrition.approval_manifest.return_value = manifest
+        intent = {
+            "operation": "sync_nutrition", "intent": "remote_sync",
+            "target_system": "intervals",
+            "authorization_scope": ["local_nutrition", "intervals_sync"],
+            "request": {"remote_write": True, "source_message_ids": [7]},
+        }
+        self._service(nutrition_service=lambda: nutrition).create_remote_write(
+            "sync_nutrition", {"pending_limit": 3}, intent,
+            conversation_id="conversation-1", client_turn_id="turn-1",
+            session_csrf_hash="session-1",
+        )
+        payload = json.loads(self._rows()[0]["payload"])
+        self.assertEqual(payload["arguments"]["_approval_manifest"], manifest)
+        self.assertEqual(payload["arguments"], {
+            "pending_limit": 3, "_approval_manifest": manifest,
+        })
+        self.assertEqual(nutrition.approval_manifest.call_args.kwargs, {"pending_limit": 3})
+
     def test_distinct_session_keys_own_distinct_proposals(self) -> None:
         self._service().create(self._undo(), "session-a")
         other_id = UUID("def12345-6789-4abc-8def-0123456789ab")

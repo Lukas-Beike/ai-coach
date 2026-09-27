@@ -37,6 +37,19 @@ class SyncJobContractTests(unittest.TestCase):
             normalize_sync_job_request("intervals", "nutrition_sync", {"pending_limit": 31}, all_sync_days=30)["payload"],
             {"pending_limit": 31},
         )
+        manifest = [{
+            "date": "2026-09-24", "revision": 2, "total_kcal": 2000,
+            "total_carbs_g": 220.5, "total_protein_g": 120.0, "total_fat_g": 65.0,
+            "entry_count": 3,
+        }]
+        digest_values = {key: value for key, value in manifest[0].items() if key != "revision"}
+        manifest[0]["sha256"] = hashlib.sha256(
+            json.dumps(digest_values, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(
+            normalize_sync_job_request("intervals", "nutrition_sync", {"approval_manifest": manifest}, all_sync_days=30)["payload"],
+            {"approval_manifest": manifest},
+        )
         for provider, payload in (
             ("garmin", {"date": "2026-09-24"}),
             ("intervals", {"date": "2026-02-30"}),
@@ -44,6 +57,7 @@ class SyncJobContractTests(unittest.TestCase):
             ("intervals", {"pending_limit": 32}),
             ("intervals", {"pending_limit": True}),
             ("intervals", {"unexpected": "value"}),
+            ("intervals", {"approval_manifest": [{"date": "2026-09-24"}]}),
         ):
             with self.subTest(provider=provider, payload=payload), self.assertRaises(JobValidationError):
                 normalize_sync_job_request(provider, "nutrition_sync", payload, all_sync_days=30)

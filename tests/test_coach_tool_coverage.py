@@ -548,10 +548,12 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 (date_job["sync_job_id"], pending_job["sync_job_id"]),
             ).fetchall()
         self.assertEqual({row["type"] for row in jobs}, {"nutrition_sync"})
-        self.assertEqual({row["payload"] for row in jobs}, {
-            json.dumps({"date": "2026-09-08"}, separators=(",", ":")),
-            json.dumps({"pending_limit": 2}, separators=(",", ":")),
-        })
+        manifests = [json.loads(row["payload"])["approval_manifest"] for row in jobs]
+        self.assertEqual(len(manifests), 2)
+        self.assertEqual(manifests[0], manifests[1])
+        self.assertEqual([item["date"] for item in manifests[0]], ["2026-09-08"])
+        self.assertEqual(manifests[0][0]["total_kcal"], 600)
+        self.assertEqual(manifests[0][0]["entry_count"], 1)
 
     def test_every_mutating_tool_rejects_missing_user_authorization_without_effect(self):
         exceptions = server.STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}

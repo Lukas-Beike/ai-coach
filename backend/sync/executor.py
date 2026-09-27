@@ -321,6 +321,17 @@ class SyncJobProviderDispatcher:
         raise AppError(400, "Unbekannter Providerjob.", reason="invalid_job_request")
 
     def _nutrition_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if "approval_manifest" in payload:
+            result = self._nutrition_sync_service.sync_approved(
+                payload["approval_manifest"]
+            )
+            incomplete = result.get("pending_dates") or result.get("failed_dates")
+            return {
+                "status": "partial" if incomplete else "completed",
+                "synced_dates": result["synced_dates"],
+                "pending_dates": result.get("pending_dates", []),
+                "failed_dates": sorted(result.get("failed_dates", {})),
+            }
         if "date" in payload:
             result = self._nutrition_sync_service.sync_day(payload["date"])
             return {

@@ -140,6 +140,23 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.assertEqual(fetched["id"], saved["id"])
         self.assertEqual(fetched["description"], "Pasta mit Pesto")
 
+    def test_approval_manifest_freezes_revision_and_totals_without_mutating_sync_state(self) -> None:
+        self.service.log_meal({
+            "meal_date": "2026-09-24", "description": "Oats", "kcal": 400,
+            "carbs_g": 60, "protein_g": 15, "fat_g": 8,
+        })
+        before = self.service.approval_manifest(meal_date="2026-09-24")
+        self.assertEqual(before[0]["total_kcal"], 400)
+        self.assertEqual(before[0]["entry_count"], 1)
+        self.assertEqual(before[0]["revision"], 1)
+        self.service.correct_meal(
+            self.service.get_day_summary("2026-09-24")["entries"][0]["id"],
+            {"kcal": 450},
+        )
+        after = self.service.approval_manifest(dates=["2026-09-24"])
+        self.assertNotEqual(before, after)
+        self.assertEqual(after[0]["total_kcal"], 450)
+
     def test_update_meal(self) -> None:
         saved = self.service.log_meal({
             "meal_date": "2026-09-24",

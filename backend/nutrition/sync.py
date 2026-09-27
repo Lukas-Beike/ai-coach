@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 from backend.config import Config
 from backend.errors import AppError
-from backend.nutrition.service import NutritionService
+from backend.nutrition.service import NutritionService, nutrition_approval_item, nutrition_approval_item_matches
 from backend.providers.intervals import IntervalsApiClient
 
 logger = logging.getLogger("ai_coach.nutrition.sync")
@@ -33,9 +33,15 @@ class IntervalsNutritionSyncService:
         raw_id = self._config.intervals_athlete_id or "0"
         return quote(str(raw_id).strip(), safe="")
 
-    def sync_day(self, meal_date: str) -> dict[str, Any]:
+    def sync_day(
+        self, meal_date: str, *, approval: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Push daily calorie and macro aggregates for a specific date to Intervals.icu."""
         summary = self._nutrition_service.get_sync_snapshot(meal_date)
+        if approval is not None and not nutrition_approval_item_matches(
+            approval, nutrition_approval_item(summary)
+        ):
+            raise AppError(409, "Nutrition data changed after approval; no update was sent.")
         revision = summary.pop("sync_revision")
         athlete = self._athlete_id
         if not athlete:
@@ -74,6 +80,39 @@ class IntervalsNutritionSyncService:
                 "Nutrition sync failed for %s (%s)", meal_date, type(exc).__name__
             )
             raise
+
+    def sync_approved(self, manifest: list[dict[str, Any]]) -> dict[str, Any]:
+        """Validate the complete approval, then sync only its frozen dates."""
+        if not isinstance(manifest, list) or len(manifest) > 31:
+            raise AppError(409, "The approved nutrition manifest is invalid.")
+        dates = [entry.get("date") for entry in manifest if isinstance(entry, dict)]
+        if len(dates) != len(manifest) or len(set(dates)) != len(dates):
+            raise AppError(409, "The approved nutrition manifest is invalid.")
+        current = self._nutrition_service.approval_manifest(dates=dates)
+        if len(current) != len(manifest) or any(
+            not nutrition_approval_item_matches(expected, actual)
+            for expected, actual in zip(manifest, current)
+        ):
+            raise AppError(409, "Nutrition data changed after approval; no updates were sent.")
+        synced: list[str] = []
+        pending: list[str] = []
+        errors: dict[str, str] = {}
+        for approved in manifest:
+            meal_date = str(approved["date"])
+            try:
+                result = self.sync_day(meal_date, approval=approved)
+                (pending if result["pending"] else synced).append(meal_date)
+            except AppError:
+                raise
+            except Exception as exc:
+                errors[meal_date] = str(exc)
+        return {
+            "ok": not pending and not errors,
+            "synced_dates": synced,
+            "pending_dates": pending,
+            "failed_dates": errors,
+            "total_pending": len(manifest),
+        }
 
     def sync_pending(self, limit: int = 14) -> dict[str, Any]:
         """Push all unsynced dates within the limit to Intervals.icu."""

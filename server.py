@@ -1172,6 +1172,7 @@ COACH_PROPOSALS = CoachProposalAssembly(
         persistence=ProposalPersistence(
             database_manager=database_manager,
             sync_state_repository=SYNC_PERSISTENCE.state_repository,
+            nutrition_service=NUTRITION_ASSEMBLY.service,
         ),
         execution=ProposalExecutionOwners(
             duplicate_activity_service=ATHLETE_DATA.duplicate_activity,
