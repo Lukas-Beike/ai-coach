@@ -12,6 +12,7 @@ import time
 import uuid
 from datetime import date, datetime, timezone
 from functools import partial
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 from backend.db import row_factory as database_row_factory
@@ -25,6 +26,7 @@ from backend.diagnostics.assembly import (
 )
 from backend.errors import (
     INTERNAL_SERVER_ERROR,
+    AppError,
     public_app_error_status,
 )
 from backend import config as app_config
