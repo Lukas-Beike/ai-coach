@@ -19,9 +19,8 @@ if ("scrollRestoration" in globalThis.history) globalThis.history.scrollRestorat
 
 function applyAppearance(appearance = "system") {
   const selected = ["system", "light", "dark"].includes(appearance) ? appearance : "system";
-  const resolved = selected === "system"
-    ? (globalThis.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark")
-    : selected;
+  let resolved = selected;
+  if (selected === "system") resolved = globalThis.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
   document.documentElement.dataset.theme = resolved;
   const themeColor = $("meta[name='theme-color']");
   if (themeColor) themeColor.content = resolved === "light" ? "#ffffff" : "#0b0b0d";
