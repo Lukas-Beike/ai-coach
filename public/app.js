@@ -782,11 +782,13 @@ function updateVoiceButton() {
 }
 
 function chatControlState(input) {
-  const chatReady = Boolean(state.data && Array.isArray(state.data.messages));
+  const configured = state.data?.configured;
+  const aiConfigured = !configured || Boolean(configured.openai || configured.gemini);
+  const chatReady = Boolean(state.data && Array.isArray(state.data.messages) && aiConfigured);
   const hasDraft = Boolean((state.chatAttachments || []).length || input?.value.trim());
   const inputAvailable = !voiceIsRecording() && !state.voiceTranscribing;
   const resuming = Boolean(state.chatRequest?.phase === "recovering" || (state.chatServerOperationId && !state.chatStream));
-  return { chatReady, hasDraft, inputAvailable, resuming, reconciling: state.chatRequest?.phase === "reconciling" };
+  return { aiConfigured, chatReady, hasDraft, inputAvailable, resuming, reconciling: state.chatRequest?.phase === "reconciling" };
 }
 
 function chatSendLabel(controls) {
@@ -830,7 +832,13 @@ function updateChatControls() {
   }
   if (input) {
     input.disabled = !controls.chatReady;
-    input.placeholder = controls.chatReady ? "Frage deinen Coach…" : "Coach-Chat wird geladen…";
+    if (!controls.aiConfigured) {
+      input.placeholder = "OpenAI- oder Gemini-API-Schlüssel in Einstellungen konfigurieren…";
+    } else if (controls.chatReady) {
+      input.placeholder = "Frage deinen Coach…";
+    } else {
+      input.placeholder = "Coach-Chat wird geladen…";
+    }
   }
   updateChatSendButton($("#sendButton"), controls);
   updateChatSteerButton($("#steerButton"), controls);

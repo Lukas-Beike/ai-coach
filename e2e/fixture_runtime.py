@@ -8,7 +8,7 @@ from datetime import timedelta
 os.environ.update({
     "DATA_DIR": "/data/coach-fixture-data",
     "APP_PASSWORD": "e2e-fixture-password-1234",
-    "OPENAI_API_KEY": "",
+    "OPENAI_API_KEY": "e2e-fixture-openai-key",
     "INTERVALS_API_KEY": "",
     "GARMIN_EMAIL": "",
     "GARMIN_PASSWORD": "",
