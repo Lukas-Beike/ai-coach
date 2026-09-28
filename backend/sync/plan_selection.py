@@ -119,16 +119,16 @@ class StructuredPlanSyncService:
         intent: dict[str, Any],
         authorized_ids: set[str],
     ) -> list[dict[str, Any]]:
+        if intent.get("_sync_all_pending"):
+            max_entries = _ALL_PENDING_MAX_ENTRIES
+        elif authorized_ids:
+            max_entries = self._coach_training_change_limit
+        else:
+            max_entries = planning_library.LIBRARY_BULK_MAX_ENTRIES
         normalized = planning_library.library_bulk_request_entries(
             entries,
             require_hash=True,
-            max_entries=(
-                _ALL_PENDING_MAX_ENTRIES
-                if intent.get("_sync_all_pending")
-                else self._coach_training_change_limit
-                if authorized_ids
-                else planning_library.LIBRARY_BULK_MAX_ENTRIES
-            ),
+            max_entries=max_entries,
         )
         entity_by_id = {
             str(entry.get("library_workout_id") or entry.get("local_id") or ""): entry.get("entity")
