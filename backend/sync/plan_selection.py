@@ -30,6 +30,7 @@ _SELECTED_SCOPE_ERROR = (
 _STALE_PLAN_ERROR = (
     "Die ausgewählte Planung wurde geändert. Lies den aktuellen Stand erneut."
 )
+_ALL_PENDING_MAX_ENTRIES = 5000
 
 
 def _query_rows(connection: Connection, query: str, params: tuple[str, ...]) -> list[Any]:
@@ -122,8 +123,10 @@ class StructuredPlanSyncService:
             entries,
             require_hash=True,
             max_entries=(
-                self._coach_training_change_limit
-                if authorized_ids or intent.get("_sync_all_pending")
+                _ALL_PENDING_MAX_ENTRIES
+                if intent.get("_sync_all_pending")
+                else self._coach_training_change_limit
+                if authorized_ids
                 else planning_library.LIBRARY_BULK_MAX_ENTRIES
             ),
         )

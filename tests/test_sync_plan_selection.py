@@ -6,6 +6,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -153,6 +154,20 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
                 },
             )
         self.assertEqual(all_pending_error.exception.reason, "intent_scope_denied")
+
+    def test_all_pending_manifest_uses_approval_limit_not_edit_limit(self) -> None:
+        entries = [
+            {
+                "library_workout_id": str(uuid.uuid4()),
+                "expected_payload_hash": "a" * 64,
+            }
+            for _ in range(367)
+        ]
+        self.pending = [dict(entry) for entry in entries]
+
+        prepared = self.service.prepare(entries, {"_sync_all_pending": True})
+
+        self.assertEqual(len(prepared.entries), 367)
 
     def test_stale_hash_rejected_before_authority_mutation(self) -> None:
         item = self.add_entry(UNIT_A, {"name": "A"})
