@@ -219,10 +219,14 @@ class StructuredPlanSyncService:
     def _validate_selected_entry(db: Any, entry: dict[str, Any]) -> str:
         local_id = entry["library_workout_id"]
         entity = entry.get("entity")
-        if entity in {"planned_unit", "workout_library"}:
-            table = "planned_units" if entity == "planned_unit" else "workout_library"
+        if entity == "planned_unit":
             rows = db.execute(
-                f"SELECT payload, '{entity}' AS entity FROM {table} WHERE local_id=?",
+                "SELECT payload, 'planned_unit' AS entity FROM planned_units WHERE local_id=?",
+                (local_id,),
+            ).fetchall()
+        elif entity == "workout_library":
+            rows = db.execute(
+                "SELECT payload, 'workout_library' AS entity FROM workout_library WHERE local_id=?",
                 (local_id,),
             ).fetchall()
         else:
