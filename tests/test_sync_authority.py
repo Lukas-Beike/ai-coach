@@ -155,7 +155,7 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
                     {
                         "local_id": "plan-1",
                         "payload_hash": "hash-1",
-                        "entity": "planned",
+                        "entity": "planned_unit",
                     },
                     {"local_id": "", "payload_hash": "ignored"},
                     {"local_id": "plan-2", "payload_hash": None},
@@ -174,11 +174,12 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
                 {
                     "library_workout_id": "plan-1",
                     "expected_payload_hash": "hash-1",
+                    "entity": "planned_unit",
                 }
             ],
         )
         self.assertEqual(
-            set(result[0]), {"library_workout_id", "expected_payload_hash"}
+            set(result[0]), {"library_workout_id", "expected_payload_hash", "entity"}
         )
         preview.assert_called_once_with()
 

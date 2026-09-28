@@ -62,6 +62,11 @@ class PlanningAuthorityService:
             {
                 "library_workout_id": str(entry["local_id"]),
                 "expected_payload_hash": str(entry["payload_hash"]),
+                "entity": (
+                    "planned_unit"
+                    if entry.get("entity") in {"planned_unit", "planned"}
+                    else "workout_library"
+                ),
             }
             for entry in entries
             if entry.get("local_id") and entry.get("payload_hash")

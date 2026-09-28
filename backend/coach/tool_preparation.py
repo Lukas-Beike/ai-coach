@@ -103,7 +103,8 @@ class CoachStructuredToolPreparationService:
             arguments["entries"] = entries
             action["_sync_all_pending"] = True
             action["authorization_scope"].extend(
-                f"planned_unit:{entry['library_workout_id']}" for entry in entries
+                f"{'planned_unit' if entry.get('entity') == 'planned_unit' else 'library_workout'}:{entry['library_workout_id']}"
+                for entry in entries
             )
             return
         if sync_scope == "created":
@@ -133,7 +134,8 @@ class CoachStructuredToolPreparationService:
             arguments["entries"] = entries
             action["_created_sync_entry_ids"] = sorted(created_ids)
             action["authorization_scope"].extend(
-                "library_workout:" + value for value in created_ids
+                f"{'planned_unit' if entry.get('entity') == 'planned_unit' else 'library_workout'}:{entry['library_workout_id']}"
+                for entry in entries
             )
             return
         if not arguments.get("entries") and not arguments.get("repair"):

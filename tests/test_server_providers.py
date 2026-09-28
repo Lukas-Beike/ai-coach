@@ -347,11 +347,25 @@ class ServerProvidersTests(ServerTestCase):
 
     def test_gemini_reset_deletes_an_existing_openai_conversation(self):
         server.key_value_service().set("openai_conversation_id", "conv-test")
+        with server.database_manager().unit_of_work() as db:
+            db.execute(
+                "INSERT INTO coach_action_proposals "
+                "(id, session_csrf_hash, action_type, target_system, object_ids, diff, payload, "
+                "payload_hash, action_token_hash, status, expires_at, created_at) "
+                "VALUES ('remote-proposal', 'session', 'remote_coach_write', 'intervals', '{}', '[]', '{}', "
+                "'hash', 'token-hash', 'ready', 9999999999, '2026-09-28T00:00:00Z')"
+            )
         config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="gemini")
         with patch.object(server, "CONFIG", config), patch.object(openai_provider.OpenAIResponsesClient, "delete_conversation", return_value=True) as delete:
             result = server.COACH_CONVERSATION.reset_service().reset()
         delete.assert_called_once_with("conv-test")
         self.assertTrue(result["remote_conversation_deleted"])
+        with server.database_manager().reader() as db:
+            proposal = db.execute(
+                "SELECT status, action_token_hash FROM coach_action_proposals WHERE id='remote-proposal'"
+            ).fetchone()
+        self.assertEqual(proposal["status"], "cancelled")
+        self.assertIsNone(proposal["action_token_hash"])
 
     def test_gemini_http_errors_keep_the_provider_status(self):
         upstream_error = HTTPError(

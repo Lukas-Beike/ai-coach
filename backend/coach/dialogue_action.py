@@ -116,7 +116,7 @@ class CoachDialogueActionService:
                     "Die Wiederholung benötigt den Anbieter des ursprünglichen Jobs.",
                     reason="request_target",
                 )
-        retry_push = bool(retry_job and retry_job["type"] in {"plan_push", "competition_push"})
+        retry_push = bool(retry_job and retry_job["type"] in {"plan_push", "competition_push", "nutrition_sync"})
         remote_write = (
             name in {"start_intervals_plan_sync", "sync_competitions", "sync_nutrition", "delete_duplicate_intervals_activity"}
             or (name == "apply_adaptive_replan" and bool(arguments.get("sync_illness_to_intervals")))

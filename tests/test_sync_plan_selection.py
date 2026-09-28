@@ -32,6 +32,9 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
                 "sync_state TEXT NOT NULL DEFAULT 'local', sync_dirty INTEGER NOT NULL DEFAULT 1, "
                 "sync_error TEXT, updated_at TEXT NOT NULL DEFAULT '')"
             )
+            db.execute(
+                "CREATE TABLE workout_library (local_id TEXT PRIMARY KEY, payload TEXT NOT NULL)"
+            )
         self.pending: list[dict[str, str]] = []
         self.events: list[tuple[str, object]] = []
         self.authority = Mock()
@@ -164,6 +167,26 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
         with self.assertRaises(AppError) as error:
             self.service.execute(prepared, [], reason="selected")
         self.assertEqual(error.exception.reason, "planning_revision_conflict")
+        self.authority.mark_planning_authoritative.assert_not_called()
+
+    def test_all_pending_selection_validates_and_queues_workout_library_rows(self) -> None:
+        raw = json.dumps({"name": "Template"}, sort_keys=True)
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO workout_library(local_id, payload) VALUES (?, ?)", (UNIT_A, raw)
+            )
+        entry = {
+            "library_workout_id": UNIT_A,
+            "expected_payload_hash": library_payload_hash(raw),
+            "entity": "workout_library",
+        }
+        self.pending = [dict(entry)]
+        prepared = self.service.prepare([entry], {"_sync_all_pending": True})
+
+        result = self.service.execute(prepared, [], reason="all pending")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.queue.enqueue.call_args.args[0], [entry])
         self.authority.mark_planning_authoritative.assert_not_called()
 
     def test_selected_rehashes_after_authority_mark_before_enqueue(self) -> None:

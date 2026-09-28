@@ -340,6 +340,7 @@ class PlannedUnitService:
         if not prepared:
             raise AppError(409, "Das Remote-Event kann nicht übernommen werden.")
         incoming, identity = prepared
+        baseline_hash = planned_units.planned_unit_payload_hash(incoming)
         local = planned_units.planned_conflict_payload(row)
         for key in (
             "plan_id", "plan_name", "rationale", "archived", "private_calendar_adjustment"
@@ -347,7 +348,6 @@ class PlannedUnitService:
             if local.get(key) is not None:
                 incoming[key] = local[key]
         incoming.update(id=local_id, sync_status="synced")
-        baseline_hash = planned_units.planned_unit_payload_hash(incoming)
         db.execute(
             "UPDATE planned_units SET external_id=?, payload=?, sync_dirty=0, "
             "sync_state='synced', sync_error=NULL, sync_conflict='', baseline_hash=?, "

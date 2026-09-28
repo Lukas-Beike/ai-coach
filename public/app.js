@@ -1844,7 +1844,7 @@ function coachActionReceipt(proposal, result) {
   } else if (duplicateDelete) {
     message = "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten.";
     title = "Duplikat gelöscht";
-    details = ["Wahoo bleibt die kanonische Radaufzeichnung"];
+    details = ["Garmin-Duplikat in Intervals.icu gelöscht; Wahoo bleibt kanonisch"];
   } else if (remoteWrite) {
     const queued = ["queued", "running"].includes(result.status)
       || Boolean(result.sync_job_id || result.sync_job_ids?.length);
@@ -1857,6 +1857,7 @@ function coachActionReceipt(proposal, result) {
   }
   if (!duplicateDelete && result.sync_job_ids?.length) details = result.sync_job_ids.map((id) => `Syncjob ${id} eingereiht`);
   else if (!duplicateDelete && result.sync_job_id) details = [`Syncjob ${result.sync_job_id} eingereiht`];
+  else if (remoteWrite) details = ["Freigegebene Remote-Änderung direkt ausgeführt"];
   return { title, message, details, duplicateDelete, undo, remoteWrite };
 }
 

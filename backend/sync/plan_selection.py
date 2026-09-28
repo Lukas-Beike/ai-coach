@@ -82,7 +82,7 @@ class StructuredPlanSyncService:
         if not changed_ids.issubset(pending_by_id):
             raise AppError(403, _CHANGED_SCOPE_ERROR, reason="intent_scope_denied")
         selected = [pending_by_id[local_id] for local_id in sorted(changed_ids)]
-        groups = self._scope_groups(selected)
+        groups = self._scope_groups(selected, intent)
         return PreparedPlanSync("changed", selected, groups)
 
     def _prepare_explicit_selection(
@@ -107,7 +107,17 @@ class StructuredPlanSyncService:
                 else planning_library.LIBRARY_BULK_MAX_ENTRIES
             ),
         )
+        entity_by_id = {
+            str(entry.get("library_workout_id") or entry.get("local_id") or ""): entry.get("entity")
+            for entry in entries
+            if isinstance(entry, dict)
+        }
+        for entry in normalized:
+            entity = entity_by_id.get(entry["library_workout_id"])
+            if entity in {"planned_unit", "workout_library"}:
+                entry["entity"] = entity
         normalized_ids = {entry["library_workout_id"] for entry in normalized}
+        groups: tuple[tuple[str, ...], ...]
         if intent.get("_sync_all_pending"):
             pending_ids = {
                 entry["library_workout_id"]
@@ -117,18 +127,31 @@ class StructuredPlanSyncService:
                 raise AppError(403, _ALL_PENDING_SCOPE_ERROR, reason="intent_scope_denied")
             groups = (("local_plan",),)
         else:
-            groups = self._scope_groups(normalized)
+            groups = self._scope_groups(normalized, intent)
         if authorized_ids and normalized_ids != authorized_ids:
             raise AppError(403, _SELECTED_SCOPE_ERROR, reason="intent_scope_denied")
         return PreparedPlanSync("selected", normalized, groups)
 
     @staticmethod
-    def _scope_groups(entries: list[dict[str, Any]]) -> tuple[tuple[str, ...], ...]:
+    def _scope_groups(
+        entries: list[dict[str, Any]], intent: dict[str, Any] | None = None
+    ) -> tuple[tuple[str, ...], ...]:
+        scopes = {
+            str(value) for value in (intent or {}).get("authorization_scope", [])
+        }
+        if not scopes:
+            return tuple(
+                (
+                    f"planned_unit:{entry['library_workout_id']}",
+                    f"library_workout:{entry['library_workout_id']}",
+                )
+                for entry in entries
+            )
         return tuple(
-            (
+            (next((token for token in (
                 f"planned_unit:{entry['library_workout_id']}",
                 f"library_workout:{entry['library_workout_id']}",
-            )
+            ) if token in scopes), f"planned_unit:{entry['library_workout_id']}"),)
             for entry in entries
         )
 
@@ -148,30 +171,46 @@ class StructuredPlanSyncService:
             entries = prepared.entries
         elif prepared.mode == "selected":
             entries = prepared.entries
-            ids = [entry["library_workout_id"] for entry in entries]
             with self._database_manager.unit_of_work() as db:
+                planned_ids = []
                 for entry in entries:
-                    row = db.execute(
-                        "SELECT payload FROM planned_units WHERE local_id=?",
-                        (entry["library_workout_id"],),
-                    ).fetchone()
-                    if not row or planning_library.library_payload_hash(
-                        row["payload"]
-                    ) != entry["expected_payload_hash"]:
+                    local_id = entry["library_workout_id"]
+                    entity = entry.get("entity")
+                    if entity in {"planned_unit", "workout_library"}:
+                        table = "planned_units" if entity == "planned_unit" else "workout_library"
+                        rows = db.execute(
+                            f"SELECT payload, '{entity}' AS entity FROM {table} WHERE local_id=?",
+                            (local_id,),
+                        ).fetchall()
+                    else:
+                        rows = db.execute(
+                            "SELECT payload, 'planned_unit' AS entity FROM planned_units WHERE local_id=? "
+                            "UNION ALL SELECT payload, 'workout_library' AS entity FROM workout_library WHERE local_id=?",
+                            (local_id, local_id),
+                        ).fetchall()
+                    matching = next((
+                        row for row in rows
+                        if planning_library.library_payload_hash(row["payload"])
+                        == entry["expected_payload_hash"]
+                    ), None)
+                    if not matching:
                         raise AppError(
                             409,
                             _STALE_PLAN_ERROR,
                             reason="planning_revision_conflict",
                         )
-                self._authority.mark_planning_authoritative(ids)
+                    if matching["entity"] == "planned_unit":
+                        planned_ids.append(entry["library_workout_id"])
+
+                if planned_ids:
+                    self._authority.mark_planning_authoritative(planned_ids)
                 for entry in entries:
                     row = db.execute(
                         "SELECT payload FROM planned_units WHERE local_id=?",
                         (entry["library_workout_id"],),
                     ).fetchone()
-                    entry["expected_payload_hash"] = planning_library.library_payload_hash(
-                        row["payload"]
-                    )
+                    if row:
+                        entry["expected_payload_hash"] = planning_library.library_payload_hash(row["payload"])
         else:
             raise ValueError(f"Unsupported prepared plan-sync mode: {prepared.mode}")
         return self._plan_push.enqueue(entries, sync_job_ids, reason=reason)
