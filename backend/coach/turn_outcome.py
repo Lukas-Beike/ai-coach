@@ -54,6 +54,7 @@ def _queued_message(
     queued: list[str],
     effects: list[dict[str, Any]],
     failures: list[dict[str, Any]],
+    incomplete_answer: bool,
 ) -> str:
     if not queued:
         return text
@@ -81,6 +82,10 @@ def _queued_message(
             + "."
         )
     lines.extend(queued)
+    if incomplete_answer:
+        lines.append(
+            "Die Antwort wurde nicht abgeschlossen. Bitte den Coach um Fortsetzung bitten."
+        )
     if question:
         lines.append(question)
     return "\n".join(line for line in lines if line)
@@ -198,7 +203,9 @@ class CoachStructuredOutcomeService:
         if incomplete_answer:
             text += "\nDie Antwort wurde nicht abgeschlossen. Bitte den Coach um Fortsetzung bitten."
         text = _failure_message(text, question, failures, effects)
-        text = _queued_message(text, question, queued, effects, failures)
+        text = _queued_message(
+            text, question, queued, effects, failures, incomplete_answer
+        )
         text = _approval_message(text, question, awaiting_remote_approval, effects)
         text = _fallback_message(text, effects)
         return text, incomplete_answer, missing_answer
