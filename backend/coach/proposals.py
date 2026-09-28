@@ -540,60 +540,48 @@ def _competition_approval_details(
 ) -> list[dict[str, str]]:
     manifest = arguments.get("_approval_manifest") or []
     with database_manager.reader() as db:
-        details = []
-        for item in manifest:
-            if item["type"] == "competition":
-                row = db.execute(
-                    "SELECT * FROM competitions WHERE id=?",
-                    (item["id"],),
-                ).fetchone()
-                if row:
-                    digest = hashlib.sha256(
-                        json.dumps(
-                            dict(row),
-                            sort_keys=True,
-                            ensure_ascii=False,
-                            separators=(",", ":"),
-                        ).encode("utf-8")
-                    ).hexdigest()
-                    if digest != item["sha256"]:
-                        raise AppError(
-                            409,
-                            "Der Wettkampfbestand hat sich vor der Freigabe geaendert.",
-                        )
-                    details.append(
-                        {
-                            "name": str(row["name"] or "Wettkampf")[:120],
-                            "date": str(row["event_date"] or "Datum unbekannt")[:10],
-                            "sport": str(row["sport"] or "")[:40],
-                            "id": str(row["id"]),
-                        }
-                    )
-            elif item["type"] == "tombstone":
-                row = db.execute(
-                    "SELECT * FROM competition_sync_tombstones WHERE id=?",
-                    (item["id"],),
-                ).fetchone()
-                if not row:
-                    raise AppError(409, "Competition manifest changed before approval.")
-                digest = hashlib.sha256(
-                    json.dumps(
-                        dict(row),
-                        sort_keys=True,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    ).encode("utf-8")
-                ).hexdigest()
-                if digest != item["sha256"]:
-                    raise AppError(409, "Competition manifest changed before approval.")
-                details.append(
-                    {
-                        "name": "Remote-Wettkampfeintrag löschen",
-                        "date": "Freigegebene Löschmarkierung",
-                        "id": str(row["intervals_event_id"] or row["id"]),
-                    }
-                )
-    return details
+        return [
+            detail for item in manifest if (detail := _competition_detail(db, item))
+        ]
+
+
+def _competition_detail(db: Any, item: dict[str, Any]) -> dict[str, str]:
+    if item["type"] == "competition":
+        row = db.execute(
+            "SELECT * FROM competitions WHERE id=?", (item["id"],)
+        ).fetchone()
+        if not row:
+            return {}
+        _validate_manifest_row(
+            row, item, "Der Wettkampfbestand hat sich vor der Freigabe geaendert."
+        )
+        return {
+            "name": str(row["name"] or "Wettkampf")[:120],
+            "date": str(row["event_date"] or "Datum unbekannt")[:10],
+            "sport": str(row["sport"] or "")[:40],
+            "id": str(row["id"]),
+        }
+    row = db.execute(
+        "SELECT * FROM competition_sync_tombstones WHERE id=?", (item["id"],)
+    ).fetchone()
+    if not row:
+        raise AppError(409, "Competition manifest changed before approval.")
+    _validate_manifest_row(row, item, "Competition manifest changed before approval.")
+    return {
+        "name": "Remote-Wettkampfeintrag l\u00f6schen",
+        "date": "Freigegebene L\u00f6schmarkierung",
+        "id": str(row["intervals_event_id"] or row["id"]),
+    }
+
+
+def _validate_manifest_row(row: Any, item: dict[str, Any], message: str) -> None:
+    digest = hashlib.sha256(
+        json.dumps(
+            dict(row), sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+    if digest != item["sha256"]:
+        raise AppError(409, message)
 
 
 def _check_approval_row_limit(rows: list[Any]) -> None:
@@ -660,6 +648,17 @@ def _nutrition_approval_arguments(
         else nutrition.approval_manifest(pending_limit=limit)
     )
     return {**arguments, "_approval_manifest": manifest}
+
+
+def _remote_source_message_status(
+    message: Any, client_turn_id: str, conversation_id: str, session_key: str
+) -> tuple[bool, bool]:
+    receipt = json.loads(message["receipt"] or "{}") if message["receipt"] else {}
+    belongs = (
+        message["conversation_id"] == conversation_id
+        and receipt.get("session_key") == session_key
+    )
+    return belongs, belongs and message["client_turn_id"] == client_turn_id
 
 
 class CoachProposalReadService:
@@ -882,12 +881,14 @@ class CoachProposalExecutionService:
             or not isinstance(arguments, dict)
             or not isinstance(intent, dict)
         ):
-            raise AppError(409, "Der freigegebene Coach-Auftrag ist ung?ltig.")
+            raise AppError(409, "Der freigegebene Coach-Auftrag ist ung\u00fcltig.")
         _validate_remote_coach_write(payload)
         client_turn_id = str(payload.get("client_turn_id") or "")
         conversation_id = str(payload.get("conversation_id") or "")
         if not client_turn_id or not conversation_id:
-            raise AppError(409, "Der freigegebene Coach-Auftrag ist nicht mehr g?ltig.")
+            raise AppError(
+                409, "Der freigegebene Coach-Auftrag ist nicht mehr g\u00fcltig."
+            )
         self._validate_remote_write_provenance(
             intent, client_turn_id, conversation_id, session_csrf_hash
         )
@@ -915,7 +916,7 @@ class CoachProposalExecutionService:
             ):
                 raise AppError(
                     409,
-                    "Der freigegebene Coach-Auftrag geh?rt nicht mehr zu dieser Sitzung.",
+                    "Der freigegebene Coach-Auftrag geh\u00f6rt nicht mehr zu dieser Sitzung.",
                 )
             placeholders = ",".join("?" for _ in source_ids)
             existing = db.execute(
@@ -928,18 +929,16 @@ class CoachProposalExecutionService:
             valid_ids = set()
             current_turn_ids = set()
             for message in existing:
-                receipt = (
-                    json.loads(message["receipt"] or "{}") if message["receipt"] else {}
+                belongs, current_turn = _remote_source_message_status(
+                    message, client_turn_id, conversation_id, session_key
                 )
-                if (
-                    message["conversation_id"] == conversation_id
-                    and receipt.get("session_key") == session_key
-                ):
+                if belongs:
                     message_id = int(message["id"])
                     valid_ids.add(message_id)
-                    if message["client_turn_id"] == client_turn_id:
+                    if current_turn:
                         current_turn_ids.add(message_id)
             if valid_ids != set(source_ids) or not current_turn_ids:
                 raise AppError(
-                    409, "Der urspr?ngliche Nutzerauftrag ist nicht mehr verf?gbar."
+                    409,
+                    "Der urspr\u00fcngliche Nutzerauftrag ist nicht mehr verf\u00fcgbar.",
                 )

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
 from backend.config import Config
 from backend.errors import AppError
-from backend.nutrition.service import NutritionService, nutrition_approval_item, nutrition_approval_item_matches
+from backend.nutrition.service import (
+    NutritionService,
+    nutrition_approval_item,
+    nutrition_approval_item_matches,
+)
 from backend.providers.intervals import IntervalsApiClient
 
 logger = logging.getLogger("ai_coach.nutrition.sync")
@@ -41,7 +44,9 @@ class IntervalsNutritionSyncService:
         if approval is not None and not nutrition_approval_item_matches(
             approval, nutrition_approval_item(summary)
         ):
-            raise AppError(409, "Nutrition data changed after approval; no update was sent.")
+            raise AppError(
+                409, "Nutrition data changed after approval; no update was sent."
+            )
         revision = summary.pop("sync_revision")
         athlete = self._athlete_id
         if not athlete:
@@ -93,7 +98,9 @@ class IntervalsNutritionSyncService:
             not nutrition_approval_item_matches(expected, actual)
             for expected, actual in zip(manifest, current)
         ):
-            raise AppError(409, "Nutrition data changed after approval; no updates were sent.")
+            raise AppError(
+                409, "Nutrition data changed after approval; no updates were sent."
+            )
         synced: list[str] = []
         pending: list[str] = []
         errors: dict[str, str] = {}
@@ -102,8 +109,8 @@ class IntervalsNutritionSyncService:
             try:
                 result = self.sync_day(meal_date, approval=approved)
                 (pending if result["pending"] else synced).append(meal_date)
-            except AppError:
-                raise
+            except AppError as exc:
+                errors[meal_date] = str(exc)
             except Exception as exc:
                 errors[meal_date] = str(exc)
         return {
