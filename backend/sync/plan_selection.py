@@ -88,6 +88,13 @@ class StructuredPlanSyncService:
     def _prepare_explicit_selection(
         self, entries: list[dict[str, Any]], intent: dict[str, Any]
     ) -> PreparedPlanSync:
+        authorized_ids = self._authorized_entry_ids(intent)
+        normalized = self._normalize_explicit_entries(entries, intent, authorized_ids)
+        groups = self._explicit_scope_groups(normalized, intent, authorized_ids)
+        return PreparedPlanSync("selected", normalized, groups)
+
+    @staticmethod
+    def _authorized_entry_ids(intent: dict[str, Any]) -> set[str]:
         authorized_ids = {
             str(value).strip()
             for key in (
@@ -98,6 +105,14 @@ class StructuredPlanSyncService:
             for value in intent.get(key) or []
             if str(value).strip()
         }
+        return authorized_ids
+
+    def _normalize_explicit_entries(
+        self,
+        entries: list[dict[str, Any]],
+        intent: dict[str, Any],
+        authorized_ids: set[str],
+    ) -> list[dict[str, Any]]:
         normalized = planning_library.library_bulk_request_entries(
             entries,
             require_hash=True,
@@ -116,8 +131,15 @@ class StructuredPlanSyncService:
             entity = entity_by_id.get(entry["library_workout_id"])
             if entity in {"planned_unit", "workout_library"}:
                 entry["entity"] = entity
+        return normalized
+
+    def _explicit_scope_groups(
+        self,
+        normalized: list[dict[str, Any]],
+        intent: dict[str, Any],
+        authorized_ids: set[str],
+    ) -> tuple[tuple[str, ...], ...]:
         normalized_ids = {entry["library_workout_id"] for entry in normalized}
-        groups: tuple[tuple[str, ...], ...]
         if intent.get("_sync_all_pending"):
             pending_ids = {
                 entry["library_workout_id"]
@@ -130,7 +152,7 @@ class StructuredPlanSyncService:
             groups = self._scope_groups(normalized, intent)
         if authorized_ids and normalized_ids != authorized_ids:
             raise AppError(403, _SELECTED_SCOPE_ERROR, reason="intent_scope_denied")
-        return PreparedPlanSync("selected", normalized, groups)
+        return groups
 
     @staticmethod
     def _scope_groups(
