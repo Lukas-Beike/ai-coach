@@ -73,7 +73,9 @@ class DailySyncScheduler:
             self._schedule_intervals()
 
     def _schedule_weather(self) -> None:
-        if not self._profile.get().get("weather_location", "").strip() or self._queue.active("weather"):
+        if not self._profile.get().get(
+            "weather_location", ""
+        ).strip() or self._queue.active("weather"):
             return
         self._queue.enqueue(
             "weather",
@@ -180,6 +182,15 @@ class DailySyncLoop:
                         "Automatic synchronization scheduling failed",
                         extra={"event": "daily_sync_failed"},
                     )
+            except Exception as exc:  # noqa: BLE001 - keep the daily loop alive
+                self._logger.error(
+                    "Automatic synchronization scheduling failed",
+                    extra={
+                        "event": "daily_sync_failed",
+                        "error_class": type(exc).__name__,
+                        "reason": getattr(exc, "reason", None),
+                    },
+                )
 
 
 @dataclass(frozen=True)
@@ -219,7 +230,9 @@ class StartupSyncScheduler:
         self._schedule_weather()
 
     def _schedule_calendar(self) -> None:
-        if self._config.calendar_enabled and not self._queue.active("calendar", "refresh"):
+        if self._config.calendar_enabled and not self._queue.active(
+            "calendar", "refresh"
+        ):
             self._queue.enqueue(
                 "calendar", "refresh", {"reason": "startup"}, requested_by="startup"
             )

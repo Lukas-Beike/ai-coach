@@ -349,14 +349,33 @@ The viewport run exercises the existing automated suite, not every possible comb
 - Non-root/read-only Docker runtime, pinned/hash-locked dependencies, immutable release-source/version checks, and protected-main release flow.
 - Current schema initialization and repository transaction/reader ownership under the isolated test suite.
 
+## Remediation evidence
+
+The implementation follow-up completed the requested remediation tasks in this branch. The source review above records the original findings; the evidence below records the post-remediation state.
+
+| Task | Implemented change | Evidence |
+|---|---|---|
+| F1 | Sync, Coach, and daily scheduling loops now recover from unexpected claim/runner/scheduler failures with safe metadata, bounded interruptible backoff, and preserved maintenance/stop/requeue behavior. | Worker, scheduler, and recovery tests passed in the full native suite. |
+| F2 | Outcome projection now derives wording from authoritative receipts and job observations for local, queued, failed, partial, and completed-observation effects; explanatory text is retained only when it cannot contradict status. | Mixed-effect and provider-finalization tests passed. |
+| F3 | Archived workout-library rows are filtered in SQL before the Coach limit, with stable ordering and preserved explicit archived reads. | Library service and HTTP/Coach parity tests passed. |
+| F4 | The E2E fixture removes only its synthetic planned units, plans, history, Coach commands, and artifact before restaging. | Plan persistence/replay passed in all five projects, including repeated and reverse-order runs. |
+| F5 | Privacy export reads a consistent database snapshot through the reader path and releases the application write lock before compression; timeout and cleanup behavior remain bounded. | Export concurrency, consistency, timeout, and cleanup tests passed. |
+| U1 / A3 | Proposal refresh uses the shared version-aware history reconciliation; setup drains pending loads and disables its state-event source so the caller stack is deterministic. | Two targeted runs per viewport passed; one history request and generation/version guards were observed. |
+| U2 | Synthetic measurements are served through `/api/performance` and exercised through the normal refresh/navigation flow. | Two targeted runs per viewport passed with date, age, fetch, and unknown-date assertions. |
+| U3 / U4 | Cursor synchronization and unauthorized-load interception were corrected without weakening generation or session guards. | Targeted cursor and 401 tests passed across viewports. |
+| A1 | CI now statically selects representative provider, planning, backup, worker, HTTP, and composition paths and automatically checks Ruff, format, and mypy for every changed backend Python file; deleted files are excluded. | Workflow selection checks passed for checked, unchecked, and documentation-only changes; representative lint/format/type checks passed. |
+| A2 | The outcome boundary now uses a typed observed-job-status contract rather than an untyped cross-domain status dictionary. | Outcome and producer tests passed, with no parallel DTO layer added. |
+
+Post-remediation validation completed with `python -m unittest discover -s tests -q` (2,931 tests, 12 skipped), focused checks, Ruff, format, mypy, compilation, Docker build, and the complete five-project Playwright matrix (270 tests) against a fresh disposable SQLCipher fixture. Real provider accounts, credentials, and remote writes remained excluded by design.
+
 ## Limitations and follow-up
 
-- The browser process was deliberately interrupted during test 244/270 after repeated desktop startup failures. The 17 completed failures are listed above; the active case and remaining 26 cases have no completed desktop result. This is not a clean browser certification.
+- The original browser run was interrupted during test 244/270 after stale fixture-container startup failures. The fixture was rebuilt/restarted from the current image and the complete 270-case five-project matrix then passed. This supersedes the earlier incomplete browser result.
 - Real OpenAI/Gemini semantic behavior, live Intervals/Garmin/calendar/weather/GitHub contracts, and remote writes were intentionally not exercised.
 - Full SQLCipher load, process restart during an effect, restore overlap, and failure-injection journeys need a disposable integration run.
 - Current dependency advisory/license checks and GitHub workflow dispatch/settings were not run.
-- The next thread should use the independent F1–F5 tasks and U1–U4 investigations above, then consider A1–A3. Update a remediation log only after each task has observable evidence; do not mark a defect resolved from code changes alone.
+- Live provider semantics, real-model language behavior, and remote writes remain outside this disposable validation scope and still require separate mocked integration coverage before any production deployment.
 
 ## Completion statement
 
-`Complete for the recorded source snapshot; all checklist domains were reviewed or explicitly blocked.` This is a complete source-and-test review, not a certification of unavailable live-provider or unfinished browser runtime behavior.
+`Complete for the recorded source snapshot and remediations listed above; all checklist domains were reviewed or explicitly bounded.` This remains a source-and-test review, not a certification of unavailable live-provider or real-model behavior.

@@ -130,7 +130,7 @@ def _reasons(
 ) -> tuple[list[str], list[str]]:
     reasons: list[str] = []
     blocking_triggers: list[str] = []
-    if illness_active:
+    if illness_active and illness_pause is not None:
         reasons.append(
             f"illness reported; sport pause through {illness_pause['end_date']}"
         )
@@ -170,7 +170,8 @@ def _change_state(
         return None
     draft_date = str(draft.get("date") or "")[:10]
     duration = _as_number(draft.get("duration_minutes"))
-    available_minutes = feedback.get("available_minutes")
+    available_minutes = _as_number(feedback.get("available_minutes"))
+    motivation = _as_number(feedback.get("motivation"))
     calendar_events = events_by_date.get(str(draft.get("date") or ""), [])
     calendar_limit, calendar_reason, no_intensity_limited, calendar_limited = (
         _calendar_limits(draft, calendar_events, duration)
@@ -184,10 +185,7 @@ def _change_state(
         "severe": bool(feedback.get("pain") or (feedback.get("soreness") or 0) >= 8),
         "high_load": bool(
             (feedback.get("stress") or 0) >= 8
-            or (
-                feedback.get("motivation") is not None
-                and feedback.get("motivation") <= 2
-            )
+            or (motivation is not None and motivation <= 2)
         ),
         "available_minutes": available_minutes,
         "duration": duration,
@@ -354,8 +352,11 @@ class AdaptiveReplanPreviewService:
         self._illness_pause_default_days = illness_pause_default_days
         self._weather_adaptive_max_minutes = weather_adaptive_max_minutes
 
-    def latest_preview(self) -> dict[str, Any] | None:
-        with self._database_manager.unit_of_work() as db:
+    def latest_preview(self, *, db: Any | None = None) -> dict[str, Any] | None:
+        if db is None:
+            with self._database_manager.unit_of_work() as connection:
+                row = self._adjustment_repository.latest(connection)
+        else:
             row = self._adjustment_repository.latest(db)
         if not row:
             return None
@@ -373,8 +374,8 @@ class AdaptiveReplanPreviewService:
             **payload,
         }
 
-    def status(self) -> dict[str, Any]:
-        preview = self.latest_preview()
+    def status(self, *, db: Any | None = None) -> dict[str, Any]:
+        preview = self.latest_preview(db=db)
         changes = preview.get("changes", []) if isinstance(preview, dict) else []
         illness_pause_pending = bool(
             preview

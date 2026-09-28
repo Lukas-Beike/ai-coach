@@ -79,6 +79,37 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         self.assertIn("Remote-Abschluss ist bestätigt", text)
         self.assertNotIn("Synchronized successfully", text)
 
+    def test_mixed_local_and_queued_effects_replace_model_completion_claim(self):
+        status, text, failures = self.finalize(
+            self.response("The check-in and remote sync are both complete."),
+            [
+                self.success(),
+                {"tool": "refresh_current_performance", "result": {
+                    "ok": True, "status": "queued", "sync_job_id": "mixed-job",
+                }},
+            ],
+        )
+
+        self.assertEqual(status, "completed")
+        self.assertEqual(failures, [])
+        self.assertIn("Tages-Check-in gespeichert", text)
+        self.assertIn("mixed-job: queued", text)
+        self.assertIn("Remote-Abschluss ist noch nicht bestätigt", text)
+        self.assertNotIn("both complete", text)
+
+    def test_queued_receipt_does_not_suppress_clarifying_question(self):
+        _, text, _ = self.finalize(
+            self.response("The sync completed."),
+            [{"tool": "refresh_current_performance", "result": {
+                "ok": True, "status": "queued", "sync_job_id": "question-job",
+            }}],
+            question="Which training period should I refresh?",
+        )
+
+        self.assertIn("question-job: queued", text)
+        self.assertIn("Which training period should I refresh?", text)
+        self.assertNotIn("The sync completed", text)
+
     def test_partial_failure_persists_request_provenance_and_confirmed_effect(self):
         request = {"summary": "Repair profile", "source_message_ids": [17], "scope": ["profile"]}
         failed = self.failure(request=request)

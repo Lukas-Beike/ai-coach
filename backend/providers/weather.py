@@ -79,16 +79,10 @@ class WeatherClient:
             if isinstance(results, list) and results and isinstance(results[0], dict)
             else None
         )
-        latitude = (
-            weather_projection.weather_number(location_result.get("latitude"))
-            if location_result
-            else None
-        )
-        longitude = (
-            weather_projection.weather_number(location_result.get("longitude"))
-            if location_result
-            else None
-        )
+        if location_result is None:
+            raise AppError(400, "Der Wetterort wurde nicht gefunden.")
+        latitude = weather_projection.weather_number(location_result.get("latitude"))
+        longitude = weather_projection.weather_number(location_result.get("longitude"))
         if latitude is None or longitude is None:
             raise AppError(400, "Der Wetterort wurde nicht gefunden.")
         return {

@@ -9,7 +9,12 @@ from contextlib import contextmanager
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.gates import ProviderResyncGate
-from backend.sync.scheduler import DailySyncScheduler, DailySyncSchedulerConfig
+from backend.sync.scheduler import (
+    DailySyncLoop,
+    DailySyncScheduler,
+    DailySyncSchedulerConfig,
+)
+from unittest.mock import Mock
 
 
 class _Profile:
@@ -173,6 +178,38 @@ class DailySyncSchedulerTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.reason, "maintenance")
         self.assertEqual(self.queue.jobs, [])
+
+    def test_daily_loop_recovers_after_unexpected_schedule_error(self):
+        class Iterations:
+            count = 0
+
+            def wait(self, _timeout):
+                self.count += 1
+                return self.count == 3
+
+        class Scheduler:
+            calls = 0
+
+            def schedule(self):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("private detail")
+
+        scheduler = Scheduler()
+        morning = Mock()
+        logger = Mock()
+        DailySyncLoop(
+            scheduler,
+            morning,
+            sleep=lambda _seconds: None,
+            logger=logger,
+            stop_event=Iterations(),
+        ).run()
+
+        self.assertEqual(scheduler.calls, 2)
+        morning.refresh.assert_called_once_with()
+        self.assertEqual(logger.error.call_args.kwargs["extra"]["error_class"], "RuntimeError")
+        self.assertNotIn("private detail", repr(logger.error.call_args))
 
 
 if __name__ == "__main__":

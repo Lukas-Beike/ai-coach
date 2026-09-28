@@ -97,18 +97,26 @@ class DailySyncLoopTests(unittest.TestCase):
             extra={"event": "daily_sync_failed"},
         )
 
-    def test_unexpected_exception_propagates(self):
+    def test_unexpected_exception_recovers_on_next_iteration(self):
         scheduler = Mock()
-        scheduler.schedule.side_effect = RuntimeError("unexpected")
+        scheduler.schedule.side_effect = [RuntimeError("unexpected"), None]
         morning = Mock()
-        loop, sleeper, logger = self.make_loop(scheduler, morning)
+        loop, sleeper, logger = self.make_loop(scheduler, morning, iterations=2)
 
-        with self.assertRaisesRegex(RuntimeError, "unexpected"):
+        with self.assertRaises(StopLoop):
             loop.run()
 
-        self.assertEqual(sleeper.calls, [300])
-        morning.refresh.assert_not_called()
-        logger.error.assert_not_called()
+        self.assertEqual(sleeper.calls, [300, 300, 300])
+        scheduler.schedule.assert_has_calls([call(), call()])
+        morning.refresh.assert_called_once_with()
+        logger.error.assert_called_once_with(
+            "Automatic synchronization scheduling failed",
+            extra={
+                "event": "daily_sync_failed",
+                "error_class": "RuntimeError",
+                "reason": None,
+            },
+        )
 
     def test_stop_interrupts_wait_without_scheduling_another_refresh(self):
         scheduler = Mock()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import unittest
 from unittest.mock import Mock, patch
 
@@ -63,6 +64,52 @@ class CoachJobWorkerTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "claim_failed")
         self.runner.run.assert_not_called()
         self.assertEqual(self.gate.state()["running_operations"], 0)
+
+    def test_transient_claim_error_does_not_kill_worker_or_replay_job(self) -> None:
+        job = {"client_turn_id": "synthetic"}
+        self.jobs.claim.side_effect = [sqlite3.OperationalError("private detail"), job]
+        self.runner.run.side_effect = lambda _job: self.worker.stop()
+
+        with patch("backend.coach.job_worker._LOGGER.error") as log_error:
+            self.worker.run_forever(lambda: self.jobs, lambda: self.runner, self.gate)
+
+        self.assertEqual(self.jobs.claim.call_count, 2)
+        self.runner.run.assert_called_once_with(job)
+        self.assertEqual(log_error.call_args.kwargs["extra"]["error_class"], "OperationalError")
+        self.assertNotIn("private detail", repr(log_error.call_args))
+
+    def test_runner_error_leaves_claimed_job_unreplayed_and_worker_polling(self) -> None:
+        job = {"client_turn_id": "synthetic"}
+        self.jobs.claim.side_effect = [job, None]
+        self.runner.run.side_effect = RuntimeError("private detail")
+        waits = 0
+
+        def wait_until_second_poll(_seconds):
+            nonlocal waits
+            waits += 1
+            if waits == 2:
+                self.worker.stop()
+
+        self.worker.wake_event.wait = Mock(side_effect=wait_until_second_poll)
+
+        with patch("backend.coach.job_worker._LOGGER.error") as log_error:
+            self.worker.run_forever(lambda: self.jobs, lambda: self.runner, self.gate)
+
+        self.assertEqual(self.jobs.claim.call_count, 2)
+        self.runner.run.assert_called_once_with(job)
+        self.assertEqual(self.worker.wake_event.wait.call_args_list[0].args, (5,))
+        self.assertEqual(log_error.call_args.kwargs["extra"]["error_class"], "RuntimeError")
+        self.assertNotIn("private detail", repr(log_error.call_args))
+
+    def test_stop_during_claim_recovery_wait_exits_without_reclaiming(self) -> None:
+        self.jobs.claim.side_effect = sqlite3.OperationalError("private detail")
+        self.worker.wake_event.wait = Mock(side_effect=lambda _seconds: self.worker.stop())
+
+        self.worker.run_forever(lambda: self.jobs, lambda: self.runner, self.gate)
+
+        self.jobs.claim.assert_called_once_with()
+        self.runner.run.assert_not_called()
+        self.worker.wake_event.wait.assert_called_once_with(5)
 
 
 if __name__ == "__main__":

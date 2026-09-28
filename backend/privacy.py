@@ -14,7 +14,10 @@ from typing import Any
 from backend.activities.feedback import ActivityFeedbackService
 from backend.athlete.checkins import CheckinService
 from backend.athlete.profile import DEFAULT_PROFILE, ProfileService
-from backend.backup.export import PrivacyArchiveExportConfig, PrivacyArchiveExportService
+from backend.backup.export import (
+    PrivacyArchiveExportConfig,
+    PrivacyArchiveExportService,
+)
 from backend.calendar import public_events as public_event_calendar
 from backend.calendar.external import ExternalCalendarReader
 from backend.db.manager import DatabaseManager
@@ -56,7 +59,10 @@ class PrivacyDataExportService:
 
     def _stored_json(self, key: str) -> Any:
         dependencies = self._dependencies
-        with dependencies.database_lock, dependencies.database_manager.unit_of_work() as db:
+        with (
+            dependencies.database_lock,
+            dependencies.database_manager.unit_of_work() as db,
+        ):
             value = dependencies.key_value_repository.get(db, key)
         try:
             return json.loads(value or "{}")
@@ -65,7 +71,10 @@ class PrivacyDataExportService:
 
     def export(self) -> dict[str, Any]:
         dependencies = self._dependencies
-        with dependencies.database_lock, dependencies.database_manager.unit_of_work() as db:
+        with (
+            dependencies.database_lock,
+            dependencies.database_manager.unit_of_work() as db,
+        ):
             messages = [
                 dict(row)
                 for row in db.execute(
@@ -74,7 +83,9 @@ class PrivacyDataExportService:
             ]
             snapshots = [
                 json.loads(row["payload"])
-                for row in db.execute("SELECT payload FROM snapshots ORDER BY id").fetchall()
+                for row in db.execute(
+                    "SELECT payload FROM snapshots ORDER BY id"
+                ).fetchall()
             ]
             library = dependencies.workout_library_service.list(include_archived=True)
             competitions = dependencies.competition_service.list()
@@ -139,20 +150,54 @@ class PrivacyDataExportService:
 PRIVACY_DELETE_CONFIRMATION_TEXT = "LOKALE DATEN LÖSCHEN"
 
 PRIVACY_DELETE_SCOPE = (
-    ("chats", "Chats, Coach-Werkzeug- und Aktionsprotokolle", ("messages", "coach_commands", "coach_plan_artifacts", "coach_action_proposals")),
+    (
+        "chats",
+        "Chats, Coach-Werkzeug- und Aktionsprotokolle",
+        (
+            "messages",
+            "coach_commands",
+            "coach_plan_artifacts",
+            "coach_action_proposals",
+        ),
+    ),
     ("snapshots", "Trainings-Snapshots", ("snapshots",)),
-    ("library", "Workout-Bibliothek und geplante Einheiten", ("workout_library", "planned_units")),
-    ("competitions", "Wettkämpfe und Sync-Vormerkungen", ("competitions", "competition_sync_tombstones")),
+    (
+        "library",
+        "Workout-Bibliothek und geplante Einheiten",
+        ("workout_library", "planned_units"),
+    ),
+    (
+        "competitions",
+        "Wettkämpfe und Sync-Vormerkungen",
+        ("competitions", "competition_sync_tombstones"),
+    ),
     ("plans", "Trainingspläne", ("training_plans", "planning_state")),
     ("checkins", "Tages-Check-ins", ("athlete_checkins",)),
     ("feedback", "Aktivitätsfeedback", ("activity_feedback",)),
-    ("nutrition", "Ernährungsprotokolle und Kalorientracking", ("nutrition_logs", "nutrition_sync_dates")),
+    (
+        "nutrition",
+        "Ernährungsprotokolle und Kalorientracking",
+        ("nutrition_logs", "nutrition_sync_dates"),
+    ),
     ("adaptive", "Adaptive Plananpassungen", ("plan_adjustments",)),
-    ("calendars", "Kalenderquellen, Kandidaten und lokale Kalenderereignisse", ("public_event_sources", "public_event_candidates", "external_calendar_events")),
+    (
+        "calendars",
+        "Kalenderquellen, Kandidaten und lokale Kalenderereignisse",
+        ("public_event_sources", "public_event_candidates", "external_calendar_events"),
+    ),
     ("sessions", "Anmeldesitzungen", ("sessions",)),
     ("settings", "Profil, Einstellungen, Syncstatus und lokale Caches", ("kv",)),
     ("history", "Lokale Änderungshistorie", ("change_history",)),
-    ("provider_status", "Bereinigter Provider-Refresh-Verlauf", ("provider_refresh_history", "sync_job_items", "sync_jobs", "provider_sync_cursors")),
+    (
+        "provider_status",
+        "Bereinigter Provider-Refresh-Verlauf",
+        (
+            "provider_refresh_history",
+            "sync_job_items",
+            "sync_jobs",
+            "provider_sync_cursors",
+        ),
+    ),
 )
 PRIVACY_REMOTE_SCOPE = (
     "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",
@@ -183,14 +228,21 @@ class PrivacyDeleteService:
         counts: dict[str, int] = {}
         for category, _label, tables in PRIVACY_DELETE_SCOPE:
             counts[category] = sum(
-                int(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])
+                int(
+                    db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()[
+                        "count"
+                    ]
+                )
                 for table in tables
             )
         return counts
 
     def preview(self) -> dict[str, Any]:
         dependencies = self._dependencies
-        with dependencies.database_lock, dependencies.database_manager.unit_of_work() as db:
+        with (
+            dependencies.database_lock,
+            dependencies.database_manager.unit_of_work() as db,
+        ):
             counts = self._counts(db)
         return {
             "status": "preview",
@@ -211,28 +263,43 @@ class PrivacyDeleteService:
             )
         dependencies = self._dependencies
         with dependencies.maintenance_gate.restore():
-            with dependencies.database_lock, dependencies.database_manager.unit_of_work() as db:
-                conversation_id = dependencies.key_value_repository.get(db, "openai_conversation_id") or ""
+            with (
+                dependencies.database_lock,
+                dependencies.database_manager.unit_of_work() as db,
+            ):
+                conversation_id = (
+                    dependencies.key_value_repository.get(db, "openai_conversation_id")
+                    or ""
+                )
             remote_delete_attempted = bool(conversation_id)
             remote_deleted = False
             if conversation_id:
                 try:
-                    remote_deleted = dependencies.openai_client.delete_conversation(conversation_id)
+                    remote_deleted = dependencies.openai_client.delete_conversation(
+                        conversation_id
+                    )
                 except Exception:
                     dependencies.logger.warning(
                         "Remote OpenAI conversation could not be deleted",
                         extra={"event": "privacy_remote_delete_failed"},
                         exc_info=True,
                     )
-            with dependencies.database_lock, dependencies.database_manager.unit_of_work() as db:
+            with (
+                dependencies.database_lock,
+                dependencies.database_manager.unit_of_work() as db,
+            ):
                 deleted_counts = self._counts(db)
                 deleted_tables = dict.fromkeys(
-                    table for _category, _label, tables in PRIVACY_DELETE_SCOPE for table in tables
+                    table
+                    for _category, _label, tables in PRIVACY_DELETE_SCOPE
+                    for table in tables
                 )
                 for table in deleted_tables:
                     db.execute(f"DELETE FROM {table}")
                 db.execute("DELETE FROM kv")
-                dependencies.key_value_repository.set(db, "profile", json.dumps(DEFAULT_PROFILE))
+                dependencies.key_value_repository.set(
+                    db, "profile", json.dumps(DEFAULT_PROFILE)
+                )
                 dependencies.planning_revision_service.mark_reset_pending()
             return {
                 "status": "ok",
@@ -302,7 +369,7 @@ class PrivacyAssembly:
         state: PrivacyStateDependencies
         archive: PrivacyArchiveSettings
 
-    def __init__(self, *, dependencies: "PrivacyAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: PrivacyAssembly.Inputs) -> None:
         athlete = dependencies.athlete
         planning = dependencies.planning
         context = dependencies.context
@@ -367,7 +434,6 @@ class PrivacyAssembly:
     def archive_export_service(self) -> PrivacyArchiveExportService:
         return PrivacyArchiveExportService(
             self._database_manager(),
-            self._database_lock(),
             self._key_value_repository,
             self._profile_service(),
             self._competition_service(),

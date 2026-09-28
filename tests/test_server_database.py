@@ -531,6 +531,65 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertTrue(handler.payload.startswith(b"PK"))
         self.assertFalse(handler.path.exists())
 
+    def test_privacy_export_compression_does_not_block_a_consistent_snapshot_writer(self):
+        service = server.PRIVACY_ASSEMBLY.archive_export_service()
+        profile_service = server.ATHLETE_DATA.profile()
+        before = {**profile_service.get(), "name": "Before export"}
+        profile_service.save(before)
+        compression_started = threading.Event()
+        release_compression = threading.Event()
+        original_write_jsonl = service._write_jsonl
+
+        def pause_compression(archive, name, rows, deadline):
+            if not compression_started.is_set():
+                compression_started.set()
+                if not release_compression.wait(5):
+                    raise TimeoutError("synthetic compression barrier timed out")
+            original_write_jsonl(archive, name, rows, deadline)
+
+        service._write_jsonl = pause_compression
+        exported_files = []
+        export_errors = []
+
+        def create_export():
+            try:
+                exported_files.append(service.create_file())
+            except Exception as exc:
+                export_errors.append(exc)
+
+        exporter = threading.Thread(target=create_export)
+        exporter.start()
+        self.assertTrue(compression_started.wait(2))
+
+        write_completed = threading.Event()
+
+        def update_profile():
+            with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+                server.ATHLETE_DATA.profile().save_in_transaction(
+                    {**before, "name": "During export"}, db
+                )
+            write_completed.set()
+
+        writer = threading.Thread(target=update_profile)
+        writer.start()
+        try:
+            self.assertTrue(write_completed.wait(2))
+        finally:
+            release_compression.set()
+            exporter.join(5)
+            writer.join(5)
+
+        self.assertFalse(exporter.is_alive())
+        self.assertFalse(writer.is_alive())
+        self.assertEqual(export_errors, [])
+        self.assertEqual(server.ATHLETE_DATA.profile().get()["name"], "During export")
+        try:
+            with zipfile.ZipFile(exported_files[0]) as archive:
+                snapshot_profile = json.loads(archive.read("profile.json"))
+                self.assertEqual(snapshot_profile["name"], "Before export")
+        finally:
+            exported_files[0].unlink(missing_ok=True)
+
     def test_privacy_download_routes_require_auth_before_streaming(self):
         from backend.http_api.privacy_get import PrivacyGetRoutes
 
@@ -603,6 +662,18 @@ class ServerDatabaseTests(ServerTestCase):
                 service.create_file()
             self.assertEqual(timeout.exception.status, 408)
             self.assertEqual(list(data_dir.iterdir()), [])
+
+            lock_acquired = threading.Event()
+
+            def acquire_database_lock():
+                with server.DB_LOCK:
+                    lock_acquired.set()
+
+            lock_probe = threading.Thread(target=acquire_database_lock)
+            lock_probe.start()
+            self.assertTrue(lock_acquired.wait(1))
+            lock_probe.join(1)
+            self.assertFalse(lock_probe.is_alive())
 
     def test_file_stream_uses_bounded_chunks_and_cleans_up_after_disconnect(self):
         class RecordingWriter:
