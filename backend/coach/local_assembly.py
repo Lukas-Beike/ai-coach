@@ -6,11 +6,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from backend.coach.clarification import CoachClarificationService
 from backend.coach.context import CoachQuickActionsService
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
-from backend.coach.clarification import CoachClarificationService
-from backend.coach.morning import ManualMorningCheckinService, MorningCheckinStateService
+from backend.coach.morning import (
+    ManualMorningCheckinService,
+    MorningCheckinStateService,
+)
 
 
 @dataclass(frozen=True)
@@ -48,7 +51,7 @@ class CoachLocalAssembly:
     def __init__(
         self,
         *,
-        dependencies: "CoachLocalAssembly.Inputs",
+        dependencies: CoachLocalAssembly.Inputs,
     ) -> None:
         state = dependencies.state
         planning = dependencies.planning
@@ -67,14 +70,19 @@ class CoachLocalAssembly:
 
     def quick_actions_service(self) -> CoachQuickActionsService:
         return CoachQuickActionsService(
-            self._database_manager(), self._key_values, self._adaptive_preview(),
-            self._local_date, self._planned_workout_label,
+            self._database_manager(),
+            self._key_values,
+            self._adaptive_preview(),
+            self._local_date,
+            self._planned_workout_label,
         )
 
     def dialogue_action_service(self) -> CoachDialogueActionService:
         manager = self._database_manager()
         return CoachDialogueActionService(
-            manager, self._database_lock, self._sync_job_queue,
+            manager,
+            self._database_lock,
+            self._sync_job_queue,
             CoachDialoguePlanScopeService(manager, self._database_lock),
             self._local_date,
         )
@@ -86,8 +94,11 @@ class CoachLocalAssembly:
 
     def manual_morning_checkin_service(self) -> ManualMorningCheckinService:
         return ManualMorningCheckinService(
-            self._garmin_sync(), self._garmin_payload(),
-            self._morning_body_battery(), self._local_date, self._logger,
+            self._garmin_sync(),
+            self._garmin_payload(),
+            self._morning_body_battery(),
+            self._local_date,
+            self._logger,
         )
 
     def morning_checkin_state_service(self) -> MorningCheckinStateService:

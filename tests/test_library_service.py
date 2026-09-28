@@ -447,6 +447,45 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
         with self.assertRaises(sqlite3.OperationalError):
             self.service.list()
 
+    def test_archived_rows_do_not_consume_active_template_limit(self) -> None:
+        with self.database_manager.unit_of_work() as db:
+            db.executemany(
+                "INSERT INTO workout_library(id, local_id, payload, updated_at) "
+                "VALUES (?, ?, ?, ?)",
+                [
+                    (
+                        f"archived-{index:03d}",
+                        f"archived-{index:03d}",
+                        json.dumps({
+                            "type": "Ride", "name": f"000 archived {index:03d}",
+                            "archived": True,
+                        }),
+                        NOW,
+                    )
+                    for index in range(100)
+                ]
+                + [
+                    (
+                        "active-after-limit", "active-after-limit",
+                        json.dumps({"type": "Ride", "name": "zzz active"}), NOW,
+                    )
+                ],
+            )
+
+        self.assertEqual(
+            [entry["name"] for entry in self.service.list(limit=100)],
+            ["zzz active"],
+        )
+        self.assertEqual(len(self.service.list(limit=100, include_archived=True)), 101)
+
+    def test_list_uses_id_to_stabilize_equal_template_sort_keys(self) -> None:
+        self._insert_payload("tie-z", json.dumps({"id": "tie-z", "type": "Ride", "name": "Same"}))
+        self._insert_payload("tie-a", json.dumps({"id": "tie-a", "type": "Ride", "name": "Same"}))
+
+        self.assertEqual(
+            [entry["id"] for entry in self.service.list()], ["tie-a", "tie-z"]
+        )
+
     def test_list_clamps_limit_and_doubles_fetch_limit_for_archived_entries(
         self,
     ) -> None:

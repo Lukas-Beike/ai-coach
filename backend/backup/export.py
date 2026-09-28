@@ -9,7 +9,7 @@ import tempfile
 import time
 import zipfile
 from collections.abc import Callable, Iterable, Mapping
-from contextlib import AbstractContextManager
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -65,7 +65,6 @@ class PrivacyArchiveExportService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        db_lock: AbstractContextManager[Any],
         key_values: KeyValueRepository,
         profile: ProfileService,
         competitions: CompetitionService,
@@ -73,7 +72,6 @@ class PrivacyArchiveExportService:
         config: PrivacyArchiveExportConfig,
     ) -> None:
         self._database_manager = database_manager
-        self._db_lock = db_lock
         self._key_values = key_values
         self._profile = profile
         self._competitions = competitions
@@ -95,14 +93,22 @@ class PrivacyArchiveExportService:
             excluded_keys={"profile", "garmin_snapshot", weather_cache.CACHE_KEY},
         )
 
-    def _write_jsonl(self, archive: Any, name: str, rows: Iterable[Mapping[str, Any]], deadline: float) -> None:
+    def _write_jsonl(
+        self,
+        archive: Any,
+        name: str,
+        rows: Iterable[Mapping[str, Any]],
+        deadline: float,
+    ) -> None:
         write_jsonl_rows(
             archive,
             name,
             rows,
             deadline,
             now=self._config.monotonic,
-            timeout_error=lambda: AppError(408, "Der Export überschreitet das Zeitlimit."),
+            timeout_error=lambda: AppError(
+                408, "Der Export überschreitet das Zeitlimit."
+            ),
         )
 
     def create_file(self) -> Path:
@@ -118,7 +124,9 @@ class PrivacyArchiveExportService:
             min(self._config.maximum_bytes, database_size * 2),
         )
         if free_bytes < required_free:
-            raise AppError(507, "Für den Export ist nicht ausreichend freier Speicher verfügbar.")
+            raise AppError(
+                507, "Für den Export ist nicht ausreichend freier Speicher verfügbar."
+            )
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=".intervals-coach-export-", suffix=".zip", dir=self._config.data_dir
         )
@@ -126,102 +134,189 @@ class PrivacyArchiveExportService:
         temporary = Path(temporary_name)
         deadline = started + self._config.time_limit_seconds
         try:
-            with self._db_lock, self._database_manager.unit_of_work() as db, zipfile.ZipFile(
-                temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
-            ) as archive:
+            with (
+                self._database_manager.reader() as db,
+                _read_snapshot(db),
+                zipfile.ZipFile(
+                    temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
+                ) as archive,
+            ):
                 archive.writestr(
                     "profile.json",
-                    json.dumps(self._profile.get(), ensure_ascii=False, separators=(",", ":")),
+                    json.dumps(
+                        self._profile.get_from_db(db),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
                 )
                 archive.writestr(
                     "application_state.json",
-                    json.dumps(self._application_state(db), ensure_ascii=False, separators=(",", ":")),
+                    json.dumps(
+                        self._application_state(db),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
                 )
                 self._write_jsonl(
                     archive,
                     "competitions.jsonl",
-                    (dict(row) for row in db.execute(
-                        "SELECT id, name, event_date, start_date_local, sport, priority, category, distance, target, "
-                        "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
-                        "sync_state, sync_conflict, last_synced_at FROM competitions ORDER BY event_date, priority, name"
-                    )),
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT id, name, event_date, start_date_local, sport, priority, category, distance, target, "
+                            "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
+                            "sync_state, sync_conflict, last_synced_at FROM competitions ORDER BY event_date, priority, name"
+                        )
+                    ),
                     deadline,
                 )
                 self._write_jsonl(
                     archive,
                     "competition_sync_tombstones.jsonl",
-                    (dict(row) for row in db.execute("SELECT intervals_event_id, external_id, created_at FROM competition_sync_tombstones ORDER BY created_at")),
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT intervals_event_id, external_id, created_at FROM competition_sync_tombstones ORDER BY created_at"
+                        )
+                    ),
                     deadline,
                 )
                 self._write_jsonl(
                     archive,
                     "messages.jsonl",
-                    (dict(row) for row in db.execute("SELECT role, content, attachments, created_at FROM messages ORDER BY id")),
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT role, content, attachments, created_at FROM messages ORDER BY id"
+                        )
+                    ),
                     deadline,
                 )
                 self._write_jsonl(
                     archive,
                     "coach_plan_artifacts.jsonl",
-                    (dict(row) for row in db.execute("SELECT id, conversation_id, client_turn_id, base_revision, status, payload, created_at, updated_at FROM coach_plan_artifacts ORDER BY created_at")),
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT id, conversation_id, client_turn_id, base_revision, status, payload, created_at, updated_at FROM coach_plan_artifacts ORDER BY created_at"
+                        )
+                    ),
                     deadline,
                 )
                 self._write_jsonl(
                     archive,
                     "coach_commands.jsonl",
-                    (dict(row) for row in db.execute("SELECT id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, receipt, error_class, created_at, updated_at FROM coach_commands ORDER BY created_at")),
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, receipt, error_class, created_at, updated_at FROM coach_commands ORDER BY created_at"
+                        )
+                    ),
                     deadline,
                 )
                 self._write_jsonl(
                     archive,
                     "snapshots.jsonl",
-                    (decode_payload(row["payload"]) for row in db.execute("SELECT payload FROM snapshots ORDER BY id")),
+                    (
+                        decode_payload(row["payload"])
+                        for row in db.execute(
+                            "SELECT payload FROM snapshots ORDER BY id"
+                        )
+                    ),
                     deadline,
                 )
-                self._write_jsonl(archive, "workout_library.jsonl", iter_workout_library(db), deadline)
-                self._write_jsonl(archive, "planned_units.jsonl", self._planned_units(db), deadline)
+                self._write_jsonl(
+                    archive, "workout_library.jsonl", iter_workout_library(db), deadline
+                )
+                self._write_jsonl(
+                    archive, "planned_units.jsonl", self._planned_units(db), deadline
+                )
                 self._write_jsonl(
                     archive,
                     "training_plans.jsonl",
-                    (dict(row) for row in db.execute("SELECT id, name, goal, start_date, end_date, status, created_at, updated_at FROM training_plans ORDER BY created_at DESC")),
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT id, name, goal, start_date, end_date, status, created_at, updated_at FROM training_plans ORDER BY created_at DESC"
+                        )
+                    ),
                     deadline,
                 )
                 self._write_jsonl(
                     archive,
                     "plan_adjustments.jsonl",
-                    (dict(row) for row in db.execute("SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at")),
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at"
+                        )
+                    ),
                     deadline,
                 )
                 self._write_jsonl(
                     archive,
                     "change_history.jsonl",
-                    (change_history.public_view(dict(row)) for row in db.execute("SELECT id, entity_type, entity_id, action, source, created_at, before_hash, after_hash, diff FROM change_history ORDER BY created_at")),
+                    (
+                        change_history.public_view(dict(row))
+                        for row in db.execute(
+                            "SELECT id, entity_type, entity_id, action, source, created_at, before_hash, after_hash, diff FROM change_history ORDER BY created_at"
+                        )
+                    ),
                     deadline,
                 )
                 self._write_jsonl(
                     archive,
                     "provider_refresh_history.jsonl",
-                    (dict(row) for row in db.execute("SELECT id, provider, area, operation_id, trigger, started_at, finished_at, phase, status, error_code, next_retry_at FROM provider_refresh_history ORDER BY started_at")),
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT id, provider, area, operation_id, trigger, started_at, finished_at, phase, status, error_code, next_retry_at FROM provider_refresh_history ORDER BY started_at"
+                        )
+                    ),
                     deadline,
                 )
                 self._write_jsonl(
                     archive,
                     "sync_jobs.jsonl",
-                    (dict(row) for row in db.execute("SELECT id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, error_class, available_at, started_at, finished_at, created_at, updated_at FROM sync_jobs ORDER BY created_at")),
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, error_class, available_at, started_at, finished_at, created_at, updated_at FROM sync_jobs ORDER BY created_at"
+                        )
+                    ),
                     deadline,
                 )
                 self._write_jsonl(
                     archive,
                     "sync_job_items.jsonl",
-                    (dict(row) for row in db.execute("SELECT id, job_id, item_key, operation, payload_hash, remote_id, status, attempts, error_class, error_detail, created_at, updated_at FROM sync_job_items ORDER BY created_at")),
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT id, job_id, item_key, operation, payload_hash, remote_id, status, attempts, error_class, error_detail, created_at, updated_at FROM sync_job_items ORDER BY created_at"
+                        )
+                    ),
                     deadline,
                 )
                 self._write_jsonl(
                     archive,
                     "provider_sync_cursors.jsonl",
-                    (dict(row) for row in db.execute("SELECT provider, stream, cursor, high_water_mark, updated_at FROM provider_sync_cursors ORDER BY provider, stream")),
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT provider, stream, cursor, high_water_mark, updated_at FROM provider_sync_cursors ORDER BY provider, stream"
+                        )
+                    ),
                     deadline,
                 )
-                for table in ("athlete_checkins", "activity_feedback", "external_calendar_events", "public_event_sources", "public_event_candidates", "nutrition_logs", "nutrition_sync_dates"):
+                for table in (
+                    "athlete_checkins",
+                    "activity_feedback",
+                    "external_calendar_events",
+                    "public_event_sources",
+                    "public_event_candidates",
+                    "nutrition_logs",
+                    "nutrition_sync_dates",
+                ):
                     self._write_jsonl(
                         archive,
                         table + ".jsonl",
@@ -232,10 +327,10 @@ class PrivacyArchiveExportService:
                     "planning.json",
                     json.dumps(
                         planning_season.planning_state(
-                            self._competitions.list(),
+                            self._competitions.list(db=db),
                             self._config.today(),
-                            self._adaptive_preview.latest_preview(),
-                            self._adaptive_preview.status(),
+                            self._adaptive_preview.latest_preview(db=db),
+                            self._adaptive_preview.status(db=db),
                         ),
                         ensure_ascii=False,
                         separators=(",", ":"),
@@ -243,11 +338,21 @@ class PrivacyArchiveExportService:
                 )
                 archive.writestr(
                     "garmin_snapshot.json",
-                    json.dumps(decode_payload(self._key_values.get(db, "garmin_snapshot")), ensure_ascii=False, separators=(",", ":")),
+                    json.dumps(
+                        decode_payload(self._key_values.get(db, "garmin_snapshot")),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
                 )
                 archive.writestr(
                     "weather_cache.json",
-                    json.dumps(decode_payload(self._key_values.get(db, weather_cache.CACHE_KEY)), ensure_ascii=False, separators=(",", ":")),
+                    json.dumps(
+                        decode_payload(
+                            self._key_values.get(db, weather_cache.CACHE_KEY)
+                        ),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
                 )
                 if self._config.monotonic() > deadline:
                     raise AppError(408, "Der Export überschreitet das Zeitlimit.")
@@ -275,6 +380,16 @@ class PrivacyArchiveExportService:
             raise
 
 
+@contextmanager
+def _read_snapshot(db: Any):
+    """Keep one consistent WAL read view without serializing application writes."""
+    db.execute("BEGIN")
+    try:
+        yield
+    finally:
+        db.rollback()
+
+
 @dataclass(frozen=True)
 class PrivacyArchiveExportConfig:
     data_dir: Path
@@ -296,7 +411,9 @@ def decode_payload(value: Any) -> Any:
         return {}
 
 
-def iter_workout_library(db: Any, *, decode: PayloadDecoder = decode_payload) -> Iterable[dict[str, Any]]:
+def iter_workout_library(
+    db: Any, *, decode: PayloadDecoder = decode_payload
+) -> Iterable[dict[str, Any]]:
     """Yield all workout-library payloads in the established order."""
     for row in db.execute(
         "SELECT payload FROM workout_library "
@@ -339,7 +456,12 @@ def write_jsonl_rows(
         for row in rows:
             if now() > deadline:
                 raise timeout_error()
-            output.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n")
+            output.write(
+                json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode(
+                    "utf-8"
+                )
+                + b"\n"
+            )
 
 
 def manifest(
@@ -355,6 +477,8 @@ def manifest(
         "format_version": format_version,
         "exported_at": exported_at,
         "status": "complete",
-        "categories": sorted(name.rsplit(".", 1)[0] for name in archive_names if name != "manifest.json"),
+        "categories": sorted(
+            name.rsplit(".", 1)[0] for name in archive_names if name != "manifest.json"
+        ),
         "jsonl_files": sorted(jsonl_files),
     }

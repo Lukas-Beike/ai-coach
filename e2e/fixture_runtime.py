@@ -95,6 +95,44 @@ artifact = {}
 
 
 def stage_fixture_artifact():
+    with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        units = db.execute(
+            "SELECT local_id, plan_id FROM planned_units "
+            "WHERE json_extract(payload, '$.plan_name')=? "
+            "AND json_extract(payload, '$.name') LIKE 'HTTP fixture %'",
+            ("Fixture sport contract",),
+        ).fetchall()
+        unit_ids = [row["local_id"] for row in units]
+        plan_ids = sorted({row["plan_id"] for row in units if row["plan_id"]})
+        for entity_type, entity_ids in (("planned_unit", unit_ids), ("training_plan", plan_ids)):
+            if entity_ids:
+                placeholders = ",".join("?" for _ in entity_ids)
+                db.execute(
+                    f"DELETE FROM change_history WHERE entity_type=? "
+                    f"AND entity_id IN ({placeholders})",
+                    (entity_type, *entity_ids),
+                )
+        if unit_ids:
+            placeholders = ",".join("?" for _ in unit_ids)
+            db.execute(
+                f"DELETE FROM planned_units WHERE local_id IN ({placeholders})",
+                unit_ids,
+            )
+        if plan_ids:
+            placeholders = ",".join("?" for _ in plan_ids)
+            db.execute(
+                f"DELETE FROM training_plans WHERE id IN ({placeholders})", plan_ids
+            )
+        db.execute(
+            "DELETE FROM coach_commands WHERE artifact_id IN "
+            "(SELECT id FROM coach_plan_artifacts WHERE client_turn_id=?)",
+            ("fixture-stage",),
+        )
+        db.execute(
+            "DELETE FROM coach_plan_artifacts WHERE client_turn_id=?",
+            ("fixture-stage",),
+        )
+
     today = server.ATHLETE_CLOCK.now().date()
     artifact.update(server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage({"payload": {
         "plan_name": "Fixture sport contract",
@@ -107,7 +145,6 @@ def stage_fixture_artifact():
 
 def initialise_fixture():
     initialise()
-    stage_fixture_artifact()
 
 
 class FixtureHandler(server.HTTP_API.request_handler_class()):
@@ -115,13 +152,15 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
         if self.path == "/api/fixture/plan":
             try:
                 self.auth_service.require_auth(self)
-                with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-                    current = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact.get("artifact_id"),)).fetchone()
-                if not current or current["status"] != "draft":
-                    stage_fixture_artifact()
+                stage_fixture_artifact()
                 self.send_json(200, artifact)
             except server.AppError as error:
                 self.send_json(error.status, {"error": error.message})
+            except Exception as error:  # noqa: BLE001 - report fixture setup failures as HTTP
+                self.send_json(
+                    500,
+                    {"error": type(error).__name__, "reason": "fixture_setup_failed"},
+                )
             return
         super().do_GET()
 

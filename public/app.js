@@ -4119,6 +4119,37 @@ function load(path = "/api/bootstrap", requestedAreas = null) {
   return tracked;
 }
 
+let chatHistoryReconciliation = null;
+let chatHistoryReconciliationVersion = null;
+
+async function refreshChatHistoryState() {
+  const requestedVersion = state.chatContentVersion;
+  if (chatHistoryReconciliation) {
+    const activeVersion = chatHistoryReconciliationVersion;
+    await chatHistoryReconciliation;
+    if (requestedVersion === state.chatContentVersion && activeVersion === requestedVersion) return;
+    return refreshChatHistoryState();
+  }
+  if (state.loadPromise) {
+    await state.loadPromise.catch(() => {});
+    return refreshChatHistoryState();
+  }
+
+  const version = state.chatContentVersion;
+  const reconciliation = load("/api/bootstrap", ["chat"]);
+  chatHistoryReconciliation = reconciliation;
+  chatHistoryReconciliationVersion = version;
+  try {
+    await reconciliation;
+  } finally {
+    if (chatHistoryReconciliation === reconciliation) {
+      chatHistoryReconciliation = null;
+      chatHistoryReconciliationVersion = null;
+    }
+  }
+  if (version !== state.chatContentVersion) await refreshChatHistoryState();
+}
+
 async function syncNow(event) {
   const button = event?.currentTarget || $("#activitiesSyncButton");
   const compactButton = button.id === "systemIntervalsSyncButton";

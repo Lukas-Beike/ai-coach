@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 import unittest
 from contextlib import contextmanager
 from typing import Any
+from unittest.mock import patch
 
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
@@ -170,6 +172,56 @@ class SyncJobWorkerTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(AppError, "runner failed"):
             worker.run_loop()
+
+    def test_transient_claim_error_keeps_worker_alive_without_replaying_job(self) -> None:
+        class RecoveringStore:
+            claims = 0
+
+            def claim(self) -> dict[str, str] | None:
+                self.claims += 1
+                if self.claims == 1:
+                    raise sqlite3.OperationalError("private detail")
+                return {"id": "job-1"}
+
+        store = RecoveringStore()
+        runner = _StoppingRunner()
+        worker = SyncJobWorker(store, runner, MaintenanceGate(), poll_seconds=0)
+        runner.worker = worker
+        runner.gate = worker._maintenance_gate
+
+        with patch("backend.sync.worker._LOGGER.error") as log_error:
+            worker.run_loop()
+
+        self.assertEqual(store.claims, 2)
+        self.assertEqual([job["id"] for job in runner.jobs], ["job-1"])
+        self.assertEqual(log_error.call_args.kwargs["extra"]["error_class"], "OperationalError")
+        self.assertNotIn("private detail", repr(log_error.call_args))
+
+    def test_runner_error_does_not_retry_claimed_effect_in_same_worker_loop(self) -> None:
+        class TwoJobs:
+            jobs = iter(({"id": "uncertain"}, {"id": "next"}))
+
+            def claim(self) -> dict[str, str] | None:
+                return next(self.jobs, None)
+
+        class FailOnceRunner:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            def run(self, job: dict[str, Any]) -> None:
+                self.calls.append(job["id"])
+                if job["id"] == "uncertain":
+                    raise RuntimeError("effect may have completed")
+                worker.stop()
+
+        runner = FailOnceRunner()
+        worker = SyncJobWorker(TwoJobs(), runner, MaintenanceGate(), poll_seconds=0)
+
+        with patch("backend.sync.worker._LOGGER.error") as log_error:
+            worker.run_loop()
+
+        self.assertEqual(runner.calls, ["uncertain", "next"])
+        self.assertEqual(log_error.call_args.kwargs["extra"]["error_class"], "RuntimeError")
 
     def test_stop_wakes_worker_and_start_restarts_after_exit(self) -> None:
         claim_seen = threading.Event()

@@ -371,6 +371,45 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(names, ["Template 0", "Template 1", "Template 2"])
         self.assertIsNone(second["next_cursor"])
 
+    def test_coach_and_http_library_views_include_the_same_active_templates(self):
+        with server.database_manager().unit_of_work() as db:
+            db.executemany(
+                "INSERT INTO workout_library(id, local_id, payload, updated_at) "
+                "VALUES (?, ?, ?, ?)",
+                [
+                    (
+                        f"archived-{index:03d}",
+                        f"archived-{index:03d}",
+                        json.dumps({
+                            "id": f"archived-{index:03d}",
+                            "type": "Ride",
+                            "name": f"000 archived {index:03d}",
+                            "archived": True,
+                        }),
+                        "synthetic-now",
+                    )
+                    for index in range(100)
+                ]
+                + [(
+                    "active-after-limit",
+                    "active-after-limit",
+                    json.dumps({
+                        "id": "active-after-limit",
+                        "type": "Ride",
+                        "name": "zzz active",
+                    }),
+                    "synthetic-now",
+                )],
+            )
+
+        coach_entries = server.PLANNING_DATA.workout_library().list(limit=100)
+        http_entries = server.HTTP_API.library_page_service().page(limit=100)["workouts"]
+        self.assertEqual(
+            [entry["id"] for entry in coach_entries],
+            [entry["id"] for entry in http_entries],
+        )
+        self.assertEqual([entry["id"] for entry in coach_entries], ["active-after-limit"])
+
     def test_bootstrap_is_bounded_and_excludes_history_collections(self):
         today = server.ATHLETE_CLOCK.now().date()
         server.SYNC_PERSISTENCE.state_repository().save_snapshot({
