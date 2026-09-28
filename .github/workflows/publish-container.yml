@@ -228,6 +228,7 @@ jobs:
         run: |
           set -euo pipefail
           projects=(mobile-small mobile tablet tablet-landscape desktop)
+          specs=(e2e/*.spec.js)
           cleanup() {
             result=$?
             if [[ "$result" != "0" ]]; then
@@ -239,24 +240,26 @@ jobs:
           }
           trap cleanup EXIT
           for project in "${projects[@]}"; do
-            cleanup
-            docker run --detach --name ai-coach-e2e --publish 127.0.0.1:8090:8090 \
-              --read-only --security-opt no-new-privileges:true --cap-drop=ALL \
-              --pids-limit=256 --memory=1g --cpus=2 --tmpfs /data:uid=100,gid=101,mode=0700 --tmpfs /tmp \
-              --env APP_PASSWORD="$E2E_APP_PASSWORD" --env COOKIE_SECURE=false \
-              --volume "${GITHUB_WORKSPACE}/e2e:/app/e2e:ro" \
-              ai-coach:e2e python /app/e2e/fixture_runtime.py >/dev/null
-            for attempt in {1..30}; do
-              if curl --fail --silent http://127.0.0.1:8090/api/health >/dev/null; then
-                break
-              fi
-              if [[ "$attempt" == "30" ]]; then
-                echo "The isolated fixture application did not become healthy for $project."
-                exit 1
-              fi
-              sleep 2
+            for spec in "${specs[@]}"; do
+              cleanup
+              docker run --detach --name ai-coach-e2e --publish 127.0.0.1:8090:8090 \
+                --read-only --security-opt no-new-privileges:true --cap-drop=ALL \
+                --pids-limit=256 --memory=1g --cpus=2 --tmpfs /data:uid=100,gid=101,mode=0700 --tmpfs /tmp \
+                --env APP_PASSWORD="$E2E_APP_PASSWORD" --env COOKIE_SECURE=false \
+                --volume "${GITHUB_WORKSPACE}/e2e:/app/e2e:ro" \
+                ai-coach:e2e python /app/e2e/fixture_runtime.py >/dev/null
+              for attempt in {1..30}; do
+                if curl --fail --silent http://127.0.0.1:8090/api/health >/dev/null; then
+                  break
+                fi
+                if [[ "$attempt" == "30" ]]; then
+                  echo "The isolated fixture application did not become healthy for $project ($spec)."
+                  exit 1
+                fi
+                sleep 2
+              done
+              npm run test:e2e -- --project "$project" "$spec"
             done
-            npm run test:e2e -- --project "$project"
           done
       - name: Upload browser failure artifacts
         if: failure()
