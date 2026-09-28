@@ -217,7 +217,7 @@ class StructuredPlanSyncService:
 
     @staticmethod
     def _validate_selected_entry(db: Any, entry: dict[str, Any]) -> str:
-        local_id = entry["library_workout_id"]
+        local_id = str(entry["library_workout_id"])
         entity = entry.get("entity")
         if entity == "planned_unit":
             rows = db.execute(
