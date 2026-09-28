@@ -22,19 +22,49 @@ from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse, urlunpa
 from backend.config import Config
 
 REDACTED_PATH = "[REDACTED_PATH]"
-REDACTED_URL_QUERY_KEYS = frozenset({
-    "access_token", "api_key", "apikey", "auth", "authorization", "credential", "key",
-    "password", "refresh_token", "secret", "signature", "sig", "token",
-})
+REDACTED_URL_QUERY_KEYS = frozenset(
+    {
+        "access_token",
+        "api_key",
+        "apikey",
+        "auth",
+        "authorization",
+        "credential",
+        "key",
+        "password",
+        "refresh_token",
+        "secret",
+        "signature",
+        "sig",
+        "token",
+    }
+)
 URL_VALUE_RE = re.compile(r"(?i)https?://[^\s<>\"'`]+")
-OPENAI_RESPONSE_ERROR_CODES = frozenset({
-    "server_error", "rate_limit_exceeded", "invalid_prompt", "data_residency_mismatch",
-    "bio_policy", "misalignment_policy_violation", "vector_store_timeout", "invalid_image",
-    "invalid_image_format", "invalid_base64_image", "invalid_image_url", "image_too_large",
-    "image_too_small", "image_parse_error", "image_content_policy_violation", "invalid_image_mode",
-    "image_file_too_large", "unsupported_image_media_type", "empty_image_file",
-    "failed_to_download_image", "image_file_not_found",
-})
+OPENAI_RESPONSE_ERROR_CODES = frozenset(
+    {
+        "server_error",
+        "rate_limit_exceeded",
+        "invalid_prompt",
+        "data_residency_mismatch",
+        "bio_policy",
+        "misalignment_policy_violation",
+        "vector_store_timeout",
+        "invalid_image",
+        "invalid_image_format",
+        "invalid_base64_image",
+        "invalid_image_url",
+        "image_too_large",
+        "image_too_small",
+        "image_parse_error",
+        "image_content_policy_violation",
+        "invalid_image_mode",
+        "image_file_too_large",
+        "unsupported_image_media_type",
+        "empty_image_file",
+        "failed_to_download_image",
+        "image_file_not_found",
+    }
+)
 
 DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 1500
 DIAGNOSTIC_CAPTURE_ENTRIES_KEY = "diagnostic_capture_entries"
@@ -62,11 +92,17 @@ def safe_url_netloc(parsed: Any) -> str:
         return "[REDACTED_HOST]"
     if not hostname:
         return "[REDACTED_HOST]"
-    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+    host = (
+        f"[{hostname}]"
+        if ":" in hostname and not hostname.startswith("[")
+        else hostname
+    )
     return f"{host}:{port}" if port else host
 
 
-def safe_response_headers(headers: Any, *, redact: Callable[[str], str]) -> dict[str, str]:
+def safe_response_headers(
+    headers: Any, *, redact: Callable[[str], str]
+) -> dict[str, str]:
     """Keep only bounded transport headers suitable for diagnostics."""
     if headers is None:
         return {}
@@ -99,7 +135,15 @@ def safe_provider_path(path: str) -> str:
         else:
             safe_segments.append(REDACTED_PATH)
         if not was_redacted and decoded.casefold() in {
-            "athlete", "activities", "activity", "event", "events", "profile", "user", "workout", "workouts",
+            "athlete",
+            "activities",
+            "activity",
+            "event",
+            "events",
+            "profile",
+            "user",
+            "workout",
+            "workouts",
         }:
             redact_next = True
     return "/" + "/".join(safe_segments)
@@ -111,7 +155,10 @@ def _unguessable_url_path_segment(segment: str) -> bool:
         return True
     if len(decoded) < 16:
         return False
-    classes = sum(bool(re.search(pattern, decoded)) for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]"))
+    classes = sum(
+        bool(re.search(pattern, decoded))
+        for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]")
+    )
     return classes >= 2 and len(set(decoded)) >= 8
 
 
@@ -127,13 +174,28 @@ def _redact_url(match: re.Match[str]) -> str:
             return match.group(0)
         path_segments = []
         for segment in parsed.path.split("/"):
-            path_segments.append(REDACTED_PATH if _unguessable_url_path_segment(segment) else segment)
+            path_segments.append(
+                REDACTED_PATH if _unguessable_url_path_segment(segment) else segment
+            )
         path = "/".join(path_segments)
         query_pairs = []
         for key, item in parse_qsl(parsed.query, keep_blank_values=True):
-            safe_item = "[REDACTED]" if key.casefold().replace("-", "_") in REDACTED_URL_QUERY_KEYS else item
+            safe_item = (
+                "[REDACTED]"
+                if key.casefold().replace("-", "_") in REDACTED_URL_QUERY_KEYS
+                else item
+            )
             query_pairs.append((key, safe_item))
-        safe = urlunparse((parsed.scheme.casefold(), safe_url_netloc(parsed), path, "", urlencode(query_pairs), ""))
+        safe = urlunparse(
+            (
+                parsed.scheme.casefold(),
+                safe_url_netloc(parsed),
+                path,
+                "",
+                urlencode(query_pairs),
+                "",
+            )
+        )
         return safe + trailing
     except (TypeError, ValueError):
         return "[REDACTED_URL]" + trailing
@@ -154,7 +216,16 @@ class Redactor:
         try:
             parsed = urlparse(str(getattr(config, "calendar_ical_url", "") or ""))
             if parsed.scheme.casefold() in {"http", "https"} and parsed.netloc:
-                return urlunparse((parsed.scheme.casefold(), safe_url_netloc(parsed), "/redacted", "", "", ""))
+                return urlunparse(
+                    (
+                        parsed.scheme.casefold(),
+                        safe_url_netloc(parsed),
+                        "/redacted",
+                        "",
+                        "",
+                        "",
+                    )
+                )
         except (TypeError, ValueError):
             pass
         return "[REDACTED_CALENDAR_URL]"
@@ -166,7 +237,9 @@ class Redactor:
         calendar_url = str(getattr(config, "calendar_ical_url", "") or "")
         calendar_safe_url = self._safe_calendar_url_for_config(config)
         for variant in sorted(_secret_variants(calendar_url), key=len, reverse=True):
-            redacted = re.sub(re.escape(variant), calendar_safe_url, redacted, flags=re.IGNORECASE)
+            redacted = re.sub(
+                re.escape(variant), calendar_safe_url, redacted, flags=re.IGNORECASE
+            )
         redacted = URL_VALUE_RE.sub(_redact_url, redacted)
         secret_values = (
             getattr(config, "openai_api_key", ""),
@@ -179,18 +252,32 @@ class Redactor:
             getattr(config, "app_password", ""),
         )
         for secret_value in secret_values:
-            for variant in sorted(_secret_variants(secret_value), key=len, reverse=True):
-                redacted = re.sub(re.escape(variant), "[REDACTED]", redacted, flags=re.IGNORECASE)
-        redacted = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED_OPENAI_KEY]", redacted)
-        redacted = re.sub(r"\bAIza[A-Za-z0-9_-]{20,}\b", "[REDACTED_GEMINI_KEY]", redacted)
-        redacted = re.sub(r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+", r"\1[REDACTED]", redacted)
+            for variant in sorted(
+                _secret_variants(secret_value), key=len, reverse=True
+            ):
+                redacted = re.sub(
+                    re.escape(variant), "[REDACTED]", redacted, flags=re.IGNORECASE
+                )
+        redacted = re.sub(
+            r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED_OPENAI_KEY]", redacted
+        )
+        redacted = re.sub(
+            r"\bAIza[A-Za-z0-9_-]{20,}\b", "[REDACTED_GEMINI_KEY]", redacted
+        )
+        redacted = re.sub(
+            r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+",
+            r"\1[REDACTED]",
+            redacted,
+        )
         return redacted
 
     def sanitize_log_value(self, value: Any) -> Any:
         if isinstance(value, str):
             return self.redact_text(value)
         if isinstance(value, dict):
-            return {str(key): self.sanitize_log_value(item) for key, item in value.items()}
+            return {
+                str(key): self.sanitize_log_value(item) for key, item in value.items()
+            }
         if isinstance(value, (list, tuple)):
             return [self.sanitize_log_value(item) for item in value]
         if value is None or isinstance(value, (bool, int, float)):
@@ -207,7 +294,9 @@ class JsonLogFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         entry: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(
+                record.created, timezone.utc
+            ).isoformat(),
             "level": record.levelname,
             "event": getattr(record, "event", "log"),
             "message": record.getMessage(),
@@ -217,7 +306,11 @@ class JsonLogFormatter(logging.Formatter):
             entry["context"] = context
         if record.exc_info:
             entry["traceback"] = self.formatException(record.exc_info)
-        return json.dumps(self._redactor.sanitize_log_value(entry), ensure_ascii=False, separators=(",", ":"))
+        return json.dumps(
+            self._redactor.sanitize_log_value(entry),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
 
 
 def configure_logging(
@@ -237,7 +330,9 @@ def configure_logging(
     logger.propagate = False
     formatter = JsonLogFormatter(redactor)
 
-    file_handler = RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        log_path, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+    )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
@@ -264,27 +359,49 @@ def safe_diagnostic_context(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     safe: dict[str, Any] = {}
-    allowed = {"window_start", "window_end", "date", "latest", "range_supported", "email_configured", "tokenstore_exists"}
+    allowed = {
+        "window_start",
+        "window_end",
+        "date",
+        "latest",
+        "range_supported",
+        "email_configured",
+        "tokenstore_exists",
+    }
     for key, item in value.items():
         key_text = str(key)[:80]
         if key_text in allowed:
-            safe[key_text] = item if item is None or isinstance(item, (bool, int, float)) else str(item)[:40]
+            safe[key_text] = (
+                item
+                if item is None or isinstance(item, (bool, int, float))
+                else str(item)[:40]
+            )
     return safe
 
 
 def diagnostic_mapping_shape(value: dict[Any, Any], depth: int) -> dict[str, Any]:
     fields = [
-        text[:80] if re.fullmatch(r"(?a:[A-Za-z][\w-]{0,79})", text) else "[nonstandard]"
+        text[:80]
+        if re.fullmatch(r"(?a:[A-Za-z][\w-]{0,79})", text)
+        else "[nonstandard]"
         for key in list(value)[:50]
         for text in (str(key),)
     ]
-    result: dict[str, Any] = {"type": "object", "field_count": len(value), "fields": fields}
+    result: dict[str, Any] = {
+        "type": "object",
+        "field_count": len(value),
+        "fields": fields,
+    }
     if depth < 1 and value:
-        result["sample"] = diagnostic_response_shape(next(iter(value.values())), depth + 1)
+        result["sample"] = diagnostic_response_shape(
+            next(iter(value.values())), depth + 1
+        )
     return result
 
 
-def diagnostic_sequence_shape(value: list[Any] | tuple[Any, ...], depth: int) -> dict[str, Any]:
+def diagnostic_sequence_shape(
+    value: list[Any] | tuple[Any, ...], depth: int
+) -> dict[str, Any]:
     result: dict[str, Any] = {"type": "array", "items": len(value)}
     if depth < 1 and value:
         result["item_shape"] = diagnostic_response_shape(value[0], depth + 1)
@@ -368,7 +485,7 @@ class DiagnosticCapture:
             self._redactor.sanitize_log_value(entry)
             for entry in raw
             if isinstance(entry, dict)
-        ][-self._max_entries:]
+        ][-self._max_entries :]
         return self._entries_cache
 
     def flush(self) -> None:
@@ -382,7 +499,7 @@ class DiagnosticCapture:
                 )
             try:
                 self._set_kv(self._entries_key, payload)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 return
             with self._lock:
                 self._dirty_count = max(0, self._dirty_count - dirty_count)
@@ -405,13 +522,15 @@ class DiagnosticCapture:
         """Persist bounded technical metadata without response or athlete content."""
         with self._lock:
             entries = self._load_entries()
-            entries.append({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "event": self._redactor.sanitize_log_value(str(event)[:80]),
-                "details": self._redactor.sanitize_log_value(details),
-            })
+            entries.append(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "event": self._redactor.sanitize_log_value(str(event)[:80]),
+                    "details": self._redactor.sanitize_log_value(details),
+                }
+            )
             if len(entries) > self._max_entries:
-                del entries[:-self._max_entries]
+                del entries[: -self._max_entries]
             self._dirty_count += 1
             should_flush = self._dirty_count >= min(self._batch_size, self._max_entries)
         if should_flush:

@@ -94,9 +94,14 @@ class CoachJobSubmissionService:
     ) -> dict[str, Any] | None:
         for row in rows:
             receipt = command_receipt(row.get("receipt"))
-            if receipt.get("mode") != "background" or receipt.get("session_key") != session_key:
+            if (
+                receipt.get("mode") != "background"
+                or receipt.get("session_key") != session_key
+            ):
                 continue
-            if operation_id and str(receipt.get("operation_id") or "") != str(operation_id):
+            if operation_id and str(receipt.get("operation_id") or "") != str(
+                operation_id
+            ):
                 continue
             return {**dict(row), "receipt": receipt}
         return None
@@ -113,12 +118,18 @@ class CoachJobSubmissionService:
         attachments: Any = None,
     ) -> dict[str, Any]:
         """Persist a long Coach turn before returning control to the browser."""
-        message, client_turn_id, request_kind, attachments, scope = self._validate_submission(
-            message, client_turn_id, request_kind, attachments
+        message, client_turn_id, request_kind, attachments, scope = (
+            self._validate_submission(
+                message, client_turn_id, request_kind, attachments
+            )
         )
         active = self.active(session_csrf_hash)
         if active and active["client_turn_id"] != client_turn_id:
-            raise AppError(409, "Für diese Sitzung läuft bereits eine Coach-Anfrage.", reason="chat_already_running")
+            raise AppError(
+                409,
+                "Für diese Sitzung läuft bereits eine Coach-Anfrage.",
+                reason="chat_already_running",
+            )
         operation_id = operation_id or uuid.uuid4().hex
         session_key = coach_session_key(session_csrf_hash)
         ai_provider, model, thinking_level = self._provider_settings(attachments)
@@ -139,11 +150,23 @@ class CoachJobSubmissionService:
         if existing_response:
             return existing_response
         self._state_event_buffer.publish(
-            "coach", {"message_id": user_message_id, "role": "user", "client_turn_id": client_turn_id}
+            "coach",
+            {
+                "message_id": user_message_id,
+                "role": "user",
+                "client_turn_id": client_turn_id,
+            },
         )
-        self._stream_registry.set_background_event(operation_id, cancel_event or threading.Event())
+        self._stream_registry.set_background_event(
+            operation_id, cancel_event or threading.Event()
+        )
         self._wake_event.set()
-        return {"status": "queued", "mode": "background", "operation_id": operation_id, "plan_scope": scope}
+        return {
+            "status": "queued",
+            "mode": "background",
+            "operation_id": operation_id,
+            "plan_scope": scope,
+        }
 
     def _validate_submission(
         self,
@@ -156,7 +179,9 @@ class CoachJobSubmissionService:
         client_turn_id = str(client_turn_id or "").strip()
         request_kind = str(request_kind or "").strip() or None
         if request_kind not in {None, "morning_checkin"}:
-            raise AppError(400, "Unbekannte Coach-Schnellaktion.", reason="invalid_request_kind")
+            raise AppError(
+                400, "Unbekannte Coach-Schnellaktion.", reason="invalid_request_kind"
+            )
         try:
             attachments = validate_attachments(attachments)
         except ValueError:
@@ -167,16 +192,32 @@ class CoachJobSubmissionService:
             ) from None
         if attachments and not message:
             message = "Bitte analysiere die angehängten Dateien."
-        scope = coach_execution_scope(None, background_horizon_days=self._background_horizon_days)
+        scope = coach_execution_scope(
+            None, background_horizon_days=self._background_horizon_days
+        )
         if not message or len(message) > 12_000:
-            raise AppError(400, "Die Coach-Nachricht ist leer oder zu lang.", reason="invalid_chat_message")
+            raise AppError(
+                400,
+                "Die Coach-Nachricht ist leer oder zu lang.",
+                reason="invalid_chat_message",
+            )
         if not client_turn_id or len(client_turn_id) > 120:
-            raise AppError(400, "client_turn_id muss eine begrenzte, nicht leere Kennung sein.", reason="invalid_client_turn")
+            raise AppError(
+                400,
+                "client_turn_id muss eine begrenzte, nicht leere Kennung sein.",
+                reason="invalid_client_turn",
+            )
         if not scope["background"]:
-            raise AppError(400, "Diese Coach-Anfrage benötigt keinen Hintergrundauftrag.", reason="background_not_required")
+            raise AppError(
+                400,
+                "Diese Coach-Anfrage benötigt keinen Hintergrundauftrag.",
+                reason="background_not_required",
+            )
         return message, client_turn_id, request_kind, attachments, scope
 
-    def _provider_settings(self, attachments: list[dict[str, Any]]) -> tuple[str, str, str]:
+    def _provider_settings(
+        self, attachments: list[dict[str, Any]]
+    ) -> tuple[str, str, str]:
         ai_provider = self._settings_service.selected_ai_provider()
         model = self._settings_service.selected_model(ai_provider)
         thinking_level = self._settings_service.selected_thinking_level()
@@ -186,7 +227,11 @@ class CoachJobSubmissionService:
                 "Kein KI-Dienst konfiguriert. Bitte hinterlege einen OpenAI- oder Gemini-API-Schlüssel in der Serverkonfiguration.",
                 reason="ai_provider_not_configured",
             )
-        if ai_provider == "gemini" and gemini_inline_image_bytes(attachments) > self._max_gemini_inline_image_bytes:
+        if (
+            ai_provider == "gemini"
+            and gemini_inline_image_bytes(attachments)
+            > self._max_gemini_inline_image_bytes
+        ):
             raise AppError(
                 413,
                 "Die ausgewählten Dateien sind für eine Gemini-Anfrage zusammen zu groß. Sende weniger Dateien oder wähle OpenAI.",
@@ -213,20 +258,29 @@ class CoachJobSubmissionService:
             database_manager = self._database_manager()
             with database_manager.unit_of_work() as db:
                 existing = db.execute(
-                    "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)
+                    "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?",
+                    (client_turn_id,),
                 ).fetchone()
                 if existing:
                     receipt = command_receipt(existing.get("receipt"))
-                    if receipt.get("session_key") != coach_session_key(session_csrf_hash):
+                    if receipt.get("session_key") != coach_session_key(
+                        session_csrf_hash
+                    ):
                         raise AppError(
                             403,
                             "Dieser Coach-Auftrag gehoert zu einer anderen Sitzung.",
                             reason="command_scope_denied",
                         )
                     if receipt.get("mode") != "background":
-                        raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
+                        raise AppError(
+                            409,
+                            "Diese Coach-Nachricht wird bereits verarbeitet.",
+                            reason="client_turn_in_progress",
+                        )
                     return {
-                        "status": "completed" if existing.get("status") == "completed" else "queued",
+                        "status": "completed"
+                        if existing.get("status") == "completed"
+                        else "queued",
                         "mode": "background",
                         "operation_id": receipt.get("operation_id"),
                         "plan_scope": receipt.get("plan_scope") or scope,
@@ -239,15 +293,23 @@ class CoachJobSubmissionService:
                         reason="chat_already_running",
                     )
 
-                user_message = self._chat_repository.add(db, "user", message, client_turn_id=client_turn_id)
-                attachment_json = json.dumps(attachments, ensure_ascii=False, separators=(",", ":"))
+                user_message = self._chat_repository.add(
+                    db, "user", message, client_turn_id=client_turn_id
+                )
+                attachment_json = json.dumps(
+                    attachments, ensure_ascii=False, separators=(",", ":")
+                )
                 stored_attachment_bytes = db.execute(
                     "SELECT COALESCE(SUM(length(attachments)), 0) AS total FROM messages"
                 ).fetchone()["total"]
                 stored_gemini_history_row = db.execute(
                     "SELECT COALESCE(length(value), 0) AS total FROM kv WHERE key='gemini_conversation_history'"
                 ).fetchone()
-                stored_gemini_history_bytes = stored_gemini_history_row["total"] if stored_gemini_history_row else 0
+                stored_gemini_history_bytes = (
+                    stored_gemini_history_row["total"]
+                    if stored_gemini_history_row
+                    else 0
+                )
                 if (
                     int(stored_attachment_bytes or 0)
                     + int(stored_gemini_history_bytes or 0)
@@ -259,7 +321,10 @@ class CoachJobSubmissionService:
                         "Der lokale Speicher für Chat-Anhänge ist ausgeschöpft. Entferne alte Chat-Daten, bevor du weitere Bilder sendest.",
                         reason="attachment_storage_quota",
                     )
-                db.execute("UPDATE messages SET attachments=? WHERE id=?", (attachment_json, user_message["id"]))
+                db.execute(
+                    "UPDATE messages SET attachments=? WHERE id=?",
+                    (attachment_json, user_message["id"]),
+                )
                 receipt = {
                     "status": "queued",
                     "mode": "background",
