@@ -473,20 +473,24 @@ class DiagnosticCapture:
         self._flush_lock = threading.Lock()
 
     def _load_entries(self) -> list[dict[str, Any]]:
-        if self._entries_cache is not None:
-            return self._entries_cache
+        with self._lock:
+            if self._entries_cache is not None:
+                return self._entries_cache
         try:
             raw = json.loads(self._get_kv(self._entries_key) or "[]")
         except (TypeError, ValueError):
             raw = []
         if not isinstance(raw, list):
             raw = []
-        self._entries_cache = [
+        loaded_entries = [
             self._redactor.sanitize_log_value(entry)
             for entry in raw
             if isinstance(entry, dict)
         ][-self._max_entries :]
-        return self._entries_cache
+        with self._lock:
+            if self._entries_cache is None:
+                self._entries_cache = loaded_entries
+            return self._entries_cache
 
     def flush(self) -> None:
         with self._flush_lock:
@@ -505,23 +509,26 @@ class DiagnosticCapture:
                 self._dirty_count = max(0, self._dirty_count - dirty_count)
 
     def status(self) -> dict[str, Any]:
+        self._load_entries()
         with self._lock:
-            entries = self._load_entries()
+            entries = self._entries_cache
             return {
                 "active": True,
-                "entries": len(entries),
+                "entries": len(entries or []),
                 "maximum_entries": self._max_entries,
             }
 
     def entries(self) -> list[dict[str, Any]]:
+        self._load_entries()
         with self._lock:
-            entries = self._load_entries()
-            return list(entries)
+            return list(self._entries_cache or [])
 
     def capture(self, event: str, details: dict[str, Any]) -> None:
         """Persist bounded technical metadata without response or athlete content."""
+        self._load_entries()
         with self._lock:
-            entries = self._load_entries()
+            entries = self._entries_cache
+            assert entries is not None
             entries.append(
                 {
                     "timestamp": datetime.now(timezone.utc).isoformat(),

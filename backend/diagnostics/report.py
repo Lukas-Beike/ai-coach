@@ -82,6 +82,8 @@ class DiagnosticReportService:
 
     def report(self) -> dict[str, Any]:
         deps = self._deps
+        diagnostic_capture_entries = deps.diagnostic_capture.entries()
+        diagnostic_capture_status = deps.diagnostic_capture.status()
         with deps.db_lock, deps.database_manager.unit_of_work() as db:
             snapshot = deps.sync_state.latest_snapshot()
             garmin_status = deps.garmin_projection.public_state()
@@ -172,8 +174,8 @@ class DiagnosticReportService:
                 },
                 "logs": deps.recent_logs.list(),
                 "debug_capture": {
-                    **deps.diagnostic_capture.status(),
-                    "entries": deps.diagnostic_capture.entries(),
+                    **diagnostic_capture_status,
+                    "entries": diagnostic_capture_entries,
                 },
                 "note": (
                     "Zugangsdaten, Tokens, Rohantworten und Athleteninhalte sind ausgeschlossen; "

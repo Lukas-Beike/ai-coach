@@ -130,8 +130,12 @@ class ObservabilityTests(unittest.TestCase):
                 raise RuntimeError("synthetic provider text")
 
         self.assertEqual(safe_response_headers(None, redact=lambda value: value), {})
-        self.assertEqual(safe_response_headers(object(), redact=lambda value: value), {})
-        self.assertEqual(safe_response_headers(InvalidHeaders(), redact=lambda value: value), {})
+        self.assertEqual(
+            safe_response_headers(object(), redact=lambda value: value), {}
+        )
+        self.assertEqual(
+            safe_response_headers(InvalidHeaders(), redact=lambda value: value), {}
+        )
 
     def test_redacts_nested_values_and_secret_variants(self):
         current = _config()
@@ -139,7 +143,10 @@ class ObservabilityTests(unittest.TestCase):
         encoded = "synthetic%40example.invalid"
         value = {
             "plain": "synthetic-openai-value",
-            "nested": ["synthetic-intervals-value", ("synthetic@example.invalid", encoded)],
+            "nested": [
+                "synthetic-intervals-value",
+                ("synthetic@example.invalid", encoded),
+            ],
             "number": 3,
             "none": None,
             "other": object(),
@@ -167,21 +174,35 @@ class ObservabilityTests(unittest.TestCase):
 
         self.assertNotIn("url-user", redacted)
         self.assertNotIn("url-password", redacted)
-        self.assertIn("https://example.invalid/api/v1/activities/[REDACTED_PATH]", redacted)
+        self.assertIn(
+            "https://example.invalid/api/v1/activities/[REDACTED_PATH]", redacted
+        )
         self.assertIn("token=%5BREDACTED%5D", redacted)
         self.assertIn("visible=ok", redacted)
 
     def test_redacts_calendar_url_and_dynamic_configuration(self):
-        configs = [_config(calendar_ical_url="https://first.example.invalid/calendar?secret=one"),
-                   _config(calendar_ical_url="https://second.example.invalid/calendar?secret=two")]
+        configs = [
+            _config(
+                calendar_ical_url="https://first.example.invalid/calendar?secret=one"
+            ),
+            _config(
+                calendar_ical_url="https://second.example.invalid/calendar?secret=two"
+            ),
+        ]
         redactor = Redactor(lambda: configs[0])
 
-        first = redactor.redact_text("configured https://first.example.invalid/calendar?secret=one")
-        self.assertEqual(redactor.safe_calendar_url(), "https://first.example.invalid/redacted")
+        first = redactor.redact_text(
+            "configured https://first.example.invalid/calendar?secret=one"
+        )
+        self.assertEqual(
+            redactor.safe_calendar_url(), "https://first.example.invalid/redacted"
+        )
         self.assertNotIn("secret=one", first)
 
         configs[0] = configs[1]
-        second = redactor.redact_text("configured https://second.example.invalid/calendar?secret=two")
+        second = redactor.redact_text(
+            "configured https://second.example.invalid/calendar?secret=two"
+        )
         self.assertIn("https://second.example.invalid/redacted", second)
         self.assertNotIn("secret=two", second)
 
@@ -204,8 +225,17 @@ class ObservabilityTests(unittest.TestCase):
                 raise RuntimeError("synthetic-openai-value")
             except RuntimeError:
                 record = logger.makeRecord(
-                    logger.name, logging.ERROR, __file__, 1, "failed", (), exc_info=sys.exc_info(),
-                    extra={"event": "synthetic_event", "context": {"secret": "synthetic-garmin-password"}},
+                    logger.name,
+                    logging.ERROR,
+                    __file__,
+                    1,
+                    "failed",
+                    (),
+                    exc_info=sys.exc_info(),
+                    extra={
+                        "event": "synthetic_event",
+                        "context": {"secret": "synthetic-garmin-password"},
+                    },
                 )
                 payload = json.loads(formatter.format(record))
         finally:
@@ -233,7 +263,11 @@ class ObservabilityTests(unittest.TestCase):
                 self.assertEqual(len(logger.handlers), 2)
                 self.assertFalse(logger.propagate)
                 self.assertEqual(logger.level, logging.INFO)
-                file_handler = next(handler for handler in logger.handlers if hasattr(handler, "maxBytes"))
+                file_handler = next(
+                    handler
+                    for handler in logger.handlers
+                    if hasattr(handler, "maxBytes")
+                )
                 self.assertEqual(file_handler.maxBytes, 1_000_000)
                 self.assertEqual(file_handler.backupCount, 3)
 
@@ -259,7 +293,9 @@ class ObservabilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory) / "not-created-data"
             log_path = data_dir / "logs" / "not-created.jsonl"
-            configure_logging(logger, data_dir, log_path, redactor, stream=io.StringIO())
+            configure_logging(
+                logger, data_dir, log_path, redactor, stream=io.StringIO()
+            )
             self.assertEqual(logger.handlers, [foreign_handler])
             self.assertFalse(data_dir.exists())
             self.assertFalse(log_path.exists())
@@ -268,33 +304,64 @@ class ObservabilityTests(unittest.TestCase):
 
     def test_safe_provider_path_redacts_resource_ids(self):
         self.assertEqual(
-            safe_provider_path("/api/v1/athlete/synthetic-athlete/activities/synthetic-activity"),
+            safe_provider_path(
+                "/api/v1/athlete/synthetic-athlete/activities/synthetic-activity"
+            ),
             "/api/v1/athlete/[REDACTED_PATH]/activities/[REDACTED_PATH]",
         )
         self.assertEqual(safe_provider_path("/api/v3/profile"), "/api/v3/profile")
 
     def test_safe_url_netloc_removes_userinfo_and_keeps_host_and_port(self):
-        parsed = urlparse("https://synthetic-user:synthetic-password@example.invalid:8443/path")
+        parsed = urlparse(
+            "https://synthetic-user:synthetic-password@example.invalid:8443/path"
+        )
         self.assertEqual(safe_url_netloc(parsed), "example.invalid:8443")
 
     def test_external_result_context_contains_shape_only(self):
         self.assertEqual(external_result_context(None), {"result_type": "null"})
-        self.assertEqual(external_result_context({"secret": "synthetic-value"}), {"result_type": "object", "result_fields": 1})
-        self.assertEqual(external_result_context((1, 2)), {"result_type": "array", "result_items": 2})
-        self.assertEqual(external_result_context("synthetic-value"), {"result_type": "str"})
+        self.assertEqual(
+            external_result_context({"secret": "synthetic-value"}),
+            {"result_type": "object", "result_fields": 1},
+        )
+        self.assertEqual(
+            external_result_context((1, 2)), {"result_type": "array", "result_items": 2}
+        )
+        self.assertEqual(
+            external_result_context("synthetic-value"), {"result_type": "str"}
+        )
 
     def test_diagnostic_shapes_are_bounded_and_keep_only_structure(self):
-        value = {"athlete_name": "Ada", "nested": [{"token": "hidden"}], "invalid key": "secret"}
+        value = {
+            "athlete_name": "Ada",
+            "nested": [{"token": "hidden"}],
+            "invalid key": "secret",
+        }
         shape = diagnostic_response_shape(value)
         self.assertEqual(shape["field_count"], 3)
         self.assertEqual(shape["fields"], ["athlete_name", "nested", "[nonstandard]"])
         self.assertEqual(shape["sample"], {"type": "string", "length": 3})
-        self.assertEqual(diagnostic_response_shape([{"token": "hidden"}])["item_shape"]["fields"], ["token"])
-        self.assertEqual(diagnostic_response_shape({"nested": [{"token": "hidden"}]}, depth=1), {"type": "object", "field_count": 1, "fields": ["nested"]})
-        self.assertEqual(diagnostic_capture_response("synthetic-response"), {"shape": {"type": "string", "length": 18}})
+        self.assertEqual(
+            diagnostic_response_shape([{"token": "hidden"}])["item_shape"]["fields"],
+            ["token"],
+        )
+        self.assertEqual(
+            diagnostic_response_shape({"nested": [{"token": "hidden"}]}, depth=1),
+            {"type": "object", "field_count": 1, "fields": ["nested"]},
+        )
+        self.assertEqual(
+            diagnostic_capture_response("synthetic-response"),
+            {"shape": {"type": "string", "length": 18}},
+        )
 
     def test_safe_diagnostic_context_and_error_never_retain_values_or_text(self):
-        context = safe_diagnostic_context({"date": "2026-09-15", "secret": "synthetic-secret", "latest": True, 1: "ignored"})
+        context = safe_diagnostic_context(
+            {
+                "date": "2026-09-15",
+                "secret": "synthetic-secret",
+                "latest": True,
+                1: "ignored",
+            }
+        )
         self.assertEqual(context, {"date": "2026-09-15", "latest": True})
         error = RuntimeError("synthetic exception text")
         error.status = 502
@@ -302,7 +369,16 @@ class ObservabilityTests(unittest.TestCase):
         error.validation_reason = "invalid_request"
         error.provider_error_code = "server_error"
         safe = safe_diagnostic_error(error)
-        self.assertEqual(safe, {"type": "RuntimeError", "status": 502, "reason": "provider_error", "validation_reason": "invalid_request", "provider_error_code": "server_error"})
+        self.assertEqual(
+            safe,
+            {
+                "type": "RuntimeError",
+                "status": 502,
+                "reason": "provider_error",
+                "validation_reason": "invalid_request",
+                "provider_error_code": "server_error",
+            },
+        )
         self.assertNotIn("synthetic", json.dumps(safe))
         error.provider_error_code = "synthetic-secret"
         error.reason = "not safe"
@@ -311,30 +387,45 @@ class ObservabilityTests(unittest.TestCase):
 
     def test_diagnostic_capture_is_always_active_and_redacts_entries(self):
         store = _KeyValueStore()
-        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), max_entries=2)
+        capture = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), max_entries=2
+        )
         self.assertTrue(capture.status()["active"])
-        capture.capture("synthetic-event", {"secret": "synthetic-openai-value", "shape": {"type": "string"}})
+        capture.capture(
+            "synthetic-event",
+            {"secret": "synthetic-openai-value", "shape": {"type": "string"}},
+        )
         self.assertEqual(capture.status()["entries"], 1)
         entry = capture.entries()[0]
         self.assertEqual(entry["event"], "synthetic-event")
-        self.assertEqual(entry["details"], {"secret": "[REDACTED]", "shape": {"type": "string"}})
+        self.assertEqual(
+            entry["details"], {"secret": "[REDACTED]", "shape": {"type": "string"}}
+        )
 
     def test_diagnostic_capture_is_bounded_and_keeps_recording(self):
         store = _KeyValueStore()
-        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), max_entries=2)
+        capture = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), max_entries=2
+        )
         for index in range(4):
-            capture.capture("event", {"index": index, "token": "synthetic-openai-value"})
+            capture.capture(
+                "event", {"index": index, "token": "synthetic-openai-value"}
+            )
         entries = capture.entries()
         self.assertEqual(len(entries), 2)
         self.assertEqual([entry["details"]["index"] for entry in entries], [2, 3])
-        self.assertTrue(all("synthetic-openai-value" not in json.dumps(entry) for entry in entries))
+        self.assertTrue(
+            all("synthetic-openai-value" not in json.dumps(entry) for entry in entries)
+        )
         capture.capture("still-recording", {"value": "technical"})
         self.assertTrue(capture.status()["active"])
         self.assertEqual(capture.entries()[-1]["event"], "still-recording")
 
     def test_diagnostic_capture_concurrent_writes_do_not_lose_updates(self):
         store = _KeyValueStore()
-        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), max_entries=32)
+        capture = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), max_entries=32
+        )
         barrier = threading.Barrier(8)
 
         def write(index: int) -> None:
@@ -348,7 +439,9 @@ class ObservabilityTests(unittest.TestCase):
             thread.join()
         entries = capture.entries()
         self.assertEqual(len(entries), 8)
-        self.assertEqual({entry["details"]["index"] for entry in entries}, set(range(8)))
+        self.assertEqual(
+            {entry["details"]["index"] for entry in entries}, set(range(8))
+        )
 
     def test_diagnostic_capture_flush_writes_outside_internal_lock(self):
         store = _KeyValueStore()
@@ -388,9 +481,61 @@ class ObservabilityTests(unittest.TestCase):
 
         self.assertEqual(capture._dirty_count, 0)
         self.assertEqual(
-            [entry["event"] for entry in json.loads(store.get("diagnostic_capture_entries"))],
+            [
+                entry["event"]
+                for entry in json.loads(store.get("diagnostic_capture_entries"))
+            ],
             ["event-1"],
         )
+
+    def test_diagnostic_capture_cache_miss_does_not_hold_lock_during_database_read(
+        self,
+    ):
+        store = _KeyValueStore()
+        first_read_started = threading.Event()
+        allow_first_read = threading.Event()
+        read_lock = threading.Lock()
+        read_count = 0
+
+        def delayed_get(key: str) -> str | None:
+            nonlocal read_count
+            with read_lock:
+                read_count += 1
+                is_first_read = read_count == 1
+            if is_first_read:
+                first_read_started.set()
+                allow_first_read.wait(timeout=2)
+            return store.get(key)
+
+        capture = DiagnosticCapture(
+            delayed_get,
+            store.set,
+            Redactor(_config),
+            max_entries=10,
+            batch_size=1,
+        )
+        status_result = []
+        writer_done = threading.Event()
+        status_thread = threading.Thread(
+            target=lambda: status_result.append(capture.status())
+        )
+        status_thread.start()
+        self.assertTrue(first_read_started.wait(timeout=1))
+
+        writer_thread = threading.Thread(
+            target=lambda: (capture.capture("event-during-load", {}), writer_done.set())
+        )
+        writer_thread.start()
+        completed_while_first_read_waited = writer_done.wait(timeout=1)
+        allow_first_read.set()
+        status_thread.join(timeout=1)
+        writer_thread.join(timeout=1)
+
+        self.assertTrue(completed_while_first_read_waited)
+        self.assertFalse(status_thread.is_alive())
+        self.assertFalse(writer_thread.is_alive())
+        self.assertTrue(status_result[0]["active"])
+        self.assertEqual(capture.entries()[0]["event"], "event-during-load")
 
     def test_observability_import_has_no_side_effect(self):
         environment = os.environ.copy()
@@ -398,7 +543,11 @@ class ObservabilityTests(unittest.TestCase):
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run(
-                [sys.executable, "-c", "import backend.observability; print('imported')"],
+                [
+                    sys.executable,
+                    "-c",
+                    "import backend.observability; print('imported')",
+                ],
                 cwd=directory,
                 env=environment,
                 capture_output=True,
