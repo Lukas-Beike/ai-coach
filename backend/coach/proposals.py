@@ -653,7 +653,7 @@ def _nutrition_approval_arguments(
 def _remote_source_message_status(
     message: Any, client_turn_id: str, conversation_id: str, session_key: str
 ) -> tuple[bool, bool]:
-    receipt = json.loads(message["receipt"] or "{}") if message["receipt"] else {}
+    receipt = json.loads(message["receipt"] or "{}")
     belongs = (
         message["conversation_id"] == conversation_id
         and receipt.get("session_key") == session_key
