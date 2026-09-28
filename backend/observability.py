@@ -353,6 +353,7 @@ class DiagnosticCapture:
         self._entries_cache: list[dict[str, Any]] | None = None
         self._dirty_count = 0
         self._lock = threading.RLock()
+        self._flush_lock = threading.Lock()
 
     def _load_entries(self) -> list[dict[str, Any]]:
         if self._entries_cache is not None:
@@ -371,18 +372,20 @@ class DiagnosticCapture:
         return self._entries_cache
 
     def flush(self) -> None:
-        payload_to_write = None
-        with self._lock:
-            if self._dirty_count > 0 and self._entries_cache is not None:
-                payload_to_write = json.dumps(
+        with self._flush_lock:
+            with self._lock:
+                if self._dirty_count <= 0 or self._entries_cache is None:
+                    return
+                dirty_count = self._dirty_count
+                payload = json.dumps(
                     self._entries_cache, ensure_ascii=False, separators=(",", ":")
                 )
-                self._dirty_count = 0
-        if payload_to_write is not None:
             try:
-                self._set_kv(self._entries_key, payload_to_write)
+                self._set_kv(self._entries_key, payload)
             except Exception:
-                pass
+                return
+            with self._lock:
+                self._dirty_count = max(0, self._dirty_count - dirty_count)
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -410,5 +413,6 @@ class DiagnosticCapture:
             if len(entries) > self._max_entries:
                 del entries[:-self._max_entries]
             self._dirty_count += 1
-            if self._dirty_count >= min(self._batch_size, self._max_entries):
-                self.flush()
+            should_flush = self._dirty_count >= min(self._batch_size, self._max_entries)
+        if should_flush:
+            self.flush()

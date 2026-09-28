@@ -359,11 +359,38 @@ class ObservabilityTests(unittest.TestCase):
             lock_held_during_set = getattr(capture._lock, "_is_owned", lambda: False)()
             store.set(key, value)
 
-        capture = DiagnosticCapture(store.get, monitored_set, Redactor(_config), max_entries=10)
+        capture = DiagnosticCapture(
+            store.get, monitored_set, Redactor(_config), max_entries=10, batch_size=1
+        )
         capture.capture("event-1", {"data": "test"})
-        capture.flush()
         self.assertFalse(lock_held_during_set)
         self.assertIn("event-1", store.get("diagnostic_capture_entries"))
+
+    def test_diagnostic_capture_retries_failed_flush_without_losing_dirty_entries(self):
+        store = _KeyValueStore()
+        fail_next_write = True
+
+        def failing_set(key: str, value: str) -> None:
+            nonlocal fail_next_write
+            if fail_next_write:
+                fail_next_write = False
+                raise OSError("synthetic storage failure")
+            store.set(key, value)
+
+        capture = DiagnosticCapture(
+            store.get, failing_set, Redactor(_config), max_entries=10, batch_size=1
+        )
+        capture.capture("event-1", {"data": "test"})
+        self.assertEqual(capture._dirty_count, 1)
+        self.assertIsNone(store.get("diagnostic_capture_entries"))
+
+        capture.flush()
+
+        self.assertEqual(capture._dirty_count, 0)
+        self.assertEqual(
+            [entry["event"] for entry in json.loads(store.get("diagnostic_capture_entries"))],
+            ["event-1"],
+        )
 
     def test_observability_import_has_no_side_effect(self):
         environment = os.environ.copy()
