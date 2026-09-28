@@ -832,9 +832,13 @@ function updateChatControls() {
   }
   if (input) {
     input.disabled = !controls.chatReady;
-    input.placeholder = !controls.aiConfigured
-      ? "OpenAI- oder Gemini-API-Schlüssel in Einstellungen konfigurieren…"
-      : (controls.chatReady ? "Frage deinen Coach…" : "Coach-Chat wird geladen…");
+    if (!controls.aiConfigured) {
+      input.placeholder = "OpenAI- oder Gemini-API-Schlüssel in Einstellungen konfigurieren…";
+    } else if (controls.chatReady) {
+      input.placeholder = "Frage deinen Coach…";
+    } else {
+      input.placeholder = "Coach-Chat wird geladen…";
+    }
   }
   updateChatSendButton($("#sendButton"), controls);
   updateChatSteerButton($("#steerButton"), controls);
