@@ -32,6 +32,10 @@ _STALE_PLAN_ERROR = (
 )
 
 
+def _query_rows(connection: Connection, query: str, params: tuple[str, ...]) -> list[Any]:
+    return connection.execute(query, params).fetchall()
+
+
 @dataclass
 class PreparedPlanSync:
     mode: str
@@ -220,23 +224,25 @@ class StructuredPlanSyncService:
     def _validate_selected_entry(db: Connection, entry: dict[str, Any]) -> str:
         local_id = str(entry["library_workout_id"])
         entity = entry.get("entity")
-        cursor = db.cursor()
         if entity == "planned_unit":
-            rows = cursor.execute(
+            rows = _query_rows(
+                db,
                 "SELECT payload, 'planned_unit' AS entity FROM planned_units WHERE local_id=?",
                 (local_id,),
-            ).fetchall()
+            )
         elif entity == "workout_library":
-            rows = cursor.execute(
+            rows = _query_rows(
+                db,
                 "SELECT payload, 'workout_library' AS entity FROM workout_library WHERE local_id=?",
                 (local_id,),
-            ).fetchall()
+            )
         else:
-            rows = cursor.execute(
+            rows = _query_rows(
+                db,
                 "SELECT payload, 'planned_unit' AS entity FROM planned_units WHERE local_id=? "
                 "UNION ALL SELECT payload, 'workout_library' AS entity FROM workout_library WHERE local_id=?",
                 (local_id, local_id),
-            ).fetchall()
+            )
         matching = next(
             (
                 row
