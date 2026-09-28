@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 from collections.abc import Callable
 from typing import Any
@@ -254,19 +255,23 @@ class WorkoutLibraryService:
     @staticmethod
     def _list_in_db(
         db: Any, limit: int, include_archived: bool
-    ) -> list[dict[str, Any]]:
+    ) -> builtins.list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT payload FROM workout_library WHERE json_extract(payload, '$.date') IS NULL "
-            "ORDER BY lower(json_extract(payload, '$.type')), lower(json_extract(payload, '$.name')) LIMIT ?",
-            (max(1, min(int(limit) * (2 if include_archived else 1), 1000)),),
+            "SELECT payload FROM workout_library WHERE json_type(payload)='object' "
+            "AND json_extract(payload, '$.date') IS NULL "
+            "AND (? OR COALESCE(json_extract(payload, '$.archived'), 0)=0) "
+            "ORDER BY lower(json_extract(payload, '$.type')), "
+            "lower(json_extract(payload, '$.name')), id LIMIT ?",
+            (
+                int(include_archived),
+                max(1, min(int(limit) * (2 if include_archived else 1), 1000)),
+            ),
         ).fetchall()
         result = []
         for row in rows:
             try:
                 payload = json.loads(row["payload"])
-                if isinstance(payload, dict) and (
-                    include_archived or not payload.get("archived")
-                ):
+                if isinstance(payload, dict):
                     result.append(payload)
             except (TypeError, ValueError):
                 continue

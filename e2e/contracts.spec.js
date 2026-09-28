@@ -10,18 +10,30 @@ async function ready(page) {
   await expect(page.locator("#appShell")).toBeVisible();
   await expect.poll(() => page.evaluate(() => state.loadPromise === null)).toBe(true);
   await expect.poll(() => page.evaluate(() => Boolean(state.data))).toBe(true);
+  await expect.poll(() => page.evaluate(() => !state.chatProposalRefreshInFlight)).toBe(true);
   await page.evaluate(() => {
-    state.stateEventSource?.close();
+    if (state.stateEventSource) {
+      state.stateEventSource.onmessage = null;
+      state.stateEventSource.onerror = null;
+      state.stateEventSource.close();
+      state.stateEventSource = null;
+    }
     clearTimeout(state.chatStatusTimer);
     state.data.messages = [];
     renderMessages([]);
   });
+  await page.evaluate(async () => {
+    await state.chatStatusPollInFlight?.catch(() => {});
+    await state.loadPromise?.catch(() => {});
+    state.pendingLoads.clear();
+  });
+  await expect.poll(() => page.evaluate(() => state.loadPromise === null)).toBe(true);
 }
 
 async function controlled(page) {
   await page.evaluate(() => {
     const original = fetch.bind(window);
-    const fixture = { histories: [], planCalls: 0, libraryCalls: 0, streamCalls: 0, proposedActions: null };
+    const fixture = { histories: [], historyCallStacks: [], planCalls: 0, libraryCalls: 0, streamCalls: 0, proposedActions: null };
     const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
     fixture.push = (event, payload) => fixture.controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
     window.__contract = fixture;
@@ -34,7 +46,10 @@ async function controlled(page) {
           fixture.push("started", { operation_id: "fixture-operation" });
         } }), { status: 200 }));
       }
-      if (path.startsWith("/api/chat/history")) return new Promise((resolve) => fixture.histories.push((messages) => resolve(json({ messages, generation: state.data.messages_generation, next_cursor: null, ...(fixture.proposedActions ? { proposed_actions: fixture.proposedActions } : {}) }))));
+      if (path.startsWith("/api/chat/history")) {
+        fixture.historyCallStacks.push(new Error().stack);
+        return new Promise((resolve) => fixture.histories.push((messages) => resolve(json({ messages, generation: state.data.messages_generation, next_cursor: null, ...(fixture.proposedActions ? { proposed_actions: fixture.proposedActions } : {}) }))));
+      }
       if (path.startsWith("/api/plan")) fixture.planCalls++;
       if (path.startsWith("/api/library")) fixture.libraryCalls++;
       return original(path, options);
@@ -153,6 +168,8 @@ test("history barriers preserve optimistic and completed messages through naviga
   await controlled(page);
   await page.evaluate(() => { void load("/api/bootstrap?local=1", ["chat"]); });
   await expect.poll(() => page.evaluate(() => __contract.histories.length)).toBe(1);
+  const caller = await page.evaluate(() => __contract.historyCallStacks[0]);
+  expect(caller).toContain("loadStateRequests");
   await page.locator("#messageInput").fill("Fixture Run plan");
   await page.locator("#sendButton").click();
   await page.evaluate(() => __contract.histories.shift()([]));
@@ -208,8 +225,20 @@ test("completed answers refresh outstanding action proposals asynchronously", as
   });
   await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
   await expect.poll(() => page.evaluate(() => __contract.histories.length)).toBe(1);
+  const caller = await page.evaluate(() => __contract.historyCallStacks[0]);
+  expect(caller).toContain("refreshChatProposalsInBackground");
   await page.evaluate(() => __contract.histories.shift()([]));
-  await expect.poll(() => page.evaluate(() => state.coachActionProposals.map((proposal) => proposal.id))).toEqual(["active-proposal"]);
+  await expect.poll(() => page.evaluate(() => ({
+    ids: state.coachActionProposals.map((proposal) => proposal.id),
+    contentVersion: state.chatContentVersion,
+    loadSequence: state.loadSequence,
+    caller: __contract.historyCallStacks[0],
+  })), { timeout: 5_000 }).toEqual({
+    ids: ["active-proposal"],
+    contentVersion: 1,
+    loadSequence: await page.evaluate(() => state.loadSequence),
+    caller,
+  });
 });
 
 test("every definite HTTP rejection retains the draft and concrete error", async ({ page }) => {

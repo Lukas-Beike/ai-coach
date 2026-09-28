@@ -77,7 +77,7 @@ class PrivacyAssemblyTests(unittest.TestCase):
 
         self.assertIsNot(first, second)
         self.assertIs(first._database_manager, manager)
-        self.assertIs(first._db_lock, replacement_lock)
+        self.assertFalse(hasattr(first, "_db_lock"))
         self.assertIs(first._profile, profile)
         self.assertIs(first._competitions, competition)
         self.assertIs(first._adaptive_preview, preview)

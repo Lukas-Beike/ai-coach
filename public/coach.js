@@ -22,9 +22,7 @@ function scheduleChatStatusPoll(delay = 1_500) {
 }
 
 async function loadChatHistoryFresh() {
-  const pendingLoad = state.loadPromise;
-  if (pendingLoad) await pendingLoad.catch(() => {});
-  await load("/api/bootstrap", ["chat"]);
+  await refreshChatHistoryState();
 }
 
 async function refreshChatProposalsInBackground(expectedContentVersion) {
@@ -37,15 +35,10 @@ async function refreshChatProposalsInBackground(expectedContentVersion) {
   const chatGeneration = state.chatGeneration;
   state.chatProposalRefreshInFlight = true;
   try {
-    const result = await api("/api/chat/history?limit=100");
+    await refreshChatHistoryState();
     if (sessionGeneration !== state.sessionGeneration
       || chatGeneration !== state.chatGeneration
-      || expectedContentVersion !== state.chatContentVersion
-      || !Array.isArray(result.proposed_actions)) return;
-    state.coachActionProposals = result.proposed_actions;
-    state.chatProposalRefreshPending = false;
-    renderCoachActionReview();
-    renderMessages(state.data?.messages || [], false);
+      || expectedContentVersion !== state.chatContentVersion) return;
   } catch (_) {
     // Keep the pending flag so the next completed turn retries the authoritative refresh.
   } finally {

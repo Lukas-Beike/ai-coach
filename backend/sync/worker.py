@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 from typing import Any, Protocol
@@ -11,6 +12,7 @@ from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.jobs import SyncJobStore
 
 _SYNC_JOB_WAKE_EVENT = threading.Event()
+_LOGGER = logging.getLogger(__name__)
 
 
 def shared_sync_job_wake_event() -> threading.Event:
@@ -93,6 +95,15 @@ class SyncJobWorker:
             except AppError as exc:
                 if exc.reason != "maintenance":
                     raise
+            except Exception as exc:  # noqa: BLE001 - survive transient claim failures
+                _LOGGER.error(
+                    "Synchronization worker iteration failed",
+                    extra={
+                        "event": "sync_worker_iteration_failed",
+                        "error_class": type(exc).__name__,
+                        "reason": getattr(exc, "reason", None),
+                    },
+                )
 
             self._wake_event.wait(self._poll_seconds)
             self._wake_event.clear()

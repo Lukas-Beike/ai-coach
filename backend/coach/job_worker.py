@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 
@@ -9,6 +10,8 @@ from backend.coach.background_job import CoachBackgroundJobRunner
 from backend.coach.job_store import CoachJobStore
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class CoachJobWorker:
@@ -56,6 +59,15 @@ class CoachJobWorker:
             except AppError as exc:
                 if exc.reason != "maintenance":
                     raise
+            except Exception as exc:  # noqa: BLE001 - survive transient claim failures
+                _LOGGER.error(
+                    "Coach worker iteration failed",
+                    extra={
+                        "event": "coach_worker_iteration_failed",
+                        "error_class": type(exc).__name__,
+                        "reason": getattr(exc, "reason", None),
+                    },
+                )
             self.wake_event.wait(5)
             self.wake_event.clear()
 

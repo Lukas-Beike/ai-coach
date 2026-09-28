@@ -162,7 +162,12 @@ test("cross-tab reset retains a rejected unsent draft and its recovery action", 
 });
 
 test("history and library cursors expose and append another page once", async ({ page }) => {
+  await expect.poll(() => page.evaluate(() => state.loadPromise === null)).toBe(true);
   await page.evaluate(() => {
+    state.stateEventSource?.close();
+    clearTimeout(state.stateEventRefreshTimer);
+    clearTimeout(state.stateEventReconnectTimer);
+    clearTimeout(state.chatStatusTimer);
     const original = window.fetch.bind(window);
     window.fetch = (url, options) => {
       if (String(url).includes("cursor=synthetic-history")) return Promise.resolve(new Response(JSON.stringify({ generation: state.data.messages_generation, messages: [{ id: 1, role: "user", content: "Older synthetic message" }], next_cursor: null })));
@@ -172,13 +177,15 @@ test("history and library cursors expose and append another page once", async ({
     state.data.messages = [{ id: 2, role: "assistant", content: "Current synthetic message" }];
     state.data.messages_next_cursor = "synthetic-history";
     renderMessages(state.data.messages);
+  });
+  await page.locator('#messages [data-page-area="chat"]').click();
+  await expect.poll(() => page.evaluate(() => state.data.messages.map((item) => item.id))).toEqual([1, 2]);
+  await page.evaluate(() => {
     state.data.library = [];
     state.data.library_next_cursor = "synthetic-library";
     renderLibrary([]);
+    document.querySelector("#library [data-page-area=library]").click();
   });
-  await page.locator('[data-page-area="chat"]').click();
-  await expect.poll(() => page.evaluate(() => state.data.messages.map((item) => item.id))).toEqual([1, 2]);
-  await page.evaluate(() => document.querySelector('[data-page-area="library"]').click());
   await expect.poll(() => page.evaluate(() => state.data.library.map((item) => item.id))).toEqual(["older-template"]);
 });
 

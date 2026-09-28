@@ -85,10 +85,14 @@ class CompetitionService:
         self._repository = repository
         self._now = now
 
-    def list(self, limit: int | None = None) -> list[dict[str, Any]]:
+    def list(
+        self, limit: int | None = None, *, db: Any | None = None
+    ) -> list[dict[str, Any]]:
         bounded = max(1, min(int(limit), 500)) if limit is not None else None
-        with self._database_manager.unit_of_work() as db:
+        if db is not None:
             return self._repository.list(db, bounded)
+        with self._database_manager.unit_of_work() as connection:
+            return self._repository.list(connection, bounded)
 
     def restore_in_transaction(
         self,

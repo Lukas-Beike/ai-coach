@@ -398,19 +398,18 @@ test.describe("critical browser states", () => {
   });
 
   test("a 401 during initial loading cannot mark the ended session scroll-ready", async ({ page }) => {
-    await openAuthenticatedApp(page);
-    await page.route("**/api/bootstrap?local=1", (route) => route.fulfill({
+    let bootstrapFailures = 0;
+    await page.route("**/api/bootstrap?local=1", (route) => {
+      bootstrapFailures += 1;
+      return route.fulfill({
       status: 401,
       json: { error: "Authentication required" },
-    }));
-
-    await page.evaluate(async () => {
-      history.replaceState(null, "", "#plan/overview");
-      state.initialStateLoaded = true;
-      await loadInitialState();
     });
+    });
+    await page.goto("/#plan/overview");
 
     await expect(page.locator("#loginDialog")).toBeVisible();
+    await expect.poll(() => bootstrapFailures).toBeGreaterThan(0);
     await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(false);
   });
 

@@ -133,7 +133,7 @@ jobs:
           echo "All native shards, syntax checks, and container tests passed."
 
   quality:
-    name: Quality baseline
+    name: Incremental quality checks
     needs: [source, test]
     if: needs.test.result == 'success'
     runs-on: ubuntu-latest
@@ -142,6 +142,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -152,24 +153,52 @@ jobs:
         run: |
           coverage run --branch --source=server.py,backend tests/run_tests.py --shard 1 --total 4
           coverage report --fail-under=0
+      # Keep a checked baseline for each ownership boundary. Unchanged backend modules stay excluded
+      # until touched; every changed backend module is automatically added below and checked strictly.
       - name: Run lint baseline
         run: >-
           ruff check tests/run_tests.py backend/coach/proposals.py
           backend/coach/read_tools.py backend/coach/tool_execution_service.py
           backend/coach/tool_preparation.py backend/db/manager.py
-          backend/errors.py backend/http_api/handler.py
+          backend/errors.py backend/http_api/handler.py backend/providers/weather.py
+          backend/planning/calendar_service.py backend/backup/export.py
+          backend/sync/worker.py backend/coach/local_assembly.py
       - name: Run formatter baseline
         run: >-
           ruff format --check tests/run_tests.py backend/coach/proposals.py
           backend/coach/read_tools.py backend/coach/tool_execution_service.py
           backend/coach/tool_preparation.py backend/db/manager.py
-          backend/errors.py backend/http_api/handler.py
+          backend/errors.py backend/http_api/handler.py backend/providers/weather.py
+          backend/planning/calendar_service.py backend/backup/export.py
+          backend/sync/worker.py backend/coach/local_assembly.py
       - name: Run lightweight type baseline
         run: >-
           mypy --ignore-missing-imports --follow-imports=skip tests/run_tests.py
           backend/coach/proposals.py backend/coach/read_tools.py
           backend/coach/tool_execution_service.py backend/coach/tool_preparation.py
           backend/db/manager.py backend/errors.py backend/http_api/handler.py
+          backend/providers/weather.py backend/planning/calendar_service.py
+          backend/backup/export.py backend/sync/worker.py
+          backend/coach/local_assembly.py
+      - name: Check changed backend modules
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          base_sha="$BASE_SHA"
+          if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]]; then
+            base_sha="${HEAD_SHA}^"
+          fi
+          mapfile -t files < <(git diff --diff-filter=ACMRT --name-only "$base_sha" "$HEAD_SHA" -- backend/ | grep -E '^backend/.*\.py$' || true)
+          if ((${#files[@]} == 0)); then
+            echo "No changed backend Python modules; incremental static checks skipped."
+            exit 0
+          fi
+          printf 'Checking changed backend modules:\n%s\n' "${files[@]}"
+          ruff check "${files[@]}"
+          ruff format --check "${files[@]}"
+          mypy --ignore-missing-imports --follow-imports=skip "${files[@]}"
 
   image_sbom:
     needs: source
