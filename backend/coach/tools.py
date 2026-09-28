@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from backend.coach.capabilities import build_capability_catalog
+from backend.coach.outcomes import COACH_OPERATION_LABELS
+
 
 def build_tool_contracts(
     *,
@@ -23,43 +26,6 @@ def build_tool_contracts(
     CHECKIN_SCORE_FIELDS = checkin_score_fields
     TRAINING_PLAN_STATUSES = training_plan_statuses
 
-    COACH_CANONICAL_TOOL_NAMES = (
-        "read_profile",
-        "update_profile",
-        "read_training_state",
-        "list_recent_activities",
-        "get_activity_details",
-        "list_workout_library",
-        "list_planned_workouts",
-        "list_change_history",
-        "list_competitions",
-        "list_training_plans",
-        "stage_training_plan",
-        "commit_training_plan",
-        "replace_training_plan",
-        "apply_training_changes",
-        "manage_training_templates",
-        "save_checkin",
-        "save_activity_feedback",
-        "delete_activity_feedback",
-        "save_competition",
-        "delete_competition",
-        "start_provider_refresh",
-        "refresh_current_performance",
-        "start_intervals_plan_sync",
-        "sync_competitions",
-        "get_sync_job",
-        "resolve_training_sync_conflict",
-        "preview_adaptive_replan",
-        "apply_adaptive_replan",
-        "update_training_plan",
-        "undo_training_change",
-        "delete_duplicate_intervals_activity",
-        "apply_workout_library_plan",
-        "save_nutrition_entry",
-        "delete_nutrition_entry",
-        "read_nutrition",
-    )
     
     
     def _canonical_coach_tool(
@@ -102,7 +68,7 @@ def build_tool_contracts(
         _canonical_coach_tool("read_training_state", "Read current local training references. For full repair include inactive entries and follow planned_units_page.next_cursor until has_more is false BEFORE editing or syncing. A changed planning revision invalidates the cursor; restart enumeration in that case.", {"include_inactive": {"type": "boolean"}, "cursor": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": COACH_TRAINING_CHANGE_LIMIT}}),
         _canonical_coach_tool("list_recent_activities", "Read completed activities from the latest local snapshot without refreshing a provider.", {"days": {"type": "integer"}, "limit": {"type": "integer"}}),
         _canonical_coach_tool("get_activity_details", "Read a bounded, sanitized detailed analysis projection for exactly one completed Intervals.icu activity from the local snapshot. Use only after an explicit request to analyse or deeply review that one activity; resolve its exact activity ID with list_recent_activities first when needed. Never use this for generic activity summaries or all past activities.", {"activity_id": {"type": "string", "minLength": 1, "maxLength": 200}}, strict=True),
-        _canonical_coach_tool("list_workout_library", "Read saved local training templates; local library data is authoritative.", {"limit": {"type": "integer"}, "include_archived": {"type": "boolean"}}),
+        _canonical_coach_tool("list_workout_library", "Read saved local training templates; local library data is authoritative. Results are limited to 100 entries per request.", {"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "include_archived": {"type": "boolean"}}),
         _canonical_coach_tool("list_planned_workouts", "Read future locally scheduled workouts.", {"limit": {"type": "integer"}}),
         _canonical_coach_tool("list_change_history", "Read local change-history references that can be used to request an undo preview.", {"limit": {"type": "integer"}}),
         _canonical_coach_tool("list_competitions", "Read locally stored target competitions."),
@@ -276,13 +242,33 @@ def build_tool_contracts(
             },
         ),
         _canonical_coach_tool(
+            "update_nutrition_entry",
+            "Correct an existing meal by ID after reading the matching entry. Supply only changed fields; omitted date, time, description, macros, and source stay unchanged.",
+            {
+                "id": {"type": "string", "description": "Exact ID of the meal identified by read_nutrition"},
+                "changes": {"type": "object", "additionalProperties": False, "properties": {
+                    "meal_date": {"type": "string"}, "logged_at": {"type": "string"},
+                    "meal_time": {"type": "string"}, "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"]},
+                    "description": {"type": "string"}, "kcal": {"type": "integer", "minimum": 0, "maximum": 10000},
+                    "carbs_g": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+                    "protein_g": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+                    "fat_g": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+                }},
+            },
+        ),
+        _canonical_coach_tool(
             "delete_nutrition_entry",
             "Delete a single nutrition log entry by its ID.",
             {"id": {"type": "string", "description": "Exact ID of the nutrition entry to delete"}},
         ),
         _canonical_coach_tool(
+            "sync_nutrition",
+            "Explicitly synchronize nutrition with Intervals.icu. Use date for one day or pending_limit for pending dates. This writes nutrition data remotely and is never automatic.",
+            {"date": {"type": "string"}, "pending_limit": {"type": "integer", "minimum": 1, "maximum": 31}},
+        ),
+        _canonical_coach_tool(
             "read_nutrition",
-            "Read nutrition entries and day summaries for a date or date range.",
+            "Read nutrition entries and day summaries for a date or a range of at most 31 days.",
             {
                 "date": {"type": "string", "description": "Optional specific date YYYY-MM-DD"},
                 "start": {"type": "string", "description": "Optional start date YYYY-MM-DD for range"},
@@ -292,6 +278,7 @@ def build_tool_contracts(
     ]
     
     
+    COACH_CANONICAL_TOOL_NAMES = tuple(tool["name"] for tool in COACH_STRUCTURED_TOOLS)
     STRUCTURED_READ_ONLY_TOOLS = {
         "read_profile",
         "read_training_state", "list_recent_activities", "get_activity_details", "list_workout_library", "list_planned_workouts",
@@ -325,4 +312,8 @@ def build_tool_contracts(
     STRUCTURED_READ_ONLY_TOOLS.add("inspect_activity_duplicates")
     
 
-    return COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, COACH_DIALOGUE_TOOLS
+    capabilities = build_capability_catalog(
+        COACH_STRUCTURED_TOOLS, COACH_DIALOGUE_TOOLS, STRUCTURED_READ_ONLY_TOOLS,
+        COACH_OPERATION_LABELS,
+    )
+    return COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, COACH_DIALOGUE_TOOLS, capabilities

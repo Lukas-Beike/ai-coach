@@ -178,6 +178,35 @@ class StructuredToolExecutionTests(unittest.TestCase):
             duplicate_delete_action(duplicate), "bound-csrf"
         )
 
+    def test_direct_duplicate_delete_requires_remote_write_approval(self) -> None:
+        action = {
+            "operation": "delete_duplicate_intervals_activity",
+            "intent": "remote_sync",
+            "target_system": "intervals",
+            "request": {"remote_write": True, "source_message_ids": [3]},
+        }
+        self.proposal_creation.create_remote_write.return_value = {
+            "status": "preview",
+            "proposed_action": {"id": "proposal-1"},
+        }
+
+        result = self.execute(
+            "delete_duplicate_intervals_activity",
+            {"canonical_id": "900", "duplicate_id": "901"},
+            action=action,
+        )
+
+        self.assertEqual(result["status"], "approval_required")
+        self.proposal_creation.create_remote_write.assert_called_once_with(
+            "delete_duplicate_intervals_activity",
+            {"canonical_id": "900", "duplicate_id": "901"},
+            action,
+            conversation_id="conversation-1",
+            client_turn_id="turn-1",
+            session_csrf_hash="csrf-hash",
+        )
+        self.tool_dispatch.execute.assert_not_called()
+
     def test_dispatch_receives_complete_turn_and_cancellation_context(self) -> None:
         expected = {"ok": True, "status": "completed"}
         arguments = {"target": "intervals", "_request": {"period": {"start": "2026-09-20"}}}

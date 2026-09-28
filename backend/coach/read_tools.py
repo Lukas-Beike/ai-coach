@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
 from backend.athlete.profile import ProfileService
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
+from backend.nutrition.models import validate_iso_date
 from backend.nutrition.service import NutritionService
 from backend.planning.competition_service import CompetitionService
 from backend.planning.library_service import WorkoutLibraryService
@@ -60,7 +62,7 @@ class CoachReadToolService:
             return self._activity_read_tool_service().execute(name, arguments)
         if name == "list_workout_library":
             limit = self._bounded_integer(
-                arguments, "limit", 100, 500, "Bibliothekslimit ist ungültig."
+                arguments, "limit", 100, 100, "Bibliothekslimit ist ungültig."
             )
             return {
                 "ok": True,
@@ -85,7 +87,10 @@ class CoachReadToolService:
         if name == "list_competitions":
             return {"ok": True, "competitions": self._competition_service().list()}
         if name == "list_training_plans":
-            return {"ok": True, "training_plans": self._training_plan_service().list(100)}
+            return {
+                "ok": True,
+                "training_plans": self._training_plan_service().list(100),
+            }
         if name == "read_nutrition":
             return self._read_nutrition(arguments)
         return None
@@ -97,11 +102,17 @@ class CoachReadToolService:
         if arguments.get("date"):
             return {"ok": True, **service.get_day_summary(str(arguments["date"]))}
         if arguments.get("start") and arguments.get("end"):
+            start = validate_iso_date(arguments["start"])
+            end = validate_iso_date(arguments["end"])
+            if (date.fromisoformat(end) - date.fromisoformat(start)).days > 30:
+                raise AppError(
+                    400,
+                    "Der Ernährungszeitraum darf höchstens 31 Tage umfassen.",
+                    reason="range_too_large",
+                )
             return {
                 "ok": True,
-                "summaries": service.get_range_summary(
-                    str(arguments["start"]), str(arguments["end"])
-                ),
+                "summaries": service.get_range_summary(start, end),
             }
         return {"ok": True, **service.get_today_summary()}
 

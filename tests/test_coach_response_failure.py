@@ -16,6 +16,19 @@ class CoachResponseFailureTests(unittest.TestCase):
     request = dialogue.CoachDialogueTests.request
     call = dialogue.CoachDialogueTests.call
 
+    @staticmethod
+    def approve_remote_write():
+        proposals = server.COACH_PROPOSALS.read_service().current("synthetic-session")
+        if not proposals:
+            raise AssertionError("expected a pending remote approval proposal")
+        confirmation = server.COACH_PROPOSALS.confirmation_service().confirm(
+            proposals[0]["id"], "synthetic-session"
+        )
+        return server.COACH_PROPOSALS.execution_service().execute(
+            confirmation["action_token"], "synthetic-session",
+            confirmation["proposed_action"]["payload_hash"],
+        )
+
     def test_background_rate_limit_retries_summary_with_parent_and_one_sync(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-08")])
         turn_id = "synthetic-sync-rate-retry"
@@ -46,13 +59,16 @@ class CoachResponseFailureTests(unittest.TestCase):
                 ) as enqueue:
             receipt = server.COACH_TURNS.chat_turn_service().run(message, client_turn_id=turn_id,
                                            session_csrf_hash="synthetic-session", background_job=True)
-        self.assertEqual(receipt["status"], "completed")
-        enqueue.assert_called_once()
+            self.assertEqual(receipt["status"], "completed")
+            enqueue.assert_not_called()
+            approved = self.approve_remote_write()
+            enqueue.assert_called_once()
         self.assertEqual(len(payloads), 3)
         self.assertEqual(payloads[1], payloads[2])
         self.assertEqual(payloads[2]["previous_response_id"], "resp_sync")
         self.assertNotIn("conversation", payloads[0])
         self.assertNotIn("previous_response_id", payloads[0])
+        self.assertEqual(approved["status"], "queued")
 
     def test_failed_background_answer_keeps_sync_and_reports_provider_code(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-08")])
@@ -88,19 +104,21 @@ class CoachResponseFailureTests(unittest.TestCase):
                                            session_csrf_hash="synthetic-session", background_job=True)
             replay = server.COACH_TURNS.chat_turn_service().run(message, client_turn_id=turn_id,
                                           session_csrf_hash="synthetic-session", background_job=True)
-        enqueue.assert_called_once()
-        self.assertEqual(responses, 2)
-        self.assertEqual(receipt, replay)
-        self.assertEqual(receipt["status"], "partial")
-        self.assertEqual(receipt["pending_operations"], [])
-        self.assertEqual(receipt["diagnostic_error"]["reason"], "response_error")
-        self.assertEqual(receipt["diagnostic_error"]["provider_error_code"], "server_error")
-        self.assertIn("KI-Dienst konnte die Antwort nicht fertigstellen", receipt["message"]["content"])
-        self.assertIn("erneut", receipt["message"]["content"])
-        self.assertIn("Plansynchronisierung beauftragt", receipt["message"]["content"])
-        self.assertIn("noch nicht bestätigt", receipt["message"]["content"])
+            enqueue.assert_not_called()
+            self.assertEqual(responses, 2)
+            self.assertEqual(receipt, replay)
+            self.assertEqual(receipt["status"], "partial")
+            self.assertEqual(receipt["pending_operations"], [])
+            self.assertEqual(receipt["diagnostic_error"]["reason"], "response_error")
+            self.assertEqual(receipt["diagnostic_error"]["provider_error_code"], "server_error")
+            self.assertIn("KI-Dienst konnte die Antwort nicht fertigstellen", receipt["message"]["content"])
+            self.assertIn("erneut", receipt["message"]["content"])
+            self.assertIn("wartet auf deine Freigabe", receipt["message"]["content"])
+            self.assertNotIn("Plansynchronisierung beauftragt", receipt["message"]["content"])
+            approved = self.approve_remote_write()
+            enqueue.assert_called_once()
         self.assertEqual(
-            server.SYNC_JOB_QUEUE.service().state(receipt["sync_job_ids"][0])[
+            server.SYNC_JOB_QUEUE.service().state(approved["sync_job_id"])[
                 "status"
             ],
             "queued",

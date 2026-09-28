@@ -604,7 +604,9 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                                 target="intervals", remote_write=True, sync_scope="selected"),
             {"output_text": "Auswahl unvollstaendig."},
         ])
-        self.assertEqual(receipt["status"], "failed")
+        self.assertEqual(receipt["status"], "completed")
+        self.assertEqual(receipt["command_receipts"][0]["result"]["status"], "failed")
+        self.assertEqual(receipt["command_receipts"][0]["result"]["reason"], "incomplete_repair_selection")
         self.assertIsNone(server.SYNC_JOB_QUEUE.store().claim())
         self.assertEqual(self.mutations, [])
 

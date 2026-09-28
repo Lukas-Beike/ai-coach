@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import unittest
+import hashlib
+import json
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from inspect import signature
@@ -59,6 +61,23 @@ class RecordingFixtureLoader:
 
     def path(self) -> Path | None:
         return self.fixture_path
+
+
+class MockNutritionSync:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def sync_day(self, day):
+        self.calls.append(("day", day))
+        return {"date": day, "pending": False}
+
+    def sync_pending(self, limit):
+        self.calls.append(("pending", limit))
+        return {"synced_dates": ["2026-09-24"], "pending_dates": [], "failed_dates": {}}
+
+    def sync_approved(self, manifest):
+        self.calls.append(("approved", manifest))
+        return {"synced_dates": [item["date"] for item in manifest], "pending_dates": [], "failed_dates": {}}
 
 
 class RecordingObserver:
@@ -131,6 +150,7 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.queue = RecordingQueue()
         self.morning = RecordingService()
         self.fixture = RecordingFixtureLoader()
+        self.nutrition = MockNutritionSync()
         self.executor = self.make_executor()
 
     def make_executor(self) -> SyncJobExecutor:
@@ -145,6 +165,7 @@ class SyncJobExecutorTests(unittest.TestCase):
         )
         return SyncJobExecutor(
             provider_dispatcher=SyncJobProviderDispatcher(
+                nutrition_sync_service=self.nutrition,
                 intervals_jobs=IntervalsSyncJobOwner(
                     historical_sync=historical_sync,
                     intervals_sync_service=self.intervals,
@@ -198,12 +219,15 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertEqual(self.performance.calls, [((), {})])
 
         competition = self.executor.execute(
-            self.job("intervals", "competition_push", {"reason": "manual"})
+            self.job(
+                "intervals", "competition_push",
+                {"reason": "manual", "approval_manifest": []},
+            )
         )
         self.assertEqual(competition, {"status": "ok", "count": 2})
         self.assertEqual(
             self.competitions.calls[-1],
-            ((), {"reason": "manual", "push_local": True}),
+            ((), {"reason": "manual", "push_local": True, "expected_manifest": []}),
         )
 
         entry = {
@@ -218,6 +242,38 @@ class SyncJobExecutorTests(unittest.TestCase):
             self.selected.calls,
             [(({"entries": [entry], "repair": True},), {})],
         )
+
+    def test_dispatches_explicit_nutrition_sync_jobs(self) -> None:
+        daily = self.executor.execute(
+            self.job("intervals", "nutrition_sync", {"date": "2026-09-24"})
+        )
+        pending = self.executor.execute(
+            self.job("intervals", "nutrition_sync", {"pending_limit": 7})
+        )
+        self.assertEqual(daily, {"status": "completed", "date": "2026-09-24", "pending": False})
+        self.assertEqual(pending, {
+            "status": "completed", "synced_dates": ["2026-09-24"],
+            "pending_dates": [], "failed_dates": [],
+        })
+        self.assertEqual(self.nutrition.calls, [("day", "2026-09-24"), ("pending", 7)])
+
+        approved = [{
+            "date": "2026-09-24", "revision": 2, "total_kcal": 1200,
+            "total_carbs_g": 120.0, "total_protein_g": 60.0,
+            "total_fat_g": 40.0, "entry_count": 2,
+        }]
+        approved[0]["sha256"] = hashlib.sha256(json.dumps(
+            {key: value for key, value in approved[0].items() if key != "revision"},
+            sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        result = self.executor.execute(
+            self.job("intervals", "nutrition_sync", {"approval_manifest": approved})
+        )
+        self.assertEqual(result, {
+            "status": "completed", "synced_dates": ["2026-09-24"],
+            "pending_dates": [], "failed_dates": [],
+        })
+        self.assertEqual(self.nutrition.calls[-1], ("approved", approved))
 
     def test_intervals_sync_observes_competitions_inside_provider_gate(self) -> None:
         self.competitions.during_call = lambda: self.assertEqual(self.gate.active, 1)

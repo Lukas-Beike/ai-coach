@@ -18,9 +18,11 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         self.plan_repair = Mock()
         self.plan_push = Mock()
         self.provider_refresh = Mock()
+        self.nutrition = Mock()
         self.service = CoachSyncToolService(
             self.queue, self.authority, self.conflicts,
             self.plan_sync, self.plan_repair, self.plan_push, self.provider_refresh,
+            nutrition_service=self.nutrition,
         )
 
     def test_provider_refresh_checks_scope_and_preserves_cancel_and_job_tracking(self):
@@ -80,14 +82,41 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         self.queue.enqueue.assert_not_called()
 
         intent["authorization_scope"] = ["local_competitions"]
+        self.authority.mark_competitions_authoritative.return_value = []
         self.queue.enqueue.return_value = {"id": "job-1"}
         jobs = []
         result = self.service.execute(
-            "sync_competitions", {}, intent=intent, sync_job_ids=jobs,
+            "sync_competitions", {"_approval_manifest": []}, intent=intent, sync_job_ids=jobs,
         )
         self.assertEqual(result, {"ok": True, "status": "queued", "sync_job_id": "job-1"})
         self.assertEqual(jobs, ["job-1"])
-        self.authority.mark_competitions_authoritative.assert_called_once_with()
+        self.authority.mark_competitions_authoritative.assert_called_once_with([])
+        self.queue.enqueue.assert_called_once_with(
+            "intervals", "competition_push",
+            {"reason": "Bestätigter Coach-Auftrag", "approval_manifest": []},
+            requested_by="coach",
+        )
+
+    def test_competition_push_rejects_stale_approval_manifest_before_queueing(self):
+        intent = {
+            "operation": "sync_competitions",
+            "target_system": "intervals",
+            "authorization_scope": ["local_competitions"],
+        }
+        self.authority.mark_competitions_authoritative.side_effect = AppError(
+            409, "competition manifest changed"
+        )
+
+        with self.assertRaises(AppError):
+            self.service.execute(
+                "sync_competitions",
+                {"_approval_manifest": [{"type": "competition", "id": "race-1", "sha256": "approved"}]},
+                intent=intent,
+                sync_job_ids=[],
+            )
+
+        self.authority.mark_competitions_authoritative.assert_called_once()
+        self.queue.enqueue.assert_not_called()
 
     def test_retry_requires_matching_provider_and_remote_write_intent(self):
         intent = {
@@ -153,7 +182,10 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         }
         result = service.execute(
             "delete_duplicate_intervals_activity",
-            {"duplicate_id": "garmin-1", "canonical_id": "wahoo-1"},
+            {"duplicate_id": "garmin-1", "canonical_id": "wahoo-1", "_approval_manifest": {
+                "canonical_id": "wahoo-1", "duplicate_id": "garmin-1",
+                "snapshot_synced_at": "2026-09-26T12:00:00Z", "date": "2026-09-26T10:00:00",
+            }},
             intent=intent,
             sync_job_ids=[],
         )

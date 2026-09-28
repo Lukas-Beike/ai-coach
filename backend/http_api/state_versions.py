@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Any
 
 from backend.athlete.profile import ProfileService
 from backend.db import DatabaseManager
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
-from backend.sync.snapshots import latest_snapshot
 
 
 class StateVersionService:
@@ -26,9 +26,9 @@ class StateVersionService:
         self._snapshot_repository = snapshot_repository
         self._profile_service = profile_service
 
-    def versions(self) -> dict[str, str]:
+    def versions(self, snapshot_metadata: dict[str, Any] | None = None) -> dict[str, str]:
         with self._database_manager.reader() as db:
-            snapshot = latest_snapshot(db, self._snapshot_repository) or {}
+            snapshot = snapshot_metadata or self._snapshot_repository.latest_metadata(db)
             message = db.execute(
                 "SELECT COUNT(*) AS count, COALESCE(MAX(id), 0) AS latest FROM messages"
             ).fetchone()
@@ -58,12 +58,11 @@ class StateVersionService:
             profile = self._profile_service.get_from_db(db)
 
         synced_at = snapshot.get("synced_at") or ""
-        recent_activities = snapshot.get("recent_activities")
         profile_hash = hashlib.sha256(
             json.dumps(profile, sort_keys=True, ensure_ascii=False).encode("utf-8")
         ).hexdigest()[:16]
         return {
-            "activities": f"{synced_at}:{len(recent_activities) if isinstance(recent_activities, list) else 0}",
+            "activities": f"{synced_at}:{snapshot.get('recent_activity_count', 0)}",
             "performance": f"{last_performance_refresh or synced_at}",
             "garmin": f"{last_garmin_sync or ''}",
             "chat": f"{message['latest']}:{message['count']}",

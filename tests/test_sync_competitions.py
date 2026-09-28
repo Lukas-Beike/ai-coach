@@ -15,6 +15,7 @@ from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.planning import competitions as planning_competitions
 from backend.planning.competition_service import CompetitionService
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
+from backend.sync.authority import competition_push_manifest
 
 NOW = "2026-09-20T12:00:00+00:00"
 IMPORT_ID = "00000000-0000-0000-0000-000000000099"
@@ -268,6 +269,16 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
 
         self.assertEqual([row["id"] for row in tombstones], ["first", "second"])
         self.assertEqual([row["id"] for row in local_rows], ["first", "later"])
+
+    def test_records_rejects_competition_changes_after_approval(self):
+        self.insert_competition(self.local_competition())
+        with self.database_manager.reader() as db:
+            approved_manifest = competition_push_manifest(db)
+        with self.database_manager.unit_of_work() as db:
+            db.execute("UPDATE competitions SET name='Changed' WHERE id='local-1'")
+
+        with self.assertRaises(AppError):
+            self.reconciler.records(approved_manifest)
 
     def test_clear_tombstones_requires_matching_id_and_created_at(self):
         self.insert_tombstone("same-id", "remote-old", None, "old")

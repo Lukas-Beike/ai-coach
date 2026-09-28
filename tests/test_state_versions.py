@@ -186,6 +186,35 @@ class StateVersionServiceTests(unittest.TestCase):
         self.assertEqual(self.manager.reader_calls, 1)
         self.assertEqual(self.manager.unit_of_work_calls, 0)
 
+    def test_snapshot_markers_are_atomic_and_do_not_decode_full_payload(self) -> None:
+        self.sync_state.save_view(
+            {"synced_at": "before", "recent_activities": [{}, {}]}
+        )
+        with self.manager.reader() as db:
+            self.assertEqual(
+                self.snapshot_repository.latest_metadata(db),
+                {"synced_at": "before", "recent_activity_count": 2},
+            )
+        try:
+            with self.manager.unit_of_work() as db:
+                self.snapshot_repository.save(
+                    db,
+                    {"synced_at": "rolled-back", "recent_activities": [{}]},
+                    "rolled-back",
+                )
+                raise RuntimeError("rollback")
+        except RuntimeError:
+            pass
+        with self.manager.reader() as db:
+            self.assertEqual(
+                self.snapshot_repository.latest_metadata(db)["synced_at"], "before"
+            )
+        def fail_if_decoded(_db):
+            raise AssertionError("decoded snapshot")
+
+        self.snapshot_repository.latest_payload = fail_if_decoded
+        self.assertEqual(self.service.versions()["activities"], "before:2")
+
 
 if __name__ == "__main__":
     unittest.main()

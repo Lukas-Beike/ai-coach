@@ -28,6 +28,11 @@ class CoachActionsPostRoutes:
             result = self._coach_proposal_confirmation_service().confirm(
                 payload.get("proposal_id"), session["csrf_hash"]
             )
+        elif path == "/api/coach/actions/cancel":
+            payload = handler.read_json()
+            result = self._coach_proposal_confirmation_service().cancel(
+                payload.get("proposal_id"), session["csrf_hash"]
+            )
         elif path == "/api/coach/actions/execute":
             payload = handler.read_json()
             result = self._coach_proposal_execution_service().execute(

@@ -56,9 +56,17 @@ class CoachStructuredToolExecutionService:
     ) -> dict[str, Any]:
         name = metadata["name"]
         arguments = metadata["arguments"]
-        local_transaction = name not in {"start_provider_refresh", "apply_adaptive_replan", "delete_duplicate_intervals_activity"}
+        local_transaction = name not in {
+            "start_provider_refresh",
+            "apply_adaptive_replan",
+            "delete_duplicate_intervals_activity",
+        }
         lock = self._database_lock if local_transaction else nullcontext()
-        transaction = self._database_manager.unit_of_work() if local_transaction else nullcontext()
+        transaction = (
+            self._database_manager.unit_of_work()
+            if local_transaction
+            else nullcontext()
+        )
         with lock, transaction as db:
             if name == "clarify_coach_request":
                 return self._clarification.save_question(arguments, context)
@@ -79,6 +87,19 @@ class CoachStructuredToolExecutionService:
                         )
                     )
                 return result
+            if (
+                action.get("intent") == "remote_sync"
+                and (action.get("request") or {}).get("remote_write") is True
+            ):
+                proposal = self._proposal_creation.create_remote_write(
+                    name,
+                    arguments,
+                    action,
+                    conversation_id=conversation_id,
+                    client_turn_id=client_turn_id,
+                    session_csrf_hash=session_csrf_hash,
+                )
+                return {**proposal, "ok": True, "status": "approval_required"}
             return self._tool_dispatch.execute(
                 name,
                 arguments,

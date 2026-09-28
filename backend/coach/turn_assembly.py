@@ -97,6 +97,7 @@ class CoachTurnAssembly:
         self._conversation_gate = lifecycle.conversation_gate
         self._maintenance_gate = lifecycle.maintenance_gate
         self._receipt_clock = lifecycle.receipt_clock
+        self._response_retry_policy = CoachResponseRetryPolicy(self._logger)
         self._settings = chat_entry.settings
         self._conversation_provision_service = chat_entry.conversation_provision_service
         self._attachment_context_service = dialogue.attachment_context_service
@@ -153,7 +154,7 @@ class CoachTurnAssembly:
         )
 
     def response_retry_policy(self) -> CoachResponseRetryPolicy:
-        return CoachResponseRetryPolicy(self._logger)
+        return self._response_retry_policy
 
     def structured_response_service(self) -> CoachStructuredResponseService:
         return CoachStructuredResponseService(

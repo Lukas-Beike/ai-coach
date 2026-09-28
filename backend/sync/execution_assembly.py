@@ -35,6 +35,7 @@ class IntervalsJobDependencies:
     performance_refresh_service: Callable[[], Any]
     selected_workout_sync_service: Callable[[], Any]
     competition_sync_service: Callable[[], Any]
+    nutrition_sync_service: Callable[[], Any]
     operation_observer: Callable[[], SyncOperationObserver]
     resync_gate: ProviderResyncGate
 
@@ -87,6 +88,7 @@ class SyncJobExecutionAssembly:
         self._garmin_fixture_loader = garmin.fixture_loader
         self._external_calendar_sync_service = calendar_weather.calendar_sync_service
         self._weather_sync_service = calendar_weather.weather_sync_service
+        self._nutrition_sync_service = intervals.nutrition_sync_service
         self._outcome_service = state.outcome_service
 
     def executor(self) -> sync_executor.SyncJobExecutor:
@@ -101,6 +103,7 @@ class SyncJobExecutionAssembly:
             sync_earliest_date=self._sync_earliest_date,
         )
         provider_dispatcher = sync_executor.SyncJobProviderDispatcher(
+            nutrition_sync_service=self._nutrition_sync_service(),
             intervals_jobs=sync_executor.IntervalsSyncJobOwner(
                 historical_sync=historical_sync,
                 intervals_sync_service=self._intervals_sync_service(),

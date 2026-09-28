@@ -155,6 +155,32 @@ class DatabaseManagerTests(unittest.TestCase):
                     )
             manager.close()
 
+    def test_readers_are_bounded_and_nested_reader_calls_reuse_the_lease(self):
+        with tempfile.TemporaryDirectory() as root:
+            manager = DatabaseManager(
+                Path(root) / "bounded.db", sqlite3, reader_count=1, timeout=0.05,
+                row_factory=sqlite3.Row,
+            )
+            self.addCleanup(manager.close)
+            with manager.reader() as first:
+                with manager.reader() as nested:
+                    self.assertIs(first, nested)
+                failures = []
+
+                def competing_reader():
+                    try:
+                        with manager.reader():
+                            pass
+                    except TimeoutError as exc:
+                        failures.append(str(exc))
+
+                contender = threading.Thread(target=competing_reader)
+                contender.start()
+                contender.join(1)
+                self.assertFalse(contender.is_alive())
+                self.assertEqual(failures, ["database reader limit reached"])
+            manager.close()
+
     def test_restore_drain_closes_connections_and_resumes_current_database(self):
         with tempfile.TemporaryDirectory() as root:
             manager = self.make_manager(root)

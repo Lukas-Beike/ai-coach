@@ -144,6 +144,130 @@ class CoachProposalCreationTests(unittest.TestCase):
         self.assertNotIn("private", repr(result))
         self.sync_state_repository.latest_snapshot.assert_not_called()
 
+    def test_competition_remote_write_binds_dirty_rows_and_tombstones_to_approval(self) -> None:
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO competitions (id, name, event_date, sport, priority, distance, target, "
+                "course_profile, notes, created_at, updated_at) "
+                "VALUES ('race-1', 'Race', '2026-10-01', 'Run', 'A', '', '', '', '', 'now', 'now')"
+            )
+            db.execute(
+                "INSERT INTO competition_sync_tombstones (id, intervals_event_id, external_id, created_at) "
+                "VALUES ('deleted-1', 'remote-1', NULL, 'now')"
+            )
+        intent = {
+            "operation": "sync_competitions",
+            "intent": "remote_sync",
+            "target_system": "intervals",
+            "authorization_scope": ["local_competitions", "intervals_sync"],
+            "request": {"remote_write": True, "source_message_ids": [7]},
+        }
+
+        result = self._service().create_remote_write(
+            "sync_competitions",
+            {"reason": "approved request"},
+            intent,
+            conversation_id="conversation-1",
+            client_turn_id="turn-1",
+            session_csrf_hash="session-1",
+        )
+
+        payload = json.loads(self._rows()[0]["payload"])
+        manifest = payload["arguments"]["_approval_manifest"]
+        self.assertEqual(
+            {(item["type"], item["id"]) for item in manifest},
+            {("competition", "race-1"), ("tombstone", "deleted-1")},
+        )
+        self.assertTrue(all(len(item["sha256"]) == 64 for item in manifest))
+        self.assertEqual(
+            result["proposed_action"]["diff"],
+            [
+                {"name": "Race", "date": "2026-10-01", "sport": "Run", "id": "race-1"},
+                {"name": "Remote-Wettkampfeintrag löschen", "date": "Freigegebene Löschmarkierung", "id": "remote-1"},
+            ],
+        )
+
+    def test_plan_approval_shows_each_concrete_workout(self) -> None:
+        raw_payload = json.dumps(
+            {"name": "Tempo ride", "date": "2026-10-02", "sport": "Ride"}
+        )
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO planned_units(id, local_id, payload, created_at, updated_at) "
+                "VALUES ('unit-1', 'unit-1', ?, 'now', 'now')",
+                (raw_payload,),
+            )
+        intent = {
+            "operation": "start_intervals_plan_sync", "intent": "remote_sync",
+            "target_system": "intervals", "authorization_scope": ["intervals_sync"],
+            "request": {"remote_write": True, "source_message_ids": [7], "sync_scope": "selected"},
+        }
+        result = self._service().create_remote_write(
+            "start_intervals_plan_sync",
+            {"entries": [{"library_workout_id": "unit-1", "expected_payload_hash": hashlib.sha256(raw_payload.encode()).hexdigest()}]},
+            intent, conversation_id="conversation-1", client_turn_id="turn-1",
+            session_csrf_hash="session-1",
+        )
+        self.assertEqual(
+            result["proposed_action"]["diff"],
+            [{"name": "Tempo ride", "date": "2026-10-02", "sport": "Ride", "id": "unit-1"}],
+        )
+
+    def test_all_pending_plan_approval_freezes_and_displays_pending_entries(self) -> None:
+        raw_payload = json.dumps(
+            {"name": "Recovery run", "date": "2026-10-03", "sport": "Run"}
+        )
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO planned_units(id, local_id, payload, created_at, updated_at) "
+                "VALUES ('unit-2', 'unit-2', ?, 'now', 'now')",
+                (raw_payload,),
+            )
+        intent = {
+            "operation": "start_intervals_plan_sync", "intent": "remote_sync",
+            "target_system": "intervals", "authorization_scope": ["intervals_sync"],
+            "request": {"remote_write": True, "source_message_ids": [8], "sync_scope": "all_pending"},
+            "_sync_all_pending": True,
+        }
+        result = self._service().create_remote_write(
+            "start_intervals_plan_sync", {}, intent,
+            conversation_id="conversation-1", client_turn_id="turn-2",
+            session_csrf_hash="session-2",
+        )
+        payload = json.loads(self._rows()[0]["payload"])
+        self.assertEqual(payload["arguments"]["entries"], [
+            {"library_workout_id": "unit-2", "expected_payload_hash": hashlib.sha256(raw_payload.encode()).hexdigest()},
+        ])
+        self.assertEqual(result["proposed_action"]["diff"], [
+            {"name": "Recovery run", "date": "2026-10-03", "sport": "Run", "id": "unit-2"},
+        ])
+
+    def test_nutrition_remote_write_freezes_dates_revisions_and_aggregates(self) -> None:
+        nutrition = Mock()
+        manifest = [{
+            "date": "2026-09-24", "revision": 4, "total_kcal": 2200,
+            "total_carbs_g": 250.0, "total_protein_g": 130.0, "total_fat_g": 65.0,
+            "entry_count": 3, "sha256": "a" * 64,
+        }]
+        nutrition.approval_manifest.return_value = manifest
+        intent = {
+            "operation": "sync_nutrition", "intent": "remote_sync",
+            "target_system": "intervals",
+            "authorization_scope": ["local_nutrition", "intervals_sync"],
+            "request": {"remote_write": True, "source_message_ids": [7]},
+        }
+        self._service(nutrition_service=lambda: nutrition).create_remote_write(
+            "sync_nutrition", {"pending_limit": 3}, intent,
+            conversation_id="conversation-1", client_turn_id="turn-1",
+            session_csrf_hash="session-1",
+        )
+        payload = json.loads(self._rows()[0]["payload"])
+        self.assertEqual(payload["arguments"]["_approval_manifest"], manifest)
+        self.assertEqual(payload["arguments"], {
+            "pending_limit": 3, "_approval_manifest": manifest,
+        })
+        self.assertEqual(nutrition.approval_manifest.call_args.kwargs, {"pending_limit": 3})
+
     def test_distinct_session_keys_own_distinct_proposals(self) -> None:
         self._service().create(self._undo(), "session-a")
         other_id = UUID("def12345-6789-4abc-8def-0123456789ab")

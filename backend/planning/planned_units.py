@@ -5,7 +5,7 @@ import json
 import math
 import uuid
 from datetime import date
-from typing import Any
+from typing import Any, TypedDict
 
 from backend.errors import (
     CORRUPT_PLANNING_ERROR,
@@ -18,6 +18,41 @@ from backend.planning import workouts as planning_workouts
 from backend.providers.workout_text import canonical_workout_zones
 
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"
+
+
+class NormalizedRemotePlannedUnit(TypedDict, total=False):
+    """Provider workout after normalization for local conflict persistence."""
+
+    id: str
+    date: str
+    source: str
+    category: str
+    remote_event_id: str
+    remote_event_external_id: str
+    external_id: str
+
+
+def adopt_normalized_remote_planned_unit(
+    remote: NormalizedRemotePlannedUnit,
+) -> tuple[NormalizedRemotePlannedUnit, str] | None:
+    """Validate a persisted normalized snapshot without treating its local ID as remote."""
+    if remote.get("source") != "intervals" or remote.get("category") != "WORKOUT":
+        return None
+    remote_id = str(remote.get("remote_event_id") or "").strip()
+    event_date = str(remote.get("date") or "").strip()
+    try:
+        if not remote_id or date.fromisoformat(event_date).isoformat() != event_date:
+            return None
+    except ValueError:
+        return None
+    identity = str(
+        remote.get("remote_event_external_id")
+        or remote.get("external_id")
+        or f"intervals-event-{remote_id}"
+    ).strip()
+    if not identity:
+        return None
+    return {**remote, "remote_event_external_id": identity}, identity
 
 
 def planned_unit_payload_hash(payload: Any) -> str:

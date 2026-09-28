@@ -67,7 +67,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         )
         _, next_model = self.turn("Und, ist er fertig?", [{"output_text": "Ich prüfe den Auftrag."}])
         previous = json.loads(next_model.call_args.args[0]["input"])["dialogue"]["confirmed_results"][0]
-        self.assertEqual(previous["sync_job_ids"], result["sync_job_ids"])
+        self.assertEqual(previous["status"], "completed")
         self.assertIn("intervals_sync", previous["steps"][0]["scope"])
 
     def test_rate_limit_exhaustion_has_specific_message_and_no_false_effect(self):

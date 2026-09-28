@@ -52,7 +52,7 @@ class CoachToolDispatchAssemblyTests(unittest.TestCase):
         ))
         return assembly, dependencies
 
-    def test_assembly_is_lazy_and_preserves_deferred_factory_identities(self):
+    def test_assembly_caches_stateless_dispatcher_and_preserves_deferred_factories(self):
         assembly, dependencies = self.make_assembly()
         constructors = (
             "CoachPlanArtifactToolService",
@@ -62,12 +62,11 @@ class CoachToolDispatchAssemblyTests(unittest.TestCase):
             "CoachToolDispatchService",
         )
         with patch.multiple(tool_dispatch_assembly, **{name: DEFAULT for name in constructors}) as factories:
-            factories["CoachToolDispatchService"].side_effect = [Mock(), Mock()]
             first = assembly.service()
             second = assembly.service()
 
-        self.assertIsNot(first, second)
-        self.assertEqual(factories["CoachToolDispatchService"].call_count, 2)
+        self.assertIs(first, second)
+        self.assertEqual(factories["CoachToolDispatchService"].call_count, 1)
         args = factories["CoachToolDispatchService"].call_args.args
         self.assertIs(args[0], dependencies["read_tools"])
         self.assertIs(args[1], dependencies["profile_update"])
@@ -78,17 +77,17 @@ class CoachToolDispatchAssemblyTests(unittest.TestCase):
         self.assertIs(args[6], dependencies["library_plans"])
         self.assertIs(args[7], dependencies["sync_tools"])
         self.assertIs(args[8], factories["CoachPlanningActionToolService"].return_value)
-        self.assertEqual(factories["TrainingTemplateToolService"].call_count, 2)
+        self.assertEqual(factories["TrainingTemplateToolService"].call_count, 1)
         factories["TrainingTemplateToolService"].assert_called_with(
             dependencies["manager"], dependencies["db_lock"], dependencies["library"]
         )
-        self.assertEqual(factories["CoachPlanArtifactToolService"].call_count, 2)
+        self.assertEqual(factories["CoachPlanArtifactToolService"].call_count, 1)
         factories["CoachPlanArtifactToolService"].assert_called_with(dependencies["artifacts"])
-        self.assertEqual(factories["CoachPlanningChangeToolService"].call_count, 2)
+        self.assertEqual(factories["CoachPlanningChangeToolService"].call_count, 1)
         factories["CoachPlanningChangeToolService"].assert_called_with(
             dependencies["plan_replacement"], dependencies["training_changes"]
         )
-        self.assertEqual(factories["CoachPlanningActionToolService"].call_count, 2)
+        self.assertEqual(factories["CoachPlanningActionToolService"].call_count, 1)
         factories["CoachPlanningActionToolService"].assert_called_with(
             dependencies["adaptive_preview"],
             dependencies["adaptive_apply"],

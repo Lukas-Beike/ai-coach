@@ -22,6 +22,7 @@ from backend.coach import structured_tool_round
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.sync.intervals import IntervalsSyncService
 from backend.sync import queue as sync_queue
+from backend.errors import AppError
 
 server = fixtures.server
 
@@ -45,6 +46,10 @@ class DialogueHarness:
         dialogue_clock.start()
         self.addCleanup(dialogue_clock.stop)
         self.counter = 0
+        # Most legacy behavior tests exercise effects after explicitly simulating
+        # the athlete clicking the new remote-approval card. Security tests turn
+        # this off and assert the proposal remains inert.
+        self.auto_approve_remote_proposals = True
 
     def workout(self, day="2026-09-09", name="Oberkörper moderat + Core"):
         return {"date": day, "name": name, "sport": "WeightTraining", "description": "- 30m 60% Synthetic easy workout",
@@ -77,6 +82,31 @@ class DialogueHarness:
             transport.request.side_effect = response
             transport.background_request.side_effect = response
             receipt = server.COACH_TURNS.chat_turn_service().run(message, client_turn_id=turn or f"turn-{self.counter}", session_csrf_hash="synthetic-session", **kwargs)
+        if self.auto_approve_remote_proposals:
+            open_proposal_ids = {
+                item["id"] for item in server.COACH_PROPOSALS.read_service().current("synthetic-session")
+            }
+            for step in receipt.get("command_receipts", []):
+                result = step.get("result") or {}
+                proposal = result.get("proposed_action")
+                if (result.get("status") != "approval_required" or not proposal
+                        or proposal["id"] not in open_proposal_ids):
+                    continue
+                confirmation = server.COACH_PROPOSALS.confirmation_service().confirm(
+                    proposal["id"], "synthetic-session"
+                )
+                try:
+                    approved = server.COACH_PROPOSALS.execution_service().execute(
+                        confirmation["action_token"], "synthetic-session",
+                        confirmation["proposed_action"]["payload_hash"],
+                    )
+                    result.update(approved)
+                    receipt_jobs = receipt.setdefault("sync_job_ids", [])
+                    for job_id in approved.get("sync_job_ids", []):
+                        if job_id not in receipt_jobs:
+                            receipt_jobs.append(job_id)
+                except AppError as error:
+                    result.update({"ok": False, "status": "failed", "reason": error.reason or "approval_failed"})
         return receipt, transport.background_request if kwargs.get("background_job") else transport.request
 
     def state(self):
@@ -280,7 +310,6 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             {"output_text": "Synchronisierung beauftragt."},
         ])
         self.assertEqual(result["status"], "completed")
-        self.assertTrue(result["command_receipts"][0]["resolved"])
         self.assertEqual(result["pending_operations"], [])
         with server.database_manager().unit_of_work() as db:
             job = db.execute("SELECT payload FROM sync_jobs WHERE id=?", (result["sync_job_ids"][0],)).fetchone()
@@ -293,8 +322,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             "entries": [{"library_workout_id": unit["id"], "expected_payload_hash": "0" * 64}]},
             ["intervals_sync", f"planned_unit:{unit['id']}"], target="intervals", remote_write=True, sync_scope="selected"),
             {"output_text": "Nicht übertragen."}])
-        self.assertEqual(result["status"], "failed")
-        self.assertEqual(self.state(), before)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(self.state()["planned_units"], before["planned_units"])
         self.assertEqual(result["sync_job_ids"], [])
 
     def test_sync_conflict_resolution_queues_hash_of_validated_updated_payload(self):
@@ -773,17 +802,19 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_sync_followup_can_read_job_and_inspect_duplicates(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-08")])
-        def inspect(payload):
-            output = json.loads(payload["input"][0]["output"])
-            return self.call("get_sync_job", {"job_id": output["sync_job_id"]})
         result, _ = self.turn("Sync zu intervals.icu durchführen", [
             lambda _: self.call("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"],
                                target="intervals", remote_write=True, sync_scope="all_pending"),
-            inspect, lambda _: self.call("inspect_activity_duplicates"),
             {"output_text": "Synchronisierung beauftragt."},
         ])
         self.assertEqual(result["status"], "completed")
-        self.assertTrue(all(step["result"]["ok"] for step in result["command_receipts"]))
+        self.assertEqual(len(result["sync_job_ids"]), 1)
+        followup, _ = self.turn("Zeig den Sync-Status.", [
+            lambda _: self.call("get_sync_job", {"job_id": result["sync_job_ids"][0]}),
+            lambda _: self.call("inspect_activity_duplicates"),
+            {"output_text": "Status gelesen."},
+        ])
+        self.assertTrue(all(step["result"]["ok"] for step in followup["command_receipts"]))
         self.assertEqual(
             server.SYNC_JOB_QUEUE.service().state(result["sync_job_ids"][0])["status"],
             "queued",
@@ -805,16 +836,15 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             replay, model = self.turn("Sync zu intervals.icu durchführen", [], turn="sync-followup-failure")
         enqueue.assert_called_once()
         model.assert_not_called()
-        self.assertEqual(replay, result)
+        self.assertEqual(replay["command_receipts"][0]["result"]["status"], "approval_required")
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["pending_operations"], [])
         self.assertEqual(result["diagnostic_error"]["reason"], "provider_unavailable")
         text = result["message"]["content"]
         self.assertIn("KI-Dienst ist vorübergehend nicht verfügbar", text)
         self.assertIn("erneut", text)
-        self.assertIn("Plansynchronisierung beauftragt", text)
-        self.assertIn("unabhängig vom Coach", text)
-        self.assertIn("noch nicht bestätigt", text)
+        self.assertIn("wartet auf deine Freigabe", text)
+        self.assertNotIn("Plansynchronisierung beauftragt", text)
         self.assertNotIn("Der Coach-Auftrag konnte nicht abgeschlossen werden", text)
         self.assertEqual(
             server.SYNC_JOB_QUEUE.service().state(result["sync_job_ids"][0])["status"],

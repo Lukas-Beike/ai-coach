@@ -109,11 +109,18 @@ class CoachReadToolServiceTests(unittest.TestCase):
 
     def test_limit_bounds_saturate_and_optional_filters_are_forwarded(self):
         self.service.execute("list_workout_library", {"limit": 900, "include_archived": False})
-        self.library.list.assert_called_once_with(500, include_archived=False)
+        self.library.list.assert_called_once_with(100, include_archived=False)
         self.service.execute("list_planned_workouts", {"limit": 900})
         self.planned_units.list_for_coach.assert_called_once_with(366)
         self.service.execute("list_change_history", {"limit": 0})
         self.history.list.assert_called_once_with(1)
+
+    def test_nutrition_range_is_validated_and_bounded(self):
+        for start, end in (("not-a-date", "2026-03-31"), ("2026-01-01", "2026-02-01")):
+            with self.subTest(start=start, end=end), self.assertRaises(AppError) as caught:
+                self.service.execute("read_nutrition", {"start": start, "end": end})
+            self.assertEqual(caught.exception.status, 400)
+        self.nutrition.get_range_summary.assert_not_called()
 
     def test_invalid_limits_keep_bad_request_reason(self):
         for tool_name in (

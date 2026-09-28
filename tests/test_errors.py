@@ -17,6 +17,17 @@ class AppErrorTests(unittest.TestCase):
     def test_reason_defaults_to_none(self):
         self.assertIsNone(errors.AppError(500, "synthetic").reason)
 
+    def test_public_envelope_is_redacted_and_carries_retry_timing(self):
+        error = errors.AppError(429, "synthetic secret", reason="rate_limited", retry_after=12)
+        payload = errors.public_error_payload(error, lambda value: value.replace("secret", "[redacted]"))
+        self.assertEqual(payload, {
+            "error": "synthetic [redacted]", "reason": "rate_limited", "retry_after": 12,
+        })
+
+    def test_public_envelope_has_a_reason_without_leaking_private_details(self):
+        payload = errors.public_error_payload(errors.AppError(500, "safe"), lambda value: value)
+        self.assertEqual(payload, {"error": "safe", "reason": "request_failed"})
+
 
 class PublicStatusTests(unittest.TestCase):
     def test_authentication_or_permission_401_is_hidden_as_bad_gateway(self):

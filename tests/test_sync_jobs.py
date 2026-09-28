@@ -28,6 +28,40 @@ from backend.sync.jobs import (
 
 
 class SyncJobContractTests(unittest.TestCase):
+    def test_nutrition_sync_job_payload_is_bounded_and_unambiguous(self):
+        self.assertEqual(
+            normalize_sync_job_request("intervals", "nutrition_sync", {"date": "2026-09-24"}, all_sync_days=30),
+            {"provider": "intervals", "type": "nutrition_sync", "payload": {"date": "2026-09-24"}},
+        )
+        self.assertEqual(
+            normalize_sync_job_request("intervals", "nutrition_sync", {"pending_limit": 31}, all_sync_days=30)["payload"],
+            {"pending_limit": 31},
+        )
+        manifest = [{
+            "date": "2026-09-24", "revision": 2, "total_kcal": 2000,
+            "total_carbs_g": 220.5, "total_protein_g": 120.0, "total_fat_g": 65.0,
+            "entry_count": 3,
+        }]
+        digest_values = {key: value for key, value in manifest[0].items() if key != "revision"}
+        manifest[0]["sha256"] = hashlib.sha256(
+            json.dumps(digest_values, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(
+            normalize_sync_job_request("intervals", "nutrition_sync", {"approval_manifest": manifest}, all_sync_days=30)["payload"],
+            {"approval_manifest": manifest},
+        )
+        for provider, payload in (
+            ("garmin", {"date": "2026-09-24"}),
+            ("intervals", {"date": "2026-02-30"}),
+            ("intervals", {"date": "2026-09-24", "pending_limit": 1}),
+            ("intervals", {"pending_limit": 32}),
+            ("intervals", {"pending_limit": True}),
+            ("intervals", {"unexpected": "value"}),
+            ("intervals", {"approval_manifest": [{"date": "2026-09-24"}]}),
+        ):
+            with self.subTest(provider=provider, payload=payload), self.assertRaises(JobValidationError):
+                normalize_sync_job_request(provider, "nutrition_sync", payload, all_sync_days=30)
+
     def test_request_contract_normalizes_provider_and_type(self):
         result = validate_job_request(" Garmin ", " REFRESH ", {"days": 30})
         self.assertEqual(
@@ -255,21 +289,47 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
     def test_performance_and_competition_jobs_are_intervals_only(self):
         for job_type in ("performance_refresh", "competition_push"):
             with self.subTest(job_type=job_type):
+                payload = {"reason": "  sync  "}
+                if job_type == "competition_push":
+                    payload["approval_manifest"] = []
+                expected = {"reason": "sync"}
+                if job_type == "competition_push":
+                    expected["approval_manifest"] = []
                 self.assertEqual(
-                    self.normalize("intervals", job_type, {"reason": "  sync  "})[
-                        "payload"
-                    ],
-                    {"reason": "sync"},
+                    self.normalize("intervals", job_type, payload)["payload"],
+                    expected,
                 )
                 self.assert_invalid(
                     "garmin", job_type, {}, "Dieser Job ist nur für Intervals.icu"
                 )
-                self.assert_invalid("intervals", job_type, {"days": 7}, "Felder")
+                invalid_payload = {"days": 7}
+                if job_type == "competition_push":
+                    invalid_payload["approval_manifest"] = []
+                self.assert_invalid("intervals", job_type, invalid_payload, "Felder")
         self.assertEqual(
             self.normalize("intervals", "performance_refresh", {"reason": " "})[
                 "payload"
             ],
             {"reason": "job"},
+        )
+
+    def test_competition_push_preserves_a_bounded_approval_manifest(self):
+        entry = {"type": "competition", "id": "race-1", "sha256": "a" * 64}
+        self.assertEqual(
+            self.normalize(
+                "intervals", "competition_push",
+                {"reason": "approved", "approval_manifest": [entry]},
+            )["payload"],
+            {"reason": "approved", "approval_manifest": [entry]},
+        )
+        self.assert_invalid(
+            "intervals", "competition_push",
+            {"approval_manifest": [{**entry, "sha256": "invalid"}]},
+            "Freigabevorschau ist ungültig",
+        )
+        self.assert_invalid(
+            "intervals", "competition_push", {"reason": "manual"},
+            "benötigt eine bestätigte Vorschau",
         )
 
     def test_plan_push_normalizes_entries_reason_and_repair(self):

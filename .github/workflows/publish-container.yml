@@ -153,11 +153,23 @@ jobs:
           coverage run --branch --source=server.py,backend tests/run_tests.py --shard 1 --total 4
           coverage report --fail-under=0
       - name: Run lint baseline
-        run: ruff check tests/run_tests.py
+        run: >-
+          ruff check tests/run_tests.py backend/coach/proposals.py
+          backend/coach/read_tools.py backend/coach/tool_execution_service.py
+          backend/coach/tool_preparation.py backend/db/manager.py
+          backend/errors.py backend/http_api/handler.py
       - name: Run formatter baseline
-        run: ruff format --check tests/run_tests.py
+        run: >-
+          ruff format --check tests/run_tests.py backend/coach/proposals.py
+          backend/coach/read_tools.py backend/coach/tool_execution_service.py
+          backend/coach/tool_preparation.py backend/db/manager.py
+          backend/errors.py backend/http_api/handler.py
       - name: Run lightweight type baseline
-        run: mypy --ignore-missing-imports --follow-imports=skip tests/run_tests.py
+        run: >-
+          mypy --ignore-missing-imports --follow-imports=skip tests/run_tests.py
+          backend/coach/proposals.py backend/coach/read_tools.py
+          backend/coach/tool_execution_service.py backend/coach/tool_preparation.py
+          backend/db/manager.py backend/errors.py backend/http_api/handler.py
 
   image_sbom:
     needs: source
@@ -216,27 +228,38 @@ jobs:
         run: |
           set -euo pipefail
           projects=(mobile-small mobile tablet tablet-landscape desktop)
-          cleanup() { docker rm --force ai-coach-e2e >/dev/null 2>&1 || true; }
+          specs=(e2e/*.spec.js)
+          cleanup() {
+            result=$?
+            if [[ "$result" != "0" ]]; then
+              docker inspect --format 'fixture state={{.State.Status}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}}' ai-coach-e2e >&2 || true
+              docker logs ai-coach-e2e >&2 || true
+            fi
+            docker rm --force ai-coach-e2e >/dev/null 2>&1 || true
+            return "$result"
+          }
           trap cleanup EXIT
           for project in "${projects[@]}"; do
-            cleanup
-            docker run --detach --name ai-coach-e2e --publish 127.0.0.1:8090:8090 \
-              --read-only --security-opt no-new-privileges:true --cap-drop=ALL \
-              --pids-limit=256 --memory=512m --cpus=1 --tmpfs /data:uid=100,gid=101,mode=0700 --tmpfs /tmp \
-              --env APP_PASSWORD="$E2E_APP_PASSWORD" --env COOKIE_SECURE=false \
-              --volume "${GITHUB_WORKSPACE}/e2e:/app/e2e:ro" \
-              ai-coach:e2e python /app/e2e/fixture_runtime.py >/dev/null
-            for attempt in {1..30}; do
-              if curl --fail --silent http://127.0.0.1:8090/api/health >/dev/null; then
-                break
-              fi
-              if [[ "$attempt" == "30" ]]; then
-                echo "The isolated fixture application did not become healthy for $project."
-                exit 1
-              fi
-              sleep 2
+            for spec in "${specs[@]}"; do
+              cleanup
+              docker run --detach --name ai-coach-e2e --publish 127.0.0.1:8090:8090 \
+                --read-only --security-opt no-new-privileges:true --cap-drop=ALL \
+                --pids-limit=256 --memory=1g --cpus=2 --tmpfs /data:uid=100,gid=101,mode=0700 --tmpfs /tmp \
+                --env APP_PASSWORD="$E2E_APP_PASSWORD" --env COOKIE_SECURE=false \
+                --volume "${GITHUB_WORKSPACE}/e2e:/app/e2e:ro" \
+                ai-coach:e2e python /app/e2e/fixture_runtime.py >/dev/null
+              for attempt in {1..30}; do
+                if curl --fail --silent http://127.0.0.1:8090/api/health >/dev/null; then
+                  break
+                fi
+                if [[ "$attempt" == "30" ]]; then
+                  echo "The isolated fixture application did not become healthy for $project ($spec)."
+                  exit 1
+                fi
+                sleep 2
+              done
+              npm run test:e2e -- "$spec" --project "$project"
             done
-            npm run test:e2e -- --project "$project"
           done
       - name: Upload browser failure artifacts
         if: failure()

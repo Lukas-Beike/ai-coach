@@ -18,6 +18,7 @@ COACH_OPERATION_LABELS = {
     "resolve_training_sync_conflict": "Synchronisierungskonflikt bearbeitet",
     "delete_duplicate_intervals_activity": "Garmin-Duplikat entfernt",
     "save_nutrition_entry": "Ernährungseintrag gespeichert", "delete_nutrition_entry": "Ernährungseintrag entfernt",
+    "update_nutrition_entry": "Ernährungseintrag korrigiert", "sync_nutrition": "Ernährungssynchronisierung beauftragt",
 }
 
 COACH_ACTION_LABELS = {
@@ -36,6 +37,7 @@ COACH_ACTION_LABELS = {
     "resolve_training_sync_conflict": "Synchronisierungskonflikt bearbeiten",
     "delete_duplicate_intervals_activity": "Garmin-Duplikat entfernen",
     "save_nutrition_entry": "Ernährungseintrag speichern", "delete_nutrition_entry": "Ernährungseintrag entfernen",
+    "update_nutrition_entry": "Ernährungseintrag korrigieren", "sync_nutrition": "Ernährung synchronisieren",
 }
 
 
@@ -62,6 +64,8 @@ def coach_failure_lines(commands: list[dict[str, Any]], pending_operations: set[
 
 def coach_effect_label(item: dict[str, Any]) -> str:
     result = item.get("result") or {}
+    if result.get("status") == "approval_required":
+        return "Remote-Änderung wartet auf ausdrückliche Freigabe"
     if item.get("tool") == "undo_training_change" and result.get("status") in {"applied", "undone"}:
         return "Lokale Änderung zurückgenommen"
     label = COACH_OPERATION_LABELS.get(item.get("tool"), "Lokale Aktion")
