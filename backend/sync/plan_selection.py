@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from sqlite3 import Connection
 from typing import Any
 
 from backend.db import DatabaseManager
@@ -216,21 +217,22 @@ class StructuredPlanSyncService:
         return entries
 
     @staticmethod
-    def _validate_selected_entry(db: Any, entry: dict[str, Any]) -> str:
+    def _validate_selected_entry(db: Connection, entry: dict[str, Any]) -> str:
         local_id = str(entry["library_workout_id"])
         entity = entry.get("entity")
+        cursor = db.cursor()
         if entity == "planned_unit":
-            rows = db.execute(
+            rows = cursor.execute(
                 "SELECT payload, 'planned_unit' AS entity FROM planned_units WHERE local_id=?",
                 (local_id,),
             ).fetchall()
         elif entity == "workout_library":
-            rows = db.execute(
+            rows = cursor.execute(
                 "SELECT payload, 'workout_library' AS entity FROM workout_library WHERE local_id=?",
                 (local_id,),
             ).fetchall()
         else:
-            rows = db.execute(
+            rows = cursor.execute(
                 "SELECT payload, 'planned_unit' AS entity FROM planned_units WHERE local_id=? "
                 "UNION ALL SELECT payload, 'workout_library' AS entity FROM workout_library WHERE local_id=?",
                 (local_id, local_id),
