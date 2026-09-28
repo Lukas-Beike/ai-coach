@@ -463,8 +463,8 @@ h2 {
 .composer #sendButton { color: var(--primary-control-ink); background: var(--primary-control-bg); box-shadow: none; }
 .composer #sendButton svg, .composer-stop-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
 .composer #sendButton:disabled { color: var(--subtle); background: var(--surface-raised); }
-.composer .composer-stop-button { border: 0; color: var(--ink); background: var(--surface-raised); box-shadow: none; }
-.composer .composer-stop-button:hover { background: var(--line-strong); }
+.composer .composer-stop-button { border: 0; color: #fff; background: #c83232; box-shadow: none; }
+.composer .composer-stop-button:hover { background: #a92323; }
 .composer .composer-stop-button[hidden] { display: none; }
 @keyframes voice-recording { 50% { box-shadow: 0 0 0 5px rgba(255, 69, 58, .15); } }
 .composer button, .profile-form > button, dialog button, .push-button {
@@ -934,7 +934,7 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .composer.is-busy { grid-template-columns: minmax(0, 1fr); padding-left: 7px; }
   .composer.is-busy textarea { grid-column: 1 / -1; }
   .composer.is-busy .composer-actions { display: flex; width: 100%; grid-column: 1 / -1; }
-  .composer.is-busy .composer-actions button { min-width: 0; flex: 1 1 0; padding-right: 9px; padding-left: 9px; }
+  .composer.is-busy .composer-actions button:not(.composer-stop-button) { min-width: 0; flex: 1 1 0; padding-right: 9px; padding-left: 9px; }
   .coach-provider-status { grid-template-columns: 1fr; }
   h1 { font-size: 1.55rem; }
   h2 { font-size: 1.35rem; }
