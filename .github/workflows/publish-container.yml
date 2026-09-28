@@ -242,7 +242,7 @@ jobs:
             cleanup
             docker run --detach --name ai-coach-e2e --publish 127.0.0.1:8090:8090 \
               --read-only --security-opt no-new-privileges:true --cap-drop=ALL \
-              --pids-limit=256 --memory=1g --cpus=1 --tmpfs /data:uid=100,gid=101,mode=0700 --tmpfs /tmp \
+              --pids-limit=256 --memory=1g --cpus=2 --tmpfs /data:uid=100,gid=101,mode=0700 --tmpfs /tmp \
               --env APP_PASSWORD="$E2E_APP_PASSWORD" --env COOKIE_SECURE=false \
               --volume "${GITHUB_WORKSPACE}/e2e:/app/e2e:ro" \
               ai-coach:e2e python /app/e2e/fixture_runtime.py >/dev/null
