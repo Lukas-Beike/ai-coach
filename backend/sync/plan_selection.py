@@ -192,47 +192,54 @@ class StructuredPlanSyncService:
             self._authority.mark_planning_authoritative(ids)
             entries = prepared.entries
         elif prepared.mode == "selected":
-            entries = prepared.entries
-            with self._database_manager.unit_of_work() as db:
-                planned_ids = []
-                for entry in entries:
-                    local_id = entry["library_workout_id"]
-                    entity = entry.get("entity")
-                    if entity in {"planned_unit", "workout_library"}:
-                        table = "planned_units" if entity == "planned_unit" else "workout_library"
-                        rows = db.execute(
-                            f"SELECT payload, '{entity}' AS entity FROM {table} WHERE local_id=?",
-                            (local_id,),
-                        ).fetchall()
-                    else:
-                        rows = db.execute(
-                            "SELECT payload, 'planned_unit' AS entity FROM planned_units WHERE local_id=? "
-                            "UNION ALL SELECT payload, 'workout_library' AS entity FROM workout_library WHERE local_id=?",
-                            (local_id, local_id),
-                        ).fetchall()
-                    matching = next((
-                        row for row in rows
-                        if planning_library.library_payload_hash(row["payload"])
-                        == entry["expected_payload_hash"]
-                    ), None)
-                    if not matching:
-                        raise AppError(
-                            409,
-                            _STALE_PLAN_ERROR,
-                            reason="planning_revision_conflict",
-                        )
-                    if matching["entity"] == "planned_unit":
-                        planned_ids.append(entry["library_workout_id"])
-
-                if planned_ids:
-                    self._authority.mark_planning_authoritative(planned_ids)
-                for entry in entries:
-                    row = db.execute(
-                        "SELECT payload FROM planned_units WHERE local_id=?",
-                        (entry["library_workout_id"],),
-                    ).fetchone()
-                    if row:
-                        entry["expected_payload_hash"] = planning_library.library_payload_hash(row["payload"])
+            entries = self._execute_selected(prepared.entries)
         else:
             raise ValueError(f"Unsupported prepared plan-sync mode: {prepared.mode}")
         return self._plan_push.enqueue(entries, sync_job_ids, reason=reason)
+
+    def _execute_selected(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        with self._database_manager.unit_of_work() as db:
+            planned_ids = [
+                entry["library_workout_id"]
+                for entry in entries
+                if self._validate_selected_entry(db, entry) == "planned_unit"
+            ]
+            if planned_ids:
+                self._authority.mark_planning_authoritative(planned_ids)
+            for entry in entries:
+                row = db.execute(
+                    "SELECT payload FROM planned_units WHERE local_id=?",
+                    (entry["library_workout_id"],),
+                ).fetchone()
+                if row:
+                    entry["expected_payload_hash"] = planning_library.library_payload_hash(row["payload"])
+        return entries
+
+    @staticmethod
+    def _validate_selected_entry(db: Any, entry: dict[str, Any]) -> str:
+        local_id = entry["library_workout_id"]
+        entity = entry.get("entity")
+        if entity in {"planned_unit", "workout_library"}:
+            table = "planned_units" if entity == "planned_unit" else "workout_library"
+            rows = db.execute(
+                f"SELECT payload, '{entity}' AS entity FROM {table} WHERE local_id=?",
+                (local_id,),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT payload, 'planned_unit' AS entity FROM planned_units WHERE local_id=? "
+                "UNION ALL SELECT payload, 'workout_library' AS entity FROM workout_library WHERE local_id=?",
+                (local_id, local_id),
+            ).fetchall()
+        matching = next(
+            (
+                row
+                for row in rows
+                if planning_library.library_payload_hash(row["payload"])
+                == entry["expected_payload_hash"]
+            ),
+            None,
+        )
+        if not matching:
+            raise AppError(409, _STALE_PLAN_ERROR, reason="planning_revision_conflict")
+        return matching["entity"]
