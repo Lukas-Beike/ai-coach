@@ -350,6 +350,21 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(len(entries), 8)
         self.assertEqual({entry["details"]["index"] for entry in entries}, set(range(8)))
 
+    def test_diagnostic_capture_flush_writes_outside_internal_lock(self):
+        store = _KeyValueStore()
+        lock_held_during_set = None
+
+        def monitored_set(key: str, value: str) -> None:
+            nonlocal lock_held_during_set
+            lock_held_during_set = getattr(capture._lock, "_is_owned", lambda: False)()
+            store.set(key, value)
+
+        capture = DiagnosticCapture(store.get, monitored_set, Redactor(_config), max_entries=10)
+        capture.capture("event-1", {"data": "test"})
+        capture.flush()
+        self.assertFalse(lock_held_during_set)
+        self.assertIn("event-1", store.get("diagnostic_capture_entries"))
+
     def test_observability_import_has_no_side_effect(self):
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(Path(backend.__file__).resolve().parent.parent)

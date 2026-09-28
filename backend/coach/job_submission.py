@@ -180,6 +180,12 @@ class CoachJobSubmissionService:
         ai_provider = self._settings_service.selected_ai_provider()
         model = self._settings_service.selected_model(ai_provider)
         thinking_level = self._settings_service.selected_thinking_level()
+        if not ai_provider:
+            raise AppError(
+                503,
+                "Kein KI-Dienst konfiguriert. Bitte hinterlege einen OpenAI- oder Gemini-API-Schlüssel in der Serverkonfiguration.",
+                reason="ai_provider_not_configured",
+            )
         if ai_provider == "gemini" and gemini_inline_image_bytes(attachments) > self._max_gemini_inline_image_bytes:
             raise AppError(
                 413,

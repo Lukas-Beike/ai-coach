@@ -126,6 +126,18 @@ class CoachTurnFailureTests(unittest.TestCase):
             self.assertIsNone(self.kv.get(db, "coach_pending_request"))
         self.assertEqual(self.events.since()["events"], [])
 
+    def test_unconfigured_ai_provider_explanation(self) -> None:
+        for reason, expected in (
+            ("ai_provider_not_configured", "Kein KI-Dienst konfiguriert"),
+            ("openai_not_configured", "OpenAI ist nicht konfiguriert"),
+            ("gemini_not_configured", "Gemini ist nicht konfiguriert"),
+        ):
+            status, text, _, _ = self.service._base_response(
+                AppError(503, "not configured", reason=reason), []
+            )
+            self.assertEqual(status, "failed")
+            self.assertIn(expected, text)
+
 
 if __name__ == "__main__":
     unittest.main()

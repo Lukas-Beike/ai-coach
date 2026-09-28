@@ -173,8 +173,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
     def test_database_counts_and_kv_reads_keep_lock_and_unit_of_work(self):
         self.service.report()
 
-        self.assertEqual(self.manager.transactions, 9)
-        self.assertEqual(self.lock.entries, 9)
+        self.assertEqual(self.manager.transactions, 1)
+        self.assertEqual(self.lock.entries, 1)
         self.assertEqual(len(self.db.queries), 5)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query, _parameters in self.db.queries],

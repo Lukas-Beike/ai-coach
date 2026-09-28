@@ -64,11 +64,10 @@ class DiagnosticReportService:
     def __init__(self, dependencies: DiagnosticReportDependencies) -> None:
         self._deps = dependencies
 
-    def _get_value(self, key: str) -> str | None:
-        with self._deps.db_lock, self._deps.database_manager.unit_of_work() as db:
-            return self._deps.key_values.get(db, key)
+    def _get_value(self, db: Any, key: str) -> str | None:
+        return self._deps.key_values.get(db, key)
 
-    def _database_counts(self) -> dict[str, int]:
+    def _database_counts(self, db: Any) -> dict[str, int]:
         queries = {
             "messages": "SELECT COUNT(*) AS count FROM messages",
             "workout_library": "SELECT COUNT(*) AS count FROM workout_library",
@@ -76,75 +75,75 @@ class DiagnosticReportService:
             "athlete_checkins": "SELECT COUNT(*) AS count FROM athlete_checkins",
             "activity_feedback": "SELECT COUNT(*) AS count FROM activity_feedback",
         }
-        with self._deps.db_lock, self._deps.database_manager.unit_of_work() as db:
-            return {
-                name: db.execute(query).fetchone()["count"]
-                for name, query in queries.items()
-            }
+        return {
+            name: db.execute(query).fetchone()["count"]
+            for name, query in queries.items()
+        }
 
     def report(self) -> dict[str, Any]:
         deps = self._deps
-        snapshot = deps.sync_state.latest_snapshot()
-        garmin_status = deps.garmin_projection.public_state()
-        database_counts = self._database_counts()
-        return {
-            "generated_at": deps.utc_now(),
-            "app": {"name": deps.app_name, "version": deps.app_version},
-            "runtime": {
-                "python": platform.python_version(),
-                "platform": platform.platform(),
-            },
-            "configuration": {
-                "openai_configured": bool(deps.config.openai_api_key),
-                "gemini_configured": bool(deps.config.gemini_api_key),
-                "ai_provider": deps.settings.selected_ai_provider(),
-                "intervals_configured": bool(deps.config.intervals_api_key),
-                "garmin_library_available": deps.garmin_client_factory.available(),
-                "garmin_configured": garmin_status["configured"],
-                "garmin_fixture_configured": deps.garmin_fixture_loader.path() is not None,
-                "model": deps.settings.selected_model(),
-                "thinking_level": deps.settings.selected_thinking_level(),
-                "available_models": [
-                    option["id"] for option in deps.settings.available_model_options()
-                ],
-            },
-            "openai": deps.provider_state.summary("openai"),
-            "gemini": deps.provider_state.summary("gemini"),
-            "coach_commands": deps.coach_history.history(),
-            "sync": {
-                "last_success": self._get_value("last_sync_at"),
-                "last_error": deps.redactor.redact_text(
-                    self._get_value("last_sync_error") or ""
-                ) or None,
-                "running": self._get_value("sync_running") == "1",
-                "snapshot_counts": {
-                    "activities": len(snapshot.get("recent_activities", [])) if snapshot else 0,
-                    "wellness": len(snapshot.get("recent_wellness", [])) if snapshot else 0,
-                    "calendar_events": len(snapshot.get("upcoming_calendar", [])) if snapshot else 0,
+        with deps.db_lock, deps.database_manager.unit_of_work() as db:
+            snapshot = deps.sync_state.latest_snapshot()
+            garmin_status = deps.garmin_projection.public_state()
+            database_counts = self._database_counts(db)
+            return {
+                "generated_at": deps.utc_now(),
+                "app": {"name": deps.app_name, "version": deps.app_version},
+                "runtime": {
+                    "python": platform.python_version(),
+                    "platform": platform.platform(),
                 },
-            },
-            "performance_refresh": {
-                "last_refresh": self._get_value("last_performance_refresh_at"),
-                "last_error": deps.redactor.redact_text(
-                    self._get_value("last_performance_error") or ""
-                ) or None,
-                "running": self._get_value("performance_refresh_running") == "1",
-            },
-            "garmin": garmin_status,
-            "provider_freshness": deps.provider_freshness.current(
-                profile=deps.profile.get(),
-                garmin_has_core_error=bool(deps.garmin_sync_state.core_error_entries()),
-                garmin_tokenstore_exists=Path(deps.config.garmin_tokenstore).exists(),
-            ),
-            "external_calendar": {
-                "configured": bool(deps.config.calendar_ical_url),
-                "last_sync_at": self._get_value("last_external_calendar_sync_at"),
-                "last_error": deps.redactor.redact_text(
-                    self._get_value("last_external_calendar_sync_error") or ""
-                ) or None,
-                "running": deps.external_calendar_sync.running(),
-                "events": len(deps.external_calendar_reader.list_events()),
-            },
+                "configuration": {
+                    "openai_configured": bool(deps.config.openai_api_key),
+                    "gemini_configured": bool(deps.config.gemini_api_key),
+                    "ai_provider": deps.settings.selected_ai_provider(),
+                    "intervals_configured": bool(deps.config.intervals_api_key),
+                    "garmin_library_available": deps.garmin_client_factory.available(),
+                    "garmin_configured": garmin_status["configured"],
+                    "garmin_fixture_configured": deps.garmin_fixture_loader.path() is not None,
+                    "model": deps.settings.selected_model(),
+                    "thinking_level": deps.settings.selected_thinking_level(),
+                    "available_models": [
+                        option["id"] for option in deps.settings.available_model_options()
+                    ],
+                },
+                "openai": deps.provider_state.summary("openai"),
+                "gemini": deps.provider_state.summary("gemini"),
+                "coach_commands": deps.coach_history.history(),
+                "sync": {
+                    "last_success": self._get_value(db, "last_sync_at"),
+                    "last_error": deps.redactor.redact_text(
+                        self._get_value(db, "last_sync_error") or ""
+                    ) or None,
+                    "running": self._get_value(db, "sync_running") == "1",
+                    "snapshot_counts": {
+                        "activities": len(snapshot.get("recent_activities", [])) if snapshot else 0,
+                        "wellness": len(snapshot.get("recent_wellness", [])) if snapshot else 0,
+                        "calendar_events": len(snapshot.get("upcoming_calendar", [])) if snapshot else 0,
+                    },
+                },
+                "performance_refresh": {
+                    "last_refresh": self._get_value(db, "last_performance_refresh_at"),
+                    "last_error": deps.redactor.redact_text(
+                        self._get_value(db, "last_performance_error") or ""
+                    ) or None,
+                    "running": self._get_value(db, "performance_refresh_running") == "1",
+                },
+                "garmin": garmin_status,
+                "provider_freshness": deps.provider_freshness.current(
+                    profile=deps.profile.get(),
+                    garmin_has_core_error=bool(deps.garmin_sync_state.core_error_entries()),
+                    garmin_tokenstore_exists=Path(deps.config.garmin_tokenstore).exists(),
+                ),
+                "external_calendar": {
+                    "configured": bool(deps.config.calendar_ical_url),
+                    "last_sync_at": self._get_value(db, "last_external_calendar_sync_at"),
+                    "last_error": deps.redactor.redact_text(
+                        self._get_value(db, "last_external_calendar_sync_error") or ""
+                    ) or None,
+                    "running": deps.external_calendar_sync.running(),
+                    "events": len(deps.external_calendar_reader.list_events()),
+                },
             "morning_checkin": deps.morning_checkin.state(),
             "database": {
                 **database_counts,

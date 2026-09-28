@@ -371,13 +371,18 @@ class DiagnosticCapture:
         return self._entries_cache
 
     def flush(self) -> None:
+        payload_to_write = None
         with self._lock:
             if self._dirty_count > 0 and self._entries_cache is not None:
-                self._set_kv(
-                    self._entries_key,
-                    json.dumps(self._entries_cache, ensure_ascii=False, separators=(",", ":")),
+                payload_to_write = json.dumps(
+                    self._entries_cache, ensure_ascii=False, separators=(",", ":")
                 )
                 self._dirty_count = 0
+        if payload_to_write is not None:
+            try:
+                self._set_kv(self._entries_key, payload_to_write)
+            except Exception:
+                pass
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -391,7 +396,6 @@ class DiagnosticCapture:
     def entries(self) -> list[dict[str, Any]]:
         with self._lock:
             entries = self._load_entries()
-            self.flush()
             return list(entries)
 
     def capture(self, event: str, details: dict[str, Any]) -> None:

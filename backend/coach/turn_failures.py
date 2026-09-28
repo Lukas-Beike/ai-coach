@@ -173,6 +173,9 @@ class CoachTurnFailureService:
         status = "cancelled" if cancelled else "failed"
         reason = getattr(error, "reason", None)
         explanations = {
+            "ai_provider_not_configured": "Kein KI-Dienst konfiguriert. Bitte hinterlege einen OpenAI- oder Gemini-API-Schlüssel in der Serverkonfiguration.",
+            "openai_not_configured": "OpenAI ist nicht konfiguriert. Bitte hinterlege einen OPENAI_API_KEY in der Serverkonfiguration.",
+            "gemini_not_configured": "Gemini ist nicht konfiguriert. Bitte hinterlege einen GEMINI_API_KEY in der Serverkonfiguration.",
             "conversation_state_invalid": "Der KI-Dienst konnte den Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten.",
             "conversation_locked": "Der KI-Dienst verarbeitet noch eine andere Anfrage. Bitte warte kurz und versuche es erneut.",
             "authentication_or_permission": "Der KI-Dienst hat den Zugriff abgelehnt. Bitte prüfe den API-Zugang in den Einstellungen.",

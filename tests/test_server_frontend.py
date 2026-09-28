@@ -126,9 +126,9 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('/views.js?v=217', index)
         self.assertIn('/forms.js?v=217', index)
         self.assertIn('/components.js?v=217', index)
-        self.assertIn('/coach.js?v=2', index)
-        self.assertIn('/app.js?v=230', index)
-        self.assertIn('intervals-coach-v231', service_worker)
+        self.assertIn('/coach.js?v=3', index)
+        self.assertIn('/app.js?v=231', index)
+        self.assertIn('intervals-coach-v232', service_worker)
         self.assertIn('"/navigation.js?v=218"', service_worker)
         self.assertIn('"/appearance.js?v=218"', service_worker)
         self.assertIn('"/state.js?v=217"', service_worker)
@@ -166,8 +166,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
         self.assertLess(index.index('/forms.js?v=217'), index.index('/components.js?v=217'))
-        self.assertLess(index.index('/components.js?v=217'), index.index('/coach.js?v=2'))
-        self.assertLess(index.index('/coach.js?v=2'), index.index('/app.js?v=230'))
+        self.assertLess(index.index('/components.js?v=217'), index.index('/coach.js?v=3'))
+        self.assertLess(index.index('/coach.js?v=3'), index.index('/app.js?v=231'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn(
@@ -304,7 +304,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split('app.js?v=', 1)[1].split('"', 1)[0]
         self.assertIn(f'app.js?v={asset_version}', markup)
-        self.assertIn('intervals-coach-v231', service_worker)
+        self.assertIn('intervals-coach-v232', service_worker)
         self.assertIn(f'/app.js?v={asset_version}', service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -450,8 +450,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"/forms.js?v=217"', source)
         self.assertIn('"/components.js?v=217"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/coach.js?v=2"', source)
-        self.assertIn('"/app.js?v=230"', source)
+        self.assertIn('"/coach.js?v=3"', source)
+        self.assertIn('"/app.js?v=231"', source)
         self.assertIn('"/icon.svg?v=217"', source)
         self.assertIn('"/styles.css?v=227"', source)
         self.assertIn('pathname.startsWith("/api/")', source)

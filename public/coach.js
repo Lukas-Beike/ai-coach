@@ -502,6 +502,11 @@ async function cancelChat() {
 
 async function sendMessage(event) {
   event.preventDefault();
+  const configured = state.data?.configured;
+  if (configured && !configured.openai && !configured.gemini) {
+    toast("Kein KI-Dienst konfiguriert. Bitte hinterlege einen OpenAI- oder Gemini-API-Schlüssel in den Einstellungen.", true);
+    return;
+  }
   const input = $("#messageInput");
   const attachments = state.chatAttachments || [];
   const message = input.value.trim() || (attachments.length ? "Bitte analysiere die angehängten Dateien." : "");
