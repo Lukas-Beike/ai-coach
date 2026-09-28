@@ -182,6 +182,14 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(error.exception.reason, "gemini_attachment_request_too_large")
         self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
 
+    def test_submission_rejects_when_no_ai_provider_is_configured(self):
+        with patch.object(server.SETTINGS, "selected_ai_provider", return_value=""):
+            with self.assertRaises(server.AppError) as error:
+                server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Analyze", "no-provider-turn", "synthetic-csrf")
+        self.assertEqual(error.exception.reason, "ai_provider_not_configured")
+        self.assertEqual(error.exception.status, 503)
+        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
+
     def test_both_provider_formats_include_image_and_gpx(self):
         attachments = validate_attachments([self.upload(), {"name": "chart.png", "data": PNG}])
         value = model_input("Analyze the route and chart", attachments)

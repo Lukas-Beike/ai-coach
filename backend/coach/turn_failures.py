@@ -102,7 +102,9 @@ class CoachTurnFailureService:
                     "status": status,
                     "awaiting_clarification": bool(question) and not cancelled,
                     "error": safe_error,
-                    "diagnostic_error": coach_error_metadata(error, deps.repository_root),
+                    "diagnostic_error": coach_error_metadata(
+                        error, deps.repository_root
+                    ),
                     "client_turn_id": client_turn_id,
                     "command_receipts": commands,
                     "sync_job_ids": receipt.get("sync_job_ids") or [],
@@ -117,8 +119,11 @@ class CoachTurnFailureService:
             )
             # A terminal failure is not resumable and must not retain inline image data.
             for key in (
-                "openai_response_id", "pending_tool_outputs", "pending_tool_calls",
-                "response_input", "previous_response_id",
+                "openai_response_id",
+                "pending_tool_outputs",
+                "pending_tool_calls",
+                "response_input",
+                "previous_response_id",
             ):
                 receipt.pop(key, None)
             receipt["message"] = deps.chat_repository.add(
@@ -127,7 +132,11 @@ class CoachTurnFailureService:
             db.execute(
                 "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? "
                 "WHERE client_turn_id=?",
-                (json.dumps(receipt, ensure_ascii=False), deps.utc_now(), client_turn_id),
+                (
+                    json.dumps(receipt, ensure_ascii=False),
+                    deps.utc_now(),
+                    client_turn_id,
+                ),
             )
         deps.event_buffer.publish(
             "coach",
@@ -141,13 +150,17 @@ class CoachTurnFailureService:
 
     def _steps(
         self, receipt: dict[str, Any], intent: dict[str, Any]
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    ) -> tuple[
+        list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[str]
+    ]:
         commands = list(receipt.get("command_receipts") or [])
         internal = self._deps.read_only_tools | {
-            "clarify_coach_request", "cancel_coach_request"
+            "clarify_coach_request",
+            "cancel_coach_request",
         }
         successes = [
-            step for step in commands
+            step
+            for step in commands
             if step.get("result", {}).get("ok") and step["tool"] not in internal
         ]
         failures = unresolved_coach_steps(commands)
@@ -161,7 +174,11 @@ class CoachTurnFailureService:
                 for step in receipt.get("pending_tool_calls", [])
                 if step.get("tool")
             }
-            | (authorized_operations(intent) - {step["tool"] for step in successes} - {""})
+            | (
+                authorized_operations(intent)
+                - {step["tool"] for step in successes}
+                - {""}
+            )
         )
         return commands, successes, failures, pending
 
@@ -171,8 +188,13 @@ class CoachTurnFailureService:
     ) -> tuple[str, str, str | None, bool]:
         cancelled = isinstance(error, AppError) and error.reason == "chat_cancelled"
         status = "cancelled" if cancelled else "failed"
-        reason = getattr(error, "reason", None)
+        reason = getattr(error, "reason", "")
+        if not isinstance(reason, str):
+            reason = ""
         explanations = {
+            "ai_provider_not_configured": "Kein KI-Dienst konfiguriert. Bitte hinterlege einen OpenAI- oder Gemini-API-Schlüssel in der Serverkonfiguration.",
+            "openai_not_configured": "OpenAI ist nicht konfiguriert. Bitte hinterlege einen OPENAI_API_KEY in der Serverkonfiguration.",
+            "gemini_not_configured": "Gemini ist nicht konfiguriert. Bitte hinterlege einen GEMINI_API_KEY in der Serverkonfiguration.",
             "conversation_state_invalid": "Der KI-Dienst konnte den Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten.",
             "conversation_locked": "Der KI-Dienst verarbeitet noch eine andere Anfrage. Bitte warte kurz und versuche es erneut.",
             "authentication_or_permission": "Der KI-Dienst hat den Zugriff abgelehnt. Bitte prüfe den API-Zugang in den Einstellungen.",
@@ -212,18 +234,24 @@ class CoachTurnFailureService:
 
     @staticmethod
     def _effect_text(
-        text: str, commands: list[dict[str, Any]], successes: list[dict[str, Any]],
-        failures: list[dict[str, Any]], pending: list[str],
+        text: str,
+        commands: list[dict[str, Any]],
+        successes: list[dict[str, Any]],
+        failures: list[dict[str, Any]],
+        pending: list[str],
     ) -> str:
         if successes:
             completed = [
-                step for step in successes
+                step
+                for step in successes
                 if (step.get("result") or {}).get("status") != "approval_required"
             ]
             if completed:
-                text += "\nBereits erfolgreich ausgefuehrt: " + "; ".join(
-                    coach_effect_label(step) for step in completed
-                ) + ". Diese Schritte bleiben gespeichert."
+                text += (
+                    "\nBereits erfolgreich ausgefuehrt: "
+                    + "; ".join(coach_effect_label(step) for step in completed)
+                    + ". Diese Schritte bleiben gespeichert."
+                )
             if len(completed) != len(successes):
                 text += "\nEine Remote-Änderung wurde noch nicht ausgeführt und wartet auf deine Freigabe."
             if any(
@@ -238,23 +266,42 @@ class CoachTurnFailureService:
         if observed_sync:
             text += "\n" + observed_sync
         if pending:
-            text += "\nNoch offen: " + ", ".join(
-                COACH_ACTION_LABELS.get(name, "Angeforderter Schritt") for name in pending
-            ) + "."
+            text += (
+                "\nNoch offen: "
+                + ", ".join(
+                    COACH_ACTION_LABELS.get(name, "Angeforderter Schritt")
+                    for name in pending
+                )
+                + "."
+            )
         return text
 
     def _response(
-        self, error: BaseException, commands: list[dict[str, Any]],
-        successes: list[dict[str, Any]], failures: list[dict[str, Any]], pending: list[str],
+        self,
+        error: BaseException,
+        commands: list[dict[str, Any]],
+        successes: list[dict[str, Any]],
+        failures: list[dict[str, Any]],
+        pending: list[str],
     ) -> tuple[str, str, str | None, bool]:
         status, text, question, cancelled = self._base_response(error, commands)
         if successes and (cancelled or not question):
             status = "partial"
-        return status, self._effect_text(text, commands, successes, failures, pending), question, cancelled
+        return (
+            status,
+            self._effect_text(text, commands, successes, failures, pending),
+            question,
+            cancelled,
+        )
 
     def _pending_request(
-        self, db: Any, receipt: dict[str, Any], *, question: str | None,
-        cancelled: bool, successes: list[dict[str, Any]],
+        self,
+        db: Any,
+        receipt: dict[str, Any],
+        *,
+        question: str | None,
+        cancelled: bool,
+        successes: list[dict[str, Any]],
     ) -> None:
         if cancelled:
             self._deps.key_values.set(db, "coach_pending_request", "null")
@@ -274,7 +321,10 @@ class CoachTurnFailureService:
                             "status": "failed",
                             "question": None,
                             "completed_steps": [
-                                {"tool": step["tool"], "status": step["result"].get("status")}
+                                {
+                                    "tool": step["tool"],
+                                    "status": step["result"].get("status"),
+                                }
                                 for step in successes
                             ],
                         },

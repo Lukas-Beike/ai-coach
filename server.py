@@ -747,7 +747,7 @@ def initialise_database() -> None:
 
 
 def key_value_service() -> KeyValueService:
-    return KeyValueService(database_manager(), KEY_VALUE_REPOSITORY)
+    return KeyValueService(database_manager(), KEY_VALUE_REPOSITORY, DB_LOCK)
 
 
 SYNC_PERIOD_DEFAULTS = {"intervals": 90, "garmin": 30}
