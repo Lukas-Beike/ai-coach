@@ -10,7 +10,6 @@ from urllib.parse import parse_qs, urlparse
 from backend.errors import AppError
 from backend.http_api.auth import SessionAuthService
 from backend.nutrition.service import NutritionService
-from backend.nutrition.sync import IntervalsNutritionSyncService
 
 NUTRITION_ENTRY_PATH = "/api/nutrition/entry"
 INVALID_BODY = "Ungültiger Anfrageinhalt."
@@ -60,10 +59,10 @@ class NutritionPostRoutes:
     def __init__(
         self,
         nutrition_service: Callable[[], NutritionService],
-        nutrition_sync_service: Callable[[], IntervalsNutritionSyncService] | None = None,
+        sync_job_queue: Callable[[], Any],
     ) -> None:
         self._nutrition_service = nutrition_service
-        self._nutrition_sync_service = nutrition_sync_service
+        self._sync_job_queue = sync_job_queue
 
     def handle(self, handler: Any, path: str) -> bool:
         routes = {
@@ -90,17 +89,19 @@ class NutritionPostRoutes:
         handler.send_json(200, {"ok": True, **result})
 
     def _sync(self, handler: Any) -> None:
-        if not self._nutrition_sync_service:
-            raise AppError(400, "Intervals.icu Sync ist nicht verfügbar.")
         payload = _read_object(handler) if handler.headers.get("Content-Length") else {}
-        sync_service = self._nutrition_sync_service()
         meal_date = payload.get("date") or payload.get("meal_date")
-        result = (
-            sync_service.sync_day(meal_date)
+        job_payload = (
+            {"date": meal_date}
             if meal_date
-            else sync_service.sync_pending(limit=payload.get("limit") or 14)
+            else {"pending_limit": payload.get("limit") or 14}
         )
-        handler.send_json(200, {"ok": True, **result})
+        job = self._sync_job_queue().enqueue(
+            "intervals", "nutrition_sync", job_payload, requested_by="http_api"
+        )
+        handler.send_json(202, {
+            "ok": True, "status": "queued", "sync_job_id": job["id"],
+        })
 
 
 class NutritionPutRoutes:

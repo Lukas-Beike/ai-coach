@@ -228,7 +228,7 @@ class ServerSyncTests(ServerTestCase):
         }
         competition_job = {
             "id": "job-competition", "provider": "intervals", "type": "competition_push",
-            "payload": json.dumps({"reason": "Coach request"}),
+            "payload": json.dumps({"reason": "Coach request", "approval_manifest": []}),
         }
         performance_service = Mock()
         performance_service.refresh.return_value = {"status": "ok"}
@@ -241,7 +241,7 @@ class ServerSyncTests(ServerTestCase):
             self.assertEqual(server.SYNC_JOB_EXECUTION.executor().execute(competition_job)["pushed"], 1)
         performance_service.refresh.assert_called_once_with()
         competition_service.sync.assert_called_once_with(
-            reason="Coach request", push_local=True
+            reason="Coach request", push_local=True, expected_manifest=[]
         )
 
     def test_normalized_intervals_job_type_dispatches_targeted_operation(self):
@@ -1357,7 +1357,7 @@ class ServerSyncTests(ServerTestCase):
                             server.SYNC_JOB_QUEUE.service().enqueue(
                                 "intervals",
                                 "competition_push",
-                                {"reason": "test"},
+                                {"reason": "test", "approval_manifest": []},
                             )
                         )
                     except server.AppError as error:

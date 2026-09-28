@@ -119,10 +119,17 @@ class PlannedCalendarSyncService:
         *,
         error: str | None = None,
         remote_event: dict[str, Any] | None = None,
+        expected_payload: str | None = None,
     ) -> None:
         with self._database_manager.unit_of_work() as db:
             self._state_writer.persist(
-                db, local_id, state, error, remote_event, now=self._now()
+                db,
+                local_id,
+                state,
+                error,
+                remote_event,
+                now=self._now(),
+                expected_payload=expected_payload,
             )
 
     def _remote_event_is_invalid(self, remote_id: str, event: Any) -> bool:
@@ -204,6 +211,7 @@ class PlannedCalendarSyncService:
         event: dict[str, Any],
         event_payload: dict[str, Any],
         error: AppError,
+        expected_payload: str,
     ) -> None:
         self._persist(
             normalized_id,
@@ -214,6 +222,7 @@ class PlannedCalendarSyncService:
                 "external_id": event.get("external_id")
                 or event_payload.get("external_id"),
             },
+            expected_payload=expected_payload,
         )
 
     def _remote_event(
@@ -221,6 +230,7 @@ class PlannedCalendarSyncService:
         normalized_id: str,
         workout: dict[str, Any],
         event_payload: dict[str, Any],
+        expected_payload: str,
     ) -> dict[str, Any]:
         self._require_calendar_access()
         result = self._provider_client_factory().upsert_calendar_events([event_payload])
@@ -232,7 +242,9 @@ class PlannedCalendarSyncService:
         try:
             planning_workouts.validate_intervals_workout_result(workout, event)
         except AppError as exc:
-            self._persist_sync_error(normalized_id, event, event_payload, exc)
+            self._persist_sync_error(
+                normalized_id, event, event_payload, exc, expected_payload
+            )
             raise
         return event
 
@@ -242,7 +254,9 @@ class PlannedCalendarSyncService:
             self._remove_event(normalized_id, row, workout)
             return None
         event_payload = self._event_payload(normalized_id, workout)
-        event = self._remote_event(normalized_id, workout, event_payload)
+        event = self._remote_event(
+            normalized_id, workout, event_payload, row["payload"]
+        )
         self._persist(
             normalized_id,
             "synced",
@@ -251,6 +265,7 @@ class PlannedCalendarSyncService:
                 "external_id": event.get("external_id")
                 or event_payload.get("external_id"),
             },
+            expected_payload=row["payload"],
         )
         return event
 

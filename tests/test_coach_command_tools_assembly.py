@@ -81,6 +81,7 @@ class CoachCommandToolsAssemblyTests(unittest.TestCase):
             deps["provider_refresh_command"].return_value,
             duplicate_activity=deps["duplicate_activity"].return_value,
             intervals_client_factory=deps["intervals_client"],
+            nutrition_service=deps["nutrition_service"].return_value,
         )
         constructors["CoachAthleteRecordToolService"].assert_called_once_with(
             deps["checkin_service"].return_value,
@@ -93,7 +94,8 @@ class CoachCommandToolsAssemblyTests(unittest.TestCase):
         )
         for name, dependency in deps.items():
             if name not in {"database_lock", "intervals_client"}:
-                self.assertEqual(dependency.call_count, 1)
+                expected_calls = 2 if name == "nutrition_service" else 1
+                self.assertEqual(dependency.call_count, expected_calls)
 
 
 if __name__ == "__main__":

@@ -114,6 +114,16 @@ class CoachTurnAssemblyTests(unittest.TestCase):
         self.assertIs(service._deps.failure, deps["failure"].return_value)
         self.assertEqual(deps["jobs"].call_count, 2)
 
+    def test_stateless_retry_policy_is_shared_by_structured_response_services(self):
+        assembly, _deps, _owners = self.make_assembly()
+
+        first = assembly.response_retry_policy()
+        second = assembly.response_retry_policy()
+        response = assembly.structured_response_service()
+
+        self.assertIs(first, second)
+        self.assertIs(response._retry_policy, first)
+
 
 if __name__ == "__main__":
     unittest.main()

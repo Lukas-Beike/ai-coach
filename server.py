@@ -391,7 +391,7 @@ OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
 SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
-APP_VERSION = "1.11.15"
+APP_VERSION = "1.11.16"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -1172,12 +1172,14 @@ COACH_PROPOSALS = CoachProposalAssembly(
         persistence=ProposalPersistence(
             database_manager=database_manager,
             sync_state_repository=SYNC_PERSISTENCE.state_repository,
+            nutrition_service=NUTRITION_ASSEMBLY.service,
         ),
         execution=ProposalExecutionOwners(
             duplicate_activity_service=ATHLETE_DATA.duplicate_activity,
             history_undo_service=HISTORY.undo_service,
             intervals_client_factory=PROVIDER_TRANSPORT.intervals_client,
             maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
+            tool_dispatch_service=lambda: COACH_TOOL_DISPATCH.service(),
         ),
         clock=ProposalClock(
             now=lambda: time.time(),
@@ -1235,6 +1237,7 @@ SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(dependencies=SyncJobExecutionAssem
         performance_refresh_service=INTERVALS_SYNC.performance_service,
         selected_workout_sync_service=SELECTED_WORKOUT_SYNC.service,
         competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
+        nutrition_sync_service=NUTRITION_ASSEMBLY.intervals_sync_service,
         operation_observer=PROVIDER_SYNC.operation_observer,
         resync_gate=INTERVALS_RESYNC_GATE,
     ),
@@ -1329,7 +1332,7 @@ CHAT_PAGE_MAX = 100
 
 
 
-COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, COACH_DIALOGUE_TOOLS = build_tool_contracts(
+COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, COACH_DIALOGUE_TOOLS, COACH_TOOL_CAPABILITIES = build_tool_contracts(
     default_profile=DEFAULT_PROFILE,
     checkin_text_limits=CHECKIN_TEXT_LIMITS,
     checkin_score_fields=CHECKIN_SCORE_FIELDS,

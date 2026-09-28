@@ -48,3 +48,69 @@ test("synchronization progress does not create chat cards", () => {
   ]);
   assert.deepEqual(cards, []);
 });
+
+test("immediate remote writes report the completed operation in their receipt", () => {
+  const receiptStart = source.indexOf("function coachActionReceipt(");
+  const receiptEnd = source.indexOf("\nasync function executeCoachActionProposal", receiptStart);
+  const context = vm.createContext({});
+  vm.runInContext(source.slice(receiptStart, receiptEnd) + ";globalThis.readReceipt = coachActionReceipt;", context);
+
+  const duplicate = context.readReceipt(
+    { action_type: "delete_duplicate_intervals_activity" },
+    { ok: true, status: "deleted" },
+  );
+  const adaptive = context.readReceipt(
+    { action_type: "remote_coach_write" },
+    { ok: true, status: "completed" },
+  );
+  const queued = context.readReceipt(
+    { action_type: "remote_coach_write" },
+    { ok: true, status: "queued", sync_job_id: "sync-1" },
+  );
+
+  assert.match(duplicate.details[0], /Intervals\.icu gelöscht/);
+  assert.match(adaptive.details[0], /direkt ausgeführt/);
+  assert.equal(queued.details.join("|"), "Syncjob sync-1 eingereiht");
+});
+
+test("an approved remote write is identified as remote in its action receipt", () => {
+  const start = source.indexOf("function coachActionReceipt(");
+  const end = source.indexOf("\nasync function executeCoachActionProposal", start);
+  assert.ok(start >= 0 && end > start);
+  const context = vm.createContext({});
+  vm.runInContext(source.slice(start, end), context);
+  const receipt = context.coachActionReceipt(
+    { action_type: "remote_coach_write" },
+    { status: "queued", sync_job_id: "sync-1" },
+  );
+  assert.equal(receipt.remoteWrite, true);
+  assert.equal(receipt.title, "Remote-Änderung eingereiht");
+  assert.match(receipt.message, /Ergebnis steht noch aus/);
+});
+
+test("a completed remote write receipt uses completion wording", () => {
+  const start = source.indexOf("function coachActionReceipt(");
+  const end = source.indexOf("\nasync function executeCoachActionProposal", start);
+  const context = vm.createContext({});
+  vm.runInContext(source.slice(start, end), context);
+  const receipt = context.coachActionReceipt(
+    { action_type: "remote_coach_write" },
+    { status: "deleted" },
+  );
+  assert.equal(receipt.title, "Remote-Änderung ausgeführt");
+});
+
+test("approval preview renders every bound remote-write value as text", () => {
+  const start = source.indexOf("function coachActionDiff(");
+  const end = source.indexOf("\nfunction coachActionButtons", start);
+  const context = vm.createContext({
+    document: { createElement: () => ({ textContent: "", children: [], append(node) { this.children.push(node); } }) },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  const list = context.coachActionDiff({ diff: [{
+    name: "Nutrition", date: "2026-09-24", id: "race-1", kcal: "450 kcal", entries: "2",
+    carbs: "60 g", protein: "20 g", fat: "10 g", keep: "ride-1", delete: "ride-2",
+  }] });
+  assert.match(list.children[0].textContent, /ID: race-1/);
+  assert.match(list.children[0].textContent, /450 kcal.*2 Einträge.*60 g.*ride-1.*ride-2/);
+});

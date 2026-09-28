@@ -42,6 +42,79 @@ async function controlled(page) {
   });
 }
 
+test("appearance choice updates the theme and survives reload on this device", async ({ page }) => {
+  await ready(page);
+  await page.getByRole("link", { name: "Mehr", exact: true }).click();
+  await page.locator("#settingsPanel").getByRole("link", { name: "Darstellung", exact: true }).click();
+  await page.locator("#appearanceSelect").selectOption("light");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect.poll(() => page.locator('meta[name="theme-color"]').getAttribute("content")).toBe("#ffffff");
+  await page.reload();
+  await expect(page.locator("#appearanceSelect")).toHaveValue("light");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+});
+
+test("a prior user message can be copied or edited as a regular draft", async ({ page }) => {
+  await ready(page);
+  await page.evaluate(() => {
+    state.data.messages = [{ id: 9001, role: "user", content: "Review this interval session", attachment_names: "[]" }];
+    renderMessages(state.data.messages);
+    $("#messageInput").dataset.requestKind = "morning";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (text) => { window.__copiedMessage = text; } },
+    });
+  });
+  await page.getByRole("button", { name: "Nachricht kopieren" }).click();
+  await expect.poll(() => page.evaluate(() => window.__copiedMessage)).toBe("Review this interval session");
+  await page.getByRole("button", { name: "Als Entwurf bearbeiten" }).click();
+  await expect(page.locator("#messageInput")).toHaveValue("Review this interval session");
+  expect(await page.locator("#messageInput").evaluate((input) => input.dataset.requestKind || null)).toBe(null);
+  await page.locator("#messageInput").fill("Current unsent draft");
+  await page.evaluate(() => {
+    state.chatAttachments = [{ name: "current.gpx", data: "fixture" }];
+    renderChatAttachments();
+  });
+  await page.getByRole("button", { name: "Als Entwurf bearbeiten" }).click();
+  await expect(page.locator("#messageInput")).toHaveValue("Current unsent draft");
+  await expect(page.locator("#chatAttachments")).toContainText("current.gpx");
+});
+
+test("light mode keeps performance source badges readable", async ({ page }) => {
+  await ready(page);
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = "light";
+    state.data.performance = { available: true, metrics: {
+      weight_kg: { value: 70, unit: "kg", source: "Manuell" },
+      cycling_ftp_watts: { value: 250, unit: "W", source: "Garmin Connect" },
+      cycling_eftp_watts: { value: 245, unit: "W", source: "Intervals.icu" },
+    } };
+    renderPerformance(state.data.performance);
+  });
+  const badges = page.locator("#performanceSummary small.metric-garmin, #performanceSummary small.metric-intervals, #performanceSummary small.metric-manual");
+  const contrastRatios = await badges.evaluateAll((elements) => ["metric-garmin", "metric-intervals", "metric-manual"].map((className) => {
+    const element = elements.find((item) => item.classList.contains(className));
+    if (!element) throw new Error(`Missing ${className} performance source badge`);
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    context.fillStyle = getComputedStyle(element).color;
+    const normalized = context.fillStyle;
+    const hex = normalized.match(/^#([\da-f]{6})$/i)?.[1];
+    const rgb = hex
+      ? hex.match(/../g).map((channel) => parseInt(channel, 16))
+      : normalized.match(/\d+/g)?.slice(0, 3).map(Number);
+    if (!rgb || rgb.length !== 3) throw new Error(`Unsupported computed color: ${normalized}`);
+    const channel = (value) => {
+      const normalized = value / 255;
+      return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+    };
+    const luminance = rgb.reduce((sum, value, index) => sum + channel(value) * [0.2126, 0.7152, 0.0722][index], 0);
+    return 1.05 / (luminance + 0.05);
+  }));
+  expect(contrastRatios, JSON.stringify(contrastRatios)).toHaveLength(3);
+  expect(contrastRatios.every((ratio) => ratio >= 4.5), JSON.stringify(contrastRatios)).toBe(true);
+});
+
 test("chat reset detaches a delayed status poll without releasing its successor", async ({ page }) => {
   await ready(page);
   await expect(page.locator("#openaiChatResetButton")).toHaveCount(1);
@@ -83,7 +156,7 @@ test("history barriers preserve optimistic and completed messages through naviga
   await page.locator("#messageInput").fill("Fixture Run plan");
   await page.locator("#sendButton").click();
   await page.evaluate(() => __contract.histories.shift()([]));
-  await expect(page.locator(".message.user")).toHaveText("Fixture Run plan");
+  await expect(page.locator(".message.user")).toContainText("Fixture Run plan");
   await page.evaluate(() => { void load("/api/bootstrap?local=1", ["chat"]); });
   await expect.poll(() => page.evaluate(() => __contract.histories.length)).toBe(1);
   await page.getByRole("link", { name: "Geplant", exact: true }).click();
@@ -97,7 +170,7 @@ test("history barriers preserve optimistic and completed messages through naviga
   await page.getByRole("link", { name: "Coach", exact: true }).click();
   await expect(page.locator(".message.user")).toHaveCount(1);
   await expect(page.locator(".message.assistant")).toHaveCount(1);
-  await expect(page.locator(".message.assistant")).toHaveText("Run plan saved");
+  await expect(page.locator(".message.assistant")).toContainText("Run plan saved");
 });
 
 test("a completed answer accepts an immediate follow-up without showing a queue", async ({ page }) => {
@@ -108,7 +181,7 @@ test("a completed answer accepts an immediate follow-up without showing a queue"
   await page.evaluate(() => {
     __contract.push("completed", { message: { id: 201, content: "First answer", client_turn_id: __contract.turn }, proposed_actions: [], command_receipts: [] });
   });
-  await expect(page.locator(".message.assistant")).toHaveText("First answer");
+  await expect(page.locator(".message.assistant")).toContainText("First answer");
   await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
 
   await page.locator("#messageInput").fill("Immediate follow-up");

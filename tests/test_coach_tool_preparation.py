@@ -158,9 +158,9 @@ class StructuredToolPreparationTests(unittest.TestCase):
     def test_created_plan_sync_projects_exact_ids_and_scopes(self) -> None:
         action = {"authorization_scope": ["intervals_sync"], "request": {"sync_scope": "created"}}
         entries = [
-            {"library_workout_id": "unit-b", "expected_payload_hash": "hash-b"},
-            {"library_workout_id": "unit-a", "expected_payload_hash": "hash-a"},
-            {"library_workout_id": "unrelated", "expected_payload_hash": "hash-x"},
+            {"library_workout_id": "unit-b", "expected_payload_hash": "hash-b", "entity": "workout_library"},
+            {"library_workout_id": "unit-a", "expected_payload_hash": "hash-a", "entity": "workout_library"},
+            {"library_workout_id": "unrelated", "expected_payload_hash": "hash-x", "entity": "workout_library"},
         ]
         self.dialogue_action.classify.return_value = action
         self.planning_authority.pending_plan_push_entries.return_value = entries
@@ -178,6 +178,26 @@ class StructuredToolPreparationTests(unittest.TestCase):
         self.assertEqual(action["authorization_scope"][0], "intervals_sync")
         self.assertEqual(set(action["authorization_scope"][1:]), {
             "library_workout:unit-a", "library_workout:unit-b",
+        })
+
+    def test_all_pending_scopes_library_and_planned_rows_by_entity(self) -> None:
+        action = {"authorization_scope": ["intervals_sync"], "request": {"sync_scope": "all_pending"}}
+        self.dialogue_action.classify.return_value = action
+        entries = [
+            {"library_workout_id": "template-1", "expected_payload_hash": "hash-a", "entity": "workout_library"},
+            {"library_workout_id": "planned-1", "expected_payload_hash": "hash-b", "entity": "planned_unit"},
+        ]
+        self.planning_authority.pending_plan_push_entries.return_value = entries
+        arguments: dict[str, Any] = {}
+
+        self.service.prepare(
+            self.metadata("start_intervals_plan_sync", arguments), [],
+            question="", cancelled=False, context={}, allow_mutations=True,
+        )
+
+        self.assertEqual(arguments["entries"], entries)
+        self.assertEqual(set(action["authorization_scope"]), {
+            "intervals_sync", "library_workout:template-1", "planned_unit:planned-1",
         })
 
     def test_created_sync_requires_successful_created_ids(self) -> None:
@@ -213,16 +233,19 @@ class StructuredToolPreparationTests(unittest.TestCase):
             ),
         )
 
-    def test_all_pending_discards_explicit_entries_without_reading_manifest(self) -> None:
+    def test_all_pending_captures_a_concrete_manifest_for_approval(self) -> None:
         action = {"authorization_scope": [], "request": {"sync_scope": "all_pending"}}
         self.dialogue_action.classify.return_value = action
+        manifest = [{"library_workout_id": "current", "expected_payload_hash": "hash"}]
+        self.planning_authority.pending_plan_push_entries.return_value = manifest
         arguments = {"entries": [{"library_workout_id": "stale"}]}
         self.service.prepare(
             self.metadata("start_intervals_plan_sync", arguments), [],
             question="", cancelled=False, context={}, allow_mutations=True,
         )
-        self.assertNotIn("entries", arguments)
-        self.planning_authority.pending_plan_push_entries.assert_not_called()
+        self.assertEqual(arguments["entries"], manifest)
+        self.assertTrue(action["_sync_all_pending"])
+        self.planning_authority.pending_plan_push_entries.assert_called_once_with()
 
     def test_selected_sync_requires_entries_unless_repairing(self) -> None:
         action = {"authorization_scope": [], "request": {"sync_scope": "selected"}}

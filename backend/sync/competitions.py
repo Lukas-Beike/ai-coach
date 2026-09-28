@@ -16,6 +16,7 @@ from backend.observability import Redactor
 from backend.planning import competitions as planning_competitions
 from backend.planning.competition_service import CompetitionService
 from backend.runtime.events import StateEventBuffer
+from backend.sync.authority import competition_push_manifest
 
 _COMPETITION_SYNC_LOCK = threading.Lock()
 
@@ -29,8 +30,17 @@ class CompetitionSyncReconciler:
         self._database_manager = database_manager
         self._uuid_factory = uuid_factory
 
-    def records(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    def records(
+        self, expected_manifest: list[dict[str, str]] | None = None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         with self._database_manager.reader() as db:
+            if (
+                expected_manifest is not None
+                and competition_push_manifest(db) != expected_manifest
+            ):
+                raise AppError(
+                    409, "Der Wettkampfbestand hat sich seit der Freigabe geändert."
+                )
             tombstones = [
                 dict(row)
                 for row in db.execute(
@@ -444,7 +454,12 @@ class CompetitionSyncService:
             _COMPETITION_SYNC_LOCK if competition_lock is None else competition_lock
         )
 
-    def sync(self, reason: str = "manual", push_local: bool = False) -> dict[str, Any]:
+    def sync(
+        self,
+        reason: str = "manual",
+        push_local: bool = False,
+        expected_manifest: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
         if not self._config.intervals_api_key:
             raise AppError(503, INTERVALS_API_KEY_ERROR)
         if not self._competition_lock.acquire(blocking=False):
@@ -456,7 +471,7 @@ class CompetitionSyncService:
                 "competition_sync_status", "Zielwettkämpfe werden synchronisiert…"
             )
             client = self._client_factory()
-            tombstones, local_rows = self._reconciler.records()
+            tombstones, local_rows = self._reconciler.records(expected_manifest)
             linked_ids = {
                 str(row["intervals_event_id"])
                 for row in local_rows

@@ -216,9 +216,16 @@ class CoachTurnFailureService:
         failures: list[dict[str, Any]], pending: list[str],
     ) -> str:
         if successes:
-            text += "\nBereits erfolgreich ausgefuehrt: " + "; ".join(
-                coach_effect_label(step) for step in successes
-            ) + ". Diese Schritte bleiben gespeichert."
+            completed = [
+                step for step in successes
+                if (step.get("result") or {}).get("status") != "approval_required"
+            ]
+            if completed:
+                text += "\nBereits erfolgreich ausgefuehrt: " + "; ".join(
+                    coach_effect_label(step) for step in completed
+                ) + ". Diese Schritte bleiben gespeichert."
+            if len(completed) != len(successes):
+                text += "\nEine Remote-Änderung wurde noch nicht ausgeführt und wartet auf deine Freigabe."
             if any(
                 step["tool"] in {"start_intervals_plan_sync", "sync_competitions"}
                 and step["result"].get("status") == "queued"

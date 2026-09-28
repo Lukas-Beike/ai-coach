@@ -145,7 +145,10 @@ class IntervalsSyncJobOwner:
             return self._performance_refresh_service.refresh()
         if job_type == "competition_push":
             return self._sync_competitions(
-                reason, push_local=True, operation_id=job["id"]
+                reason,
+                push_local=True,
+                operation_id=job["id"],
+                approval_manifest=payload.get("approval_manifest"),
             )
         if job_type == "plan_push":
             selected_payload = {"entries": payload.get("entries")}
@@ -181,7 +184,12 @@ class IntervalsSyncJobOwner:
         return result
 
     def _sync_competitions(
-        self, reason: str, *, push_local: bool, operation_id: str
+        self,
+        reason: str,
+        *,
+        push_local: bool,
+        operation_id: str,
+        approval_manifest: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         with (
             self._sync_operation_observer.observe(
@@ -189,9 +197,10 @@ class IntervalsSyncJobOwner:
             ) as scope,
             self._intervals_resync_gate.operation(),
         ):
-            result = self._competition_sync_service.sync(
-                reason=reason, push_local=push_local
-            )
+            sync_arguments = {"reason": reason, "push_local": push_local}
+            if approval_manifest is not None:
+                sync_arguments["expected_manifest"] = approval_manifest
+            result = self._competition_sync_service.sync(**sync_arguments)
             scope.result = result
             return result
 
@@ -271,10 +280,12 @@ class SyncJobProviderDispatcher:
         self,
         *,
         intervals_jobs: IntervalsSyncJobOwner,
+        nutrition_sync_service: Any,
         garmin_jobs: GarminSyncJobOwner,
         calendar_weather_jobs: CalendarWeatherSyncJobOwner,
     ) -> None:
         self._intervals_jobs = intervals_jobs
+        self._nutrition_sync_service = nutrition_sync_service
         self._garmin_jobs = garmin_jobs
         self._calendar_weather_jobs = calendar_weather_jobs
 
@@ -285,6 +296,8 @@ class SyncJobProviderDispatcher:
         provider = envelope["provider"]
         job_type = envelope["type"]
         reason = str(payload.get("reason") or "Persistenter Providerjob")
+        if provider == "intervals" and job_type == "nutrition_sync":
+            return self._nutrition_sync(payload)
         if provider == "intervals":
             specific = self._intervals_jobs.execute_specific(
                 job, payload, reason, job_type
@@ -306,6 +319,34 @@ class SyncJobProviderDispatcher:
                 provider, job, payload, reason
             )
         raise AppError(400, "Unbekannter Providerjob.", reason="invalid_job_request")
+
+    def _nutrition_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if "approval_manifest" in payload:
+            result = self._nutrition_sync_service.sync_approved(
+                payload["approval_manifest"]
+            )
+            incomplete = result.get("pending_dates") or result.get("failed_dates")
+            return {
+                "status": "partial" if incomplete else "completed",
+                "synced_dates": result["synced_dates"],
+                "pending_dates": result.get("pending_dates", []),
+                "failed_dates": sorted(result.get("failed_dates", {})),
+            }
+        if "date" in payload:
+            result = self._nutrition_sync_service.sync_day(payload["date"])
+            return {
+                "status": "partial" if result.get("pending") else "completed",
+                "date": result["date"],
+                "pending": result.get("pending", False),
+            }
+        result = self._nutrition_sync_service.sync_pending(payload["pending_limit"])
+        incomplete = result.get("pending_dates") or result.get("failed_dates")
+        return {
+            "status": "partial" if incomplete else "completed",
+            "synced_dates": result["synced_dates"],
+            "pending_dates": result.get("pending_dates", []),
+            "failed_dates": sorted(result.get("failed_dates", {})),
+        }
 
 
 class SyncJobExecutor:

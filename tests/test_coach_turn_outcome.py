@@ -46,6 +46,39 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(server.key_value_service().get("coach_pending_request"), "null")
         self.assertEqual(receipts[0]["result"]["status"], "saved")
 
+    def test_queued_remote_job_overrides_false_model_completion_claim(self):
+        result = {
+            "ok": True,
+            "status": "queued",
+            "sync_job_id": "synthetic-job-1",
+        }
+        status, text, failures = self.finalize(
+            self.response("Synchronized successfully."),
+            [{"call_id": "sync", "tool": "start_intervals_plan_sync", "result": result}],
+        )
+        self.assertEqual(status, "completed")
+        self.assertEqual(failures, [])
+        self.assertIn("synthetic-job-1: queued", text)
+        self.assertIn("Remote-Abschluss ist noch nicht bestätigt", text)
+        self.assertNotIn("Synchronized successfully", text)
+
+    def test_observed_terminal_job_status_replaces_queued_status(self):
+        status, text, _ = self.finalize(
+            self.response("Synchronized successfully."),
+            [
+                {"tool": "start_intervals_plan_sync", "result": {
+                    "ok": True, "status": "queued", "sync_job_id": "synthetic-job-2",
+                }},
+                {"tool": "get_sync_job", "result": {
+                    "ok": True, "job": {"id": "synthetic-job-2", "status": "completed"},
+                }},
+            ],
+        )
+        self.assertEqual(status, "completed")
+        self.assertIn("synthetic-job-2: completed", text)
+        self.assertIn("Remote-Abschluss ist bestätigt", text)
+        self.assertNotIn("Synchronized successfully", text)
+
     def test_partial_failure_persists_request_provenance_and_confirmed_effect(self):
         request = {"summary": "Repair profile", "source_message_ids": [17], "scope": ["profile"]}
         failed = self.failure(request=request)

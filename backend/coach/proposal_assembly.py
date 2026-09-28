@@ -24,6 +24,7 @@ from backend.sync.state import SyncStateRepository
 class ProposalPersistence:
     database_manager: Callable[[], DatabaseManager]
     sync_state_repository: Callable[[], SyncStateRepository]
+    nutrition_service: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class ProposalExecutionOwners:
     history_undo_service: Callable[[], HistoryUndoService]
     intervals_client_factory: Callable[[], Any]
     maintenance_gate: Callable[[], Any]
+    tool_dispatch_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -60,10 +62,12 @@ class CoachProposalAssembly:
         clock = dependencies.clock
         self._database_manager = persistence.database_manager
         self._sync_state_repository = persistence.sync_state_repository
+        self._nutrition_service = persistence.nutrition_service
         self._duplicate_activity_service = execution.duplicate_activity_service
         self._history_undo_service = execution.history_undo_service
         self._intervals_client_factory = execution.intervals_client_factory
         self._maintenance_gate = execution.maintenance_gate
+        self._tool_dispatch_service = execution.tool_dispatch_service
         self._now = clock.now
         self._utc_now = clock.utc_now
         self._uuid_factory = clock.uuid_factory
@@ -78,6 +82,7 @@ class CoachProposalAssembly:
             now=self._now,
             utc_now=self._utc_now,
             uuid_factory=self._uuid_factory,
+            nutrition_service=self._nutrition_service,
         )
 
     def confirmation_service(self) -> CoachProposalConfirmationService:
@@ -90,6 +95,7 @@ class CoachProposalAssembly:
             self._history_undo_service(),
             self._intervals_client_factory,
             self._maintenance_gate(),
+            tool_dispatch_service=self._tool_dispatch_service,
             now=self._now,
             utc_now=self._utc_now,
         )

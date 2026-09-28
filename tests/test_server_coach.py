@@ -19,6 +19,7 @@ from backend.coach.proposals import validated_coach_action_preview_input
 from backend.http_api import server as http_server_module
 from backend.planning import competitions as planning_competitions
 from backend.sync import queue as sync_queue
+from backend.sync.authority import competition_push_manifest
 from server_test_support import server, ServerTestCase
 from support import build_gemini_request_payload
 
@@ -108,17 +109,21 @@ class ServerCoachTests(ServerTestCase):
         )
         self.assertEqual(listed["competitions"][0]["id"], competition["id"])
 
+        with server.database_manager().reader() as db:
+            approval_manifest = competition_push_manifest(db)
         with patch.object(sync_queue.SyncJobQueueService, "enqueue", return_value={"id": "job-competition"}) as enqueue:
             synced = server.COACH_TOOL_DISPATCH.service().execute(
-                "sync_competitions", {},
+                "sync_competitions", {"_approval_manifest": approval_manifest},
                 intent={**intent, "operation": "sync_competitions", "intent": "remote_sync", "target_system": "intervals"},
                 conversation_id="conversation-competition", client_turn_id="turn-competition-sync",
                 session_csrf_hash="", sync_job_ids=[],
             )
         self.assertEqual(synced["sync_job_id"], "job-competition")
-        enqueue.assert_called_once_with(
-            "intervals", "competition_push", {"reason": "Bestätigter Coach-Auftrag"}, requested_by="coach",
-        )
+        enqueue.assert_called_once()
+        self.assertEqual(enqueue.call_args.args[:2], ("intervals", "competition_push"))
+        self.assertEqual(enqueue.call_args.args[2]["reason"], "Bestätigter Coach-Auftrag")
+        self.assertEqual(len(enqueue.call_args.args[2]["approval_manifest"]), 1)
+        self.assertEqual(enqueue.call_args.kwargs, {"requested_by": "coach"})
 
     def test_explicit_activity_detail_reads_only_the_requested_complete_raw_record(self):
         server.SYNC_PERSISTENCE.state_repository().save_snapshot({

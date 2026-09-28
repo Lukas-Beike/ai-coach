@@ -8,7 +8,7 @@ from typing import Any
 CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "kv": {"key", "value", "updated_at"},
     "messages": {"id", "role", "content", "client_turn_id", "created_at", "attachments"},
-    "snapshots": {"id", "payload", "created_at"},
+    "snapshots": {"id", "payload", "created_at", "synced_at", "recent_activity_count"},
     "workout_library": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "last_synced_at", "updated_at"},
     "planned_units": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "sync_conflict", "baseline_hash", "last_synced_at", "plan_id", "revision", "tombstone", "command_id", "created_at", "updated_at"},
     "planning_state": {"id", "revision", "updated_at"},
@@ -62,7 +62,9 @@ def initialize_schema(db: Any) -> None:
     CREATE TABLE snapshots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         payload TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        synced_at TEXT NOT NULL DEFAULT '',
+        recent_activity_count INTEGER NOT NULL DEFAULT 0
     );
      CREATE TABLE workout_library (
          id TEXT PRIMARY KEY,

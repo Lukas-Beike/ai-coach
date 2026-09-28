@@ -14,6 +14,7 @@ from backend.config import Config
 from backend.db import DatabaseManager, row_factory
 from backend.errors import AppError
 from backend.planning import library
+from backend.planning.planned_units import planned_unit_payload_hash
 from backend.sync.planned_calendar import (
     PlannedCalendarRepairService,
     PlannedCalendarSyncService,
@@ -100,10 +101,10 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         )
         with self.manager.unit_of_work() as db:
             db.execute(
-                "CREATE TABLE planned_units (local_id TEXT PRIMARY KEY, payload TEXT NOT NULL, "
+                "CREATE TABLE planned_units (id TEXT, local_id TEXT PRIMARY KEY, payload TEXT NOT NULL, "
                 "sync_dirty INTEGER NOT NULL DEFAULT 1, sync_state TEXT NOT NULL DEFAULT 'local', "
                 "sync_error TEXT, sync_conflict TEXT NOT NULL DEFAULT '', external_id TEXT, "
-                "baseline_hash TEXT, last_synced_at TEXT, updated_at TEXT)"
+                "baseline_hash TEXT, last_synced_at TEXT, created_at TEXT, updated_at TEXT)"
             )
         self.revisions = RevisionCounter()
         self.writer = PlannedUnitSyncStateWriter(self.revisions, TestRedactor())
@@ -276,6 +277,175 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         self.assertEqual(second_payload["id"], "event-1")
         self.assertEqual(self.unit()["sync_state"], "synced")
         self.assertEqual(self.revisions.count, 2)
+
+    def test_edit_during_upload_keeps_new_payload_pending_and_retries_it(self):
+        self.add_unit()
+        self.client.responses = [
+            [{"id": "event-1", "type": "WeightTraining"}],
+            [{"id": "event-1", "type": "WeightTraining"}],
+        ]
+
+        original_upsert = self.client.upsert_calendar_events
+        edited = False
+
+        def edit_during_upload(events):
+            nonlocal edited
+            if edited:
+                return original_upsert(events)
+            edited = True
+            uploaded = events[0]
+            with self.manager.unit_of_work() as db:
+                current = db.execute(
+                    "SELECT payload FROM planned_units WHERE local_id=?", (LOCAL_ID,)
+                ).fetchone()
+                payload = json.loads(current["payload"])
+                payload["name"] = "Synthetic concurrent edit"
+                payload["duration_minutes"] = 50
+                payload["moving_time"] = 3000
+                db.execute(
+                    "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local' "
+                    "WHERE local_id=?",
+                    (json.dumps(payload), LOCAL_ID),
+                )
+            return [{**uploaded, "id": "event-1", "type": "WeightTraining"}]
+
+        self.client.upsert_calendar_events = edit_during_upload
+        self.service.sync_entry(LOCAL_ID)
+        row = self.unit()
+        payload = json.loads(row["payload"])
+        self.assertEqual(payload["duration_minutes"], 50)
+        self.assertEqual(payload["moving_time"], 3000)
+        self.assertEqual(payload["remote_event_id"], "event-1")
+        self.assertEqual(row["sync_dirty"], 1)
+        self.assertEqual(row["sync_state"], "local")
+        self.assertNotEqual(row["baseline_hash"], planned_unit_payload_hash(payload))
+        self.service.sync_entry(LOCAL_ID)
+        self.assertEqual(self.client.upserts[-1][0]["name"], "Synthetic concurrent edit")
+        self.assertEqual(self.client.upserts[-1][0]["id"], "event-1")
+        self.assertEqual(self.unit()["sync_dirty"], 0)
+        self.assertEqual(self.unit()["sync_state"], "synced")
+
+    def test_delete_during_upload_becomes_remote_cleanup_tombstone(self):
+        self.add_unit()
+        original_upsert = self.client.upsert_calendar_events
+
+        def delete_during_upload(events):
+            with self.manager.unit_of_work() as db:
+                db.execute("DELETE FROM planned_units WHERE local_id=?", (LOCAL_ID,))
+            return [{**events[0], "id": "event-1", "type": "WeightTraining"}]
+
+        self.client.upsert_calendar_events = delete_during_upload
+        self.service.sync_entry(LOCAL_ID)
+        row = self.unit()
+        payload = json.loads(row["payload"])
+        self.assertTrue(payload["local_deleted"])
+        self.assertEqual(payload["remote_event_id"], "event-1")
+        self.assertEqual(row["sync_dirty"], 1)
+        self.assertEqual(row["sync_state"], "local")
+
+        self.client.remote_event = {
+            "id": "event-1",
+            "category": "WORKOUT",
+            "start_date_local": TODAY.isoformat() + "T06:00:00",
+        }
+        self.client.upsert_calendar_events = original_upsert
+        self.service.sync_entry(LOCAL_ID)
+        self.assertEqual(self.client.deleted, ["event-1"])
+        self.assertEqual(self.unit()["sync_state"], "synced")
+
+    def test_reschedule_during_upload_stays_pending_and_retries_new_date(self):
+        self.add_unit()
+        self.client.responses = [
+            [{"id": "event-1", "type": "WeightTraining"}],
+            [{"id": "event-1", "type": "WeightTraining"}],
+        ]
+        original_upsert = self.client.upsert_calendar_events
+        rescheduled = False
+
+        def reschedule_during_upload(events):
+            nonlocal rescheduled
+            if rescheduled:
+                return original_upsert(events)
+            rescheduled = True
+            with self.manager.unit_of_work() as db:
+                row = db.execute(
+                    "SELECT payload FROM planned_units WHERE local_id=?", (LOCAL_ID,)
+                ).fetchone()
+                payload = json.loads(row["payload"])
+                payload["date"] = "2026-09-22"
+                db.execute(
+                    "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local' "
+                    "WHERE local_id=?",
+                    (json.dumps(payload), LOCAL_ID),
+                )
+            return [{**events[0], "id": "event-1", "type": "WeightTraining"}]
+
+        self.client.upsert_calendar_events = reschedule_during_upload
+        self.service.sync_entry(LOCAL_ID)
+        row = self.unit()
+        payload = json.loads(row["payload"])
+        self.assertEqual(payload["date"], "2026-09-22")
+        self.assertEqual(payload["remote_event_id"], "event-1")
+        self.assertEqual(row["sync_dirty"], 1)
+        self.assertEqual(row["sync_state"], "local")
+        self.service.sync_entry(LOCAL_ID)
+        self.assertEqual(self.client.upserts[-1][0]["start_date_local"], "2026-09-22T00:00:00")
+        self.assertEqual(self.unit()["sync_state"], "synced")
+
+    def test_archive_during_upload_keeps_identity_until_remote_cleanup(self):
+        self.add_unit()
+        self.client.responses = [[{"id": "event-1", "type": "WeightTraining"}]]
+
+        def archive_during_upload(events):
+            with self.manager.unit_of_work() as db:
+                row = db.execute(
+                    "SELECT payload FROM planned_units WHERE local_id=?", (LOCAL_ID,)
+                ).fetchone()
+                payload = json.loads(row["payload"])
+                payload["archived"] = True
+                db.execute(
+                    "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local' "
+                    "WHERE local_id=?",
+                    (json.dumps(payload), LOCAL_ID),
+                )
+            return [{**events[0], "id": "event-1", "type": "WeightTraining"}]
+
+        self.client.upsert_calendar_events = archive_during_upload
+        self.service.sync_entry(LOCAL_ID)
+        row = self.unit()
+        payload = json.loads(row["payload"])
+        self.assertTrue(payload["archived"])
+        self.assertEqual(payload["remote_event_id"], "event-1")
+        self.assertEqual(row["sync_dirty"], 1)
+        self.assertEqual(row["sync_state"], "local")
+
+    def test_concurrent_edit_survives_upload_validation_error(self):
+        self.add_unit()
+
+        def edit_then_return_invalid(events):
+            with self.manager.unit_of_work() as db:
+                payload = json.loads(
+                    db.execute(
+                        "SELECT payload FROM planned_units WHERE local_id=?",
+                        (LOCAL_ID,),
+                    ).fetchone()["payload"]
+                )
+                payload["name"] = "New local name"
+                db.execute(
+                    "UPDATE planned_units SET payload=? WHERE local_id=?",
+                    (json.dumps(payload), LOCAL_ID),
+                )
+            return [{**events[0], "id": "event-1", "type": "Ride"}]
+
+        self.client.upsert_calendar_events = edit_then_return_invalid
+        with self.assertRaises(AppError):
+            self.service.sync_entry(LOCAL_ID)
+        row = self.unit()
+        payload = json.loads(row["payload"])
+        self.assertEqual(payload["name"], "New local name")
+        self.assertEqual(payload["remote_event_id"], "event-1")
+        self.assertEqual(row["sync_state"], "sync_error")
+        self.assertEqual(row["sync_dirty"], 1)
 
     def test_malformed_provider_result_is_rejected(self):
         self.add_unit()

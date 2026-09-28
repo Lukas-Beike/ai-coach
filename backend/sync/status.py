@@ -17,7 +17,7 @@ from backend.sync.queue import SyncJobQueueService
 
 
 class _StateVersionProvider(Protocol):
-    def versions(self) -> dict[str, str]: ...
+    def versions(self, snapshot_metadata: dict[str, Any] | None = None) -> dict[str, str]: ...
 
 
 class SyncOperationStateWriter:
@@ -157,6 +157,7 @@ class SyncPublicStateService:
         *,
         freshness: list[dict[str, Any]] | None = None,
         jobs: list[dict[str, Any]] | None = None,
+        state_versions: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         running = (
             self._intervals_sync_lock.locked() or self._get_value("sync_running") == "1"
@@ -173,7 +174,7 @@ class SyncPublicStateService:
         result = project_sync_status(
             running=running,
             get_value=self._get_value,
-            state_versions=self._state_version_service.versions(),
+            state_versions=state_versions or self._state_version_service.versions(),
             provider_freshness=provider_freshness,
             maintenance=self._maintenance_gate.state(),
         )
@@ -187,9 +188,12 @@ class SyncPublicStateService:
         *,
         freshness: list[dict[str, Any]] | None = None,
         jobs: list[dict[str, Any]] | None = None,
+        state_versions: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Return the bounded sync projection consumed by the browser."""
-        result = self.state(freshness=freshness, jobs=jobs)
+        result = self.state(
+            freshness=freshness, jobs=jobs, state_versions=state_versions
+        )
         # Bootstrap already carries these projections at the top level. Keeping
         # them out of the nested sync card preserves its bounded payload size.
         for key in ("state_versions", "provider_freshness", "maintenance"):

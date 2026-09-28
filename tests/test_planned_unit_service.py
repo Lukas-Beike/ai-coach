@@ -634,7 +634,7 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertEqual(self.calendar_conflicts.calls, [])
 
     def test_resolve_conflict_adopts_normalized_remote_and_metadata(self):
-        remote = {
+        provider_event = {
             "id": "remote-42",
             "external_id": "provider-workout-42",
             "category": "WORKOUT",
@@ -644,7 +644,19 @@ class PlannedUnitServiceTests(unittest.TestCase):
             "description": "- 30m Z2",
             "moving_time": 1800,
         }
+        remote = planned_units.remote_planned_unit_payload(
+            provider_event, today=TODAY
+        )[0]
         local_id = self.make_conflict({"remote": remote})
+        with self.manager.unit_of_work() as db:
+            local = json.loads(db.execute(
+                "SELECT payload FROM planned_units WHERE local_id=?", (local_id,)
+            ).fetchone()["payload"])
+            local.update(plan_id="plan-1", plan_name="Spring plan", archived=False)
+            db.execute(
+                "UPDATE planned_units SET payload=? WHERE local_id=?",
+                (json.dumps(local), local_id),
+            )
 
         result = self.service.resolve_conflict(local_id, "adopt_remote")
 
@@ -652,6 +664,7 @@ class PlannedUnitServiceTests(unittest.TestCase):
         payload = json.loads(planned[0]["payload"])
         self.assertEqual(result["strategy"], "adopt_remote")
         self.assertEqual(result["planned_unit"]["id"], local_id)
+        self.assertEqual(result["planned_unit"]["remote_event_id"], "remote-42")
         self.assertEqual(result["planned_unit"]["name"], "Remote Fahrt")
         self.assertEqual(payload["sync_status"], "synced")
         self.assertEqual(planned[0]["external_id"], "provider-workout-42")
@@ -660,9 +673,18 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertEqual(planned[0]["sync_conflict"], "")
         self.assertIsNone(planned[0]["sync_error"])
         self.assertTrue(planned[0]["baseline_hash"])
+        self.assertEqual(payload["plan_id"], "plan-1")
+        self.assertEqual(payload["plan_name"], "Spring plan")
         self.assertEqual(
             planned[0]["baseline_hash"],
-            planned_units.planned_unit_payload_hash(payload),
+            planned_units.planned_unit_payload_hash(remote),
+        )
+        self.assertEqual(
+            planned_units.remote_planned_unit_existing_state(
+                {**planned[0], "sync_dirty": 0, "sync_state": "synced"},
+                planned[0]["baseline_hash"],
+            )[1],
+            "unchanged",
         )
         self.assertEqual(planned[0]["last_synced_at"], NOW)
         self.assertEqual(planned[0]["updated_at"], NOW)

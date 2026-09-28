@@ -100,6 +100,9 @@ class SyncConflictCommandServiceTests(unittest.TestCase):
         self.assertTrue(
             SyncConflictCommandService.is_push_job({"type": "competition_push"})
         )
+        self.assertTrue(
+            SyncConflictCommandService.is_push_job({"type": "nutrition_sync"})
+        )
         self.assertFalse(
             SyncConflictCommandService.is_push_job({"type": "refresh"})
         )

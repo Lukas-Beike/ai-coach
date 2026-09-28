@@ -1483,6 +1483,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "ASSET_API_JS",
             "ASSET_APP_JS",
             "ASSET_NAVIGATION_JS",
+            "ASSET_APPEARANCE_JS",
             "ASSET_STATE_JS",
             "ASSET_VIEWS_JS",
             "ASSET_FORMS_JS",

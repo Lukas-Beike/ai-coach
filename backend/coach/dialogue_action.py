@@ -116,9 +116,9 @@ class CoachDialogueActionService:
                     "Die Wiederholung benötigt den Anbieter des ursprünglichen Jobs.",
                     reason="request_target",
                 )
-        retry_push = bool(retry_job and retry_job["type"] in {"plan_push", "competition_push"})
+        retry_push = bool(retry_job and retry_job["type"] in {"plan_push", "competition_push", "nutrition_sync"})
         remote_write = (
-            name in {"start_intervals_plan_sync", "sync_competitions", "delete_duplicate_intervals_activity"}
+            name in {"start_intervals_plan_sync", "sync_competitions", "sync_nutrition", "delete_duplicate_intervals_activity"}
             or (name == "apply_adaptive_replan" and bool(arguments.get("sync_illness_to_intervals")))
             or retry_push
         )
@@ -216,7 +216,9 @@ class CoachDialogueActionService:
             )
         if name == "apply_adaptive_replan":
             require_coach_scope(action, "adaptive_replan:" + str(arguments.get("adjustment_id") or ""))
-        if name in {"save_nutrition_entry", "delete_nutrition_entry"}:
+        if name in {"save_nutrition_entry", "update_nutrition_entry", "delete_nutrition_entry"}:
             require_coach_scope(action, "local_nutrition")
+        if name == "sync_nutrition":
+            require_coach_scope(action, "local_nutrition", "intervals_sync")
         if name == "delete_duplicate_intervals_activity":
             require_coach_scope(action, "intervals_sync")

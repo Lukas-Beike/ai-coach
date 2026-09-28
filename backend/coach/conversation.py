@@ -98,6 +98,10 @@ class CoachConversationResetService:
                     ),
                 )
             db.execute("DELETE FROM messages")
+            db.execute(
+                "UPDATE coach_action_proposals SET status='cancelled', action_token_hash=NULL "
+                "WHERE action_type='remote_coach_write' AND status IN ('preview', 'ready')"
+            )
             self._key_values.set(db, "chat_generation", self._uuid_factory().hex)
             db.execute(
                 "UPDATE coach_plan_artifacts SET status='superseded', updated_at=? "

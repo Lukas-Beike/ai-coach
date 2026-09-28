@@ -17,6 +17,7 @@ class CoachProposalAssemblyTests(unittest.TestCase):
         dependencies = {
             "manager": Mock(name="database_manager"),
             "sync_state": Mock(name="sync_state_repository"),
+            "nutrition": Mock(name="nutrition_service"),
             "duplicate": Mock(name="duplicate_activity_service"),
             "history": Mock(name="history_undo_service"),
             "intervals": Mock(name="intervals_client_factory"),
@@ -27,13 +28,15 @@ class CoachProposalAssemblyTests(unittest.TestCase):
         }
         dependencies["manager_provider"] = Mock(return_value=dependencies["manager"])
         dependencies["sync_state_provider"] = Mock(return_value=dependencies["sync_state"])
+        dependencies["nutrition_provider"] = Mock(return_value=dependencies["nutrition"])
         dependencies["duplicate_provider"] = Mock(return_value=dependencies["duplicate"])
         dependencies["history_provider"] = Mock(return_value=dependencies["history"])
         first_gate = Mock(name="first_gate")
         dependencies["gate"].return_value = first_gate
         assembly = CoachProposalAssembly(dependencies=CoachProposalAssembly.Inputs(
             persistence=ProposalPersistence(
-                dependencies["manager_provider"], dependencies["sync_state_provider"]
+                dependencies["manager_provider"], dependencies["sync_state_provider"],
+                dependencies["nutrition_provider"],
             ),
             execution=ProposalExecutionOwners(
                 dependencies["duplicate_provider"], dependencies["history_provider"],
@@ -63,6 +66,7 @@ class CoachProposalAssemblyTests(unittest.TestCase):
         self.assertIs(read_factory.call_args.args[0], dependencies["manager"])
         self.assertIs(create_factory.call_args.args[0], dependencies["manager"])
         self.assertIs(create_factory.call_args.args[1], dependencies["sync_state"])
+        self.assertIs(create_factory.call_args.kwargs["nutrition_service"], dependencies["nutrition_provider"])
         self.assertIs(confirm_factory.call_args.args[0], dependencies["manager"])
         self.assertEqual(dependencies["manager_provider"].call_count, 3)
 

@@ -120,7 +120,8 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
             db.execute(
                 "CREATE TABLE snapshots ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL, "
-                "created_at TEXT NOT NULL)"
+                "created_at TEXT NOT NULL, synced_at TEXT NOT NULL DEFAULT '', "
+                "recent_activity_count INTEGER NOT NULL DEFAULT 0)"
             )
         self.feedback_repository = ActivityFeedbackRepository(
             lambda: "2026-09-20T12:00:00+00:00"

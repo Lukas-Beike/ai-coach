@@ -415,11 +415,24 @@ class SnapshotRepository:
     """Persist bounded provider snapshots without owning a connection."""
 
     def save(self, db: Any, snapshot: dict[str, Any], created_at: str, *, keep: int = 12) -> None:
+        recent = snapshot.get("recent_activities")
         db.execute(
-            "INSERT INTO snapshots(payload, created_at) VALUES (?, ?)",
-            (json.dumps(snapshot, ensure_ascii=False), created_at),
+            "INSERT INTO snapshots(payload, created_at, synced_at, recent_activity_count) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                json.dumps(snapshot, ensure_ascii=False),
+                created_at,
+                str(snapshot.get("synced_at") or ""),
+                len(recent) if isinstance(recent, list) else 0,
+            ),
         )
         db.execute("DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT ?)", (keep,))
+
+    def latest_metadata(self, db: Any) -> dict[str, Any]:
+        row = db.execute(
+            "SELECT synced_at, recent_activity_count FROM snapshots ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row else {}
 
     def latest_payload(self, db: Any) -> str | None:
         row = db.execute("SELECT payload FROM snapshots ORDER BY id DESC LIMIT 1").fetchone()
@@ -542,13 +555,26 @@ class NutritionRepository:
         ).fetchall()
         return [str(row["meal_date"]) for row in rows]
 
-    def day_sync_snapshot(self, db: Any, meal_date: str) -> dict[str, Any]:
-        db.execute(
-            "INSERT OR IGNORE INTO nutrition_sync_dates(meal_date, revision, sync_state, updated_at) "
-            "VALUES (?, 1, 'pending', ?)",
-            (meal_date, self._now()),
-        )
+    def day_sync_snapshot(
+        self, db: Any, meal_date: str, *, create_if_missing: bool = True
+    ) -> dict[str, Any]:
+        if create_if_missing:
+            db.execute(
+                "INSERT OR IGNORE INTO nutrition_sync_dates(meal_date, revision, sync_state, updated_at) "
+                "VALUES (?, 1, 'pending', ?)",
+                (meal_date, self._now()),
+            )
         snapshot = self.day_summary(db, meal_date)
+        entries = snapshot["entries"]
+        for field in ("carbs_g", "protein_g", "fat_g"):
+            known = [entry[field] for entry in entries if entry.get(field) is not None]
+            total_field = "total_" + field
+            if known:
+                snapshot[total_field] = round(sum(float(value) for value in known), 1)
+            elif not entries:
+                snapshot[total_field] = 0
+            else:
+                snapshot[total_field] = None
         row = db.execute(
             "SELECT revision FROM nutrition_sync_dates WHERE meal_date = ?", (meal_date,)
         ).fetchone()
