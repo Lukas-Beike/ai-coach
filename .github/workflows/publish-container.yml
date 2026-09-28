@@ -258,7 +258,7 @@ jobs:
                 fi
                 sleep 2
               done
-              npm run test:e2e -- --project "$project" "$spec"
+              npm run test:e2e -- "$spec" --project "$project"
             done
           done
       - name: Upload browser failure artifacts
