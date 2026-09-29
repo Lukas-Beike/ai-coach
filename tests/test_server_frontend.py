@@ -130,7 +130,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('/components.js?v=217', index)
         self.assertIn('/coach.js?v=3', index)
         self.assertIn('/app.js?v=234', index)
-        self.assertIn('intervals-coach-v237', service_worker)
+        self.assertIn('intervals-coach-v238', service_worker)
         self.assertIn('"/navigation.js?v=218"', service_worker)
         self.assertIn('"/appearance.js?v=218"', service_worker)
         self.assertIn('"/state.js?v=217"', service_worker)
@@ -309,7 +309,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split('app.js?v=', 1)[1].split('"', 1)[0]
         self.assertIn(f'app.js?v={asset_version}', markup)
-        self.assertIn('intervals-coach-v237', service_worker)
+        self.assertIn('intervals-coach-v238', service_worker)
         self.assertIn(f'/app.js?v={asset_version}', service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -458,7 +458,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"/coach.js?v=3"', source)
         self.assertIn('"/app.js?v=234"', source)
         self.assertIn('"/icon.svg?v=217"', source)
-        self.assertIn('"/styles.css?v=228"', source)
+        self.assertIn('"/styles.css?v=229"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
