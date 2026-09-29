@@ -27,7 +27,9 @@ from backend.providers import http as provider_http
 if TYPE_CHECKING:
     from backend.providers.state import ProviderStateService
 
-OPENAI_UNEXPECTED_RESPONSE_MESSAGE = "OpenAI hat eine unerwartete Antwort zurückgegeben."
+OPENAI_UNEXPECTED_RESPONSE_MESSAGE = (
+    "OpenAI hat eine unerwartete Antwort zurückgegeben."
+)
 
 OPENAI_RATE_LIMIT_HEADERS = {
     "retry-after": "retry_after",
@@ -67,7 +69,11 @@ def response_id(value: Any) -> str:
     """Normalize and validate an OpenAI Responses API response identifier."""
     normalized = str(value or "").strip()
     if not re.fullmatch(r"(?a:resp_[\w-]{1,200})", normalized):
-        raise AppError(502, "OpenAI hat keine gültige Response-ID zurückgegeben.", reason="invalid_response")
+        raise AppError(
+            502,
+            "OpenAI hat keine gültige Response-ID zurückgegeben.",
+            reason="invalid_response",
+        )
     return normalized
 
 
@@ -100,12 +106,21 @@ def poll_background_response(
 
     while str(current.get("status") or "").casefold() in {"queued", "in_progress"}:
         if cancel_event is not None:
-            if cancel_event.wait(poll_seconds) or getattr(cancel_event, "is_set", lambda: False)():
+            if (
+                cancel_event.wait(poll_seconds)
+                or getattr(cancel_event, "is_set", lambda: False)()
+            ):
                 abort(AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled"))
         else:
             wait(poll_seconds)
         if monotonic() - started >= max_seconds:
-            abort(AppError(504, "Die Hintergrundplanung hat das Zeitlimit überschritten.", reason="provider_timeout"))
+            abort(
+                AppError(
+                    504,
+                    "Die Hintergrundplanung hat das Zeitlimit überschritten.",
+                    reason="provider_timeout",
+                )
+            )
         current = retrieve(active_response_id)
     return current
 
@@ -114,7 +129,9 @@ def _conversation_retry_cancelled(cancel_event: Any) -> bool:
     return cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)()
 
 
-def _raise_if_conversation_retry_cancelled(cancel_event: Any, cause: BaseException) -> None:
+def _raise_if_conversation_retry_cancelled(
+    cancel_event: Any, cause: BaseException
+) -> None:
     if _conversation_retry_cancelled(cancel_event):
         raise provider_http.ProviderRequestCancelled from cause
 
@@ -140,14 +157,21 @@ def request_with_conversation_retry(
     max_attempts: int = 3,
 ) -> Any:
     """Run a request, retrying only while its conversation is locked."""
-    if not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or max_attempts <= 0:
+    if (
+        not isinstance(max_attempts, int)
+        or isinstance(max_attempts, bool)
+        or max_attempts <= 0
+    ):
         raise ValueError("max_attempts must be positive")
 
     for attempt in range(max_attempts):
         try:
             return request()
         except Exception as exc:
-            if getattr(exc, "reason", None) != "conversation_locked" or attempt + 1 >= max_attempts:
+            if (
+                getattr(exc, "reason", None) != "conversation_locked"
+                or attempt + 1 >= max_attempts
+            ):
                 raise
             delay = 2**attempt
             _raise_if_conversation_retry_cancelled(cancel_event, exc)
@@ -211,7 +235,9 @@ class OpenAIResponsesClient:
         if prepared:
             request_payload = dict(payload)
         elif path == self.responses_path:
-            request_payload = responses_payload(payload, thinking_level=self.thinking_level())
+            request_payload = responses_payload(
+                payload, thinking_level=self.thinking_level()
+            )
         else:
             request_payload = dict(payload)
         request_kwargs = {
@@ -230,17 +256,25 @@ class OpenAIResponsesClient:
         result = self.provider_state.validate_openai_response(path, result)
         if not isinstance(result, dict):
             raise AppError(502, OPENAI_UNEXPECTED_RESPONSE_MESSAGE)
-        if not (path == self.responses_path and request_payload.get("background") is True):
-            self.provider_state.record_usage("openai", result, path.strip("/") or "request")
+        if not (
+            path == self.responses_path and request_payload.get("background") is True
+        ):
+            self.provider_state.record_usage(
+                "openai", result, path.strip("/") or "request"
+            )
         return result
 
     def request(self, path: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Send one OpenAI JSON request and observe its response."""
         return self._send(path, payload)
 
-    def responses(self, payload: Mapping[str, Any], *, cancel_event: Any = None) -> dict[str, Any]:
+    def responses(
+        self, payload: Mapping[str, Any], *, cancel_event: Any = None
+    ) -> dict[str, Any]:
         """Send a Responses request, retrying only transient conversation locks."""
-        request_payload = responses_payload(payload, thinking_level=self.thinking_level())
+        request_payload = responses_payload(
+            payload, thinking_level=self.thinking_level()
+        )
         return self._responses_prepared(request_payload, cancel_event=cancel_event)
 
     def retrieve(self, response_id: str) -> dict[str, Any]:
@@ -258,7 +292,9 @@ class OpenAIResponsesClient:
             timeout=self.response_timeout_seconds,
             service="openai",
         )
-        result = self.provider_state.validate_openai_response(self.responses_path, result)
+        result = self.provider_state.validate_openai_response(
+            self.responses_path, result
+        )
         if not isinstance(result, dict):
             raise AppError(502, OPENAI_UNEXPECTED_RESPONSE_MESSAGE)
         return result
@@ -323,11 +359,15 @@ class OpenAIResponsesClient:
                 thinking_level=self.thinking_level(),
                 background=True,
             )
-            current = self._responses_prepared(request_payload, cancel_event=cancel_event)
+            current = self._responses_prepared(
+                request_payload, cancel_event=cancel_event
+            )
             active_response_id = _validate_response_id(current.get("id"))
             if on_response_id is not None:
                 on_response_id(active_response_id)
-        remaining_seconds = max(0.0, self.background_max_seconds - (self.monotonic() - started))
+        remaining_seconds = max(
+            0.0, self.background_max_seconds - (self.monotonic() - started)
+        )
         current = poll_background_response(
             {**current, "id": active_response_id},
             retrieve=self.retrieve,
@@ -338,13 +378,17 @@ class OpenAIResponsesClient:
             monotonic=self.monotonic,
             wait=self.wait,
         )
-        current = self.provider_state.validate_openai_response(self.responses_path, current)
+        current = self.provider_state.validate_openai_response(
+            self.responses_path, current
+        )
         if not isinstance(current, dict):
             raise AppError(502, OPENAI_UNEXPECTED_RESPONSE_MESSAGE)
         self.provider_state.record_usage("openai", current, "responses_background")
         return current
 
-    def _responses_prepared(self, payload: Mapping[str, Any], *, cancel_event: Any = None) -> dict[str, Any]:
+    def _responses_prepared(
+        self, payload: Mapping[str, Any], *, cancel_event: Any = None
+    ) -> dict[str, Any]:
         try:
             return request_with_conversation_retry(
                 lambda: self._send(
@@ -368,7 +412,11 @@ class OpenAIResponsesClient:
 
 
 def responses_payload(
-    payload: Mapping[str, Any], *, thinking_level: str, stream: bool = False, background: bool = False
+    payload: Mapping[str, Any],
+    *,
+    thinking_level: str,
+    stream: bool = False,
+    background: bool = False,
 ) -> dict[str, Any]:
     """Build an OpenAI Responses API payload without mutating caller state."""
     request_payload = dict(payload)
@@ -394,24 +442,40 @@ def endpoint(base_url: Any, path: str, *, default_base_url: str) -> str:
         or parsed.query
         or parsed.fragment
     ):
-        raise AppError(500, "OPENAI_BASE_URL muss eine gültige HTTP(S)-Basis-URL ohne Zugangsdaten oder Query-Parameter sein.")
+        raise AppError(
+            500,
+            "OPENAI_BASE_URL muss eine gültige HTTP(S)-Basis-URL ohne Zugangsdaten oder Query-Parameter sein.",
+        )
     normalized_path = "/" + str(path or "").lstrip("/")
-    return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/") + normalized_path, "", "", ""))
+    return urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path.rstrip("/") + normalized_path,
+            "",
+            "",
+            "",
+        )
+    )
 
 
-def response_failure_reason(path: str, result: Any, responses_path: str = "/responses") -> str | None:
+def response_failure_reason(
+    path: str, result: Any, responses_path: str = "/responses"
+) -> str | None:
     """Return the normalized wire-level failure, without application side effects."""
     if not isinstance(result, dict):
         return "invalid_response"
-    if result.get("error"):
-        return "response_error"
     if path != responses_path:
-        return None
+        return "response_error" if result.get("error") else None
+    if result.get("type") == "error":
+        return "response_error"
     status = str(result.get("status") or "").casefold()
     if status in {"failed", "cancelled"}:
         return "response_failed"
     if status and status not in {"completed", "incomplete", "in_progress", "queued"}:
         return "invalid_response_status"
+    if result.get("error"):
+        return "response_error"
     return None
 
 
@@ -428,10 +492,23 @@ _RESPONSE_FAILURE_MESSAGES = MappingProxyType(
 class OpenAIResponseFailure(Exception):
     """Safe, normalized failure from validating an OpenAI response."""
 
-    def __init__(self, reason: str, *, provider_error_code: str | None = None):
+    def __init__(
+        self,
+        reason: str,
+        *,
+        provider_error_code: str | None = None,
+        provider_error_type: str | None = None,
+        provider_response_status: str | None = None,
+        provider_incomplete_reason: str | None = None,
+    ):
         self.reason = reason
-        self.message = _RESPONSE_FAILURE_MESSAGES.get(reason, "OpenAI response validation failed.")
+        self.message = _RESPONSE_FAILURE_MESSAGES.get(
+            reason, "OpenAI response validation failed."
+        )
         self.provider_error_code = provider_error_code
+        self.provider_error_type = provider_error_type
+        self.provider_response_status = provider_response_status
+        self.provider_incomplete_reason = provider_incomplete_reason
         super().__init__(self.message)
 
 
@@ -447,19 +524,73 @@ def validate_response(
     if failure is None:
         return result
 
-    provider_error_code = None
-    if failure == "response_error":
-        provider_error = result.get("error")
-        code = provider_error.get("code") if isinstance(provider_error, dict) else None
-        if isinstance(code, str) and code in allowed_error_codes:
-            provider_error_code = code
-    raise OpenAIResponseFailure(failure, provider_error_code=provider_error_code)
+    response = result if isinstance(result, dict) else {}
+    provider_error = response.get("error")
+    if not isinstance(provider_error, dict):
+        provider_error = {}
+    if response.get("type") == "error":
+        provider_error = response
+    error_code = provider_error.get("code")
+    incomplete_details = response.get("incomplete_details")
+    incomplete_reason = (
+        incomplete_details.get("reason")
+        if isinstance(incomplete_details, dict)
+        else None
+    )
+    raise OpenAIResponseFailure(
+        failure,
+        provider_error_code=(
+            error_code
+            if isinstance(error_code, str) and error_code in allowed_error_codes
+            else None
+        ),
+        provider_error_type=_safe_openai_error_token(provider_error.get("type")),
+        provider_response_status=_safe_openai_error_token(response.get("status")),
+        provider_incomplete_reason=_safe_openai_error_token(incomplete_reason),
+    )
+
+
+def response_diagnostic_details(response: Any) -> dict[str, str]:
+    """Expose only bounded provider markers from a terminal Responses object."""
+    if not isinstance(response, dict):
+        return {}
+    result: dict[str, str] = {}
+    error = response.get("error")
+    error = error if isinstance(error, dict) else {}
+    if response.get("type") == "error":
+        error = response
+    code = _safe_openai_error_token(error.get("code"))
+    if code and code in observability.OPENAI_RESPONSE_ERROR_CODES:
+        result["provider_error_code"] = code
+    error_type = _safe_openai_error_token(error.get("type"))
+    if error_type and error_type in {
+        "invalid_request_error",
+        "authentication_error",
+        "permission_error",
+        "rate_limit_error",
+        "server_error",
+    }:
+        result["provider_error_type"] = error_type
+    status = _safe_openai_error_token(response.get("status"))
+    if status and status in {"failed", "cancelled", "incomplete", "completed"}:
+        result["provider_response_status"] = status
+    incomplete = response.get("incomplete_details")
+    marker = _safe_openai_error_token(
+        incomplete.get("reason") if isinstance(incomplete, dict) else None
+    )
+    if marker and marker in {"max_output_tokens", "content_filter", "stop", "timeout"}:
+        result["provider_incomplete_reason"] = marker
+    return result
 
 
 def _content_text(content: Any) -> str | None:
     if not isinstance(content, dict):
         return None
-    if content.get("type") in {"output_text", "text"} and isinstance(content.get("text"), str) and content["text"]:
+    if (
+        content.get("type") in {"output_text", "text"}
+        and isinstance(content.get("text"), str)
+        and content["text"]
+    ):
         return content["text"]
     if content.get("type") == "refusal" and content.get("refusal"):
         return f"The coach declined to answer: {content['refusal']}"
@@ -474,7 +605,9 @@ def _item_text(item: Any) -> list[str]:
         return [refusal]
     if item.get("type") != "message":
         return []
-    return [text for content in item.get("content", []) if (text := _content_text(content))]
+    return [
+        text for content in item.get("content", []) if (text := _content_text(content))
+    ]
 
 
 def response_text(response: dict[str, Any]) -> str:
@@ -482,7 +615,15 @@ def response_text(response: dict[str, Any]) -> str:
     direct = response.get("output_text")
     if isinstance(direct, str) and direct.strip():
         return direct.strip()
-    return "\n".join(text for item in response.get("output", []) for text in _item_text(item)).strip()
+    return "\n".join(
+        text for item in response.get("output", []) for text in _item_text(item)
+    ).strip()
+
+
+def _terminal_sse_response(
+    kind: str, event: dict[str, Any], candidate: dict[str, Any]
+) -> dict[str, Any]:
+    return event if kind == "error" else candidate
 
 
 def consume_sse_event(
@@ -498,7 +639,8 @@ def consume_sse_event(
     if event is None:
         return None
     kind = event_name or str(event.get("type") or "")
-    candidate = event.get("response") if isinstance(event.get("response"), dict) else event
+    response_candidate = event.get("response")
+    candidate = response_candidate if isinstance(response_candidate, dict) else event
     if kind in {"response.created", "response.in_progress"}:
         response_id = str(candidate.get("id") or "").strip()
         if response_id and on_response_id is not None:
@@ -507,8 +649,13 @@ def consume_sse_event(
         delta = event.get("delta")
         if isinstance(delta, str) and delta:
             on_text_delta(delta)
-    elif kind in {"response.completed", "response.incomplete", "response.failed"}:
-        return candidate
+    elif kind in {
+        "error",
+        "response.completed",
+        "response.incomplete",
+        "response.failed",
+    }:
+        return _terminal_sse_response(kind, event, candidate)
     return None
 
 
@@ -539,6 +686,7 @@ def read_stream_response(
     state: StreamReadState | None = None,
 ) -> StreamReadResult:
     """Read and parse an OpenAI SSE response without owning its lifecycle."""
+
     def check_cancelled() -> None:
         if cancel_event is not None and cancel_event.is_set():
             raise provider_http.ProviderRequestCancelled
@@ -552,10 +700,14 @@ def read_stream_response(
         check_cancelled()
         read_state.response_bytes += len(raw_line)
         if read_state.response_bytes > max_bytes:
-            raise provider_http.ProviderResponseTooLarge("provider response exceeds configured size limit")
+            raise provider_http.ProviderResponseTooLarge(
+                "provider response exceeds configured size limit"
+            )
         line = raw_line.decode("utf-8").rstrip("\r\n")
         if not line:
-            event_response = consume_sse_event(data_lines, event_name, on_text_delta, on_response_id)
+            event_response = consume_sse_event(
+                data_lines, event_name, on_text_delta, on_response_id
+            )
             check_cancelled()
             event_name = ""
             data_lines = []
@@ -566,7 +718,9 @@ def read_stream_response(
         elif line.startswith("data:"):
             data_lines.append(line[5:].lstrip())
     check_cancelled()
-    event_response = consume_sse_event(data_lines, event_name, on_text_delta, on_response_id)
+    event_response = consume_sse_event(
+        data_lines, event_name, on_text_delta, on_response_id
+    )
     check_cancelled()
     if event_response is not None:
         final_response = event_response
@@ -586,8 +740,12 @@ def request_stream_response(
 ) -> StreamReadResult:
     """Open, read, and close an OpenAI SSE response."""
     transport_state = state or StreamReadState()
-    response = provider_http.open_interruptibly(request, timeout, cancel_event, opener=opener)
-    transport_state.status = getattr(response, "status", None) or getattr(response, "code", None) or 200
+    response = provider_http.open_interruptibly(
+        request, timeout, cancel_event, opener=opener
+    )
+    transport_state.status = (
+        getattr(response, "status", None) or getattr(response, "code", None) or 200
+    )
     transport_state.headers = getattr(response, "headers", None)
     with response:
         if cancel_event is not None:
@@ -603,7 +761,10 @@ def request_stream_response(
             )
         finally:
             missing = object()
-            if cancel_event is not None and getattr(cancel_event, "_provider_response", missing) is response:
+            if (
+                cancel_event is not None
+                and getattr(cancel_event, "_provider_response", missing) is response
+            ):
                 delattr(cancel_event, "_provider_response")
 
 
@@ -714,6 +875,7 @@ class OpenAIStreamTelemetry:
         reason: str,
         status: int,
         *,
+        diagnostic: Mapping[str, str] | None = None,
         level: int = logging.WARNING,
     ) -> None:
         self.logger.log(
@@ -727,6 +889,7 @@ class OpenAIStreamTelemetry:
                     "reason": reason,
                     "duration_ms": round((self.clock() - started) * 1000, 1),
                     "response_bytes": response_bytes,
+                    **(diagnostic or {}),
                 },
             },
         )
@@ -757,11 +920,21 @@ class OpenAIStreamTelemetry:
         response_bytes: int,
         reason: str,
         status: int,
+        final_response: dict[str, Any] | None = None,
         *,
         level: int = logging.WARNING,
     ) -> None:
-        self.log_failure(context, started, response_bytes, reason, status, level=level)
-        self.capture_failure(status, reason, started, response_bytes)
+        diagnostic = response_diagnostic_details(final_response)
+        self.log_failure(
+            context,
+            started,
+            response_bytes,
+            reason,
+            status,
+            diagnostic=diagnostic,
+            level=level,
+        )
+        self.capture_failure(status, reason, started, response_bytes, diagnostic)
 
     def record_cancelled(
         self,
@@ -770,7 +943,9 @@ class OpenAIStreamTelemetry:
         response_bytes: int,
     ) -> None:
         self.record_usage({"usage": {}}, "responses_stream_cancelled")
-        self.log_failure(context, started, response_bytes, "chat_cancelled", 499, level=logging.INFO)
+        self.log_failure(
+            context, started, response_bytes, "chat_cancelled", 499, level=logging.INFO
+        )
         self.capture_failure(499, "chat_cancelled", started, response_bytes)
 
     def record_disconnect(
@@ -779,7 +954,14 @@ class OpenAIStreamTelemetry:
         started: float,
         response_bytes: int,
     ) -> None:
-        self.log_failure(context, started, response_bytes, "client_disconnected", 499, level=logging.INFO)
+        self.log_failure(
+            context,
+            started,
+            response_bytes,
+            "client_disconnected",
+            499,
+            level=logging.INFO,
+        )
         self.capture_failure(499, "client_disconnected", started, response_bytes)
 
     def record_timeout(
@@ -838,7 +1020,10 @@ class OpenAIStreamTelemetry:
             safe_log_reason(details["reason"]),
             status,
         )
-        self.capture_failure(status, details["reason"], started, response_bytes, diagnostic)
+        self.capture_failure(
+            status, details["reason"], started, response_bytes, diagnostic
+        )
+
 
 class OpenAIStreamClient:
     """Own one complete OpenAI Responses SSE request."""
@@ -870,7 +1055,13 @@ class OpenAIStreamClient:
 
     def _context(self, body: bytes) -> dict[str, Any]:
         config = self.config
-        parsed = urlparse(endpoint(config.base_url, config.responses_path, default_base_url=config.default_base_url))
+        parsed = urlparse(
+            endpoint(
+                config.base_url,
+                config.responses_path,
+                default_base_url=config.default_base_url,
+            )
+        )
         context = {
             "service": "openai",
             "method": "POST",
@@ -891,7 +1082,11 @@ class OpenAIStreamClient:
         stream_bytes: int,
     ) -> NoReturn:
         reason = safe_log_reason(exc.reason or "request_failed")
-        if cancel_event is not None and cancel_event.is_set() and final_response is None:
+        if (
+            cancel_event is not None
+            and cancel_event.is_set()
+            and final_response is None
+        ):
             self.telemetry.record_usage({"usage": {}}, "responses_stream_cancelled")
         self.telemetry.record_app_error(
             context,
@@ -899,6 +1094,7 @@ class OpenAIStreamClient:
             stream_bytes,
             reason,
             exc.status,
+            final_response,
             level=logging.INFO if exc.reason == "chat_cancelled" else logging.WARNING,
         )
         raise exc
@@ -926,7 +1122,9 @@ class OpenAIStreamClient:
         self.telemetry.record_rate_limits(headers)
         raw_error = provider_http.read_error_body(exc, self.config.max_bytes)
         status = int(getattr(exc, "code", 502) or 502)
-        details = error_details(status, raw_error, headers, updated_at=self.telemetry.now())
+        details = error_details(
+            status, raw_error, headers, updated_at=self.telemetry.now()
+        )
         diagnostic = error_diagnostic_details(
             raw_error,
             headers,
@@ -962,7 +1160,9 @@ class OpenAIStreamClient:
             self.telemetry.record_cancelled(context, started, stream_bytes)
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
         self.telemetry.record_timeout(context, started, stream_bytes)
-        raise AppError(504, "OpenAI hat nicht rechtzeitig geantwortet.", reason="provider_timeout") from exc
+        raise AppError(
+            504, "OpenAI hat nicht rechtzeitig geantwortet.", reason="provider_timeout"
+        ) from exc
 
     def _network(
         self,
@@ -976,7 +1176,11 @@ class OpenAIStreamClient:
             self.telemetry.record_cancelled(context, started, stream_bytes)
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
         self.telemetry.record_network_failure(context, started, stream_bytes)
-        raise AppError(503, "OpenAI ist vorübergehend nicht verfügbar.", reason="provider_unavailable") from exc
+        raise AppError(
+            503,
+            "OpenAI ist vorübergehend nicht verfügbar.",
+            reason="provider_unavailable",
+        ) from exc
 
     def _stream_once(
         self,
@@ -989,7 +1193,11 @@ class OpenAIStreamClient:
     ) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
         config = self.config
-        url = endpoint(config.base_url, config.responses_path, default_base_url=config.default_base_url)
+        url = endpoint(
+            config.base_url,
+            config.responses_path,
+            default_base_url=config.default_base_url,
+        )
         request = Request(
             url,
             data=body,
@@ -1003,7 +1211,9 @@ class OpenAIStreamClient:
         )
         context = self._context(body)
         started = self.telemetry.clock()
-        attempt_state.update(context=context, started=started, stream_bytes=0, final_response=None)
+        attempt_state.update(
+            context=context, started=started, stream_bytes=0, final_response=None
+        )
         self.telemetry.record_started(context)
         stream_state = StreamReadState()
         try:
@@ -1031,8 +1241,12 @@ class OpenAIStreamClient:
                     "OpenAI hat keine vollständige Streaming-Antwort zurückgegeben.",
                     reason="invalid_response",
                 )
-            final_response = self.telemetry.provider_state.validate_openai_response(config.responses_path, final_response)
-            self.telemetry.record_success(final_response, stream_state, started, context)
+            final_response = self.telemetry.provider_state.validate_openai_response(
+                config.responses_path, final_response
+            )
+            self.telemetry.record_success(
+                final_response, stream_state, started, context
+            )
             return final_response
         except AppError as exc:
             self._app_error(
@@ -1044,7 +1258,12 @@ class OpenAIStreamClient:
                 stream_state.response_bytes,
             )
         except ClientDisconnected:
-            self._disconnect(attempt_state.get("final_response"), context, started, stream_state.response_bytes)
+            self._disconnect(
+                attempt_state.get("final_response"),
+                context,
+                started,
+                stream_state.response_bytes,
+            )
         except provider_http.ProviderRequestCancelled:
             self._app_error(
                 AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled"),
@@ -1056,7 +1275,11 @@ class OpenAIStreamClient:
             )
         except provider_http.ProviderResponseTooLarge:
             self._app_error(
-                AppError(502, "Die Streaming-Antwort von OpenAI ist zu groß.", reason="response_too_large"),
+                AppError(
+                    502,
+                    "Die Streaming-Antwort von OpenAI ist zu groß.",
+                    reason="response_too_large",
+                ),
                 cancel_event,
                 attempt_state.get("final_response"),
                 context,
@@ -1066,9 +1289,13 @@ class OpenAIStreamClient:
         except HTTPError as exc:
             self._http_error(exc, context, started, stream_state.response_bytes)
         except TimeoutError as exc:
-            self._timeout(exc, cancel_event, context, started, stream_state.response_bytes)
+            self._timeout(
+                exc, cancel_event, context, started, stream_state.response_bytes
+            )
         except (OSError, ValueError) as exc:
-            self._network(exc, cancel_event, context, started, stream_state.response_bytes)
+            self._network(
+                exc, cancel_event, context, started, stream_state.response_bytes
+            )
 
     def stream(
         self,
@@ -1096,11 +1323,15 @@ class OpenAIStreamClient:
                     attempt_state=attempt_state,
                 ),
                 cancel_event=cancel_event,
-                on_retry=lambda attempt, delay: self.telemetry.record_retry(attempt, delay),
+                on_retry=lambda attempt, delay: self.telemetry.record_retry(
+                    attempt, delay
+                ),
                 wait=self.wait,
             )
         except provider_http.ProviderRequestCancelled as exc:
-            context = attempt_state.get("context", {"service": "openai", "method": "POST"})
+            context = attempt_state.get(
+                "context", {"service": "openai", "method": "POST"}
+            )
             started = attempt_state.get("started", self.telemetry.clock())
             stream_bytes = attempt_state.get("stream_bytes", 0)
             self.telemetry.record_cancelled(context, started, stream_bytes)
@@ -1158,17 +1389,29 @@ def _provider_error_payload(raw_body: bytes) -> dict[str, Any]:
     return error if isinstance(error, dict) else {}
 
 
-def error_diagnostic_details(raw_body: bytes, headers: Any = None, *, max_response_bytes: int) -> dict[str, Any]:
+def error_diagnostic_details(
+    raw_body: bytes, headers: Any = None, *, max_response_bytes: int
+) -> dict[str, Any]:
     """Return safe OpenAI error metadata; never retain an upstream message/body."""
     error = _provider_error_payload(raw_body)
     max_bytes = max(0, max_response_bytes)
-    details: dict[str, Any] = {"error_body_bytes": min(len(raw_body or b""), max_bytes + 1)}
-    for source, target in (("code", "error_code"), ("type", "error_type"), ("param", "parameter")):
+    details: dict[str, Any] = {
+        "error_body_bytes": min(len(raw_body or b""), max_bytes + 1)
+    }
+    for source, target in (
+        ("code", "error_code"),
+        ("type", "error_type"),
+        ("param", "parameter"),
+    ):
         token = _safe_openai_error_token(error.get(source))
         if token:
             details[target] = token
     try:
-        request_id = _safe_openai_error_token(headers.get("x-request-id")) if headers is not None else None
+        request_id = (
+            _safe_openai_error_token(headers.get("x-request-id"))
+            if headers is not None
+            else None
+        )
     except (AttributeError, TypeError):
         request_id = None
     if request_id:
@@ -1186,11 +1429,20 @@ def _openai_error_tokens(error: dict[str, Any]) -> tuple[str, str, str, str, str
     return code, error_type, parameter, provider_message, searchable
 
 
-def _openai_invalid_input_state(error_type: str, parameter: str, provider_message: str) -> bool:
+def _openai_invalid_input_state(
+    error_type: str, parameter: str, provider_message: str
+) -> bool:
     """Identify recoverable tool-output and reasoning continuation state errors."""
-    return error_type == "invalid_request_error" and parameter.startswith("input") and (
-        "no tool output found for function call" in provider_message
-        or ("reasoning" in provider_message and "required following item" in provider_message)
+    return (
+        error_type == "invalid_request_error"
+        and parameter.startswith("input")
+        and (
+            "no tool output found for function call" in provider_message
+            or (
+                "reasoning" in provider_message
+                and "required following item" in provider_message
+            )
+        )
     )
 
 
@@ -1203,54 +1455,117 @@ def _openai_conversation_error(
     searchable: str,
 ) -> tuple[str, str] | None:
     """Classify conversation locking and invalid continuation state separately."""
-    if code in {"conversation_locked", "conversation_lock_timeout", "concurrent_request"} or (
-        "conversation" in searchable and "lock" in searchable
-    ):
-        return "conversation_locked", "Die OpenAI-Konversation wird gerade von einer anderen Anfrage verwendet. Bitte kurz warten und erneut versuchen."
+    if code in {
+        "conversation_locked",
+        "conversation_lock_timeout",
+        "concurrent_request",
+    } or ("conversation" in searchable and "lock" in searchable):
+        return (
+            "conversation_locked",
+            "Die OpenAI-Konversation wird gerade von einer anderen Anfrage verwendet. Bitte kurz warten und erneut versuchen.",
+        )
     invalid_state = _openai_invalid_input_state(error_type, parameter, provider_message)
     continuation_error = "conversation" in searchable and any(
         marker in searchable for marker in ("state", "previous", "invalid", "not found")
     )
     if status == 400 and (
-        code in {"conversation_not_found", "invalid_conversation", "conversation_state_invalid", "invalid_function_call_output"}
+        code
+        in {
+            "conversation_not_found",
+            "invalid_conversation",
+            "conversation_state_invalid",
+            "invalid_function_call_output",
+        }
         or "function_call_output" in searchable
         or invalid_state
         or continuation_error
     ):
-        return "conversation_state_invalid", "Der KI-Dienst konnte den bisherigen Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten."
+        return (
+            "conversation_state_invalid",
+            "Der KI-Dienst konnte den bisherigen Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten.",
+        )
     return None
 
 
-def _openai_billing_error(code: str, error_type: str, searchable: str) -> tuple[str, str] | None:
+def _openai_billing_error(
+    code: str, error_type: str, searchable: str
+) -> tuple[str, str] | None:
     """Classify quota and billing limits before generic rate limiting."""
     if code == "credit_balance_exhausted":
-        return "credit_balance_exhausted", "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
-    if code in {"organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
-        return code, "Das OpenAI-Ausgaben- oder Nutzungslimit ist erreicht. Bitte das Limit im OpenAI-Konto prüfen."
-    if code in {"insufficient_quota", "billing_hard_limit_reached"} or error_type == "insufficient_quota" or any(
-        marker in searchable for marker in ("insufficient_quota", "quota", "billing_hard_limit", "credits")
+        return (
+            "credit_balance_exhausted",
+            "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen.",
+        )
+    if code in {
+        "organization_spend_limit_exceeded",
+        "project_spend_limit_exceeded",
+        "organization_usage_limit_exceeded",
+    }:
+        return (
+            code,
+            "Das OpenAI-Ausgaben- oder Nutzungslimit ist erreicht. Bitte das Limit im OpenAI-Konto prüfen.",
+        )
+    if (
+        code in {"insufficient_quota", "billing_hard_limit_reached"}
+        or error_type == "insufficient_quota"
+        or any(
+            marker in searchable
+            for marker in (
+                "insufficient_quota",
+                "quota",
+                "billing_hard_limit",
+                "credits",
+            )
+        )
     ):
-        return "insufficient_quota", "Das OpenAI-Guthaben bzw. Kontingent ist aufgebraucht. Bitte Guthaben und Abrechnung im OpenAI-Konto prüfen."
+        return (
+            "insufficient_quota",
+            "Das OpenAI-Guthaben bzw. Kontingent ist aufgebraucht. Bitte Guthaben und Abrechnung im OpenAI-Konto prüfen.",
+        )
     return None
 
 
 def _openai_error_reason(status: int, error: dict[str, Any]) -> tuple[str, str]:
     """Map safe OpenAI error markers to an athlete-facing recovery action."""
-    code, error_type, parameter, provider_message, searchable = _openai_error_tokens(error)
-    conversation_error = _openai_conversation_error(status, code, error_type, parameter, provider_message, searchable)
+    code, error_type, parameter, provider_message, searchable = _openai_error_tokens(
+        error
+    )
+    conversation_error = _openai_conversation_error(
+        status, code, error_type, parameter, provider_message, searchable
+    )
     if conversation_error:
         return conversation_error
     billing_error = _openai_billing_error(code, error_type, searchable)
     if billing_error:
         return billing_error
-    if status == 429 or code == "rate_limit_exceeded" or error_type == "rate_limit_exceeded":
-        return "rate_limit_exceeded", "OpenAI hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen."
-    if status in {401, 403} or code in {"invalid_api_key", "invalid_organization", "permission_denied"}:
-        return "authentication_or_permission", "Der OpenAI-Zugang wurde abgelehnt. Bitte API-Schlüssel und Projektberechtigungen prüfen."
+    if (
+        status == 429
+        or code == "rate_limit_exceeded"
+        or error_type == "rate_limit_exceeded"
+    ):
+        return (
+            "rate_limit_exceeded",
+            "OpenAI hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen.",
+        )
+    if status in {401, 403} or code in {
+        "invalid_api_key",
+        "invalid_organization",
+        "permission_denied",
+    }:
+        return (
+            "authentication_or_permission",
+            "Der OpenAI-Zugang wurde abgelehnt. Bitte API-Schlüssel und Projektberechtigungen prüfen.",
+        )
     if status == 404 or code in {"model_not_found", "not_found"}:
-        return "not_found", "Das konfigurierte OpenAI-Modell oder der angeforderte Dienst wurde nicht gefunden."
+        return (
+            "not_found",
+            "Das konfigurierte OpenAI-Modell oder der angeforderte Dienst wurde nicht gefunden.",
+        )
     if status >= 500:
-        return "provider_unavailable", "OpenAI ist vorübergehend nicht verfügbar. Bitte später erneut versuchen."
+        return (
+            "provider_unavailable",
+            "OpenAI ist vorübergehend nicht verfügbar. Bitte später erneut versuchen.",
+        )
     return "http_error", f"OpenAI konnte die Anfrage nicht verarbeiten (HTTP {status})."
 
 
