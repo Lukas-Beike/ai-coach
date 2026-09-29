@@ -1806,7 +1806,14 @@ def main() -> None:
         COACH_BACKGROUND_JOBS.job_store().resume_interrupted(COACH_BACKGROUND_JOBS.turn_failure_service())
         sync_worker = sync_job_worker()
         sync_worker.start()
-        COACH_JOB_WORKER.start(COACH_BACKGROUND_JOBS.job_store, COACH_BACKGROUND_JOBS.background_job_runner, runtime_maintenance.MAINTENANCE_GATE)
+        COACH_JOB_WORKER.start(
+            COACH_BACKGROUND_JOBS.job_store,
+            COACH_BACKGROUND_JOBS.background_job_runner,
+            runtime_maintenance.MAINTENANCE_GATE,
+            lambda: COACH_BACKGROUND_JOBS.job_store().resume_interrupted(
+                COACH_BACKGROUND_JOBS.turn_failure_service()
+            ),
+        )
         SYNC_SCHEDULERS.startup_scheduler().schedule()
         daily_loop = SYNC_SCHEDULERS.daily_loop()
         daily_thread = threading.Thread(target=daily_loop.run, daemon=True)

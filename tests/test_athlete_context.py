@@ -26,6 +26,10 @@ class _Manager:
             self.db.rollback()
             raise
 
+    @contextmanager
+    def reader(self):
+        yield self.db
+
 
 def _normalize_competition(value):
     if not isinstance(value, dict):

@@ -80,6 +80,41 @@ async function installControlledChatStream(page) {
   });
 }
 
+test("provider-backed API calls outlast their server deadlines", async ({ page }) => {
+  await openAuthenticatedApp(page);
+  const timeouts = await page.evaluate(async () => {
+    const delays = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalFetch = globalThis.fetch;
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      delays.push(delay);
+      return originalSetTimeout(callback, delay, ...args);
+    };
+    globalThis.fetch = async (url) => new Response(JSON.stringify(
+      String(url).includes("/api/transcribe")
+        ? { transcript: "fixture transcript" }
+        : { status: "completed" },
+    ), { status: 200, headers: { "Content-Type": "application/json" } });
+    try {
+      await AppApi.request("/api/health", { method: "GET" });
+      await AppApi.request("/api/coach/actions/execute", {
+        method: "POST",
+        body: "{}",
+      });
+      await AppApi.audio(
+        "/api/transcribe",
+        new Blob(["fixture audio"], { type: "audio/webm" }),
+      );
+      return delays;
+    } finally {
+      globalThis.fetch = originalFetch;
+      globalThis.setTimeout = originalSetTimeout;
+    }
+  });
+
+  expect(timeouts).toEqual([25_000, 55_000, 100_000]);
+});
+
 test.describe("critical browser states", () => {
   test("login, main views, dialog and profile form state", async ({ page }, testInfo) => {
     const browserErrors = installBrowserGuards(page);

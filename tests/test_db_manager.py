@@ -141,6 +141,34 @@ class DatabaseManagerTests(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM records").fetchone()[0], 4)
             manager.close()
 
+    def test_writer_wait_is_bounded(self):
+        with tempfile.TemporaryDirectory() as root:
+            manager = DatabaseManager(
+                Path(root) / "bounded-writer.db", sqlite3, timeout=0.05,
+                row_factory=sqlite3.Row,
+            )
+            with manager.unit_of_work() as db:
+                db.execute("CREATE TABLE records (value INTEGER NOT NULL)")
+            self.assertTrue(manager._writer_lock.acquire())
+            try:
+                failure = []
+
+                def competing_writer() -> None:
+                    try:
+                        with manager.unit_of_work():
+                            pass
+                    except TimeoutError as exc:
+                        failure.append(str(exc))
+
+                contender = threading.Thread(target=competing_writer)
+                contender.start()
+                contender.join(1)
+                self.assertFalse(contender.is_alive())
+                self.assertEqual(failure, ["database writer limit reached"])
+            finally:
+                manager._writer_lock.release()
+                manager.close()
+
     def test_reader_nested_in_unit_of_work_reuses_writer_and_sees_uncommitted_row(self):
         with tempfile.TemporaryDirectory() as root:
             manager = self.make_manager(root)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
+from typing import Any
 
 from backend.coach.background_job import CoachBackgroundJobRunner
 from backend.coach.job_store import CoachJobStore
@@ -28,6 +29,7 @@ class CoachJobWorker:
         jobs: Callable[[], CoachJobStore],
         runner: Callable[[], CoachBackgroundJobRunner],
         maintenance: MaintenanceGate,
+        recover: Callable[[], Any],
     ) -> None:
         """Start at most one daemon after DB initialization and restart recovery."""
         with self._lock:
@@ -36,7 +38,7 @@ class CoachJobWorker:
             self.stop_event.clear()
             self._thread = threading.Thread(
                 target=self.run_forever,
-                args=(jobs, runner, maintenance),
+                args=(jobs, runner, maintenance, recover),
                 name="coach-job-worker",
                 daemon=True,
             )
@@ -47,29 +49,73 @@ class CoachJobWorker:
         jobs: Callable[[], CoachJobStore],
         runner: Callable[[], CoachBackgroundJobRunner],
         maintenance: MaintenanceGate,
+        recover: Callable[[], Any],
     ) -> None:
-        """Keep claim and outcome within the outer maintenance operation."""
+        """Recover claimed work after runner or outcome persistence failures."""
+        recovery_pending = False
         while not self.stop_event.is_set():
-            try:
-                with maintenance.operation():
-                    job = jobs().claim()
-                    if job:
-                        runner().run(job)
-                        continue
-            except AppError as exc:
-                if exc.reason != "maintenance":
-                    raise
-            except Exception as exc:  # noqa: BLE001 - survive transient claim failures
-                _LOGGER.error(
-                    "Coach worker iteration failed",
-                    extra={
-                        "event": "coach_worker_iteration_failed",
-                        "error_class": type(exc).__name__,
-                        "reason": getattr(exc, "reason", None),
-                    },
-                )
-            self.wake_event.wait(5)
-            self.wake_event.clear()
+            if recovery_pending:
+                recovery_pending = not self._recover_interrupted(maintenance, recover)
+                if recovery_pending:
+                    self._wait_for_wake()
+                    continue
+
+            processed, recovery_pending = self._run_iteration(jobs, runner, maintenance)
+            if processed:
+                continue
+            self._wait_for_wake()
+
+    def _recover_interrupted(
+        self, maintenance: MaintenanceGate, recover: Callable[[], Any]
+    ) -> bool:
+        try:
+            with maintenance.operation():
+                recover()
+        except AppError as exc:
+            if exc.reason != "maintenance":
+                self._log_failure("coach_worker_recovery_failed", exc)
+            return False
+        except Exception as exc:  # noqa: BLE001 - retry interrupted-state recovery
+            self._log_failure("coach_worker_recovery_failed", exc)
+            return False
+        return True
+
+    def _run_iteration(
+        self,
+        jobs: Callable[[], CoachJobStore],
+        runner: Callable[[], CoachBackgroundJobRunner],
+        maintenance: MaintenanceGate,
+    ) -> tuple[bool, bool]:
+        job = None
+        try:
+            with maintenance.operation():
+                job = jobs().claim()
+                if job is not None:
+                    runner().run(job)
+                    return True, False
+        except AppError as exc:
+            if exc.reason != "maintenance":
+                self._log_failure("coach_worker_iteration_failed", exc)
+            return False, job is not None
+        except Exception as exc:  # noqa: BLE001 - survive transient claim failures
+            self._log_failure("coach_worker_iteration_failed", exc)
+            return False, job is not None
+        return False, False
+
+    def _wait_for_wake(self) -> None:
+        self.wake_event.wait(5)
+        self.wake_event.clear()
+
+    @staticmethod
+    def _log_failure(event: str, error: Exception) -> None:
+        _LOGGER.error(
+            "Coach worker iteration failed",
+            extra={
+                "event": event,
+                "error_class": type(error).__name__,
+                "reason": getattr(error, "reason", None),
+            },
+        )
 
     def stop(self) -> None:
         self.stop_event.set()
