@@ -1142,7 +1142,7 @@ COACH_CONTEXT = CoachContextAssembly(dependencies=CoachContextAssembly.Inputs(
             "activity_limit_per_sport": coach_context_module.COACH_RECENT_ACTIVITIES_PER_SPORT,
             "planned_event_limit": coach_context_module.COACH_PLANNED_EVENT_LIMIT,
         },
-        long_plan_max_output_tokens=lambda: coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
+        default_max_output_tokens=lambda: coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
     ),
 ))
 COACH_READ_TOOLS = CoachReadToolsAssembly(
