@@ -536,6 +536,10 @@ def response_text(response: dict[str, Any]) -> str:
     return "\n".join(text for item in response.get("output", []) for text in _item_text(item)).strip()
 
 
+def _terminal_sse_response(kind: str, event: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    return event if kind == "error" else candidate
+
+
 def consume_sse_event(
     data_lines: list[str],
     event_name: str,
@@ -558,10 +562,8 @@ def consume_sse_event(
         delta = event.get("delta")
         if isinstance(delta, str) and delta:
             on_text_delta(delta)
-    elif kind == "error":
-        return event
-    elif kind in {"response.completed", "response.incomplete", "response.failed"}:
-        return candidate
+    elif kind in {"error", "response.completed", "response.incomplete", "response.failed"}:
+        return _terminal_sse_response(kind, event, candidate)
     return None
 
 
