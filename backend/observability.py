@@ -44,6 +44,13 @@ OPENAI_RESPONSE_ERROR_CODES = frozenset(
     {
         "server_error",
         "rate_limit_exceeded",
+        "model_not_found",
+        "unsupported_parameter",
+        "context_length_exceeded",
+        "insufficient_quota",
+        "billing_hard_limit_reached",
+        "invalid_api_key",
+        "permission_denied",
         "invalid_prompt",
         "data_residency_mismatch",
         "bio_policy",
