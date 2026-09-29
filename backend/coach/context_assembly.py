@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -62,7 +61,7 @@ class CoachContextAssembly:
         planning: CoachContextPlanningSources
         dialogue: CoachContextDialogueSources
 
-    def __init__(self, *, dependencies: "CoachContextAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: CoachContextAssembly.Inputs) -> None:
         performance = dependencies.performance
         planning = dependencies.planning
         dialogue = dependencies.dialogue
@@ -128,7 +127,9 @@ class CoachContextAssembly:
 
     def request_payload_service(self) -> CoachRequestPayloadService:
         return CoachRequestPayloadService(
-            self.training_context_service(), self._settings, self._default_max_output_tokens()
+            self.training_context_service(),
+            self._settings,
+            self._default_max_output_tokens(),
         )
 
     def preview_service(self) -> CoachContextPreviewService:
