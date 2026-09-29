@@ -1,7 +1,9 @@
 import unittest
 from datetime import datetime, timedelta, timezone
+import threading
 
 from backend.athlete.clock import AthleteLocalClock
+from backend.db.manager import DATABASE_LOCK
 
 
 class Profile:
@@ -13,6 +15,35 @@ class Profile:
 
 
 class AthleteLocalClockTests(unittest.TestCase):
+    def test_profile_timezone_read_does_not_require_a_global_database_lock(self):
+        clock = AthleteLocalClock(
+            Profile("UTC"),
+            lambda zone=None: datetime(2026, 1, 15, 12, tzinfo=zone),
+        )
+
+        self.assertEqual(clock.now().tzinfo.key, "UTC")
+
+    def test_profile_timezone_read_does_not_wait_for_the_global_database_lock(self):
+        entered = threading.Event()
+        completed = threading.Event()
+        clock = AthleteLocalClock(
+            Profile("UTC"),
+            lambda zone=None: datetime(2026, 1, 15, 12, tzinfo=zone),
+        )
+
+        def read_clock():
+            entered.set()
+            clock.now()
+            completed.set()
+
+        with DATABASE_LOCK:
+            reader = threading.Thread(target=read_clock)
+            reader.start()
+            self.assertTrue(entered.wait(1))
+            self.assertTrue(completed.wait(0.5))
+        reader.join(1)
+        self.assertFalse(reader.is_alive())
+
     def test_uses_timezone_from_current_profile(self):
         profile = Profile("America/Los_Angeles")
         clock = AthleteLocalClock(

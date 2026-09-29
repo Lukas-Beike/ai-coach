@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -33,7 +34,10 @@ def daily_sync_is_due(
 ) -> bool:
     """Check whether a provider's last success or attempt was an hour ago."""
     timestamps = []
-    for marker in (get_value(daily_attempt_marker_key(source)), get_value(daily_marker_key(source))):
+    for marker in (
+        get_value(daily_attempt_marker_key(source)),
+        get_value(daily_marker_key(source)),
+    ):
         if not marker:
             continue
         try:
@@ -93,15 +97,19 @@ class DailySyncMarkerService:
 
     def mark(self, source: str, now: datetime | None = None) -> None:
         """Store the provider's last successful refresh time."""
-        current = now or self._local_now()
         with self._database_manager.unit_of_work() as db:
-            mark_daily_sync(
-                source,
-                current,
-                set_value=lambda key, value: self._key_value_repository.set(
-                    db, key, value
-                ),
-            )
+            self.mark_in_transaction(db, source, now)
+
+    def mark_in_transaction(
+        self, db: Any, source: str, now: datetime | None = None
+    ) -> None:
+        """Write the success marker into the caller's transaction."""
+        current = now or self._local_now()
+        mark_daily_sync(
+            source,
+            current,
+            set_value=lambda key, value: self._key_value_repository.set(db, key, value),
+        )
 
     def mark_attempt(self, source: str, now: datetime | None = None) -> None:
         """Store when a scheduled provider refresh was queued."""

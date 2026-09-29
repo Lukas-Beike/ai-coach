@@ -64,6 +64,10 @@ class DatabaseManager:
         finally:
             self._current = None
 
+    @contextmanager
+    def reader(self):
+        yield self.connection
+
 
 class Client:
     def __init__(self, result=None, error=None):
@@ -201,6 +205,26 @@ class WeatherServiceTests(unittest.TestCase):
         self.assertEqual(
             self.tracker.events[-1],
             ("finish", "refresh-1", "skipped", "location_changed", None),
+        )
+
+    def test_location_change_discards_failure_retry_state_for_previous_location(self):
+        client = Client()
+        service = self.service(client)
+
+        def changed_fetch(query):
+            self.assertEqual(query, "Berlin")
+            self.profile.save({"weather_location": "Hamburg"})
+            raise AppError(503, "upstream")
+
+        client.fetch = changed_fetch
+        result = service.state()
+
+        self.assertEqual(result["state"], "loading")
+        self.assertEqual(self.get(cache.FAILURE_KEY), "")
+        self.assertEqual(self.profile.get()["weather_location"], "Hamburg")
+        self.assertEqual(
+            self.tracker.events[-1],
+            ("finish", "refresh-1", "error", "failed", "provider_error"),
         )
 
     def test_cache_and_history_writes_roll_back_together(self):

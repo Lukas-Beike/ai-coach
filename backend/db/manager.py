@@ -10,7 +10,7 @@ from __future__ import annotations
 import queue
 import threading
 from collections.abc import Callable, Iterator
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -99,23 +99,30 @@ class DatabaseManager:
         if current is not None:
             yield current
             return
-        with self._lease(), self._writer_lock:
-            connection = self._writer if self.persist_connections else self._connect()
-            if self.persist_connections and connection is None:
-                connection = self._connect()
-                self._writer = connection
-            assert connection is not None
-            token = self._unit_of_work.set(connection)
+        with self._lease():
+            if not self._writer_lock.acquire(timeout=self.timeout):
+                raise TimeoutError("database writer limit reached")
             try:
-                yield connection
-                connection.commit()
-            except Exception:
-                connection.rollback()
-                raise
+                connection = (
+                    self._writer if self.persist_connections else self._connect()
+                )
+                if self.persist_connections and connection is None:
+                    connection = self._connect()
+                    self._writer = connection
+                assert connection is not None
+                token = self._unit_of_work.set(connection)
+                try:
+                    yield connection
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+                finally:
+                    self._unit_of_work.reset(token)
+                    if not self.persist_connections:
+                        connection.close()
             finally:
-                self._unit_of_work.reset(token)
-                if not self.persist_connections:
-                    connection.close()
+                self._writer_lock.release()
 
     @contextmanager
     def reader(self) -> Iterator[Any]:
@@ -199,6 +206,9 @@ class DatabaseManagerCache:
         self.manager: DatabaseManager | None = None
         self.signature: tuple[str, str, bool] | None = None
         self._lock = threading.RLock()
+        self._current_manager: ContextVar[DatabaseManager | None] = ContextVar(
+            f"database_cache_manager_{id(self)}", default=None
+        )
 
     def get(
         self,
@@ -213,6 +223,9 @@ class DatabaseManagerCache:
         timeout: float = 20.0,
         persist_connections: bool = True,
     ) -> DatabaseManager:
+        current = self._current_manager.get()
+        if current is not None:
+            return current
         with self._lock:
             if self.manager is not None and self.signature != signature:
                 self.manager.close()
@@ -238,21 +251,43 @@ class DatabaseManagerCache:
 
     def reset(self) -> None:
         with self._lock:
-            if self.manager is not None:
-                self.manager.close()
+            manager = self.manager
             self.manager = None
             self.signature = None
+        if manager is not None:
+            manager.close()
 
     @contextmanager
     def unit_of_work(self) -> Iterator[Any]:
         """Use the current manager without forcing its construction."""
-        with ExitStack() as stack:
+        manager = self._current_manager.get()
+        if manager is None:
             with self._lock:
                 manager = self.manager
-                if manager is None:
-                    raise RuntimeError("database manager is not initialized")
-                db = stack.enter_context(manager.unit_of_work())
-            yield db
+            if manager is None:
+                raise RuntimeError("database manager is not initialized")
+        token = self._current_manager.set(manager)
+        try:
+            with manager.unit_of_work() as db:
+                yield db
+        finally:
+            self._current_manager.reset(token)
+
+    @contextmanager
+    def reader(self) -> Iterator[Any]:
+        """Use a read lease without holding the cache lock while waiting."""
+        manager = self._current_manager.get()
+        if manager is None:
+            with self._lock:
+                manager = self.manager
+            if manager is None:
+                raise RuntimeError("database manager is not initialized")
+        token = self._current_manager.set(manager)
+        try:
+            with manager.reader() as db:
+                yield db
+        finally:
+            self._current_manager.reset(token)
 
 
 DATABASE_MANAGER_CACHE = DatabaseManagerCache()

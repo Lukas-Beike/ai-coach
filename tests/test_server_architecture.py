@@ -2581,6 +2581,7 @@ class ServerArchitectureTests(unittest.TestCase):
             [ast.unparse(argument) for argument in assignment.value.args],
             ["ATHLETE_PROFILE_SERVICE"],
         )
+        self.assertEqual(assignment.value.keywords, [])
 
     def test_session_auth_cache_state_is_owned_by_http_api_auth(self) -> None:
         auth_tree = _parse(BACKEND_ROOT / "http_api" / "auth.py")
@@ -3358,7 +3359,7 @@ class ServerArchitectureTests(unittest.TestCase):
             "_do_PUT",
             "ATHLETE_PUT_ROUTES",
             ("/api/athlete-context", "/api/profile"),
-            "AthletePutRoutes(athlete_context_service, ATHLETE_DATA.profile)",
+            "AthletePutRoutes(athlete_context_service, ATHLETE_DATA.profile, DB_LOCK)",
         )
         route_source = (BACKEND_ROOT / "http_api" / "athlete_put.py").read_text(
             encoding="utf-8"

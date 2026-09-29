@@ -10,7 +10,7 @@ import unittest
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from backend.activities import grouping as activity_grouping
 from backend.coach import streams as coach_streams
@@ -34,7 +34,7 @@ class ServerRuntimeTests(ServerTestCase):
             server.sync_job_worker().start()
             server.COACH_JOB_WORKER.start(
                 server.COACH_BACKGROUND_JOBS.job_store, server.COACH_BACKGROUND_JOBS.background_job_runner,
-                server.runtime_maintenance.MAINTENANCE_GATE,
+                server.runtime_maintenance.MAINTENANCE_GATE, Mock(),
             )
         sync_start.assert_called_once_with()
         self.assertEqual(thread.call_count, 1)

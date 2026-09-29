@@ -389,6 +389,37 @@ class ExternalCalendarSyncTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "provider_client_error")
         self.assertEqual([row["id"] for row in self.rows()], ["event-old"])
 
+    def test_daily_marker_failure_rolls_back_events_and_success_timestamps(self):
+        self.add_existing_event()
+        with self.manager.unit_of_work() as db:
+            self.key_values.set(db, "last_external_calendar_sync_at", "previous-sync")
+            self.key_values.set(db, "sync_calendar_last_success_at", "previous-daily")
+        with (
+            patch.object(
+                self.daily_markers,
+                "mark_in_transaction",
+                side_effect=RuntimeError("synthetic marker failure"),
+            ),
+            patch.object(self.events, "publish") as publish,
+            patch(
+                "backend.providers.calendar.external_calendar_url",
+                return_value="https://calendar.example/feed.ics",
+            ),
+            patch("backend.providers.calendar.fetch_calendar_feed", return_value=b"feed"),
+            patch(
+                "backend.providers.calendar.parse_ical_calendar",
+                return_value=[self.parsed_event()],
+            ),
+            self.assertRaises(AppError),
+        ):
+            self.service.sync()
+
+        self.assertEqual([row["id"] for row in self.rows()], ["event-old"])
+        self.assertEqual(self.kv("last_external_calendar_sync_at"), "previous-sync")
+        self.assertEqual(self.kv("sync_calendar_last_success_at"), "previous-daily")
+        self.assertTrue(self.kv("last_external_calendar_sync_error"))
+        publish.assert_not_called()
+
     def test_adaptive_preview_failure_uses_status_projection(self):
         fallback = {"needs_replan": True, "replan_changes": 4, "extra": "kept"}
         preview = FakePreview(error=RuntimeError("preview failed"), status=fallback)

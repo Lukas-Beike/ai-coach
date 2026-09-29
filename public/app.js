@@ -414,6 +414,39 @@ async function api(path, options = {}) {
   return result;
 }
 
+async function withRequestTimeout(operation, timeoutMs, timeoutMessage) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await operation(controller.signal);
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(timeoutMessage);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function downloadRequest(path, fallback, timeoutMs = 25_000) {
+  const timeoutMessage = timeoutMs > 25_000
+    ? "Der Download konnte nicht innerhalb von zwei Minuten bestätigt werden."
+    : "Der Server antwortet nicht innerhalb von 25 Sekunden.";
+  return withRequestTimeout(async (signal) => {
+    const response = await fetch(path, { credentials: "same-origin", cache: "no-store", signal });
+    if (!response.ok) {
+      if (response.status === 401) showLogin();
+      let payload = {};
+      try { payload = await response.json(); } catch (_) { /* use the safe fallback */ }
+      throw globalThis.AppApi.responseError(
+        response,
+        typeof payload.error === "string" ? payload.error : fallback,
+        payload.reason || "http_error",
+      );
+    }
+    return response.blob();
+  }, timeoutMs, timeoutMessage);
+}
+
 function scheduleStateEventRefresh(areas) {
   (areas || []).forEach((area) => state.stateEventRefreshAreas.add(area));
   if (state.stateEventRefreshTimer) clearTimeout(state.stateEventRefreshTimer);
@@ -3923,13 +3956,7 @@ async function downloadServerLogs() {
   const button = $("#logsDownloadButton");
   button.disabled = true;
   try {
-    const response = await fetch("/api/logs/download", { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) {
-      let message = "Server-Logs konnten nicht heruntergeladen werden.";
-      try { message = (await response.json()).error || message; } catch (_) { /* keep safe fallback */ }
-      throw new Error(message);
-    }
-    const url = URL.createObjectURL(await response.blob());
+    const url = URL.createObjectURL(await downloadRequest("/api/logs/download", "Server-Logs konnten nicht heruntergeladen werden."));
     const link = document.createElement("a");
     link.href = url;
     link.download = `intervals-coach-server-logs-${todayIso()}.jsonl`;
@@ -4361,9 +4388,11 @@ async function downloadDatabaseBackup() {
   const button = $("#backupDownloadButton");
   if (button) button.disabled = true;
   try {
-    const response = await fetch("/api/privacy/backup", { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) throw new Error("Datenbank-Backup konnte nicht erstellt werden.");
-    const blob = await response.blob();
+    const blob = await downloadRequest(
+      "/api/privacy/backup",
+      "Datenbank-Backup konnte nicht erstellt werden.",
+      130_000,
+    );
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.download = `intervals-coach-database-${todayIso()}.backup`;
@@ -4380,14 +4409,22 @@ async function restoreDatabaseBackup() {
   if (!file || !await requestConfirmation("Das aktuelle Datenbank-Backup wird vorher gesichert und durch die ausgewählte Datei ersetzt. Fortfahren?", { title: "Datenbank-Backup wiederherstellen?" })) return;
   const button = $("#backupRestoreButton");
   button.disabled = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 130_000);
   try {
-    const response = await fetch("/api/privacy/restore", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/octet-stream", "X-CSRF-Token": cookie("ic_csrf") }, body: file });
+    const response = await fetch("/api/privacy/restore", { method: "POST", credentials: "same-origin", cache: "no-store", signal: controller.signal, headers: { "Content-Type": "application/octet-stream", "X-CSRF-Token": cookie("ic_csrf") }, body: file });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Backup konnte nicht wiederhergestellt werden.");
     toast("Backup wiederhergestellt. Bitte erneut anmelden.");
     showLogin();
-  } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; }
+  } catch (error) {
+    toast(error?.name === "AbortError"
+      ? "Die Bestätigung der Wiederherstellung fehlt. Der Server kann den Vorgang noch abschließen; bitte vor einem erneuten Versuch den Status prüfen."
+      : error.message, true);
+  } finally {
+    clearTimeout(timeout);
+    button.disabled = false;
+  }
 }
 
 async function saveModel(event) {
@@ -4469,19 +4506,8 @@ async function downloadDiagnostics() {
   button.disabled = true;
   button.textContent = "Wird vorbereitet…";
   try {
-    const response = await fetch("/api/diagnostics", { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) {
-      if (response.status === 401) showLogin();
-      let payload = {};
-      try { payload = await response.json(); } catch (_) { /* use the safe fallback */ }
-      throw globalThis.AppApi.responseError(
-        response,
-        typeof payload.error === "string" ? payload.error : `Anfrage fehlgeschlagen (${response.status})`,
-        payload.reason || "http_error",
-      );
-    }
     renderConnectivityStatus(true);
-    const blob = await response.blob();
+    const blob = await downloadRequest("/api/diagnostics", "Diagnose konnte nicht heruntergeladen werden.");
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -4502,13 +4528,11 @@ function renderDiagnosticCapture(capture = {}) {
 
 async function downloadPrivacyExport() {
   try {
-    const response = await fetch("/api/privacy/export", { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) {
-      let message = "Privacy-Export konnte nicht erstellt werden.";
-      try { message = (await response.json()).error || message; } catch (_) { /* keep safe fallback */ }
-      throw new Error(message);
-    }
-    const blob = await response.blob();
+    const blob = await downloadRequest(
+      "/api/privacy/export",
+      "Privacy-Export konnte nicht erstellt werden.",
+      130_000,
+    );
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.download = `intervals-coach-export-${todayIso()}.zip`;

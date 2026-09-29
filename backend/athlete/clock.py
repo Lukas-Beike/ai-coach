@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 from typing import Protocol
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend.athlete.profile import timezone_name
 
@@ -31,5 +31,5 @@ class AthleteLocalClock:
         timezone = timezone_name(self._profile.get().get("timezone"))
         try:
             return self._now(ZoneInfo(timezone))
-        except Exception:
+        except (OSError, RuntimeError, TypeError, ZoneInfoNotFoundError):
             return self._now().astimezone()
