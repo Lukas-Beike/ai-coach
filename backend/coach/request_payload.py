@@ -59,7 +59,6 @@ class CoachRequestPayloadService:
             "input": json.dumps(dialogue_input, ensure_ascii=False),
             "tools": tools,
             "tool_choice": "auto",
-            "parallel_tool_calls": False,
             "max_output_tokens": self._max_output_tokens,
             "truncation": "auto",
         }
@@ -69,6 +68,7 @@ class CoachRequestPayloadService:
             payload.pop("conversation")
         if ai_provider == "openai":
             payload["store"] = True
+            payload["parallel_tool_calls"] = False
         payload["input"] = coach_attachments.model_input(payload["input"], attachments)
         if ai_provider == "gemini":
             payload["_gemini_transient_images"] = [
