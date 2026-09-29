@@ -103,7 +103,9 @@ class DatabaseManager:
             if not self._writer_lock.acquire(timeout=self.timeout):
                 raise TimeoutError("database writer limit reached")
             try:
-                connection = self._writer if self.persist_connections else self._connect()
+                connection = (
+                    self._writer if self.persist_connections else self._connect()
+                )
                 if self.persist_connections and connection is None:
                     connection = self._connect()
                     self._writer = connection

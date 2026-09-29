@@ -34,7 +34,10 @@ def daily_sync_is_due(
 ) -> bool:
     """Check whether a provider's last success or attempt was an hour ago."""
     timestamps = []
-    for marker in (get_value(daily_attempt_marker_key(source)), get_value(daily_marker_key(source))):
+    for marker in (
+        get_value(daily_attempt_marker_key(source)),
+        get_value(daily_marker_key(source)),
+    ):
         if not marker:
             continue
         try:
@@ -105,9 +108,7 @@ class DailySyncMarkerService:
         mark_daily_sync(
             source,
             current,
-            set_value=lambda key, value: self._key_value_repository.set(
-                db, key, value
-            ),
+            set_value=lambda key, value: self._key_value_repository.set(db, key, value),
         )
 
     def mark_attempt(self, source: str, now: datetime | None = None) -> None:

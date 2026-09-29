@@ -45,9 +45,8 @@ class DatabaseBackupService:
 
     def checkpoint(self) -> None:
         """Checkpoint before restore swaps the active database file."""
-        with self._database_lock:
-            with self._manager.unit_of_work() as db:
-                db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        with self._database_lock, self._manager.unit_of_work() as db:
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     @staticmethod
     def _first_row_value(row: Any) -> Any:
@@ -67,9 +66,15 @@ class DatabaseBackupService:
             self._discard_snapshot(snapshot)
             self._logger.warning(
                 "Database backup snapshot could not be created",
-                extra={"event": "database_backup_snapshot_failed", "error_class": type(exc).__name__},
+                extra={
+                    "event": "database_backup_snapshot_failed",
+                    "error_class": type(exc).__name__,
+                },
             )
-            raise AppError(503, "Die Datenbank konnte nicht konsistent als Backup vorbereitet werden.") from exc
+            raise AppError(
+                503,
+                "Die Datenbank konnte nicht konsistent als Backup vorbereitet werden.",
+            ) from exc
 
     def _create_snapshot(self, deadline: float) -> Path:
         with self._manager.reader() as source:
@@ -106,7 +111,10 @@ class DatabaseBackupService:
     def _check_free_space(self, required_bytes: int) -> None:
         free_bytes = self._config.disk_usage(self._config.data_dir).free
         if free_bytes < required_bytes:
-            raise AppError(507, "Für den Backup-Download ist nicht ausreichend freier Speicher verfügbar.")
+            raise AppError(
+                507,
+                "Für den Backup-Download ist nicht ausreichend freier Speicher verfügbar.",
+            )
 
     def _connect_target(self, snapshot: Path) -> Any:
         target = self._manager.backend.connect(
@@ -127,7 +135,9 @@ class DatabaseBackupService:
                 raise TimeoutError("database backup time limit reached")
 
         source.backup(target, pages=128, progress=check_deadline, sleep=0.01)
-        check = self._first_row_value(target.execute("PRAGMA integrity_check").fetchone())
+        check = self._first_row_value(
+            target.execute("PRAGMA integrity_check").fetchone()
+        )
         if not check or str(check).lower() != "ok":
             raise RuntimeError("database backup integrity check failed")
 
@@ -141,7 +151,9 @@ class DatabaseBackupService:
             try:
                 return path.read_bytes()
             except OSError as exc:
-                raise AppError(500, "Die Datenbank konnte nicht als Backup gelesen werden.") from exc
+                raise AppError(
+                    500, "Die Datenbank konnte nicht als Backup gelesen werden."
+                ) from exc
 
     @contextmanager
     def stream_file(self) -> Iterator[tuple[Path, float]]:

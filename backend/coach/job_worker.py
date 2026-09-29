@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
+from typing import Any
 
 from backend.coach.background_job import CoachBackgroundJobRunner
 from backend.coach.job_store import CoachJobStore
@@ -59,9 +60,7 @@ class CoachJobWorker:
                     self._wait_for_wake()
                     continue
 
-            processed, recovery_pending = self._run_iteration(
-                jobs, runner, maintenance
-            )
+            processed, recovery_pending = self._run_iteration(jobs, runner, maintenance)
             if processed:
                 continue
             self._wait_for_wake()

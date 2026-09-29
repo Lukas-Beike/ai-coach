@@ -208,9 +208,7 @@ class WeatherService:
         ):
             return False
         if cache.retry_wait(state.failure, now=self._now()) > 0 and not force:
-            state.error = (
-                "Wetterdaten konnten nach einem Fehler noch nicht erneut geladen werden."
-            )
+            state.error = "Wetterdaten konnten nach einem Fehler noch nicht erneut geladen werden."
             return False
 
         refresh_id = self._refresh_journal.start() if track_refresh else None
@@ -249,7 +247,9 @@ class WeatherService:
             base_seconds=self._retry_policy.retry_base_seconds,
             max_seconds=self._retry_policy.retry_max_seconds,
         )
-        stored_for_current_location = self._cache_store.store_failure(state.query, failure)
+        stored_for_current_location = self._cache_store.store_failure(
+            state.query, failure
+        )
         self._refresh_journal.finish(refresh_id, "error", "failed", error=error)
         self._refresh_journal.log_failure(error)
         return not stored_for_current_location
