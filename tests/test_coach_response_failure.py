@@ -109,7 +109,7 @@ class CoachResponseFailureTests(unittest.TestCase):
             self.assertEqual(receipt, replay)
             self.assertEqual(receipt["status"], "partial")
             self.assertEqual(receipt["pending_operations"], [])
-            self.assertEqual(receipt["diagnostic_error"]["reason"], "response_error")
+            self.assertEqual(receipt["diagnostic_error"]["reason"], "response_failed")
             self.assertEqual(receipt["diagnostic_error"]["provider_error_code"], "server_error")
             self.assertIn("KI-Dienst konnte die Antwort nicht fertigstellen", receipt["message"]["content"])
             self.assertIn("erneut", receipt["message"]["content"])

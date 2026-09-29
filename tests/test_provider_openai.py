@@ -27,6 +27,7 @@ from backend.providers.openai import (
     request_stream_response,
     request_with_conversation_retry,
     response_failure_reason,
+    response_diagnostic_details,
     response_id,
     response_text,
     responses_payload,
@@ -521,6 +522,11 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                     event["response"],
                 )
 
+    def test_consume_sse_event_returns_provider_error_events_for_diagnostics(self):
+        event = {"type": "error", "code": "model_not_found", "message": "private provider detail"}
+        self.assertEqual(consume_sse_event([json.dumps(event)], "error", lambda _: None), event)
+        self.assertEqual(response_failure_reason("/responses", event), "response_error")
+
     def test_consume_sse_event_rejects_invalid_json_and_non_objects(self):
         expected_message = "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben."
         for data_lines in (["{"], ["[]"]):
@@ -845,6 +851,58 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 self.assertEqual(str(raised.exception), message)
                 self.assertIsNone(raised.exception.provider_error_code)
                 self.assertNotIn("private provider detail", str(raised.exception))
+
+    def test_failed_response_keeps_terminal_status_and_safe_diagnostic_markers(self):
+        response = {
+            "status": "failed",
+            "error": {
+                "code": "model_not_found",
+                "type": "invalid_request_error",
+                "message": "private provider detail",
+            },
+        }
+        self.assertEqual(response_failure_reason("/responses", response), "response_failed")
+        with self.assertRaises(OpenAIResponseFailure) as raised:
+            validate_response("/responses", response, allowed_error_codes=("model_not_found",))
+        self.assertEqual(raised.exception.reason, "response_failed")
+        self.assertEqual(
+            response_diagnostic_details(response),
+            {
+                "provider_error_code": "model_not_found",
+                "provider_error_type": "invalid_request_error",
+                "provider_response_status": "failed",
+            },
+        )
+        unsafe = {"status": "failed", "error": {"code": "private provider detail"}}
+        self.assertNotIn("provider_error_code", response_diagnostic_details(unsafe))
+
+    def test_stream_failure_diagnostics_keep_safe_markers_without_provider_text(self):
+        capture = _DiagnosticCapture()
+        logger = _ClientLogger()
+        telemetry = OpenAIStreamTelemetry(
+            _StreamStateService(), capture, logger, lambda: 2.0, lambda: "now"
+        )
+        telemetry.record_app_error(
+            {"service": "openai", "path": "/v1/responses"},
+            1.0,
+            503_904,
+            "response_failed",
+            502,
+            {
+                "status": "failed",
+                "error": {
+                    "code": "model_not_found",
+                    "type": "invalid_request_error",
+                    "message": "private provider detail",
+                },
+            },
+        )
+        event, details = capture.events[-1]
+        self.assertEqual(event, "openai_stream_failed")
+        self.assertEqual(details["provider_error_code"], "model_not_found")
+        self.assertEqual(details["provider_error_type"], "invalid_request_error")
+        self.assertEqual(details["provider_response_status"], "failed")
+        self.assertNotIn("private provider detail", json.dumps((capture.events, logger.logs)))
 
     def test_validate_response_allows_only_allowlisted_error_codes(self):
         allowed_result = {"error": {"code": "known_code", "message": "private provider detail"}}

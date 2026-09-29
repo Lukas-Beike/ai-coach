@@ -403,15 +403,17 @@ def response_failure_reason(path: str, result: Any, responses_path: str = "/resp
     """Return the normalized wire-level failure, without application side effects."""
     if not isinstance(result, dict):
         return "invalid_response"
-    if result.get("error"):
-        return "response_error"
     if path != responses_path:
-        return None
+        return "response_error" if result.get("error") else None
+    if result.get("type") == "error":
+        return "response_error"
     status = str(result.get("status") or "").casefold()
     if status in {"failed", "cancelled"}:
         return "response_failed"
     if status and status not in {"completed", "incomplete", "in_progress", "queued"}:
         return "invalid_response_status"
+    if result.get("error"):
+        return "response_error"
     return None
 
 
@@ -428,10 +430,21 @@ _RESPONSE_FAILURE_MESSAGES = MappingProxyType(
 class OpenAIResponseFailure(Exception):
     """Safe, normalized failure from validating an OpenAI response."""
 
-    def __init__(self, reason: str, *, provider_error_code: str | None = None):
+    def __init__(
+        self,
+        reason: str,
+        *,
+        provider_error_code: str | None = None,
+        provider_error_type: str | None = None,
+        provider_response_status: str | None = None,
+        provider_incomplete_reason: str | None = None,
+    ):
         self.reason = reason
         self.message = _RESPONSE_FAILURE_MESSAGES.get(reason, "OpenAI response validation failed.")
         self.provider_error_code = provider_error_code
+        self.provider_error_type = provider_error_type
+        self.provider_response_status = provider_response_status
+        self.provider_incomplete_reason = provider_incomplete_reason
         super().__init__(self.message)
 
 
@@ -447,13 +460,51 @@ def validate_response(
     if failure is None:
         return result
 
-    provider_error_code = None
-    if failure == "response_error":
-        provider_error = result.get("error")
-        code = provider_error.get("code") if isinstance(provider_error, dict) else None
-        if isinstance(code, str) and code in allowed_error_codes:
-            provider_error_code = code
-    raise OpenAIResponseFailure(failure, provider_error_code=provider_error_code)
+    response = result if isinstance(result, dict) else {}
+    provider_error = response.get("error") if isinstance(response.get("error"), dict) else {}
+    if response.get("type") == "error":
+        provider_error = response
+    incomplete_details = response.get("incomplete_details")
+    incomplete_reason = incomplete_details.get("reason") if isinstance(incomplete_details, dict) else None
+    raise OpenAIResponseFailure(
+        failure,
+        provider_error_code=(
+            provider_error.get("code")
+            if isinstance(provider_error.get("code"), str)
+            and provider_error.get("code") in allowed_error_codes
+            else None
+        ),
+        provider_error_type=_safe_openai_error_token(provider_error.get("type")),
+        provider_response_status=_safe_openai_error_token(response.get("status")),
+        provider_incomplete_reason=_safe_openai_error_token(incomplete_reason),
+    )
+
+
+def response_diagnostic_details(response: Any) -> dict[str, str]:
+    """Expose only bounded provider markers from a terminal Responses object."""
+    if not isinstance(response, dict):
+        return {}
+    result: dict[str, str] = {}
+    error = response.get("error")
+    error = error if isinstance(error, dict) else {}
+    if response.get("type") == "error":
+        error = response
+    code = _safe_openai_error_token(error.get("code"))
+    if code and code in observability.OPENAI_RESPONSE_ERROR_CODES:
+        result["provider_error_code"] = code
+    error_type = _safe_openai_error_token(error.get("type"))
+    if error_type and error_type in {
+        "invalid_request_error", "authentication_error", "permission_error", "rate_limit_error", "server_error"
+    }:
+        result["provider_error_type"] = error_type
+    status = _safe_openai_error_token(response.get("status"))
+    if status and status in {"failed", "cancelled", "incomplete", "completed"}:
+        result["provider_response_status"] = status
+    incomplete = response.get("incomplete_details")
+    marker = _safe_openai_error_token(incomplete.get("reason") if isinstance(incomplete, dict) else None)
+    if marker and marker in {"max_output_tokens", "content_filter", "stop", "timeout"}:
+        result["provider_incomplete_reason"] = marker
+    return result
 
 
 def _content_text(content: Any) -> str | None:
@@ -507,6 +558,8 @@ def consume_sse_event(
         delta = event.get("delta")
         if isinstance(delta, str) and delta:
             on_text_delta(delta)
+    elif kind == "error":
+        return event
     elif kind in {"response.completed", "response.incomplete", "response.failed"}:
         return candidate
     return None
@@ -714,6 +767,7 @@ class OpenAIStreamTelemetry:
         reason: str,
         status: int,
         *,
+        diagnostic: Mapping[str, str] | None = None,
         level: int = logging.WARNING,
     ) -> None:
         self.logger.log(
@@ -727,6 +781,7 @@ class OpenAIStreamTelemetry:
                     "reason": reason,
                     "duration_ms": round((self.clock() - started) * 1000, 1),
                     "response_bytes": response_bytes,
+                    **(diagnostic or {}),
                 },
             },
         )
@@ -757,11 +812,21 @@ class OpenAIStreamTelemetry:
         response_bytes: int,
         reason: str,
         status: int,
+        final_response: dict[str, Any] | None = None,
         *,
         level: int = logging.WARNING,
     ) -> None:
-        self.log_failure(context, started, response_bytes, reason, status, level=level)
-        self.capture_failure(status, reason, started, response_bytes)
+        diagnostic = response_diagnostic_details(final_response)
+        self.log_failure(
+            context,
+            started,
+            response_bytes,
+            reason,
+            status,
+            diagnostic=diagnostic,
+            level=level,
+        )
+        self.capture_failure(status, reason, started, response_bytes, diagnostic)
 
     def record_cancelled(
         self,
@@ -899,6 +964,7 @@ class OpenAIStreamClient:
             stream_bytes,
             reason,
             exc.status,
+            final_response,
             level=logging.INFO if exc.reason == "chat_cancelled" else logging.WARNING,
         )
         raise exc
