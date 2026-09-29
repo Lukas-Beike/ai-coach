@@ -45,8 +45,17 @@ class DatabaseBackupService:
 
     def checkpoint(self) -> None:
         """Checkpoint before restore swaps the active database file."""
-        with self._database_lock, self._manager.unit_of_work() as db:
-            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        try:
+            with self._database_lock, self._manager.unit_of_work() as db:
+                db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception as exc:  # noqa: BLE001 - a failed checkpoint must not block a validated restore.
+            self._logger.warning(
+                "Database checkpoint failed before validated restore",
+                extra={
+                    "event": "database_restore_checkpoint_failed",
+                    "error_class": type(exc).__name__,
+                },
+            )
 
     @staticmethod
     def _first_row_value(row: Any) -> Any:
@@ -77,24 +86,35 @@ class DatabaseBackupService:
             ) from exc
 
     def _create_snapshot(self, deadline: float) -> Path:
-        with self._manager.reader() as source:
-            self._check_source_capacity(source)
-            descriptor, temporary_name = tempfile.mkstemp(
-                prefix=".database-backup-", suffix=".tmp", dir=self._config.data_dir
-            )
-            os.close(descriptor)
-            snapshot = Path(temporary_name)
-            target = self._connect_target(snapshot)
-            try:
-                self._copy_snapshot(source, target, deadline)
-            finally:
-                target.close()
+        snapshot: Path | None = None
+        try:
+            with self._manager.reader() as source:
+                self._check_source_capacity(source)
+                descriptor, temporary_name = tempfile.mkstemp(
+                    prefix=".database-backup-",
+                    suffix=".tmp",
+                    dir=self._config.data_dir,
+                )
+                snapshot = Path(temporary_name)
+                os.close(descriptor)
+                target = self._connect_target(snapshot)
+                try:
+                    self._copy_snapshot(source, target, deadline)
+                finally:
+                    target.close()
 
-        size = snapshot.stat().st_size
-        if size > self._config.maximum_bytes:
-            raise AppError(413, "Das Datenbank-Backup überschreitet das Größenlimit.")
-        self._check_free_space(self._config.minimum_free_bytes)
-        return snapshot
+            if snapshot is None:
+                raise RuntimeError("database backup snapshot path is missing")
+            size = snapshot.stat().st_size
+            if size > self._config.maximum_bytes:
+                raise AppError(
+                    413, "Das Datenbank-Backup überschreitet das Größenlimit."
+                )
+            self._check_free_space(self._config.minimum_free_bytes)
+            return snapshot
+        except BaseException:
+            self._discard_snapshot(snapshot)
+            raise
 
     def _check_source_capacity(self, source: Any) -> None:
         page_count = int(

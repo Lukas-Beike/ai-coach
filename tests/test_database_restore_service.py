@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -9,6 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.backup.restore import DatabaseRestoreConfig, DatabaseRestoreService
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
@@ -127,6 +129,36 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.assertEqual(
             (self.data_dir / second["previous_database_backup"]).read_bytes(),
             b"replacement database",
+        )
+
+    def test_restore_continues_when_damaged_database_checkpoint_fails(self) -> None:
+        manager = Mock()
+        manager.unit_of_work.side_effect = sqlite3.DatabaseError(
+            "synthetic damaged database"
+        )
+        logger = Mock()
+        backup = DatabaseBackupService(
+            manager,
+            self.lock,
+            DatabaseBackupConfig(
+                database_path=self.database_path,
+                data_dir=self.data_dir,
+                maximum_bytes=1_000_000,
+                minimum_free_bytes=0,
+                time_limit_seconds=5,
+            ),
+            logger,
+        )
+        self.service._backup = backup
+
+        result = self.service.restore(b"replacement database")
+
+        self.assertTrue(result["restored"])
+        self.assertEqual(self.database_path.read_bytes(), b"replacement database")
+        logger.warning.assert_called_once()
+        self.assertEqual(
+            logger.warning.call_args.kwargs["extra"]["event"],
+            "database_restore_checkpoint_failed",
         )
 
     def test_unexpected_validation_error_is_redacted_without_mutation(self) -> None:

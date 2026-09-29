@@ -5,10 +5,11 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 try:
     import sqlcipher3
@@ -84,6 +85,73 @@ class DatabaseBackupServiceTests(unittest.TestCase):
         finally:
             snapshot.unlink(missing_ok=True)
 
+    def test_checkpoint_failure_is_logged_and_does_not_block_restore(self) -> None:
+        manager = Mock()
+        database = Mock()
+        manager.unit_of_work.return_value = nullcontext(database)
+        database.execute.side_effect = sqlite3.DatabaseError(
+            "synthetic checkpoint failure"
+        )
+        service = DatabaseBackupService(
+            manager, nullcontext(), self.config, self.logger
+        )
+
+        service.checkpoint()
+
+        self.logger.warning.assert_called_once()
+        self.assertEqual(
+            self.logger.warning.call_args.kwargs["extra"],
+            {
+                "event": "database_restore_checkpoint_failed",
+                "error_class": "DatabaseError",
+            },
+        )
+
+    def test_failed_snapshot_creation_discards_temporary_file(self) -> None:
+        connection_service = self.service()
+        copy_service = self.service()
+        size_service = self.service(replace(self.config, maximum_bytes=1))
+        free_space_service = self.service()
+        cases = (
+            (
+                "target connection",
+                connection_service,
+                patch.object(
+                    connection_service,
+                    "_connect_target",
+                    side_effect=RuntimeError("synthetic connection failure"),
+                ),
+            ),
+            (
+                "snapshot copy",
+                copy_service,
+                patch.object(
+                    copy_service,
+                    "_copy_snapshot",
+                    side_effect=RuntimeError("synthetic copy failure"),
+                ),
+            ),
+            (
+                "post-copy size check",
+                size_service,
+                patch.object(size_service, "_check_source_capacity"),
+            ),
+            (
+                "post-copy free-space check",
+                free_space_service,
+                patch.object(
+                    free_space_service,
+                    "_check_free_space",
+                    side_effect=[None, RuntimeError("synthetic free-space failure")],
+                ),
+            ),
+        )
+
+        for name, service, failure in cases:
+            with self.subTest(failure=name), failure, self.assertRaises(AppError):
+                service._snapshot(deadline=15.0)
+            self.assertFalse(list(self.root.glob(".database-backup-*.tmp")))
+
     @unittest.skipIf(sqlcipher3 is None, "SQLCipher runtime required")
     def test_sqlcipher_snapshot_keeps_encrypted_data_and_mapping_rows(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -130,17 +198,19 @@ class DatabaseBackupServiceTests(unittest.TestCase):
             (replace(self.config, disk_usage=lambda _path: SimpleNamespace(free=0)), 507),
         )
         for config, status in cases:
-            with self.subTest(status=status), self.assertRaises(AppError) as raised:
-                with self.service(config).stream_file():
-                    self.fail("an over-limit backup must not stream")
+            with (
+                self.subTest(status=status),
+                self.assertRaises(AppError) as raised,
+                self.service(config).stream_file(),
+            ):
+                self.fail("an over-limit backup must not stream")
             self.assertEqual(raised.exception.status, status)
             self.assertFalse(list(self.root.glob(".database-backup-*.tmp")))
 
     def test_missing_database_does_not_create_an_empty_successful_backup(self) -> None:
         missing = replace(self.config, database_path=self.root / "missing.db")
-        with self.assertRaises(AppError) as raised:
-            with self.service(missing).stream_file():
-                self.fail("a missing database must not stream")
+        with self.assertRaises(AppError) as raised, self.service(missing).stream_file():
+            self.fail("a missing database must not stream")
         self.assertEqual(raised.exception.status, 503)
 
 

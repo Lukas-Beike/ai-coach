@@ -120,7 +120,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("globalThis.AppApi.audio(path, blob, () =>", app)
         self.assertIn("Array.isArray(result.model_options)", app)
         self.assertIn("renderModel(model)", app)
-        self.assertIn('/api.js?v=220', index)
+        self.assertIn('/api.js?v=221', index)
         self.assertIn('/navigation.js?v=218', index)
         self.assertIn('/appearance.js?v=218', index)
         self.assertNotIn('<script>', index)
@@ -130,7 +130,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('/components.js?v=217', index)
         self.assertIn('/coach.js?v=3', index)
         self.assertIn('/app.js?v=234', index)
-        self.assertIn('intervals-coach-v235', service_worker)
+        self.assertIn('intervals-coach-v236', service_worker)
         self.assertIn('"/navigation.js?v=218"', service_worker)
         self.assertIn('"/appearance.js?v=218"', service_worker)
         self.assertIn('"/state.js?v=217"', service_worker)
@@ -309,7 +309,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split('app.js?v=', 1)[1].split('"', 1)[0]
         self.assertIn(f'app.js?v={asset_version}', markup)
-        self.assertIn('intervals-coach-v235', service_worker)
+        self.assertIn('intervals-coach-v236', service_worker)
         self.assertIn(f'/app.js?v={asset_version}', service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -447,7 +447,7 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=220"', source)
+        self.assertIn('"/api.js?v=221"', source)
         self.assertIn('"/navigation.js?v=218"', source)
         self.assertIn('"/appearance.js?v=218"', source)
         self.assertIn('"/state.js?v=217"', source)
