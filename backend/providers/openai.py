@@ -848,6 +848,19 @@ class OpenAIStreamTelemetry:
         self.provider_state.record_rate_limits(headers)
 
     def record_started(self, context: dict[str, Any]) -> None:
+        optional_context: dict[str, Any] = {
+            key: context[key]
+            for key in (
+                "model",
+                "reasoning_effort",
+                "max_output_tokens",
+                "tools_count",
+                "input_chars",
+                "instructions_chars",
+                "conversation_present",
+            )
+            if key in context
+        }
         self.logger.info(
             "External HTTP request started",
             extra={"event": "external_request_started", "context": context},
@@ -860,19 +873,7 @@ class OpenAIStreamTelemetry:
                 "host": context["host"],
                 "path": context["path"],
                 "request_bytes": context["request_bytes"],
-                **{
-                    key: context[key]
-                    for key in (
-                        "model",
-                        "reasoning_effort",
-                        "max_output_tokens",
-                        "tools_count",
-                        "input_chars",
-                        "instructions_chars",
-                        "conversation_present",
-                    )
-                    if key in context
-                },
+                **optional_context,
             },
         )
 
