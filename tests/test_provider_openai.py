@@ -571,6 +571,17 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(result.response_bytes, sum(map(len, lines)))
         self.assertEqual(deltas, ["trailing"])
 
+    def test_read_stream_response_records_terminal_type_from_data_only_event(self):
+        state = StreamReadState()
+        result = read_stream_response(
+            [b'data: {"type":"response.failed","response":{"id":"resp_123","status":"failed"}}\n'],
+            max_bytes=1000,
+            on_text_delta=lambda _: None,
+            state=state,
+        )
+        self.assertEqual(result.response, {"id": "resp_123", "status": "failed"})
+        self.assertEqual(state.terminal_event_type, "response.failed")
+
     def test_read_stream_response_raises_before_iterating_when_cancelled(self):
         cancel_event = threading.Event()
         cancel_event.set()
