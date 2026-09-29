@@ -562,7 +562,9 @@ def response_diagnostic_details(response: Any) -> dict[str, str]:
     if error:
         result["provider_error_present"] = "true"
     identifier = response.get("id")
-    if isinstance(identifier, str) and re.fullmatch(r"(?a:resp_[\w-]{1,200})", identifier.strip()):
+    if isinstance(identifier, str) and re.fullmatch(
+        r"(?a:resp_[\w-]{1,200})", identifier.strip()
+    ):
         result["provider_response_id"] = identifier.strip()
     code = _safe_openai_error_token(error.get("code"))
     if code and code in observability.OPENAI_RESPONSE_ERROR_CODES:
@@ -745,7 +747,9 @@ def read_stream_response(
         check_cancelled()
         if event_response is not None:
             final_response = event_response
-            read_state.terminal_event_type = terminal_event_type or str(event_response.get("type") or "")
+            read_state.terminal_event_type = terminal_event_type or str(
+                event_response.get("type") or ""
+            )
     check_cancelled()
     _, _, event_response, terminal_event_type = _consume_sse_line(
         "", event_name, data_lines, on_text_delta, on_response_id
@@ -753,7 +757,9 @@ def read_stream_response(
     check_cancelled()
     if event_response is not None:
         final_response = event_response
-        read_state.terminal_event_type = terminal_event_type or str(event_response.get("type") or "")
+        read_state.terminal_event_type = terminal_event_type or str(
+            event_response.get("type") or ""
+        )
     return StreamReadResult(final_response, read_state.response_bytes)
 
 
@@ -842,6 +848,19 @@ class OpenAIStreamTelemetry:
         self.provider_state.record_rate_limits(headers)
 
     def record_started(self, context: dict[str, Any]) -> None:
+        optional_context: dict[str, Any] = {
+            key: context[key]
+            for key in (
+                "model",
+                "reasoning_effort",
+                "max_output_tokens",
+                "tools_count",
+                "input_chars",
+                "instructions_chars",
+                "conversation_present",
+            )
+            if key in context
+        }
         self.logger.info(
             "External HTTP request started",
             extra={"event": "external_request_started", "context": context},
@@ -854,7 +873,7 @@ class OpenAIStreamTelemetry:
                 "host": context["host"],
                 "path": context["path"],
                 "request_bytes": context["request_bytes"],
-                **{key: context[key] for key in ("model", "reasoning_effort", "max_output_tokens", "tools_count", "input_chars", "instructions_chars", "conversation_present") if key in context},
+                **optional_context,
             },
         )
 
@@ -958,13 +977,24 @@ class OpenAIStreamTelemetry:
     ) -> None:
         diagnostic = response_diagnostic_details(final_response)
         if state is not None:
-            if state.terminal_event_type in {"error", "response.completed", "response.incomplete", "response.failed"}:
+            if state.terminal_event_type in {
+                "error",
+                "response.completed",
+                "response.incomplete",
+                "response.failed",
+            }:
                 diagnostic["terminal_event_type"] = state.terminal_event_type
             try:
-                request_id = state.headers.get("x-request-id") if state.headers is not None else None
+                request_id = (
+                    state.headers.get("x-request-id")
+                    if state.headers is not None
+                    else None
+                )
             except (AttributeError, TypeError):
                 request_id = None
-            if isinstance(request_id, str) and re.fullmatch(r"req_[A-Za-z0-9_-]{1,128}", request_id):
+            if isinstance(request_id, str) and re.fullmatch(
+                r"req_[A-Za-z0-9_-]{1,128}", request_id
+            ):
                 diagnostic["request_id"] = request_id
         self.log_failure(
             context,
