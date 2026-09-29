@@ -54,38 +54,58 @@ class CoachJobWorker:
         recovery_pending = False
         while not self.stop_event.is_set():
             if recovery_pending:
-                try:
-                    with maintenance.operation():
-                        recover()
-                    recovery_pending = False
-                except AppError as exc:
-                    if exc.reason != "maintenance":
-                        self._log_failure("coach_worker_recovery_failed", exc)
-                except Exception as exc:  # noqa: BLE001 - retry interrupted-state recovery
-                    self._log_failure("coach_worker_recovery_failed", exc)
+                recovery_pending = not self._recover_interrupted(maintenance, recover)
                 if recovery_pending:
-                    self.wake_event.wait(5)
-                    self.wake_event.clear()
+                    self._wait_for_wake()
                     continue
 
-            job = None
-            try:
-                with maintenance.operation():
-                    job = jobs().claim()
-                    if job:
-                        runner().run(job)
-                        continue
-            except AppError as exc:
+            processed, recovery_pending = self._run_iteration(
+                jobs, runner, maintenance
+            )
+            if processed:
+                continue
+            self._wait_for_wake()
+
+    def _recover_interrupted(
+        self, maintenance: MaintenanceGate, recover: Callable[[], Any]
+    ) -> bool:
+        try:
+            with maintenance.operation():
+                recover()
+        except AppError as exc:
+            if exc.reason != "maintenance":
+                self._log_failure("coach_worker_recovery_failed", exc)
+            return False
+        except Exception as exc:  # noqa: BLE001 - retry interrupted-state recovery
+            self._log_failure("coach_worker_recovery_failed", exc)
+            return False
+        return True
+
+    def _run_iteration(
+        self,
+        jobs: Callable[[], CoachJobStore],
+        runner: Callable[[], CoachBackgroundJobRunner],
+        maintenance: MaintenanceGate,
+    ) -> tuple[bool, bool]:
+        job = None
+        try:
+            with maintenance.operation():
+                job = jobs().claim()
                 if job is not None:
-                    recovery_pending = True
-                if exc.reason != "maintenance":
-                    self._log_failure("coach_worker_iteration_failed", exc)
-            except Exception as exc:  # noqa: BLE001 - survive transient claim failures
-                if job is not None:
-                    recovery_pending = True
+                    runner().run(job)
+                    return True, False
+        except AppError as exc:
+            if exc.reason != "maintenance":
                 self._log_failure("coach_worker_iteration_failed", exc)
-            self.wake_event.wait(5)
-            self.wake_event.clear()
+            return False, job is not None
+        except Exception as exc:  # noqa: BLE001 - survive transient claim failures
+            self._log_failure("coach_worker_iteration_failed", exc)
+            return False, job is not None
+        return False, False
+
+    def _wait_for_wake(self) -> None:
+        self.wake_event.wait(5)
+        self.wake_event.clear()
 
     @staticmethod
     def _log_failure(event: str, error: Exception) -> None:

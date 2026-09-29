@@ -10,8 +10,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+try:
+    import sqlcipher3
+except ImportError:
+    sqlcipher3 = None
+
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
+from backend.db import row_factory
 from backend.db.manager import DatabaseManager
+from backend.db.schema import configure_cipher
 from backend.errors import AppError
 
 
@@ -21,7 +28,9 @@ class DatabaseBackupServiceTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.path = self.root / "athlete.db"
-        self.manager = DatabaseManager(self.path, sqlite3, timeout=0.1)
+        self.manager = DatabaseManager(
+            self.path, sqlite3, timeout=0.1, row_factory=row_factory
+        )
         self.addCleanup(self.manager.close)
         with self.manager.unit_of_work() as db:
             db.execute("PRAGMA journal_mode=WAL")
@@ -74,6 +83,46 @@ class DatabaseBackupServiceTests(unittest.TestCase):
             self.assert_snapshot_has_wal_data(snapshot)
         finally:
             snapshot.unlink(missing_ok=True)
+
+    @unittest.skipIf(sqlcipher3 is None, "SQLCipher runtime required")
+    def test_sqlcipher_snapshot_keeps_encrypted_data_and_mapping_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database_path = root / "encrypted.db"
+            password = "synthetic-sqlcipher-backup-test-key"
+            manager = DatabaseManager(
+                database_path,
+                sqlcipher3,
+                password=password,
+                configure=configure_cipher,
+                row_factory=row_factory,
+                timeout=0.1,
+            )
+            try:
+                with manager.unit_of_work() as db:
+                    db.execute("CREATE TABLE records (value TEXT NOT NULL)")
+                    db.execute("INSERT INTO records VALUES ('encrypted snapshot')")
+                config = replace(
+                    self.config,
+                    database_path=database_path,
+                    data_dir=root,
+                )
+                backup = DatabaseBackupService(
+                    manager, self.lock, config, self.logger
+                ).read_bytes()
+                backup_path = root / "encrypted-backup.db"
+                backup_path.write_bytes(backup)
+                restored = sqlcipher3.connect(backup_path)
+                try:
+                    configure_cipher(restored, password)
+                    self.assertEqual(
+                        restored.execute("SELECT value FROM records").fetchone()[0],
+                        "encrypted snapshot",
+                    )
+                finally:
+                    restored.close()
+            finally:
+                manager.close()
 
     def test_size_and_free_space_limits_reject_backup(self) -> None:
         cases = (

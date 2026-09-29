@@ -7,7 +7,7 @@ import os
 import shutil
 import tempfile
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,62 +49,92 @@ class DatabaseBackupService:
             with self._manager.unit_of_work() as db:
                 db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
+    @staticmethod
+    def _first_row_value(row: Any) -> Any:
+        return next(iter(row.values())) if isinstance(row, Mapping) else row[0]
+
     def _snapshot(self, deadline: float) -> Path:
         if not self._config.database_path.is_file():
             raise AppError(503, "Der Backup-Speicher ist nicht verfügbar.")
+        snapshot = None
         try:
-            with self._manager.reader() as source:
-                page_count = int(source.execute("PRAGMA page_count").fetchone()[0])
-                page_size = int(source.execute("PRAGMA page_size").fetchone()[0])
-                expected_size = page_count * page_size
-                if expected_size > self._config.maximum_bytes:
-                    raise AppError(413, "Das Datenbank-Backup überschreitet das Größenlimit.")
-                free_bytes = self._config.disk_usage(self._config.data_dir).free
-                if free_bytes < expected_size + self._config.minimum_free_bytes:
-                    raise AppError(507, "Für den Backup-Download ist nicht ausreichend freier Speicher verfügbar.")
-
-                descriptor, temporary_name = tempfile.mkstemp(
-                    prefix=".database-backup-", suffix=".tmp", dir=self._config.data_dir
-                )
-                os.close(descriptor)
-                snapshot = Path(temporary_name)
-                target = self._manager.backend.connect(
-                    snapshot, timeout=self._manager.timeout, check_same_thread=False
-                )
-                try:
-                    if self._manager.password and self._manager.configure:
-                        self._manager.configure(target, self._manager.password)
-                    target.execute("PRAGMA foreign_keys = ON")
-
-                    def check_deadline(_status: int, _remaining: int, _total: int) -> None:
-                        if self._config.monotonic() > deadline:
-                            raise TimeoutError("database backup time limit reached")
-
-                    source.backup(target, pages=128, progress=check_deadline, sleep=0.01)
-                    check = target.execute("PRAGMA integrity_check").fetchone()
-                    if not check or str(check[0]).lower() != "ok":
-                        raise RuntimeError("database backup integrity check failed")
-                finally:
-                    target.close()
-
-            size = snapshot.stat().st_size
-            if size > self._config.maximum_bytes:
-                raise AppError(413, "Das Datenbank-Backup überschreitet das Größenlimit.")
-            if self._config.disk_usage(self._config.data_dir).free < self._config.minimum_free_bytes:
-                raise AppError(507, "Für den Backup-Download ist nicht ausreichend freier Speicher verfügbar.")
+            snapshot = self._create_snapshot(deadline)
             return snapshot
         except AppError:
-            if "snapshot" in locals():
-                snapshot.unlink(missing_ok=True)
+            self._discard_snapshot(snapshot)
             raise
         except Exception as exc:
-            if "snapshot" in locals():
-                snapshot.unlink(missing_ok=True)
+            self._discard_snapshot(snapshot)
             self._logger.warning(
                 "Database backup snapshot could not be created",
                 extra={"event": "database_backup_snapshot_failed", "error_class": type(exc).__name__},
             )
             raise AppError(503, "Die Datenbank konnte nicht konsistent als Backup vorbereitet werden.") from exc
+
+    def _create_snapshot(self, deadline: float) -> Path:
+        with self._manager.reader() as source:
+            self._check_source_capacity(source)
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=".database-backup-", suffix=".tmp", dir=self._config.data_dir
+            )
+            os.close(descriptor)
+            snapshot = Path(temporary_name)
+            target = self._connect_target(snapshot)
+            try:
+                self._copy_snapshot(source, target, deadline)
+            finally:
+                target.close()
+
+        size = snapshot.stat().st_size
+        if size > self._config.maximum_bytes:
+            raise AppError(413, "Das Datenbank-Backup überschreitet das Größenlimit.")
+        self._check_free_space(self._config.minimum_free_bytes)
+        return snapshot
+
+    def _check_source_capacity(self, source: Any) -> None:
+        page_count = int(
+            self._first_row_value(source.execute("PRAGMA page_count").fetchone())
+        )
+        page_size = int(
+            self._first_row_value(source.execute("PRAGMA page_size").fetchone())
+        )
+        expected_size = page_count * page_size
+        if expected_size > self._config.maximum_bytes:
+            raise AppError(413, "Das Datenbank-Backup überschreitet das Größenlimit.")
+        self._check_free_space(expected_size + self._config.minimum_free_bytes)
+
+    def _check_free_space(self, required_bytes: int) -> None:
+        free_bytes = self._config.disk_usage(self._config.data_dir).free
+        if free_bytes < required_bytes:
+            raise AppError(507, "Für den Backup-Download ist nicht ausreichend freier Speicher verfügbar.")
+
+    def _connect_target(self, snapshot: Path) -> Any:
+        target = self._manager.backend.connect(
+            snapshot, timeout=self._manager.timeout, check_same_thread=False
+        )
+        try:
+            if self._manager.password and self._manager.configure:
+                self._manager.configure(target, self._manager.password)
+            target.execute("PRAGMA foreign_keys = ON")
+            return target
+        except Exception:
+            target.close()
+            raise
+
+    def _copy_snapshot(self, source: Any, target: Any, deadline: float) -> None:
+        def check_deadline(_status: int, _remaining: int, _total: int) -> None:
+            if self._config.monotonic() > deadline:
+                raise TimeoutError("database backup time limit reached")
+
+        source.backup(target, pages=128, progress=check_deadline, sleep=0.01)
+        check = self._first_row_value(target.execute("PRAGMA integrity_check").fetchone())
+        if not check or str(check).lower() != "ok":
+            raise RuntimeError("database backup integrity check failed")
+
+    @staticmethod
+    def _discard_snapshot(snapshot: Path | None) -> None:
+        if snapshot is not None:
+            snapshot.unlink(missing_ok=True)
 
     def read_bytes(self) -> bytes:
         with self.stream_file() as (path, _deadline):

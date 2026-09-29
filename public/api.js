@@ -75,7 +75,9 @@
         headers: { "Content-Type": blob.type || "application/octet-stream", "X-CSRF-Token": cookie("ic_csrf") },
       });
       const payload = await readResponse(response, onUnauthorized);
-    if (typeof payload.transcript !== "string") throw responseError(response, "Die Transkriptionsbestätigung fehlt.", "invalid_transcription");
+      if (typeof payload.transcript !== "string") {
+        throw responseError(response, "Die Transkriptionsbestätigung fehlt.", "invalid_transcription");
+      }
       return payload;
     } catch (error) {
       if (error?.name === "AbortError") throw new Error("Die Transkription antwortet nicht innerhalb von 25 Sekunden.");
