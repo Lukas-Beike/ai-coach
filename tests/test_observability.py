@@ -7,7 +7,6 @@ import sys
 import tempfile
 import threading
 import unittest
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -458,6 +457,14 @@ class ObservabilityTests(unittest.TestCase):
         capture.capture("event-1", {"data": "test"})
         self.assertFalse(lock_held_during_set)
         self.assertIn("event-1", store.get("diagnostic_capture_entries"))
+
+    def test_diagnostic_capture_default_retains_more_than_1500_entries(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(store.get, store.set, Redactor(_config))
+        for index in range(1501):
+            capture.capture("synthetic_event", {"index": index})
+        self.assertEqual(capture.status()["maximum_entries"], 10000)
+        self.assertEqual(len(capture.entries()), 1501)
 
     def test_diagnostic_capture_retries_failed_flush_without_losing_dirty_entries(self):
         store = _KeyValueStore()
