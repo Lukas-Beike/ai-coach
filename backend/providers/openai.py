@@ -559,6 +559,11 @@ def response_diagnostic_details(response: Any) -> dict[str, str]:
     error = error if isinstance(error, dict) else {}
     if response.get("type") == "error":
         error = response
+    if error:
+        result["provider_error_present"] = "true"
+    identifier = response.get("id")
+    if isinstance(identifier, str) and re.fullmatch(r"(?a:resp_[\w-]{1,200})", identifier.strip()):
+        result["provider_response_id"] = identifier.strip()
     code = _safe_openai_error_token(error.get("code"))
     if code and code in observability.OPENAI_RESPONSE_ERROR_CODES:
         result["provider_error_code"] = code
@@ -674,6 +679,36 @@ class StreamReadState:
     response_bytes: int = 0
     status: int | None = None
     headers: Any = None
+    terminal_event_type: str | None = None
+
+
+def _consume_sse_line(
+    line: str,
+    event_name: str,
+    data_lines: list[str],
+    on_text_delta: Callable[[str], None],
+    on_response_id: Callable[[str], None] | None,
+) -> tuple[str, list[str], dict[str, Any] | None, str | None]:
+    if not line:
+        event_response = consume_sse_event(
+            data_lines, event_name, on_text_delta, on_response_id
+        )
+        terminal_type = event_name
+        if event_response is not None and not terminal_type:
+            event = _decode_sse_event(data_lines)
+            terminal_type = str(event.get("type") or "") if event else ""
+        return (
+            "",
+            [],
+            event_response,
+            terminal_type,
+        )
+    if line.startswith("event:"):
+        return line[6:].strip(), data_lines, None, None
+    if line.startswith("data:"):
+        data_lines.append(line[5:].lstrip())
+        return event_name, data_lines, None, None
+    return event_name, data_lines, None, None
 
 
 def read_stream_response(
@@ -704,26 +739,21 @@ def read_stream_response(
                 "provider response exceeds configured size limit"
             )
         line = raw_line.decode("utf-8").rstrip("\r\n")
-        if not line:
-            event_response = consume_sse_event(
-                data_lines, event_name, on_text_delta, on_response_id
-            )
-            check_cancelled()
-            event_name = ""
-            data_lines = []
-            if event_response is not None:
-                final_response = event_response
-        elif line.startswith("event:"):
-            event_name = line[6:].strip()
-        elif line.startswith("data:"):
-            data_lines.append(line[5:].lstrip())
+        event_name, data_lines, event_response, terminal_event_type = _consume_sse_line(
+            line, event_name, data_lines, on_text_delta, on_response_id
+        )
+        check_cancelled()
+        if event_response is not None:
+            final_response = event_response
+            read_state.terminal_event_type = terminal_event_type or str(event_response.get("type") or "")
     check_cancelled()
-    event_response = consume_sse_event(
-        data_lines, event_name, on_text_delta, on_response_id
+    _, _, event_response, terminal_event_type = _consume_sse_line(
+        "", event_name, data_lines, on_text_delta, on_response_id
     )
     check_cancelled()
     if event_response is not None:
         final_response = event_response
+        read_state.terminal_event_type = terminal_event_type or str(event_response.get("type") or "")
     return StreamReadResult(final_response, read_state.response_bytes)
 
 
@@ -824,6 +854,7 @@ class OpenAIStreamTelemetry:
                 "host": context["host"],
                 "path": context["path"],
                 "request_bytes": context["request_bytes"],
+                **{key: context[key] for key in ("model", "reasoning_effort", "max_output_tokens", "tools_count", "input_chars", "instructions_chars", "conversation_present") if key in context},
             },
         )
 
@@ -922,9 +953,19 @@ class OpenAIStreamTelemetry:
         status: int,
         final_response: dict[str, Any] | None = None,
         *,
+        state: StreamReadState | None = None,
         level: int = logging.WARNING,
     ) -> None:
         diagnostic = response_diagnostic_details(final_response)
+        if state is not None:
+            if state.terminal_event_type in {"error", "response.completed", "response.incomplete", "response.failed"}:
+                diagnostic["terminal_event_type"] = state.terminal_event_type
+            try:
+                request_id = state.headers.get("x-request-id") if state.headers is not None else None
+            except (AttributeError, TypeError):
+                request_id = None
+            if isinstance(request_id, str) and re.fullmatch(r"req_[A-Za-z0-9_-]{1,128}", request_id):
+                diagnostic["request_id"] = request_id
         self.log_failure(
             context,
             started,
@@ -1053,7 +1094,7 @@ class OpenAIStreamClient:
     def _record_transport(self, state: StreamReadState) -> None:
         self.telemetry.record_transport(state)
 
-    def _context(self, body: bytes) -> dict[str, Any]:
+    def _context(self, body: bytes, payload: Mapping[str, Any]) -> dict[str, Any]:
         config = self.config
         parsed = urlparse(
             endpoint(
@@ -1070,6 +1111,29 @@ class OpenAIStreamClient:
             "timeout_seconds": config.timeout,
             "request_bytes": len(body),
         }
+        model = _safe_openai_error_token(payload.get("model"))
+        if model and re.fullmatch(r"gpt-[a-z0-9.-]{1,60}", model):
+            context["model"] = model
+        reasoning = payload.get("reasoning")
+        if isinstance(reasoning, Mapping):
+            effort = _safe_openai_error_token(reasoning.get("effort"))
+            if effort in {"none", "minimal", "low", "medium", "high", "xhigh"}:
+                context["reasoning_effort"] = effort
+        max_tokens = payload.get("max_output_tokens")
+        if type(max_tokens) is int and 0 <= max_tokens <= 1_000_000:
+            context["max_output_tokens"] = max_tokens
+        tools = payload.get("tools")
+        if isinstance(tools, list):
+            context["tools_count"] = len(tools)
+        input_value = payload.get("input")
+        if isinstance(input_value, str):
+            context["input_chars"] = len(input_value)
+        elif isinstance(input_value, list):
+            context["input_chars"] = len(json.dumps(input_value, ensure_ascii=False))
+        instructions = payload.get("instructions")
+        if isinstance(instructions, str):
+            context["instructions_chars"] = len(instructions)
+        context["conversation_present"] = bool(payload.get("conversation"))
         return context
 
     def _app_error(
@@ -1080,6 +1144,7 @@ class OpenAIStreamClient:
         context: dict[str, Any],
         started: float,
         stream_bytes: int,
+        stream_state: StreamReadState | None = None,
     ) -> NoReturn:
         reason = safe_log_reason(exc.reason or "request_failed")
         if (
@@ -1095,6 +1160,7 @@ class OpenAIStreamClient:
             reason,
             exc.status,
             final_response,
+            state=stream_state,
             level=logging.INFO if exc.reason == "chat_cancelled" else logging.WARNING,
         )
         raise exc
@@ -1209,7 +1275,7 @@ class OpenAIStreamClient:
             },
             method="POST",
         )
-        context = self._context(body)
+        context = self._context(body, payload)
         started = self.telemetry.clock()
         attempt_state.update(
             context=context, started=started, stream_bytes=0, final_response=None
@@ -1256,6 +1322,7 @@ class OpenAIStreamClient:
                 context,
                 started,
                 stream_state.response_bytes,
+                stream_state,
             )
         except ClientDisconnected:
             self._disconnect(
@@ -1272,6 +1339,7 @@ class OpenAIStreamClient:
                 context,
                 started,
                 stream_state.response_bytes,
+                stream_state,
             )
         except provider_http.ProviderResponseTooLarge:
             self._app_error(
@@ -1285,6 +1353,7 @@ class OpenAIStreamClient:
                 context,
                 started,
                 stream_state.response_bytes,
+                stream_state,
             )
         except HTTPError as exc:
             self._http_error(exc, context, started, stream_state.response_bytes)

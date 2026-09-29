@@ -26,8 +26,8 @@ from backend.providers.openai import (
     read_stream_response,
     request_stream_response,
     request_with_conversation_retry,
-    response_failure_reason,
     response_diagnostic_details,
+    response_failure_reason,
     response_id,
     response_text,
     responses_payload,
@@ -571,6 +571,17 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(result.response_bytes, sum(map(len, lines)))
         self.assertEqual(deltas, ["trailing"])
 
+    def test_read_stream_response_records_terminal_type_from_data_only_event(self):
+        state = StreamReadState()
+        result = read_stream_response(
+            [b'data: {"type":"response.failed","response":{"id":"resp_123","status":"failed"}}\n'],
+            max_bytes=1000,
+            on_text_delta=lambda _: None,
+            state=state,
+        )
+        self.assertEqual(result.response, {"id": "resp_123", "status": "failed"})
+        self.assertEqual(state.terminal_event_type, "response.failed")
+
     def test_read_stream_response_raises_before_iterating_when_cancelled(self):
         cancel_event = threading.Event()
         cancel_event.set()
@@ -868,6 +879,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(
             response_diagnostic_details(response),
             {
+                "provider_error_present": "true",
                 "provider_error_code": "model_not_found",
                 "provider_error_type": "invalid_request_error",
                 "provider_response_status": "failed",
@@ -875,6 +887,8 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         )
         unsafe = {"status": "failed", "error": {"code": "private provider detail"}}
         self.assertNotIn("provider_error_code", response_diagnostic_details(unsafe))
+        self.assertEqual(response_diagnostic_details(unsafe)["provider_error_present"], "true")
+        self.assertNotIn("provider_response_id", response_diagnostic_details({"id": "resp_private/text"}))
 
     def test_stream_failure_diagnostics_keep_safe_markers_without_provider_text(self):
         capture = _DiagnosticCapture()
@@ -903,6 +917,11 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(details["provider_error_type"], "invalid_request_error")
         self.assertEqual(details["provider_response_status"], "failed")
         self.assertNotIn("private provider detail", json.dumps((capture.events, logger.logs)))
+
+        unsafe_state = StreamReadState(headers={"x-request-id": "req_private/text"}, terminal_event_type="private text")
+        telemetry.record_app_error({}, 1.0, 0, "response_failed", 502, state=unsafe_state)
+        self.assertNotIn("request_id", capture.events[-1][1])
+        self.assertNotIn("terminal_event_type", capture.events[-1][1])
 
     def test_validate_response_allows_only_allowlisted_error_codes(self):
         allowed_result = {"error": {"code": "known_code", "message": "private provider detail"}}
@@ -1322,6 +1341,42 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(request.headers["Authorization"], "Bearer sk-test")
         self.assertEqual(kwargs["timeout"], 17)
         self.assertEqual(len(state.usage), 1)
+
+    def test_stream_failure_records_bounded_request_and_terminal_metadata(self):
+        class ValidatingState(_StreamStateService):
+            def validate_openai_response(self, path, result):
+                raise AppError(502, "Synthetic provider failure", reason="response_failed")
+
+        capture = _DiagnosticCapture()
+        logger = _ClientLogger()
+        private_text = "private athlete training context"
+        lines = [
+            b"event: response.failed\n",
+            b'data: {"response":{"id":"resp_safe123","status":"failed","error":{"code":"unknown_private_code","message":"private provider text"}}}\n',
+            b"\n",
+        ]
+        response = _StreamResponse(lines, headers={"x-request-id": "req_safe123"})
+        client = self._stream_client(lambda *_args, **_kwargs: response, state=ValidatingState(), capture=capture, logger=logger)
+        with self.assertRaises(AppError):
+            client.stream({
+                "model": "gpt-6-luna", "input": private_text, "instructions": "private instructions",
+                "tools": [{"type": "function"}], "max_output_tokens": 1234,
+                "conversation": "conv_fake", "reasoning": {"effort": "high"},
+            }, lambda _delta: None)
+
+        started = next(details for event, details in capture.events if event == "openai_stream_started")
+        failed = next(details for event, details in capture.events if event == "openai_stream_failed")
+        self.assertEqual({key: started[key] for key in ("model", "reasoning_effort", "max_output_tokens", "tools_count", "input_chars", "instructions_chars", "conversation_present")}, {
+            "model": "gpt-6-luna", "reasoning_effort": "high", "max_output_tokens": 1234,
+            "tools_count": 1, "input_chars": len(private_text), "instructions_chars": 20,
+            "conversation_present": True,
+        })
+        self.assertEqual(failed["terminal_event_type"], "response.failed")
+        self.assertEqual(failed["provider_response_id"], "resp_safe123")
+        self.assertEqual(failed["request_id"], "req_safe123")
+        self.assertEqual(failed["provider_error_present"], "true")
+        self.assertNotIn("provider_error_code", failed)
+        self.assertNotIn("private", repr((capture.events, logger.infos, logger.logs)))
 
     def test_stream_client_saves_final_response_before_post_read_cancellation(self):
         cancel_event = threading.Event()
