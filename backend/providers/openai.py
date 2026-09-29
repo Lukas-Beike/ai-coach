@@ -636,7 +636,6 @@ def consume_sse_event(
     event_name: str,
     on_text_delta: Callable[[str], None],
     on_response_id: Callable[[str], None] | None = None,
-    on_event_type: Callable[[str], None] | None = None,
 ) -> dict[str, Any] | None:
     """Interpret one OpenAI Responses API SSE event without side effects."""
     if not data_lines:
@@ -661,8 +660,6 @@ def consume_sse_event(
         "response.incomplete",
         "response.failed",
     }:
-        if on_event_type is not None:
-            on_event_type(kind)
         return _terminal_sse_response(kind, event, candidate)
     return None
 
@@ -693,18 +690,18 @@ def _consume_sse_line(
     on_response_id: Callable[[str], None] | None,
 ) -> tuple[str, list[str], dict[str, Any] | None, str | None]:
     if not line:
-        terminal_type: list[str] = []
+        event_response = consume_sse_event(
+            data_lines, event_name, on_text_delta, on_response_id
+        )
+        terminal_type = event_name
+        if event_response is not None and not terminal_type:
+            event = _decode_sse_event(data_lines)
+            terminal_type = str(event.get("type") or "") if event else ""
         return (
             "",
             [],
-            consume_sse_event(
-                data_lines,
-                event_name,
-                on_text_delta,
-                on_response_id,
-                terminal_type.append,
-            ),
-            terminal_type[0] if terminal_type else event_name,
+            event_response,
+            terminal_type,
         )
     if line.startswith("event:"):
         return line[6:].strip(), data_lines, None, None
