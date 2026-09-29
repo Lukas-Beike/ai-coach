@@ -682,6 +682,27 @@ class StreamReadState:
     terminal_event_type: str | None = None
 
 
+def _consume_sse_line(
+    line: str,
+    event_name: str,
+    data_lines: list[str],
+    on_text_delta: Callable[[str], None],
+    on_response_id: Callable[[str], None] | None,
+) -> tuple[str, list[str], dict[str, Any] | None, str | None]:
+    if not line:
+        return (
+            "",
+            [],
+            consume_sse_event(data_lines, event_name, on_text_delta, on_response_id),
+            event_name,
+        )
+    if line.startswith("event:"):
+        return line[6:].strip(), data_lines, None, None
+    if line.startswith("data:"):
+        return event_name, [*data_lines, line[5:].lstrip()], None, None
+    return event_name, data_lines, None, None
+
+
 def read_stream_response(
     response: Any,
     *,
@@ -710,29 +731,21 @@ def read_stream_response(
                 "provider response exceeds configured size limit"
             )
         line = raw_line.decode("utf-8").rstrip("\r\n")
-        if not line:
-            event_response = consume_sse_event(
-                data_lines, event_name, on_text_delta, on_response_id
-            )
-            check_cancelled()
-            terminal_event_type = event_name
-            event_name = ""
-            data_lines = []
-            if event_response is not None:
-                final_response = event_response
-                read_state.terminal_event_type = terminal_event_type or str(event_response.get("type") or "")
-        elif line.startswith("event:"):
-            event_name = line[6:].strip()
-        elif line.startswith("data:"):
-            data_lines.append(line[5:].lstrip())
+        event_name, data_lines, event_response, terminal_event_type = _consume_sse_line(
+            line, event_name, data_lines, on_text_delta, on_response_id
+        )
+        check_cancelled()
+        if event_response is not None:
+            final_response = event_response
+            read_state.terminal_event_type = terminal_event_type or str(event_response.get("type") or "")
     check_cancelled()
-    event_response = consume_sse_event(
-        data_lines, event_name, on_text_delta, on_response_id
+    _, _, event_response, terminal_event_type = _consume_sse_line(
+        "", event_name, data_lines, on_text_delta, on_response_id
     )
     check_cancelled()
     if event_response is not None:
         final_response = event_response
-        read_state.terminal_event_type = event_name or str(event_response.get("type") or "")
+        read_state.terminal_event_type = terminal_event_type or str(event_response.get("type") or "")
     return StreamReadResult(final_response, read_state.response_bytes)
 
 
