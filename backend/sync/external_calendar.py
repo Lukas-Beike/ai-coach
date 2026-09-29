@@ -152,10 +152,9 @@ class ExternalCalendarSyncService:
                         synced_at,
                     ),
                 )
-
-        self._set_value("last_external_calendar_sync_at", synced_at)
-        self._daily_sync_marker_service.mark("calendar")
-        self._set_value("last_external_calendar_sync_error", "")
+            self._key_value_repository.set(db, "last_external_calendar_sync_at", synced_at)
+            self._daily_sync_marker_service.mark_in_transaction(db, "calendar")
+            self._key_value_repository.set(db, "last_external_calendar_sync_error", "")
         self._state_event_buffer.publish("coach", {"status": "changed"})
         replan = self._replan_projection("external calendar")
         return {

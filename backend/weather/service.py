@@ -64,11 +64,14 @@ class WeatherCacheStore:
             self._key_values.set(db, cache.FAILURE_KEY, "")
         return False
 
-    def store_failure(self, failure: dict[str, Any]) -> None:
+    def store_failure(self, query: str, failure: dict[str, Any]) -> bool:
         with self._database_manager.unit_of_work() as db:
+            if self._location(db) != query:
+                return False
             self._key_values.set(
                 db, cache.FAILURE_KEY, json.dumps(failure, ensure_ascii=False)
             )
+        return True
 
     def _location(self, db: Any) -> str:
         return (
@@ -226,7 +229,7 @@ class WeatherService:
             state.error = None
             self._refresh_journal.finish(refresh_id, "success", "complete")
         except Exception as exc:  # noqa: BLE001 - provider boundary normalizes failures
-            self._record_failure(state, exc, refresh_id)
+            return self._record_failure(state, exc, refresh_id)
         return False
 
     def _record_failure(
@@ -234,7 +237,7 @@ class WeatherService:
         state: cache.WeatherCacheState,
         error: Exception,
         refresh_id: str | None,
-    ) -> None:
+    ) -> bool:
         state.error = (
             error.message
             if isinstance(error, AppError) and error.status == 400
@@ -246,9 +249,10 @@ class WeatherService:
             base_seconds=self._retry_policy.retry_base_seconds,
             max_seconds=self._retry_policy.retry_max_seconds,
         )
-        self._cache_store.store_failure(failure)
+        stored_for_current_location = self._cache_store.store_failure(state.query, failure)
         self._refresh_journal.finish(refresh_id, "error", "failed", error=error)
         self._refresh_journal.log_failure(error)
+        return not stored_for_current_location
 
 
 class WeatherServiceCache:

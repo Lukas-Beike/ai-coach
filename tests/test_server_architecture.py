@@ -2581,9 +2581,7 @@ class ServerArchitectureTests(unittest.TestCase):
             [ast.unparse(argument) for argument in assignment.value.args],
             ["ATHLETE_PROFILE_SERVICE"],
         )
-        self.assertEqual(
-            ast.unparse(assignment.value.keywords[0].value), "DB_LOCK"
-        )
+        self.assertEqual(assignment.value.keywords, [])
 
     def test_session_auth_cache_state_is_owned_by_http_api_auth(self) -> None:
         auth_tree = _parse(BACKEND_ROOT / "http_api" / "auth.py")

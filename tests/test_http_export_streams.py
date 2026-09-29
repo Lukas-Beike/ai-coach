@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Self
 from unittest.mock import Mock
 
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
+from backend.db.manager import DatabaseManager
 from backend.http_api.export_streams import ExportStreamTransport
 
 
@@ -25,26 +27,33 @@ class TrackedLock:
 
 
 class ExportStreamTransportTests(unittest.TestCase):
-    def test_database_backup_holds_lock_until_send_finishes_and_passes_service_deadline(self) -> None:
+    def backup(self, root: Path, lock: TrackedLock) -> DatabaseBackupService:
+        database_path = root / "coach.db"
+        manager = DatabaseManager(database_path, sqlite3, persist_connections=False)
+        with manager.unit_of_work() as db:
+            db.execute("CREATE TABLE records(value TEXT NOT NULL)")
+            db.execute("INSERT INTO records VALUES ('saved')")
+        self.addCleanup(manager.close)
+        return DatabaseBackupService(
+            manager,
+            lock,
+            DatabaseBackupConfig(
+                database_path=database_path,
+                data_dir=root,
+                maximum_bytes=100_000,
+                minimum_free_bytes=0,
+                time_limit_seconds=8,
+                monotonic=lambda: 10,
+                disk_usage=lambda _path: SimpleNamespace(free=100_000),
+            ),
+            logging.getLogger(__name__),
+        )
+
+    def test_database_backup_releases_database_lock_before_send_and_passes_deadline(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            database_path = Path(temporary) / "coach.db"
-            database_path.write_bytes(b"backup")
+            root = Path(temporary)
             lock = TrackedLock()
-            backup = DatabaseBackupService(
-                Mock(),
-                lock,
-                DatabaseBackupConfig(
-                    database_path=database_path,
-                    data_dir=Path(temporary),
-                    maximum_bytes=100,
-                    minimum_free_bytes=0,
-                    time_limit_seconds=8,
-                    monotonic=lambda: 10,
-                    disk_usage=lambda _path: SimpleNamespace(free=100),
-                ),
-                logging.getLogger(__name__),
-            )
-            backup._checkpoint_locked = Mock()
+            backup = self.backup(root, lock)
             privacy_export_factory = Mock(side_effect=RuntimeError("unused privacy export construction failed"))
             transport = ExportStreamTransport(
                 lambda: backup,
@@ -55,37 +64,24 @@ class ExportStreamTransportTests(unittest.TestCase):
             handler = Mock()
 
             def send_file_stream(*args: object, **kwargs: object) -> None:
-                self.assertTrue(lock.held)
-                self.assertEqual(args, (database_path, "application/octet-stream", "intervals-coach-database.backup"))
+                self.assertFalse(lock.held)
+                self.assertEqual(args[0].name.startswith(".database-backup-"), True)
+                self.assertEqual(args[1:], ("application/octet-stream", "intervals-coach-database.backup"))
                 self.assertEqual(kwargs, {"deadline": 18})
+                self.assertTrue(Path(args[0]).exists())
 
             handler.send_file_stream.side_effect = send_file_stream
             transport.stream_database_backup(handler)
 
             self.assertFalse(lock.held)
-            backup._checkpoint_locked.assert_called_once()
+            self.assertFalse(list(root.glob(".database-backup-*.tmp")))
             privacy_export_factory.assert_not_called()
 
     def test_database_backup_releases_lock_when_send_raises(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            database_path = Path(temporary) / "coach.db"
-            database_path.write_bytes(b"backup")
+            root = Path(temporary)
             lock = TrackedLock()
-            backup = DatabaseBackupService(
-                Mock(),
-                lock,
-                DatabaseBackupConfig(
-                    database_path=database_path,
-                    data_dir=Path(temporary),
-                    maximum_bytes=100,
-                    minimum_free_bytes=0,
-                    time_limit_seconds=8,
-                    monotonic=lambda: 10,
-                    disk_usage=lambda _path: SimpleNamespace(free=100),
-                ),
-                logging.getLogger(__name__),
-            )
-            backup._checkpoint_locked = Mock()
+            backup = self.backup(root, lock)
             transport = ExportStreamTransport(
                 lambda: backup,
                 Mock(side_effect=RuntimeError("unused privacy export construction failed")),
@@ -99,6 +95,7 @@ class ExportStreamTransportTests(unittest.TestCase):
                 transport.stream_database_backup(handler)
 
             self.assertFalse(lock.held)
+            self.assertFalse(list(root.glob(".database-backup-*.tmp")))
 
     def test_privacy_export_uses_injected_deadline_and_cleans_up_on_send_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

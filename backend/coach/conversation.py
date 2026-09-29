@@ -51,14 +51,6 @@ class CoachConversationResetService:
         self._uuid_factory = uuid_factory
         self._logger = logger
 
-    def _get_value(self, key: str) -> str | None:
-        with self._db_lock, self._database_manager.unit_of_work() as db:
-            return self._key_values.get(db, key)
-
-    def _set_value(self, key: str, value: str) -> None:
-        with self._db_lock, self._database_manager.unit_of_work() as db:
-            self._key_values.set(db, key, value)
-
     def _delete_remote(self, conversation_id: str) -> bool:
         if not conversation_id:
             return False
@@ -72,9 +64,10 @@ class CoachConversationResetService:
             )
             return False
 
-    def _reset_local(self) -> list[str]:
+    def _reset_local(self) -> tuple[list[str], str, str]:
         with self._db_lock, self._database_manager.unit_of_work() as db:
             now = self._utc_now()
+            openai_conversation_id = self._key_values.get(db, "openai_conversation_id") or ""
             active_commands = db.execute(
                 "SELECT client_turn_id, receipt FROM coach_commands "
                 "WHERE status IN ('queued', 'running')"
@@ -102,28 +95,30 @@ class CoachConversationResetService:
                 "UPDATE coach_action_proposals SET status='cancelled', action_token_hash=NULL "
                 "WHERE action_type='remote_coach_write' AND status IN ('preview', 'ready')"
             )
-            self._key_values.set(db, "chat_generation", self._uuid_factory().hex)
+            generation = self._uuid_factory().hex
+            self._key_values.set(db, "chat_generation", generation)
+            self._key_values.set(db, "openai_conversation_id", "")
+            self._key_values.set(db, "gemini_conversation_id", "")
+            self._key_values.set(db, "gemini_conversation_history", "[]")
+            self._key_values.set(db, "gemini_call_names", "{}")
+            self._key_values.set(db, "last_chat_reset_at", now)
             db.execute(
                 "UPDATE coach_plan_artifacts SET status='superseded', updated_at=? "
                 "WHERE status='draft'",
                 (self._utc_now(),),
             )
             self._key_values.set(db, "coach_pending_request", "null")
-        return operation_ids
+        return operation_ids, openai_conversation_id, generation
 
     def reset(self) -> dict[str, Any]:
         with self._conversation_lock:
-            remote_deleted = self._delete_remote(self._get_value("openai_conversation_id") or "")
-            for operation_id in self._reset_local():
+            operation_ids, openai_conversation_id, generation = self._reset_local()
+            for operation_id in operation_ids:
                 self._streams.cancel_background_event(operation_id)
-            self._set_value("openai_conversation_id", "")
-            self._set_value("gemini_conversation_id", "")
-            self._set_value("gemini_conversation_history", "[]")
-            self._set_value("gemini_call_names", "{}")
-            self._set_value("last_chat_reset_at", self._utc_now())
+        remote_deleted = self._delete_remote(openai_conversation_id)
         return {
             "status": "ok",
-            "generation": self._get_value("chat_generation"),
+            "generation": generation,
             "remote_conversation_deleted": remote_deleted,
             "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt.",
         }

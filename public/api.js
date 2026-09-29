@@ -64,15 +64,25 @@
   }
 
   async function audio(path, blob, onUnauthorized) {
-    const response = await fetch(path, {
-      method: "POST",
-      credentials: "same-origin",
-      body: blob,
-      headers: { "Content-Type": blob.type || "application/octet-stream", "X-CSRF-Token": cookie("ic_csrf") },
-    });
-    const payload = await readResponse(response, onUnauthorized);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        credentials: "same-origin",
+        body: blob,
+        signal: controller.signal,
+        headers: { "Content-Type": blob.type || "application/octet-stream", "X-CSRF-Token": cookie("ic_csrf") },
+      });
+      const payload = await readResponse(response, onUnauthorized);
     if (typeof payload.transcript !== "string") throw responseError(response, "Die Transkriptionsbestätigung fehlt.", "invalid_transcription");
-    return payload;
+      return payload;
+    } catch (error) {
+      if (error?.name === "AbortError") throw new Error("Die Transkription antwortet nicht innerhalb von 25 Sekunden.");
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   globalThis.AppApi = Object.freeze({ audio, request, responseError });

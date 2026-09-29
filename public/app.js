@@ -414,11 +414,25 @@ async function api(path, options = {}) {
   return result;
 }
 
-async function downloadRequest(path, fallback) {
+async function withRequestTimeout(operation, timeoutMs, timeoutMessage) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(path, { credentials: "same-origin", cache: "no-store", signal: controller.signal });
+    return await operation(controller.signal);
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(timeoutMessage);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function downloadRequest(path, fallback, timeoutMs = 25_000) {
+  const timeoutMessage = timeoutMs > 25_000
+    ? "Der Download konnte nicht innerhalb von zwei Minuten bestätigt werden."
+    : "Der Server antwortet nicht innerhalb von 25 Sekunden.";
+  return withRequestTimeout(async (signal) => {
+    const response = await fetch(path, { credentials: "same-origin", cache: "no-store", signal });
     if (!response.ok) {
       if (response.status === 401) showLogin();
       let payload = {};
@@ -429,13 +443,8 @@ async function downloadRequest(path, fallback) {
         payload.reason || "http_error",
       );
     }
-    return await response.blob();
-  } catch (error) {
-    if (error?.name === "AbortError") throw new Error("Der Server antwortet nicht innerhalb von 25 Sekunden.");
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+    return response.blob();
+  }, timeoutMs, timeoutMessage);
 }
 
 function scheduleStateEventRefresh(areas) {
@@ -4379,9 +4388,11 @@ async function downloadDatabaseBackup() {
   const button = $("#backupDownloadButton");
   if (button) button.disabled = true;
   try {
-    const response = await fetch("/api/privacy/backup", { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) throw new Error("Datenbank-Backup konnte nicht erstellt werden.");
-    const blob = await response.blob();
+    const blob = await downloadRequest(
+      "/api/privacy/backup",
+      "Datenbank-Backup konnte nicht erstellt werden.",
+      130_000,
+    );
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.download = `intervals-coach-database-${todayIso()}.backup`;
@@ -4398,14 +4409,22 @@ async function restoreDatabaseBackup() {
   if (!file || !await requestConfirmation("Das aktuelle Datenbank-Backup wird vorher gesichert und durch die ausgewählte Datei ersetzt. Fortfahren?", { title: "Datenbank-Backup wiederherstellen?" })) return;
   const button = $("#backupRestoreButton");
   button.disabled = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 130_000);
   try {
-    const response = await fetch("/api/privacy/restore", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/octet-stream", "X-CSRF-Token": cookie("ic_csrf") }, body: file });
+    const response = await fetch("/api/privacy/restore", { method: "POST", credentials: "same-origin", cache: "no-store", signal: controller.signal, headers: { "Content-Type": "application/octet-stream", "X-CSRF-Token": cookie("ic_csrf") }, body: file });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Backup konnte nicht wiederhergestellt werden.");
     toast("Backup wiederhergestellt. Bitte erneut anmelden.");
     showLogin();
-  } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; }
+  } catch (error) {
+    toast(error?.name === "AbortError"
+      ? "Die Bestätigung der Wiederherstellung fehlt. Der Server kann den Vorgang noch abschließen; bitte vor einem erneuten Versuch den Status prüfen."
+      : error.message, true);
+  } finally {
+    clearTimeout(timeout);
+    button.disabled = false;
+  }
 }
 
 async function saveModel(event) {
@@ -4509,13 +4528,11 @@ function renderDiagnosticCapture(capture = {}) {
 
 async function downloadPrivacyExport() {
   try {
-    const response = await fetch("/api/privacy/export", { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) {
-      let message = "Privacy-Export konnte nicht erstellt werden.";
-      try { message = (await response.json()).error || message; } catch (_) { /* keep safe fallback */ }
-      throw new Error(message);
-    }
-    const blob = await response.blob();
+    const blob = await downloadRequest(
+      "/api/privacy/export",
+      "Privacy-Export konnte nicht erstellt werden.",
+      130_000,
+    );
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.download = `intervals-coach-export-${todayIso()}.zip`;

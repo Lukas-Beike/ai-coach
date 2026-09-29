@@ -73,7 +73,7 @@ class ProfileService:
             return dict(DEFAULT_PROFILE)
 
     def get(self) -> dict[str, str]:
-        with self._manager.unit_of_work() as db:
+        with self._manager.reader() as db:
             return self.get_from_db(db)
 
     def save_in_transaction(

@@ -22,6 +22,10 @@ class _Manager:
             self.db.rollback()
             raise
 
+    @contextmanager
+    def reader(self):
+        yield self.db
+
 
 class ProfileServiceTests(unittest.TestCase):
     def setUp(self):
