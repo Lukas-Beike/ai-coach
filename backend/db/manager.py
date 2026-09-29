@@ -99,23 +99,28 @@ class DatabaseManager:
         if current is not None:
             yield current
             return
-        with self._lease(), self._writer_lock:
-            connection = self._writer if self.persist_connections else self._connect()
-            if self.persist_connections and connection is None:
-                connection = self._connect()
-                self._writer = connection
-            assert connection is not None
-            token = self._unit_of_work.set(connection)
+        with self._lease():
+            if not self._writer_lock.acquire(timeout=self.timeout):
+                raise TimeoutError("database writer limit reached")
             try:
-                yield connection
-                connection.commit()
-            except Exception:
-                connection.rollback()
-                raise
+                connection = self._writer if self.persist_connections else self._connect()
+                if self.persist_connections and connection is None:
+                    connection = self._connect()
+                    self._writer = connection
+                assert connection is not None
+                token = self._unit_of_work.set(connection)
+                try:
+                    yield connection
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+                finally:
+                    self._unit_of_work.reset(token)
+                    if not self.persist_connections:
+                        connection.close()
             finally:
-                self._unit_of_work.reset(token)
-                if not self.persist_connections:
-                    connection.close()
+                self._writer_lock.release()
 
     @contextmanager
     def reader(self) -> Iterator[Any]:

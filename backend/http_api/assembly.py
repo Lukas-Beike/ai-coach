@@ -383,7 +383,9 @@ class HttpApiAssembly:
             session_auth_service, StateEventTransport(state_event_buffer),
         )
         self.settings_put_routes = SettingsPutRoutes(settings)
-        self.athlete_put_routes = AthletePutRoutes(athlete_context_service, profile_service)
+        self.athlete_put_routes = AthletePutRoutes(
+            athlete_context_service, profile_service, database_lock()
+        )
         self.planning_commands_post_routes = PlanningCommandsPostRoutes(
             coach_planning_command_service,
             coach_provision_service,

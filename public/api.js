@@ -1,4 +1,6 @@
 (() => {
+  const REQUEST_TIMEOUT_MS = 25_000;
+
   function cookie(name) {
     return document.cookie.split("; ").find((part) => part.startsWith(`${name}=`))?.split("=").slice(1).join("=") || "";
   }
@@ -34,14 +36,31 @@
 
   async function request(path, options, onUnauthorized) {
     const method = options?.method;
-    const response = await fetch(path, {
-      credentials: "same-origin",
-      ...options,
-      headers: { "Content-Type": "application/json", ...(method && method !== "GET" && { "X-CSRF-Token": cookie("ic_csrf") }), ...options?.headers },
-    });
-    const payload = await readResponse(response, onUnauthorized);
-    if (method && method !== "GET" && !Object.keys(payload).length) throw responseError(response, "Die Serverbestätigung fehlt. Bitte den gespeicherten Stand prüfen.", "empty_confirmation");
-    return payload;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const callerSignal = options?.signal;
+    const abortFromCaller = () => controller.abort();
+    if (callerSignal?.aborted) controller.abort();
+    else callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
+    try {
+      const response = await fetch(path, {
+        credentials: "same-origin",
+        ...options,
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json", ...(method && method !== "GET" && { "X-CSRF-Token": cookie("ic_csrf") }), ...options?.headers },
+      });
+      const payload = await readResponse(response, onUnauthorized);
+      if (method && method !== "GET" && !Object.keys(payload).length) throw responseError(response, "Die Serverbestätigung fehlt. Bitte den gespeicherten Stand prüfen.", "empty_confirmation");
+      return payload;
+    } catch (error) {
+      if (error?.name === "AbortError" && !callerSignal?.aborted) {
+        throw new Error("Der Server antwortet nicht innerhalb von 25 Sekunden.");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      callerSignal?.removeEventListener("abort", abortFromCaller);
+    }
   }
 
   async function audio(path, blob, onUnauthorized) {

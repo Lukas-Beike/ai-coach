@@ -414,6 +414,30 @@ async function api(path, options = {}) {
   return result;
 }
 
+async function downloadRequest(path, fallback) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25_000);
+  try {
+    const response = await fetch(path, { credentials: "same-origin", cache: "no-store", signal: controller.signal });
+    if (!response.ok) {
+      if (response.status === 401) showLogin();
+      let payload = {};
+      try { payload = await response.json(); } catch (_) { /* use the safe fallback */ }
+      throw globalThis.AppApi.responseError(
+        response,
+        typeof payload.error === "string" ? payload.error : fallback,
+        payload.reason || "http_error",
+      );
+    }
+    return await response.blob();
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("Der Server antwortet nicht innerhalb von 25 Sekunden.");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function scheduleStateEventRefresh(areas) {
   (areas || []).forEach((area) => state.stateEventRefreshAreas.add(area));
   if (state.stateEventRefreshTimer) clearTimeout(state.stateEventRefreshTimer);
@@ -3923,13 +3947,7 @@ async function downloadServerLogs() {
   const button = $("#logsDownloadButton");
   button.disabled = true;
   try {
-    const response = await fetch("/api/logs/download", { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) {
-      let message = "Server-Logs konnten nicht heruntergeladen werden.";
-      try { message = (await response.json()).error || message; } catch (_) { /* keep safe fallback */ }
-      throw new Error(message);
-    }
-    const url = URL.createObjectURL(await response.blob());
+    const url = URL.createObjectURL(await downloadRequest("/api/logs/download", "Server-Logs konnten nicht heruntergeladen werden."));
     const link = document.createElement("a");
     link.href = url;
     link.download = `intervals-coach-server-logs-${todayIso()}.jsonl`;
@@ -4469,19 +4487,8 @@ async function downloadDiagnostics() {
   button.disabled = true;
   button.textContent = "Wird vorbereitet…";
   try {
-    const response = await fetch("/api/diagnostics", { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) {
-      if (response.status === 401) showLogin();
-      let payload = {};
-      try { payload = await response.json(); } catch (_) { /* use the safe fallback */ }
-      throw globalThis.AppApi.responseError(
-        response,
-        typeof payload.error === "string" ? payload.error : `Anfrage fehlgeschlagen (${response.status})`,
-        payload.reason || "http_error",
-      );
-    }
     renderConnectivityStatus(true);
-    const blob = await response.blob();
+    const blob = await downloadRequest("/api/diagnostics", "Diagnose konnte nicht heruntergeladen werden.");
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;

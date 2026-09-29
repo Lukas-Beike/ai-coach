@@ -567,7 +567,7 @@ ATHLETE_DATA = AthleteDataAssembly(
 ATHLETE_PROFILE_SERVICE = ATHLETE_DATA.profile_for(
     database_manager_runtime.DATABASE_MANAGER_CACHE
 )
-ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
+ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE, database_lock=DB_LOCK)
 
 PLANNING_DATA = PlanningDataAssembly(
     dependencies=PlanningDataAssembly.Inputs(

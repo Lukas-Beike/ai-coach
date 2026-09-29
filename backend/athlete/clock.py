@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 from backend.athlete.profile import timezone_name
@@ -23,12 +24,16 @@ class AthleteLocalClock:
         self,
         profile: AthleteProfileReader,
         now: Callable[..., datetime] = datetime.now,
+        database_lock: Any | None = None,
     ) -> None:
         self._profile = profile
         self._now = now
+        self._database_lock = database_lock
 
     def now(self) -> datetime:
-        timezone = timezone_name(self._profile.get().get("timezone"))
+        lock = self._database_lock or nullcontext()
+        with lock:
+            timezone = timezone_name(self._profile.get().get("timezone"))
         try:
             return self._now(ZoneInfo(timezone))
         except Exception:

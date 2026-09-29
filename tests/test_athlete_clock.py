@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime, timedelta, timezone
+from threading import RLock
 
 from backend.athlete.clock import AthleteLocalClock
 
@@ -13,6 +14,23 @@ class Profile:
 
 
 class AthleteLocalClockTests(unittest.TestCase):
+    def test_profile_timezone_read_takes_database_lock_first(self):
+        lock = RLock()
+
+        class LockedProfile(Profile):
+            def get(self) -> dict[str, str]:
+                if not lock._is_owned():
+                    raise AssertionError("profile read must hold the database lock")
+                return super().get()
+
+        clock = AthleteLocalClock(
+            LockedProfile("UTC"),
+            lambda zone=None: datetime(2026, 1, 15, 12, tzinfo=zone),
+            database_lock=lock,
+        )
+
+        self.assertEqual(clock.now().tzinfo.key, "UTC")
+
     def test_uses_timezone_from_current_profile(self):
         profile = Profile("America/Los_Angeles")
         clock = AthleteLocalClock(
