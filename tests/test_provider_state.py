@@ -167,11 +167,11 @@ class ProviderStateServiceTests(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(raised.exception.reason, "provider_unavailable")
+        self.assertEqual(raised.exception.reason, "response_error")
         self.assertEqual(raised.exception.provider_error_code, "server_error")
         self.assertNotIn("private provider content", str(raised.exception))
         status = json.loads(self.repository.values["openai_status"])
-        self.assertEqual(status["reason"], "provider_unavailable")
+        self.assertEqual(status["reason"], "response_error")
         self.assertEqual(status["provider_error_code"], "server_error")
         self.assertNotIn("private provider content", json.dumps(status))
 

@@ -1816,7 +1816,7 @@ def _openai_error_reason(status: int, error: dict[str, Any]) -> tuple[str, str]:
             "not_found",
             "Das konfigurierte OpenAI-Modell oder der angeforderte Dienst wurde nicht gefunden.",
         )
-    if status >= 500 or code == "server_error" or error_type == "server_error":
+    if status >= 500:
         return (
             "provider_unavailable",
             "OpenAI ist vorübergehend nicht verfügbar. Bitte später erneut versuchen.",

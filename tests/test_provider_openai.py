@@ -939,11 +939,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             ("permission_denied", None, "authentication_or_permission"),
             ("model_not_found", None, "not_found"),
             ("rate_limit_exceeded", None, "rate_limit_exceeded"),
-            ("server_error", None, "provider_unavailable"),
             (None, "authentication_error", "authentication_or_permission"),
             (None, "permission_error", "authentication_or_permission"),
             (None, "rate_limit_error", "rate_limit_exceeded"),
-            (None, "server_error", "provider_unavailable"),
             ("conversation_locked", None, "conversation_locked"),
         )
         for code, error_type, reason in cases:
