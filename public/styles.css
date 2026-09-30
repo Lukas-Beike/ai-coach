@@ -442,7 +442,7 @@ h2 {
   background: transparent;
 }
 .composer textarea::placeholder { color: var(--subtle); }
-.composer-actions { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; }
+.composer-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .composer-actions button { min-height: 44px; }
 .composer.is-busy .voice-button { display: none; }
 .composer .voice-button {
@@ -934,7 +934,7 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .composer.is-busy { grid-template-columns: minmax(0, 1fr); padding-left: 7px; }
   .composer.is-busy textarea { grid-column: 1 / -1; }
   .composer.is-busy .composer-actions { display: flex; width: 100%; grid-column: 1 / -1; }
-  .composer.is-busy .composer-actions button:not(.composer-stop-button) { min-width: 0; flex: 1 1 0; padding-right: 9px; padding-left: 9px; }
+  .composer.is-busy .composer-actions button:not(.attachment-button):not(.composer-stop-button):not(#sendButton) { min-width: 0; flex: 1 1 0; padding-right: 9px; padding-left: 9px; }
   .coach-provider-status { grid-template-columns: 1fr; }
   h1 { font-size: 1.55rem; }
   h2 { font-size: 1.35rem; }
