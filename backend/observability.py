@@ -91,7 +91,7 @@ _DIAGNOSTIC_SECRET_SUFFIXES = (
 _DIAGNOSTIC_BINARY_FIELDS = frozenset({"inlinedata", "filedata", "audio", "inputaudio"})
 _DIAGNOSTIC_AUTH_RE = re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9_+/=.-]+")
 _DIAGNOSTIC_LABELED_SECRET_RE = re.compile(
-    r'''(?i)\b(password|passwd|secret|api[_-]?key|token|authorization|cookie)\s*[:=]\s*([^,;\r\n]+)'''
+    r"(?i)\b(password|passwd|secret|api[_-]?key|token|authorization|cookie)\s*[:=]"
 )
 _DIAGNOSTIC_PRIVATE_KEY_RE = re.compile(
     r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.DOTALL
@@ -334,12 +334,26 @@ def _encoded_diagnostic_secrets(config: Config) -> tuple[str, ...]:
     return tuple(sorted(secrets, key=len, reverse=True))
 
 
+def _redact_labeled_secrets(value: str) -> str:
+    pieces = []
+    cursor = 0
+    for match in _DIAGNOSTIC_LABELED_SECRET_RE.finditer(value):
+        newline = value.find("\n", match.end())
+        line_end = len(value) if newline < 0 else newline
+        delimiters = [position for char in (",", ";") if (position := value.find(char, match.end(), line_end)) >= 0]
+        end = min(delimiters, default=line_end)
+        pieces.extend((value[cursor:match.start(1)], match.group(1) + "=" + _REDACTED))
+        cursor = end
+    pieces.append(value[cursor:])
+    return "".join(pieces)
+
+
 def _clean_diagnostic_text(value: str, redactor: Redactor, encoded_secrets: tuple[str, ...]) -> str:
     safe = redactor.redact_text(value)
     for secret in encoded_secrets:
         safe = safe.replace(secret, _REDACTED)
     safe = _DIAGNOSTIC_AUTH_RE.sub("[REDACTED_AUTHORIZATION]", safe)
-    safe = _DIAGNOSTIC_LABELED_SECRET_RE.sub(lambda match: match.group(1) + "=" + _REDACTED, safe)
+    safe = _redact_labeled_secrets(safe)
     safe = re.sub(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b", "[REDACTED_TOKEN]", safe)
     safe = _DIAGNOSTIC_PRIVATE_KEY_RE.sub("[REDACTED_PRIVATE_KEY]", safe)
     return _DIAGNOSTIC_DATA_URL_RE.sub("[OMITTED_BINARY]", safe)
@@ -650,10 +664,9 @@ class DiagnosticCapture:
         }
         compact_details: dict[str, Any] = {"truncated": True, "reason": "entry_size_limit", **compact_errors}
         compact = {"timestamp": entry.get("timestamp"), "event": entry.get("event"), "details": compact_details}
-        if self._entry_bytes(compact) <= self._max_entry_bytes:
-            return compact
-        compact_details.update({key: {"truncated": True} for key in compact_errors})
-        return {"timestamp": entry.get("timestamp"), "event": entry.get("event"), "details": compact_details}
+        if self._entry_bytes(compact) > self._max_entry_bytes:
+            compact_details.update({key: {"truncated": True} for key in compact_errors})
+        return compact
 
     def _compact_error(self, value: Any) -> Any:
         if not isinstance(value, dict):

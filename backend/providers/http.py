@@ -435,44 +435,46 @@ class JsonHttpClient:
         except HTTPError as exc:
             self._http_error(exc, service, request_context, parsed_url, started, cancel_event)
         except (OSError, ValueError) as exc:
-            if cancel_event is not None and cancel_event.is_set():
-                raise self._cancelled_error(request_context, parsed_url, started) from exc
-            if service == "openai":
-                self.provider_state.record_status(
-                    "openai",
-                    state="error",
-                    reason="network_error",
-                    message="OpenAI ist nicht erreichbar. Bitte Netzwerkverbindung prüfen und später erneut versuchen.",
-                )
-            self.logger.exception(
-                "Upstream service is unavailable",
-                extra={
-                    "event": "upstream_network_error",
-                    "context": self._failure_context(request_context, started, exc),
-                },
-            )
-            self._capture_failure(request_context, parsed_url, started, exc)
-            raise provider_error(service, "network") from exc
+            self._network_failure(exc, service, request_context, parsed_url, started, cancel_event)
         except AppError as exc:
             self._capture_failure(request_context, parsed_url, started, exc)
             raise
         except Exception as exc:
-            if service == "openai":
-                self.provider_state.record_status(
-                    "openai",
-                    state="error",
-                    reason="client_error",
-                    message="Die OpenAI-Antwort konnte nicht verarbeitet werden. Bitte später erneut versuchen.",
-                )
-            self.logger.exception(
-                "External HTTP request failed while processing response",
-                extra={
-                    "event": "external_request_failed",
-                    "context": self._failure_context(request_context, started, exc),
-                },
+            self._client_failure(exc, service, request_context, parsed_url, started)
+
+    def _network_failure(
+        self, error: OSError | ValueError, service: str | None, context: dict[str, Any],
+        parsed_url: Any, started: float, cancel_event: Any,
+    ) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise self._cancelled_error(context, parsed_url, started) from error
+        if service == "openai":
+            self.provider_state.record_status(
+                "openai", state="error", reason="network_error",
+                message="OpenAI ist nicht erreichbar. Bitte Netzwerkverbindung pruefen und spaeter erneut versuchen.",
             )
-            self._capture_failure(request_context, parsed_url, started, exc)
-            raise provider_error(service, "client") from exc
+        self.logger.exception(
+            "Upstream service is unavailable",
+            extra={"event": "upstream_network_error", "context": self._failure_context(context, started, error)},
+        )
+        self._capture_failure(context, parsed_url, started, error)
+        raise provider_error(service, "network") from error
+
+    def _client_failure(
+        self, error: Exception, service: str | None, context: dict[str, Any],
+        parsed_url: Any, started: float,
+    ) -> None:
+        if service == "openai":
+            self.provider_state.record_status(
+                "openai", state="error", reason="client_error",
+                message="Die OpenAI-Antwort konnte nicht verarbeitet werden. Bitte spaeter erneut versuchen.",
+            )
+        self.logger.exception(
+            "External HTTP request failed while processing response",
+            extra={"event": "external_request_failed", "context": self._failure_context(context, started, error)},
+        )
+        self._capture_failure(context, parsed_url, started, error)
+        raise provider_error(service, "client") from error
 
     def _raise_cancelled(self, cancel_event: Any) -> None:
         if cancel_event is not None and cancel_event.is_set():
