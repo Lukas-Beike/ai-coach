@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from backend.coach import context as coach_context, streams as coach_streams
+from backend.coach import context as coach_context, limits as coach_limits, streams as coach_streams
 from backend.coach.attachments import gemini_history_parts
 from backend.coach.context import CoachIntervalsContextService, future_coach_planned_workouts
 from backend.coach.morning import ManualMorningCheckinService
@@ -584,6 +584,7 @@ class ServerCoachTests(ServerTestCase):
     def test_context_budget_factories_use_backend_owned_values(self):
         training = server.COACH_CONTEXT.training_context_service()
         preview_limits = server.COACH_CONTEXT.preview_service()._limits
+        self.assertEqual(server.COACH_CONTEXT.request_payload_service()._max_output_tokens, coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS)
         expected = {
             "_local_planned_limit": coach_context.COACH_LOCAL_PLANNED_LIMIT,
             "_library_limit": coach_context.COACH_LIBRARY_LIMIT,

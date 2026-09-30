@@ -391,7 +391,7 @@ OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
 SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
-APP_VERSION = "1.12.4"
+APP_VERSION = "1.12.5"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -1142,7 +1142,7 @@ COACH_CONTEXT = CoachContextAssembly(dependencies=CoachContextAssembly.Inputs(
             "activity_limit_per_sport": coach_context_module.COACH_RECENT_ACTIVITIES_PER_SPORT,
             "planned_event_limit": coach_context_module.COACH_PLANNED_EVENT_LIMIT,
         },
-        long_plan_max_output_tokens=lambda: coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
+        default_max_output_tokens=lambda: coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
     ),
 ))
 COACH_READ_TOOLS = CoachReadToolsAssembly(

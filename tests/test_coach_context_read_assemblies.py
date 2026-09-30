@@ -66,7 +66,7 @@ class CoachContextAssemblyTests(unittest.TestCase):
                 message_service=deps["messages"],
                 settings=deps["settings"],
                 limits=deps["limits"],
-                long_plan_max_output_tokens=Mock(return_value=5000),
+                default_max_output_tokens=Mock(return_value=5000),
             ),
         ))
         return assembly, deps
