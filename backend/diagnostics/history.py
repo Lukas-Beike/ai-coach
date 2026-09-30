@@ -51,8 +51,6 @@ class CoachDiagnosticHistoryService:
                 "id": hashlib.sha256(str(row["client_turn_id"]).encode()).hexdigest()[
                     :12
                 ],
-                "client_turn_id": row["client_turn_id"],
-                "receipt": receipt,
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
                 "status": status

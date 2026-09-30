@@ -583,7 +583,7 @@ class ServerProvidersTests(ServerTestCase):
         self.assertNotIn("do-not-log-request-body", log_text)
         self.assertNotIn("do-not-log-response-body", log_text)
 
-    def test_diagnostic_capture_retains_provider_content_and_removes_credentials(self):
+    def test_diagnostic_capture_omits_provider_content_and_removes_credentials(self):
         self.assertTrue(server.DIAGNOSTIC_CAPTURE.status()["active"])
         response = {
             "bodyBattery": 82,
@@ -601,14 +601,14 @@ class ServerProvidersTests(ServerTestCase):
         report = server.DIAGNOSTICS_ASSEMBLY.report_service().report()
         report_text = json.dumps(report, ensure_ascii=False)
         self.assertIn("bodyBattery", report_text)
-        self.assertIn("synthetic athlete note", report_text)
+        self.assertNotIn("synthetic athlete note", report_text)
         self.assertNotIn("must-never-appear", report_text)
         self.assertNotIn("must-also-never-appear", report_text)
         entries = server.DIAGNOSTIC_CAPTURE.entries()
         self.assertTrue(entries)
         response_capture = entries[-1]["details"]["response"]
         self.assertIn("shape", response_capture)
-        self.assertNotIn("content", response_capture)
+        self.assertNotIn("synthetic athlete note", json.dumps(response_capture))
 
         server.provider_http.external_call(
             "garmin",
@@ -618,7 +618,7 @@ class ServerProvidersTests(ServerTestCase):
             diagnostic_capture=server.DIAGNOSTIC_CAPTURE,
             operation_context=sync_observation.operation_context(),
         )
-        self.assertIn("synthetic provider response", json.dumps(server.DIAGNOSTICS_ASSEMBLY.report_service().report(), ensure_ascii=False))
+        self.assertNotIn("synthetic provider response", json.dumps(server.DIAGNOSTICS_ASSEMBLY.report_service().report(), ensure_ascii=False))
 
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
         server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)

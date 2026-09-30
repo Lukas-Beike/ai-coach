@@ -589,14 +589,14 @@ class JsonHttpClient:
             "path": request_context["path"],
             "duration_ms": round((self.monotonic() - started) * 1000, 1),
             "error": observability.safe_diagnostic_error(error),
-            "exception_message": str(error),
+            "exception_type": type(error).__name__,
         }
         if error_bytes is not None:
             context["error_bytes"] = error_bytes
         if headers is not None:
             context["headers"] = self.safe_response_headers(headers)
         if response_body is not None:
-            context["response_body"] = response_body.decode("utf-8", errors="replace")
+            context["response_body_bytes"] = len(response_body)
         self.diagnostic_capture.capture("external_http_failed", context)
 
     def _success(
@@ -638,7 +638,6 @@ class JsonHttpClient:
                 "response_bytes": response.response_bytes,
                 "headers": self.safe_response_headers(response.headers),
                 "response": observability.diagnostic_capture_response(result),
-                "response_body": result,
             },
         )
         return result
@@ -882,7 +881,6 @@ def external_call(
             "operation": operation,
             "duration_ms": duration_ms,
             "response": observability.diagnostic_capture_response(result),
-            "response_body": result,
         },
     )
     return result

@@ -821,6 +821,8 @@ class DiagnosticCapture:
             self._set_kv(self._entries_key, "[]")
             with self._lock:
                 self._entries_cache = []
+                self._entry_sizes = []
+                self._total_bytes = 2
                 self._dirty_count = 0
         return {"ok": True, "entries": 0}
 

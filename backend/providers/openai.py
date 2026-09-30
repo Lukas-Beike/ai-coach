@@ -26,6 +26,16 @@ from backend.errors import (
 )
 from backend.providers import http as provider_http
 
+
+def _payload_shape(value: Any) -> dict[str, Any]:
+    """Describe payload structure without retaining athlete content."""
+    if isinstance(value, dict):
+        return {"kind": "object", "keys": sorted(str(key) for key in value)[:200]}
+    if isinstance(value, list):
+        return {"kind": "array", "length": len(value)}
+    return {"kind": type(value).__name__}
+
+
 if TYPE_CHECKING:
     from backend.providers.state import ProviderStateService
 
@@ -953,7 +963,7 @@ class OpenAIStreamTelemetry:
                 "diagnostic_id": context.get("diagnostic_id"),
                 "attempt": context.get("attempt"),
                 "request_sha256": context.get("request_sha256"),
-                "request": payload,
+                "request_shape": _payload_shape(payload),
                 **optional_context,
             },
         )
@@ -976,7 +986,7 @@ class OpenAIStreamTelemetry:
                 "response_bytes": state.response_bytes,
                 "diagnostic_id": context.get("diagnostic_id"),
                 "attempt": context.get("attempt"),
-                "provider_response": response,
+                "provider_response_shape": _payload_shape(response),
             },
         )
         self.logger.info(

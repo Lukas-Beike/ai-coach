@@ -537,6 +537,11 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(capture.entries(), [])
         self.assertEqual(capture.status()["entries"], 0)
         self.assertEqual(store.get("diagnostic_capture_entries"), "[]")
+        self.assertEqual(capture.status()["bytes"], 2)
+
+        capture.capture("event-after-clear", {"data": "fresh"})
+        self.assertEqual(capture.status()["entries"], 1)
+        self.assertGreater(capture.status()["bytes"], 2)
 
     def test_diagnostic_capture_clear_failure_preserves_cache_and_raises(self):
         store = _KeyValueStore()

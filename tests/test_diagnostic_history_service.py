@@ -109,9 +109,8 @@ class CoachDiagnosticHistoryServiceTests(unittest.TestCase):
         ])
         serialized = json.dumps(entry)
         self.assertNotIn("private-token", serialized)
-        self.assertEqual(entry["client_turn_id"], "private-turn-id")
-        self.assertEqual(entry["receipt"]["command_receipts"][0]["arguments"], {"athlete": "private athlete data"})
-        self.assertEqual(entry["receipt"]["command_receipts"][0]["result"]["body"], "private result")
+        self.assertNotIn("client_turn_id", entry)
+        self.assertNotIn("receipt", entry)
         self.assertEqual(len(self.redacted_values), 3)
 
     def test_limits_to_20_rows_40_steps_and_8_frames(self):

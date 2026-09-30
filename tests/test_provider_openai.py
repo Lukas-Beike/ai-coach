@@ -177,7 +177,16 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(started["diagnostic_id"], transport["diagnostic_id"])
         self.assertEqual((started["attempt"], failed["attempt"], transport["attempt"]), (1, 1, 1))
         self.assertEqual(len(started["request_sha256"]), 64)
-        self.assertEqual(started["request"]["input"], "Analysiere meine letzte Einheit")
+        self.assertEqual(
+            started["request_shape"],
+            {
+                "kind": "object",
+                "keys": ["input", "instructions", "reasoning", "stream", "tools"],
+            },
+        )
+        self.assertNotIn(
+            "Analysiere meine letzte Einheit", values["diagnostic_capture_entries"]
+        )
         self.assertEqual(transport["http_status"], 200)
         self.assertEqual(transport["event_counts"], {"response.failed": 1})
         self.assertEqual(failed["provider_error"]["code"], "unknown_schema_failure")
