@@ -2,11 +2,13 @@ import io
 import json
 import threading
 import unittest
+from types import SimpleNamespace
 from types import MappingProxyType
 from unittest import mock
 from urllib.error import HTTPError
 
 from backend.errors import AppError, ClientDisconnected
+from backend.observability import DiagnosticCapture, Redactor
 from backend.providers import openai as openai_provider
 from backend.providers.http import ProviderRequestCancelled, ProviderResponseTooLarge
 from backend.providers.openai import (
@@ -148,10 +150,49 @@ class _DiagnosticCapture:
         self.events = []
 
     def capture(self, name, details):
-        self.events.append((name, details))
+        redactor = Redactor(lambda: SimpleNamespace(openai_api_key="sk-test-secret"))
+        self.events.append((name, redactor.sanitize_diagnostic_value(details)))
 
 
 class OpenAIProviderErrorTests(unittest.TestCase):
+    def test_real_stream_capture_correlates_request_failure_and_removes_secrets_before_storage(self):
+        class ValidatingState(_StreamStateService):
+            def validate_openai_response(self, path, result):
+                raise AppError(502, "Synthetic response failure", reason="response_failed")
+
+        values = {}
+        capture = DiagnosticCapture(values.get, values.__setitem__, Redactor(lambda: SimpleNamespace(openai_api_key="synthetic-provider-credential")))
+        response = {"id": "resp_synthetic_failure", "status": "failed", "error": {
+            "code": "unknown_schema_failure", "message": "Synthetic schema rejected; synthetic-provider-credential", "param": "tools[0]",
+        }}
+        lines = [b"event: response.failed\n", ("data: " + json.dumps({"response": response}) + "\n").encode(), b"\n"]
+        client = self._stream_client(lambda *_args, **_kwargs: _StreamResponse(lines), state=ValidatingState(), capture=capture)
+        with self.assertRaises(AppError):
+            client.stream({"input": "Analysiere meine letzte Einheit", "instructions": "Synthetic local profile", "tools": [{"name": "get_activity_details"}]}, lambda _text: None)
+        entries = capture.entries()
+        started = next(entry["details"] for entry in entries if entry["event"] == "openai_stream_started")
+        failed = next(entry["details"] for entry in entries if entry["event"] == "openai_stream_failed")
+        transport = next(entry["details"] for entry in entries if entry["event"] == "openai_stream_transport")
+        self.assertEqual(started["diagnostic_id"], failed["diagnostic_id"])
+        self.assertEqual(started["diagnostic_id"], transport["diagnostic_id"])
+        self.assertEqual((started["attempt"], failed["attempt"], transport["attempt"]), (1, 1, 1))
+        self.assertEqual(len(started["request_sha256"]), 64)
+        self.assertEqual(
+            started["request_shape"],
+            {
+                "kind": "object",
+                "keys": ["input", "instructions", "reasoning", "stream", "tools"],
+            },
+        )
+        self.assertNotIn(
+            "Analysiere meine letzte Einheit", values["diagnostic_capture_entries"]
+        )
+        self.assertEqual(transport["http_status"], 200)
+        self.assertEqual(transport["event_counts"], {"response.failed": 1})
+        self.assertEqual(failed["provider_error"]["code"], "unknown_schema_failure")
+        self.assertEqual(failed["provider_error_parameter"], "tools[0]")
+        self.assertNotIn("synthetic-provider-credential", values["diagnostic_capture_entries"])
+
     def test_request_with_conversation_retry_returns_without_retry(self):
         calls = []
 
@@ -916,7 +957,8 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(details["provider_error_code"], "model_not_found")
         self.assertEqual(details["provider_error_type"], "invalid_request_error")
         self.assertEqual(details["provider_response_status"], "failed")
-        self.assertNotIn("private provider detail", json.dumps((capture.events, logger.logs)))
+        self.assertNotIn("private provider detail", json.dumps(logger.logs))
+        self.assertEqual(details["provider_error_message"], "private provider detail")
 
         unsafe_state = StreamReadState(headers={"x-request-id": "req_private/text"}, terminal_event_type="private text")
         telemetry.record_app_error({}, 1.0, 0, "response_failed", 502, state=unsafe_state)
@@ -1376,7 +1418,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(failed["request_id"], "req_safe123")
         self.assertEqual(failed["provider_error_present"], "true")
         self.assertNotIn("provider_error_code", failed)
-        self.assertNotIn("private", repr((capture.events, logger.infos, logger.logs)))
+        self.assertNotIn("private", repr((logger.infos, logger.logs)))
+        self.assertEqual(failed["provider_error_message"], "private provider text")
+        self.assertEqual(failed["provider_error_code_raw"], "unknown_private_code")
 
     def test_stream_client_saves_final_response_before_post_read_cancellation(self):
         cancel_event = threading.Event()
@@ -1435,6 +1479,11 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "completed")
         self.assertEqual(waits, [1])
+        events = client.telemetry.diagnostic_capture.events
+        requests = [details for event, details in events if event == "openai_stream_started"]
+        self.assertEqual([entry["attempt"] for entry in requests], [1, 2])
+        self.assertEqual(requests[0]["diagnostic_id"], requests[1]["diagnostic_id"])
+        self.assertEqual(requests[0]["request_sha256"], requests[1]["request_sha256"])
 
     def test_stream_client_cancellation_before_headers_is_public_499(self):
         cancel_event = threading.Event()
@@ -1521,7 +1570,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         self.assertEqual((raised.exception.status, raised.exception.reason), (429, "rate_limit_exceeded"))
         self.assertEqual(raised.exception.retry_after_seconds, 2)
-        self.assertNotIn("private", repr(capture.events))
+        self.assertIn("private", repr(capture.events))
         self.assertNotIn("sk-test-secret", repr(capture.events))
         self.assertEqual(state.rate_limits, [{"retry-after": "1.2", "x-request-id": "req_test"}])
 
@@ -1575,7 +1624,8 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         ), self.assertRaises(AppError):
             client.stream({"input": "hello"}, lambda _delta: None)
 
-        self.assertEqual(events, ["rate_limits", "parse", "status", "log", "diagnostic"])
+        self.assertEqual([event for event in events if event != "diagnostic"], ["rate_limits", "parse", "status", "log"])
+        self.assertTrue(any(event == "openai_http_failed" for event, _details in client.telemetry.diagnostic_capture.events))
 
     def test_stream_client_requires_final_response_and_records_usage_once_on_success(self):
         state = _StreamStateService()

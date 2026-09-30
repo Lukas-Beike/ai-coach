@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from backend.diagnostics.history import CoachDiagnosticHistoryService
 from backend.diagnostics.logs import RecentLogEntriesService
-from backend.diagnostics.report import DiagnosticReportDependencies, DiagnosticReportService
+from backend.diagnostics.report import (
+    DiagnosticReportDependencies,
+    DiagnosticReportService,
+)
 
 
 @dataclass(frozen=True)
@@ -69,7 +71,7 @@ class DiagnosticsAssembly:
         local_projections: DiagnosticLocalProjections
         report: DiagnosticReportSettings
 
-    def __init__(self, *, dependencies: "DiagnosticsAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: DiagnosticsAssembly.Inputs) -> None:
         runtime = dependencies.runtime
         provider = dependencies.provider_health
         garmin = dependencies.garmin
@@ -108,35 +110,37 @@ class DiagnosticsAssembly:
         return CoachDiagnosticHistoryService(
             database=self._database_manager().unit_of_work,
             db_lock=self._database_lock,
-            redact=self._redactor.sanitize_log_value,
+            redact=self._redactor.sanitize_diagnostic_value,
             receipt_parser=self._receipt_parser,
             allowed_tools=self._allowed_tools(),
         )
 
     def report_service(self) -> DiagnosticReportService:
-        return DiagnosticReportService(DiagnosticReportDependencies(
-            database_manager=self._database_manager(),
-            db_lock=self._database_lock,
-            key_values=self._key_values,
-            config=self._config(),
-            settings=self._settings,
-            app_name=self._app_name,
-            app_version=self._app_version,
-            utc_now=self._utc_now,
-            sync_state=self._sync_state(),
-            garmin_projection=self._garmin_projection(),
-            garmin_client_factory=self._garmin_client_factory(),
-            garmin_fixture_loader=self._garmin_fixture_loader(),
-            provider_state=self._provider_state(),
-            coach_history=self.coach_history_service(),
-            redactor=self._redactor,
-            provider_freshness=self._provider_freshness(),
-            profile=self._profile(),
-            garmin_sync_state=self._garmin_sync_state(),
-            external_calendar_sync=self._external_calendar_sync(),
-            external_calendar_reader=self._external_calendar_reader(),
-            morning_checkin=self._morning_checkin(),
-            workout_library_sync_state=self._workout_library_sync_state(),
-            recent_logs=self.recent_log_entries_service(),
-            diagnostic_capture=self._diagnostic_capture,
-        ))
+        return DiagnosticReportService(
+            DiagnosticReportDependencies(
+                database_manager=self._database_manager(),
+                db_lock=self._database_lock,
+                key_values=self._key_values,
+                config=self._config(),
+                settings=self._settings,
+                app_name=self._app_name,
+                app_version=self._app_version,
+                utc_now=self._utc_now,
+                sync_state=self._sync_state(),
+                garmin_projection=self._garmin_projection(),
+                garmin_client_factory=self._garmin_client_factory(),
+                garmin_fixture_loader=self._garmin_fixture_loader(),
+                provider_state=self._provider_state(),
+                coach_history=self.coach_history_service(),
+                redactor=self._redactor,
+                provider_freshness=self._provider_freshness(),
+                profile=self._profile(),
+                garmin_sync_state=self._garmin_sync_state(),
+                external_calendar_sync=self._external_calendar_sync(),
+                external_calendar_reader=self._external_calendar_reader(),
+                morning_checkin=self._morning_checkin(),
+                workout_library_sync_state=self._workout_library_sync_state(),
+                recent_logs=self.recent_log_entries_service(),
+                diagnostic_capture=self._diagnostic_capture,
+            )
+        )
