@@ -263,7 +263,7 @@ class OpenAIResponsesClient:
             "POST",
             endpoint(self.base_url, path, default_base_url=self.default_base_url),
             request_payload,
-            **request_kwargs,
+            **request_kwargs,  # type: ignore[arg-type]
         )
         result = self.provider_state.validate_openai_response(path, result)
         if not isinstance(result, dict):

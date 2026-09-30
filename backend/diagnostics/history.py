@@ -76,7 +76,10 @@ class CoachDiagnosticHistoryService:
         for step in command_receipts[:40]:
             if not isinstance(step, dict):
                 continue
-            result = step.get("result") if isinstance(step.get("result"), dict) else {}
+            result_value = step.get("result")
+            result: dict[str, Any] = (
+                result_value if isinstance(result_value, dict) else {}
+            )
             tool = step.get("tool")
             steps.append(
                 {

@@ -355,7 +355,7 @@ def _encoded_diagnostic_secrets(config: Config) -> tuple[str, ...]:
         "app_password",
         "calendar_ical_url",
     )
-    secrets = set()
+    secrets: set[str] = set()
     for attribute in attributes:
         secret = str(getattr(config, attribute, "") or "")
         if len(secret) >= 4:
@@ -369,7 +369,7 @@ def _encoded_diagnostic_secrets(config: Config) -> tuple[str, ...]:
 
 
 def _redact_labeled_secrets(value: str) -> str:
-    pieces = []
+    pieces: list[str] = []
     cursor = 0
     for match in _DIAGNOSTIC_LABELED_SECRET_RE.finditer(value):
         newline = value.find("\n", match.end())

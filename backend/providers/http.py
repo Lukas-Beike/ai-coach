@@ -116,7 +116,7 @@ def _open_request(
 ) -> None:
     try:
         response = opener(request, timeout=timeout)
-    except Exception as exc:  # noqa: BLE001  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         state.save_error(exc)
     else:
         if not state.save_response(response):
