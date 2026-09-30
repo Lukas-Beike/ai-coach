@@ -10,6 +10,7 @@ from datetime import date, datetime
 from typing import Any
 
 from backend.calendar import local as calendar_local
+from backend.coach.context_selection import CONTEXT_SECTIONS, CoachContextSelection
 from backend.coach.conversation import CoachMessageService
 from backend.coach.prompt import COACH_PROMPT
 from backend.db import DatabaseManager
@@ -45,13 +46,39 @@ COACH_CONTEXT_SECTION_LIMITS = {
 LOGGER = logging.getLogger("intervals_coach")
 
 COACH_ACTIVITY_FIELDS = (
-    "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain",
-    "icu_training_load", "icu_intensity", "average_heartrate", "max_heartrate", "average_watts",
-    "weighted_average_watts", "icu_weighted_avg_watts", "normalized_power", "average_speed", "icu_weighted_avg_speed", "icu_pace", "icu_rpe", "feel",
+    "id",
+    "start_date_local",
+    "name",
+    "type",
+    "moving_time",
+    "distance",
+    "total_elevation_gain",
+    "icu_training_load",
+    "icu_intensity",
+    "average_heartrate",
+    "max_heartrate",
+    "average_watts",
+    "weighted_average_watts",
+    "icu_weighted_avg_watts",
+    "normalized_power",
+    "average_speed",
+    "icu_weighted_avg_speed",
+    "icu_pace",
+    "icu_rpe",
+    "feel",
 )
 COACH_LIBRARY_FIELDS = (
-    "id", "name", "description", "type", "moving_time", "distance", "target",
-    "icu_training_load", "icu_intensity", "indoor", "tags",
+    "id",
+    "name",
+    "description",
+    "type",
+    "moving_time",
+    "distance",
+    "target",
+    "icu_training_load",
+    "icu_intensity",
+    "indoor",
+    "tags",
 )
 
 
@@ -100,9 +127,7 @@ class CoachQuickActionsService:
             morning_status = self._key_value_repository.get(
                 db, "morning_checkin_status"
             )
-            morning_date = self._key_value_repository.get(
-                db, "morning_checkin_date"
-            )
+            morning_date = self._key_value_repository.get(db, "morning_checkin_date")
         return coach_quick_actions_state(
             self._today(),
             morning_status,
@@ -112,23 +137,58 @@ class CoachQuickActionsService:
         )
 
 
-def _truncate_values(value: dict[str, Any], limits: Mapping[str, int]) -> dict[str, Any]:
+def _truncate_values(
+    value: dict[str, Any], limits: Mapping[str, int]
+) -> dict[str, Any]:
     for key, limit in limits.items():
         if key in value:
             value[key] = str(value[key])[:limit]
     return value
 
 
-def compact_coach_activity(activity: Any, *, select: Callable[[Any, tuple[str, ...]], dict[str, Any]]) -> dict[str, Any]:
-    return _truncate_values(select(activity, COACH_ACTIVITY_FIELDS), {"id": 200, "name": 200, "type": 80, "feel": 120})
+def compact_coach_activity(
+    activity: Any, *, select: Callable[[Any, tuple[str, ...]], dict[str, Any]]
+) -> dict[str, Any]:
+    return _truncate_values(
+        select(activity, COACH_ACTIVITY_FIELDS),
+        {"id": 200, "name": 200, "type": 80, "feel": 120},
+    )
 
 
-def compact_coach_planned_event(event: Any, *, select: Callable[[Any, tuple[str, ...]], dict[str, Any]]) -> dict[str, Any]:
-    compacted = select(event, ("id", "start_date_local", "name", "type", "moving_time", "target", "icu_intensity", "status", "sync_status"))
-    return _truncate_values(compacted, {"id": 200, "start_date_local": 40, "name": 200, "type": 80, "target": 1000, "status": 80, "sync_status": 80})
+def compact_coach_planned_event(
+    event: Any, *, select: Callable[[Any, tuple[str, ...]], dict[str, Any]]
+) -> dict[str, Any]:
+    compacted = select(
+        event,
+        (
+            "id",
+            "start_date_local",
+            "name",
+            "type",
+            "moving_time",
+            "target",
+            "icu_intensity",
+            "status",
+            "sync_status",
+        ),
+    )
+    return _truncate_values(
+        compacted,
+        {
+            "id": 200,
+            "start_date_local": 40,
+            "name": 200,
+            "type": 80,
+            "target": 1000,
+            "status": 80,
+            "sync_status": 80,
+        },
+    )
 
 
-def future_coach_planned_workouts(events: list[Any], today: date) -> list[dict[str, Any]]:
+def future_coach_planned_workouts(
+    events: list[Any], today: date
+) -> list[dict[str, Any]]:
     planned = []
     for event in events:
         if not isinstance(event, dict):
@@ -160,10 +220,16 @@ class CoachIntervalsContextService:
     ) -> dict[str, Any]:
         snapshot = snapshot if isinstance(snapshot, dict) else {}
         raw_activities = snapshot.get("recent_activities")
-        activities = [item for item in raw_activities if isinstance(item, dict)] if isinstance(raw_activities, list) else []
+        activities = (
+            [item for item in raw_activities if isinstance(item, dict)]
+            if isinstance(raw_activities, list)
+            else []
+        )
         grouped: dict[str, list[dict[str, Any]]] = {}
         for activity in activities:
-            grouped.setdefault(activity_validation.activity_sport(activity), []).append(activity)
+            grouped.setdefault(activity_validation.activity_sport(activity), []).append(
+                activity
+            )
 
         recent_by_sport = {
             sport: [
@@ -228,7 +294,10 @@ class CoachPlanningContextReader:
 
     def daily(self, snapshot: Any, planned: Any, weather: Any, checkins: Any) -> Any:
         return self._daily_planning_context_service.build(
-            snapshot, planned, weather, checkins.get("recent", []),
+            snapshot,
+            planned,
+            weather,
+            checkins.get("recent", []),
             self._external_calendar_reader.list_events(
                 limit=50, training_relevant_only=True
             ),
@@ -339,32 +408,85 @@ class CoachStructuredContextService:
         self._planning_reader = planning_reader
         self._performance_reader = performance_reader
 
-    def build(self, snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    def build(
+        self,
+        snapshot: dict[str, Any] | None = None,
+        *,
+        selection: CoachContextSelection | None = None,
+    ) -> dict[str, Any]:
         """Assemble the bounded structured context using explicit read services."""
         snapshot = (
             snapshot
             if snapshot is not None
             else self._sync_state_repository.latest_snapshot()
         )
-        checkins = self._checkin_service.context()
-        local_planned_workouts = self._planning_reader.planned()
-        weather = self._weather_service.state(local_planned_workouts, refresh=False)
-        daily_context = self._planning_reader.daily(
-            snapshot, local_planned_workouts, weather, checkins
+        included = selection.sections if selection else CONTEXT_SECTIONS
+        checkins = (
+            self._checkin_service.context()
+            if included & {"local_feedback", "daily_planning_context"}
+            else {}
         )
-        return {
-            "durable_profile": self._performance_reader.profile(),
-            "target_competitions": self._planning_reader.competitions(),
-            "training_plans": self._planning_reader.training_plans(),
+        local_planned_workouts = (
+            self._planning_reader.planned()
+            if included
+            & {
+                "local_planned_workouts",
+                "daily_planning_context",
+                "weather",
+                "calendar",
+                "intervals",
+            }
+            else []
+        )
+        weather = (
+            self._weather_service.state(local_planned_workouts, refresh=False)
+            if included & {"weather", "daily_planning_context"}
+            else {}
+        )
+        daily_context = (
+            self._planning_reader.daily(
+                snapshot, local_planned_workouts, weather, checkins
+            )
+            if "daily_planning_context" in included
+            else []
+        )
+        context = {
+            "durable_profile": self._performance_reader.profile()
+            if "durable_profile" in included
+            else None,
+            "target_competitions": self._planning_reader.competitions()
+            if "target_competitions" in included
+            else None,
+            "training_plans": self._planning_reader.training_plans()
+            if "training_plans" in included
+            else None,
             "local_feedback": checkins,
-            "activity_feedback": self._activity_feedback_service.context(),
-            "planning": self._planning_reader.planning(),
+            "activity_feedback": self._activity_feedback_service.context()
+            if "activity_feedback" in included
+            else None,
+            "planning": self._planning_reader.planning()
+            if "planning" in included
+            else None,
             "local_planned_workouts": local_planned_workouts,
-            "calendar": self._planning_reader.calendar(local_planned_workouts),
-            "external_calendar": self._planning_reader.external_calendar(),
-            "intervals": self._performance_reader.intervals(snapshot, local_planned_workouts),
-            "current_performance": self._performance_reader.current_performance(snapshot),
-            "garmin": self._performance_reader.garmin(snapshot),
+            "calendar": self._planning_reader.calendar(local_planned_workouts)
+            if "calendar" in included
+            else None,
+            "external_calendar": self._planning_reader.external_calendar()
+            if "external_calendar" in included
+            else None,
+            "intervals": self._performance_reader.intervals(
+                snapshot, local_planned_workouts
+            )
+            if "intervals" in included
+            else None,
+            "current_performance": self._performance_reader.current_performance(
+                snapshot
+            )
+            if "current_performance" in included
+            else None,
+            "garmin": self._performance_reader.garmin(snapshot)
+            if "garmin" in included
+            else None,
             "weather": weather,
             "daily_planning_context": daily_context,
             "source_policy": {
@@ -380,11 +502,38 @@ class CoachStructuredContextService:
                 "conversation": "Nur Dialogkontinuität; keine autoritative Quelle für dauerhafte Athletenfakten",
             },
         }
+        return {key: value for key, value in context.items() if key in included}
 
 
-def compact_coach_local_planned_workout(workout: Any, *, select: Callable[[Any, tuple[str, ...]], dict[str, Any]]) -> dict[str, Any]:
-    compacted = select(workout, ("id", "date", "name", "type", "duration_minutes", "target", "icu_intensity", "status", "sync_status"))
-    return _truncate_values(compacted, {"id": 80, "date": 20, "name": 200, "type": 80, "target": 1000, "status": 80, "sync_status": 80})
+def compact_coach_local_planned_workout(
+    workout: Any, *, select: Callable[[Any, tuple[str, ...]], dict[str, Any]]
+) -> dict[str, Any]:
+    compacted = select(
+        workout,
+        (
+            "id",
+            "date",
+            "name",
+            "type",
+            "duration_minutes",
+            "target",
+            "icu_intensity",
+            "status",
+            "sync_status",
+        ),
+    )
+    return _truncate_values(
+        compacted,
+        {
+            "id": 80,
+            "date": 20,
+            "name": 200,
+            "type": 80,
+            "target": 1000,
+            "status": 80,
+            "sync_status": 80,
+        },
+    )
 
 
 def compact_coach_local_planned_workouts(
@@ -405,7 +554,10 @@ def compact_coach_local_planned_workouts(
 
 
 def coach_workout_library(
-    items: list[Any], *, limit: int, description_limit: int,
+    items: list[Any],
+    *,
+    limit: int,
+    description_limit: int,
 ) -> list[dict[str, Any]]:
     """Project an already-read workout library into a balanced prompt catalogue."""
     by_type: dict[str, list[dict[str, Any]]] = {}
@@ -425,13 +577,17 @@ def coach_workout_library(
             rows = by_type[workout_type]
             if index >= len(rows):
                 continue
-            chosen.append(_compact_coach_library_workout(rows[index], description_limit))
+            chosen.append(
+                _compact_coach_library_workout(rows[index], description_limit)
+            )
             if len(chosen) >= limit:
                 return chosen
     return chosen
 
 
-def _compact_coach_library_workout(workout: dict[str, Any], description_limit: int) -> dict[str, Any]:
+def _compact_coach_library_workout(
+    workout: dict[str, Any], description_limit: int
+) -> dict[str, Any]:
     compacted = planning_context.selected(workout, COACH_LIBRARY_FIELDS)
     if "name" in compacted:
         compacted["name"] = str(compacted["name"])[:200]
@@ -504,7 +660,13 @@ def bounded_coach_context_sections(
         projected[section] = projected_value
         projected_size = coach_context_json_size(projected_value)
         if projected_size < original_size:
-            truncations.append({"section": section, "original_characters": original_size, "projected_characters": projected_size})
+            truncations.append(
+                {
+                    "section": section,
+                    "original_characters": original_size,
+                    "projected_characters": projected_size,
+                }
+            )
     return projected, truncations
 
 
@@ -520,12 +682,19 @@ def coach_context_projection_meta(
     local_planned_limit: int,
     truncations: list[dict[str, int | str]] | None = None,
 ) -> dict[str, Any]:
-    section_sizes = {section: coach_context_json_size(context.get(section)) for section in sorted(section_limits)}
+    section_sizes = {
+        section: coach_context_json_size(context.get(section))
+        for section in sorted(section_limits)
+    }
     return {
         "version": 1,
         "budgets": {**section_limits, "total": total_limit},
         "section_characters": section_sizes,
-        "over_budget_sections": [section for section in sorted(section_sizes) if section_sizes[section] > section_limits[section]],
+        "over_budget_sections": [
+            section
+            for section in sorted(section_sizes)
+            if section_sizes[section] > section_limits[section]
+        ],
         "truncated_sections": truncations or [],
         "planned_local_items": local_planned_count,
         "library_items": library_count,
@@ -563,10 +732,18 @@ class CoachTrainingContextService:
         self._activity_limit_per_sport = activity_limit_per_sport
         self._planned_event_limit = planned_event_limit
 
-    def build(self) -> str:
+    def build(
+        self, *, selection: CoachContextSelection | None = None, local_date: str = ""
+    ) -> str:
         snapshot = self._sync_state_repository.latest_snapshot()
-        structured_context = self._structured_context_service.build(snapshot)
+        structured_context = (
+            self._structured_context_service.build(snapshot, selection=selection)
+            if selection
+            else self._structured_context_service.build(snapshot)
+        )
         prompt_context = dict(structured_context)
+        if selection:
+            prompt_context = selection.project(prompt_context, local_date)
         local_planned_workouts = compact_coach_local_planned_workouts(
             prompt_context.get("local_planned_workouts"),
             limit=self._local_planned_limit,
@@ -577,11 +754,13 @@ class CoachTrainingContextService:
         prompt_context, truncations = bounded_coach_context_sections(
             prompt_context, section_limits=self._section_limits
         )
-        library = coach_workout_library(
-            self._workout_library_service.list(),
-            limit=self._library_limit,
-            description_limit=self._library_description_limit,
-        )
+        library = []
+        if selection is None or selection.include_library:
+            library = coach_workout_library(
+                self._workout_library_service.list(),
+                limit=self._library_limit,
+                description_limit=self._library_description_limit,
+            )
         prompt_context["projection"] = coach_context_projection_meta(
             prompt_context,
             len(local_planned_workouts),
@@ -593,9 +772,23 @@ class CoachTrainingContextService:
             local_planned_limit=self._local_planned_limit,
             truncations=truncations,
         )
-        prompt_context = {"projection": prompt_context.pop("projection"), **prompt_context}
+        prompt_context = {
+            "projection": prompt_context.pop("projection"),
+            **prompt_context,
+        }
+        if selection:
+            prompt_context["projection"].update(
+                {
+                    "context_profile": selection.name,
+                    "horizon_days": selection.horizon_days,
+                    "activity_limit_per_sport": selection.activity_limit,
+                    "omitted_sections": sorted(CONTEXT_SECTIONS - selection.sections),
+                }
+            )
         library_text = json.dumps(library, ensure_ascii=False, separators=(",", ":"))
-        structured_text = json.dumps(prompt_context, ensure_ascii=False, separators=(",", ":"))
+        structured_text = json.dumps(
+            prompt_context, ensure_ascii=False, separators=(",", ":")
+        )
         context_prefix = (
             COACH_PROMPT
             + "\nBEGIN UNTRUSTED EXTERNAL DATA\nSTRUCTURED ATHLETE CONTEXT (authoritative for this turn):\n"
@@ -604,16 +797,38 @@ class CoachTrainingContextService:
         context_suffix = (
             "\nLOCAL TRAINING LIBRARY (bounded selection synced from Intervals.icu; templates available to the coach):\n"
             + library_text
+            + (
+                "\nOmitted sections are not missing data. Use read_coach_context to load them and enable additional tools. Selection never authorizes writes.\n"
+                if selection
+                else ""
+            )
             + "\nEND UNTRUSTED EXTERNAL DATA\n"
         )
         context = context_prefix + structured_text + context_suffix
+        LOGGER.info(
+            "Coach context projection",
+            extra={
+                "event": "coach_context_projection",
+                "context_profile": selection.name if selection else "full",
+                "section_characters": {
+                    key: coach_context_json_size(value)
+                    for key, value in prompt_context.items()
+                },
+                "library_characters": len(library_text),
+                "static_instruction_characters": len(COACH_PROMPT),
+            },
+        )
         if len(context) > self._total_char_limit:
             structured_limit = max(
                 0,
                 self._total_char_limit - len(context_prefix) - len(context_suffix),
             )
-            prompt_context = bounded_coach_context_value(prompt_context, structured_limit)
-            structured_text = json.dumps(prompt_context, ensure_ascii=False, separators=(",", ":"))
+            prompt_context = bounded_coach_context_value(
+                prompt_context, structured_limit
+            )
+            structured_text = json.dumps(
+                prompt_context, ensure_ascii=False, separators=(",", ":")
+            )
             context = context_prefix + structured_text + context_suffix
             LOGGER.warning(
                 "Coach context exceeds projection budget",
@@ -705,7 +920,9 @@ class CoachContextPreviewService:
             truncations=preview_truncations,
         )
         projection["context_characters"] = len(context_text)
-        projection["within_total_budget"] = len(context_text) <= self._limits.total_char_limit
+        projection["within_total_budget"] = (
+            len(context_text) <= self._limits.total_char_limit
+        )
         return {
             "generated_at": self._utc_now().isoformat(),
             "snapshot_truncated": False,

@@ -8,6 +8,8 @@ from typing import Any
 
 from backend.athlete.profile import ProfileService
 from backend.coach.activity_read_tools import CoachActivityReadToolService
+from backend.coach.context import bounded_coach_context_value, coach_context_json_size
+from backend.coach.context_selection import CONTEXT_SECTIONS, CoachContextSelection
 from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
 from backend.nutrition.models import validate_iso_date
@@ -34,6 +36,7 @@ class CoachReadToolService:
         training_plan_service: Callable[[], TrainingPlanService],
         training_change_limit: int,
         nutrition_service: Callable[[], NutritionService] | None = None,
+        context_service: Callable[[], Any] | None = None,
     ) -> None:
         self._profile_service = profile_service
         self._structured_training_state_service = structured_training_state_service
@@ -45,8 +48,43 @@ class CoachReadToolService:
         self._training_plan_service = training_plan_service
         self._training_change_limit = training_change_limit
         self._nutrition_service = nutrition_service
+        self._context_service = context_service
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
+        if name == "read_coach_context":
+            sections = arguments.get("sections")
+            if (
+                not isinstance(sections, list)
+                or not 1 <= len(sections) <= 15
+                or any(
+                    not isinstance(section, str) or section not in CONTEXT_SECTIONS
+                    for section in sections
+                )
+            ):
+                raise AppError(
+                    400,
+                    "Ungültige Coach-Kontextabschnitte.",
+                    reason="invalid_context_sections",
+                )
+            if self._context_service is None:
+                raise AppError(503, "Coach-Kontext ist nicht verfügbar.")
+            context = self._context_service().build(
+                selection=CoachContextSelection(
+                    "requested_details",
+                    frozenset(sections),
+                    include_library=False,
+                )
+            )
+            bounded = bounded_coach_context_value(context, 40_000)
+            return {
+                "ok": True,
+                "context": bounded,
+                "projection": {
+                    "requested_sections": sections,
+                    "characters": coach_context_json_size(bounded),
+                    "complete": coach_context_json_size(context) <= 40_000,
+                },
+            }
         if name == "read_profile":
             return {"ok": True, "profile": self._profile_service().get()}
         if name == "read_training_state":

@@ -10,6 +10,7 @@ from typing import Any
 
 from backend.coach.authorization import coach_execution_scope
 from backend.coach.context import CoachTrainingContextService
+from backend.coach.context_selection import select_coach_context
 from backend.coach.dialogue import INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS
 from backend.coach.job_store import CoachJobStore
 from backend.coach.proposals import coach_action_hash
@@ -86,17 +87,26 @@ class CoachStructuredToolRoundService:
         self._limits = limits
 
     def _execute_tool_call(
-        self, item: dict[str, Any], *, state: StructuredCoachRoundState, question: str, cancelled: bool,
+        self,
+        item: dict[str, Any],
+        *,
+        state: StructuredCoachRoundState,
+        question: str,
+        cancelled: bool,
     ) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
         name = str(item.get("name") or "")
         call_id = str(item.get("call_id") or "")
         action = {"operation": name, "authorization_scope": []}
-        effect_key = coach_action_hash({"tool": name, "arguments": item.get("arguments")})
+        effect_key = coach_action_hash(
+            {"tool": name, "arguments": item.get("arguments")}
+        )
         step_key = name
         repair_key = scope_repair_key = request_binding_key = plan_effect_key = None
         model_instructions = state.model_instructions
         try:
-            metadata = structured_tool_call_metadata(item, state.tools, state.command_receipts)
+            metadata = structured_tool_call_metadata(
+                item, state.tools, state.command_receipts
+            )
             name, call_id = metadata["name"], metadata["call_id"]
             action = metadata["action"]
             effect_key, step_key = metadata["effect_key"], metadata["step_key"]
@@ -109,67 +119,149 @@ class CoachStructuredToolRoundService:
                 result = cached["result"]
             else:
                 action = self._preparation.prepare(
-                    metadata, state.command_receipts, question=question, cancelled=cancelled,
-                    context=state.context, allow_mutations=state.allow_mutations,
+                    metadata,
+                    state.command_receipts,
+                    question=question,
+                    cancelled=cancelled,
+                    context=state.context,
+                    allow_mutations=state.allow_mutations,
                 )
-                local_transaction = name not in {"start_provider_refresh", "apply_adaptive_replan", "delete_duplicate_intervals_activity"}
+                local_transaction = name not in {
+                    "start_provider_refresh",
+                    "apply_adaptive_replan",
+                    "delete_duplicate_intervals_activity",
+                }
                 with (
                     self._database_lock if local_transaction else nullcontext(),
-                    self._database_manager().unit_of_work() if local_transaction else nullcontext(),
+                    self._database_manager().unit_of_work()
+                    if local_transaction
+                    else nullcontext(),
                 ):
                     result = self._execution.execute(
-                        metadata, action=action, context=state.context, conversation_id=state.conversation_id,
-                        client_turn_id=state.client_turn_id, session_csrf_hash=state.session_csrf_hash,
-                        sync_job_ids=state.sync_job_ids, cancel_event=state.cancel_event,
+                        metadata,
+                        action=action,
+                        context=state.context,
+                        conversation_id=state.conversation_id,
+                        client_turn_id=state.client_turn_id,
+                        session_csrf_hash=state.session_csrf_hash,
+                        sync_job_ids=state.sync_job_ids,
+                        cancel_event=state.cancel_event,
                     )
-                    state.command_receipts.append({
-                        "call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key,
-                        "repair_key": repair_key, "scope_repair_key": scope_repair_key,
-                        "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key,
-                        "request": action.get("request"), "result": result,
-                    })
-                    self._jobs.merge_receipt(state.client_turn_id, {
-                        "command_receipts": state.command_receipts, "sync_job_ids": state.sync_job_ids,
-                    })
-            if result.get("synchronous_refresh") or (name == "get_sync_job" and result.get("ok")):
-                model_instructions = self._training_context.build() + "\n\n" + COACH_DIALOGUE_INSTRUCTIONS
+                    state.command_receipts.append(
+                        {
+                            "call_id": call_id,
+                            "tool": name,
+                            "effect_key": effect_key,
+                            "step_key": step_key,
+                            "repair_key": repair_key,
+                            "scope_repair_key": scope_repair_key,
+                            "request_binding_key": request_binding_key,
+                            "plan_effect_key": plan_effect_key,
+                            "request": action.get("request"),
+                            "result": result,
+                        }
+                    )
+                    self._jobs.merge_receipt(
+                        state.client_turn_id,
+                        {
+                            "command_receipts": state.command_receipts,
+                            "sync_job_ids": state.sync_job_ids,
+                        },
+                    )
+            if result.get("synchronous_refresh") or (
+                name == "get_sync_job" and result.get("ok")
+            ):
+                model_instructions = (
+                    self._training_context.build(
+                        selection=select_coach_context(
+                            state.message, state.context, has_receipts=True
+                        ),
+                        local_date=state.context.get("local_date", ""),
+                    )
+                    + "\n\n"
+                    + COACH_DIALOGUE_INSTRUCTIONS
+                )
+                if not state.allow_mutations:
+                    model_instructions += "\nThis is an automatic advisory run. Do not change data or pending requests."
             if action.get("period"):
-                scope = coach_execution_scope(action, background_horizon_days=self._limits.background_horizon_days)
+                scope = coach_execution_scope(
+                    action, background_horizon_days=self._limits.background_horizon_days
+                )
                 state.request_payload["max_output_tokens"] = (
-                    self._limits.long_plan_max_output_tokens if scope["planning"]
+                    self._limits.long_plan_max_output_tokens
+                    if scope["planning"]
                     else self._limits.default_max_output_tokens
                 )
                 self._jobs.merge_receipt(state.client_turn_id, {"plan_scope": scope})
         except (AppError, ValueError, TypeError, KeyError) as exc:
             result = self._failure.project(
-                exc, name=name, call_id=call_id, effect_key=effect_key, step_key=step_key,
-                repair_key=repair_key, scope_repair_key=scope_repair_key,
-                request_binding_key=request_binding_key, plan_effect_key=plan_effect_key,
-                action=action, command_receipts=state.command_receipts,
+                exc,
+                name=name,
+                call_id=call_id,
+                effect_key=effect_key,
+                step_key=step_key,
+                repair_key=repair_key,
+                scope_repair_key=scope_repair_key,
+                request_binding_key=request_binding_key,
+                plan_effect_key=plan_effect_key,
+                action=action,
+                command_receipts=state.command_receipts,
             )
         state.model_instructions = model_instructions
         return name, call_id, result, action
 
     def _followup_response(
-        self, response: dict[str, Any], *, outputs: list[dict[str, Any]], state: StructuredCoachRoundState,
-        question: str, cancelled: bool, rounds: int,
+        self,
+        response: dict[str, Any],
+        *,
+        outputs: list[dict[str, Any]],
+        state: StructuredCoachRoundState,
+        question: str,
+        cancelled: bool,
+        rounds: int,
     ) -> dict[str, Any]:
         followup = {
-            **state.request_payload, "instructions": state.model_instructions, "input": outputs,
-            "tool_choice": "none" if question or cancelled or rounds >= self._limits.max_rounds else "auto",
+            **state.request_payload,
+            "instructions": state.model_instructions,
+            "input": outputs,
+            "tool_choice": "none"
+            if question or cancelled or rounds >= self._limits.max_rounds
+            else "auto",
         }
-        if state.ai_provider == "openai" and response.get("id") and not followup.get("conversation"):
+        if any(
+            step.get("tool") == "read_coach_context"
+            and (step.get("result") or {}).get("ok")
+            for step in state.command_receipts
+        ):
+            followup["tools"] = state.tools
+        if (
+            state.ai_provider == "openai"
+            and response.get("id")
+            and not followup.get("conversation")
+        ):
             followup["previous_response_id"] = response["id"]
         return self._response.respond(
-            followup, request_payload=state.request_payload, context=state.context, message=state.message,
-            command_receipts=state.command_receipts, attachments=state.attachments,
-            client_turn_id=state.client_turn_id, ai_provider=state.ai_provider,
-            background_owned=state.background_owned, on_text_delta=state.on_text_delta,
-            cancel_event=state.cancel_event, recovery_state=state.recovery_state,
+            followup,
+            request_payload=state.request_payload,
+            context=state.context,
+            message=state.message,
+            command_receipts=state.command_receipts,
+            attachments=state.attachments,
+            client_turn_id=state.client_turn_id,
+            ai_provider=state.ai_provider,
+            background_owned=state.background_owned,
+            on_text_delta=state.on_text_delta,
+            cancel_event=state.cancel_event,
+            recovery_state=state.recovery_state,
         )
 
     def run(
-        self, response: dict[str, Any], *, rounds: int, question: str, cancelled: bool,
+        self,
+        response: dict[str, Any],
+        *,
+        rounds: int,
+        question: str,
+        cancelled: bool,
         state: StructuredCoachRoundState,
     ) -> tuple[dict[str, Any], int, str, bool, str]:
         """Run bounded tool rounds while preserving durable replay checkpoints."""
@@ -178,22 +270,35 @@ class CoachStructuredToolRoundService:
             if not calls:
                 break
             pending = self._journal.start_round(state.client_turn_id, calls)
-            outputs = []
+            outputs: list[dict[str, Any]] = []
             for item in calls:
                 raise_if_chat_cancelled(state.cancel_event)
                 name, call_id, result, _ = self._execute_tool_call(
-                    item, state=state, question=question, cancelled=cancelled,
+                    item,
+                    state=state,
+                    question=question,
+                    cancelled=cancelled,
                 )
                 question, cancelled, pending = self._journal.record_output(
-                    client_turn_id=state.client_turn_id, name=name, call_id=call_id,
-                    result=result, outputs=outputs, pending=pending,
+                    client_turn_id=state.client_turn_id,
+                    name=name,
+                    call_id=call_id,
+                    result=result,
+                    outputs=outputs,
+                    pending=pending,
                     command_receipts=state.command_receipts,
-                    question=question, cancelled=cancelled,
+                    question=question,
+                    cancelled=cancelled,
                 )
             rounds += 1
             self._journal.finish_round(state.client_turn_id, rounds)
             response = self._followup_response(
-                response, outputs=outputs, state=state, question=question, cancelled=cancelled, rounds=rounds,
+                response,
+                outputs=outputs,
+                state=state,
+                question=question,
+                cancelled=cancelled,
+                rounds=rounds,
             )
             self._journal.clear_outputs(state.client_turn_id)
             if question or cancelled:

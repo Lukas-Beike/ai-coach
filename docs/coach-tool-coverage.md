@@ -1,6 +1,6 @@
 # Coach tool execution coverage
 
-This matrix covers the 39 tools currently offered to the conversational Coach.
+This matrix covers the 40 tools currently offered to the conversational Coach.
 It builds on the profile/sync fix in `ebbe311`. It measures execution through
 `chat_with_coach`, not the accuracy of a language model's interpretation.
 
@@ -44,6 +44,7 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `manage_training_templates` | `archive`, `create`, `delete`, `restore`, `update` | `test_template_lifecycle_and_scheduling_preserve_the_scheduled_copy` |
 | `preview_adaptive_replan` | `success` | `test_adaptive_preview_requires_later_acceptance_before_changing_workout` |
 | `read_profile` | `success` | `test_permanent_profile_acceptance_reads_and_preserves_existing_facts` |
+| `read_coach_context` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `read_training_state` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `refresh_current_performance` | `success` | `test_provider_reads_and_job_status_use_correct_provider` |
 | `replace_training_plan` | `success` | `test_replacement_changes_only_requested_period` |

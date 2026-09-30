@@ -450,10 +450,12 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(model.call_count, 1)
         payload = model.call_args.args[0]
         self.assertEqual(payload["tool_choice"], "auto")
-        self.assertTrue(any(tool["name"] == "apply_training_patch" for tool in payload["tools"]))
+        self.assertTrue(any(tool["name"] == "read_coach_context" for tool in payload["tools"]))
+        self.assertFalse(any(tool["name"] == "apply_training_patch" for tool in payload["tools"]))
         context = json.loads(payload["input"])["dialogue"]
         self.assertEqual(context["local_date"], "2026-09-07")
-        self.assertEqual(context["messages"][-1]["role"], "user")
+        self.assertIsNotNone(context["current_user_message_id"])
+        self.assertEqual(json.loads(payload["input"])["current_message"], "Was hältst du von Mittwoch?")
         self.assertFalse(hasattr(server, "request_coach_intent"))
         self.assertEqual(self.state()["planned_units"], [])
 
