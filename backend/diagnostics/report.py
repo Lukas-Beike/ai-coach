@@ -182,8 +182,9 @@ class DiagnosticReportService:
                     "entries": diagnostic_capture_entries,
                 },
                 "note": (
-                    "Zugangsdaten, Tokens, Rohantworten und Athleteninhalte sind ausgeschlossen; "
-                    "die immer aktive Diagnoseaufzeichnung speichert nur technische Antwortformen "
-                    "und Metadaten."
+                    "Die Diagnose enthält Athletenkontext, Coach-Anfragen, Tool-Aufrufe sowie "
+                    "Provider-Antworten und Fehlerdetails. Zugangsdaten, Schlüssel, Tokens und "
+                    "Sitzungsdaten werden vor dem Speichern entfernt. Binäre Inhalte werden "
+                    "ausgelassen; Größenlimits und Kürzungen sind ausgewiesen."
                 ),
             }

@@ -223,7 +223,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertEqual(output["status"], "preview")
         self.assertEqual(result["proposed_actions"][0]["action_type"], "delete_duplicate_intervals_activity")
 
-    def test_failed_tool_is_diagnosable_without_detail_capture_and_without_content(self):
+    def test_failed_tool_is_diagnosable_without_session_credentials(self):
         private = "synthetic-private-content-never-export"
         with patch.object(
             ActivityFeedbackService,

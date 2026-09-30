@@ -8,6 +8,7 @@ redacted and tests can use isolated configuration snapshots.
 from __future__ import annotations
 
 import json
+import base64
 import logging
 import re
 import sys
@@ -74,6 +75,8 @@ OPENAI_RESPONSE_ERROR_CODES = frozenset(
 )
 
 DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 10000
+DIAGNOSTIC_CAPTURE_MAX_BYTES = 16 * 1024 * 1024
+DIAGNOSTIC_CAPTURE_MAX_ENTRY_BYTES = 1024 * 1024
 DIAGNOSTIC_CAPTURE_ENTRIES_KEY = "diagnostic_capture_entries"
 
 
@@ -291,6 +294,70 @@ class Redactor:
             return value
         return self.redact_text(str(value))
 
+    def sanitize_diagnostic_value(self, value: Any) -> Any:
+        """Retain diagnostic content while removing credentials before storage."""
+        config = self._config_supplier()
+        encoded_secrets = []
+        for attribute in (
+            "openai_api_key", "gemini_api_key", "intervals_api_key", "garmin_email",
+            "garmin_password", "app_password", "calendar_ical_url",
+        ):
+            secret = str(getattr(config, attribute, "") or "")
+            if len(secret) >= 4:
+                encoded_secrets.extend((
+                    base64.b64encode(secret.encode()).decode(),
+                    json.dumps(secret, ensure_ascii=True)[1:-1],
+                ))
+
+        def text(item: str) -> str:
+            safe = self.redact_text(item)
+            for secret in sorted(set(encoded_secrets), key=len, reverse=True):
+                safe = safe.replace(secret, "[REDACTED]")
+            safe = re.sub(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9_+/=.-]+", "[REDACTED_AUTHORIZATION]", safe)
+            safe = re.sub(
+                r'''(?im)(\b(?:password|passwd|secret|api[_-]?key|token|access[_-]?token|refresh[_-]?token|csrf[_-]?token|authorization|cookie)["']?\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\r\n,;}\]]+)''',
+                r'\1"[REDACTED]"', safe,
+            )
+            safe = re.sub(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b", "[REDACTED_TOKEN]", safe)
+            safe = re.sub(r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", "[REDACTED_PRIVATE_KEY]", safe, flags=re.DOTALL)
+            return re.sub(r'''data:[^\s,;]+(?:;[^,]*)?,[^\s"']+''', "[OMITTED_BINARY]", safe)
+
+        def clean(item: Any, depth: int = 0) -> Any:
+            if depth >= 40:
+                return {"truncated": True, "reason": "depth_limit"}
+            if isinstance(item, str):
+                if item.lstrip().startswith(("{", "[")):
+                    try:
+                        decoded = json.loads(item)
+                    except (ValueError, RecursionError):
+                        pass
+                    else:
+                        return json.dumps(clean(decoded, depth + 1), ensure_ascii=False)
+                return text(item)
+            if isinstance(item, dict):
+                result = {}
+                for key, child in item.items():
+                    name = re.sub(r"[^a-z0-9]", "", str(key).casefold())
+                    if name in {"key", "credentials", "session", "sessionid", "sessionhash", "sessionkey", "sessionkeyhash", "signature", "oauth1", "oauth2", "csrftoken", "csrf"} or name.endswith((
+                        "password", "passwd", "passphrase", "passwordhash", "secret", "token", "apikey", "privatekey", "databasekey", "encryptionkey", "credential", "credentials", "authorization", "cookie", "csrfhash", "sessionid", "sessionhash",
+                    )):
+                        child = "[REDACTED]"
+                    elif name in {"inlinedata", "filedata", "audio", "inputaudio"}:
+                        child = "[OMITTED_BINARY]"
+                    else:
+                        child = clean(child, depth + 1)
+                    result[text(str(key))] = child
+                return result
+            if isinstance(item, (list, tuple)):
+                return [clean(child, depth + 1) for child in item]
+            if isinstance(item, bytes):
+                return {"omitted_binary_bytes": len(item)}
+            if item is None or isinstance(item, (bool, int, float)):
+                return item
+            return text(str(item))
+
+        return clean(value)
+
 
 class JsonLogFormatter(logging.Formatter):
     """Serialize log records as compact JSON after redacting all values."""
@@ -452,11 +519,19 @@ def safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
     provider_code = getattr(exc, "provider_error_code", None)
     if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
         result["provider_error_code"] = provider_code
+    for attribute, key in (
+        ("provider_error_type", "provider_error_type"),
+        ("provider_response_status", "provider_response_status"),
+        ("provider_incomplete_reason", "provider_incomplete_reason"),
+    ):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, str) and re.fullmatch(r"[a-z0-9_.\[\]-]{1,160}", value):
+            result[key] = value
     return result
 
 
 class DiagnosticCapture:
-    """Keep a bounded, privacy-safe record of technical diagnostic metadata."""
+    """Keep secret-redacted diagnostic evidence within count and byte limits."""
 
     def __init__(
         self,
@@ -467,6 +542,8 @@ class DiagnosticCapture:
         max_entries: int = DIAGNOSTIC_CAPTURE_MAX_ENTRIES,
         entries_key: str = DIAGNOSTIC_CAPTURE_ENTRIES_KEY,
         batch_size: int = 10,
+        max_bytes: int = DIAGNOSTIC_CAPTURE_MAX_BYTES,
+        max_entry_bytes: int = DIAGNOSTIC_CAPTURE_MAX_ENTRY_BYTES,
     ) -> None:
         self._get_kv = get_kv
         self._set_kv = set_kv
@@ -474,6 +551,10 @@ class DiagnosticCapture:
         self._max_entries = max_entries
         self._entries_key = entries_key
         self._batch_size = max(1, batch_size)
+        self._max_bytes = max(2048, max_bytes)
+        self._max_entry_bytes = min(self._max_bytes - 2, max(1024, max_entry_bytes))
+        self._entry_sizes: list[int] = []
+        self._total_bytes = 2
         self._entries_cache: list[dict[str, Any]] | None = None
         self._dirty_count = 0
         self._lock = threading.RLock()
@@ -490,14 +571,63 @@ class DiagnosticCapture:
         if not isinstance(raw, list):
             raw = []
         loaded_entries = [
-            self._redactor.sanitize_log_value(entry)
+            self._bounded_entry(entry)
             for entry in raw
             if isinstance(entry, dict)
         ][-self._max_entries :]
         with self._lock:
             if self._entries_cache is None:
                 self._entries_cache = loaded_entries
+                self._entry_sizes = [self._entry_bytes(entry) for entry in loaded_entries]
+                self._total_bytes = 2 + sum(self._entry_sizes)
+                self._trim()
             return self._entries_cache
+
+    @staticmethod
+    def _entry_bytes(entry: dict[str, Any]) -> int:
+        return len(json.dumps(entry, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 1
+
+    def _bounded_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
+        safe = self._redactor.sanitize_diagnostic_value(entry)
+        if self._entry_bytes(safe) <= self._max_entry_bytes:
+            return safe
+        details = safe.get("details")
+        if isinstance(details, dict):
+            for key in sorted(details, key=lambda name: len(json.dumps(details[name], ensure_ascii=False)), reverse=True):
+                if key in {"error", "provider_error", "last_error", "diagnostic_error"}:
+                    continue
+                rendered = json.dumps(details[key], ensure_ascii=False)
+                details[key] = {"truncated": True, "original_bytes": len(rendered.encode("utf-8")), "preview": rendered[:self._max_entry_bytes // 16]}
+                if self._entry_bytes(safe) <= self._max_entry_bytes:
+                    return safe
+        compact_errors: dict[str, Any] = {}
+        if isinstance(details, dict):
+            for key in ("error", "provider_error", "last_error", "diagnostic_error"):
+                value = details.get(key)
+                if value is None:
+                    continue
+                if isinstance(value, dict):
+                    compact: dict[str, Any] = {}
+                    for field in ("code", "type", "param", "message", "reason", "status"):
+                        item = value.get(field)
+                        if isinstance(item, (str, int, float, bool)):
+                            compact[field] = item[:min(4000, self._max_entry_bytes // 64)] if isinstance(item, str) else item
+                    compact_errors[key] = compact or {"truncated": True}
+                else:
+                    compact_errors[key] = str(value)[:min(4000, self._max_entry_bytes // 64)]
+        compact_details: dict[str, Any] = {"truncated": True, "reason": "entry_size_limit"}
+        compact_details.update(compact_errors)
+        compact = {"timestamp": safe.get("timestamp"), "event": safe.get("event"), "details": compact_details}
+        if self._entry_bytes(compact) <= self._max_entry_bytes:
+            return compact
+        for key in compact_errors:
+            compact_details[key] = {"truncated": True}
+        return compact
+
+    def _trim(self) -> None:
+        while self._entries_cache and (len(self._entries_cache) > self._max_entries or self._total_bytes > self._max_bytes):
+            self._entries_cache.pop(0)
+            self._total_bytes -= self._entry_sizes.pop(0)
 
     def flush(self) -> None:
         with self._flush_lock:
@@ -523,12 +653,15 @@ class DiagnosticCapture:
                 "active": True,
                 "entries": len(entries or []),
                 "maximum_entries": self._max_entries,
+                "bytes": self._total_bytes,
+                "maximum_bytes": self._max_bytes,
+                "maximum_entry_bytes": self._max_entry_bytes,
             }
 
     def entries(self) -> list[dict[str, Any]]:
         self._load_entries()
         with self._lock:
-            return list(self._entries_cache or [])
+            return self._redactor.sanitize_diagnostic_value(list(self._entries_cache or []))
 
     def clear(self) -> dict[str, Any]:
         """Clear all captured technical diagnostic metadata."""
@@ -540,21 +673,21 @@ class DiagnosticCapture:
         return {"ok": True, "entries": 0}
 
     def capture(self, event: str, details: dict[str, Any]) -> None:
-        """Persist bounded technical metadata without response or athlete content."""
+        """Redact content before it reaches the in-memory cache or database."""
         self._load_entries()
+        entry = self._bounded_entry({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": str(event)[:80], "details": details,
+        })
         with self._lock:
             entries = self._entries_cache
             assert entries is not None
-            entries.append(
-                {
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "event": self._redactor.sanitize_log_value(str(event)[:80]),
-                    "details": self._redactor.sanitize_log_value(details),
-                }
-            )
-            if len(entries) > self._max_entries:
-                del entries[: -self._max_entries]
+            entries.append(entry)
+            size = self._entry_bytes(entry)
+            self._entry_sizes.append(size)
+            self._total_bytes += size
+            self._trim()
             self._dirty_count += 1
             should_flush = self._dirty_count >= min(self._batch_size, self._max_entries)
-        if should_flush:
+        if should_flush or event.endswith("_failed"):
             self.flush()

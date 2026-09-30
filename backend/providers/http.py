@@ -12,6 +12,7 @@ import re
 import secrets
 import threading
 import time
+import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -395,6 +396,7 @@ class JsonHttpClient:
             **request_context,
             "service": service or observability.safe_url_netloc(parsed_url),
             "host": observability.safe_url_netloc(parsed_url),
+            "diagnostic_id": uuid.uuid4().hex,
         }
         started = self.monotonic()
         self.logger.info(
@@ -402,6 +404,7 @@ class JsonHttpClient:
             extra={"event": "external_request_started", "context": request_context},
         )
         self.diagnostic_capture.capture("external_http_started", {
+            "diagnostic_id": request_context["diagnostic_id"],
             "service": request_context["service"],
             "method": request_context["method"],
             "host": observability.safe_url_netloc(parsed_url),
@@ -409,6 +412,8 @@ class JsonHttpClient:
             "query_keys": request_context.get("query_keys", []),
             "request_bytes": request_context["request_bytes"],
             "content_type": request_headers.get("Content-Type"),
+            "request": payload,
+            "binary_request_bytes": len(raw_body) if raw_body else 0,
         })
         try:
             self._raise_cancelled(cancel_event)
@@ -501,19 +506,24 @@ class JsonHttpClient:
         *,
         error_bytes: int | None = None,
         headers: Any = None,
+        response_body: bytes | None = None,
     ) -> None:
         context: dict[str, Any] = {
+            "diagnostic_id": request_context.get("diagnostic_id"),
             "service": request_context["service"],
             "method": request_context["method"],
             "host": observability.safe_url_netloc(parsed_url),
             "path": request_context["path"],
             "duration_ms": round((self.monotonic() - started) * 1000, 1),
             "error": observability.safe_diagnostic_error(error),
+            "exception_message": str(error),
         }
         if error_bytes is not None:
             context["error_bytes"] = error_bytes
         if headers is not None:
             context["headers"] = self.safe_response_headers(headers)
+        if response_body is not None:
+            context["response_body"] = response_body.decode("utf-8", errors="replace")
         self.diagnostic_capture.capture("external_http_failed", context)
 
     def _success(
@@ -543,6 +553,7 @@ class JsonHttpClient:
             },
         )
         self.diagnostic_capture.capture("external_http_completed", {
+            "diagnostic_id": request_context.get("diagnostic_id"),
             "service": request_context["service"],
             "method": request_context["method"],
             "host": observability.safe_url_netloc(parsed_url),
@@ -552,6 +563,7 @@ class JsonHttpClient:
             "response_bytes": response.response_bytes,
             "headers": self.safe_response_headers(response.headers),
             "response": observability.diagnostic_capture_response(result),
+            "response_body": result,
         })
         return result
 
@@ -588,6 +600,7 @@ class JsonHttpClient:
             error,
             error_bytes=len(raw_body),
             headers=getattr(error, "headers", None),
+            response_body=raw_body,
         )
         if details:
             if service == "gemini":
@@ -693,6 +706,7 @@ def external_call(
     """Observe one SDK call using caller-owned logging and diagnostics."""
     safe_details = observability.safe_diagnostic_context(details)
     context = {"service": service, "operation": operation, **safe_details}
+    diagnostic_id = uuid.uuid4().hex
     if operation_context:
         for key in ("operation_id", "trigger"):
             if key in operation_context:
@@ -702,6 +716,7 @@ def external_call(
     started = time.perf_counter()
     logger.info("External call started", extra={"event": "external_call_started", "context": context})
     diagnostic_capture.capture("external_call_started", {
+        "diagnostic_id": diagnostic_id,
         "service": service,
         "operation": operation,
         "details": safe_details,
@@ -711,10 +726,12 @@ def external_call(
     except AppError as exc:
         duration_ms = round((time.perf_counter() - started) * 1000, 1)
         diagnostic_capture.capture("external_call_failed", {
+            "diagnostic_id": diagnostic_id,
             "service": service,
             "operation": operation,
             "duration_ms": duration_ms,
             "error": observability.safe_diagnostic_error(exc),
+            "exception_message": str(exc),
         })
         raise
     except Exception as exc:
@@ -727,10 +744,12 @@ def external_call(
             },
         )
         diagnostic_capture.capture("external_call_failed", {
+            "diagnostic_id": diagnostic_id,
             "service": service,
             "operation": operation,
             "duration_ms": duration_ms,
             "error": observability.safe_diagnostic_error(exc),
+            "exception_message": str(exc),
         })
         raise provider_error(service, "client") from exc
 
@@ -743,10 +762,12 @@ def external_call(
         },
     )
     diagnostic_capture.capture("external_call_completed", {
+        "diagnostic_id": diagnostic_id,
         "service": service,
         "operation": operation,
         "duration_ms": duration_ms,
         "response": observability.diagnostic_capture_response(result),
+        "response_body": result,
     })
     return result
 

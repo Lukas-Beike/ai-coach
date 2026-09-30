@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
 import re
 import time
+import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, NoReturn
 from urllib.error import HTTPError
@@ -590,6 +592,28 @@ def response_diagnostic_details(response: Any) -> dict[str, str]:
     return result
 
 
+def response_diagnostic_content(response: Any) -> dict[str, Any]:
+    """Expose provider error content for the bounded, redacted diagnostic store."""
+    if not isinstance(response, dict):
+        return {}
+    error = response.get("error")
+    error = error if isinstance(error, dict) else {}
+    if response.get("type") == "error":
+        error = response
+    content: dict[str, Any] = {}
+    for source, target in (("code", "provider_error_code_raw"), ("type", "provider_error_type"), ("param", "provider_error_parameter"), ("message", "provider_error_message")):
+        value = error.get(source)
+        if isinstance(value, str) and value.strip():
+            content[target] = value
+    incomplete = response.get("incomplete_details")
+    if isinstance(incomplete, dict):
+        content["incomplete_details"] = incomplete
+    last_error = response.get("last_error")
+    if isinstance(last_error, dict):
+        content["last_error"] = last_error
+    return content
+
+
 def _content_text(content: Any) -> str | None:
     if not isinstance(content, dict):
         return None
@@ -638,23 +662,38 @@ def consume_sse_event(
     event_name: str,
     on_text_delta: Callable[[str], None],
     on_response_id: Callable[[str], None] | None = None,
+    state: StreamReadState | None = None,
 ) -> dict[str, Any] | None:
     """Interpret one OpenAI Responses API SSE event without side effects."""
     if not data_lines:
         return None
-    event = _decode_sse_event(data_lines)
+    try:
+        event = _decode_sse_event(data_lines)
+    except AppError:
+        if state is not None:
+            state.invalid_events += 1
+        raise
     if event is None:
         return None
     kind = event_name or str(event.get("type") or "")
+    if state is not None:
+        marker = kind if re.fullmatch(r"[a-z_.]{1,100}", kind) else "unknown"
+        state.event_counts[marker] = state.event_counts.get(marker, 0) + 1
     response_candidate = event.get("response")
     candidate = response_candidate if isinstance(response_candidate, dict) else event
+    if state is not None and isinstance(candidate.get("id"), str):
+        state.response_id = candidate["id"]
     if kind in {"response.created", "response.in_progress"}:
         response_id = str(candidate.get("id") or "").strip()
+        if state is not None:
+            state.response_id = response_id
         if response_id and on_response_id is not None:
             on_response_id(response_id)
     elif kind == "response.output_text.delta":
         delta = event.get("delta")
         if isinstance(delta, str) and delta:
+            if state is not None:
+                state.text_delta_chars += len(delta)
             on_text_delta(delta)
     elif kind in {
         "error",
@@ -682,6 +721,10 @@ class StreamReadState:
     status: int | None = None
     headers: Any = None
     terminal_event_type: str | None = None
+    response_id: str = ""
+    event_counts: dict[str, int] = field(default_factory=dict)
+    invalid_events: int = 0
+    text_delta_chars: int = 0
 
 
 def _consume_sse_line(
@@ -690,10 +733,11 @@ def _consume_sse_line(
     data_lines: list[str],
     on_text_delta: Callable[[str], None],
     on_response_id: Callable[[str], None] | None,
+    state: StreamReadState | None = None,
 ) -> tuple[str, list[str], dict[str, Any] | None, str | None]:
     if not line:
         event_response = consume_sse_event(
-            data_lines, event_name, on_text_delta, on_response_id
+            data_lines, event_name, on_text_delta, on_response_id, state
         )
         terminal_type = event_name
         if event_response is not None and not terminal_type:
@@ -742,7 +786,7 @@ def read_stream_response(
             )
         line = raw_line.decode("utf-8").rstrip("\r\n")
         event_name, data_lines, event_response, terminal_event_type = _consume_sse_line(
-            line, event_name, data_lines, on_text_delta, on_response_id
+            line, event_name, data_lines, on_text_delta, on_response_id, read_state
         )
         check_cancelled()
         if event_response is not None:
@@ -752,7 +796,7 @@ def read_stream_response(
             )
     check_cancelled()
     _, _, event_response, terminal_event_type = _consume_sse_line(
-        "", event_name, data_lines, on_text_delta, on_response_id
+        "", event_name, data_lines, on_text_delta, on_response_id, read_state
     )
     check_cancelled()
     if event_response is not None:
@@ -847,7 +891,7 @@ class OpenAIStreamTelemetry:
     def record_rate_limits(self, headers: Any) -> None:
         self.provider_state.record_rate_limits(headers)
 
-    def record_started(self, context: dict[str, Any]) -> None:
+    def record_started(self, context: dict[str, Any], payload: Mapping[str, Any] | None = None) -> None:
         optional_context: dict[str, Any] = {
             key: context[key]
             for key in (
@@ -873,6 +917,10 @@ class OpenAIStreamTelemetry:
                 "host": context["host"],
                 "path": context["path"],
                 "request_bytes": context["request_bytes"],
+                "diagnostic_id": context.get("diagnostic_id"),
+                "attempt": context.get("attempt"),
+                "request_sha256": context.get("request_sha256"),
+                "request": payload,
                 **optional_context,
             },
         )
@@ -893,6 +941,9 @@ class OpenAIStreamTelemetry:
                 "status": 200,
                 "duration_ms": duration_ms,
                 "response_bytes": state.response_bytes,
+                "diagnostic_id": context.get("diagnostic_id"),
+                "attempt": context.get("attempt"),
+                "provider_response": response,
             },
         )
         self.logger.info(
@@ -1005,7 +1056,20 @@ class OpenAIStreamTelemetry:
             diagnostic=diagnostic,
             level=level,
         )
-        self.capture_failure(status, reason, started, response_bytes, diagnostic)
+        self.capture_failure(
+            status,
+            reason,
+            started,
+            response_bytes,
+            {
+                **diagnostic,
+                "diagnostic_id": context.get("diagnostic_id"),
+                "attempt": context.get("attempt"),
+                **response_diagnostic_content(final_response),
+                "provider_error": final_response.get("error") if isinstance(final_response, dict) else None,
+                "provider_response": final_response,
+            },
+        )
 
     def record_cancelled(
         self,
@@ -1124,7 +1188,10 @@ class OpenAIStreamClient:
     def _record_transport(self, state: StreamReadState) -> None:
         self.telemetry.record_transport(state)
 
-    def _context(self, body: bytes, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def _context(
+        self, body: bytes, payload: Mapping[str, Any],
+        *, diagnostic_id: str, attempt: int,
+    ) -> dict[str, Any]:
         config = self.config
         parsed = urlparse(
             endpoint(
@@ -1140,6 +1207,9 @@ class OpenAIStreamClient:
             "path": observability.safe_provider_path(parsed.path),
             "timeout_seconds": config.timeout,
             "request_bytes": len(body),
+            "diagnostic_id": diagnostic_id,
+            "attempt": attempt,
+            "request_sha256": hashlib.sha256(body).hexdigest(),
         }
         model = _safe_openai_error_token(payload.get("model"))
         if model and re.fullmatch(r"gpt-[a-z0-9.-]{1,60}", model):
@@ -1238,6 +1308,11 @@ class OpenAIStreamClient:
             details,
             diagnostic,
         )
+        self.telemetry.diagnostic_capture.capture("openai_http_failed", {
+            "diagnostic_id": context.get("diagnostic_id"),
+            "status": status,
+            "response_body": raw_error.decode("utf-8", errors="replace"),
+        })
         error = AppError(status, details["message"], reason=details["reason"])
         retry_after = details.get("retry_after_seconds")
         if isinstance(retry_after, int):
@@ -1286,6 +1361,7 @@ class OpenAIStreamClient:
         cancel_event: Any,
         on_response_id: Callable[[str], Any] | None,
         attempt_state: dict[str, Any],
+        diagnostic_id: str,
     ) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
         config = self.config
@@ -1305,12 +1381,16 @@ class OpenAIStreamClient:
             },
             method="POST",
         )
-        context = self._context(body, payload)
+        attempt = int(attempt_state.get("attempt", 0)) + 1
+        attempt_state["attempt"] = attempt
+        context = self._context(
+            body, payload, diagnostic_id=diagnostic_id, attempt=attempt
+        )
         started = self.telemetry.clock()
         attempt_state.update(
             context=context, started=started, stream_bytes=0, final_response=None
         )
-        self.telemetry.record_started(context)
+        self.telemetry.record_started(context, payload)
         stream_state = StreamReadState()
         try:
             self._raise_if_cancelled(cancel_event)
@@ -1327,6 +1407,18 @@ class OpenAIStreamClient:
                 )
             finally:
                 self._record_transport(stream_state)
+                self.telemetry.diagnostic_capture.capture("openai_stream_transport", {
+                    "diagnostic_id": context["diagnostic_id"],
+                    "attempt": context["attempt"],
+                    "http_status": stream_state.status,
+                    "headers": observability.safe_response_headers(stream_state.headers, redact=str),
+                    "response_id": stream_state.response_id,
+                    "terminal_event_type": stream_state.terminal_event_type,
+                    "event_counts": stream_state.event_counts,
+                    "invalid_events": stream_state.invalid_events,
+                    "text_delta_chars": stream_state.text_delta_chars,
+                    "response_bytes": stream_state.response_bytes,
+                })
             final_response = result.response
             attempt_state["final_response"] = final_response
             attempt_state["stream_bytes"] = stream_state.response_bytes
@@ -1412,6 +1504,7 @@ class OpenAIStreamClient:
             stream=True,
         )
         attempt_state: dict[str, Any] = {}
+        diagnostic_id = uuid.uuid4().hex
         try:
             return request_with_conversation_retry(
                 lambda: self._stream_once(
@@ -1420,6 +1513,7 @@ class OpenAIStreamClient:
                     cancel_event=cancel_event,
                     on_response_id=on_response_id,
                     attempt_state=attempt_state,
+                    diagnostic_id=diagnostic_id,
                 ),
                 cancel_event=cancel_event,
                 on_retry=lambda attempt, delay: self.telemetry.record_retry(

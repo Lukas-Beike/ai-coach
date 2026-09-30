@@ -108,7 +108,7 @@ class DiagnosticsAssembly:
         return CoachDiagnosticHistoryService(
             database=self._database_manager().unit_of_work,
             db_lock=self._database_lock,
-            redact=self._redactor.sanitize_log_value,
+            redact=self._redactor.sanitize_diagnostic_value,
             receipt_parser=self._receipt_parser,
             allowed_tools=self._allowed_tools(),
         )

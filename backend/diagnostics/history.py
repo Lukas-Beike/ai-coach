@@ -31,7 +31,7 @@ class CoachDiagnosticHistoryService:
         self._allowed_tools = frozenset(allowed_tools)
 
     def history(self) -> list[dict[str, Any]]:
-        """Return up to 20 entries without dialogue, arguments, or results."""
+        """Return recent command evidence after credential redaction."""
         with self._db_lock, self._database() as db:
             rows = db.execute(
                 "SELECT client_turn_id, receipt, created_at, updated_at "
@@ -44,8 +44,10 @@ class CoachDiagnosticHistoryService:
         receipt = self._receipt_parser(row["receipt"])
         status = receipt.get("status")
         response_status = receipt.get("response_status")
-        return {
+        return self._redact({
             "id": hashlib.sha256(str(row["client_turn_id"]).encode()).hexdigest()[:12],
+            "client_turn_id": row["client_turn_id"],
+            "receipt": receipt,
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "status": status if isinstance(status, str) and status in _STATUSES else "unknown",
@@ -57,7 +59,7 @@ class CoachDiagnosticHistoryService:
             "awaiting_clarification": receipt.get("awaiting_clarification") is True,
             "error": self._error_metadata(receipt.get("diagnostic_error")),
             "steps": self._command_steps(receipt),
-        }
+        })
 
     def _command_steps(self, receipt: dict[str, Any]) -> list[dict[str, Any]]:
         command_receipts = receipt.get("command_receipts")

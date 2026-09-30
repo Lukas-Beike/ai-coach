@@ -201,6 +201,12 @@ class ProviderStateService:
             error = AppError(502, failure.message, reason=failure.reason)
             if failure.provider_error_code is not None:
                 error.provider_error_code = failure.provider_error_code
+            if failure.provider_error_type is not None:
+                error.provider_error_type = failure.provider_error_type
+            if failure.provider_response_status is not None:
+                error.provider_response_status = failure.provider_response_status
+            if failure.provider_incomplete_reason is not None:
+                error.provider_incomplete_reason = failure.provider_incomplete_reason
             raise error from failure
 
     def record_usage(
