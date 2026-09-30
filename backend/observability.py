@@ -91,7 +91,7 @@ _DIAGNOSTIC_SECRET_SUFFIXES = (
 _DIAGNOSTIC_BINARY_FIELDS = frozenset({"inlinedata", "filedata", "audio", "inputaudio"})
 _DIAGNOSTIC_AUTH_RE = re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9_+/=.-]+")
 _DIAGNOSTIC_LABELED_SECRET_RE = re.compile(
-    r'''(?i)\b(password|passwd|secret|api[_-]?key|token|authorization|cookie)\s*[:=]\s*([^,;}\r\n]+)'''
+    r'''(?i)\b(password|passwd|secret|api[_-]?key|token|authorization|cookie)\s*[:=]\s*([^,;\r\n]+)'''
 )
 _DIAGNOSTIC_PRIVATE_KEY_RE = re.compile(
     r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.DOTALL
@@ -653,7 +653,7 @@ class DiagnosticCapture:
         if self._entry_bytes(compact) <= self._max_entry_bytes:
             return compact
         compact_details.update({key: {"truncated": True} for key in compact_errors})
-        return compact
+        return {"timestamp": entry.get("timestamp"), "event": entry.get("event"), "details": compact_details}
 
     def _compact_error(self, value: Any) -> Any:
         if not isinstance(value, dict):
