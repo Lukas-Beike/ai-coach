@@ -175,6 +175,38 @@ class ProviderStateServiceTests(unittest.TestCase):
         self.assertEqual(status["provider_error_code"], "server_error")
         self.assertNotIn("private provider content", json.dumps(status))
 
+    def test_openai_terminal_error_codes_use_production_allowlist_and_actionable_reasons(self):
+        cases = (
+            ("conversation_locked", "conversation_locked"),
+            ("conversation_lock_timeout", "conversation_locked"),
+            ("concurrent_request", "conversation_locked"),
+            ("conversation_state_invalid", "conversation_state_invalid"),
+            ("conversation_not_found", "conversation_state_invalid"),
+            ("invalid_conversation", "conversation_state_invalid"),
+            ("invalid_function_call_output", "conversation_state_invalid"),
+            ("invalid_organization", "authentication_or_permission"),
+        )
+        for code, reason in cases:
+            with self.subTest(code=code):
+                with self.assertRaises(AppError) as raised:
+                    self.service.validate_openai_response(
+                        "/responses",
+                        {
+                            "status": "failed",
+                            "error": {
+                                "code": code,
+                                "message": "private provider content",
+                            },
+                        },
+                    )
+                self.assertEqual(raised.exception.reason, reason)
+                self.assertEqual(raised.exception.provider_error_code, code)
+                self.assertNotIn("private provider content", str(raised.exception))
+                status = json.loads(self.repository.values["openai_status"])
+                self.assertEqual(status["reason"], reason)
+                self.assertEqual(status["provider_error_code"], code)
+                self.assertNotIn("private provider content", json.dumps(status))
+
     def test_openai_response_validation_drops_untrusted_code_and_keeps_invalid_shape_out_of_state(self):
         with self.assertRaises(AppError) as raised:
             self.service.validate_openai_response(
@@ -190,6 +222,26 @@ class ProviderStateServiceTests(unittest.TestCase):
             self.service.validate_openai_response("/responses", None)
         self.assertEqual(invalid.exception.reason, "invalid_response")
         self.assertNotIn("openai_status", self.repository.values)
+
+    def test_openai_response_validation_surfaces_and_persists_billing_failure(self):
+        with self.assertRaises(AppError) as raised:
+            self.service.validate_openai_response("/responses", {
+                "status": "failed",
+                "error": {
+                    "code": "credit_balance_exhausted",
+                    "message": "private provider content",
+                },
+            })
+        message = "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
+        self.assertEqual(raised.exception.reason, "credit_balance_exhausted")
+        self.assertEqual(raised.exception.message, message)
+        self.assertEqual(raised.exception.provider_error_code, "credit_balance_exhausted")
+        self.assertEqual(raised.exception.status, 502)
+        status = json.loads(self.repository.values["openai_status"])
+        self.assertEqual(status["reason"], "credit_balance_exhausted")
+        self.assertEqual(status["provider_error_code"], "credit_balance_exhausted")
+        self.assertEqual(status["message"], message)
+        self.assertNotIn("private provider content", json.dumps(status))
 
     def test_openai_response_validation_returns_valid_result_unchanged(self):
         result = {"id": "response-test", "status": "completed"}

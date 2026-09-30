@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from backend.coach import attachments as coach_attachments
 from backend.coach import dialogue
 from backend.coach.context import CoachTrainingContextService
+from backend.coach.context_selection import (
+    compact_coach_dialogue,
+    select_coach_context,
+    select_coach_tools,
+)
 from backend.settings import SettingsService
 
 
@@ -40,13 +46,23 @@ class CoachRequestPayloadService:
         retain_openai_attachment_context: bool,
         has_prior_openai_attachments: bool,
     ) -> tuple[str, dict[str, Any]]:
+        selection = select_coach_context(
+            message,
+            context,
+            attachments=bool(attachments or has_prior_openai_attachments),
+            has_receipts=bool(command_receipts),
+        )
         model_instructions = (
-            self._training_context.build() + "\n\n" + dialogue.INSTRUCTIONS
+            self._training_context.build(
+                selection=selection, local_date=context.get("local_date", "")
+            )
+            + "\n\n"
+            + dialogue.INSTRUCTIONS
         )
         if not allow_mutations:
             model_instructions += "\nThis is an automatic advisory run. Do not change data or pending requests."
         dialogue_input = {
-            "dialogue": context,
+            "dialogue": compact_coach_dialogue(context, selection),
             "current_message": message,
             "confirmed_steps": command_receipts,
         }
@@ -73,7 +89,7 @@ class CoachRequestPayloadService:
             "conversation": conversation_id,
             "instructions": model_instructions,
             "input": json.dumps(dialogue_input, ensure_ascii=False),
-            "tools": tools,
+            "tools": select_coach_tools(tools, selection),
             "tool_choice": "auto",
             "max_output_tokens": self._max_output_tokens,
             "truncation": "auto",
@@ -113,4 +129,19 @@ class CoachRequestPayloadService:
                 "\nEarlier attachments are available only through local summaries and dialogue. Earlier image pixels are unavailable; "
                 "ask for missing evidence only if essential. Never invent attachment details."
             )
+        logging.getLogger("intervals_coach").info(
+            "Coach request sizes",
+            extra={
+                "event": "coach_request_sizes",
+                "context_profile": selection.name,
+                "instruction_characters": len(payload["instructions"]),
+                "input_characters": len(
+                    json.dumps(payload["input"], ensure_ascii=False)
+                ),
+                "tool_schema_characters": len(
+                    json.dumps(payload["tools"], ensure_ascii=False)
+                ),
+                "tool_count": len(payload["tools"]),
+            },
+        )
         return model_instructions, payload

@@ -517,6 +517,11 @@ class OpenAIResponseFailure(Exception):
         self.message = _RESPONSE_FAILURE_MESSAGES.get(
             reason, "OpenAI response validation failed."
         )
+        classified_reason, classified_message = _openai_error_reason(
+            0, {"code": provider_error_code, "type": provider_error_type}
+        )
+        if classified_reason != "http_error":
+            self.reason, self.message = classified_reason, classified_message
         self.provider_error_code = provider_error_code
         self.provider_error_type = provider_error_type
         self.provider_response_status = provider_response_status
@@ -1718,17 +1723,16 @@ def _openai_conversation_error(
     continuation_error = "conversation" in searchable and any(
         marker in searchable for marker in ("state", "previous", "invalid", "not found")
     )
-    if status == 400 and (
-        code
-        in {
-            "conversation_not_found",
-            "invalid_conversation",
-            "conversation_state_invalid",
-            "invalid_function_call_output",
-        }
-        or "function_call_output" in searchable
-        or invalid_state
-        or continuation_error
+    if code in {
+        "conversation_not_found",
+        "invalid_conversation",
+        "conversation_state_invalid",
+        "invalid_function_call_output",
+    } or (
+        status == 400
+        and (
+            "function_call_output" in searchable or invalid_state or continuation_error
+        )
     ):
         return (
             "conversation_state_invalid",
@@ -1791,17 +1795,17 @@ def _openai_error_reason(status: int, error: dict[str, Any]) -> tuple[str, str]:
     if (
         status == 429
         or code == "rate_limit_exceeded"
-        or error_type == "rate_limit_exceeded"
+        or error_type in {"rate_limit_exceeded", "rate_limit_error"}
     ):
         return (
             "rate_limit_exceeded",
             "OpenAI hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen.",
         )
-    if status in {401, 403} or code in {
-        "invalid_api_key",
-        "invalid_organization",
-        "permission_denied",
-    }:
+    if (
+        status in {401, 403}
+        or code in {"invalid_api_key", "invalid_organization", "permission_denied"}
+        or error_type in {"authentication_error", "permission_error"}
+    ):
         return (
             "authentication_or_permission",
             "Der OpenAI-Zugang wurde abgelehnt. Bitte API-Schlüssel und Projektberechtigungen prüfen.",

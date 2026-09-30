@@ -37,7 +37,7 @@ Intervals Coach adheres to a clean-slate installation and maintenance model:
 - **Dual AI Provider Support**: Native integration with the OpenAI Responses API (GPT-6 Luna) and Google Gemini (Gemini 3.8 Flash) with real-time SSE token streaming.
 - **Durable Turn Queueing**: Every chat request is persisted in a durable SQLite background queue before processing, enabling seamless answer recovery across network drops or browser reloads.
 - **Permanent Fact Memorization**: Conversational profile updates that save athlete preferences, equipment notes, and constraints to the durable profile only upon explicit confirmation.
-- **Bounded Context Projection**: Dynamic context assembly projecting the 5 newest activities per sport, compact planned units, target competitions, and wellness trends within strict token budgets.
+- **Request-Specific Context Projection**: Compact daily, activity and dialogue windows for routine turns; detailed local context and additional tools are available on demand, with conservative fallback for continuations.
 - **Targeted Clarification Protocol**: Ambiguous coaching prompts generate a single, concrete clarification question stored locally across reloads and model switches until answered.
 - **Atomic Training Changesets**: Plan updates, session moves, and workout creations use transactional revision tracking and object hashes to prevent race conditions.
 - **Contextual Quick Actions**: Dynamic start cards presenting context-relevant prompts such as the Morning Check-in or recent workout analysis without permanent UI clutter.
@@ -375,6 +375,7 @@ Conversational turns are persisted in `coach_commands`; provider synchronization
 - **Streaming Handshake**: When an HTTP turn starts, Server-Sent Events (SSE) immediately return the durable job UUID.
 - **Decoupled Execution**: If the athlete locks their phone or loses cellular connection, the server continues execution uninterrupted.
 - **Recovery on Reconnect**: Upon reconnection or app reload, the PWA polls the durable job result using its UUID, rendering the completed answer without re-executing actions.
+- **Visible Provider Failures**: OpenAI API credit, quota, spending-limit, access, rate-limit, unavailable-model, conversation-state, timeout, and service-unavailability failures produce a clear recovery instruction in the chat history, including classified failures reported inside an HTTP-200 response stream. The message remains visible after reload; private provider error text is not shown. Unknown failures use a safe technical-error message with retry and diagnostic-export guidance.
 
 ### Provider Data Handling
 - **Intervals.icu Activity Pull**: Ingests new completed workouts with full telemetry (duration, distance, TSS, HR zones, power curves). Large imports are safely fetched in paginated windows.
@@ -386,15 +387,21 @@ Conversational turns are persisted in `coach_commands`; provider synchronization
 
 ## Coach Intelligence & Execution Boundaries
 
-### Prompt Projection & Token Budgeting
+### Prompt Projection & Context Budgeting
 To optimize API token consumption and response latency, Intervals Coach uses a strictly bounded context projection rather than dumping entire databases into prompts:
-- **Activity Projection**: Bounded to the 5 most recent completed activities per normalized sport type.
-- **Planning Projection**: Bounded to at most 50 future planned units.
+- **Request Profiles**: General coaching, today's training, activity analysis, weekly planning, plan edits, competition preparation, profile/check-in, provider sync and attachments select different projections. Selection is not an authorization decision.
+- **Activity Projection**: Routine turns include the newest completed activity per sport; planning and analysis retain up to five. Exact activity details remain available through the existing read tools.
+- **Planning Projection**: Routine turns include a three-day outlook and two recent days; weekly planning includes a 14-day outlook. Daily planning combines recovery, illness/check-ins, weather and calendar constraints instead of repeating separate provider histories. Confirmed profile constraints, competitions and labeled current performance remain available.
+- **On-Demand Details**: `read_coach_context` loads selected omitted local sections without a provider refresh. Its output is bounded to 40,000 characters and marks incomplete results. Successful reads also expose remaining tools already permitted for the turn, without granting mutation or remote-write authorization.
+- **Conservative Fallback**: Pending requests, short continuations, resumed tool work, provider refresh/sync and long-range or explicitly dated planning retain full bounded context and tools. The 120,000-character training-context cap, model selection, attachment handling and output-token limits remain unchanged.
+- **Library Selection**: Template descriptions are included for planning, not ordinary questions; library read tools remain available when details are needed.
 - **Metric Sanitization**: Raw JSON payloads from providers are stripped down to core athletic parameters (FTP, TSS, RPE, Heart Rate, Power Zones, Duration, Distance).
-- **Dialogue Pruning**: Multi-turn dialogue history is maintained locally; remote conversation chains are pruned between distinct command sessions.
+- **Dialogue Pruning**: Routine requests send up to eight recent messages and three completed-action receipts. Pending work retains the full bounded dialogue and source IDs; authorization still uses the original local dialogue. Remote conversation chains are pruned between distinct command sessions.
+- **Size Diagnostics**: Context profiles, section character counts and request/tool-schema sizes are recorded without athlete content. Character counts are not provider token measurements; synthetic reduction tests do not establish live quality or latency.
+- **Context Preview**: The preview remains a full local context overview; actual request selection depends on the message subsequently sent.
 
 ### Tool Execution & Reversible Changesets
-The Coach interacts with the athlete's data via 39 structured tools covering plan inspection, template management, profile editing, nutrition correction, and provider synchronization:
+The Coach interacts with the athlete's data via structured tools covering plan inspection, template management, profile editing, nutrition correction, and provider synchronization:
 - **Transaction Locks**: All database updates share SQLite transaction locks to guarantee that conversational actions and background syncs never collide.
 - **Revision Control**: Plan modifications require passing the current planning revision and object hash, preventing overwrite collisions if edits occur concurrently.
 - **Remote Approval**: Intervals.icu changes remain proposals until the athlete approves their visible scope. A changed or stale workout manifest fails closed, and approval is bound to the current session and originating Coach turn.

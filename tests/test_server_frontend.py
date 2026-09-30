@@ -102,6 +102,14 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('const SYNC_POLL_ACTIVE_MS = 1_500;', app)
         self.assertNotIn('setInterval(() => {\n  if (state.localSync.intervals', app)
 
+    def test_mobile_busy_composer_keeps_round_actions_and_centers_controls(self):
+        styles = (Path(__file__).resolve().parents[1] / "public" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn(".composer-actions { display: flex; align-items: center;", styles)
+        self.assertIn(
+            ".composer.is-busy .composer-actions button:not(.attachment-button):not(.composer-stop-button):not(#sendButton)",
+            styles,
+        )
+
     def test_maintenance_ui_status_and_restore_asset_versions_are_present(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         api_client = (Path(__file__).resolve().parents[1] / "public" / "api.js").read_text(encoding="utf-8")
@@ -130,7 +138,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('/components.js?v=217', index)
         self.assertIn('/coach.js?v=3', index)
         self.assertIn('/app.js?v=236', index)
-        self.assertIn('intervals-coach-v240', service_worker)
+        self.assertIn('/styles.css?v=230', index)
+        self.assertIn('intervals-coach-v241', service_worker)
         self.assertIn('"/navigation.js?v=218"', service_worker)
         self.assertIn('"/appearance.js?v=218"', service_worker)
         self.assertIn('"/state.js?v=217"', service_worker)
@@ -315,7 +324,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split('app.js?v=', 1)[1].split('"', 1)[0]
         self.assertIn(f'app.js?v={asset_version}', markup)
-        self.assertIn('intervals-coach-v240', service_worker)
+        self.assertIn('intervals-coach-v241', service_worker)
         self.assertIn(f'/app.js?v={asset_version}', service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -464,7 +473,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"/coach.js?v=3"', source)
         self.assertIn('"/app.js?v=236"', source)
         self.assertIn('"/icon.svg?v=217"', source)
-        self.assertIn('"/styles.css?v=229"', source)
+        self.assertIn('"/styles.css?v=230"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)

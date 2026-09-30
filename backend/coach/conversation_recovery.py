@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from backend.coach.attachments import model_input
+from backend.coach.context_selection import compact_coach_dialogue, select_coach_context
 from backend.coach.job_store import CoachJobStore
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -65,7 +66,15 @@ class CoachConversationRecoveryService:
         payload["input"] = model_input(
             json.dumps(
                 {
-                    "dialogue": context,
+                    "dialogue": compact_coach_dialogue(
+                        context,
+                        select_coach_context(
+                            message,
+                            context,
+                            attachments=bool(attachments),
+                            has_receipts=bool(command_receipts),
+                        ),
+                    ),
                     "current_message": message,
                     "confirmed_steps": command_receipts,
                 },

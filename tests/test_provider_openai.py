@@ -916,7 +916,8 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(response_failure_reason("/responses", response), "response_failed")
         with self.assertRaises(OpenAIResponseFailure) as raised:
             validate_response("/responses", response, allowed_error_codes=("model_not_found",))
-        self.assertEqual(raised.exception.reason, "response_failed")
+        self.assertEqual(raised.exception.reason, "not_found")
+        self.assertNotIn("private provider detail", str(raised.exception))
         self.assertEqual(
             response_diagnostic_details(response),
             {
@@ -930,6 +931,61 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertNotIn("provider_error_code", response_diagnostic_details(unsafe))
         self.assertEqual(response_diagnostic_details(unsafe)["provider_error_present"], "true")
         self.assertNotIn("provider_response_id", response_diagnostic_details({"id": "resp_private/text"}))
+
+    def test_terminal_response_provider_errors_use_safe_actionable_messages(self):
+        cases = (
+            ("invalid_api_key", None, "authentication_or_permission"),
+            ("invalid_organization", None, "authentication_or_permission"),
+            ("permission_denied", None, "authentication_or_permission"),
+            ("model_not_found", None, "not_found"),
+            ("rate_limit_exceeded", None, "rate_limit_exceeded"),
+            (None, "authentication_error", "authentication_or_permission"),
+            (None, "permission_error", "authentication_or_permission"),
+            (None, "rate_limit_error", "rate_limit_exceeded"),
+            ("conversation_locked", None, "conversation_locked"),
+        )
+        for code, error_type, reason in cases:
+            for status in ("failed", "error"):
+                with self.subTest(code=code, error_type=error_type, status=status):
+                    error = {"code": code, "type": error_type, "message": "private provider detail"}
+                    response = (
+                        {"status": "failed", "error": error}
+                        if status == "failed"
+                        else {**error, "type": "error"}
+                    )
+                    expected_reason = reason if status == "failed" or code else "response_error"
+                    with self.assertRaises(OpenAIResponseFailure) as raised:
+                        validate_response("/responses", response, allowed_error_codes=(code,) if code else ())
+                    self.assertEqual(raised.exception.reason, expected_reason)
+                    self.assertNotIn("private provider detail", str(raised.exception))
+
+    def test_terminal_response_billing_errors_use_safe_actionable_messages(self):
+        codes = (
+            "credit_balance_exhausted", "insufficient_quota", "billing_hard_limit_reached",
+            "organization_spend_limit_exceeded", "project_spend_limit_exceeded",
+            "organization_usage_limit_exceeded",
+        )
+        for code in codes:
+            expected = error_details(429, body({"code": code}), updated_at="now")
+            error = {"code": code, "message": "private provider detail"}
+            for response in ({"status": "failed", "error": error}, {"type": "error", **error}):
+                with self.subTest(code=code, response_type=response.get("type", "failed")):
+                    with self.assertRaises(OpenAIResponseFailure) as raised:
+                        validate_response("/responses", response, allowed_error_codes=codes)
+                    self.assertEqual(raised.exception.reason, expected["reason"])
+                    self.assertEqual(raised.exception.message, expected["message"])
+                    self.assertEqual(raised.exception.provider_error_code, code)
+                    self.assertNotIn("private provider detail", str(raised.exception))
+
+    def test_response_validation_does_not_classify_billing_from_untrusted_text(self):
+        with self.assertRaises(OpenAIResponseFailure) as raised:
+            validate_response("/responses", {
+                "status": "failed",
+                "error": {"code": "private_code", "message": "private credits quota detail"},
+            })
+        self.assertEqual(raised.exception.reason, "response_failed")
+        self.assertEqual(raised.exception.message, "OpenAI did not complete the coach response.")
+        self.assertIsNone(raised.exception.provider_error_code)
 
     def test_stream_failure_diagnostics_keep_safe_markers_without_provider_text(self):
         capture = _DiagnosticCapture()

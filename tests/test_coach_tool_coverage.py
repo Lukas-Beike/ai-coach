@@ -154,7 +154,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(server.ATHLETE_DATA.profile().get()["equipment"], "Indoor bike")
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
-    @covers("read_training_state:success", "list_planned_workouts:success", "list_workout_library:success",
+    @covers("read_coach_context:success", "read_training_state:success", "list_planned_workouts:success", "list_workout_library:success",
             "list_training_plans:success", "list_competitions:success", "list_change_history:success", "list_recent_activities:success",
             "get_activity_details:success")
     def test_read_tools_return_seeded_objects_without_mutating_them(self):
@@ -173,6 +173,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 result = self.run_tool(tool, arguments, message=message)
                 self.assertIn(expected, json.dumps(result))
                 self.assertEqual(self.athlete_state(), before)
+        result = self.run_tool("read_coach_context", {"sections": ["garmin"]}, message="Zeig Garmin-Kontext.")
+        self.assertEqual(set(result["context"]), {"garmin"})
+        self.assertEqual(self.athlete_state(), before)
 
     @covers("manage_training_templates:create", "manage_training_templates:update", "manage_training_templates:archive",
             "manage_training_templates:restore", "manage_training_templates:delete", "apply_workout_library_plan:success")
