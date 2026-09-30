@@ -466,6 +466,38 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(capture.status()["maximum_entries"], 10000)
         self.assertEqual(len(capture.entries()), 1501)
 
+    def test_diagnostic_capture_clear_resets_cache_and_persisted_entries(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(store.get, store.set, Redactor(_config))
+        capture.capture("event-1", {"data": "test"})
+        capture.flush()
+        self.assertEqual(len(capture.entries()), 1)
+        self.assertEqual(capture.status()["entries"], 1)
+
+        result = capture.clear()
+
+        self.assertEqual(result, {"ok": True, "entries": 0})
+        self.assertEqual(capture.entries(), [])
+        self.assertEqual(capture.status()["entries"], 0)
+        self.assertEqual(store.get("diagnostic_capture_entries"), "[]")
+
+    def test_diagnostic_capture_clear_failure_preserves_cache_and_raises(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(store.get, store.set, Redactor(_config))
+        capture.capture("event-1", {"data": "test"})
+        capture.flush()
+        self.assertEqual(len(capture.entries()), 1)
+
+        def failing_set(key: str, value: str) -> None:
+            raise OSError("storage failure")
+
+        capture._set_kv = failing_set
+        with self.assertRaises(OSError):
+            capture.clear()
+
+        self.assertEqual(len(capture.entries()), 1)
+        self.assertEqual(capture.status()["entries"], 1)
+
     def test_diagnostic_capture_retries_failed_flush_without_losing_dirty_entries(self):
         store = _KeyValueStore()
         fail_next_write = True

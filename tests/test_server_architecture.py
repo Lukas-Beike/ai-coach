@@ -3018,7 +3018,7 @@ class ServerArchitectureTests(unittest.TestCase):
                 "COACH_ACTIONS_POST_ROUTES", "CHAT_POST_ROUTES", "TRANSCRIBE_POST_ROUTES",
                 "PLANNING_COMMANDS_POST_ROUTES", "FEEDBACK_POST_ROUTES", "CHAT_STREAM_TRANSPORT",
                 "SYNC_COMMAND_POST_ROUTE", "HISTORY_UNDO_POST_ROUTES", "DIAGNOSTICS_CAPTURE_POST_ROUTES",
-                "PRIVACY_DELETE_POST_ROUTES", "NUTRITION_POST_ROUTES",
+                "PRIVACY_DELETE_POST_ROUTES", "NUTRITION_POST_ROUTES", "DIAGNOSTICS_DELETE_POST_ROUTES",
             }
             self.assertIn(route_name, post_routes)
             owner_attr = (
@@ -3340,6 +3340,18 @@ class ServerArchitectureTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertNotIn("server", route_source.casefold())
         self.assertNotIn("PRIVACY_ASSEMBLY.delete_service().delete()", ast.unparse(server_tree))
+
+    def test_diagnostics_delete_post_routes_are_owned_by_http_api_module(self) -> None:
+        self._assert_write_route_owned(
+            "do_POST",
+            "DIAGNOSTICS_DELETE_POST_ROUTES",
+            ("/api/logs/delete", "/api/diagnostics/delete"),
+            "DiagnosticsDeletePostRoutes(recent_log_entries_service, diagnostic_report_service)",
+        )
+        route_source = (
+            BACKEND_ROOT / "http_api" / "diagnostics_delete_post.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("server", route_source.casefold())
 
     def test_settings_put_routes_are_owned_by_http_api_module(self) -> None:
         self._assert_write_route_owned(

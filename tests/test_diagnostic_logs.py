@@ -102,6 +102,32 @@ class RecentLogEntriesServiceTests(unittest.TestCase):
         self.assertEqual(json.loads(lines[0]), {"message": "rotated [REDACTED]"})
         self.assertEqual(json.loads(lines[1]), {"message": "current"})
 
+    def test_clear_removes_rotated_logs_and_truncates_active_log(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "app.log"
+            log_path.write_text('{"message":"current"}\n', encoding="utf-8")
+            log_path.with_name("app.log.1").write_text('{"message":"rot1"}\n', encoding="utf-8")
+            log_path.with_name("app.log.2").write_text('{"message":"rot2"}\n', encoding="utf-8")
+            service = RecentLogEntriesService(log_path, _redactor(), lambda: "fixed-time")
+
+            result = service.clear()
+
+            self.assertEqual(result, {"ok": True, "cleared": True})
+            self.assertEqual(log_path.read_text(encoding="utf-8"), "")
+            self.assertFalse(log_path.with_name("app.log.1").exists())
+            self.assertFalse(log_path.with_name("app.log.2").exists())
+            self.assertEqual(service.list(), [])
+            self.assertEqual(service.download(), b"")
+
+    def test_clear_propagates_oserror_when_truncation_or_unlink_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "app.log"
+            log_path.write_text("content\n", encoding="utf-8")
+            service = RecentLogEntriesService(log_path, _redactor(), lambda: "fixed-time")
+            with patch.object(Path, "write_text", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    service.clear()
+
 
 if __name__ == "__main__":
     unittest.main()

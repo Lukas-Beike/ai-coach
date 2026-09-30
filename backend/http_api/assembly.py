@@ -15,6 +15,7 @@ from backend.http_api.chat_post import ChatPostRoutes
 from backend.http_api.chat_stream import CoachChatStreamTransport
 from backend.http_api.coach_actions_post import CoachActionsPostRoutes
 from backend.http_api.coach_get import CoachGetRoutes
+from backend.http_api.diagnostics_delete_post import DiagnosticsDeletePostRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.feedback_post import FeedbackPostRoutes
@@ -411,6 +412,10 @@ class HttpApiAssembly:
         self.privacy_delete_post_routes = PrivacyDeletePostRoutes(
             privacy_delete_service
         )
+        self.diagnostics_delete_post_routes = DiagnosticsDeletePostRoutes(
+            recent_log_entries_service,
+            diagnostic_report_service,
+        )
         self.privacy_get_routes = PrivacyGetRoutes(
             session_auth_service,
             self.export_stream_transport,
@@ -480,6 +485,7 @@ class HttpApiAssembly:
             self.sync_command_post_route,
             self.history_undo_post_routes,
             self.privacy_delete_post_routes,
+            self.diagnostics_delete_post_routes,
             self.nutrition_post_routes,
         )
         self.post_dispatcher = HttpPostDispatcher(

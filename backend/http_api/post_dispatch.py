@@ -5,12 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from backend.errors import AppError, NOT_FOUND_ERROR
+from backend.errors import NOT_FOUND_ERROR, AppError
 from backend.http_api.auth_post import AuthPostRoutes
 from backend.http_api.chat_cancel_post import ChatCancelPostRoutes
 from backend.http_api.chat_post import ChatPostRoutes
 from backend.http_api.chat_stream import CoachChatStreamTransport
 from backend.http_api.coach_actions_post import CoachActionsPostRoutes
+from backend.http_api.diagnostics_delete_post import DiagnosticsDeletePostRoutes
 from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.nutrition import NutritionPostRoutes
@@ -34,6 +35,7 @@ class HttpAuthenticatedPostRoutes:
     sync_commands: SyncCommandPostRoute
     history_undo: HistoryUndoPostRoutes
     privacy_delete: PrivacyDeletePostRoutes
+    diagnostics_delete: DiagnosticsDeletePostRoutes
     nutrition: NutritionPostRoutes
 
 
@@ -59,6 +61,7 @@ class HttpPostDispatcher:
         self._sync_commands = authenticated_routes.sync_commands
         self._history_undo = authenticated_routes.history_undo
         self._privacy_delete = authenticated_routes.privacy_delete
+        self._diagnostics_delete = authenticated_routes.diagnostics_delete
         self._nutrition = authenticated_routes.nutrition
 
     def handle_before_auth(self, handler: Any, path: str) -> bool:
@@ -92,6 +95,8 @@ class HttpPostDispatcher:
         if self._history_undo.handle(handler, path, session):
             return
         if self._privacy_delete.handle(handler, path):
+            return
+        if self._diagnostics_delete.handle(handler, path):
             return
         if self._nutrition.handle(handler, path):
             return
