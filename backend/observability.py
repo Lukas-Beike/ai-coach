@@ -89,7 +89,7 @@ _DIAGNOSTIC_SECRET_SUFFIXES = (
     "authorization", "cookie", "csrfhash", "sessionid", "sessionhash",
 )
 _DIAGNOSTIC_BINARY_FIELDS = frozenset({"inlinedata", "filedata", "audio", "inputaudio"})
-_DIAGNOSTIC_AUTH_RE = re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9_+/=.-]+")
+_DIAGNOSTIC_AUTH_RE = re.compile(r'''(?i)\b(?:bearer|basic)\s+[^\s,;"'}]+''')
 _DIAGNOSTIC_LABELED_SECRET_RE = re.compile(
     r"(?i)\b(password|passwd|secret|api[_-]?key|token|authorization|cookie)\s*[:=]"
 )
