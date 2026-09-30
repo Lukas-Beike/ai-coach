@@ -80,29 +80,35 @@ async function installControlledChatStream(page) {
   });
 }
 
-test("OpenAI billing failures remain visible in the chat after reload", async ({ page }, testInfo) => {
-  const browserErrors = installBrowserGuards(page);
-  await openAuthenticatedApp(page);
-  await page.getByRole("link", { name: "Coach", exact: true }).click();
-  const message = "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen.";
-  const failures = page.locator(".message.assistant").filter({ hasText: message });
-  const previousFailures = await failures.count();
-  await page.locator("#messageInput").fill("E2E fixture: OpenAI credit balance exhausted");
-  await page.getByRole("button", { name: "Senden", exact: true }).click();
-  await expect(failures).toHaveCount(previousFailures + 1);
-  await expect(failures.last()).toBeVisible();
-  await expect(page.locator("#coachWorking")).toHaveCount(0);
-  await page.locator("#messageInput").fill("Neue Frage nach dem Guthabenfehler");
-  await expect(page.locator("#sendButton")).toBeEnabled();
-  await page.locator("#messageInput").fill("");
-  await expect(page.locator("#messages")).not.toContainText("Synthetic private provider detail");
-  await page.reload();
-  await expect(page.locator("#appShell")).toBeVisible();
-  await expect(failures.last()).toBeVisible();
-  await expect(failures.last()).toContainText(message);
-  await expectNoBrowserErrorsOrOverflow(page, browserErrors);
-  await page.screenshot({ path: testInfo.outputPath("openai-billing-error.png"), fullPage: true });
-});
+for (const [scenario, prompt, message] of [
+  ["billing", "E2E fixture: OpenAI credit balance exhausted", "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."],
+  ["model", "E2E fixture: OpenAI model not found", "Das konfigurierte KI-Modell oder der angeforderte Dienst wurde nicht gefunden. Bitte die Modellkonfiguration prüfen."],
+  ["access", "E2E fixture: OpenAI access denied", "Der KI-Dienst hat den Zugriff abgelehnt. Bitte prüfe den API-Zugang in den Einstellungen."],
+  ["timeout", "E2E fixture: OpenAI timeout", "Der KI-Dienst hat nicht rechtzeitig geantwortet. Bitte versuche es erneut."],
+]) {
+  test(`OpenAI ${scenario} failures remain visible in the chat after reload`, async ({ page }, testInfo) => {
+    const browserErrors = installBrowserGuards(page);
+    await openAuthenticatedApp(page);
+    await page.getByRole("link", { name: "Coach", exact: true }).click();
+    const failures = page.locator(".message.assistant").filter({ hasText: message });
+    const previousFailures = await failures.count();
+    await page.locator("#messageInput").fill(prompt);
+    await page.getByRole("button", { name: "Senden", exact: true }).click();
+    await expect(failures).toHaveCount(previousFailures + 1);
+    await expect(failures.last()).toBeVisible();
+    await expect(page.locator("#coachWorking")).toHaveCount(0);
+    await page.locator("#messageInput").fill("Neue Frage nach dem Anbieterfehler");
+    await expect(page.locator("#sendButton")).toBeEnabled();
+    await page.locator("#messageInput").fill("");
+    await expect(page.locator("#messages")).not.toContainText("Synthetic private provider detail");
+    await page.reload();
+    await expect(page.locator("#appShell")).toBeVisible();
+    await expect(failures.last()).toBeVisible();
+    await expect(failures.last()).toContainText(message);
+    await expectNoBrowserErrorsOrOverflow(page, browserErrors);
+    await page.screenshot({ path: testInfo.outputPath(`openai-${scenario}-error.png`), fullPage: true });
+  });
+}
 
 test("provider-backed API calls outlast their server deadlines", async ({ page }) => {
   await openAuthenticatedApp(page);

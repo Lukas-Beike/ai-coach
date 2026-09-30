@@ -49,10 +49,18 @@ def fixture_coach_response(payload, **kwargs):
         question = next((item.get("question") for item in outputs if item.get("question")), None)
         return {"output_text": question or "Deine Rückmeldung ist gespeichert."}
     decoded = json.loads(value)
-    if decoded.get("current_message") == "E2E fixture: OpenAI credit balance exhausted":
+    current_message = decoded.get("current_message")
+    if current_message == "E2E fixture: OpenAI timeout":
+        raise server.AppError(504, "Synthetic private provider detail", reason="provider_timeout")
+    provider_failure_codes = {
+        "E2E fixture: OpenAI credit balance exhausted": "credit_balance_exhausted",
+        "E2E fixture: OpenAI model not found": "model_not_found",
+        "E2E fixture: OpenAI access denied": "permission_denied",
+    }
+    if current_message in provider_failure_codes:
         return server.provider_state_service().validate_openai_response("/responses", {
             "status": "failed",
-            "error": {"code": "credit_balance_exhausted", "message": "Synthetic private provider detail"},
+            "error": {"code": provider_failure_codes[current_message], "message": "Synthetic private provider detail"},
         })
     context = decoded["dialogue"]
     current_id = context["current_user_message_id"]

@@ -517,11 +517,11 @@ class OpenAIResponseFailure(Exception):
         self.message = _RESPONSE_FAILURE_MESSAGES.get(
             reason, "OpenAI response validation failed."
         )
-        billing_error = _openai_billing_error(
-            provider_error_code or "", provider_error_type or "", ""
+        classified_reason, classified_message = _openai_error_reason(
+            0, {"code": provider_error_code, "type": provider_error_type}
         )
-        if billing_error is not None:
-            self.reason, self.message = billing_error
+        if classified_reason != "http_error":
+            self.reason, self.message = classified_reason, classified_message
         self.provider_error_code = provider_error_code
         self.provider_error_type = provider_error_type
         self.provider_response_status = provider_response_status
@@ -1796,17 +1796,17 @@ def _openai_error_reason(status: int, error: dict[str, Any]) -> tuple[str, str]:
     if (
         status == 429
         or code == "rate_limit_exceeded"
-        or error_type == "rate_limit_exceeded"
+        or error_type in {"rate_limit_exceeded", "rate_limit_error"}
     ):
         return (
             "rate_limit_exceeded",
             "OpenAI hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen.",
         )
-    if status in {401, 403} or code in {
-        "invalid_api_key",
-        "invalid_organization",
-        "permission_denied",
-    }:
+    if (
+        status in {401, 403}
+        or code in {"invalid_api_key", "invalid_organization", "permission_denied"}
+        or error_type in {"authentication_error", "permission_error"}
+    ):
         return (
             "authentication_or_permission",
             "Der OpenAI-Zugang wurde abgelehnt. Bitte API-Schlüssel und Projektberechtigungen prüfen.",
@@ -1816,7 +1816,7 @@ def _openai_error_reason(status: int, error: dict[str, Any]) -> tuple[str, str]:
             "not_found",
             "Das konfigurierte OpenAI-Modell oder der angeforderte Dienst wurde nicht gefunden.",
         )
-    if status >= 500:
+    if status >= 500 or code == "server_error" or error_type == "server_error":
         return (
             "provider_unavailable",
             "OpenAI ist vorübergehend nicht verfügbar. Bitte später erneut versuchen.",

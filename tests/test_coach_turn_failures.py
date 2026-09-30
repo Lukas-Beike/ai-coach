@@ -138,12 +138,52 @@ class CoachTurnFailureTests(unittest.TestCase):
             self.assertEqual(status, "failed")
             self.assertIn(expected, text)
 
+    def test_provider_failure_explanations_are_actionable_and_safe(self) -> None:
+        cases = (
+            ("provider_timeout", "nicht rechtzeitig geantwortet"),
+            ("not_found", "Modellkonfiguration prüfen"),
+            ("authentication_or_permission", "API-Zugang"),
+            ("rate_limit_exceeded", "Anfragelimit erreicht"),
+            ("provider_unavailable", "vorübergehend nicht verfügbar"),
+            ("conversation_locked", "warte kurz"),
+            ("conversation_state_invalid", "dein lokaler Chat bleibt erhalten"),
+            ("insufficient_quota", "Guthaben und Abrechnung"),
+            ("organization_spend_limit_exceeded", "Limit im OpenAI-Konto prüfen"),
+            ("project_spend_limit_exceeded", "Limit im OpenAI-Konto prüfen"),
+            ("organization_usage_limit_exceeded", "Limit im OpenAI-Konto prüfen"),
+        )
+        for reason, expected in cases:
+            with self.subTest(reason=reason):
+                status, text, _, _ = self.service._base_response(
+                    AppError(502, "private provider text", reason=reason), []
+                )
+                self.assertEqual(status, "failed")
+                self.assertIn(expected, text)
+                self.assertNotIn("private provider text", text)
+
+    def test_provider_timeout_is_a_persisted_actionable_chat_message(self) -> None:
+        self._assert_persisted_failure(
+            "provider_timeout",
+            "Der KI-Dienst hat nicht rechtzeitig geantwortet. Bitte versuche es erneut.",
+        )
+
+    def test_model_not_found_is_a_persisted_actionable_chat_message(self) -> None:
+        self._assert_persisted_failure(
+            "not_found",
+            "Das konfigurierte KI-Modell oder der angeforderte Dienst wurde nicht gefunden. Bitte die Modellkonfiguration prüfen.",
+        )
+
     def test_openai_billing_failure_is_a_persisted_actionable_chat_message(self) -> None:
+        self._assert_persisted_failure(
+            "credit_balance_exhausted",
+            "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen.",
+        )
+
+    def _assert_persisted_failure(self, reason: str, expected: str) -> None:
         self._seed({"command_receipts": []})
         result = self.service.persist(
-            "turn-1", {}, AppError(502, "sensitive provider text", reason="credit_balance_exhausted")
+            "turn-1", {}, AppError(502, "sensitive provider text", reason=reason)
         )
-        expected = "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["message"]["content"], expected)
         status, stored = self._stored()
