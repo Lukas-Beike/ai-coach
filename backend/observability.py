@@ -78,7 +78,7 @@ DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 10000
 DIAGNOSTIC_CAPTURE_MAX_BYTES = 16 * 1024 * 1024
 DIAGNOSTIC_CAPTURE_MAX_ENTRY_BYTES = 1024 * 1024
 DIAGNOSTIC_CAPTURE_ENTRIES_KEY = "diagnostic_capture_entries"
-_REDACTED = _REDACTED
+_REDACTED = "[REDACTED]"
 _DIAGNOSTIC_SECRET_FIELDS = frozenset({
     "key", "credentials", "session", "sessionid", "sessionhash", "sessionkey",
     "sessionkeyhash", "signature", "oauth1", "oauth2", "csrftoken", "csrf",
