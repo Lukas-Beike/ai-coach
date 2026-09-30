@@ -91,7 +91,7 @@ _DIAGNOSTIC_SECRET_SUFFIXES = (
 _DIAGNOSTIC_BINARY_FIELDS = frozenset({"inlinedata", "filedata", "audio", "inputaudio"})
 _DIAGNOSTIC_AUTH_RE = re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9_+/=.-]+")
 _DIAGNOSTIC_LABELED_SECRET_RE = re.compile(
-    r'''(?i)\b(password|passwd|secret|api[_-]?key|token|authorization|cookie)\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|\S+)'''
+    r'''(?i)\b(password|passwd|secret|api[_-]?key|token|authorization|cookie)\s*[:=]\s*([^,;}\r\n]+)'''
 )
 _DIAGNOSTIC_PRIVATE_KEY_RE = re.compile(
     r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.DOTALL
@@ -210,7 +210,7 @@ def _redact_url(match: re.Match[str]) -> str:
         query_pairs = []
         for key, item in parse_qsl(parsed.query, keep_blank_values=True):
             safe_item = (
-                "[REDACTED]"
+                _REDACTED
                 if key.casefold().replace("-", "_") in REDACTED_URL_QUERY_KEYS
                 else item
             )
@@ -285,7 +285,7 @@ class Redactor:
                 _secret_variants(secret_value), key=len, reverse=True
             ):
                 redacted = re.sub(
-                    re.escape(variant), "[REDACTED]", redacted, flags=re.IGNORECASE
+                    re.escape(variant), _REDACTED, redacted, flags=re.IGNORECASE
                 )
         redacted = re.sub(
             r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED_OPENAI_KEY]", redacted
@@ -295,7 +295,7 @@ class Redactor:
         )
         redacted = re.sub(
             r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+",
-            r"\1[REDACTED]",
+            r"\1" + _REDACTED,
             redacted,
         )
         return redacted
@@ -339,7 +339,7 @@ def _clean_diagnostic_text(value: str, redactor: Redactor, encoded_secrets: tupl
     for secret in encoded_secrets:
         safe = safe.replace(secret, _REDACTED)
     safe = _DIAGNOSTIC_AUTH_RE.sub("[REDACTED_AUTHORIZATION]", safe)
-    safe = _DIAGNOSTIC_LABELED_SECRET_RE.sub(lambda match: match.group(1) + "=[REDACTED]", safe)
+    safe = _DIAGNOSTIC_LABELED_SECRET_RE.sub(lambda match: match.group(1) + "=" + _REDACTED, safe)
     safe = re.sub(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b", "[REDACTED_TOKEN]", safe)
     safe = _DIAGNOSTIC_PRIVATE_KEY_RE.sub("[REDACTED_PRIVATE_KEY]", safe)
     return _DIAGNOSTIC_DATA_URL_RE.sub("[OMITTED_BINARY]", safe)
@@ -618,42 +618,57 @@ class DiagnosticCapture:
     def _entry_bytes(entry: dict[str, Any]) -> int:
         return len(json.dumps(entry, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 1
 
-    def _bounded_entry(self, entry: dict[str, Any]) -> dict[str, Any]:  # NOSONAR - bounded diagnostic fallback intentionally handles multiple data shapes
+    def _bounded_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
         safe = self._redactor.sanitize_diagnostic_value(entry)
         if self._entry_bytes(safe) <= self._max_entry_bytes:
             return safe
         details = safe.get("details")
-        if isinstance(details, dict):
-            for key in sorted(details, key=lambda name: len(json.dumps(details[name], ensure_ascii=False)), reverse=True):
-                if key in {"error", "provider_error", "last_error", "diagnostic_error"}:
-                    continue
-                rendered = json.dumps(details[key], ensure_ascii=False)
-                details[key] = {"truncated": True, "original_bytes": len(rendered.encode("utf-8")), "preview": rendered[:self._max_entry_bytes // 16]}
-                if self._entry_bytes(safe) <= self._max_entry_bytes:
-                    return safe
-        compact_errors: dict[str, Any] = {}
-        if isinstance(details, dict):
-            for key in ("error", "provider_error", "last_error", "diagnostic_error"):
-                value = details.get(key)
-                if value is None:
-                    continue
-                if isinstance(value, dict):
-                    compact: dict[str, Any] = {}
-                    for field in ("code", "type", "param", "message", "reason", "status"):
-                        item = value.get(field)
-                        if isinstance(item, (str, int, float, bool)):
-                            compact[field] = item[:min(4000, self._max_entry_bytes // 64)] if isinstance(item, str) else item
-                    compact_errors[key] = compact or {"truncated": True}
-                else:
-                    compact_errors[key] = str(value)[:min(4000, self._max_entry_bytes // 64)]
-        compact_details: dict[str, Any] = {"truncated": True, "reason": "entry_size_limit"}
-        compact_details.update(compact_errors)
-        compact = {"timestamp": safe.get("timestamp"), "event": safe.get("event"), "details": compact_details}
+        if isinstance(details, dict) and self._truncate_details(safe, details):
+            return safe
+        return self._compact_oversize_entry(safe, details)
+
+    def _truncate_details(self, entry: dict[str, Any], details: dict[str, Any]) -> bool:
+        protected = {"error", "provider_error", "last_error", "diagnostic_error"}
+        for key in sorted(details, key=lambda name: len(json.dumps(details[name], ensure_ascii=False)), reverse=True):
+            if key in protected:
+                continue
+            rendered = json.dumps(details[key], ensure_ascii=False)
+            details[key] = {
+                "truncated": True,
+                "original_bytes": len(rendered.encode("utf-8")),
+                "preview": rendered[:self._max_entry_bytes // 16],
+            }
+            if self._entry_bytes(entry) <= self._max_entry_bytes:
+                return True
+        return False
+
+    def _compact_oversize_entry(self, entry: dict[str, Any], details: Any) -> dict[str, Any]:
+        compact_errors = {
+            key: self._compact_error(details[key])
+            for key in ("error", "provider_error", "last_error", "diagnostic_error")
+            if isinstance(details, dict) and details.get(key) is not None
+        }
+        compact_details: dict[str, Any] = {"truncated": True, "reason": "entry_size_limit", **compact_errors}
+        compact = {"timestamp": entry.get("timestamp"), "event": entry.get("event"), "details": compact_details}
         if self._entry_bytes(compact) <= self._max_entry_bytes:
             return compact
-        for key in compact_errors:
-            compact_details[key] = {"truncated": True}
+        compact_details.update({key: {"truncated": True} for key in compact_errors})
         return compact
+
+    def _compact_error(self, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return str(value)[:min(4000, self._max_entry_bytes // 64)]
+        fields = ("code", "type", "param", "message", "reason", "status")
+        return {
+            key: self._clip_error_field(value[key])
+            for key in fields
+            if isinstance(value.get(key), (str, int, float, bool))
+        } or {"truncated": True}
+
+    def _clip_error_field(self, value: Any) -> Any:
+        if isinstance(value, str):
+            return value[:min(4000, self._max_entry_bytes // 64)]
+        return value
 
     def _trim(self) -> None:
         while self._entries_cache and (len(self._entries_cache) > self._max_entries or self._total_bytes > self._max_bytes):
