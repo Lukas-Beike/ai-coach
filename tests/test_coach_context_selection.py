@@ -17,7 +17,7 @@ class CoachContextSelectionTests(unittest.TestCase):
             with self.subTest(message=message):
                 selection = select_coach_context(message, {})
                 self.assertEqual(selection.sections, CoachContextSelection("fallback").sections)
-                self.assertIsNone(selection.planned_horizon_days)
+                self.assertIsNone(selection.horizon_days)
 
     def test_profiles(self):
         examples = {
