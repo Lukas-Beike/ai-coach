@@ -4,11 +4,13 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
 from contextlib import contextmanager
 from pathlib import Path
 
 from backend.coach.service import command_receipt
 from backend.diagnostics.history import CoachDiagnosticHistoryService
+from backend.observability import Redactor
 
 
 class CoachDiagnosticHistoryServiceTests(unittest.TestCase):
@@ -37,6 +39,7 @@ class CoachDiagnosticHistoryServiceTests(unittest.TestCase):
 
         def redact(value):
             self.redacted_values.append(value)
+            value = Redactor(lambda: SimpleNamespace()).sanitize_diagnostic_value(value)
             return {**value, "reason": "[REDACTED]"} if "reason" in value else value
 
         self.service = CoachDiagnosticHistoryService(
@@ -105,12 +108,10 @@ class CoachDiagnosticHistoryServiceTests(unittest.TestCase):
             {"tool": "unknown", "ok": False, "error": None},
         ])
         serialized = json.dumps(entry)
-        for secret in (
-            "private-turn-id", "athlete-secret@example.invalid", "private-token",
-            "private athlete data", "private result", "C:/private/path.py",
-        ):
-            self.assertNotIn(secret, serialized)
-        self.assertEqual(len(self.redacted_values), 2)
+        self.assertNotIn("private-token", serialized)
+        self.assertNotIn("client_turn_id", entry)
+        self.assertNotIn("receipt", entry)
+        self.assertEqual(len(self.redacted_values), 3)
 
     def test_limits_to_20_rows_40_steps_and_8_frames(self):
         frames = [

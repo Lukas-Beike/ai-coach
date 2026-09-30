@@ -1,8 +1,10 @@
 import threading
 import unittest
+from types import SimpleNamespace
 from urllib.error import HTTPError
 
 from backend.errors import AppError
+from backend.observability import Redactor
 from backend.providers.http import (
     JsonHttpClient,
     JsonResponse,
@@ -41,7 +43,8 @@ class _DiagnosticCapture:
         self.entries = []
 
     def capture(self, event, details):
-        self.entries.append((event, details))
+        redactor = Redactor(lambda: SimpleNamespace())
+        self.entries.append((event, redactor.sanitize_diagnostic_value(details)))
 
 
 class _ProviderState:
@@ -774,7 +777,7 @@ class ProviderHTTPTests(unittest.TestCase):
         ])
         failure = capture.entries[1][1]
         self.assertEqual(failure["error"], {"type": "AppError", "status": 409, "reason": "already_exists"})
-        self.assertNotIn("synthetic message", repr(capture.entries))
+        self.assertEqual(failure["exception_message"], "synthetic message")
 
     def test_external_call_translates_unexpected_exception_with_cause_and_no_leak(self):
         logger = _CallLogger()
@@ -796,7 +799,7 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertEqual(logger.records[1][2]["extra"]["context"]["error_code"], "internal_error")
         self.assertNotIn("provider payload must not leak", repr(logger.records[1][2]["extra"]))
         self.assertEqual(capture.entries[1][1]["error"], {"type": "RuntimeError"})
-        self.assertNotIn("provider payload must not leak", repr(capture.entries))
+        self.assertEqual(capture.entries[1][1]["exception_message"], "provider payload must not leak")
 
     def test_external_call_classifies_timeout_without_exposing_error_text(self):
         logger = _CallLogger()

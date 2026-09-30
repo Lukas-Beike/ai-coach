@@ -138,7 +138,7 @@ Intervals Coach adheres to a clean-slate installation and maintenance model:
 - **Zero-Downtime Maintenance Mode**: Process-level maintenance gate that prevents concurrent writes and ensures transaction safety during database restoration.
 - **Pre-Restore Rollback Copies**: Automated creation of a safety copy of the existing database before executing any database restore or replacement.
 - **Redacted Operational Logging**: Structured server logs that correlate technical operation IDs while stripping authentication headers, tokens, and athlete text.
-- **Always-on Technical Diagnostics**: Bounded technical diagnostic logger (up to 1,500 entries) recording API response shapes and error traces without capturing athlete content, credentials, or tokens.
+- **Always-on Technical Diagnostics**: Bounded diagnostic logger (up to 10,000 entries, 16 MiB total, 1 MiB per entry) recording sanitized Coach requests and responses, provider error details, tool activity, and error traces. Credentials, keys, tokens, and session data are removed before storage.
 
 ---
 
@@ -470,7 +470,7 @@ When a database restore is initiated:
 
 ### Operational Logging & Diagnostics
 - **Sanitized Logs**: Standard container logs contain only operational timestamps, correlation IDs, status codes, and anonymized error classifications. API tokens, passwords, and athlete metrics are never logged.
-- **Always-on Technical Diagnostics**: The application keeps up to 1,500 recent technical metadata entries, including response shapes, without storing response contents, athlete data, credentials, or tokens.
+- **Always-on Technical Diagnostics**: The application keeps up to 10,000 recent diagnostic entries (16 MiB total, 1 MiB per entry, with truncation marked), including sanitized Coach requests, provider responses, tool activity, and provider error messages. Credentials, keys, tokens, and session data are removed before storage.
 - **Server Log Management**: In **Betrieb & Diagnose**, authenticated users can download the sanitized current server log and its available rotations as JSON Lines, or delete the log files.
 - **Diagnostics Management**: In **Betrieb & Diagnose**, authenticated users can download the sanitized technical diagnostic report as JSON, or clear the stored technical diagnostic entries.
 

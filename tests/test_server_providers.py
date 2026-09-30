@@ -583,12 +583,12 @@ class ServerProvidersTests(ServerTestCase):
         self.assertNotIn("do-not-log-request-body", log_text)
         self.assertNotIn("do-not-log-response-body", log_text)
 
-    def test_diagnostic_capture_is_always_active_and_keeps_response_shape_without_content(self):
+    def test_diagnostic_capture_omits_provider_content_and_removes_credentials(self):
         self.assertTrue(server.DIAGNOSTIC_CAPTURE.status()["active"])
         response = {
             "bodyBattery": 82,
             "access_token": "must-never-appear",
-            "nested": {"sessionId": "must-also-never-appear", "athlete_note": "must-not-appear"},
+            "nested": {"sessionId": "must-also-never-appear", "athlete_note": "synthetic athlete note"},
         }
         server.provider_http.external_call(
             "garmin",
@@ -601,24 +601,24 @@ class ServerProvidersTests(ServerTestCase):
         report = server.DIAGNOSTICS_ASSEMBLY.report_service().report()
         report_text = json.dumps(report, ensure_ascii=False)
         self.assertIn("bodyBattery", report_text)
-        self.assertNotIn("must-not-appear", report_text)
+        self.assertNotIn("synthetic athlete note", report_text)
         self.assertNotIn("must-never-appear", report_text)
         self.assertNotIn("must-also-never-appear", report_text)
         entries = server.DIAGNOSTIC_CAPTURE.entries()
         self.assertTrue(entries)
         response_capture = entries[-1]["details"]["response"]
         self.assertIn("shape", response_capture)
-        self.assertNotIn("content", response_capture)
+        self.assertNotIn("synthetic athlete note", json.dumps(response_capture))
 
         server.provider_http.external_call(
             "garmin",
             "body_battery",
-            lambda: {"new_marker": "not captured"},
+            lambda: {"new_marker": "synthetic provider response"},
             logger=server.LOGGER,
             diagnostic_capture=server.DIAGNOSTIC_CAPTURE,
             operation_context=sync_observation.operation_context(),
         )
-        self.assertNotIn("not captured", json.dumps(server.DIAGNOSTICS_ASSEMBLY.report_service().report(), ensure_ascii=False))
+        self.assertNotIn("synthetic provider response", json.dumps(server.DIAGNOSTICS_ASSEMBLY.report_service().report(), ensure_ascii=False))
 
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
         server.observability.configure_logging(server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR)
@@ -728,7 +728,7 @@ class ServerProvidersTests(ServerTestCase):
         self.assertEqual(raised.exception.reason, "rate_limit_exceeded")
         self.assertEqual(raised.exception.retry_after_seconds, 9)
 
-    def test_streaming_openai_400_is_captured_without_error_message_or_payload(self):
+    def test_streaming_openai_400_is_captured_with_provider_error_details(self):
         raw_error = json.dumps({
             "error": {
                 "code": "invalid_function_call_output",
@@ -748,7 +748,7 @@ class ServerProvidersTests(ServerTestCase):
         failed = next(entry for entry in reversed(captured) if entry["event"] == "openai_stream_failed")
         self.assertEqual(failed["details"]["error_code"], "invalid_function_call_output")
         self.assertEqual(failed["details"]["request_id"], "req_test_456")
-        self.assertNotIn("athlete-private", json.dumps(captured))
+        self.assertIn("athlete-private", json.dumps(captured))
 
     def test_responses_stream_request_emits_deltas_and_validates_only_final_response(self):
         response_payload = {

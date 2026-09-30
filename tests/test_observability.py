@@ -67,6 +67,63 @@ class _KeyValueStore:
 
 
 class ObservabilityTests(unittest.TestCase):
+    def test_detail_capture_retains_evidence_and_removes_nested_and_encoded_credentials(self):
+        import base64
+
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(store.get, store.set, Redactor(_config))
+        capture.capture("synthetic_failed", {
+            "request": {"input": json.dumps({"message": "Analyse my last ride", "password": "unknown synthetic value"}),
+                        "instructions": "Athlete training context", "max_output_tokens": 6000},
+            "provider_error": {"code": "unrecognized_provider_code", "message": "Invalid function schema at input[0]"},
+            "accessToken": "unknown bearer value", "session_csrf_hash": "unknown session value",
+            "session_key": "unknown session key",
+            "nested": [{"refresh_token": "unknown refresh value", "authorization": "unknown auth value"}],
+            "known_encoded": base64.b64encode(b"synthetic-openai-value").decode(),
+            "text": "password=unknown text value\ntraining facts remain",
+            "image": "data:image/png;base64,syntheticpixels",
+            "inlineData": {"mimeType": "image/png", "data": "syntheticpixels"},
+        })
+        serialized = store.get("diagnostic_capture_entries")
+        for secret in ("unknown synthetic value", "unknown bearer value", "unknown session value", "unknown session key", "unknown refresh value", "unknown auth value", "unknown text value", "syntheticpixels", base64.b64encode(b"synthetic-openai-value").decode()):
+            self.assertNotIn(secret, serialized)
+        details = capture.entries()[0]["details"]
+        self.assertEqual(details["provider_error"]["code"], "unrecognized_provider_code")
+        self.assertEqual(details["provider_error"]["message"], "Invalid function schema at input[0]")
+        self.assertEqual(json.loads(details["request"]["input"])["message"], "Analyse my last ride")
+        self.assertEqual(details["request"]["max_output_tokens"], 6000)
+        self.assertIn("training facts remain", details["text"])
+
+    def test_capture_limits_bytes_preserves_error_and_persists_failure_before_restart(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(store.get, store.set, Redactor(_config), max_bytes=8192, max_entry_bytes=2048)
+        for index in range(30):
+            capture.capture("request", {"index": index, "context": "Synthetic training content " * 15})
+        capture.capture("provider_failed", {"request": "synthetic-openai-value " + "x" * 10000,
+                                             "provider_error": {"code": "unknown_code", "message": "Synthetic invalid request"}})
+        self.assertLessEqual(len(store.get("diagnostic_capture_entries").encode()), 8192)
+        self.assertLessEqual(capture.status()["bytes"], 8192)
+        final = capture.entries()[-1]
+        self.assertTrue(final["details"]["request"]["truncated"])
+        self.assertEqual(final["details"]["provider_error"]["message"], "Synthetic invalid request")
+        self.assertNotIn("synthetic-openai-value", store.get("diagnostic_capture_entries"))
+        restarted = DiagnosticCapture(store.get, store.set, Redactor(_config), max_bytes=8192, max_entry_bytes=2048)
+        self.assertEqual(restarted.entries(), capture.entries())
+
+    def test_capture_retains_error_markers_when_error_itself_exceeds_entry_limit(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), max_entry_bytes=1024,
+        )
+        capture.capture("provider_failed", {"provider_error": {
+            "code": "server_error", "type": "server_error",
+            "message": "Synthetic upstream failure " + "x" * 5000,
+        }})
+        entry = capture.entries()[0]
+        self.assertTrue(entry["details"]["truncated"])
+        self.assertEqual(entry["details"]["provider_error"]["code"], "server_error")
+        self.assertLessEqual(capture._entry_bytes(entry), 1024)
+
     def test_safe_response_headers_keeps_only_allowlisted_transport_headers(self):
         headers = {
             "Content-Type": "application/json",
@@ -480,6 +537,11 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(capture.entries(), [])
         self.assertEqual(capture.status()["entries"], 0)
         self.assertEqual(store.get("diagnostic_capture_entries"), "[]")
+        self.assertEqual(capture.status()["bytes"], 2)
+
+        capture.capture("event-after-clear", {"data": "fresh"})
+        self.assertEqual(capture.status()["entries"], 1)
+        self.assertGreater(capture.status()["bytes"], 2)
 
     def test_diagnostic_capture_clear_failure_preserves_cache_and_raises(self):
         store = _KeyValueStore()

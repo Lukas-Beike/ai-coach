@@ -71,7 +71,10 @@ def _safe_json_value(value: Any) -> Any:
 
 def _json(value: Any) -> str:
     return json.dumps(
-        _safe_json_value(value), ensure_ascii=False, allow_nan=False, separators=(",", ":")
+        _safe_json_value(value),
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
     )
 
 
@@ -96,7 +99,9 @@ class ProviderStateService:
 
     def _summary_unlocked(self, db: Any, provider: str) -> dict[str, Any]:
         raw_rate_limits = (
-            self._repository.get(db, _OPENAI_RATE_LIMITS_KEY) if provider == "openai" else None
+            self._repository.get(db, _OPENAI_RATE_LIMITS_KEY)
+            if provider == "openai"
+            else None
         )
         summary = provider_usage.daily_summary(
             self._repository.get(db, _USAGE_KEYS[provider]),
@@ -167,7 +172,8 @@ class ProviderStateService:
                 provider,
                 state="ok",
                 reason="ok",
-                message=("OpenAI" if provider == "openai" else "Gemini") + " ist verfügbar.",
+                message=("OpenAI" if provider == "openai" else "Gemini")
+                + " ist verfügbar.",
                 http_status=http_status,
                 provider_error_code=None,
             )
@@ -201,6 +207,12 @@ class ProviderStateService:
             error = AppError(502, failure.message, reason=failure.reason)
             if failure.provider_error_code is not None:
                 error.provider_error_code = failure.provider_error_code
+            if failure.provider_error_type is not None:
+                error.provider_error_type = failure.provider_error_type
+            if failure.provider_response_status is not None:
+                error.provider_response_status = failure.provider_response_status
+            if failure.provider_incomplete_reason is not None:
+                error.provider_incomplete_reason = failure.provider_incomplete_reason
             raise error from failure
 
     def record_usage(
