@@ -596,15 +596,12 @@ def response_diagnostic_content(response: Any) -> dict[str, Any]:
     """Expose provider error content for the bounded, redacted diagnostic store."""
     if not isinstance(response, dict):
         return {}
-    error = response.get("error")
-    error = error if isinstance(error, dict) else {}
-    if response.get("type") == "error":
-        error = response
-    content: dict[str, Any] = {}
-    for source, target in (("code", "provider_error_code_raw"), ("type", "provider_error_type"), ("param", "provider_error_parameter"), ("message", "provider_error_message")):
-        value = error.get(source)
-        if isinstance(value, str) and value.strip():
-            content[target] = value
+    error = _response_error_object(response)
+    content = {
+        target: error[source]
+        for source, target in (("code", "provider_error_code_raw"), ("type", "provider_error_type"), ("param", "provider_error_parameter"), ("message", "provider_error_message"))
+        if isinstance(error.get(source), str) and error[source].strip()
+    }
     incomplete = response.get("incomplete_details")
     if isinstance(incomplete, dict):
         content["incomplete_details"] = incomplete
@@ -612,6 +609,13 @@ def response_diagnostic_content(response: Any) -> dict[str, Any]:
     if isinstance(last_error, dict):
         content["last_error"] = last_error
     return content
+
+
+def _response_error_object(response: dict[str, Any]) -> dict[str, Any]:
+    error = response.get("error")
+    if isinstance(error, dict):
+        return error
+    return response if response.get("type") == "error" else {}
 
 
 def _content_text(content: Any) -> str | None:
@@ -676,33 +680,42 @@ def consume_sse_event(
     if event is None:
         return None
     kind = event_name or str(event.get("type") or "")
-    if state is not None:
-        marker = kind if re.fullmatch(r"[a-z_.]{1,100}", kind) else "unknown"
-        state.event_counts[marker] = state.event_counts.get(marker, 0) + 1
+    _record_sse_event(state, kind)
     response_candidate = event.get("response")
     candidate = response_candidate if isinstance(response_candidate, dict) else event
     if state is not None and isinstance(candidate.get("id"), str):
         state.response_id = candidate["id"]
     if kind in {"response.created", "response.in_progress"}:
-        response_id = str(candidate.get("id") or "").strip()
-        if state is not None:
-            state.response_id = response_id
-        if response_id and on_response_id is not None:
-            on_response_id(response_id)
+        _handle_sse_response_id(candidate, state, on_response_id)
     elif kind == "response.output_text.delta":
-        delta = event.get("delta")
-        if isinstance(delta, str) and delta:
-            if state is not None:
-                state.text_delta_chars += len(delta)
-            on_text_delta(delta)
-    elif kind in {
-        "error",
-        "response.completed",
-        "response.incomplete",
-        "response.failed",
-    }:
+        _handle_sse_delta(event, state, on_text_delta)
+    elif kind in {"error", "response.completed", "response.incomplete", "response.failed"}:
         return _terminal_sse_response(kind, event, candidate)
     return None
+
+
+def _record_sse_event(state: StreamReadState | None, kind: str) -> None:
+    if state is None:
+        return
+    marker = kind if re.fullmatch(r"[a-z_.]{1,100}", kind) else "unknown"
+    state.event_counts[marker] = state.event_counts.get(marker, 0) + 1
+
+
+def _handle_sse_response_id(candidate: dict[str, Any], state: StreamReadState | None, callback: Callable[[str], None] | None) -> None:
+    response_id = str(candidate.get("id") or "").strip()
+    if state is not None:
+        state.response_id = response_id
+    if response_id and callback is not None:
+        callback(response_id)
+
+
+def _handle_sse_delta(event: dict[str, Any], state: StreamReadState | None, callback: Callable[[str], None]) -> None:
+    delta = event.get("delta")
+    if not isinstance(delta, str) or not delta:
+        return
+    if state is not None:
+        state.text_delta_chars += len(delta)
+    callback(delta)
 
 
 @dataclass(frozen=True)

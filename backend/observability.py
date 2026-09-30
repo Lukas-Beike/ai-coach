@@ -78,6 +78,25 @@ DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 10000
 DIAGNOSTIC_CAPTURE_MAX_BYTES = 16 * 1024 * 1024
 DIAGNOSTIC_CAPTURE_MAX_ENTRY_BYTES = 1024 * 1024
 DIAGNOSTIC_CAPTURE_ENTRIES_KEY = "diagnostic_capture_entries"
+_REDACTED = "[REDACTED]"
+_DIAGNOSTIC_SECRET_FIELDS = frozenset({
+    "key", "credentials", "session", "sessionid", "sessionhash", "sessionkey",
+    "sessionkeyhash", "signature", "oauth1", "oauth2", "csrftoken", "csrf",
+})
+_DIAGNOSTIC_SECRET_SUFFIXES = (
+    "password", "passwd", "passphrase", "passwordhash", "secret", "token",
+    "apikey", "privatekey", "databasekey", "encryptionkey", "credential",
+    "authorization", "cookie", "csrfhash", "sessionid", "sessionhash",
+)
+_DIAGNOSTIC_BINARY_FIELDS = frozenset({"inlinedata", "filedata", "audio", "inputaudio"})
+_DIAGNOSTIC_AUTH_RE = re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9_+/=.-]+")
+_DIAGNOSTIC_LABELED_SECRET_RE = re.compile(
+    r'''(?i)\b(password|passwd|secret|api[_-]?key|token|authorization|cookie)\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|\S+)'''
+)
+_DIAGNOSTIC_PRIVATE_KEY_RE = re.compile(
+    r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.DOTALL
+)
+_DIAGNOSTIC_DATA_URL_RE = re.compile(r'''data:[^\s,;]+(?:;[^,]*)?,[^\s"']+''')
 
 
 def _secret_variants(value: Any) -> set[str]:
@@ -297,66 +316,78 @@ class Redactor:
     def sanitize_diagnostic_value(self, value: Any) -> Any:
         """Retain diagnostic content while removing credentials before storage."""
         config = self._config_supplier()
-        encoded_secrets = []
-        for attribute in (
-            "openai_api_key", "gemini_api_key", "intervals_api_key", "garmin_email",
-            "garmin_password", "app_password", "calendar_ical_url",
-        ):
-            secret = str(getattr(config, attribute, "") or "")
-            if len(secret) >= 4:
-                encoded_secrets.extend((
-                    base64.b64encode(secret.encode()).decode(),
-                    json.dumps(secret, ensure_ascii=True)[1:-1],
-                ))
+        encoded_secrets = _encoded_diagnostic_secrets(config)
+        return _clean_diagnostic_value(value, self, encoded_secrets)
 
-        def text(item: str) -> str:
-            safe = self.redact_text(item)
-            for secret in sorted(set(encoded_secrets), key=len, reverse=True):
-                safe = safe.replace(secret, "[REDACTED]")
-            safe = re.sub(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9_+/=.-]+", "[REDACTED_AUTHORIZATION]", safe)
-            safe = re.sub(
-                r'''(?im)(\b(?:password|passwd|secret|api[_-]?key|token|access[_-]?token|refresh[_-]?token|csrf[_-]?token|authorization|cookie)["']?\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\r\n,;}\]]+)''',
-                r'\1"[REDACTED]"', safe,
-            )
-            safe = re.sub(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b", "[REDACTED_TOKEN]", safe)
-            safe = re.sub(r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", "[REDACTED_PRIVATE_KEY]", safe, flags=re.DOTALL)
-            return re.sub(r'''data:[^\s,;]+(?:;[^,]*)?,[^\s"']+''', "[OMITTED_BINARY]", safe)
 
-        def clean(item: Any, depth: int = 0) -> Any:
-            if depth >= 40:
-                return {"truncated": True, "reason": "depth_limit"}
-            if isinstance(item, str):
-                if item.lstrip().startswith(("{", "[")):
-                    try:
-                        decoded = json.loads(item)
-                    except (ValueError, RecursionError):
-                        pass
-                    else:
-                        return json.dumps(clean(decoded, depth + 1), ensure_ascii=False)
-                return text(item)
-            if isinstance(item, dict):
-                result = {}
-                for key, child in item.items():
-                    name = re.sub(r"[^a-z0-9]", "", str(key).casefold())
-                    if name in {"key", "credentials", "session", "sessionid", "sessionhash", "sessionkey", "sessionkeyhash", "signature", "oauth1", "oauth2", "csrftoken", "csrf"} or name.endswith((
-                        "password", "passwd", "passphrase", "passwordhash", "secret", "token", "apikey", "privatekey", "databasekey", "encryptionkey", "credential", "credentials", "authorization", "cookie", "csrfhash", "sessionid", "sessionhash",
-                    )):
-                        child = "[REDACTED]"
-                    elif name in {"inlinedata", "filedata", "audio", "inputaudio"}:
-                        child = "[OMITTED_BINARY]"
-                    else:
-                        child = clean(child, depth + 1)
-                    result[text(str(key))] = child
-                return result
-            if isinstance(item, (list, tuple)):
-                return [clean(child, depth + 1) for child in item]
-            if isinstance(item, bytes):
-                return {"omitted_binary_bytes": len(item)}
-            if item is None or isinstance(item, (bool, int, float)):
-                return item
-            return text(str(item))
+def _encoded_diagnostic_secrets(config: Config) -> tuple[str, ...]:
+    attributes = (
+        "openai_api_key", "gemini_api_key", "intervals_api_key", "garmin_email",
+        "garmin_password", "app_password", "calendar_ical_url",
+    )
+    secrets = set()
+    for attribute in attributes:
+        secret = str(getattr(config, attribute, "") or "")
+        if len(secret) >= 4:
+            secrets.update((base64.b64encode(secret.encode()).decode(),
+                            json.dumps(secret, ensure_ascii=True)[1:-1]))
+    return tuple(sorted(secrets, key=len, reverse=True))
 
-        return clean(value)
+
+def _clean_diagnostic_text(value: str, redactor: Redactor, encoded_secrets: tuple[str, ...]) -> str:
+    safe = redactor.redact_text(value)
+    for secret in encoded_secrets:
+        safe = safe.replace(secret, _REDACTED)
+    safe = _DIAGNOSTIC_AUTH_RE.sub("[REDACTED_AUTHORIZATION]", safe)
+    safe = _DIAGNOSTIC_LABELED_SECRET_RE.sub(lambda match: match.group(1) + "=[REDACTED]", safe)
+    safe = re.sub(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b", "[REDACTED_TOKEN]", safe)
+    safe = _DIAGNOSTIC_PRIVATE_KEY_RE.sub("[REDACTED_PRIVATE_KEY]", safe)
+    return _DIAGNOSTIC_DATA_URL_RE.sub("[OMITTED_BINARY]", safe)
+
+
+def _clean_diagnostic_value(value: Any, redactor: Redactor, encoded_secrets: tuple[str, ...], depth: int = 0) -> Any:
+    if depth >= 40:
+        return {"truncated": True, "reason": "depth_limit"}
+    if isinstance(value, str):
+        return _clean_diagnostic_string(value, redactor, encoded_secrets, depth)
+    if isinstance(value, dict):
+        return _clean_diagnostic_mapping(value, redactor, encoded_secrets, depth)
+    if isinstance(value, (list, tuple)):
+        return [_clean_diagnostic_value(child, redactor, encoded_secrets, depth + 1) for child in value]
+    if isinstance(value, bytes):
+        return {"omitted_binary_bytes": len(value)}
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return _clean_diagnostic_text(str(value), redactor, encoded_secrets)
+
+
+def _clean_diagnostic_string(value: str, redactor: Redactor, encoded_secrets: tuple[str, ...], depth: int) -> str:
+    if value.lstrip().startswith(("{", "[")):
+        try:
+            decoded = json.loads(value)
+        except (ValueError, RecursionError):
+            pass
+        else:
+            return json.dumps(_clean_diagnostic_value(decoded, redactor, encoded_secrets, depth + 1), ensure_ascii=False)
+    return _clean_diagnostic_text(value, redactor, encoded_secrets)
+
+
+def _clean_diagnostic_mapping(value: dict[Any, Any], redactor: Redactor, encoded_secrets: tuple[str, ...], depth: int) -> dict[str, Any]:
+    result = {}
+    for key, child in value.items():
+        name = re.sub(r"[^a-z0-9]", "", str(key).casefold())
+        result[_clean_diagnostic_text(str(key), redactor, encoded_secrets)] = _clean_diagnostic_field(
+            name, child, redactor, encoded_secrets, depth + 1
+        )
+    return result
+
+
+def _clean_diagnostic_field(name: str, value: Any, redactor: Redactor, encoded_secrets: tuple[str, ...], depth: int) -> Any:
+    if name in _DIAGNOSTIC_SECRET_FIELDS or name.endswith(_DIAGNOSTIC_SECRET_SUFFIXES):
+        return _REDACTED
+    if name in _DIAGNOSTIC_BINARY_FIELDS:
+        return "[OMITTED_BINARY]"
+    return _clean_diagnostic_value(value, redactor, encoded_secrets, depth)
 
 
 class JsonLogFormatter(logging.Formatter):
