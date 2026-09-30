@@ -1164,6 +1164,7 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
         policy=CoachReadToolPolicy(
             nutrition_service=NUTRITION_ASSEMBLY.service,
             training_change_limit=lambda: coach_limits.COACH_TRAINING_CHANGE_LIMIT,
+            context_service=COACH_CONTEXT.structured_context_service,
         ),
     )
 )

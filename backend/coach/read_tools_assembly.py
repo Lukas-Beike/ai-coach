@@ -33,6 +33,7 @@ class CoachPlanningReadSources:
 class CoachReadToolPolicy:
     nutrition_service: Callable[[], Any]
     training_change_limit: Callable[[], int]
+    context_service: Callable[[], Any] | None = None
 
 
 class CoachReadToolsAssembly:
@@ -47,7 +48,7 @@ class CoachReadToolsAssembly:
     def __init__(
         self,
         *,
-        dependencies: "CoachReadToolsAssembly.Inputs",
+        dependencies: CoachReadToolsAssembly.Inputs,
     ) -> None:
         activity = dependencies.activity
         planning = dependencies.planning
@@ -56,7 +57,9 @@ class CoachReadToolsAssembly:
         self._garmin_payload_service = activity.garmin_payload_service
         self._profile_service = activity.profile_service
         self._today = activity.today
-        self._structured_training_state_service = planning.structured_training_state_service
+        self._structured_training_state_service = (
+            planning.structured_training_state_service
+        )
         self._workout_library_service = planning.workout_library_service
         self._planned_unit_service = planning.planned_unit_service
         self._change_history_service = planning.change_history_service
@@ -64,6 +67,7 @@ class CoachReadToolsAssembly:
         self._training_plan_service = planning.training_plan_service
         self._nutrition_service = policy.nutrition_service
         self._training_change_limit = policy.training_change_limit
+        self._context_service = policy.context_service
 
     def activity_read_service(self) -> CoachActivityReadToolService:
         return CoachActivityReadToolService(
@@ -85,4 +89,5 @@ class CoachReadToolsAssembly:
             self._training_plan_service,
             self._training_change_limit(),
             self._nutrition_service,
+            self._context_service,
         )
