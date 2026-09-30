@@ -175,6 +175,38 @@ class ProviderStateServiceTests(unittest.TestCase):
         self.assertEqual(status["provider_error_code"], "server_error")
         self.assertNotIn("private provider content", json.dumps(status))
 
+    def test_openai_terminal_error_codes_use_production_allowlist_and_actionable_reasons(self):
+        cases = (
+            ("conversation_locked", "conversation_locked"),
+            ("conversation_lock_timeout", "conversation_locked"),
+            ("concurrent_request", "conversation_locked"),
+            ("conversation_state_invalid", "conversation_state_invalid"),
+            ("conversation_not_found", "conversation_state_invalid"),
+            ("invalid_conversation", "conversation_state_invalid"),
+            ("invalid_function_call_output", "conversation_state_invalid"),
+            ("invalid_organization", "authentication_or_permission"),
+        )
+        for code, reason in cases:
+            with self.subTest(code=code):
+                with self.assertRaises(AppError) as raised:
+                    self.service.validate_openai_response(
+                        "/responses",
+                        {
+                            "status": "failed",
+                            "error": {
+                                "code": code,
+                                "message": "private provider content",
+                            },
+                        },
+                    )
+                self.assertEqual(raised.exception.reason, reason)
+                self.assertEqual(raised.exception.provider_error_code, code)
+                self.assertNotIn("private provider content", str(raised.exception))
+                status = json.loads(self.repository.values["openai_status"])
+                self.assertEqual(status["reason"], reason)
+                self.assertEqual(status["provider_error_code"], code)
+                self.assertNotIn("private provider content", json.dumps(status))
+
     def test_openai_response_validation_drops_untrusted_code_and_keeps_invalid_shape_out_of_state(self):
         with self.assertRaises(AppError) as raised:
             self.service.validate_openai_response(

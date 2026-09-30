@@ -1723,17 +1723,16 @@ def _openai_conversation_error(
     continuation_error = "conversation" in searchable and any(
         marker in searchable for marker in ("state", "previous", "invalid", "not found")
     )
-    if status == 400 and (
-        code
-        in {
-            "conversation_not_found",
-            "invalid_conversation",
-            "conversation_state_invalid",
-            "invalid_function_call_output",
-        }
-        or "function_call_output" in searchable
-        or invalid_state
-        or continuation_error
+    if code in {
+        "conversation_not_found",
+        "invalid_conversation",
+        "conversation_state_invalid",
+        "invalid_function_call_output",
+    } or (
+        status == 400
+        and (
+            "function_call_output" in searchable or invalid_state or continuation_error
+        )
     ):
         return (
             "conversation_state_invalid",
