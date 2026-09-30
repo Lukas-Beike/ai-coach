@@ -156,9 +156,14 @@ def select_coach_context(
         sections.update({"planning", "training_plans"})
     if "provider_refresh_or_sync" in matched:
         return CoachContextSelection(name)
-    if planning and re.search(
-        r"monat|month|jahr|year|saison|season|\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.|\b(?:[3-9]|\d{2,})\s*(?:wochen|weeks|tage|days)",
-        normalized,
+    if re.search(r"\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.", normalized):
+        return CoachContextSelection(name)
+    if planning and any(
+        re.search(pattern, normalized)
+        for pattern in (
+            r"monat|month|jahr|year|saison|season",
+            r"\b(?:[3-9]|\d{2,})\s*(?:wochen|weeks|tage|days)",
+        )
     ):
         return CoachContextSelection(name)
     if attachments:

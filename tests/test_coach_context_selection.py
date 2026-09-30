@@ -9,6 +9,16 @@ from backend.coach.context_selection import (
 
 
 class CoachContextSelectionTests(unittest.TestCase):
+    def test_explicit_dates_without_planning_keywords_use_full_context(self):
+        for message in (
+            "What should I train on 2026-12-01?",
+            "Was trainiere ich am 01.12.?",
+        ):
+            with self.subTest(message=message):
+                selection = select_coach_context(message, {})
+                self.assertEqual(selection.sections, CoachContextSelection("fallback").sections)
+                self.assertIsNone(selection.planned_horizon_days)
+
     def test_profiles(self):
         examples = {
             "Wie geht es meiner Erholung?": "general_coaching",

@@ -52,39 +52,47 @@ class CoachReadToolService:
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
         if name == "read_coach_context":
-            sections = arguments.get("sections")
-            if (
-                not isinstance(sections, list)
-                or not 1 <= len(sections) <= 15
-                or any(
-                    not isinstance(section, str) or section not in CONTEXT_SECTIONS
-                    for section in sections
-                )
-            ):
-                raise AppError(
-                    400,
-                    "Ungültige Coach-Kontextabschnitte.",
-                    reason="invalid_context_sections",
-                )
-            if self._context_service is None:
-                raise AppError(503, "Coach-Kontext ist nicht verfügbar.")
-            context = self._context_service().build(
-                selection=CoachContextSelection(
-                    "requested_details",
-                    frozenset(sections),
-                    include_library=False,
-                )
+            return self._read_coach_context(arguments)
+        return self._execute_domain_read(name, arguments)
+
+    def _read_coach_context(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        sections = arguments.get("sections")
+        if (
+            not isinstance(sections, list)
+            or not 1 <= len(sections) <= 15
+            or any(
+                not isinstance(section, str) or section not in CONTEXT_SECTIONS
+                for section in sections
             )
-            bounded = bounded_coach_context_value(context, 40_000)
-            return {
-                "ok": True,
-                "context": bounded,
-                "projection": {
-                    "requested_sections": sections,
-                    "characters": coach_context_json_size(bounded),
-                    "complete": coach_context_json_size(context) <= 40_000,
-                },
-            }
+        ):
+            raise AppError(
+                400,
+                "Ungültige Coach-Kontextabschnitte.",
+                reason="invalid_context_sections",
+            )
+        if self._context_service is None:
+            raise AppError(503, "Coach-Kontext ist nicht verfügbar.")
+        context = self._context_service().build(
+            selection=CoachContextSelection(
+                "requested_details",
+                frozenset(sections),
+                include_library=False,
+            )
+        )
+        bounded = bounded_coach_context_value(context, 40_000)
+        return {
+            "ok": True,
+            "context": bounded,
+            "projection": {
+                "requested_sections": sections,
+                "characters": coach_context_json_size(bounded),
+                "complete": coach_context_json_size(context) <= 40_000,
+            },
+        }
+
+    def _execute_domain_read(
+        self, name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any] | None:
         if name == "read_profile":
             return {"ok": True, "profile": self._profile_service().get()}
         if name == "read_training_state":

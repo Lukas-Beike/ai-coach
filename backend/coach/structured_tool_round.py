@@ -184,15 +184,7 @@ class CoachStructuredToolRoundService:
                 if not state.allow_mutations:
                     model_instructions += "\nThis is an automatic advisory run. Do not change data or pending requests."
             if action.get("period"):
-                scope = coach_execution_scope(
-                    action, background_horizon_days=self._limits.background_horizon_days
-                )
-                state.request_payload["max_output_tokens"] = (
-                    self._limits.long_plan_max_output_tokens
-                    if scope["planning"]
-                    else self._limits.default_max_output_tokens
-                )
-                self._jobs.merge_receipt(state.client_turn_id, {"plan_scope": scope})
+                self._update_plan_scope(state, action)
         except (AppError, ValueError, TypeError, KeyError) as exc:
             result = self._failure.project(
                 exc,
@@ -209,6 +201,19 @@ class CoachStructuredToolRoundService:
             )
         state.model_instructions = model_instructions
         return name, call_id, result, action
+
+    def _update_plan_scope(
+        self, state: StructuredCoachRoundState, action: dict[str, Any]
+    ) -> None:
+        scope = coach_execution_scope(
+            action, background_horizon_days=self._limits.background_horizon_days
+        )
+        state.request_payload["max_output_tokens"] = (
+            self._limits.long_plan_max_output_tokens
+            if scope["planning"]
+            else self._limits.default_max_output_tokens
+        )
+        self._jobs.merge_receipt(state.client_turn_id, {"plan_scope": scope})
 
     def _followup_response(
         self,

@@ -4,7 +4,11 @@ import json
 import unittest
 from unittest.mock import Mock
 
-from backend.coach.context import CoachTrainingContextService
+from backend.coach.context import (
+    CoachTrainingContextService,
+    bounded_coach_context_value,
+    coach_context_json_size,
+)
 from backend.coach.context_selection import CoachContextSelection, select_coach_context
 from backend.coach.read_tools import CoachReadToolService
 from backend.errors import AppError
@@ -14,6 +18,13 @@ from tests import test_coach_structured_tool_round as round_tests
 
 
 class CoachContextReductionTests(unittest.TestCase):
+    def test_oversized_single_section_retains_useful_prefix(self):
+        result = bounded_coach_context_value(
+            {"garmin": {"history": "synthetic " * 5000}}, 40_000
+        )
+        self.assertTrue(result["garmin"]["history"])
+        self.assertLessEqual(coach_context_json_size(result), 40_000)
+
     def test_scoped_assembly_skips_unnecessary_reads(self):
         fixture = context_tests.CoachStructuredContextServiceTests()
         fixture.setUp()

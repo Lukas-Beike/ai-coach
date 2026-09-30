@@ -450,6 +450,19 @@ class CoachStructuredContextService:
             if "daily_planning_context" in included
             else []
         )
+        return self._selected_sections(
+            included, snapshot, checkins, local_planned_workouts, weather, daily_context
+        )
+
+    def _selected_sections(
+        self,
+        included: frozenset[str],
+        snapshot: Any,
+        checkins: Any,
+        local_planned_workouts: Any,
+        weather: Any,
+        daily_context: Any,
+    ) -> dict[str, Any]:
         context = {
             "durable_profile": self._performance_reader.profile()
             if "durable_profile" in included
@@ -627,7 +640,10 @@ def _bounded_dict(value: dict[Any, Any], limit: int) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, item in value.items():
         candidate = dict(result)
-        candidate[str(key)] = bounded_coach_context_value(item, limit)
+        key_overhead = coach_context_json_size({str(key): None}) + 2
+        candidate[str(key)] = bounded_coach_context_value(
+            item, max(0, limit - key_overhead)
+        )
         if coach_context_json_size(candidate) > limit:
             break
         result = candidate
