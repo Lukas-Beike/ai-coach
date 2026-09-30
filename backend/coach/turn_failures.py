@@ -24,6 +24,10 @@ from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
 
 BACKEND_SOURCE_ROOT = Path(__file__).resolve().parents[1]
+OPENAI_USAGE_LIMIT_MESSAGE = (
+    "Das OpenAI-Ausgaben- oder Nutzungslimit ist erreicht. "
+    "Bitte das Limit im OpenAI-Konto prüfen."
+)
 
 
 def coach_error_metadata(exc: BaseException, repository_root: Path) -> dict[str, Any]:
@@ -199,7 +203,12 @@ class CoachTurnFailureService:
             "conversation_locked": "Der KI-Dienst verarbeitet noch eine andere Anfrage. Bitte warte kurz und versuche es erneut.",
             "authentication_or_permission": "Der KI-Dienst hat den Zugriff abgelehnt. Bitte prüfe den API-Zugang in den Einstellungen.",
             "insufficient_quota": "Das KI-Kontingent ist aufgebraucht. Bitte prüfe Guthaben und Abrechnung beim KI-Anbieter.",
-            "credit_balance_exhausted": "Das KI-Guthaben ist aufgebraucht. Bitte prüfe die Abrechnung beim KI-Anbieter.",
+            "credit_balance_exhausted": "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen.",
+            "organization_spend_limit_exceeded": OPENAI_USAGE_LIMIT_MESSAGE,
+            "project_spend_limit_exceeded": OPENAI_USAGE_LIMIT_MESSAGE,
+            "organization_usage_limit_exceeded": OPENAI_USAGE_LIMIT_MESSAGE,
+            "provider_timeout": "Der KI-Dienst hat nicht rechtzeitig geantwortet. Bitte versuche es erneut.",
+            "not_found": "Das konfigurierte KI-Modell oder der angeforderte Dienst wurde nicht gefunden. Bitte die Modellkonfiguration prüfen.",
             "provider_unavailable": "Der KI-Dienst ist vorübergehend nicht verfügbar. Bitte versuche es in Kürze erneut.",
             "response_error": "Der KI-Dienst konnte die Antwort nicht fertigstellen. Bitte versuche es erneut.",
             "response_failed": "Der KI-Dienst konnte die Antwort nicht fertigstellen. Bitte versuche es erneut.",
