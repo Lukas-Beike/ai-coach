@@ -7,8 +7,8 @@ redacted and tests can use isolated configuration snapshots.
 
 from __future__ import annotations
 
-import json
 import base64
+import json
 import logging
 import re
 import sys
@@ -79,24 +79,49 @@ DIAGNOSTIC_CAPTURE_MAX_BYTES = 16 * 1024 * 1024
 DIAGNOSTIC_CAPTURE_MAX_ENTRY_BYTES = 1024 * 1024
 DIAGNOSTIC_CAPTURE_ENTRIES_KEY = "diagnostic_capture_entries"
 _REDACTED = "[REDACTED]"
-_DIAGNOSTIC_SECRET_FIELDS = frozenset({
-    "key", "credentials", "session", "sessionid", "sessionhash", "sessionkey",
-    "sessionkeyhash", "signature", "oauth1", "oauth2", "csrftoken", "csrf",
-})
+_DIAGNOSTIC_SECRET_FIELDS = frozenset(
+    {
+        "key",
+        "credentials",
+        "session",
+        "sessionid",
+        "sessionhash",
+        "sessionkey",
+        "sessionkeyhash",
+        "signature",
+        "oauth1",
+        "oauth2",
+        "csrftoken",
+        "csrf",
+    }
+)
 _DIAGNOSTIC_SECRET_SUFFIXES = (
-    "password", "passwd", "passphrase", "passwordhash", "secret", "token",
-    "apikey", "privatekey", "databasekey", "encryptionkey", "credential",
-    "authorization", "cookie", "csrfhash", "sessionid", "sessionhash",
+    "password",
+    "passwd",
+    "passphrase",
+    "passwordhash",
+    "secret",
+    "token",
+    "apikey",
+    "privatekey",
+    "databasekey",
+    "encryptionkey",
+    "credential",
+    "authorization",
+    "cookie",
+    "csrfhash",
+    "sessionid",
+    "sessionhash",
 )
 _DIAGNOSTIC_BINARY_FIELDS = frozenset({"inlinedata", "filedata", "audio", "inputaudio"})
-_DIAGNOSTIC_AUTH_RE = re.compile(r'''(?i)\b(?:bearer|basic)\s+[^\s,;"'}]+''')
+_DIAGNOSTIC_AUTH_RE = re.compile(r"""(?i)\b(?:bearer|basic)\s+[^\s,;"'}]+""")
 _DIAGNOSTIC_LABELED_SECRET_RE = re.compile(
     r"(?i)\b(password|passwd|secret|api[_-]?key|token|authorization|cookie)\s*[:=]"
 )
 _DIAGNOSTIC_PRIVATE_KEY_RE = re.compile(
     r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.DOTALL
 )
-_DIAGNOSTIC_DATA_URL_RE = re.compile(r'''data:[^\s,;]+(?:;[^,]*)?,[^\s"']+''')
+_DIAGNOSTIC_DATA_URL_RE = re.compile(r"""data:[^\s,;]+(?:;[^,]*)?,[^\s"']+""")
 
 
 def _secret_variants(value: Any) -> set[str]:
@@ -322,15 +347,24 @@ class Redactor:
 
 def _encoded_diagnostic_secrets(config: Config) -> tuple[str, ...]:
     attributes = (
-        "openai_api_key", "gemini_api_key", "intervals_api_key", "garmin_email",
-        "garmin_password", "app_password", "calendar_ical_url",
+        "openai_api_key",
+        "gemini_api_key",
+        "intervals_api_key",
+        "garmin_email",
+        "garmin_password",
+        "app_password",
+        "calendar_ical_url",
     )
     secrets = set()
     for attribute in attributes:
         secret = str(getattr(config, attribute, "") or "")
         if len(secret) >= 4:
-            secrets.update((base64.b64encode(secret.encode()).decode(),
-                            json.dumps(secret, ensure_ascii=True)[1:-1]))
+            secrets.update(
+                (
+                    base64.b64encode(secret.encode()).decode(),
+                    json.dumps(secret, ensure_ascii=True)[1:-1],
+                )
+            )
     return tuple(sorted(secrets, key=len, reverse=True))
 
 
@@ -340,26 +374,40 @@ def _redact_labeled_secrets(value: str) -> str:
     for match in _DIAGNOSTIC_LABELED_SECRET_RE.finditer(value):
         newline = value.find("\n", match.end())
         line_end = len(value) if newline < 0 else newline
-        delimiters = [position for char in (",", ";") if (position := value.find(char, match.end(), line_end)) >= 0]
+        delimiters = [
+            position
+            for char in (",", ";")
+            if (position := value.find(char, match.end(), line_end)) >= 0
+        ]
         end = min(delimiters, default=line_end)
-        pieces.extend((value[cursor:match.start(1)], match.group(1) + "=" + _REDACTED))
+        pieces.extend(
+            (value[cursor : match.start(1)], match.group(1) + "=" + _REDACTED)
+        )
         cursor = end
     pieces.append(value[cursor:])
     return "".join(pieces)
 
 
-def _clean_diagnostic_text(value: str, redactor: Redactor, encoded_secrets: tuple[str, ...]) -> str:
+def _clean_diagnostic_text(
+    value: str, redactor: Redactor, encoded_secrets: tuple[str, ...]
+) -> str:
     safe = redactor.redact_text(value)
     for secret in encoded_secrets:
         safe = safe.replace(secret, _REDACTED)
     safe = _DIAGNOSTIC_AUTH_RE.sub("[REDACTED_AUTHORIZATION]", safe)
     safe = _redact_labeled_secrets(safe)
-    safe = re.sub(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b", "[REDACTED_TOKEN]", safe)
+    safe = re.sub(
+        r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b",
+        "[REDACTED_TOKEN]",
+        safe,
+    )
     safe = _DIAGNOSTIC_PRIVATE_KEY_RE.sub("[REDACTED_PRIVATE_KEY]", safe)
     return _DIAGNOSTIC_DATA_URL_RE.sub("[OMITTED_BINARY]", safe)
 
 
-def _clean_diagnostic_value(value: Any, redactor: Redactor, encoded_secrets: tuple[str, ...], depth: int = 0) -> Any:
+def _clean_diagnostic_value(
+    value: Any, redactor: Redactor, encoded_secrets: tuple[str, ...], depth: int = 0
+) -> Any:
     if depth >= 40:
         return {"truncated": True, "reason": "depth_limit"}
     if isinstance(value, str):
@@ -367,7 +415,10 @@ def _clean_diagnostic_value(value: Any, redactor: Redactor, encoded_secrets: tup
     if isinstance(value, dict):
         return _clean_diagnostic_mapping(value, redactor, encoded_secrets, depth)
     if isinstance(value, (list, tuple)):
-        return [_clean_diagnostic_value(child, redactor, encoded_secrets, depth + 1) for child in value]
+        return [
+            _clean_diagnostic_value(child, redactor, encoded_secrets, depth + 1)
+            for child in value
+        ]
     if isinstance(value, bytes):
         return {"omitted_binary_bytes": len(value)}
     if value is None or isinstance(value, (bool, int, float)):
@@ -375,28 +426,44 @@ def _clean_diagnostic_value(value: Any, redactor: Redactor, encoded_secrets: tup
     return _clean_diagnostic_text(str(value), redactor, encoded_secrets)
 
 
-def _clean_diagnostic_string(value: str, redactor: Redactor, encoded_secrets: tuple[str, ...], depth: int) -> str:
+def _clean_diagnostic_string(
+    value: str, redactor: Redactor, encoded_secrets: tuple[str, ...], depth: int
+) -> str:
     if value.lstrip().startswith(("{", "[")):
         try:
             decoded = json.loads(value)
         except (ValueError, RecursionError):
             pass
         else:
-            return json.dumps(_clean_diagnostic_value(decoded, redactor, encoded_secrets, depth + 1), ensure_ascii=False)
+            return json.dumps(
+                _clean_diagnostic_value(decoded, redactor, encoded_secrets, depth + 1),
+                ensure_ascii=False,
+            )
     return _clean_diagnostic_text(value, redactor, encoded_secrets)
 
 
-def _clean_diagnostic_mapping(value: dict[Any, Any], redactor: Redactor, encoded_secrets: tuple[str, ...], depth: int) -> dict[str, Any]:
+def _clean_diagnostic_mapping(
+    value: dict[Any, Any],
+    redactor: Redactor,
+    encoded_secrets: tuple[str, ...],
+    depth: int,
+) -> dict[str, Any]:
     result = {}
     for key, child in value.items():
         name = re.sub(r"[^a-z0-9]", "", str(key).casefold())
-        result[_clean_diagnostic_text(str(key), redactor, encoded_secrets)] = _clean_diagnostic_field(
-            name, child, redactor, encoded_secrets, depth + 1
+        result[_clean_diagnostic_text(str(key), redactor, encoded_secrets)] = (
+            _clean_diagnostic_field(name, child, redactor, encoded_secrets, depth + 1)
         )
     return result
 
 
-def _clean_diagnostic_field(name: str, value: Any, redactor: Redactor, encoded_secrets: tuple[str, ...], depth: int) -> Any:
+def _clean_diagnostic_field(
+    name: str,
+    value: Any,
+    redactor: Redactor,
+    encoded_secrets: tuple[str, ...],
+    depth: int,
+) -> Any:
     if name in _DIAGNOSTIC_SECRET_FIELDS or name.endswith(_DIAGNOSTIC_SECRET_SUFFIXES):
         return _REDACTED
     if name in _DIAGNOSTIC_BINARY_FIELDS:
@@ -616,21 +683,28 @@ class DiagnosticCapture:
         if not isinstance(raw, list):
             raw = []
         loaded_entries = [
-            self._bounded_entry(entry)
-            for entry in raw
-            if isinstance(entry, dict)
+            self._bounded_entry(entry) for entry in raw if isinstance(entry, dict)
         ][-self._max_entries :]
         with self._lock:
             if self._entries_cache is None:
                 self._entries_cache = loaded_entries
-                self._entry_sizes = [self._entry_bytes(entry) for entry in loaded_entries]
+                self._entry_sizes = [
+                    self._entry_bytes(entry) for entry in loaded_entries
+                ]
                 self._total_bytes = 2 + sum(self._entry_sizes)
                 self._trim()
             return self._entries_cache
 
     @staticmethod
     def _entry_bytes(entry: dict[str, Any]) -> int:
-        return len(json.dumps(entry, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 1
+        return (
+            len(
+                json.dumps(entry, ensure_ascii=False, separators=(",", ":")).encode(
+                    "utf-8"
+                )
+            )
+            + 1
+        )
 
     def _bounded_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
         safe = self._redactor.sanitize_diagnostic_value(entry)
@@ -643,34 +717,48 @@ class DiagnosticCapture:
 
     def _truncate_details(self, entry: dict[str, Any], details: dict[str, Any]) -> bool:
         protected = {"error", "provider_error", "last_error", "diagnostic_error"}
-        for key in sorted(details, key=lambda name: len(json.dumps(details[name], ensure_ascii=False)), reverse=True):
+        for key in sorted(
+            details,
+            key=lambda name: len(json.dumps(details[name], ensure_ascii=False)),
+            reverse=True,
+        ):
             if key in protected:
                 continue
             rendered = json.dumps(details[key], ensure_ascii=False)
             details[key] = {
                 "truncated": True,
                 "original_bytes": len(rendered.encode("utf-8")),
-                "preview": rendered[:self._max_entry_bytes // 16],
+                "preview": rendered[: self._max_entry_bytes // 16],
             }
             if self._entry_bytes(entry) <= self._max_entry_bytes:
                 return True
         return False
 
-    def _compact_oversize_entry(self, entry: dict[str, Any], details: Any) -> dict[str, Any]:
+    def _compact_oversize_entry(
+        self, entry: dict[str, Any], details: Any
+    ) -> dict[str, Any]:
         compact_errors = {
             key: self._compact_error(details[key])
             for key in ("error", "provider_error", "last_error", "diagnostic_error")
             if isinstance(details, dict) and details.get(key) is not None
         }
-        compact_details: dict[str, Any] = {"truncated": True, "reason": "entry_size_limit", **compact_errors}
-        compact = {"timestamp": entry.get("timestamp"), "event": entry.get("event"), "details": compact_details}
+        compact_details: dict[str, Any] = {
+            "truncated": True,
+            "reason": "entry_size_limit",
+            **compact_errors,
+        }
+        compact = {
+            "timestamp": entry.get("timestamp"),
+            "event": entry.get("event"),
+            "details": compact_details,
+        }
         if self._entry_bytes(compact) > self._max_entry_bytes:
             compact_details.update({key: {"truncated": True} for key in compact_errors})
         return compact
 
     def _compact_error(self, value: Any) -> Any:
         if not isinstance(value, dict):
-            return str(value)[:min(4000, self._max_entry_bytes // 64)]
+            return str(value)[: min(4000, self._max_entry_bytes // 64)]
         fields = ("code", "type", "param", "message", "reason", "status")
         return {
             key: self._clip_error_field(value[key])
@@ -680,11 +768,14 @@ class DiagnosticCapture:
 
     def _clip_error_field(self, value: Any) -> Any:
         if isinstance(value, str):
-            return value[:min(4000, self._max_entry_bytes // 64)]
+            return value[: min(4000, self._max_entry_bytes // 64)]
         return value
 
     def _trim(self) -> None:
-        while self._entries_cache and (len(self._entries_cache) > self._max_entries or self._total_bytes > self._max_bytes):
+        while self._entries_cache and (
+            len(self._entries_cache) > self._max_entries
+            or self._total_bytes > self._max_bytes
+        ):
             self._entries_cache.pop(0)
             self._total_bytes -= self._entry_sizes.pop(0)
 
@@ -720,7 +811,9 @@ class DiagnosticCapture:
     def entries(self) -> list[dict[str, Any]]:
         self._load_entries()
         with self._lock:
-            return self._redactor.sanitize_diagnostic_value(list(self._entries_cache or []))
+            return self._redactor.sanitize_diagnostic_value(
+                list(self._entries_cache or [])
+            )
 
     def clear(self) -> dict[str, Any]:
         """Clear all captured technical diagnostic metadata."""
@@ -734,10 +827,13 @@ class DiagnosticCapture:
     def capture(self, event: str, details: dict[str, Any]) -> None:
         """Redact content before it reaches the in-memory cache or database."""
         self._load_entries()
-        entry = self._bounded_entry({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "event": str(event)[:80], "details": details,
-        })
+        entry = self._bounded_entry(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "event": str(event)[:80],
+                "details": details,
+            }
+        )
         with self._lock:
             entries = self._entries_cache
             assert entries is not None

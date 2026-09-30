@@ -599,7 +599,12 @@ def response_diagnostic_content(response: Any) -> dict[str, Any]:
     error = _response_error_object(response)
     content = {
         target: error[source]
-        for source, target in (("code", "provider_error_code_raw"), ("type", "provider_error_type"), ("param", "provider_error_parameter"), ("message", "provider_error_message"))
+        for source, target in (
+            ("code", "provider_error_code_raw"),
+            ("type", "provider_error_type"),
+            ("param", "provider_error_parameter"),
+            ("message", "provider_error_message"),
+        )
         if isinstance(error.get(source), str) and error[source].strip()
     }
     incomplete = response.get("incomplete_details")
@@ -689,7 +694,12 @@ def consume_sse_event(
         _handle_sse_response_id(candidate, state, on_response_id)
     elif kind == "response.output_text.delta":
         _handle_sse_delta(event, state, on_text_delta)
-    elif kind in {"error", "response.completed", "response.incomplete", "response.failed"}:
+    elif kind in {
+        "error",
+        "response.completed",
+        "response.incomplete",
+        "response.failed",
+    }:
         return _terminal_sse_response(kind, event, candidate)
     return None
 
@@ -701,7 +711,11 @@ def _record_sse_event(state: StreamReadState | None, kind: str) -> None:
     state.event_counts[marker] = state.event_counts.get(marker, 0) + 1
 
 
-def _handle_sse_response_id(candidate: dict[str, Any], state: StreamReadState | None, callback: Callable[[str], None] | None) -> None:
+def _handle_sse_response_id(
+    candidate: dict[str, Any],
+    state: StreamReadState | None,
+    callback: Callable[[str], None] | None,
+) -> None:
     response_id = str(candidate.get("id") or "").strip()
     if state is not None:
         state.response_id = response_id
@@ -709,7 +723,11 @@ def _handle_sse_response_id(candidate: dict[str, Any], state: StreamReadState | 
         callback(response_id)
 
 
-def _handle_sse_delta(event: dict[str, Any], state: StreamReadState | None, callback: Callable[[str], None]) -> None:
+def _handle_sse_delta(
+    event: dict[str, Any],
+    state: StreamReadState | None,
+    callback: Callable[[str], None],
+) -> None:
     delta = event.get("delta")
     if not isinstance(delta, str) or not delta:
         return
@@ -904,7 +922,9 @@ class OpenAIStreamTelemetry:
     def record_rate_limits(self, headers: Any) -> None:
         self.provider_state.record_rate_limits(headers)
 
-    def record_started(self, context: dict[str, Any], payload: Mapping[str, Any] | None = None) -> None:
+    def record_started(
+        self, context: dict[str, Any], payload: Mapping[str, Any] | None = None
+    ) -> None:
         optional_context: dict[str, Any] = {
             key: context[key]
             for key in (
@@ -1079,7 +1099,9 @@ class OpenAIStreamTelemetry:
                 "diagnostic_id": context.get("diagnostic_id"),
                 "attempt": context.get("attempt"),
                 **response_diagnostic_content(final_response),
-                "provider_error": final_response.get("error") if isinstance(final_response, dict) else None,
+                "provider_error": final_response.get("error")
+                if isinstance(final_response, dict)
+                else None,
                 "provider_response": final_response,
             },
         )
@@ -1202,8 +1224,12 @@ class OpenAIStreamClient:
         self.telemetry.record_transport(state)
 
     def _context(
-        self, body: bytes, payload: Mapping[str, Any],
-        *, diagnostic_id: str, attempt: int,
+        self,
+        body: bytes,
+        payload: Mapping[str, Any],
+        *,
+        diagnostic_id: str,
+        attempt: int,
     ) -> dict[str, Any]:
         config = self.config
         parsed = urlparse(
@@ -1321,11 +1347,14 @@ class OpenAIStreamClient:
             details,
             diagnostic,
         )
-        self.telemetry.diagnostic_capture.capture("openai_http_failed", {
-            "diagnostic_id": context.get("diagnostic_id"),
-            "status": status,
-            "response_body": raw_error.decode("utf-8", errors="replace"),
-        })
+        self.telemetry.diagnostic_capture.capture(
+            "openai_http_failed",
+            {
+                "diagnostic_id": context.get("diagnostic_id"),
+                "status": status,
+                "response_body": raw_error.decode("utf-8", errors="replace"),
+            },
+        )
         error = AppError(status, details["message"], reason=details["reason"])
         retry_after = details.get("retry_after_seconds")
         if isinstance(retry_after, int):
@@ -1420,18 +1449,23 @@ class OpenAIStreamClient:
                 )
             finally:
                 self._record_transport(stream_state)
-                self.telemetry.diagnostic_capture.capture("openai_stream_transport", {
-                    "diagnostic_id": context["diagnostic_id"],
-                    "attempt": context["attempt"],
-                    "http_status": stream_state.status,
-                    "headers": observability.safe_response_headers(stream_state.headers, redact=str),
-                    "response_id": stream_state.response_id,
-                    "terminal_event_type": stream_state.terminal_event_type,
-                    "event_counts": stream_state.event_counts,
-                    "invalid_events": stream_state.invalid_events,
-                    "text_delta_chars": stream_state.text_delta_chars,
-                    "response_bytes": stream_state.response_bytes,
-                })
+                self.telemetry.diagnostic_capture.capture(
+                    "openai_stream_transport",
+                    {
+                        "diagnostic_id": context["diagnostic_id"],
+                        "attempt": context["attempt"],
+                        "http_status": stream_state.status,
+                        "headers": observability.safe_response_headers(
+                            stream_state.headers, redact=str
+                        ),
+                        "response_id": stream_state.response_id,
+                        "terminal_event_type": stream_state.terminal_event_type,
+                        "event_counts": stream_state.event_counts,
+                        "invalid_events": stream_state.invalid_events,
+                        "text_delta_chars": stream_state.text_delta_chars,
+                        "response_bytes": stream_state.response_bytes,
+                    },
+                )
             final_response = result.response
             attempt_state["final_response"] = final_response
             attempt_state["stream_bytes"] = stream_state.response_bytes
