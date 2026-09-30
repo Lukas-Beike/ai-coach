@@ -11,3 +11,4 @@ Use for PR status, failed CI, review gates, Sonar findings, rebase checks, or me
 - Report `head`, `base`, checks, review threads, ruleset blockers, merge state, and ancestry as compact `path/status` facts.
 - After a rebase, compare `git diff origin/<base>...HEAD` and validate the current head again.
 - Never print tokens, credentials, full logs, or unfiltered external content.
+- This skill is read-only diagnosis, not authorization to push, resolve feedback, or merge. Register the PR with the thread's linking tool when available.
