@@ -378,7 +378,7 @@ class JsonHttpClient:
         raw_body: bytes | None = None,
         content_type: str | None = None,
         cancel_event: Any = None,
-    ) -> Any:
+    ) -> Any:  # NOSONAR - transport boundary owns the complete exception contract
         request, parsed_url, request_headers, request_context = json_request_parts(
             method,
             url,

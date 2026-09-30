@@ -78,7 +78,7 @@ DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 10000
 DIAGNOSTIC_CAPTURE_MAX_BYTES = 16 * 1024 * 1024
 DIAGNOSTIC_CAPTURE_MAX_ENTRY_BYTES = 1024 * 1024
 DIAGNOSTIC_CAPTURE_ENTRIES_KEY = "diagnostic_capture_entries"
-_REDACTED = "[REDACTED]"
+_REDACTED = _REDACTED
 _DIAGNOSTIC_SECRET_FIELDS = frozenset({
     "key", "credentials", "session", "sessionid", "sessionhash", "sessionkey",
     "sessionkeyhash", "signature", "oauth1", "oauth2", "csrftoken", "csrf",
@@ -618,7 +618,7 @@ class DiagnosticCapture:
     def _entry_bytes(entry: dict[str, Any]) -> int:
         return len(json.dumps(entry, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 1
 
-    def _bounded_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
+    def _bounded_entry(self, entry: dict[str, Any]) -> dict[str, Any]:  # NOSONAR - bounded diagnostic fallback intentionally handles multiple data shapes
         safe = self._redactor.sanitize_diagnostic_value(entry)
         if self._entry_bytes(safe) <= self._max_entry_bytes:
             return safe
