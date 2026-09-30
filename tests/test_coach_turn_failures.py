@@ -138,6 +138,22 @@ class CoachTurnFailureTests(unittest.TestCase):
             self.assertEqual(status, "failed")
             self.assertIn(expected, text)
 
+    def test_openai_billing_failure_is_a_persisted_actionable_chat_message(self) -> None:
+        self._seed({"command_receipts": []})
+        result = self.service.persist(
+            "turn-1", {}, AppError(502, "sensitive provider text", reason="credit_balance_exhausted")
+        )
+        expected = "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["message"]["content"], expected)
+        status, stored = self._stored()
+        self.assertEqual(status, "completed")
+        self.assertEqual(stored["message"]["content"], expected)
+        self.assertNotIn("sensitive provider text", json.dumps(stored))
+        with self.manager.reader() as db:
+            message = db.execute("SELECT content FROM messages WHERE role='assistant'").fetchone()
+        self.assertEqual(message["content"], expected)
+
 
 if __name__ == "__main__":
     unittest.main()

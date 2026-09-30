@@ -191,6 +191,26 @@ class ProviderStateServiceTests(unittest.TestCase):
         self.assertEqual(invalid.exception.reason, "invalid_response")
         self.assertNotIn("openai_status", self.repository.values)
 
+    def test_openai_response_validation_surfaces_and_persists_billing_failure(self):
+        with self.assertRaises(AppError) as raised:
+            self.service.validate_openai_response("/responses", {
+                "status": "failed",
+                "error": {
+                    "code": "credit_balance_exhausted",
+                    "message": "private provider content",
+                },
+            })
+        message = "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
+        self.assertEqual(raised.exception.reason, "credit_balance_exhausted")
+        self.assertEqual(raised.exception.message, message)
+        self.assertEqual(raised.exception.provider_error_code, "credit_balance_exhausted")
+        self.assertEqual(raised.exception.status, 502)
+        status = json.loads(self.repository.values["openai_status"])
+        self.assertEqual(status["reason"], "credit_balance_exhausted")
+        self.assertEqual(status["provider_error_code"], "credit_balance_exhausted")
+        self.assertEqual(status["message"], message)
+        self.assertNotIn("private provider content", json.dumps(status))
+
     def test_openai_response_validation_returns_valid_result_unchanged(self):
         result = {"id": "response-test", "status": "completed"}
         self.assertIs(self.service.validate_openai_response("/responses", result), result)

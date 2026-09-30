@@ -931,6 +931,34 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(response_diagnostic_details(unsafe)["provider_error_present"], "true")
         self.assertNotIn("provider_response_id", response_diagnostic_details({"id": "resp_private/text"}))
 
+    def test_terminal_response_billing_errors_use_safe_actionable_messages(self):
+        codes = (
+            "credit_balance_exhausted", "insufficient_quota", "billing_hard_limit_reached",
+            "organization_spend_limit_exceeded", "project_spend_limit_exceeded",
+            "organization_usage_limit_exceeded",
+        )
+        for code in codes:
+            expected = error_details(429, body({"code": code}), updated_at="now")
+            error = {"code": code, "message": "private provider detail"}
+            for response in ({"status": "failed", "error": error}, {"type": "error", **error}):
+                with self.subTest(code=code, response_type=response.get("type", "failed")):
+                    with self.assertRaises(OpenAIResponseFailure) as raised:
+                        validate_response("/responses", response, allowed_error_codes=codes)
+                    self.assertEqual(raised.exception.reason, expected["reason"])
+                    self.assertEqual(raised.exception.message, expected["message"])
+                    self.assertEqual(raised.exception.provider_error_code, code)
+                    self.assertNotIn("private provider detail", str(raised.exception))
+
+    def test_response_validation_does_not_classify_billing_from_untrusted_text(self):
+        with self.assertRaises(OpenAIResponseFailure) as raised:
+            validate_response("/responses", {
+                "status": "failed",
+                "error": {"code": "private_code", "message": "private credits quota detail"},
+            })
+        self.assertEqual(raised.exception.reason, "response_failed")
+        self.assertEqual(raised.exception.message, "OpenAI did not complete the coach response.")
+        self.assertIsNone(raised.exception.provider_error_code)
+
     def test_stream_failure_diagnostics_keep_safe_markers_without_provider_text(self):
         capture = _DiagnosticCapture()
         logger = _ClientLogger()

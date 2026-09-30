@@ -517,6 +517,11 @@ class OpenAIResponseFailure(Exception):
         self.message = _RESPONSE_FAILURE_MESSAGES.get(
             reason, "OpenAI response validation failed."
         )
+        billing_error = _openai_billing_error(
+            provider_error_code or "", provider_error_type or "", ""
+        )
+        if billing_error is not None:
+            self.reason, self.message = billing_error
         self.provider_error_code = provider_error_code
         self.provider_error_type = provider_error_type
         self.provider_response_status = provider_response_status

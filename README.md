@@ -375,6 +375,7 @@ Conversational turns are persisted in `coach_commands`; provider synchronization
 - **Streaming Handshake**: When an HTTP turn starts, Server-Sent Events (SSE) immediately return the durable job UUID.
 - **Decoupled Execution**: If the athlete locks their phone or loses cellular connection, the server continues execution uninterrupted.
 - **Recovery on Reconnect**: Upon reconnection or app reload, the PWA polls the durable job result using its UUID, rendering the completed answer without re-executing actions.
+- **Visible Provider Failures**: OpenAI API credit, quota, and spending-limit failures produce a clear recovery instruction in the chat history, including failures reported inside an HTTP-200 response stream. The message remains visible after reload; private provider error text is not shown.
 
 ### Provider Data Handling
 - **Intervals.icu Activity Pull**: Ingests new completed workouts with full telemetry (duration, distance, TSS, HR zones, power curves). Large imports are safely fetched in paginated windows.
