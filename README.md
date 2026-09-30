@@ -471,7 +471,8 @@ When a database restore is initiated:
 ### Operational Logging & Diagnostics
 - **Sanitized Logs**: Standard container logs contain only operational timestamps, correlation IDs, status codes, and anonymized error classifications. API tokens, passwords, and athlete metrics are never logged.
 - **Always-on Technical Diagnostics**: The application keeps up to 1,500 recent technical metadata entries, including response shapes, without storing response contents, athlete data, credentials, or tokens.
-- **Server Log Download**: In **Betrieb & Diagnose**, authenticated users can download the sanitized current server log and its available rotations as JSON Lines.
+- **Server Log Management**: In **Betrieb & Diagnose**, authenticated users can download the sanitized current server log and its available rotations as JSON Lines, or delete the log files.
+- **Diagnostics Management**: In **Betrieb & Diagnose**, authenticated users can download the sanitized technical diagnostic report as JSON, or clear the stored technical diagnostic entries.
 
 ---
 

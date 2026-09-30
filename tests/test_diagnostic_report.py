@@ -237,6 +237,14 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         )
         self.assertEqual(self.key_values.get.call_count, 8)
 
+    def test_clear_delegates_to_diagnostic_capture(self):
+        self.capture.clear.return_value = {"ok": True, "entries": 0}
+
+        result = self.service.clear()
+
+        self.assertEqual(result, {"ok": True, "entries": 0})
+        self.capture.clear.assert_called_once_with()
+
     def test_diagnostic_capture_is_snapshotted_before_database_lock(self):
         self.capture.entries.side_effect = lambda: (
             self.assertEqual(self.lock.entries, 0)

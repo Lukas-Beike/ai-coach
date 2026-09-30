@@ -530,6 +530,15 @@ class DiagnosticCapture:
         with self._lock:
             return list(self._entries_cache or [])
 
+    def clear(self) -> dict[str, Any]:
+        """Clear all captured technical diagnostic metadata."""
+        with self._flush_lock:
+            self._set_kv(self._entries_key, "[]")
+            with self._lock:
+                self._entries_cache = []
+                self._dirty_count = 0
+        return {"ok": True, "entries": 0}
+
     def capture(self, event: str, details: dict[str, Any]) -> None:
         """Persist bounded technical metadata without response or athlete content."""
         self._load_entries()

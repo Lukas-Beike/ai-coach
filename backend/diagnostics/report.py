@@ -80,6 +80,10 @@ class DiagnosticReportService:
             for name, query in queries.items()
         }
 
+    def clear(self) -> dict[str, Any]:
+        """Clear the captured technical diagnostic entries."""
+        return self._deps.diagnostic_capture.clear()
+
     def report(self) -> dict[str, Any]:
         deps = self._deps
         diagnostic_capture_entries = deps.diagnostic_capture.entries()
