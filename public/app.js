@@ -3969,6 +3969,25 @@ async function downloadServerLogs() {
   finally { button.disabled = false; }
 }
 
+async function deleteServerLogs() {
+  const confirmed = await requestConfirmation("Server-Logs wirklich löschen?", {
+    title: "Server-Logs löschen?",
+  });
+  if (!confirmed) return;
+  const button = $("#logsDeleteButton");
+  if (button) button.disabled = true;
+  try {
+    await api("/api/logs/delete", { method: "POST" });
+    const output = $("#logsOutput");
+    if (output) output.textContent = "Noch keine Log-Einträge vorhanden.";
+    toast("Server-Logs gelöscht");
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function render(data) {
   const firstRender = !state.data;
   state.data = data;
@@ -4521,6 +4540,27 @@ async function downloadDiagnostics() {
   finally { button.disabled = false; button.textContent = "Diagnose herunterladen"; }
 }
 
+async function deleteDiagnostics() {
+  const confirmed = await requestConfirmation("Diagnosedaten wirklich löschen?", {
+    title: "Diagnose löschen?",
+  });
+  if (!confirmed) return;
+  const button = $("#diagnosticsDeleteButton");
+  if (button) button.disabled = true;
+  try {
+    await api("/api/diagnostics/delete", { method: "POST" });
+    if (state.data?.diagnostic_capture) {
+      state.data.diagnostic_capture.entries = 0;
+    }
+    renderDiagnosticCapture(state.data?.diagnostic_capture || { entries: 0 });
+    toast("Diagnose gelöscht");
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function renderDiagnosticCapture(capture = {}) {
   const status = $("#diagnosticCaptureStatus");
   if (status) status.textContent = `Erweiterte technische Diagnose ist immer aktiv · ${Number(capture.entries || 0)} technische Einträge gespeichert.`;
@@ -4724,8 +4764,10 @@ $("#aiProviderSelect").addEventListener("change", saveAiProvider);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
+$("#diagnosticsDeleteButton")?.addEventListener("click", deleteDiagnostics);
 $("#logsRefreshButton").addEventListener("click", loadLogs);
 $("#logsDownloadButton").addEventListener("click", downloadServerLogs);
+$("#logsDeleteButton")?.addEventListener("click", deleteServerLogs);
 $("#openaiChatResetButton").addEventListener("click", resetCoachChat);
 $("#chatResetButton").addEventListener("click", resetCoachChat);
 $("#privacyExportButton").addEventListener("click", downloadPrivacyExport);

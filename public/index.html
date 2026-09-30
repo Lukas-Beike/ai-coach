@@ -289,7 +289,7 @@
         </details>
         <details class="settings-section logs-section collapsible-section" data-more-segment-panel="operations">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Server-Logs</span><span class="collapsible-summary-meta">Bereinigte Laufzeitdaten</span></summary>
-          <div class="settings-section-heading"><div><h3>Server-Logs</h3><p>Die bereinigten Einträge aus Fehler- und Laufzeitprotokoll.</p></div><div class="settings-inline-action"><button id="logsDownloadButton" type="button" class="secondary-button">Logs herunterladen</button><button id="logsRefreshButton" type="button" class="secondary-button">Logs aktualisieren</button></div></div>
+          <div class="settings-section-heading"><div><h3>Server-Logs</h3><p>Die bereinigten Einträge aus Fehler- und Laufzeitprotokoll.</p></div><div class="settings-inline-action"><button id="logsDownloadButton" type="button" class="secondary-button">Logs herunterladen</button><button id="logsRefreshButton" type="button" class="secondary-button">Logs aktualisieren</button><button id="logsDeleteButton" type="button" class="secondary-button danger-button">Logs löschen</button></div></div>
           <pre id="logsOutput" class="logs-output">Logs werden beim Öffnen geladen…</pre>
         </details>
         <details class="settings-section collapsible-section" data-more-segment-panel="privacy">
@@ -327,7 +327,10 @@
         <details class="settings-section collapsible-section" data-more-segment-panel="operations">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Diagnose</span><span class="collapsible-summary-meta">Bereinigten Status herunterladen</span></summary>
           <div class="diagnostic-actions">
-            <button type="button" id="diagnosticsButton" class="secondary-button">Diagnose herunterladen</button>
+            <div class="settings-inline-action">
+              <button type="button" id="diagnosticsButton" class="secondary-button">Diagnose herunterladen</button>
+              <button type="button" id="diagnosticsDeleteButton" class="secondary-button danger-button">Diagnose löschen</button>
+            </div>
             <p id="diagnosticCaptureStatus" class="fine-print">Erweiterte technische Diagnose ist immer aktiv.</p>
             <p class="fine-print">Gespeichert werden nur begrenzte technische Metadaten und Antwortformen, keine Antwortinhalte, Athletendaten, Zugangsdaten oder Tokens.</p>
           </div>
@@ -378,6 +381,6 @@
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
   <script src="/coach.js?v=3" defer></script>
-  <script src="/app.js?v=234" defer></script>
+  <script src="/app.js?v=235" defer></script>
 </body>
 </html>
