@@ -2722,7 +2722,7 @@ function appendPlannedSessionHeader(cardSummary, entry, actual) {
 function appendPlannedExecution(cardSummary, entry, status) {
   const percentage = calendarMetricNumber(entry.compliance?.percentage);
   const measurable = percentage != null && ["training_load", "duration"].includes(entry.compliance?.basis);
-  if (entry.is_completed_activity || (status !== "missed" && !measurable)) return;
+  if (status !== "missed" && !measurable) return;
   const execution = document.createElement("span");
   const value = status === "missed" ? 0 : Number(entry.compliance.percentage);
   let executionState = "is-on-target";
