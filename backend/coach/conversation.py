@@ -99,7 +99,8 @@ class CoachConversationResetService:
             db.execute("DELETE FROM messages")
             db.execute(
                 "UPDATE coach_action_proposals SET status='cancelled', action_token_hash=NULL "
-                "WHERE action_type='remote_coach_write' AND status IN ('preview', 'ready')"
+                "WHERE action_type IN ('remote_coach_write', 'local_coach_write') "
+                "AND status IN ('preview', 'ready')"
             )
             generation = self._uuid_factory().hex
             self._key_values.set(db, "chat_generation", generation)

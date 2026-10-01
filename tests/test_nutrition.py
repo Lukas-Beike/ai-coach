@@ -143,6 +143,22 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.assertEqual(entry["meal_date"], "2026-09-23")
         self.assertEqual(entry["logged_at"], "2026-09-23T12:00")
 
+    def test_template_meal_type_defaults_from_consumption_time_and_keeps_explicit_type(self) -> None:
+        inferred = self.service.save_template({
+            "name": "Time inferred", "description": "Food", "kcal": 100, "source": "coach",
+        })
+        inferred_entry = self.service.log_template(inferred["id"], meal_time="19:10")
+        self.assertEqual(inferred_entry["meal_type"], "dinner")
+        self.assertEqual(inferred_entry["source"], "coach")
+
+        explicit = self.service.save_template({
+            "name": "Explicit breakfast", "description": "Food", "kcal": 100,
+            "meal_type": "breakfast", "source": "coach",
+        })
+        explicit_entry = self.service.log_template(explicit["id"], meal_time="19:10")
+        self.assertEqual(explicit_entry["meal_type"], "breakfast")
+        self.assertEqual(explicit_entry["source"], "coach")
+
     def test_template_validation_preserves_state(self) -> None:
         template = self.service.save_template({"name": "Snack", "description": "Synthetic snack", "kcal": 500})
         for amount in [0, -1, 21, float("nan"), float("inf"), "invalid"]:

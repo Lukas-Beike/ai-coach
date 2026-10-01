@@ -126,11 +126,12 @@ class CoachAthleteRecordToolService:
         if not self._nutrition:
             raise AppError(500, "NutritionService ist nicht verfügbar.")
         if name == "save_nutrition_template":
+            template_payload = structured_action_payload(arguments)
+            if not template_payload.get("id"):
+                template_payload.setdefault("source", "coach")
             return {
                 "ok": True,
-                "template": self._nutrition.save_template(
-                    structured_action_payload(arguments)
-                ),
+                "template": self._nutrition.save_template(template_payload),
             }
         if name == "delete_nutrition_template":
             return {

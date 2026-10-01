@@ -25,6 +25,7 @@ OBJECT_SCOPE_TABLES = {
     "adaptive_replan": ("plan_adjustments", "id"),
     "change": ("change_history", "id"),
     "sync_job": ("sync_jobs", "id"),
+    "nutrition_template": ("nutrition_templates", "id"),
 }
 BROAD_SCOPES = frozenset(
     {
@@ -104,9 +105,11 @@ class CoachDialogueActionService:
             raise error from exc
         target = request["target"]
         scope = set(request["scope"])
+        if name in {"delete_nutrition_template", "log_nutrition_template"}:
+            scope.add("nutrition_template:" + str(arguments.get("id") or ""))
         remote_write, refresh = self._retry_metadata(name, arguments, target)
         self._validate_target(request, target, scope, remote_write, refresh)
-        self._validate_objects(name, scope)
+        self._validate_objects(name, arguments, scope)
         action = {
             "intent": "remote_sync" if remote_write or refresh else "local_action",
             "operation": name,
@@ -198,7 +201,9 @@ class CoachDialogueActionService:
                 reason="request_target",
             )
 
-    def _validate_objects(self, name: str, scope: set[str]) -> None:
+    def _validate_objects(
+        self, name: str, arguments: dict[str, Any], scope: set[str]
+    ) -> None:
         with self._db_lock, self._database_manager.unit_of_work() as db:
             for token in scope:
                 kind, _, object_id = token.partition(":")
@@ -229,6 +234,14 @@ class CoachDialogueActionService:
                     raise AppError(
                         400,
                         "Der Auftrag enthält einen ungültigen Objektbezug.",
+                        reason="request_scope",
+                    )
+            if name in {"delete_nutrition_template", "log_nutrition_template"}:
+                template_id = str(arguments.get("id") or "")
+                if f"nutrition_template:{template_id}" not in scope:
+                    raise AppError(
+                        403,
+                        "Die Aktion umfasst diese gespeicherte Mahlzeit nicht.",
                         reason="request_scope",
                     )
 
@@ -323,6 +336,9 @@ class CoachDialogueActionService:
             "delete_nutrition_entry",
         }:
             require_coach_scope(action, "local_nutrition")
+            if name in {"delete_nutrition_template", "log_nutrition_template"}:
+                template_id = str(arguments.get("id") or "")
+                require_coach_scope(action, f"nutrition_template:{template_id}")
         if name == "sync_nutrition":
             require_coach_scope(action, "local_nutrition", "intervals_sync")
         if name == "delete_duplicate_intervals_activity":

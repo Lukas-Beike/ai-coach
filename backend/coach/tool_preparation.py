@@ -88,6 +88,13 @@ class CoachStructuredToolPreparationService:
             action["authorization_scope"] = [
                 "sync_job:" + str(arguments.get("job_id") or "")
             ]
+        if name in {"delete_nutrition_template", "log_nutrition_template"}:
+            action["authorization_scope"].append(
+                "nutrition_template:" + str(arguments.get("id") or "")
+            )
+            action["request"]["scope"].append(
+                "nutrition_template:" + str(arguments.get("id") or "")
+            )
         if name == "start_intervals_plan_sync":
             self._prepare_plan_sync(arguments, action, command_receipts)
         return action

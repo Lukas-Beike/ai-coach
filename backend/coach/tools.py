@@ -785,6 +785,7 @@ def build_tool_contracts(
                         "type": "object",
                         "properties": template_properties,
                         "additionalProperties": False,
+                        "required": ["name", "description", "kcal"],
                     }
                 },
             ),

@@ -29,6 +29,7 @@ COACH_ACTION_TYPES = {
     "undo_change",
     "delete_duplicate_intervals_activity",
     "remote_coach_write",
+    "local_coach_write",
 }
 REMOTE_COACH_WRITE_TOOLS = frozenset(
     {
@@ -40,6 +41,7 @@ REMOTE_COACH_WRITE_TOOLS = frozenset(
         "apply_adaptive_replan",
     }
 )
+LOCAL_COACH_WRITE_TOOLS = frozenset({"save_nutrition_template"})
 COACH_ACTION_TTL_SECONDS = 600
 LOGGER = logging.getLogger("intervals_coach")
 _MAX_REMOTE_APPROVAL_DETAILS = 5000
@@ -83,7 +85,13 @@ def validated_coach_action_preview_input(
         }
         else "local"
     )
-    if target_system != expected_target or not diff:
+    if action_type == "local_coach_write":
+        if target_system != "local" or not diff:
+            raise AppError(
+                400, "Die lokale Coach-Aktion benÃ¶tigt einen sichtbaren Diff."
+            )
+        _validate_local_coach_write(payload)
+    elif target_system != expected_target or not diff:
         raise AppError(
             400,
             "Die geschuetzte Aktion benoetigt das passende Ziel und einen sichtbaren Diff.",
@@ -123,6 +131,38 @@ def _validate_remote_coach_write(payload: dict[str, Any]) -> None:
         raise AppError(
             400, "Die Coach-Aktion ist keine gültige Intervals.icu-Änderung."
         )
+
+
+def _validate_local_coach_write(payload: dict[str, Any]) -> None:
+    tool = payload.get("tool")
+    arguments = payload.get("arguments")
+    intent = payload.get("intent")
+    request = intent.get("request") if isinstance(intent, dict) else None
+    scope = intent.get("authorization_scope") if isinstance(intent, dict) else None
+    source_ids = (
+        request.get("source_message_ids") if isinstance(request, dict) else None
+    )
+    values = arguments.get("payload") if isinstance(arguments, dict) else None
+    source_ids_ok = (
+        isinstance(source_ids, list)
+        and 1 <= len(source_ids) <= 24
+        and all(type(value) is int and value > 0 for value in source_ids)
+        and len(source_ids) == len(set(source_ids))
+    )
+    if (
+        tool not in LOCAL_COACH_WRITE_TOOLS
+        or not isinstance(intent, dict)
+        or intent.get("operation") != tool
+        or intent.get("target_system") != "local"
+        or not isinstance(request, dict)
+        or not source_ids_ok
+        or not isinstance(scope, list)
+        or "local_nutrition" not in scope
+        or not isinstance(values, dict)
+        or not isinstance(values.get("name"), str)
+        or not isinstance(values.get("description"), str)
+    ):
+        raise AppError(400, "Die lokale Coach-Aktion ist ungÃ¼ltig.")
 
 
 REMOTE_WRITE_LABELS = {
@@ -388,6 +428,66 @@ class CoachProposalCreationService:
                 "diff": remote_coach_write_diff(
                     tool, arguments, intent, approval_manifest, approval_details
                 ),
+                "payload": payload,
+            },
+            session_csrf_hash,
+        )
+
+    def create_local_write(
+        self,
+        tool: str,
+        arguments: dict[str, Any],
+        intent: dict[str, Any],
+        *,
+        conversation_id: str,
+        client_turn_id: str,
+        session_csrf_hash: str,
+    ) -> dict[str, Any]:
+        if not conversation_id or not client_turn_id or not session_csrf_hash:
+            raise AppError(
+                403, "Die lokale Aktion ist nicht an eine Coach-Sitzung gebunden."
+            )
+        payload = {
+            "tool": tool,
+            "arguments": dict(arguments),
+            "intent": intent,
+            "conversation_id": str(conversation_id)[:160],
+            "client_turn_id": str(client_turn_id)[:160],
+        }
+        _validate_local_coach_write(payload)
+        values = arguments["payload"]
+        diff = [
+            {
+                "name": values["name"],
+                "description": values["description"][:500],
+                "kcal": str(
+                    values.get("kcal")
+                    if values.get("kcal") is not None
+                    else "unbekannt"
+                ),
+                "carbs": str(
+                    values.get("carbs_g")
+                    if values.get("carbs_g") is not None
+                    else "unbekannt"
+                ),
+                "protein": str(
+                    values.get("protein_g")
+                    if values.get("protein_g") is not None
+                    else "unbekannt"
+                ),
+                "fat": str(
+                    values.get("fat_g")
+                    if values.get("fat_g") is not None
+                    else "unbekannt"
+                ),
+            }
+        ]
+        return self.create(
+            {
+                "action_type": "local_coach_write",
+                "target_system": "local",
+                "object_ids": {"operation": tool, "template_id": values.get("id")},
+                "diff": diff,
                 "payload": payload,
             },
             session_csrf_hash,
@@ -831,8 +931,8 @@ class CoachProposalExecutionService:
             }
         elif action_type == "undo_change":
             result = self._history_undo_service.apply(payload)
-        elif action_type == "remote_coach_write":
-            result = self._execute_remote_coach_write(payload, session_csrf_hash)
+        elif action_type in {"remote_coach_write", "local_coach_write"}:
+            result = self._execute_coach_write(payload, session_csrf_hash)
         else:
             raise AppError(400, "Unbekannte Coach-Aktion.")
         LOGGER.info(
@@ -848,7 +948,7 @@ class CoachProposalExecutionService:
         )
         return result
 
-    def _execute_remote_coach_write(
+    def _execute_coach_write(
         self, payload: dict[str, Any], session_csrf_hash: str
     ) -> dict[str, Any]:
         if not self._tool_dispatch_service:
@@ -856,6 +956,17 @@ class CoachProposalExecutionService:
         tool, arguments, intent, conversation_id, client_turn_id = (
             self._validate_remote_write_context(payload, session_csrf_hash)
         )
+        if tool in LOCAL_COACH_WRITE_TOOLS:
+            result = self._tool_dispatch_service().execute(
+                tool,
+                arguments,
+                intent=intent,
+                conversation_id=conversation_id,
+                client_turn_id=client_turn_id,
+                session_csrf_hash=session_csrf_hash,
+                sync_job_ids=[],
+            )
+            return {**result, "ok": True, "status": "applied"}
         sync_job_ids: list[str] = []
         result = self._tool_dispatch_service().execute(
             tool,
@@ -876,13 +987,18 @@ class CoachProposalExecutionService:
         tool = payload.get("tool")
         arguments = payload.get("arguments")
         intent = payload.get("intent")
+        local_write = tool in LOCAL_COACH_WRITE_TOOLS
         if (
-            tool not in REMOTE_COACH_WRITE_TOOLS
+            not isinstance(tool, str)
+            or (tool not in REMOTE_COACH_WRITE_TOOLS and not local_write)
             or not isinstance(arguments, dict)
             or not isinstance(intent, dict)
         ):
             raise AppError(409, "Der freigegebene Coach-Auftrag ist ung\u00fcltig.")
-        _validate_remote_coach_write(payload)
+        if local_write:
+            _validate_local_coach_write(payload)
+        else:
+            _validate_remote_coach_write(payload)
         client_turn_id = str(payload.get("client_turn_id") or "")
         conversation_id = str(payload.get("conversation_id") or "")
         if not client_turn_id or not conversation_id:

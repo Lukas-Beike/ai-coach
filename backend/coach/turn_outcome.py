@@ -156,7 +156,7 @@ class CoachStructuredOutcomeService:
     ) -> tuple[str, str, list[dict[str, Any]]]:
         failures = unresolved_coach_steps(command_receipts)
         mark_resolved_receipts(command_receipts, failures)
-        effects = effects_from_receipts(command_receipts, self._internal_tools)
+        effects = effects_from_receipts(command_receipts, set(self._internal_tools))
         text, incomplete_answer, missing_answer = self._text(
             response, question, failures, effects, command_receipts
         )
@@ -195,7 +195,7 @@ class CoachStructuredOutcomeService:
             ((entry.get("result") or {}).get("proposed_action") or {}).get(
                 "action_type"
             )
-            == "remote_coach_write"
+            in {"remote_coach_write", "local_coach_write"}
             for entry in command_receipts
         )
         incomplete_answer = response.get("status") == "incomplete"

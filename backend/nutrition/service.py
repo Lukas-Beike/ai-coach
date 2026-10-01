@@ -130,6 +130,9 @@ class NutritionService:
                     "source",
                 )
             }
+            template["meal_type_explicit"] = "meal_type" in payload or bool(
+                existing and existing.get("meal_type_explicit")
+            )
             template.update(
                 id=template_id or uuid.uuid4().hex,
                 name=name,
@@ -172,6 +175,12 @@ class NutritionService:
                 "meal_time": meal_time or "12:00",
             }
             payload.pop("id")
+            payload.pop("meal_type", None)
+            if template.get("meal_type_explicit"):
+                payload["meal_type"] = template["meal_type"]
+            payload["source"] = (
+                "coach" if template.get("source") == "coach" else template["source"]
+            )
             for key in ("kcal", "carbs_g", "protein_g", "fat_g"):
                 payload[key] = None if template[key] is None else template[key] * amount
             entry = normalize_nutrition_entry(

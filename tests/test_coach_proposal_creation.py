@@ -144,6 +144,32 @@ class CoachProposalCreationTests(unittest.TestCase):
         self.assertNotIn("private", repr(result))
         self.sync_state_repository.latest_snapshot.assert_not_called()
 
+    def test_local_nutrition_write_requires_bound_request_and_shows_safe_values(self) -> None:
+        service = self._service()
+        intent = {
+            "operation": "save_nutrition_template", "target_system": "local",
+            "authorization_scope": ["local_nutrition"],
+            "request": {"source_message_ids": [7]},
+        }
+        args = {"payload": {"name": "Recovery bowl", "description": "Oats and yogurt", "kcal": 420}}
+        result = service.create_local_write(
+            "save_nutrition_template", args, intent, conversation_id="conversation-1",
+            client_turn_id="turn-1", session_csrf_hash="session-1",
+        )
+        action = result["proposed_action"]
+        self.assertEqual(action["action_type"], "local_coach_write")
+        self.assertEqual(action["diff"][0]["name"], "Recovery bowl")
+        self.assertEqual(action["diff"][0]["kcal"], "420")
+        self.assertNotIn("payload", action)
+        with self.assertRaises(AppError):
+            service.create_local_write(
+                "save_nutrition_template", args,
+                {**intent, "request": {"source_message_ids": []}},
+                conversation_id="conversation-1", client_turn_id="turn-1",
+                session_csrf_hash="session-1",
+            )
+        self.assertEqual(len(self._rows()), 1)
+
     def test_competition_remote_write_binds_dirty_rows_and_tombstones_to_approval(self) -> None:
         with self.database_manager.unit_of_work() as db:
             db.execute(
