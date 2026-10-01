@@ -100,7 +100,9 @@ class NutritionService:
             existing = self._templates.get(db, template_id) if template_id else None
             if template_id and not existing:
                 raise AppError(404, SAVED_MEAL_NOT_FOUND)
-            name = str(payload.get("name") or (existing or {}).get("name") or "").strip()
+            name = str(
+                payload.get("name") or (existing or {}).get("name") or ""
+            ).strip()
             if not name or len(name) > 120:
                 raise AppError(400, "Mahlzeitname muss 1 bis 120 Zeichen enthalten.")
             if any(
