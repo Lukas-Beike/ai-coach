@@ -15,7 +15,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, NoReturn
 from urllib.error import HTTPError
 from urllib.parse import quote, urlparse, urlunparse
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from backend import observability
 from backend.errors import (
@@ -25,6 +25,7 @@ from backend.errors import (
     ClientDisconnected,
 )
 from backend.providers import http as provider_http
+from backend.providers.http import urlopen
 
 
 def _payload_shape(value: Any) -> dict[str, Any]:

@@ -55,7 +55,7 @@ PROFILE_KEYWORDS = (
     ("competition_preparation", r"wettkampf|rennen|race|competition|marathon"),
     (
         "profile_or_checkin",
-        r"profil|check.?in|befinden|nutrition|ernährung|ernaehrung|gegessen|ate|calorie|kalorie",
+        r"profil|check.?in|befinden|nutrition|ernährung|ernaehrung|gegessen|\bate\b|calorie|kalorie",
     ),
     (
         "activity_analysis",
@@ -72,6 +72,7 @@ class CoachContextSelection:
     horizon_days: int | None = None
     activity_limit: int = 5
     include_library: bool = True
+    retain_dialogue: bool = False
 
     def project(self, context: dict[str, Any], local_date: str = "") -> dict[str, Any]:
         result = {key: value for key, value in context.items() if key in self.sections}
@@ -139,14 +140,21 @@ def select_coach_context(
 ) -> CoachContextSelection:
     normalized = message.casefold()
     continuation = re.search(
-        r"\b(ja|yes|ok|okay|mach|weiter|das|diese|diesen|that|those|it|continue)\b",
+        r"\b(ja|yes|ok|okay|mach|weiter|fortsetzen|das|diese|diesen|that|those|it|continue)\b",
         normalized,
     )
-    if dialogue.get("pending_request") or has_receipts or continuation:
-        return CoachContextSelection("fallback")
     matched = [
         name for name, pattern in PROFILE_KEYWORDS if re.search(pattern, normalized)
     ]
+    if dialogue.get("pending_request") or (
+        continuation
+        and (
+            not matched
+            or len(normalized.split()) <= 3
+            or len(set(matched) - {"today_training"}) > 1
+        )
+    ):
+        return CoachContextSelection("fallback")
     name = matched[0] if matched else "general_coaching"
     sections = set(BASE_SECTIONS)
     planning = bool(
@@ -162,7 +170,7 @@ def select_coach_context(
         re.search(pattern, normalized)
         for pattern in (
             r"monat|month|jahr|year|saison|season",
-            r"\b(?:[3-9]|\d{2,})\s*(?:wochen|weeks|tage|days)",
+            r"\b(?:wochen|weeks|tage|days)\b",
         )
     ):
         return CoachContextSelection(name)
@@ -174,26 +182,29 @@ def select_coach_context(
         14 if planning else 3,
         5 if planning or "activity_analysis" in matched else 1,
         planning,
+        retain_dialogue=bool(continuation or has_receipts),
     )
 
 
 def compact_coach_dialogue(
     context: dict[str, Any], selection: CoachContextSelection
 ) -> dict[str, Any]:
-    if selection.horizon_days is None:
-        return context
     result = dict(context)
+    retain_history = selection.horizon_days is None or selection.retain_dialogue
     messages = context.get("messages")
     if isinstance(messages, list):
-        selected = messages[-8:]
+        selected = messages if retain_history else messages[-8:]
         current_id = context.get("current_user_message_id")
         result["messages"] = [
             item
             for item in selected
-            if not isinstance(item, dict) or item.get("id") != current_id
+            if not isinstance(item, dict)
+            or current_id is None
+            or item.get("id") != current_id
+            or item.get("role") != "user"
         ]
     results = context.get("confirmed_results")
-    if isinstance(results, list):
+    if isinstance(results, list) and not retain_history:
         result["confirmed_results"] = results[:3]
     return result
 

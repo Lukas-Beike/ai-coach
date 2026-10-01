@@ -88,7 +88,9 @@ class CoachRequestPayloadService:
             },
             "conversation": conversation_id,
             "instructions": model_instructions,
-            "input": json.dumps(dialogue_input, ensure_ascii=False),
+            "input": json.dumps(
+                dialogue_input, ensure_ascii=False, separators=(",", ":")
+            ),
             "tools": select_coach_tools(tools, selection),
             "tool_choice": "auto",
             "max_output_tokens": self._max_output_tokens,
