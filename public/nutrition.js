@@ -76,8 +76,9 @@ async function loadNutrition() {
   document.querySelector("#nutritionTemplates").replaceChildren();
   document.querySelector("#nutritionTotals").replaceChildren();
   try {
+    const dateQuery = dateInput.value ? `?date=${encodeURIComponent(dateInput.value)}` : "";
     const [day, saved] = await Promise.all([
-      api(`/api/nutrition/day${dateInput.value ? `?date=${encodeURIComponent(dateInput.value)}` : ""}`),
+      api(`/api/nutrition/day${dateQuery}`),
       api("/api/nutrition/templates"),
     ]);
     if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration) return;
@@ -89,7 +90,8 @@ async function loadNutrition() {
       tile.className = "nutrition-total";
       const value = document.createElement("strong");
       const known = day.entries.some((entry) => entry[key] != null);
-      value.textContent = `${known ? day[`total_${key}`] : "–"} ${unit}`;
+      const total = day[`total_${key}`];
+      value.textContent = `${known ? total : "–"} ${unit}`;
       const caption = document.createElement("span");
       caption.textContent = label + (known && day.entries.some((entry) => entry[key] == null) ? " · unvollständig" : "");
       tile.append(value, caption);

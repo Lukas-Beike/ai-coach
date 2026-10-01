@@ -205,45 +205,60 @@ class CoachDialogueActionService:
         self, name: str, arguments: dict[str, Any], scope: set[str]
     ) -> None:
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            for token in scope:
-                kind, _, object_id = token.partition(":")
-                if kind in OBJECT_SCOPE_TABLES and object_id:
-                    table, column = OBJECT_SCOPE_TABLES[kind]
-                    if not db.execute(
-                        f"SELECT 1 FROM {table} WHERE {column}=?", (object_id,)
-                    ).fetchone():
-                        raise AppError(
-                            409,
-                            "Das ausgewählte Objekt ist nicht mehr verfügbar. Lies den aktuellen Stand erneut.",
-                            reason="request_object_missing",
-                        )
-                    if (
-                        kind == "training_plan"
-                        and name == "replace_training_plan"
-                        and db.execute(
-                            "SELECT status FROM training_plans WHERE id=?", (object_id,)
-                        ).fetchone()["status"]
-                        == "archived"
-                    ):
-                        raise AppError(
-                            409,
-                            "Dieser Plan ist archiviert. Wähle den aktuellen Plan oder erstelle einen neuen.",
-                            reason="request_object_missing",
-                        )
-                elif token not in BROAD_SCOPES:
+            self._validate_scope_tokens(db, name, scope)
+        self._validate_template_action_scope(name, arguments, scope)
+
+    @staticmethod
+    def _validate_scope_tokens(db: Any, name: str, scope: set[str]) -> None:
+        for token in scope:
+            kind, _, object_id = token.partition(":")
+            if kind in OBJECT_SCOPE_TABLES and object_id:
+                table, column = OBJECT_SCOPE_TABLES[kind]
+                if not db.execute(
+                    f"SELECT 1 FROM {table} WHERE {column}=?", (object_id,)
+                ).fetchone():
                     raise AppError(
-                        400,
-                        "Der Auftrag enthält einen ungültigen Objektbezug.",
-                        reason="request_scope",
+                        409,
+                        "Das ausgewählte Objekt ist nicht mehr verfügbar. Lies den aktuellen Stand erneut.",
+                        reason="request_object_missing",
                     )
-            if name in {"delete_nutrition_template", "log_nutrition_template"}:
-                template_id = str(arguments.get("id") or "")
-                if f"nutrition_template:{template_id}" not in scope:
+                if CoachDialogueActionService._is_archived_plan(
+                    db, name, kind, object_id
+                ):
                     raise AppError(
-                        403,
-                        "Die Aktion umfasst diese gespeicherte Mahlzeit nicht.",
-                        reason="request_scope",
+                        409,
+                        "Dieser Plan ist archiviert. Wähle den aktuellen Plan oder erstelle einen neuen.",
+                        reason="request_object_missing",
                     )
+            elif token not in BROAD_SCOPES:
+                raise AppError(
+                    400,
+                    "Der Auftrag enthält einen ungültigen Objektbezug.",
+                    reason="request_scope",
+                )
+
+    @staticmethod
+    def _is_archived_plan(db: Any, name: str, kind: str, object_id: str) -> bool:
+        if kind != "training_plan" or name != "replace_training_plan":
+            return False
+        row = db.execute(
+            "SELECT status FROM training_plans WHERE id=?", (object_id,)
+        ).fetchone()
+        return bool(row and row["status"] == "archived")
+
+    @staticmethod
+    def _validate_template_action_scope(
+        name: str, arguments: dict[str, Any], scope: set[str]
+    ) -> None:
+        if name not in {"delete_nutrition_template", "log_nutrition_template"}:
+            return
+        template_id = str(arguments.get("id") or "")
+        if f"nutrition_template:{template_id}" not in scope:
+            raise AppError(
+                403,
+                "Die Aktion umfasst diese gespeicherte Mahlzeit nicht.",
+                reason="request_scope",
+            )
 
     def _validate_repair_scope(
         self,
@@ -284,6 +299,13 @@ class CoachDialogueActionService:
         arguments: dict[str, Any],
         action: dict[str, Any],
     ) -> None:
+        self._apply_planning_scope(name, arguments, action)
+        self._apply_sync_scope(name, arguments, action)
+        self._apply_object_scope(name, arguments, action)
+
+    def _apply_planning_scope(
+        self, name: str, arguments: dict[str, Any], action: dict[str, Any]
+    ) -> None:
         if name in {
             "apply_training_patch",
             "apply_training_changes",
@@ -304,6 +326,10 @@ class CoachDialogueActionService:
                 "start": max(period["start"], self._today().isoformat()),
             }
             self._plan_scope.validate(name, arguments, action)
+
+    def _apply_sync_scope(
+        self, name: str, arguments: dict[str, Any], action: dict[str, Any]
+    ) -> None:
         if name == "start_intervals_plan_sync":
             if action["request"]["sync_scope"] not in {
                 "created",
@@ -317,6 +343,15 @@ class CoachDialogueActionService:
                 action["request"]["sync_scope"] == "all_pending"
             )
             self._validate_repair_scope(arguments, action["request"], action)
+        if name == "sync_nutrition":
+            require_coach_scope(action, "local_nutrition", "intervals_sync")
+        elif name == "delete_duplicate_intervals_activity":
+            require_coach_scope(action, "intervals_sync")
+
+    @staticmethod
+    def _apply_object_scope(
+        name: str, arguments: dict[str, Any], action: dict[str, Any]
+    ) -> None:
         if name == "update_training_plan":
             require_coach_scope(
                 action,
@@ -339,7 +374,3 @@ class CoachDialogueActionService:
             if name in {"delete_nutrition_template", "log_nutrition_template"}:
                 template_id = str(arguments.get("id") or "")
                 require_coach_scope(action, f"nutrition_template:{template_id}")
-        if name == "sync_nutrition":
-            require_coach_scope(action, "local_nutrition", "intervals_sync")
-        if name == "delete_duplicate_intervals_activity":
-            require_coach_scope(action, "intervals_sync")

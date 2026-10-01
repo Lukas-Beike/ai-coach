@@ -103,18 +103,7 @@ class NutritionService:
             name = str(
                 payload.get("name") or (existing or {}).get("name") or ""
             ).strip()
-            if not name or len(name) > 120:
-                raise AppError(400, "Mahlzeitname muss 1 bis 120 Zeichen enthalten.")
-            if any(
-                t["name"].casefold() == name.casefold() and t["id"] != template_id
-                for t in self._templates.list(db)
-            ):
-                raise AppError(
-                    409,
-                    "Dieser Mahlzeitname ist bereits vergeben. Lies die Vorlage und ändere sie gezielt.",
-                )
-            if not existing and len(self._templates.list(db)) >= 200:
-                raise AppError(400, "Maximal 200 gespeicherte Mahlzeiten sind möglich.")
+            self._validate_template_name(db, name, template_id, existing)
             normalized = normalize_nutrition_entry(
                 {**(existing or {}), **payload}, local_now_factory=self._local_now
             )
@@ -140,6 +129,27 @@ class NutritionService:
             )
             self._templates.save(db, template)
             return template
+
+    def _validate_template_name(
+        self,
+        db: Any,
+        name: str,
+        template_id: str,
+        existing: dict[str, Any] | None,
+    ) -> None:
+        if not name or len(name) > 120:
+            raise AppError(400, "Mahlzeitname muss 1 bis 120 Zeichen enthalten.")
+        templates = self._templates.list(db)
+        if any(
+            item["name"].casefold() == name.casefold() and item["id"] != template_id
+            for item in templates
+        ):
+            raise AppError(
+                409,
+                "Dieser Mahlzeitname ist bereits vergeben. Lies die Vorlage und ändere sie gezielt.",
+            )
+        if not existing and len(templates) >= 200:
+            raise AppError(400, "Maximal 200 gespeicherte Mahlzeiten sind möglich.")
 
     def delete_template(self, template_id: str) -> dict[str, Any]:
         with self._db_lock, self._database_manager.unit_of_work() as db:
