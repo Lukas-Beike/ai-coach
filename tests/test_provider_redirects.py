@@ -19,10 +19,11 @@ class ProviderRedirectTests(unittest.TestCase):
                     self.rfile.read(body_length)
                 if self.path.startswith("/redirect/"):
                     _, _, status, host = self.path.split("/")
+                    redirect_host = "localhost" if host == "localhost" else "127.0.0.1"
                     self.send_response(int(status))
                     self.send_header(
                         "Location",
-                        f"http://{host}:{self.server.server_port}/destination",
+                        f"http://{redirect_host}:{self.server.server_port}/destination",
                     )
                     self.end_headers()
                     return
