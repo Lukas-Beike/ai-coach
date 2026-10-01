@@ -129,11 +129,19 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.assertEqual(entry["kcal"], 200)
         self.assertEqual(entry["carbs_g"], 30)
         self.assertEqual(entry["logged_at"], "2026-09-23T08:15")
-        self.service.save_template({**template, "kcal": 600})
+        updated = self.service.save_template({"id": template["id"], "kcal": 600})
+        self.assertEqual(updated["name"], "Breakfast")
+        self.assertEqual(updated["kcal"], 600)
         self.assertEqual(self.service.get_meal(entry["id"])["kcal"], 200)
         self.service.delete_template(template["id"])
         self.assertEqual(self.service.list_templates(), [])
         self.assertEqual(self.service.get_meal(entry["id"])["kcal"], 200)
+
+    def test_logging_saved_meal_on_past_date_defaults_timestamp_to_that_date(self) -> None:
+        template = self.service.save_template({"name": "Snack", "description": "Fruit", "kcal": 120})
+        entry = self.service.log_template(template["id"], meal_date="2026-09-23")
+        self.assertEqual(entry["meal_date"], "2026-09-23")
+        self.assertEqual(entry["logged_at"], "2026-09-23T12:00")
 
     def test_template_validation_preserves_state(self) -> None:
         template = self.service.save_template({"name": "Snack", "description": "Synthetic snack", "kcal": 500})

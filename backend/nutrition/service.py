@@ -95,14 +95,14 @@ class NutritionService:
         """Save a confirmed recipe for one portion without recording consumption."""
         if not isinstance(payload, dict):
             raise AppError(400, "Mahlzeit muss ein Objekt sein.")
-        name = str(payload.get("name") or "").strip()
-        if not name or len(name) > 120:
-            raise AppError(400, "Mahlzeitname muss 1 bis 120 Zeichen enthalten.")
         template_id = str(payload.get("id") or "").strip()
         with self._db_lock, self._database_manager.unit_of_work() as db:
             existing = self._templates.get(db, template_id) if template_id else None
             if template_id and not existing:
                 raise AppError(404, SAVED_MEAL_NOT_FOUND)
+            name = str(payload.get("name") or (existing or {}).get("name") or "").strip()
+            if not name or len(name) > 120:
+                raise AppError(400, "Mahlzeitname muss 1 bis 120 Zeichen enthalten.")
             if any(
                 t["name"].casefold() == name.casefold() and t["id"] != template_id
                 for t in self._templates.list(db)
@@ -167,7 +167,7 @@ class NutritionService:
                 **template,
                 "description": f"{template['name']} · {amount:g} Portion(en): {template['description']}",
                 "meal_date": meal_date,
-                "meal_time": meal_time,
+                "meal_time": meal_time or "12:00",
             }
             payload.pop("id")
             for key in ("kcal", "carbs_g", "protein_g", "fat_g"):

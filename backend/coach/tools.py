@@ -770,7 +770,7 @@ def build_tool_contracts(
     template_properties = {
         key: value
         for key, value in meal_properties.items()
-        if key not in {"meal_date", "meal_time"}
+        if key not in {"meal_date", "meal_time"} and key != "name"
     }
     template_properties.update(
         name={"type": "string", "maxLength": 120}, id={"type": "string"}
