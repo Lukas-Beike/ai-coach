@@ -173,27 +173,7 @@ class CoachStructuredToolRoundService:
             if result.get("synchronous_refresh") or (
                 name == "get_sync_job" and result.get("ok")
             ):
-                model_instructions = (
-                    self._training_context.build(
-                        selection=select_coach_context(
-                            state.message,
-                            state.context,
-                            attachments=bool(
-                                state.attachments
-                                or (
-                                    state.ai_provider == "openai"
-                                    and state.request_payload.get("conversation")
-                                )
-                            ),
-                            has_receipts=True,
-                        ),
-                        local_date=state.context.get("local_date", ""),
-                    )
-                    + "\n\n"
-                    + COACH_DIALOGUE_INSTRUCTIONS
-                )
-                if not state.allow_mutations:
-                    model_instructions += "\nThis is an automatic advisory run. Do not change data or pending requests."
+                model_instructions = self._refreshed_instructions(state)
             if action.get("period"):
                 self._update_plan_scope(state, action)
         except (AppError, ValueError, TypeError, KeyError) as exc:
@@ -212,6 +192,30 @@ class CoachStructuredToolRoundService:
             )
         state.model_instructions = model_instructions
         return name, call_id, result, action
+
+    def _refreshed_instructions(self, state: StructuredCoachRoundState) -> str:
+        instructions = (
+            self._training_context.build(
+                selection=select_coach_context(
+                    state.message,
+                    state.context,
+                    attachments=bool(
+                        state.attachments
+                        or (
+                            state.ai_provider == "openai"
+                            and state.request_payload.get("conversation")
+                        )
+                    ),
+                    has_receipts=True,
+                ),
+                local_date=state.context.get("local_date", ""),
+            )
+            + "\n\n"
+            + COACH_DIALOGUE_INSTRUCTIONS
+        )
+        if not state.allow_mutations:
+            instructions += "\nThis is an automatic advisory run. Do not change data or pending requests."
+        return instructions
 
     def _update_plan_scope(
         self, state: StructuredCoachRoundState, action: dict[str, Any]
