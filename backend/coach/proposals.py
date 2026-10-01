@@ -497,6 +497,11 @@ class CoachProposalCreationService:
             )
             preview_values.update(calculation)
             payload["arguments"]["_food_calculation"] = calculation
+        elif set(values) & {"kcal", "carbs_g", "protein_g", "fat_g"}:
+            if self._nutrition_service is not None:
+                preview_values.update(
+                    self._nutrition_service()._prepare_values(preview_values)
+                )
         return preview_values
 
     @staticmethod

@@ -152,6 +152,10 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
             "packaging_label": True,
         })
         self.assertEqual(label_entry["nutrition_basis"]["kind"], "packaging_label")
+        corrected = self.service.correct_meal(
+            entry["id"], {"kcal": 110, "packaging_label": True}
+        )
+        self.assertEqual(corrected["nutrition_basis"]["kind"], "packaging_label")
 
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()

@@ -354,6 +354,7 @@ class NutritionService:
             "fat_g",
             "fat",
             "food_ingredients",
+            "packaging_label",
         }
         if not isinstance(changes, dict) or not changes or set(changes) - editable:
             raise AppError(
@@ -381,7 +382,11 @@ class NutritionService:
                 str(aliases.get(key, key)): value for key, value in changes.items()
             }
             merged = {**existing, **canonical_changes}
-            if set(canonical_changes) & {*NUTRIENTS, "food_ingredients"}:
+            if set(canonical_changes) & {
+                *NUTRIENTS,
+                "food_ingredients",
+                "packaging_label",
+            }:
                 merged = (
                     {**merged, **calculation}
                     if calculation is not None
