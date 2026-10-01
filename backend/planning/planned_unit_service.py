@@ -91,8 +91,7 @@ class PlannedUnitService:
             db.execute("DELETE FROM planned_units WHERE local_id=?", (entity_id,))
             return None
         if current is None:
-            restore_date = str(target.get("date") or "")[:10]
-            self._reject_restore_conflict(entity_id, restore_date)
+            self._reject_restore_conflict(entity_id, target)
             restored = planned_units.normalize_planned_unit(
                 target, local_id=entity_id, sync_status="local"
             )
@@ -122,12 +121,9 @@ class PlannedUnitService:
 
         restore_date = str(target.get("date") or current_payload.get("date") or "")[:10]
         current_date = str(current_payload.get("date") or "")[:10]
-        archived, local_deleted, restored_from_hidden = (
-            self._restore_visibility_state(current_payload, target, history_action)
+        archived, local_deleted, restored_from_hidden = self._restore_visibility_state(
+            current_payload, target, history_action
         )
-        if restore_date != current_date or restored_from_hidden:
-            self._reject_restore_conflict(entity_id, restore_date)
-
         restored_target = dict(target)
         if restore_date:
             previous_start = str(current_payload.get("start_date_local") or "")
@@ -137,6 +133,10 @@ class PlannedUnitService:
                 else "T00:00:00"
             )
             restored_target["start_date_local"] = restore_date + suffix
+        if restore_date != current_date or restored_from_hidden:
+            self._reject_restore_conflict(
+                entity_id, {**current_payload, **restored_target}
+            )
         restored = planned_units.normalize_planned_unit(
             {
                 **current_payload,
@@ -184,9 +184,15 @@ class PlannedUnitService:
         )
         return archived, local_deleted, restored_from_hidden
 
-    def _reject_restore_conflict(self, entity_id: str, restore_date: str) -> None:
+    def _reject_restore_conflict(self, entity_id: str, workout_or_date: Any) -> None:
+        workout = (
+            workout_or_date
+            if isinstance(workout_or_date, dict)
+            else {"date": str(workout_or_date or "")[:10]}
+        )
+        restore_date = str(workout.get("date") or "")[:10]
         if restore_date and self._calendar_conflict_service.conflicts(
-            {"date": restore_date}, {entity_id}
+            workout, {entity_id}
         ):
             raise AppError(
                 409,
@@ -343,7 +349,11 @@ class PlannedUnitService:
         baseline_hash = planned_units.planned_unit_payload_hash(incoming)
         local = planned_units.planned_conflict_payload(row)
         for key in (
-            "plan_id", "plan_name", "rationale", "archived", "private_calendar_adjustment"
+            "plan_id",
+            "plan_name",
+            "rationale",
+            "archived",
+            "private_calendar_adjustment",
         ):
             if local.get(key) is not None:
                 incoming[key] = local[key]
@@ -447,7 +457,7 @@ class PlannedUnitService:
         date_changed = planned_units.prepare_planned_workout_date(candidate, current)
         if not skip_calendar_conflict and date_changed:
             conflicts = self._calendar_conflict_service.conflicts(
-                {"date": candidate["date"][:10]}, {normalized_id}
+                candidate, {normalized_id}
             )
             if conflicts:
                 raise AppError(

@@ -256,12 +256,18 @@ class StructuredTrainingChangeServiceTests(unittest.TestCase):
         self.db.commit()
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
-    def _create(self, *, plan_id: str | None = None) -> dict[str, Any]:
+    def _create(
+        self,
+        *,
+        plan_id: str | None = None,
+        date: str = "2031-06-13",
+        name: str = "Easy run",
+    ) -> dict[str, Any]:
         change = {
             "action": "create",
-            "date": "2031-06-13",
+            "date": date,
             "sport": "Run",
-            "name": "Easy run",
+            "name": name,
             "description": "- 30m 60% easy",
             "duration_minutes": 30,
             "target": "POWER",
@@ -391,6 +397,23 @@ class StructuredTrainingChangeServiceTests(unittest.TestCase):
                 "commit",
                 "publish",
             ],
+        )
+
+    def test_apply_allows_multiple_creates_on_same_date(self) -> None:
+        self.service.apply(
+            {
+                "changes": [
+                    self._create(date="2031-06-15", name="Morning"),
+                    self._create(date="2031-06-15", name="Evening"),
+                ]
+            }
+        )
+        self.assertEqual(len(self.planned_units.create_calls), 2)
+        self.assertEqual(
+            self.planned_units.create_calls[0]["workout"]["date"], "2031-06-15"
+        )
+        self.assertEqual(
+            self.planned_units.create_calls[1]["workout"]["date"], "2031-06-15"
         )
 
     def test_create_with_blank_plan_id_remains_standalone(self) -> None:

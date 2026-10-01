@@ -44,9 +44,10 @@ def prepare_structured_plan_replacement(
 def validate_replacement_workouts(
     workouts: list[dict[str, Any]], today: str, period: dict[str, str]
 ) -> None:
-    """Reject past, out-of-period, or duplicate-day workouts in a replacement."""
-    dates: set[str] = set()
-    for workout in workouts:
+    """Reject past, out-of-period, or overlapping-time workouts in a replacement."""
+    from backend.planning import calendar as planning_calendar
+
+    for i, workout in enumerate(workouts):
         workout_date = str(workout.get("date") or "")[:10]
         if workout_date < today or not period["start"] <= workout_date <= period["end"]:
             raise AppError(
@@ -54,10 +55,11 @@ def validate_replacement_workouts(
                 "Ein vollständiger Planersatz darf keine vergangenen Einheiten enthalten.",
                 reason="invalid_plan",
             )
-        if workout_date in dates:
-            raise AppError(
-                409,
-                f"Der Plan enthält mehrere Einheiten für den {workout_date}; pro Tag ist eine Einheit möglich.",
-                reason="plan_date_conflict",
-            )
-        dates.add(workout_date)
+        for other in workouts[i + 1 :]:
+            matches, match = planning_calendar._calendar_items_conflict(workout, other)
+            if matches and match == "time_window":
+                raise AppError(
+                    409,
+                    f"Der Plan enthält zeitlich überschneidende Einheiten für den {workout_date}.",
+                    reason="plan_date_conflict",
+                )

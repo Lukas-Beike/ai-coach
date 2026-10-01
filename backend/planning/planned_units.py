@@ -158,14 +158,31 @@ def planned_workout_update_candidate(
         if action == "restore":
             candidate["local_deleted"] = False
     elif action == "update":
-        for key in ("date", "name", "description", "duration_minutes", "target"):
-            if key in values:
-                candidate[key] = values.get(key)
-        if "type" in values or "sport" in values:
-            candidate["sport"] = values.get("sport") or values.get("type")
+        _apply_planned_workout_update(candidate, values)
     else:
         raise AppError(400, "Unbekannte Aktion für lokale Planung.")
     return candidate
+
+
+def _apply_planned_workout_update(
+    candidate: dict[str, Any], values: dict[str, Any]
+) -> None:
+    for key in (
+        "date",
+        "start_date_local",
+        "name",
+        "description",
+        "duration_minutes",
+        "target",
+    ):
+        if key in values:
+            candidate[key] = values.get(key)
+    if "start_date_local" in values:
+        candidate["start_date_local"] = planning_workouts.validate_workout_start_date(
+            values["start_date_local"], str(candidate.get("date") or "")
+        )
+    if "type" in values or "sport" in values:
+        candidate["sport"] = values.get("sport") or values.get("type")
 
 
 def prepare_planned_workout_date(
@@ -177,14 +194,18 @@ def prepare_planned_workout_date(
     except (TypeError, ValueError) as exc:
         raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
     date_changed = candidate["date"][:10] != str(current.get("date") or "")[:10]
-    if date_changed:
+    if date_changed and candidate.get("start_date_local") in (
+        None,
+        current.get("start_date_local"),
+    ):
         old_start = str(current.get("start_date_local") or "")
-        time_suffix = (
-            old_start[10:]
-            if len(old_start) > 10 and old_start[10] == "T"
-            else _ISO_MIDNIGHT_SUFFIX
-        )
-        candidate["start_date_local"] = candidate["date"][:10] + time_suffix
+        if old_start:
+            time_suffix = (
+                old_start[10:]
+                if len(old_start) > 10 and old_start[10] == "T"
+                else _ISO_MIDNIGHT_SUFFIX
+            )
+            candidate["start_date_local"] = candidate["date"][:10] + time_suffix
     return date_changed
 
 

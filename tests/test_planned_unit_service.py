@@ -486,10 +486,9 @@ class PlannedUnitServiceTests(unittest.TestCase):
             caught.exception.message,
             "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht verschoben werden.",
         )
-        self.assertEqual(
-            self.calendar_conflicts.calls,
-            [({"date": "2026-09-23"}, {str(self.id)})],
-        )
+        self.assertEqual(len(self.calendar_conflicts.calls), 1)
+        self.assertEqual(self.calendar_conflicts.calls[0][0]["date"], "2026-09-23")
+        self.assertEqual(self.calendar_conflicts.calls[0][1], {str(self.id)})
         self.assertEqual(len(self.state()[0]), 1)
         self.assertEqual(self.state()[2], 1)
         self.assertEqual(self.events, [])
@@ -644,14 +643,16 @@ class PlannedUnitServiceTests(unittest.TestCase):
             "description": "- 30m Z2",
             "moving_time": 1800,
         }
-        remote = planned_units.remote_planned_unit_payload(
-            provider_event, today=TODAY
-        )[0]
+        remote = planned_units.remote_planned_unit_payload(provider_event, today=TODAY)[
+            0
+        ]
         local_id = self.make_conflict({"remote": remote})
         with self.manager.unit_of_work() as db:
-            local = json.loads(db.execute(
-                "SELECT payload FROM planned_units WHERE local_id=?", (local_id,)
-            ).fetchone()["payload"])
+            local = json.loads(
+                db.execute(
+                    "SELECT payload FROM planned_units WHERE local_id=?", (local_id,)
+                ).fetchone()["payload"]
+            )
             local.update(plan_id="plan-1", plan_name="Spring plan", archived=False)
             db.execute(
                 "UPDATE planned_units SET payload=? WHERE local_id=?",

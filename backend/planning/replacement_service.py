@@ -153,9 +153,7 @@ class StructuredTrainingPlanReplacementService:
         self, workouts: list[dict[str, Any]], ignored_calendar_ids: set[str]
     ) -> None:
         for workout in workouts:
-            if self._calendar_conflict_service.conflicts(
-                {"date": workout["date"]}, ignored_calendar_ids
-            ):
+            if self._calendar_conflict_service.conflicts(workout, ignored_calendar_ids):
                 raise AppError(
                     409,
                     f"Für den {workout['date']} existiert bereits eine lokale Kalendereinheit.",

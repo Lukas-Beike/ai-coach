@@ -192,11 +192,10 @@ class LibraryPlanServiceTests(unittest.TestCase):
         self.assertEqual(self.events, [])
 
     def test_duplicate_conflicts_are_complete_and_limited_to_eight_descriptions(self):
-        ids = [str(uuid.uuid4()) for _ in range(10)]
-        for index, local_id in enumerate(ids):
-            self.add_template(local_id, self.template(name=f"Ride {index}"))
+        template_id = str(uuid.uuid4())
+        self.add_template(template_id, self.template(name="Ride 0"))
         entries = [
-            {"library_workout_id": local_id, "date": "2026-09-21"} for local_id in ids
+            {"library_workout_id": template_id, "date": "2026-09-21"} for _ in range(10)
         ]
 
         with self.assertRaises(AppError) as raised:
@@ -206,12 +205,28 @@ class LibraryPlanServiceTests(unittest.TestCase):
         self.assertEqual(
             raised.exception.message,
             "Planung wegen bestehender Kalendereinheiten nicht möglich: "
-            + ", ".join(f"2026-09-21: {name}" for name in ["Mehrere Einheiten"] * 8)
+            + ", ".join(
+                f"2026-09-21: {name}" for name in ["Doppelte Bibliothekseinheit"] * 8
+            )
             + ". Weitere Konflikte wurden nicht aufgelistet.",
         )
-        self.assertEqual(len(self.calendar.calls), 10)
-        self.assertEqual(self.state(), ([], [], 0))
-        self.assertEqual(self.events, [])
+
+    def test_multiple_different_templates_on_same_date_are_allowed(self):
+        ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+        for index, local_id in enumerate(ids):
+            self.add_template(local_id, self.template(name=f"Ride {index}"))
+        result = self.service.apply(
+            [
+                {"library_workout_id": ids[0], "date": "2026-09-21"},
+                {"library_workout_id": ids[1], "date": "2026-09-21"},
+            ]
+        )
+        self.assertEqual(result["status"], "local")
+        self.assertEqual(result["local_planned"], 2)
+        self.assertEqual(len(self.calendar.calls), 2)
+        rows, _history, revision = self.state()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(revision, 2)
 
     def test_conflict_descriptions_distinguish_same_and_different_template(self):
         local_id = str(uuid.uuid4())
@@ -229,7 +244,6 @@ class LibraryPlanServiceTests(unittest.TestCase):
         self.assertIn(
             "2026-09-21: Doppelte Bibliothekseinheit", raised.exception.message
         )
-        self.assertIn("2026-09-21: Mehrere Einheiten", raised.exception.message)
 
     def test_success_creates_batch_with_history_revision_and_one_post_commit_event(
         self,

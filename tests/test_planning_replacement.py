@@ -134,18 +134,41 @@ class PlanningReplacementTests(unittest.TestCase):
                     message="Ein vollständiger Planersatz darf keine vergangenen Einheiten enthalten.",
                 )
 
-    def test_rejects_duplicate_workout_dates(self):
+    def test_allows_multiple_workout_dates_in_replacement(self):
         arguments = self.arguments()
         arguments["payload"]["workouts"] = [
             self.workout("2026-09-22"),
             self.workout("2026-09-22", name="Second workout"),
         ]
 
+        result = prepare_structured_plan_replacement(arguments, today=self.today)
+        self.assertEqual(len(result[2]), 2)
+        self.assertEqual(result[2][0]["name"], "Endurance")
+        self.assertEqual(result[2][1]["name"], "Second workout")
+
+    def test_rejects_overlapping_time_windows_in_replacement(self):
+        arguments = self.arguments()
+        arguments["payload"]["workouts"] = [
+            self.workout(
+                "2026-09-22",
+                start_date_local="2026-09-22T08:00:00",
+                duration_minutes=45,
+                description="- 45m Z2",
+            ),
+            self.workout(
+                "2026-09-22",
+                name="Second",
+                start_date_local="2026-09-22T08:30:00",
+                duration_minutes=30,
+                description="- 30m Z2",
+            ),
+        ]
+
         self.assert_app_error(
             arguments,
             status=409,
             reason="plan_date_conflict",
-            message="Der Plan enthält mehrere Einheiten für den 2026-09-22; pro Tag ist eine Einheit möglich.",
+            message="Der Plan enthält zeitlich überschneidende Einheiten für den 2026-09-22.",
         )
 
     def test_passes_injected_today_to_workout_normalization(self):
@@ -174,8 +197,16 @@ class PlanningReplacementTests(unittest.TestCase):
 
     def test_direct_workout_validation_rejects_past_before_duplicate(self):
         workouts = [
-            {"date": "2026-09-19"},
-            {"date": "2026-09-19"},
+            {
+                "date": "2026-09-19",
+                "start_date_local": "2026-09-19T08:00:00",
+                "duration_minutes": 60,
+            },
+            {
+                "date": "2026-09-19",
+                "start_date_local": "2026-09-19T08:30:00",
+                "duration_minutes": 30,
+            },
         ]
 
         with self.assertRaises(AppError) as raised:

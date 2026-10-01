@@ -86,14 +86,10 @@ class WorkoutLibraryPlanService:
             plan_date = request["date"]
             workout_id = request["library_workout_id"]
             previous_id = seen_dates.get(plan_date)
-            if previous_id:
+            if previous_id and previous_id == workout_id:
                 conflicts.append(
                     {
-                        "name": (
-                            "Doppelte Bibliothekseinheit"
-                            if previous_id == workout_id
-                            else "Mehrere Einheiten"
-                        ),
+                        "name": "Doppelte Bibliothekseinheit",
                         "date": plan_date,
                     }
                 )

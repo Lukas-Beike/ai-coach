@@ -59,7 +59,13 @@ class CalendarConflictServiceTests(unittest.TestCase):
         self._temporary_directory.cleanup()
 
     def _add_planned_unit(
-        self, local_id: str, *, archived: bool = False, local_deleted: bool = False
+        self,
+        local_id: str,
+        *,
+        archived: bool = False,
+        local_deleted: bool = False,
+        start_date_local: str | None = None,
+        duration_minutes: int | None = None,
     ) -> None:
         payload = {
             "source": "coach",
@@ -68,6 +74,10 @@ class CalendarConflictServiceTests(unittest.TestCase):
             "archived": archived,
             "local_deleted": local_deleted,
         }
+        if start_date_local is not None:
+            payload["start_date_local"] = start_date_local
+        if duration_minutes is not None:
+            payload["duration_minutes"] = duration_minutes
         with self.database_manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO planned_units (local_id, payload) VALUES (?, ?)",
@@ -77,7 +87,11 @@ class CalendarConflictServiceTests(unittest.TestCase):
     def test_conflicts_keep_source_order_and_exclude_archived_or_deleted_units(
         self,
     ) -> None:
-        self._add_planned_unit("active")
+        self._add_planned_unit(
+            "active",
+            start_date_local="2026-10-04T08:00:00",
+            duration_minutes=60,
+        )
         self._add_planned_unit("archived", archived=True)
         self._add_planned_unit("deleted", local_deleted=True)
         with self.database_manager.unit_of_work() as db:
@@ -88,7 +102,13 @@ class CalendarConflictServiceTests(unittest.TestCase):
                 ("race-1", "Local race", "2026-10-04", None, None),
             )
 
-        conflicts = self.service.conflicts({"date": "2026-10-04"})
+        conflicts = self.service.conflicts(
+            {
+                "date": "2026-10-04",
+                "start_date_local": "2026-10-04T08:30:00",
+                "duration_minutes": 30,
+            }
+        )
 
         self.assertEqual(
             conflicts,
@@ -98,9 +118,9 @@ class CalendarConflictServiceTests(unittest.TestCase):
                     "name": "active",
                     "date": "2026-10-04",
                     "source": "local_library",
-                    "match": "date",
-                    "start_local": None,
-                    "end_local": None,
+                    "match": "time_window",
+                    "start_local": "2026-10-04T08:00",
+                    "end_local": "2026-10-04T09:00",
                 },
                 {
                     "id": "race-1",
@@ -125,7 +145,11 @@ class CalendarConflictServiceTests(unittest.TestCase):
         self.assertEqual(self.external_reader.calls, [(1000, True)])
 
     def test_exclude_ids_only_remove_local_library_conflicts(self) -> None:
-        self._add_planned_unit("excluded")
+        self._add_planned_unit(
+            "excluded",
+            start_date_local="2026-10-04T08:00:00",
+            duration_minutes=60,
+        )
         with self.database_manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO competitions "
@@ -134,7 +158,14 @@ class CalendarConflictServiceTests(unittest.TestCase):
                 ("race-1", "Local race", "2026-10-04", None, None),
             )
 
-        conflicts = self.service.conflicts({"date": "2026-10-04"}, {"excluded"})
+        conflicts = self.service.conflicts(
+            {
+                "date": "2026-10-04",
+                "start_date_local": "2026-10-04T08:30:00",
+                "duration_minutes": 30,
+            },
+            {"excluded"},
+        )
 
         self.assertEqual(
             [item["source"] for item in conflicts],
@@ -156,6 +187,14 @@ class CalendarConflictServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "calendar read failed"):
             service.conflicts({"date": "2026-10-04"})
+
+    def test_untimed_local_units_do_not_conflict_on_same_date(self) -> None:
+        self._add_planned_unit("untimed")
+        conflicts = self.service.conflicts({"date": "2026-10-04"})
+        self.assertEqual(
+            [item["id"] for item in conflicts],
+            ["external-1"],
+        )
 
 
 if __name__ == "__main__":

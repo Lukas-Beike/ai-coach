@@ -108,8 +108,18 @@ class PlanningCalendarTests(unittest.TestCase):
 
     def test_projection_uses_source_match_identity_and_display_fallbacks(self) -> None:
         conflicts = calendar.calendar_conflicts_for_items(
-            {"date": "2026-10-04"},
-            [{"local_id": "local-1", "event_date": "2026-10-04"}],
+            {
+                "date": "2026-10-04",
+                "start_date_local": "2026-10-04T08:00:00",
+                "duration_minutes": 60,
+            },
+            [
+                {
+                    "local_id": "local-1",
+                    "start_date_local": "2026-10-04T08:30:00",
+                    "duration_minutes": 30,
+                }
+            ],
             "local_library",
         )
 
@@ -121,12 +131,20 @@ class PlanningCalendarTests(unittest.TestCase):
                     "name": "Einheit",
                     "date": "2026-10-04",
                     "source": "local_library",
-                    "match": "date",
-                    "start_local": None,
-                    "end_local": None,
+                    "match": "time_window",
+                    "start_local": "2026-10-04T08:30",
+                    "end_local": "2026-10-04T09:00",
                 }
             ],
         )
+
+    def test_local_library_date_only_is_not_a_conflict(self) -> None:
+        conflicts = calendar.calendar_conflicts_for_items(
+            {"date": "2026-10-04"},
+            [{"local_id": "local-1", "event_date": "2026-10-04"}],
+            "local_library",
+        )
+        self.assertEqual(conflicts, [])
 
     def test_inputs_are_not_mutated(self) -> None:
         candidate = {

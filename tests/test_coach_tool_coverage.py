@@ -16,10 +16,10 @@ from backend.coach.training_patch import CoachTrainingPatchService
 from backend.planning import library as planning_library
 from backend.providers import gemini as gemini_provider
 from backend.providers import http as provider_http
-from backend.providers import openai as openai_provider
-from backend.sync.intervals import IntervalsSyncService
 from backend.providers import intervals_client as intervals_client_module
+from backend.providers import openai as openai_provider
 from backend.sync.adaptive import IllnessPauseSyncService
+from backend.sync.intervals import IntervalsSyncService
 
 
 def covers(*cases):
@@ -490,6 +490,24 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(catalog["apply_training_patch"]["surface"], "dialogue_only")
         self.assertIn("apply_training_changes", server.COACH_CANONICAL_TOOL_NAMES)
         self.assertEqual(catalog["apply_training_changes"]["surface"], "canonical_only")
+
+    def test_planning_tool_schemas_accept_local_start_times(self):
+        tools = {tool["name"]: tool for tool in server.COACH_STRUCTURED_TOOLS}
+        for name in ("stage_training_plan", "replace_training_plan"):
+            workout_schema = tools[name]["parameters"]["properties"]["payload"][
+                "properties"
+            ]["workouts"]["items"]
+            self.assertIn("start_date_local", workout_schema["required"])
+            self.assertEqual(
+                workout_schema["properties"]["start_date_local"]["type"],
+                ["string", "null"],
+            )
+        changes_schema = tools["apply_training_changes"]["parameters"]["properties"][
+            "changes"
+        ]["items"]
+        self.assertEqual(
+            changes_schema["properties"]["start_date_local"]["type"], "string"
+        )
 
     @covers("save_nutrition_template:success", "log_nutrition_template:success", "delete_nutrition_template:success")
     def test_saved_meals_run_through_authorized_coach_and_receipts(self):

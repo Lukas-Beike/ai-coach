@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from backend.db.repositories import PlanningStateRepository
@@ -20,6 +20,27 @@ from backend.planning.workouts import normalize_workout
 _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL = (
     "SELECT payload FROM planned_units WHERE local_id=?"
 )
+
+
+def _project_existing_training_change(
+    current: dict[str, Any], change: dict[str, Any], candidate_date: str
+) -> dict[str, Any]:
+    candidate = {**current, **change, "date": candidate_date}
+    start_date_local = current.get("start_date_local")
+    if not start_date_local or change.get("start_date_local"):
+        return candidate
+    try:
+        parsed_start = datetime.fromisoformat(
+            str(start_date_local).strip().replace("Z", "+00:00")
+        )
+        candidate["start_date_local"] = parsed_start.replace(
+            year=int(candidate_date[:4]),
+            month=int(candidate_date[5:7]),
+            day=int(candidate_date[8:10]),
+        ).isoformat()
+    except (TypeError, ValueError):
+        candidate.pop("start_date_local", None)
+    return candidate
 
 
 def validated_training_date(value: Any) -> str:
@@ -88,7 +109,9 @@ def prepare_structured_training_change(
                 "duration_minutes",
                 "target",
                 "rationale",
+                "start_date_local",
             )
+            if key != "start_date_local" or key in normalized
         },
     }
     if "plan_id" in change:
@@ -156,14 +179,13 @@ class StructuredTrainingChangeValidator:
         final_dates: dict[str, str],
         final_active: dict[str, bool],
         restore_identities: set[str],
+        changes_by_identity: dict[str, dict[str, Any]],
     ) -> None:
         action = str(change.get("action") or "update").strip().casefold()
         if action == "restore":
             restore_identities.add(change_identity)
         local_id = str(change.get("local_id") or "").strip()
-        row = db.execute(
-            _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)
-        ).fetchone()
+        row = db.execute(_PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)).fetchone()
         if not row:
             return
         try:
@@ -182,6 +204,7 @@ class StructuredTrainingChangeValidator:
         )
         if action in {"delete", "archive"}:
             final_active[change_identity] = False
+            changes_by_identity[change_identity] = {**current, **change}
             return
         if action == "restore":
             final_active[change_identity] = True
@@ -193,28 +216,44 @@ class StructuredTrainingChangeValidator:
         ).strip()[:10]
         if candidate_date:
             final_dates[change_identity] = validated_training_date(candidate_date)
+        changes_by_identity[change_identity] = _project_existing_training_change(
+            current, change, candidate_date
+        )
 
-    def _validate_training_change_dates(
-        self,
+    @staticmethod
+    def _validate_batch_time_windows(
+        changes_by_identity: dict[str, dict[str, Any]],
+        final_dates: dict[str, str],
+        final_active: dict[str, bool],
+    ) -> None:
+        from backend.planning import calendar as planning_calendar
+
+        active_ids = [ident for ident in final_dates if final_active.get(ident, True)]
+        for i, id_a in enumerate(active_ids):
+            date_a = final_dates[id_a]
+            change_a = changes_by_identity.get(id_a, {"date": date_a})
+            for id_b in active_ids[i + 1 :]:
+                if final_dates[id_b] != date_a:
+                    continue
+                change_b = changes_by_identity.get(id_b, {"date": date_a})
+                matches, match = planning_calendar._calendar_items_conflict(
+                    change_a, change_b
+                )
+                if matches and match == "time_window":
+                    raise AppError(
+                        409,
+                        f"Der Plan enthält zeitlich überschneidende Einheiten für den {date_a}.",
+                        reason="plan_date_conflict",
+                    )
+
+    @staticmethod
+    def _dates_needing_calendar_check(
         final_dates: dict[str, str],
         final_active: dict[str, bool],
         original_dates: dict[str, str],
         restore_identities: set[str],
-        batch_ids: set[str],
-    ) -> None:
-        occupied_dates: dict[str, str] = {}
-        for change_identity, candidate_date in final_dates.items():
-            if not final_active.get(change_identity, True):
-                continue
-            previous_identity = occupied_dates.get(candidate_date)
-            if previous_identity is not None and previous_identity != change_identity:
-                raise AppError(
-                    409,
-                    f"Der Plan enthält mehrere Einheiten für den {candidate_date}; pro Tag ist eine Einheit möglich.",
-                    reason="plan_date_conflict",
-                )
-            occupied_dates[candidate_date] = change_identity
-        dates_needing_calendar_check = {
+    ) -> set[str]:
+        return {
             candidate_date
             for change_identity, candidate_date in final_dates.items()
             if final_active.get(change_identity, True)
@@ -224,7 +263,24 @@ class StructuredTrainingChangeValidator:
                 or change_identity in restore_identities
             )
         }
-        for candidate_date in dates_needing_calendar_check:
+
+    def _validate_training_change_dates(
+        self,
+        final_dates: dict[str, str],
+        final_active: dict[str, bool],
+        original_dates: dict[str, str],
+        restore_identities: set[str],
+        batch_ids: set[str],
+        changes_by_identity: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        if changes_by_identity:
+            self._validate_batch_time_windows(
+                changes_by_identity, final_dates, final_active
+            )
+        dates_to_check = self._dates_needing_calendar_check(
+            final_dates, final_active, original_dates, restore_identities
+        )
+        for candidate_date in dates_to_check:
             if self.calendar_conflict_service.conflicts(
                 {"date": candidate_date}, batch_ids
             ):
@@ -244,6 +300,7 @@ class StructuredTrainingChangeValidator:
         final_dates: dict[str, str] = {}
         final_active: dict[str, bool] = {}
         restore_identities: set[str] = set()
+        changes_by_identity: dict[str, dict[str, Any]] = {}
         for index, change in enumerate(changes):
             local_id = str(change.get("local_id") or "").strip()
             change_identity = local_id or f"create:{index}"
@@ -251,6 +308,7 @@ class StructuredTrainingChangeValidator:
                 self._record_created_training_change(
                     change, change_identity, final_dates, final_active
                 )
+                changes_by_identity[change_identity] = change
                 continue
             self._record_existing_training_change(
                 change,
@@ -260,6 +318,7 @@ class StructuredTrainingChangeValidator:
                 final_dates,
                 final_active,
                 restore_identities,
+                changes_by_identity,
             )
         self._validate_training_change_dates(
             final_dates,
@@ -267,6 +326,7 @@ class StructuredTrainingChangeValidator:
             original_dates,
             restore_identities,
             batch_ids,
+            changes_by_identity=changes_by_identity,
         )
 
     def validate_batch(self, changes: list[dict[str, Any]], db: Any) -> None:
@@ -399,9 +459,7 @@ class StructuredTrainingPlanResolver:
         local_id = str(change.get("local_id") or "").strip()
         if action == "create" or not local_id:
             return None, None
-        row = db.execute(
-            _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)
-        ).fetchone()
+        row = db.execute(_PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)).fetchone()
         if not row:
             return None, None
         try:

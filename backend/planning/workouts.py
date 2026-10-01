@@ -2,7 +2,7 @@
 
 import math
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from itertools import pairwise
 from typing import Any
 
@@ -371,6 +371,25 @@ def validate_intervals_workout_result(
         raise AppError(502, str(exc), reason=exc.reason) from exc
 
 
+def validate_workout_start_date(value: Any, workout_date: str) -> str:
+    message = "Die lokale Startzeit muss ein ISO-8601-Zeitstempel am Trainingsdatum sein."
+    if not isinstance(value, str):
+        raise AppError(400, message, reason="invalid_workout_start_date")
+    start_date_local = value.strip()
+    try:
+        parsed_start = datetime.fromisoformat(
+            start_date_local.replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise AppError(400, message, reason="invalid_workout_start_date") from exc
+    if (
+        "T" not in start_date_local.upper()
+        or parsed_start.date().isoformat() != workout_date
+    ):
+        raise AppError(400, message, reason="invalid_workout_start_date")
+    return start_date_local[:40]
+
+
 def normalize_workout(workout: Any, *, today: date) -> dict[str, Any]:
     if not isinstance(workout, dict):
         raise AppError(400, "Jede geplante Einheit muss ein Objekt sein.")
@@ -391,8 +410,13 @@ def normalize_workout(workout: Any, *, today: date) -> dict[str, Any]:
             workout.get("rationale") or "Manuell geplante Einheit"
         ).strip()[:2000],
     }
+    start_date_local = workout.get("start_date_local")
+    if start_date_local is not None:
+        draft["start_date_local"] = validate_workout_start_date(
+            start_date_local, str(draft["date"])
+        )
     try:
-        draft["duration_minutes"] = int(draft["duration_minutes"])
+        draft["duration_minutes"] = int(str(draft["duration_minutes"]))
     except (TypeError, ValueError) as exc:
         raise AppError(400, "Die Trainingsdauer muss eine ganze Zahl sein.") from exc
     if not draft["description"]:

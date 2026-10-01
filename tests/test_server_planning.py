@@ -1371,7 +1371,7 @@ class ServerPlanningTests(ServerTestCase):
         server.COACH_TOOL_DISPATCH.service().execute(
             "replace_training_plan",
             {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Conflict Replacement", "goal": "", "workouts": [
-                {"date": old["date"], "sport": "Ride", "name": "New", "description": "- 40m 60% easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
+                {"date": old["date"], "start_date_local": (date.today() + timedelta(days=1)).isoformat() + "T07:45:00", "sport": "Ride", "name": "New", "description": "- 40m 60% easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
             ]}},
             intent=intent, conversation_id="conversation-undo-conflict", client_turn_id="turn-undo-conflict",
             session_csrf_hash="", sync_job_ids=[],
