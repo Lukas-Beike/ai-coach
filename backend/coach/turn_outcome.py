@@ -94,11 +94,17 @@ def _queued_message(
 def _approval_message(
     text: str,
     question: str,
-    awaiting_remote_approval: bool,
+    awaiting_approval: bool,
     effects: list[dict[str, Any]],
+    command_receipts: list[dict[str, Any]],
 ) -> str:
-    if not awaiting_remote_approval or question:
+    if not awaiting_approval or question:
         return text
+    local_approval = any(
+        ((entry.get("result") or {}).get("proposed_action") or {}).get("action_type")
+        == "local_coach_write"
+        for entry in command_receipts
+    )
     local_effects = [
         entry
         for entry in effects
@@ -111,9 +117,10 @@ def _approval_message(
             + "; ".join(coach_effect_label(entry) for entry in local_effects)
             + ". "
         )
-    return (
-        prefix
-        + "Die Remote-Änderung wartet auf deine ausdrückliche Freigabe. Prüfe den Aktionsvorschlag, bevor sie ausgeführt wird."
+    return prefix + (
+        "Die lokale Änderung wartet auf deine ausdrückliche Freigabe. Prüfe den Aktionsvorschlag, bevor sie gespeichert wird."
+        if local_approval
+        else "Die Remote-Änderung wartet auf deine ausdrückliche Freigabe. Prüfe den Aktionsvorschlag, bevor sie ausgeführt wird."
     )
 
 
@@ -156,7 +163,7 @@ class CoachStructuredOutcomeService:
     ) -> tuple[str, str, list[dict[str, Any]]]:
         failures = unresolved_coach_steps(command_receipts)
         mark_resolved_receipts(command_receipts, failures)
-        effects = effects_from_receipts(command_receipts, self._internal_tools)
+        effects = effects_from_receipts(command_receipts, set(self._internal_tools))
         text, incomplete_answer, missing_answer = self._text(
             response, question, failures, effects, command_receipts
         )
@@ -191,11 +198,11 @@ class CoachStructuredOutcomeService:
     ) -> tuple[str, bool, bool]:
         text = question or response_text(response)
         queued = CoachStructuredOutcomeService._queued_jobs(effects, command_receipts)
-        awaiting_remote_approval = any(
+        awaiting_approval = any(
             ((entry.get("result") or {}).get("proposed_action") or {}).get(
                 "action_type"
             )
-            == "remote_coach_write"
+            in {"remote_coach_write", "local_coach_write"}
             for entry in command_receipts
         )
         incomplete_answer = response.get("status") == "incomplete"
@@ -206,7 +213,9 @@ class CoachStructuredOutcomeService:
         text = _queued_message(
             text, question, queued, effects, failures, incomplete_answer
         )
-        text = _approval_message(text, question, awaiting_remote_approval, effects)
+        text = _approval_message(
+            text, question, awaiting_approval, effects, command_receipts
+        )
         text = _fallback_message(text, effects)
         return text, incomplete_answer, missing_answer
 

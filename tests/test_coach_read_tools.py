@@ -28,6 +28,7 @@ class CoachReadToolServiceTests(unittest.TestCase):
         self.training_plans = Mock()
         self.training_plans.list.return_value = [{"id": "plan-1"}]
         self.nutrition = Mock()
+        self.nutrition.list_templates.return_value = [{"id": "template-1"}]
         self.nutrition.get_day_summary.return_value = {"date": "2026-03-30", "total_kcal": 2100}
         self.nutrition.get_range_summary.return_value = [{"date": "2026-03-30", "total_kcal": 2100}]
         self.nutrition_factory = Mock(return_value=self.nutrition)
@@ -100,11 +101,11 @@ class CoachReadToolServiceTests(unittest.TestCase):
 
     def test_read_nutrition_day_and_range(self):
         day_res = self.service.execute("read_nutrition", {"date": "2026-03-30"})
-        self.assertEqual(day_res, {"ok": True, "date": "2026-03-30", "total_kcal": 2100})
+        self.assertEqual(day_res, {"ok": True, "templates": [{"id": "template-1"}], "date": "2026-03-30", "total_kcal": 2100})
         self.nutrition.get_day_summary.assert_called_once_with("2026-03-30")
 
         range_res = self.service.execute("read_nutrition", {"start": "2026-03-01", "end": "2026-03-31"})
-        self.assertEqual(range_res, {"ok": True, "summaries": [{"date": "2026-03-30", "total_kcal": 2100}]})
+        self.assertEqual(range_res, {"ok": True, "templates": [{"id": "template-1"}], "summaries": [{"date": "2026-03-30", "total_kcal": 2100}]})
         self.nutrition.get_range_summary.assert_called_once_with("2026-03-01", "2026-03-31")
 
     def test_limit_bounds_saturate_and_optional_filters_are_forwarded(self):

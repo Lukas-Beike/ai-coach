@@ -120,6 +120,16 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
         self.competitions.save.assert_not_called()
         self.competitions.delete.assert_not_called()
 
+    def test_meal_template_tools_require_operation_and_nutrition_scope(self):
+        for name in ("save_nutrition_template", "log_nutrition_template", "delete_nutrition_template"):
+            for intent in ({"operation": name}, {"authorization_scope": ["local_nutrition"]}):
+                with self.subTest(name=name, intent=intent), self.assertRaises(AppError) as raised:
+                    self.service.execute(name, {}, intent)
+                self.assertEqual(raised.exception.status, 403)
+        self.nutrition.save_template.assert_not_called()
+        self.nutrition.log_template.assert_not_called()
+        self.nutrition.delete_template.assert_not_called()
+
     def test_invalid_payloads_keep_shared_and_domain_validation(self):
         invalid_saves = (
             ("save_checkin", "local_checkin"),

@@ -38,6 +38,13 @@ class NutritionHttpApiTests(unittest.TestCase):
             nutrition_service=lambda: self.nutrition_service,
         )
 
+    def test_templates_route_requires_authentication(self) -> None:
+        self.handler.path = "/api/nutrition/templates"
+        self.nutrition_service.list_templates.return_value = [{"id": "template-1"}]
+        self.assertTrue(self.get_routes.handle(self.handler, "/api/nutrition/templates"))
+        self.auth.require_auth.assert_called_once_with(self.handler)
+        self.handler.send_json.assert_called_once_with(200, {"ok": True, "templates": [{"id": "template-1"}]})
+
     def test_get_day_route(self) -> None:
         self.handler.path = "/api/nutrition/day?date=2026-09-24"
         self.nutrition_service.get_day_summary.return_value = {

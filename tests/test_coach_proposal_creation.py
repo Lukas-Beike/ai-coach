@@ -144,6 +144,54 @@ class CoachProposalCreationTests(unittest.TestCase):
         self.assertNotIn("private", repr(result))
         self.sync_state_repository.latest_snapshot.assert_not_called()
 
+    def test_local_nutrition_write_requires_bound_request_and_shows_safe_values(self) -> None:
+        service = self._service()
+        intent = {
+            "operation": "save_nutrition_template", "target_system": "local",
+            "authorization_scope": ["local_nutrition"],
+            "request": {"source_message_ids": [7]},
+        }
+        args = {"payload": {"name": "Recovery bowl", "description": "Oats and yogurt", "kcal": 420}}
+        result = service.create_local_write(
+            "save_nutrition_template", args, intent, conversation_id="conversation-1",
+            client_turn_id="turn-1", session_csrf_hash="session-1",
+        )
+        action = result["proposed_action"]
+        self.assertEqual(action["action_type"], "local_coach_write")
+        self.assertEqual(action["diff"][0]["name"], "Recovery bowl")
+        self.assertEqual(action["diff"][0]["kcal"], "420")
+        self.assertNotIn("payload", action)
+        with self.assertRaises(AppError):
+            service.create_local_write(
+                "save_nutrition_template", args,
+                {**intent, "request": {"source_message_ids": []}},
+                conversation_id="conversation-1", client_turn_id="turn-1",
+                session_csrf_hash="session-1",
+            )
+        self.assertEqual(len(self._rows()), 1)
+
+    def test_local_nutrition_update_preview_shows_retained_macros(self) -> None:
+        nutrition = Mock()
+        nutrition.list_templates.return_value = [{
+            "id": "template-1", "name": "Recovery bowl", "description": "Oats",
+            "kcal": 420, "carbs_g": 64, "protein_g": 22, "fat_g": 8,
+        }]
+        intent = {
+            "operation": "save_nutrition_template", "target_system": "local",
+            "authorization_scope": ["local_nutrition"],
+            "request": {"source_message_ids": [7]},
+        }
+        result = self._service(nutrition_service=lambda: nutrition).create_local_write(
+            "save_nutrition_template",
+            {"payload": {"id": "template-1", "name": "Recovery bowl", "description": "Oats with berries", "kcal": 450}},
+            intent, conversation_id="conversation-1", client_turn_id="turn-1",
+            session_csrf_hash="session-1",
+        )
+        self.assertEqual(
+            result["proposed_action"]["diff"][0],
+            {"name": "Recovery bowl", "description": "Oats with berries", "kcal": "450", "carbs": "64", "protein": "22", "fat": "8"},
+        )
+
     def test_competition_remote_write_binds_dirty_rows_and_tombstones_to_approval(self) -> None:
         with self.database_manager.unit_of_work() as db:
             db.execute(

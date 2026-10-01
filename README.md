@@ -579,3 +579,11 @@ Always listen to your body. Do not follow workout intensity or duration recommen
 ## License
 
 Intervals Coach is open-source software licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. See [`LICENSE`](LICENSE) for the complete license terms.
+
+### Ernährung und gespeicherte Mahlzeiten
+
+Der Tab **Ernährung** zeigt das Tagebuch mit Kalorien und Makros sowie **Meine Mahlzeiten**. Erfassung, Korrekturen und Löschen laufen über den Coach per Text, Sprache oder Foto. Aktionen im Tab bereiten eine bearbeitbare Nachricht vor; sie speichern und senden nichts automatisch. Ein vorhandener Chatentwurf bleibt erhalten.
+
+Mit "Definiere mein Standardfrühstück" lassen sich wiederverwendbare Mahlzeiten mit Zutaten, Mengen und Nährwerten für eine Portion anlegen. Der Coach zeigt die Vorlage zur Bestätigung, bevor er sie speichert. Eine Vorlage zählt noch nicht als gegessen. "Ich habe eine halbe Portion meines Standardfrühstücks gegessen" erfasst den Verzehr mit entsprechend skalierten Nährwerten. Einmalige Abweichungen verändern nur den Tagebucheintrag; dauerhafte Änderungen verändern die Vorlage und niemals frühere Einträge.
+
+Kalorien und Makros aus KI-Schätzungen sind Näherungswerte. Fehlende Makros und nicht erfasste Tage werden nicht als vollständige Nullwerte dargestellt. Daten bleiben lokal; eine Übertragung der Tagessummen zu Intervals.icu erfolgt nur nach explizitem Auftrag und Freigabe. Vorlagen gehören zu Datenschutzexport, verschlüsseltem Backup und der Löschkategorie Ernährung.

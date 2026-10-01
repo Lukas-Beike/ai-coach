@@ -6,6 +6,7 @@ const navigation = [
   ["Coach", "chatPanel", "coach"],
   ["Geplant", "workoutsPanel", "plan/overview"],
   ["Analyse", "dataPanel", "analysis/performance"],
+  ["Ernährung", "nutritionPanel", "nutrition/diary"],
   ["Mehr", "settingsPanel", "more"],
 ];
 

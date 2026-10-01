@@ -181,6 +181,7 @@ function updateNavigationHistory(panelRoute, historyMode) {
 function renderActiveRoute(mainRoute, panelRoute) {
   if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
   if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
+  if (mainRoute === "nutrition") { renderNutritionSegments(panelRoute); if (state.data) void loadNutrition(); }
   if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
   if (state.data && mainRoute === "more") {
     void loadContextPreview();
@@ -313,6 +314,7 @@ function showLogin() {
   state.stateEventLastId = 0;
   state.stateEventBackoff = 1000;
   state.data = null;
+  resetNutritionView();
   state.busy = false;
   state.chatRequest = null;
   state.chatStreamText = "";
@@ -1773,6 +1775,7 @@ function createCoachWorkingIndicator() {
 
 function coachActionDescription(proposal) {
   if (proposal.action_type === "undo_change") return "Diese lokale Änderung zurücknehmen? Der aktuelle Stand wird vor der Ausführung erneut geprüft.";
+  if (proposal.action_type === "local_coach_write") return "Diese Mahlzeitvorlage wird lokal gespeichert. Sie wird erst nach deiner Bestätigung angelegt.";
   if (proposal.action_type === "remote_coach_write") {
     return "Diese Änderung wird an Intervals.icu gesendet. Sie wird erst ausgeführt, wenn du sie hier freigibst.";
   }
@@ -1804,15 +1807,16 @@ function coachActionDiff(proposal) {
 
 function coachActionButtons(proposal) {
   const undo = proposal.action_type === "undo_change";
+  const localWrite = proposal.action_type === "local_coach_write";
   const remoteWrite = proposal.action_type === "remote_coach_write";
   const actions = document.createElement("div");
   actions.className = "coach-action-card-actions";
   const later = document.createElement("button");
   later.type = "button";
   later.className = "secondary-button";
-  later.textContent = remoteWrite ? "Nicht freigeben" : "Später prüfen";
+  later.textContent = remoteWrite || localWrite ? "Nicht freigeben" : "Später prüfen";
   later.addEventListener("click", () => {
-    if (remoteWrite) {
+    if (remoteWrite || localWrite) {
       later.disabled = true;
       api("/api/coach/actions/cancel", {
         method: "POST",
@@ -1834,6 +1838,8 @@ function coachActionButtons(proposal) {
   confirm.type = "button";
   if (remoteWrite) {
     confirm.textContent = "Remote-Änderung freigeben";
+  } else if (localWrite) {
+    confirm.textContent = "Mahlzeitvorlage speichern";
   } else if (undo) {
     confirm.textContent = "Änderung zurücknehmen";
   } else {
@@ -1865,7 +1871,7 @@ function renderCoachActionReview() {
   const root = $("#coachActionReview");
   const content = $("#coachActionReviewContent");
   if (!root || !content) return;
-  const proposals = (state.coachActionProposals || []).filter((proposal) => ["undo_change", "delete_duplicate_intervals_activity", "remote_coach_write"].includes(proposal.action_type));
+  const proposals = (state.coachActionProposals || []).filter((proposal) => ["undo_change", "delete_duplicate_intervals_activity", "remote_coach_write", "local_coach_write"].includes(proposal.action_type));
   content.replaceChildren(...proposals.map(coachActionCard));
   root.hidden = proposals.length === 0;
   $("#coachActionReviewTitle").textContent = "Aktion prüfen";
@@ -1876,10 +1882,15 @@ function coachActionReceipt(proposal, result) {
     const undo = proposal.action_type === "undo_change";
     const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
     const remoteWrite = proposal.action_type === "remote_coach_write";
+    const localWrite = proposal.action_type === "local_coach_write";
   let message = "Planung lokal gespeichert.";
   let title = "Planung gespeichert";
   let details = ["Keine implizite Remote-Änderung"];
-  if (undo) {
+  if (localWrite) {
+    message = "Die Mahlzeitvorlage wurde lokal gespeichert.";
+    title = "Mahlzeitvorlage gespeichert";
+    details = ["Nur lokal gespeichert; keine Synchronisierung an Intervals.icu"];
+  } else if (undo) {
     message = "Die lokale Änderung wurde zurückgenommen.";
     title = "Änderung zurückgenommen";
   } else if (duplicateDelete) {
@@ -1899,7 +1910,7 @@ function coachActionReceipt(proposal, result) {
   if (!duplicateDelete && result.sync_job_ids?.length) details = result.sync_job_ids.map((id) => `Syncjob ${id} eingereiht`);
   else if (!duplicateDelete && result.sync_job_id) details = [`Syncjob ${result.sync_job_id} eingereiht`];
   else if (remoteWrite) details = ["Freigegebene Remote-Änderung direkt ausgeführt"];
-  return { title, message, details, duplicateDelete, undo, remoteWrite };
+  return { title, message, details, duplicateDelete, undo, remoteWrite, localWrite };
 }
 
 async function executeCoachActionProposal(proposal, button) {
@@ -1921,7 +1932,8 @@ async function executeCoachActionProposal(proposal, button) {
     addCoachReceipt(receipt);
     toast(receipt.message);
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["activities"] : ["plan", "library", "profile", "feedback"]);
-    if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) void applyNavigationRoute("plan", { historyMode: "push" });
+    if (receipt.localWrite) void applyNavigationRoute("nutrition/meals", { historyMode: "push" });
+    else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) void applyNavigationRoute("plan", { historyMode: "push" });
   } catch (error) {
     addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
     if ([409, 410].includes(error.status)) { proposal.status = "expired"; renderCoachActionReview(); }
@@ -3989,6 +4001,7 @@ async function deleteServerLogs() {
 }
 
 function render(data) {
+  if (baseRoute() === "nutrition") void loadNutrition();
   const firstRender = !state.data;
   state.data = data;
   renderAppVersion(data.app);

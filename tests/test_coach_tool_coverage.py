@@ -491,6 +491,17 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertIn("apply_training_changes", server.COACH_CANONICAL_TOOL_NAMES)
         self.assertEqual(catalog["apply_training_changes"]["surface"], "canonical_only")
 
+    @covers("save_nutrition_template:success", "log_nutrition_template:success", "delete_nutrition_template:success")
+    def test_saved_meals_run_through_authorized_coach_and_receipts(self):
+        template = self.run_tool("save_nutrition_template", {"payload": {"name": "Synthetic breakfast", "description": "80 g oats", "kcal": 400}}, ["local_nutrition"], message="Ja, speichere diese Mahlzeitvorlage.")["template"]
+        read = self.run_tool("read_nutrition", {})
+        self.assertEqual(read["templates"][0]["id"], template["id"])
+        self.assertEqual(read["entry_count"], 0)
+        entry = self.run_tool("log_nutrition_template", {"id": template["id"], "portions": 0.5}, ["local_nutrition"], message="Ich habe eine halbe Portion gegessen, erfasse sie.")["entry"]
+        self.assertEqual(entry["kcal"], 200)
+        self.run_tool("delete_nutrition_template", {"id": template["id"]}, ["local_nutrition"], message="Lösche diese Mahlzeitvorlage.")
+        self.assertEqual(server.NUTRITION_ASSEMBLY.service().get_meal(entry["id"])["kcal"], 200)
+
     @covers("save_nutrition_entry:success", "read_nutrition:success", "delete_nutrition_entry:success")
     def test_nutrition_entries_can_be_saved_read_and_deleted(self):
         saved = self.run_tool(
