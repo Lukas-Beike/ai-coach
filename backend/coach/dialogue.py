@@ -3,6 +3,7 @@
 The model resolves meaning; the server validates the resulting references,
 request provenance and effects. There is deliberately no intent classifier.
 """
+
 from __future__ import annotations
 
 import json
@@ -18,6 +19,13 @@ from backend.coach.service import command_receipt
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 
+__all__ = [
+    "INSTRUCTIONS",
+    "REQUEST_SCHEMA",
+    "CoachDialogueReadService",
+    "dialogue_tools",
+    "validate_request",
+]
 
 INSTRUCTIONS = """
 You are the athlete's conversational Coach. Understand the current message in
@@ -254,9 +262,7 @@ class CoachDialogueReadService:
                 for item in sorted(messages, key=lambda item: item["id"])
             ],
             "pending_request": pending,
-            "confirmed_results": [
-                self._command_result(row) for row in recent_rows
-            ],
+            "confirmed_results": [self._command_result(row) for row in recent_rows],
         }
 
     def artifact_refs(self) -> list[dict[str, Any]]:
@@ -291,7 +297,8 @@ class CoachDialogueReadService:
                     "scope": ((step.get("request") or {}).get("scope") or [])[:40],
                     "scope_truncated": len(
                         (step.get("request") or {}).get("scope") or []
-                    ) > 40,
+                    )
+                    > 40,
                     "artifact_id": step.get("result", {}).get("artifact_id"),
                 }
                 for step in steps[:40]

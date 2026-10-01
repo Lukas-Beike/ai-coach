@@ -17,7 +17,9 @@ from backend.errors import COACH_ABORTED_ERROR, GEMINI_API_KEY_ERROR, AppError
 from backend.providers import http as provider_http
 from backend.providers.http import urlopen
 
-_STREAMING_EVENT_ERROR = "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben."
+_STREAMING_EVENT_ERROR = (
+    "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben."
+)
 _STREAMING_RESPONSE_TOO_LARGE = "Die Streaming-Antwort von Gemini ist zu\\u00df."
 _STREAMING_TIMEOUT = "Gemini hat nicht rechtzeitig geantwortet."
 _STREAMING_UNAVAILABLE = "Gemini ist vor\\u00fcbergehend nicht verf\\u00fcgbar."
@@ -68,7 +70,9 @@ class GeminiStreamClient:
             raise AppError(400, "Ung\\u00fcltiges Gemini-Modell.")
 
         body = json.dumps(payload).encode("utf-8")
-        endpoint = f"{self.base_url.rstrip('/')}/models/{model}:streamGenerateContent?alt=sse"
+        endpoint = (
+            f"{self.base_url.rstrip('/')}/models/{model}:streamGenerateContent?alt=sse"
+        )
         request = Request(
             endpoint,
             data=body,
@@ -110,9 +114,15 @@ class GeminiStreamClient:
             response_bytes = stream_result.response_bytes
             aggregate = stream_result.aggregate
             if not aggregate.get("candidates"):
-                raise AppError(502, "Gemini hat keine Coach-Antwort geliefert.", reason="invalid_response")
+                raise AppError(
+                    502,
+                    "Gemini hat keine Coach-Antwort geliefert.",
+                    reason="invalid_response",
+                )
             self.provider_state.record_success("gemini", 200)
-            self.provider_state.record_usage("gemini", aggregate, "generate_content_stream")
+            self.provider_state.record_usage(
+                "gemini", aggregate, "generate_content_stream"
+            )
             self.logger.info(
                 "External HTTP request completed",
                 extra={
@@ -129,13 +139,17 @@ class GeminiStreamClient:
         except provider_http.ProviderRequestCancelled as exc:
             raise self._cancelled_error() from exc
         except provider_http.ProviderResponseTooLarge as exc:
-            error = AppError(502, _STREAMING_RESPONSE_TOO_LARGE, reason="response_too_large")
+            error = AppError(
+                502, _STREAMING_RESPONSE_TOO_LARGE, reason="response_too_large"
+            )
             self._record_error(error)
             raise error from exc
         except HTTPError as exc:
             raw_error = provider_http.read_error_body(exc, self.max_bytes)
             details = error_details(int(exc.code), raw_error, updated_at=self.now())
-            error = AppError(int(exc.code), details["message"], reason=details["reason"])
+            error = AppError(
+                int(exc.code), details["message"], reason=details["reason"]
+            )
             self._record_error(error)
             raise error from exc
         except AppError as exc:
@@ -238,7 +252,11 @@ class GeminiJsonClient:
                 message="Gemini hat keine JSON-Antwort geliefert.",
                 http_status=502,
             )
-            raise AppError(502, "Gemini hat keine gültige Antwort geliefert.", reason="invalid_response")
+            raise AppError(
+                502,
+                "Gemini hat keine gültige Antwort geliefert.",
+                reason="invalid_response",
+            )
         self.provider_state.record_success("gemini", None)
         self.provider_state.record_usage("gemini", result, operation)
         return result
@@ -267,15 +285,19 @@ class StreamAccumulator:
         try:
             chunk = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise AppError(502, _STREAMING_EVENT_ERROR, reason="invalid_response") from exc
+            raise AppError(
+                502, _STREAMING_EVENT_ERROR, reason="invalid_response"
+            ) from exc
         self._merge_chunk(chunk)
 
     def _merge_chunk(self, chunk: Any) -> None:
         if not isinstance(chunk, dict):
             raise AppError(502, _STREAMING_EVENT_ERROR, reason="invalid_response")
         self._merge_response_metadata(chunk)
-        candidates = chunk.get("candidates") if isinstance(chunk.get("candidates"), list) else []
-        for index, candidate in enumerate(candidates):
+        candidates = chunk.get("candidates")
+        for index, candidate in enumerate(
+            candidates if isinstance(candidates, list) else []
+        ):
             if isinstance(candidate, dict):
                 self._merge_candidate(index, candidate)
 
@@ -289,20 +311,30 @@ class StreamAccumulator:
 
     def _merge_candidate(self, index: int, candidate: dict[str, Any]) -> None:
         while len(self.aggregate["candidates"]) <= index:
-            self.aggregate["candidates"].append({"content": {"role": "model", "parts": []}})
+            self.aggregate["candidates"].append(
+                {"content": {"role": "model", "parts": []}}
+            )
         target = self.aggregate["candidates"][index]
-        for key in ("finishReason", "finishMessage", "safetyRatings", "citationMetadata"):
+        for key in (
+            "finishReason",
+            "finishMessage",
+            "safetyRatings",
+            "citationMetadata",
+        ):
             if key in candidate:
                 target[key] = candidate[key]
-        content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
+        content = candidate.get("content")
+        content = content if isinstance(content, dict) else {}
         if content.get("role"):
             target["content"]["role"] = content["role"]
-        parts = content.get("parts") if isinstance(content.get("parts"), list) else []
-        for part in parts:
+        parts = content.get("parts")
+        for part in parts if isinstance(parts, list) else []:
             if isinstance(part, dict):
                 self._merge_part(index, target["content"]["parts"], part)
 
-    def _merge_part(self, index: int, target_parts: list[dict[str, Any]], part: dict[str, Any]) -> None:
+    def _merge_part(
+        self, index: int, target_parts: list[dict[str, Any]], part: dict[str, Any]
+    ) -> None:
         delta = part.get("text")
         if not isinstance(delta, str) or not delta:
             target_parts.append(dict(part))
@@ -311,8 +343,10 @@ class StreamAccumulator:
             self._on_text_delta(delta)
         metadata = {key: value for key, value in part.items() if key != "text"}
         previous = target_parts[-1] if target_parts else None
-        if isinstance(previous, dict) and set(previous) <= {"text", *metadata} and all(
-            previous.get(key) == value for key, value in metadata.items()
+        if (
+            isinstance(previous, dict)
+            and set(previous) <= {"text", *metadata}
+            and all(previous.get(key) == value for key, value in metadata.items())
         ):
             previous["text"] = str(previous.get("text") or "") + delta
         else:
@@ -329,6 +363,7 @@ def read_stream_response(
     opener: Any = urlopen,
 ) -> StreamReadResult:
     """Read and aggregate a Gemini SSE response."""
+
     def check_cancelled() -> None:
         if cancel_event is not None and cancel_event.is_set():
             raise provider_http.ProviderRequestCancelled
@@ -344,7 +379,9 @@ def read_stream_response(
         accumulator.consume_data_lines(event_lines)
 
     check_cancelled()
-    with provider_http.open_interruptibly(request, timeout, cancel_event, opener=opener) as response:
+    with provider_http.open_interruptibly(
+        request, timeout, cancel_event, opener=opener
+    ) as response:
         if cancel_event is not None:
             cancel_event._provider_response = response
         try:
@@ -352,7 +389,9 @@ def read_stream_response(
                 check_cancelled()
                 response_bytes += len(raw_line)
                 if response_bytes > max_bytes:
-                    raise provider_http.ProviderResponseTooLarge("provider response exceeds configured size limit")
+                    raise provider_http.ProviderResponseTooLarge(
+                        "provider response exceeds configured size limit"
+                    )
                 line = raw_line.decode("utf-8").rstrip("\r\n")
                 if not line:
                     flush_event()
@@ -362,7 +401,10 @@ def read_stream_response(
             check_cancelled()
         finally:
             missing = object()
-            if cancel_event is not None and getattr(cancel_event, "_provider_response", missing) is response:
+            if (
+                cancel_event is not None
+                and getattr(cancel_event, "_provider_response", missing) is response
+            ):
                 delattr(cancel_event, "_provider_response")
     return StreamReadResult(accumulator.aggregate, response_bytes)
 
@@ -370,24 +412,43 @@ def read_stream_response(
 def response_text(result: Any) -> str:
     """Extract visible text from the first Gemini candidate."""
     candidates = result.get("candidates") if isinstance(result, dict) else []
-    candidate = candidates[0] if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict) else {}
-    content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
-    parts = content.get("parts") if isinstance(content.get("parts"), list) else []
-    return "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict) and part.get("text")).strip()
+    candidate = (
+        candidates[0]
+        if isinstance(candidates, list)
+        and candidates
+        and isinstance(candidates[0], dict)
+        else {}
+    )
+    content = candidate.get("content")
+    content = content if isinstance(content, dict) else {}
+    parts = content.get("parts")
+    parts = parts if isinstance(parts, list) else []
+    return "\n".join(
+        str(part.get("text") or "")
+        for part in parts
+        if isinstance(part, dict) and part.get("text")
+    ).strip()
 
 
 def function_tools(tools: Any) -> list[dict[str, Any]]:
     """Translate Responses-style function tools to Gemini declarations."""
     declarations = []
     for tool in tools if isinstance(tools, list) else []:
-        if not isinstance(tool, dict) or tool.get("type") != "function" or not tool.get("name"):
+        if (
+            not isinstance(tool, dict)
+            or tool.get("type") != "function"
+            or not tool.get("name")
+        ):
             continue
-        declarations.append({
-            "name": str(tool["name"]),
-            "description": str(tool.get("description") or ""),
-            "parametersJsonSchema": tool.get("parameters") if isinstance(tool.get("parameters"), dict)
-            else {"type": "object", "properties": {}},
-        })
+        declarations.append(
+            {
+                "name": str(tool["name"]),
+                "description": str(tool.get("description") or ""),
+                "parametersJsonSchema": tool.get("parameters")
+                if isinstance(tool.get("parameters"), dict)
+                else {"type": "object", "properties": {}},
+            }
+        )
     return [{"functionDeclarations": declarations}] if declarations else []
 
 
@@ -420,7 +481,9 @@ def _user_content_parts(content: list[Any]) -> list[dict[str, Any]]:
     return parts
 
 
-def _function_response_part(item: dict[str, Any], call_names: Mapping[str, str]) -> dict[str, Any]:
+def _function_response_part(
+    item: dict[str, Any], call_names: Mapping[str, str]
+) -> dict[str, Any]:
     try:
         output = json.loads(item.get("output") or "{}")
     except (TypeError, ValueError):
@@ -434,7 +497,11 @@ def _function_response_part(item: dict[str, Any], call_names: Mapping[str, str])
 
 
 def _input_item_parts(item: Any, call_names: Mapping[str, str]) -> list[dict[str, Any]]:
-    if isinstance(item, dict) and item.get("role") == "user" and isinstance(item.get("content"), list):
+    if (
+        isinstance(item, dict)
+        and item.get("role") == "user"
+        and isinstance(item.get("content"), list)
+    ):
         return _user_content_parts(item["content"])
     if isinstance(item, dict) and item.get("type") == "function_call_output":
         return [_function_response_part(item, call_names)]
@@ -443,7 +510,8 @@ def _input_item_parts(item: Any, call_names: Mapping[str, str]) -> list[dict[str
 
 def _has_input_media(parts: list[dict[str, Any]]) -> bool:
     return any(
-        "inlineData" in part or "untrusted_fit_raw_base64" in str(part.get("text") or "")
+        "inlineData" in part
+        or "untrusted_fit_raw_base64" in str(part.get("text") or "")
         for part in parts
         if isinstance(part, dict)
     )
@@ -489,14 +557,18 @@ def request_payload(
     request: dict[str, Any] = {
         "contents": contents,
         "generationConfig": {
-            "maxOutputTokens": int(payload.get("max_output_tokens") or default_max_output_tokens),
+            "maxOutputTokens": int(
+                payload.get("max_output_tokens") or default_max_output_tokens
+            ),
         },
     }
     instructions = str(payload.get("instructions") or "")
     if instructions:
         request["systemInstruction"] = {"parts": [{"text": instructions}]}
     request.update(_tool_request_parts(payload))
-    request["generationConfig"].update(_response_schema_config(payload, json_media_type))
+    request["generationConfig"].update(
+        _response_schema_config(payload, json_media_type)
+    )
     thinking_config = _thinking_config(payload, model, default_thinking_level)
     if thinking_config:
         request["generationConfig"]["thinkingConfig"] = thinking_config
@@ -516,10 +588,16 @@ def _tool_request_parts(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {"tools": tools, "toolConfig": {"functionCallingConfig": config}}
 
 
-def _response_schema_config(payload: Mapping[str, Any], json_media_type: str) -> dict[str, Any]:
-    text_format = payload.get("text") if isinstance(payload.get("text"), dict) else {}
-    format_config = text_format.get("format") if isinstance(text_format.get("format"), dict) else {}
-    if format_config.get("type") == "json_schema" and isinstance(format_config.get("schema"), dict):
+def _response_schema_config(
+    payload: Mapping[str, Any], json_media_type: str
+) -> dict[str, Any]:
+    text_format = payload.get("text")
+    text_format = text_format if isinstance(text_format, dict) else {}
+    format_config = text_format.get("format")
+    format_config = format_config if isinstance(format_config, dict) else {}
+    if format_config.get("type") == "json_schema" and isinstance(
+        format_config.get("schema"), dict
+    ):
         return {
             "responseMimeType": json_media_type,
             "responseJsonSchema": format_config["schema"],
@@ -527,9 +605,16 @@ def _response_schema_config(payload: Mapping[str, Any], json_media_type: str) ->
     return {}
 
 
-def _thinking_config(payload: Mapping[str, Any], model: str, default_thinking_level: str) -> dict[str, Any]:
-    explicit_reasoning = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else {}
-    thinking_level = str(explicit_reasoning.get("effort") or default_thinking_level).casefold()
+def _thinking_config(
+    payload: Mapping[str, Any], model: str, default_thinking_level: str
+) -> dict[str, Any]:
+    explicit_reasoning = payload.get("reasoning")
+    explicit_reasoning = (
+        explicit_reasoning if isinstance(explicit_reasoning, dict) else {}
+    )
+    thinking_level = str(
+        explicit_reasoning.get("effort") or default_thinking_level
+    ).casefold()
     if thinking_level not in {"low", "medium", "high"}:
         thinking_level = str(default_thinking_level).casefold()
     if model.startswith("gemini-3."):
@@ -549,27 +634,57 @@ def _provider_error_payload(raw_body: bytes) -> dict[str, Any]:
 
 def _gemini_error_tokens(error: dict[str, Any]) -> str:
     tokens = [str(error.get("status") or "").casefold()]
-    for detail in error.get("details") if isinstance(error.get("details"), list) else []:
+    details = error.get("details")
+    for detail in details if isinstance(details, list) else []:
         if isinstance(detail, dict):
-            tokens.extend(str(detail.get(key) or "").casefold() for key in ("reason", "@type"))
+            tokens.extend(
+                str(detail.get(key) or "").casefold() for key in ("reason", "@type")
+            )
     return " ".join(tokens)
 
 
 def _gemini_error_reason(status: int, searchable: str) -> tuple[str, str]:
-    if status in {401, 403} or "permission" in searchable or "unauthenticated" in searchable:
-        return "authentication_or_permission", "Der Gemini-Zugang wurde abgelehnt. Bitte API-Schlüssel und Berechtigungen prüfen."
+    if (
+        status in {401, 403}
+        or "permission" in searchable
+        or "unauthenticated" in searchable
+    ):
+        return (
+            "authentication_or_permission",
+            "Der Gemini-Zugang wurde abgelehnt. Bitte API-Schlüssel und Berechtigungen prüfen.",
+        )
     if status == 429 and "quota" in searchable:
-        return "insufficient_quota", "Das Gemini-Kontingent ist aufgebraucht. Bitte Nutzung und Abrechnung im Google-Konto prüfen."
+        return (
+            "insufficient_quota",
+            "Das Gemini-Kontingent ist aufgebraucht. Bitte Nutzung und Abrechnung im Google-Konto prüfen.",
+        )
     if status == 429:
-        return "rate_limit_exceeded", "Gemini hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen."
+        return (
+            "rate_limit_exceeded",
+            "Gemini hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen.",
+        )
     if status == 404:
-        return "not_found", "Das konfigurierte Gemini-Modell oder der angeforderte Dienst wurde nicht gefunden."
+        return (
+            "not_found",
+            "Das konfigurierte Gemini-Modell oder der angeforderte Dienst wurde nicht gefunden.",
+        )
     if status >= 500:
-        return "provider_unavailable", "Gemini ist vorübergehend nicht verfügbar. Bitte später erneut versuchen."
+        return (
+            "provider_unavailable",
+            "Gemini ist vorübergehend nicht verfügbar. Bitte später erneut versuchen.",
+        )
     return "http_error", f"Gemini konnte die Anfrage nicht verarbeiten (HTTP {status})."
 
 
 def error_details(status: int, raw_body: bytes, *, updated_at: str) -> dict[str, Any]:
     """Classify a Gemini failure without retaining provider response content."""
-    reason, message = _gemini_error_reason(status, _gemini_error_tokens(_provider_error_payload(raw_body)))
-    return {"state": "error", "reason": reason, "message": message, "http_status": status, "updated_at": updated_at}
+    reason, message = _gemini_error_reason(
+        status, _gemini_error_tokens(_provider_error_payload(raw_body))
+    )
+    return {
+        "state": "error",
+        "reason": reason,
+        "message": message,
+        "http_status": status,
+        "updated_at": updated_at,
+    }
