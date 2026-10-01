@@ -145,6 +145,12 @@ Project-specific skills must remain repository-local. See
 synchronize them into a user-global skill directory. Scan sources before
 reading them, including when following skill references.
 
+For requested local security reviews or scans, use
+`.agents/skills/ai-coach-codex-security/SKILL.md`. Authenticate through the
+installed Codex Security plugin or ChatGPT login (`--auth chatgpt`). Keep
+Codex Security local to the user's authenticated Codex session; do not add an
+API-key requirement or GitHub Actions workflow for it.
+
 Run from the repository root:
 
 ```powershell
