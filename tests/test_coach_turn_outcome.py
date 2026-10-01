@@ -60,6 +60,21 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         )
         self.assertEqual(receipts[0]["result"]["status"], "saved")
 
+    def test_local_nutrition_approval_uses_local_only_wording(self):
+        _, text, _ = self.finalize(
+            self.response(""),
+            [{
+                "tool": "save_nutrition_template",
+                "result": {
+                    "ok": True, "status": "approval_required",
+                    "proposed_action": {"action_type": "local_coach_write"},
+                },
+            }],
+        )
+        self.assertIn("lokale Änderung", text)
+        self.assertIn("gespeichert wird", text)
+        self.assertNotIn("Remote-Änderung", text)
+
     def test_queued_remote_job_overrides_false_model_completion_claim(self):
         result = {
             "ok": True,

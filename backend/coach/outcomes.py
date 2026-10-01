@@ -115,6 +115,9 @@ def coach_failure_lines(
 def coach_effect_label(item: dict[str, Any]) -> str:
     result = item.get("result") or {}
     if result.get("status") == "approval_required":
+        proposal = result.get("proposed_action") or {}
+        if proposal.get("action_type") == "local_coach_write":
+            return "Lokale Änderung wartet auf ausdrückliche Freigabe"
         return "Remote-Änderung wartet auf ausdrückliche Freigabe"
     if item.get("tool") == "undo_training_change" and result.get("status") in {
         "applied",

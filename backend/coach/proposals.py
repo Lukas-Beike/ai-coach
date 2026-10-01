@@ -456,28 +456,41 @@ class CoachProposalCreationService:
         }
         _validate_local_coach_write(payload)
         values = arguments["payload"]
+        preview_values = dict(values)
+        template_id = str(values.get("id") or "").strip()
+        if template_id and self._nutrition_service:
+            existing = next(
+                (
+                    template
+                    for template in self._nutrition_service().list_templates()
+                    if template.get("id") == template_id
+                ),
+                None,
+            )
+            if existing:
+                preview_values = {**existing, **preview_values}
         diff = [
             {
-                "name": values["name"],
-                "description": values["description"][:500],
+                "name": preview_values.get("name", ""),
+                "description": str(preview_values.get("description") or "")[:500],
                 "kcal": str(
-                    values.get("kcal")
-                    if values.get("kcal") is not None
+                    preview_values.get("kcal")
+                    if preview_values.get("kcal") is not None
                     else "unbekannt"
                 ),
                 "carbs": str(
-                    values.get("carbs_g")
-                    if values.get("carbs_g") is not None
+                    preview_values.get("carbs_g")
+                    if preview_values.get("carbs_g") is not None
                     else "unbekannt"
                 ),
                 "protein": str(
-                    values.get("protein_g")
-                    if values.get("protein_g") is not None
+                    preview_values.get("protein_g")
+                    if preview_values.get("protein_g") is not None
                     else "unbekannt"
                 ),
                 "fat": str(
-                    values.get("fat_g")
-                    if values.get("fat_g") is not None
+                    preview_values.get("fat_g")
+                    if preview_values.get("fat_g") is not None
                     else "unbekannt"
                 ),
             }

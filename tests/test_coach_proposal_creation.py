@@ -170,6 +170,28 @@ class CoachProposalCreationTests(unittest.TestCase):
             )
         self.assertEqual(len(self._rows()), 1)
 
+    def test_local_nutrition_update_preview_shows_retained_macros(self) -> None:
+        nutrition = Mock()
+        nutrition.list_templates.return_value = [{
+            "id": "template-1", "name": "Recovery bowl", "description": "Oats",
+            "kcal": 420, "carbs_g": 64, "protein_g": 22, "fat_g": 8,
+        }]
+        intent = {
+            "operation": "save_nutrition_template", "target_system": "local",
+            "authorization_scope": ["local_nutrition"],
+            "request": {"source_message_ids": [7]},
+        }
+        result = self._service(nutrition_service=lambda: nutrition).create_local_write(
+            "save_nutrition_template",
+            {"payload": {"id": "template-1", "name": "Recovery bowl", "description": "Oats with berries", "kcal": 450}},
+            intent, conversation_id="conversation-1", client_turn_id="turn-1",
+            session_csrf_hash="session-1",
+        )
+        self.assertEqual(
+            result["proposed_action"]["diff"][0],
+            {"name": "Recovery bowl", "description": "Oats with berries", "kcal": "450", "carbs": "64", "protein": "22", "fat": "8"},
+        )
+
     def test_competition_remote_write_binds_dirty_rows_and_tombstones_to_approval(self) -> None:
         with self.database_manager.unit_of_work() as db:
             db.execute(
