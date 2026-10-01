@@ -299,7 +299,7 @@ def validate_workout_description(workout: dict[str, Any]) -> float | None:
     """Require quantity-first endurance steps; never guess intent from prose."""
     sport = intervals_workout_sport(workout.get("sport") or workout.get("type"))
     if sport not in INTERVALS_ENDURANCE_WORKOUT_TYPES:
-        return
+        return None
     description = str(workout.get("description") or "")[:12000]
     _validate_endurance_workout_steps(description)
     seconds, has_distance = _structured_workout_duration(
@@ -372,14 +372,14 @@ def validate_intervals_workout_result(
 
 
 def validate_workout_start_date(value: Any, workout_date: str) -> str:
-    message = "Die lokale Startzeit muss ein ISO-8601-Zeitstempel am Trainingsdatum sein."
+    message = (
+        "Die lokale Startzeit muss ein ISO-8601-Zeitstempel am Trainingsdatum sein."
+    )
     if not isinstance(value, str):
         raise AppError(400, message, reason="invalid_workout_start_date")
     start_date_local = value.strip()
     try:
-        parsed_start = datetime.fromisoformat(
-            start_date_local.replace("Z", "+00:00")
-        )
+        parsed_start = datetime.fromisoformat(start_date_local.replace("Z", "+00:00"))
     except ValueError as exc:
         raise AppError(400, message, reason="invalid_workout_start_date") from exc
     if (
