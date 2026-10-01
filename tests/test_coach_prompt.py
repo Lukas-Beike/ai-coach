@@ -1,9 +1,10 @@
 import hashlib
 import unittest
 
+from backend.coach.dialogue import INSTRUCTIONS
 from backend.coach.prompt import COACH_PROMPT
 
-EXPECTED_SHA256 = "9e3e57d76d6c1e6e7a9deaa73069de31fed0ff209f238b1cd6fb20f0f421f346"
+EXPECTED_SHA256 = "433550e3ac28456ffaf4b85adc6b1d45fbb482538fbaf01b9fa6c357654c0e50"
 
 
 class CoachPromptTests(unittest.TestCase):
@@ -29,6 +30,25 @@ class CoachPromptTests(unittest.TestCase):
         for marker in required_markers:
             with self.subTest(marker=marker):
                 self.assertIn(marker, COACH_PROMPT)
+
+    def test_clarification_is_conversational_and_negation_is_not_authority(self):
+        for marker in (
+            "ask one concise question in Coach Chat",
+            "wait for the athlete's reply before writing",
+            "execute an unambiguous authorized request directly",
+        ):
+            self.assertIn(marker, COACH_PROMPT)
+        self.assertNotIn(
+            "ask the athlete to confirm it in the Profile screen", COACH_PROMPT
+        )
+        for marker in (
+            "Explicit prohibitions and",
+            "read-only constraints override general planning or saving language",
+            "Do not infer permission from _request",
+            "no confirmation buttons",
+            "Never combine a clarification or cancellation with write tools",
+        ):
+            self.assertIn(marker, INSTRUCTIONS)
 
 
 if __name__ == "__main__":

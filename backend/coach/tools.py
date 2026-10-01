@@ -226,7 +226,7 @@ def build_tool_contracts(
         ),
         _canonical_coach_tool(
             "replace_training_plan",
-            "Atomically replace local Coach/library plan units within the requested period. Use the planning revision returned by read_training_state. "
+            "Atomically replace local plan units, including locally stored Intervals units, within the requested period. Use the planning revision returned by read_training_state. "
             "This operation may create, update, and archive a different number of sessions and never writes remotely.",
             {
                 "payload": {

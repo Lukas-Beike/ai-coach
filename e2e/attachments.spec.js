@@ -1,6 +1,6 @@
 const { test, expect } = require("@playwright/test");
 
-test("attachments can be removed, rejected and sent with an empty text draft", async ({ page }) => {
+test("attachments can be removed, rejected and sent with an empty text draft", { tag: "@responsive" }, async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
   await page.evaluate(() => jumpToChatComposer());

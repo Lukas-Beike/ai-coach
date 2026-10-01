@@ -93,6 +93,7 @@ class CoachStructuredToolRoundService:
         state: StructuredCoachRoundState,
         question: str,
         cancelled: bool,
+        paused: bool = False,
     ) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
         name = str(item.get("name") or "")
         call_id = str(item.get("call_id") or "")
@@ -125,6 +126,7 @@ class CoachStructuredToolRoundService:
                     cancelled=cancelled,
                     context=state.context,
                     allow_mutations=state.allow_mutations,
+                    paused=paused,
                 )
                 local_transaction = name not in {
                     "start_provider_refresh",
@@ -171,18 +173,7 @@ class CoachStructuredToolRoundService:
             if result.get("synchronous_refresh") or (
                 name == "get_sync_job" and result.get("ok")
             ):
-                model_instructions = (
-                    self._training_context.build(
-                        selection=select_coach_context(
-                            state.message, state.context, has_receipts=True
-                        ),
-                        local_date=state.context.get("local_date", ""),
-                    )
-                    + "\n\n"
-                    + COACH_DIALOGUE_INSTRUCTIONS
-                )
-                if not state.allow_mutations:
-                    model_instructions += "\nThis is an automatic advisory run. Do not change data or pending requests."
+                model_instructions = self._refreshed_instructions(state)
             if action.get("period"):
                 self._update_plan_scope(state, action)
         except (AppError, ValueError, TypeError, KeyError) as exc:
@@ -201,6 +192,30 @@ class CoachStructuredToolRoundService:
             )
         state.model_instructions = model_instructions
         return name, call_id, result, action
+
+    def _refreshed_instructions(self, state: StructuredCoachRoundState) -> str:
+        instructions = (
+            self._training_context.build(
+                selection=select_coach_context(
+                    state.message,
+                    state.context,
+                    attachments=bool(
+                        state.attachments
+                        or (
+                            state.ai_provider == "openai"
+                            and state.request_payload.get("conversation")
+                        )
+                    ),
+                    has_receipts=True,
+                ),
+                local_date=state.context.get("local_date", ""),
+            )
+            + "\n\n"
+            + COACH_DIALOGUE_INSTRUCTIONS
+        )
+        if not state.allow_mutations:
+            instructions += "\nThis is an automatic advisory run. Do not change data or pending requests."
+        return instructions
 
     def _update_plan_scope(
         self, state: StructuredCoachRoundState, action: dict[str, Any]
@@ -275,6 +290,10 @@ class CoachStructuredToolRoundService:
             if not calls:
                 break
             pending = self._journal.start_round(state.client_turn_id, calls)
+            paused = any(
+                item.get("name") in {"clarify_coach_request", "cancel_coach_request"}
+                for item in calls
+            )
             outputs: list[dict[str, Any]] = []
             for item in calls:
                 raise_if_chat_cancelled(state.cancel_event)
@@ -283,6 +302,7 @@ class CoachStructuredToolRoundService:
                     state=state,
                     question=question,
                     cancelled=cancelled,
+                    paused=paused,
                 )
                 question, cancelled, pending = self._journal.record_output(
                     client_turn_id=state.client_turn_id,

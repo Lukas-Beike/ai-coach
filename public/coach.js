@@ -17,7 +17,7 @@ function scheduleChatStatusPoll(delay = 1_500) {
   if (state.chatStatusTimer) clearTimeout(state.chatStatusTimer);
   state.chatStatusTimer = setTimeout(() => {
     state.chatStatusTimer = null;
-    pollChatStatus();
+    void pollChatStatus();
   }, delay);
 }
 

@@ -13,6 +13,7 @@ Intervals Coach is intentionally standalone and designed for operation on a trus
 - **Single-Athlete Authority**: Built specifically for one athlete. There are no multi-tenant abstractions, user role hierarchies, or hosted cloud dependencies.
 - **Local Source of Truth**: The local SQLCipher database is the authoritative source for future planned units, training goals, workout templates, and athlete feedback. Intervals.icu remains the authoritative record of completed historical activities.
 - **Explicit Action Gate**: Local Coach actions follow the athlete's direct request. Intervals.icu writes show a separate, session-bound preview that the athlete must approve before a job is queued; the preview expires and rechecks its target before execution.
+- **Plan Replacement**: A requested full plan replacement archives local Coach, library, and imported Intervals units within the selected period (or selected plan). Competitions and external calendar blockers remain protected. Remote changes require a separate approved synchronization.
 - **Untrusted External Content**: Data received from Intervals.icu, Garmin Connect, Open-Meteo, and external iCalendar feeds is strictly treated as untrusted data, never as system instructions.
 - **Zero Cloud Telemetry**: Biometric data, activity recordings, API keys, database keys, and athlete conversations never leave the host server, except when sending sanitized coaching prompts to the user's selected AI provider.
 - **Standard-Library Foundation**: The backend runs on Python's native `http.server` without heavyweight web frameworks. Application logic is modularized under `backend/`, keeping `server.py` strictly as a composition root.
@@ -393,10 +394,11 @@ To optimize API token consumption and response latency, Intervals Coach uses a s
 - **Activity Projection**: Routine turns include the newest completed activity per sport; planning and analysis retain up to five. Exact activity details remain available through the existing read tools.
 - **Planning Projection**: Routine turns include a three-day outlook and two recent days; weekly planning includes a 14-day outlook. Daily planning combines recovery, illness/check-ins, weather and calendar constraints instead of repeating separate provider histories. Confirmed profile constraints, competitions and labeled current performance remain available.
 - **On-Demand Details**: `read_coach_context` loads selected omitted local sections without a provider refresh. Its output is bounded to 40,000 characters and marks incomplete results. Successful reads also expose remaining tools already permitted for the turn, without granting mutation or remote-write authorization.
-- **Conservative Fallback**: Pending requests, short continuations, resumed tool work, provider refresh/sync and long-range or explicitly dated planning retain full bounded context and tools. The 120,000-character training-context cap, model selection, attachment handling and output-token limits remain unchanged.
+- **Conservative Fallback**: Pending requests, short continuations, explicit provider refresh/sync requests and long-range or explicitly dated planning retain full bounded context and tools. A clear topical request does not select full training context merely because it contains a pronoun such as "das" or "diese". The 120,000-character training-context cap, model selection, attachment handling and output-token limits remain unchanged.
+- **Refresh Follow-Ups**: After refresh results, the Coach rebuilds current data using the original request topic and attachment context. Existing tool receipts retain dialogue continuity without automatically expanding all training sections or tools.
 - **Library Selection**: Template descriptions are included for planning, not ordinary questions; library read tools remain available when details are needed.
 - **Metric Sanitization**: Raw JSON payloads from providers are stripped down to core athletic parameters (FTP, TSS, RPE, Heart Rate, Power Zones, Duration, Distance).
-- **Dialogue Pruning**: Routine requests send up to eight recent messages and three completed-action receipts. Pending work retains the full bounded dialogue and source IDs; authorization still uses the original local dialogue. Remote conversation chains are pruned between distinct command sessions.
+- **Dialogue Pruning**: Routine requests send up to eight recent messages and three completed-action receipts. Pending work, pronoun references and resumed tool work retain the full bounded dialogue and source IDs; authorization still uses the original local dialogue. The current user message is sent once, separately with its source ID, and request JSON omits unnecessary separator whitespace. Remote conversation chains are pruned between distinct command sessions.
 - **Size Diagnostics**: Context profiles, section character counts and request/tool-schema sizes are recorded without athlete content. Character counts are not provider token measurements; synthetic reduction tests do not establish live quality or latency.
 - **Context Preview**: The preview remains a full local context overview; actual request selection depends on the message subsequently sent.
 
@@ -539,9 +541,17 @@ Execute full SQLCipher container tests without exposing local host `.env` or dat
 #### Playwright Browser E2E Tests
 End-to-end browser testing validates PWA responsiveness, keyboard navigation, and UI flows across 5 device viewports:
 ```sh
-npm install
+npm ci
 npm run test:e2e
 ```
+Functional contracts run once on desktop. Tests tagged `@responsive` also run on
+all four smaller viewports. CI runs the five projects in independent jobs, with
+a fresh disposable SQLCipher fixture per spec and one worker per invocation.
+Chromium downloads are cached by the locked dependency version; system
+dependencies are installed on every runner. Follow
+`.agents/skills/ai-coach-pwa-e2e/references/browser-validation.md` for safe local
+fixture setup; never target a connected installation.
+
 Configured viewports in `playwright.config.cjs`:
 - `mobile-small`: 320x568 (Compact mobile)
 - `mobile`: 390x844 (Standard mobile)
