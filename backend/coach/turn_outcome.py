@@ -101,9 +101,8 @@ def _approval_message(
     if not awaiting_approval or question:
         return text
     local_approval = any(
-        ((entry.get("result") or {}).get("proposed_action") or {}).get(
-            "action_type"
-        ) == "local_coach_write"
+        ((entry.get("result") or {}).get("proposed_action") or {}).get("action_type")
+        == "local_coach_write"
         for entry in command_receipts
     )
     local_effects = [
@@ -118,13 +117,10 @@ def _approval_message(
             + "; ".join(coach_effect_label(entry) for entry in local_effects)
             + ". "
         )
-    return (
-        prefix
-        + (
-            "Die lokale Änderung wartet auf deine ausdrückliche Freigabe. Prüfe den Aktionsvorschlag, bevor sie gespeichert wird."
-            if local_approval
-            else "Die Remote-Änderung wartet auf deine ausdrückliche Freigabe. Prüfe den Aktionsvorschlag, bevor sie ausgeführt wird."
-        )
+    return prefix + (
+        "Die lokale Änderung wartet auf deine ausdrückliche Freigabe. Prüfe den Aktionsvorschlag, bevor sie gespeichert wird."
+        if local_approval
+        else "Die Remote-Änderung wartet auf deine ausdrückliche Freigabe. Prüfe den Aktionsvorschlag, bevor sie ausgeführt wird."
     )
 
 
