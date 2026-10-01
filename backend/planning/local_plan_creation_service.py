@@ -8,6 +8,7 @@ from typing import Any
 
 from backend import change_history
 from backend.errors import AppError
+from backend.planning import calendar as planning_calendar
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
 
@@ -40,23 +41,24 @@ class LocalTrainingPlanCreationService:
         self._logger = logger
 
     def validate_calendar(self, workouts: list[dict[str, Any]]) -> None:
-        """Reject duplicate plan dates and dates already occupied locally."""
-        requested_dates: set[str] = set()
-        for workout in workouts:
-            workout_date = workout["date"]
-            if workout_date in requested_dates:
+        """Reject workouts with conflicting calendar blockers or overlapping times."""
+        for i, workout in enumerate(workouts):
+            for other in workouts[i + 1 :]:
+                matches, match = planning_calendar._calendar_items_conflict(
+                    workout, other
+                )
+                if matches and match == "time_window":
+                    raise AppError(
+                        409,
+                        f"Der Plan enthält zeitlich überschneidende Einheiten für den {workout['date']}.",
+                        reason="plan_date_conflict",
+                    )
+            if self._calendar_conflict_service.conflicts(workout):
                 raise AppError(
                     409,
-                    f"Der Plan enthält mehrere Einheiten für den {workout_date}; pro Tag ist eine Einheit möglich.",
+                    f"Für den {workout['date']} existiert bereits eine lokale Kalendereinheit. Berücksichtige diesen Termin und plane zusätzliche Einheiten an freien Tagen.",
                     reason="plan_date_conflict",
                 )
-            if self._calendar_conflict_service.conflicts({"date": workout_date}):
-                raise AppError(
-                    409,
-                    f"Für den {workout_date} existiert bereits eine lokale Kalendereinheit. Berücksichtige diesen Termin und plane zusätzliche Einheiten an freien Tagen.",
-                    reason="plan_date_conflict",
-                )
-            requested_dates.add(workout_date)
 
     def save(
         self,

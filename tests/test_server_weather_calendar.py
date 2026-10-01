@@ -628,7 +628,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
     def test_calendar_conflict_is_detected_before_push(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([{"id": "existing", "name": "Existing", "category": "WORKOUT", "type": "Ride", "start_date_local": tomorrow + "T08:00:00", "moving_time": 3600}])
-        self.assertEqual(server.PLANNING_WORKFLOWS.calendar_conflict_service().conflicts({"date": tomorrow})[0]["name"], "Existing")
+        self.assertEqual(server.PLANNING_WORKFLOWS.calendar_conflict_service().conflicts({"date": tomorrow, "start_date_local": tomorrow + "T08:30:00", "duration_minutes": 30})[0]["name"], "Existing")
+        self.assertEqual(server.PLANNING_WORKFLOWS.calendar_conflict_service().conflicts({"date": tomorrow}), [])
 
     def test_calendar_conflicts_use_time_windows_when_both_events_are_timed(self):
         day = (date.today() + timedelta(days=2)).isoformat()

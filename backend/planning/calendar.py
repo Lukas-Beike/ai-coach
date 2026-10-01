@@ -141,5 +141,7 @@ def calendar_conflicts_for_items(
     for item in items:
         matches, match = _calendar_items_conflict(candidate, item)
         if matches:
+            if source == "local_library" and match != "time_window":
+                continue
             conflicts.append(_calendar_conflict_record(item, source, match))
     return conflicts

@@ -40,10 +40,12 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
 
     def test_duplicate_calendar_day_rolls_back_plan_and_revision(self):
         before = self.state()["planning_revision"]
+        w1 = {**self.workout(name="One"), "start_date_local": "2026-09-08T08:00:00", "duration_minutes": 60}
+        w2 = {**self.workout(name="Two"), "start_date_local": "2026-09-08T08:30:00", "duration_minutes": 30}
         with self.assertRaises(server.AppError) as error:
             server.COACH_PLANNING_TOOLS.training_patch_service().apply(
                 {"expected_revision": before, "changes": [],
-                 "workouts": [self.workout(name="One"), self.workout(name="Two")],
+                 "workouts": [w1, w2],
                  "plan_name": "Synthetic conflicting plan"},
                 self.action("local_plan"),
             )
@@ -51,6 +53,18 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(self.state()["planning_revision"], before)
         with server.database_manager().unit_of_work() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM training_plans").fetchone()["count"], 0)
+
+    def test_multiple_workouts_on_same_calendar_day_are_applied(self):
+        before = self.state()["planning_revision"]
+        result = server.COACH_PLANNING_TOOLS.training_patch_service().apply(
+            {"expected_revision": before, "changes": [],
+             "workouts": [self.workout(name="One"), {**self.workout(name="Two"), "sport": "Run"}],
+             "plan_name": "Synthetic multiple workouts plan"},
+            self.action("local_plan"),
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(result["library_entry_ids"]), 2)
+        self.assertEqual(len(self.state()["planned_units"]), 2)
 
     def test_approved_constraints_are_attached_to_created_plan(self):
         action = self.action("local_plan")

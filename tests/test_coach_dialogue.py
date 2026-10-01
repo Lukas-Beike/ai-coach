@@ -553,12 +553,15 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertIsNone(json.loads(server.key_value_service().get("coach_pending_request")))
 
     def test_failed_addition_rolls_back_move_and_revision(self):
-        existing = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])[0]
+        existing = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([
+            {**self.workout(), "start_date_local": "2026-09-08T08:30:00", "duration_minutes": 30}
+        ])[0]
         before = self.state()
         def action(_):
             return self.call("apply_training_patch", {"changes": [{"local_id": existing["id"], "action": "update", "date": "2026-09-08",
+                "start_date_local": "2026-09-08T08:30:00",
                 "expected_payload_hash": before["planned_units"][0]["expected_payload_hash"]}],
-                "workouts": [self.workout("2026-09-08", "Collision")], "expected_revision": before["planning_revision"]},
+                "workouts": [{**self.workout("2026-09-08", "Collision"), "start_date_local": "2026-09-08T08:00:00", "duration_minutes": 60}], "expected_revision": before["planning_revision"]},
                 [f"planned_unit:{existing['id']}", "local_plan"], {"start": "2026-09-08", "end": "2026-09-09"})
         result, _ = self.turn("Dann Dienstag beides", [action, {"output_text": "Gespeichert."}])
         self.assertEqual(result["status"], "failed")

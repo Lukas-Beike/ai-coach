@@ -394,14 +394,43 @@ class ReplacementServiceTest(unittest.TestCase):
         self.assertTrue(imported["archived"])
 
     def test_imported_local_unit_is_replaced_without_calendar_conflict(self):
-        self.add_unit("imported", source="intervals", external_id="remote-id")
+        self.add_unit(
+            "imported",
+            source="intervals",
+            external_id="remote-id",
+            payload=json.dumps(
+                {
+                    "id": "imported",
+                    "date": "2030-01-03",
+                    "start_date_local": "2030-01-03T08:00:00",
+                    "duration_minutes": 60,
+                    "source": "intervals",
+                }
+            ),
+        )
         calendar = CalendarConflictService(
             SimpleNamespace(unit_of_work=lambda: nullcontext(self.db)),
             SimpleNamespace(list_events=lambda *args, **kwargs: []),
         )
-        self.assertTrue(calendar.conflicts({"date": "2030-01-03"}))
+        self.assertTrue(
+            calendar.conflicts(
+                {
+                    "date": "2030-01-03",
+                    "start_date_local": "2030-01-03T08:30:00",
+                    "duration_minutes": 30,
+                }
+            )
+        )
+        request = self.request()
+        workout = request["payload"]["workouts"][0]
+        workout["start_date_local"] = "2030-01-03T08:30:00"
+        workout["duration_minutes"] = 30
+        workout["description"] = "- 30m 60% easy"
         result = self.make_service(calendar_conflict_service=calendar).replace(
-            {**self.request(), "period": {"start": "2030-01-03", "end": "2030-01-03"}}
+            {
+                **request,
+                "period": {"start": "2030-01-03", "end": "2030-01-03"},
+            }
         )
         self.assertEqual(result["archived_count"], 1)
         row = self.db.execute(

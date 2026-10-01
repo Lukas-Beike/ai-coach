@@ -391,6 +391,8 @@ def normalize_workout(workout: Any, *, today: date) -> dict[str, Any]:
             workout.get("rationale") or "Manuell geplante Einheit"
         ).strip()[:2000],
     }
+    if workout.get("start_date_local"):
+        draft["start_date_local"] = str(workout["start_date_local"]).strip()[:40]
     try:
         draft["duration_minutes"] = int(draft["duration_minutes"])
     except (TypeError, ValueError) as exc:

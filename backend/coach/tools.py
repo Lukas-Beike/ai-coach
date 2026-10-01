@@ -161,7 +161,7 @@ def build_tool_contracts(
         ),
         _canonical_coach_tool(
             "stage_training_plan",
-            "Store a complete local training-plan draft. Include only future workouts, no rest-day placeholders or already completed activities. At most one workout per date; respect existing calendar conflicts. Correct rejected arguments before committing. Never writes remotely.",
+            "Store a complete local training-plan draft. Include only future workouts, no rest-day placeholders or already completed activities. Respect existing calendar conflicts. Correct rejected arguments before committing. Never writes remotely.",
             {
                 "payload": {
                     "type": "object",

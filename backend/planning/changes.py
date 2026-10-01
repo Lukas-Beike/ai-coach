@@ -161,9 +161,7 @@ class StructuredTrainingChangeValidator:
         if action == "restore":
             restore_identities.add(change_identity)
         local_id = str(change.get("local_id") or "").strip()
-        row = db.execute(
-            _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)
-        ).fetchone()
+        row = db.execute(_PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)).fetchone()
         if not row:
             return
         try:
@@ -201,19 +199,30 @@ class StructuredTrainingChangeValidator:
         original_dates: dict[str, str],
         restore_identities: set[str],
         batch_ids: set[str],
+        changes_by_identity: dict[str, dict[str, Any]] | None = None,
     ) -> None:
-        occupied_dates: dict[str, str] = {}
-        for change_identity, candidate_date in final_dates.items():
-            if not final_active.get(change_identity, True):
-                continue
-            previous_identity = occupied_dates.get(candidate_date)
-            if previous_identity is not None and previous_identity != change_identity:
-                raise AppError(
-                    409,
-                    f"Der Plan enthält mehrere Einheiten für den {candidate_date}; pro Tag ist eine Einheit möglich.",
-                    reason="plan_date_conflict",
-                )
-            occupied_dates[candidate_date] = change_identity
+        from backend.planning import calendar as planning_calendar
+
+        if changes_by_identity:
+            active_ids = [
+                ident for ident in final_dates if final_active.get(ident, True)
+            ]
+            for i, id_a in enumerate(active_ids):
+                date_a = final_dates[id_a]
+                change_a = changes_by_identity.get(id_a, {"date": date_a})
+                for id_b in active_ids[i + 1 :]:
+                    if final_dates[id_b] != date_a:
+                        continue
+                    change_b = changes_by_identity.get(id_b, {"date": date_a})
+                    matches, match = planning_calendar._calendar_items_conflict(
+                        change_a, change_b
+                    )
+                    if matches and match == "time_window":
+                        raise AppError(
+                            409,
+                            f"Der Plan enthält zeitlich überschneidende Einheiten für den {date_a}.",
+                            reason="plan_date_conflict",
+                        )
         dates_needing_calendar_check = {
             candidate_date
             for change_identity, candidate_date in final_dates.items()
@@ -261,12 +270,17 @@ class StructuredTrainingChangeValidator:
                 final_active,
                 restore_identities,
             )
+        changes_by_identity = {
+            (str(change.get("local_id") or "").strip() or f"create:{idx}"): change
+            for idx, change in enumerate(changes)
+        }
         self._validate_training_change_dates(
             final_dates,
             final_active,
             original_dates,
             restore_identities,
             batch_ids,
+            changes_by_identity=changes_by_identity,
         )
 
     def validate_batch(self, changes: list[dict[str, Any]], db: Any) -> None:
@@ -399,9 +413,7 @@ class StructuredTrainingPlanResolver:
         local_id = str(change.get("local_id") or "").strip()
         if action == "create" or not local_id:
             return None, None
-        row = db.execute(
-            _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)
-        ).fetchone()
+        row = db.execute(_PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)).fetchone()
         if not row:
             return None, None
         try:
