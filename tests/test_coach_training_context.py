@@ -134,7 +134,9 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
         )
         parsed = json.loads(result[structured_start:structured_end])
         self.assertEqual(parsed["intervals"], intervals)
-        self.assertEqual(len(parsed["intervals"]["recent_activities_by_sport"]["Run"]), 6)
+        self.assertEqual(
+            len(parsed["intervals"]["recent_activities_by_sport"]["Run"]), 6
+        )
         self.assertEqual(len(parsed["intervals"]["planned_workouts"]), 51)
         self.assertEqual(
             parsed["projection"]["section_characters"]["intervals"],
@@ -143,6 +145,7 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
         self.structured.build.assert_called_once_with(self.snapshot)
 
     def test_section_and_total_truncation_keep_valid_bounded_context(self):
+        budget = len(COACH_PROMPT) + 1000
         structured = {
             "planning": {"notes": "athlete note " * 800},
             "unbounded": "context value " * 5000,
@@ -151,13 +154,13 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
         service = self.make_service(
             structured,
             section_limits={"planning": 180},
-            total_char_limit=12_500,
+            total_char_limit=budget,
         )
 
         with self.assertLogs("intervals_coach", level="WARNING") as captured:
             result = service.build()
 
-        self.assertLessEqual(len(result), 12_500)
+        self.assertLessEqual(len(result), budget)
         self.assertIn('"truncated_sections":[{"section":"planning"', result)
         self.assertEqual(captured.records[0].event, "coach_context_budget_applied")
 
@@ -169,7 +172,7 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
         )
         parsed = json.loads(result[structured_start:structured_end])
         self.assertIsInstance(parsed, dict)
-        self.assertLessEqual(len(result), 12_500)
+        self.assertLessEqual(len(result), budget)
 
 
 if __name__ == "__main__":

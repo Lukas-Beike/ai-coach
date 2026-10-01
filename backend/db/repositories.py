@@ -537,12 +537,18 @@ class NutritionRepository:
     def __init__(self, now: Callable[[], str]):
         self._now = now
 
+    @staticmethod
+    def _entry(row: Any) -> dict[str, Any]:
+        entry = dict(row)
+        entry["nutrition_basis"] = json.loads(entry["nutrition_basis"])
+        return entry
+
     def create(self, db: Any, entry: dict[str, Any]) -> dict[str, Any]:
         now = self._now()
         entry_id = str(entry["id"])
         db.execute(
-            "INSERT INTO nutrition_logs(id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, sync_state, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO nutrition_logs(id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, nutrition_basis, sync_state, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 entry_id,
                 entry["meal_date"],
@@ -554,6 +560,7 @@ class NutritionRepository:
                 entry.get("protein_g"),
                 entry.get("fat_g"),
                 entry.get("source", "manual"),
+                json.dumps(entry.get("nutrition_basis") or {}, ensure_ascii=False),
                 entry.get("sync_state", "local"),
                 now,
                 now,
@@ -564,11 +571,11 @@ class NutritionRepository:
 
     def get(self, db: Any, entry_id: str) -> dict[str, Any] | None:
         row = db.execute(
-            "SELECT id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, sync_state, created_at, updated_at "
+            "SELECT id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, nutrition_basis, sync_state, created_at, updated_at "
             "FROM nutrition_logs WHERE id = ?",
             (entry_id,),
         ).fetchone()
-        return dict(row) if row else None
+        return self._entry(row) if row else None
 
     def update(
         self, db: Any, entry_id: str, entry: dict[str, Any]
@@ -578,7 +585,7 @@ class NutritionRepository:
         if not existing:
             return None
         cursor = db.execute(
-            "UPDATE nutrition_logs SET meal_date=?, logged_at=?, meal_type=?, description=?, kcal=?, carbs_g=?, protein_g=?, fat_g=?, source=?, sync_state=?, updated_at=? "
+            "UPDATE nutrition_logs SET meal_date=?, logged_at=?, meal_type=?, description=?, kcal=?, carbs_g=?, protein_g=?, fat_g=?, source=?, nutrition_basis=?, sync_state=?, updated_at=? "
             "WHERE id=?",
             (
                 entry["meal_date"],
@@ -590,6 +597,7 @@ class NutritionRepository:
                 entry.get("protein_g"),
                 entry.get("fat_g"),
                 entry.get("source", "manual"),
+                json.dumps(entry.get("nutrition_basis") or {}, ensure_ascii=False),
                 entry.get("sync_state", "local"),
                 now,
                 entry_id,
@@ -612,21 +620,21 @@ class NutritionRepository:
 
     def list_by_date(self, db: Any, meal_date: str) -> list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, sync_state, created_at, updated_at "
+            "SELECT id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, nutrition_basis, sync_state, created_at, updated_at "
             "FROM nutrition_logs WHERE meal_date = ? ORDER BY logged_at ASC, created_at ASC",
             (meal_date,),
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._entry(row) for row in rows]
 
     def list_by_range(
         self, db: Any, start_date: str, end_date: str
     ) -> list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, sync_state, created_at, updated_at "
+            "SELECT id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, nutrition_basis, sync_state, created_at, updated_at "
             "FROM nutrition_logs WHERE meal_date >= ? AND meal_date <= ? ORDER BY meal_date ASC, logged_at ASC",
             (start_date, end_date),
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._entry(row) for row in rows]
 
     def day_summary(self, db: Any, meal_date: str) -> dict[str, Any]:
         entries = self.list_by_date(db, meal_date)

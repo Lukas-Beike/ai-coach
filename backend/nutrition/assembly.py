@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.config import Config
 from backend.db.repositories import NutritionRepository
+from backend.nutrition.food_database import FoodDatabaseService
 from backend.nutrition.service import NutritionService
 from backend.nutrition.sync import IntervalsNutritionSyncService
 from backend.providers.intervals import IntervalsApiClient
@@ -38,7 +39,7 @@ class NutritionAssembly:
     def __init__(
         self,
         *,
-        dependencies: "NutritionAssembly.Inputs",
+        dependencies: NutritionAssembly.Inputs,
     ) -> None:
         self._config = dependencies.runtime.config
         self._database_manager = dependencies.persistence.database_manager
@@ -46,6 +47,10 @@ class NutritionAssembly:
         self._utc_now = dependencies.runtime.utc_now
         self._local_now = dependencies.runtime.local_now
         self._intervals_request = dependencies.runtime.intervals_request
+        self._food_database = FoodDatabaseService()
+
+    def food_database(self) -> FoodDatabaseService:
+        return self._food_database
 
     def service(self) -> NutritionService:
         return NutritionService(
@@ -54,6 +59,7 @@ class NutritionAssembly:
             nutrition_repository=NutritionRepository(self._utc_now),
             utc_now=self._utc_now,
             local_now=self._local_now,
+            food_database=self._food_database,
         )
 
     def intervals_sync_service(self) -> IntervalsNutritionSyncService:

@@ -6,6 +6,9 @@ test.beforeAll(async ({ request }) => { fixture = await captureReadFixture(reque
 test.beforeEach(async ({ page }) => { await installReadFixture(page, fixture); });
 
 async function ready(page) {
+  // These UI contracts don't exercise the SSE transport; abort it before the
+  // app starts so closed browser contexts don't hold fixture server slots.
+  await page.route("**/api/state/events*", (route) => route.abort());
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
   await expect.poll(() => page.evaluate(() => state.loadPromise === null)).toBe(true);

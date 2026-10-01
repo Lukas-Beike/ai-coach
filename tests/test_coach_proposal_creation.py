@@ -19,6 +19,7 @@ from backend.coach.proposals import (
 from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.nutrition.food_database import FoodDatabaseService
 
 
 class CoachProposalCreationTests(unittest.TestCase):
@@ -176,6 +177,9 @@ class CoachProposalCreationTests(unittest.TestCase):
             "id": "template-1", "name": "Recovery bowl", "description": "Oats",
             "kcal": 420, "carbs_g": 64, "protein_g": 22, "fat_g": 8,
         }]
+        nutrition._prepare_values.side_effect = lambda values: {
+            **values, "nutrition_basis": {"kind": "manual"}
+        }
         intent = {
             "operation": "save_nutrition_template", "target_system": "local",
             "authorization_scope": ["local_nutrition"],
@@ -191,6 +195,55 @@ class CoachProposalCreationTests(unittest.TestCase):
             result["proposed_action"]["diff"][0],
             {"name": "Recovery bowl", "description": "Oats with berries", "kcal": "450", "carbs": "64", "protein": "22", "fat": "8"},
         )
+
+    def test_template_update_preview_drops_stale_database_provenance(self) -> None:
+        nutrition = Mock()
+        nutrition.list_templates.return_value = [{
+            "id": "template-1", "name": "Oats", "description": "Oats",
+            "kcal": 174, "carbs_g": 30, "protein_g": 6, "fat_g": 3,
+            "source": "coach", "nutrition_basis": {
+                "kind": "database", "ingredients": [{
+                    "source": "BLS", "name": "Oats", "amount": 50,
+                    "unit": "g", "basis_unit": "g",
+                }],
+            },
+        }]
+        nutrition._prepare_values.side_effect = lambda values: {
+            **values, "nutrition_basis": {"kind": "estimate"}
+        }
+        intent = {
+            "operation": "save_nutrition_template", "target_system": "local",
+            "authorization_scope": ["local_nutrition"],
+            "request": {"source_message_ids": [7]},
+        }
+        result = self._service(nutrition_service=lambda: nutrition).create_local_write(
+            "save_nutrition_template",
+            {"payload": {
+                "id": "template-1", "name": "Oats", "description": "Oats",
+                "kcal": 200,
+            }}, intent, conversation_id="conversation-1", client_turn_id="turn-1",
+            session_csrf_hash="session-1",
+        )
+        diff = result["proposed_action"]["diff"][0]
+        self.assertEqual(diff["kcal"], "200")
+        self.assertNotIn("source", diff)
+
+    def test_database_preview_uses_server_values_and_freezes_the_calculation(self) -> None:
+        nutrition = Mock()
+        nutrition.food_database = FoodDatabaseService()
+        args = {"payload": {"name": "Oats", "description": "50 g oats", "kcal": 999,
+                            "food_ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]}}
+        intent = {"operation": "save_nutrition_template", "target_system": "local", "authorization_scope": ["local_nutrition"], "request": {"source_message_ids": [7]}}
+        result = self._service(nutrition_service=lambda: nutrition).create_local_write(
+            "save_nutrition_template", args, intent, conversation_id="conversation-1",
+            client_turn_id="turn-1", session_csrf_hash="session-1",
+        )
+        diff = result["proposed_action"]["diff"][0]
+        self.assertEqual(diff["kcal"], "174")
+        self.assertIn("Max Rubner-Institut", diff["source"])
+        self.assertIn("50 g (Basis 100 g)", diff["source"])
+        stored = json.loads(self._rows()[0]["payload"])
+        self.assertEqual(stored["arguments"]["_food_calculation"]["kcal"], 174)
 
     def test_competition_remote_write_binds_dirty_rows_and_tombstones_to_approval(self) -> None:
         with self.database_manager.unit_of_work() as db:
@@ -366,9 +419,8 @@ class CoachProposalCreationTests(unittest.TestCase):
             {**self._undo(), "target_system": "intervals"},
         ]
         for values in invalid_values:
-            with self.subTest(values=values):
-                with self.assertRaises(AppError):
-                    self._service().create(values, "session")
+            with self.subTest(values=values), self.assertRaises(AppError):
+                self._service().create(values, "session")
 
         self.sync_state_repository.latest_snapshot.assert_not_called()
         self.assertEqual(self._rows(), [])

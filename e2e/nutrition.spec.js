@@ -1,6 +1,13 @@
 const { test, expect } = require("@playwright/test");
 
 test("@responsive nutrition diary and saved meals use the Coach and preserve consumption", async ({ page }) => {
+  const showNutrition = async (route) => {
+    await page.evaluate(async (nextRoute) => {
+      await applyNavigationRoute(nextRoute, { historyMode: "push" });
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await loadNutrition();
+    }, route);
+  };
   await page.goto("/#nutrition/diary");
   await expect(page.locator("#appShell")).toBeVisible();
   await expect(page.locator("#nutritionStatus")).not.toContainText("wird geladen");
@@ -18,7 +25,7 @@ test("@responsive nutrition diary and saved meals use the Coach and preserve con
   await expect(page.locator("#coachActionReview")).toBeVisible();
   await page.locator("#coachActionReview").getByRole("button", { name: "Mahlzeitvorlage speichern" }).click();
   await expect(page.locator("#coachActionReview")).toBeHidden();
-  await page.evaluate(() => applyNavigationRoute("nutrition/meals", { historyMode: "push" }));
+  await showNutrition("nutrition/meals");
   await expect(page.locator("#nutritionTemplates .nutrition-card")).toHaveCount(1);
   await expect(page.locator("#nutritionTemplates")).toContainText("400 kcal");
   await expect(page.locator("#nutritionTemplates img")).toHaveCount(0);
@@ -26,7 +33,7 @@ test("@responsive nutrition diary and saved meals use the Coach and preserve con
   await expect(page.locator("#nutritionEntries .nutrition-card")).toHaveCount(0);
   await page.locator("#nutritionLog").click();
   await send("E2E nutrition: half portion");
-  await page.evaluate(() => applyNavigationRoute("nutrition/diary", { historyMode: "push" }));
+  await showNutrition("nutrition/diary");
   await expect(page.locator("#nutritionEntries .nutrition-card")).toHaveCount(1);
   await expect(page.locator("#nutritionTotals")).toContainText("200 kcal");
   await page.locator('[data-nutrition-segment="meals"]').click();
@@ -35,11 +42,11 @@ test("@responsive nutrition diary and saved meals use the Coach and preserve con
   await expect(page.locator("#coachActionReview")).toBeVisible();
   await page.locator("#coachActionReview").getByRole("button", { name: "Mahlzeitvorlage speichern" }).click();
   await expect(page.locator("#coachActionReview")).toBeHidden();
-  await page.evaluate(() => applyNavigationRoute("nutrition/meals", { historyMode: "push" }));
+  await showNutrition("nutrition/meals");
   await expect(page.locator("#nutritionTemplates")).toContainText("600 kcal");
   await page.locator("#nutritionTemplates").getByRole("button", { name: "Löschen beim Coach" }).click();
   await send("E2E nutrition: delete meal");
-  await page.evaluate(() => applyNavigationRoute("nutrition/diary", { historyMode: "push" }));
+  await showNutrition("nutrition/diary");
   await expect(page.locator("#nutritionTotals")).toContainText("200 kcal");
   await page.locator("#nutritionPrevious").click();
   await expect(page.locator("#nutritionEntries .nutrition-card")).toHaveCount(0);
@@ -51,5 +58,26 @@ test("@responsive nutrition diary and saved meals use the Coach and preserve con
   await page.locator("#messageInput").fill("");
   await page.goto("/#nutrition/diary");
   await expect(page.locator("#nutritionTotals")).toContainText("200 kcal");
+  await page.locator("#nutritionLog").click();
+  await send("E2E nutrition: database oats");
+  await showNutrition("nutrition/diary");
+  const databaseCard = page.locator("#nutritionEntries .nutrition-card").filter({ hasText: "50 g Haferflocken" });
+  await expect(databaseCard).toContainText("174 kcal");
+  await expect(databaseCard).toContainText("Datenbankberechnung");
+  await expect(databaseCard).toContainText("Max Rubner-Institut");
+  await expect(databaseCard).toContainText("50 g (Basis 100 g)");
+  await page.reload();
+  await expect(databaseCard).toContainText("174 kcal");
+  await expect(databaseCard).toContainText("Datenbankberechnung");
+  await page.locator('[data-nutrition-segment="meals"]').click();
+  await page.locator("#nutritionDefine").click();
+  await send("E2E nutrition: confirm database meal");
+  await expect(page.locator("#coachActionReview")).toContainText("174");
+  await expect(page.locator("#coachActionReview")).toContainText("Max Rubner-Institut");
+  await page.locator("#coachActionReview").getByRole("button", { name: "Mahlzeitvorlage speichern" }).click();
+  await expect(page.locator("#coachActionReview")).toBeHidden();
+  await showNutrition("nutrition/meals");
+  await expect(page.locator("#nutritionTemplates")).toContainText("174 kcal");
+  await expect(page.locator("#nutritionTemplates")).toContainText("Datenbankberechnung");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

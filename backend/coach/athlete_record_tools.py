@@ -131,7 +131,14 @@ class CoachAthleteRecordToolService:
                 template_payload.setdefault("source", "coach")
             return {
                 "ok": True,
-                "template": self._nutrition.save_template(template_payload),
+                "template": self._nutrition.save_template(
+                    template_payload,
+                    **(
+                        {"expected_calculation": arguments["_food_calculation"]}
+                        if "_food_calculation" in arguments
+                        else {}
+                    ),
+                ),
             }
         if name == "delete_nutrition_template":
             return {

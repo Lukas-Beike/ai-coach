@@ -14,6 +14,7 @@ from typing import Any
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import NutritionRepository, NutritionTemplateRepository
 from backend.errors import AppError
+from backend.nutrition.food_database import NUTRIENTS, FoodDatabaseService
 from backend.nutrition.models import (
     NutritionDaySummary,
     NutritionEntry,
@@ -79,6 +80,7 @@ class NutritionService:
         nutrition_repository: NutritionRepository,
         utc_now: Callable[[], str],
         local_now: Callable[[], datetime],
+        food_database: FoodDatabaseService | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._db_lock = db_lock
@@ -86,15 +88,56 @@ class NutritionService:
         self._utc_now = utc_now
         self._local_now = local_now
         self._templates = NutritionTemplateRepository()
+        self.food_database = food_database or FoodDatabaseService()
+
+    def _prepare_values(self, payload: dict[str, Any]) -> dict[str, Any]:
+        packaging_label = payload.get("packaging_label") is True
+        payload = {
+            key: value
+            for key, value in payload.items()
+            if key not in {"nutrition_basis", "packaging_label"}
+        }
+        if "food_ingredients" in payload:
+            return {
+                **payload,
+                **self.food_database.calculate(payload["food_ingredients"]),
+            }
+        kind = (
+            "packaging_label"
+            if packaging_label
+            else self._nutrition_basis_kind(payload)
+        )
+        return {**payload, "nutrition_basis": {"kind": kind}}
+
+    @staticmethod
+    def _nutrition_basis_kind(payload: dict[str, Any]) -> str:
+        return (
+            "estimate"
+            if payload.get("source") in {"coach", "photo", "voice"}
+            else "manual"
+        )
 
     def list_templates(self) -> list[dict[str, Any]]:
         with self._db_lock, self._database_manager.unit_of_work() as db:
             return self._templates.list(db)
 
-    def save_template(self, payload: Any) -> dict[str, Any]:
+    def save_template(
+        self, payload: Any, *, expected_calculation: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Save a confirmed recipe for one portion without recording consumption."""
         if not isinstance(payload, dict):
             raise AppError(400, "Mahlzeit muss ein Objekt sein.")
+        prepared = (
+            self._prepare_values(payload) if "food_ingredients" in payload else payload
+        )
+        if expected_calculation is not None and any(
+            prepared.get(key) != value for key, value in expected_calculation.items()
+        ):
+            raise AppError(
+                409,
+                "Datenbankwerte haben sich seit der Vorschau geändert. Bitte neue Vorschau bestätigen.",
+                reason="food_calculation_changed",
+            )
         template_id = str(payload.get("id") or "").strip()
         with self._db_lock, self._database_manager.unit_of_work() as db:
             existing = self._templates.get(db, template_id) if template_id else None
@@ -104,31 +147,76 @@ class NutritionService:
                 payload.get("name") or (existing or {}).get("name") or ""
             ).strip()
             self._validate_template_name(db, name, template_id, existing)
-            normalized = normalize_nutrition_entry(
-                {**(existing or {}), **payload}, local_now_factory=self._local_now
-            )
-            template = {
-                key: normalized[key]
-                for key in (
-                    "description",
-                    "meal_type",
-                    "kcal",
-                    "carbs_g",
-                    "protein_g",
-                    "fat_g",
-                    "source",
-                )
-            }
-            template["meal_type_explicit"] = "meal_type" in payload or bool(
-                existing and existing.get("meal_type_explicit")
-            )
-            template.update(
-                id=template_id or uuid.uuid4().hex,
-                name=name,
-                updated_at=self._utc_now(),
+            template = self._build_template(
+                payload, prepared, existing, name, template_id
             )
             self._templates.save(db, template)
             return template
+
+    def _prepare_template_values(
+        self, payload: dict[str, Any], expected: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        prepared = (
+            self._prepare_values(payload) if "food_ingredients" in payload else payload
+        )
+        if expected is not None and any(
+            prepared.get(key) != value for key, value in expected.items()
+        ):
+            raise AppError(
+                409,
+                "Datenbankwerte haben sich seit der Vorschau ge�ndert. Bitte neue Vorschau best�tigen.",
+                reason="food_calculation_changed",
+            )
+        return prepared
+
+    def _build_template(
+        self,
+        payload: dict[str, Any],
+        prepared: dict[str, Any],
+        existing: dict[str, Any] | None,
+        name: str,
+        template_id: str,
+    ) -> dict[str, Any]:
+        values = {**(existing or {}), **payload}
+        values = (
+            {**values, **prepared}
+            if "food_ingredients" in payload
+            else self._prepare_values(values)
+        )
+        normalized = normalize_nutrition_entry(
+            values, local_now_factory=self._local_now
+        )
+        nutrients_unchanged = not any(
+            key in payload and payload[key] != (existing or {}).get(key)
+            for key in NUTRIENTS
+        )
+        if (
+            existing
+            and "food_ingredients" not in payload
+            and nutrients_unchanged
+            and payload.get("packaging_label") is not True
+        ):
+            normalized["nutrition_basis"] = existing.get(
+                "nutrition_basis", {"kind": "manual"}
+            )
+        fields = (
+            "description",
+            "meal_type",
+            "kcal",
+            "carbs_g",
+            "protein_g",
+            "fat_g",
+            "source",
+            "nutrition_basis",
+        )
+        template = {key: normalized[key] for key in fields}
+        template["meal_type_explicit"] = "meal_type" in payload or bool(
+            existing and existing.get("meal_type_explicit")
+        )
+        template.update(
+            id=template_id or uuid.uuid4().hex, name=name, updated_at=self._utc_now()
+        )
+        return template
 
     def _validate_template_name(
         self,
@@ -193,6 +281,14 @@ class NutritionService:
             )
             for key in ("kcal", "carbs_g", "protein_g", "fat_g"):
                 payload[key] = None if template[key] is None else template[key] * amount
+            if template.get("nutrition_basis", {}).get("kind") == "database":
+                payload["nutrition_basis"] = {
+                    "kind": "database",
+                    "ingredients": [
+                        {**item, "amount": item["amount"] * amount}
+                        for item in template["nutrition_basis"]["ingredients"]
+                    ],
+                }
             entry = normalize_nutrition_entry(
                 payload, local_now_factory=self._local_now
             )
@@ -201,7 +297,11 @@ class NutritionService:
 
     def log_meal(self, payload: Any) -> dict[str, Any]:
         """Normalize, validate and store a meal entry."""
-        entry = normalize_nutrition_entry(payload, local_now_factory=self._local_now)
+        if not isinstance(payload, dict):
+            raise AppError(400, "Ernährungseintrag muss ein Objekt sein.")
+        entry = normalize_nutrition_entry(
+            self._prepare_values(payload), local_now_factory=self._local_now
+        )
         if not entry.get("id"):
             entry["id"] = uuid.uuid4().hex
 
@@ -225,13 +325,23 @@ class NutritionService:
         clean_id = str(entry_id or "").strip()
         if not clean_id:
             raise AppError(400, INVALID_ENTRY_ID)
-        entry = normalize_nutrition_entry(payload, local_now_factory=self._local_now)
-        entry["id"] = clean_id
-
+        if not isinstance(payload, dict):
+            raise AppError(400, "Ernährungseintrag muss ein Objekt sein.")
         with self._db_lock, self._database_manager.unit_of_work() as db:
             existing = self._nutrition_repository.get(db, clean_id)
             if not existing:
                 raise AppError(404, ENTRY_NOT_FOUND)
+            prepared = self._prepare_values({**existing, **payload})
+            entry = normalize_nutrition_entry(
+                prepared, local_now_factory=self._local_now
+            )
+            if "food_ingredients" not in payload and not any(
+                entry.get(key) != existing.get(key) for key in NUTRIENTS
+            ):
+                entry["nutrition_basis"] = existing.get(
+                    "nutrition_basis", {"kind": "manual"}
+                )
+            entry["id"] = clean_id
             updated = self._nutrition_repository.update(db, clean_id, entry)
         if not updated:
             raise AppError(404, ENTRY_NOT_FOUND)
@@ -258,11 +368,18 @@ class NutritionService:
             "protein",
             "fat_g",
             "fat",
+            "food_ingredients",
+            "packaging_label",
         }
         if not isinstance(changes, dict) or not changes or set(changes) - editable:
             raise AppError(
                 400, "Korrektur muss mindestens ein gültiges Ernährungsfeld enthalten."
             )
+        calculation = (
+            self.food_database.calculate(changes["food_ingredients"])
+            if "food_ingredients" in changes
+            else None
+        )
         with self._db_lock, self._database_manager.unit_of_work() as db:
             existing = self._nutrition_repository.get(db, clean_id)
             if not existing:
@@ -280,6 +397,21 @@ class NutritionService:
                 str(aliases.get(key, key)): value for key, value in changes.items()
             }
             merged = {**existing, **canonical_changes}
+            if set(canonical_changes) & {
+                *NUTRIENTS,
+                "food_ingredients",
+                "packaging_label",
+            }:
+                merged = (
+                    {**merged, **calculation}
+                    if calculation is not None
+                    else self._prepare_values(merged)
+                )
+                if (
+                    "food_ingredients" not in canonical_changes
+                    and canonical_changes.get("packaging_label") is not True
+                ):
+                    merged["nutrition_basis"] = {"kind": "manual_correction"}
             entry = normalize_nutrition_entry(merged, local_now_factory=self._local_now)
             entry["id"] = clean_id
             entry["source"] = existing["source"]

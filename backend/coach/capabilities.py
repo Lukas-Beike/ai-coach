@@ -18,6 +18,8 @@ OWNER_TOOLS = {
         "list_training_plans",
         "get_sync_job",
         "read_nutrition",
+        "lookup_food",
+        "calculate_food_nutrition",
         "inspect_activity_duplicates",
     },
     "CoachProfileUpdateService": {"update_profile"},

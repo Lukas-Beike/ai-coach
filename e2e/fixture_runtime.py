@@ -64,10 +64,16 @@ def fixture_coach_response(payload, **kwargs):
         })
     context = decoded["dialogue"]
     current_id = context["current_user_message_id"]
-    if current_message in {"E2E nutrition: confirm meal", "E2E nutrition: half portion", "E2E nutrition: update meal", "E2E nutrition: delete meal"}:
+    if current_message in {"E2E nutrition: confirm meal", "E2E nutrition: half portion", "E2E nutrition: update meal", "E2E nutrition: delete meal", "E2E nutrition: database oats", "E2E nutrition: confirm database meal"}:
         nutrition = server.NUTRITION_ASSEMBLY.service()
         templates = nutrition.list_templates()
-        if current_message == "E2E nutrition: confirm meal":
+        if current_message == "E2E nutrition: confirm database meal":
+            name = "save_nutrition_template"
+            arguments = {"payload": {"name": "Database oats", "description": "50 g Haferflocken", "kcal": 999, "source": "coach", "food_ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]}}
+        elif current_message == "E2E nutrition: database oats":
+            name = "save_nutrition_entry"
+            arguments = {"payload": {"description": "50 g Haferflocken", "kcal": 999, "source": "coach", "food_ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]}}
+        elif current_message == "E2E nutrition: confirm meal":
             name = "save_nutrition_template"
             arguments = {"payload": {"name": "Fixture breakfast", "description": "80 g oats - <img src=x onerror=alert(1)>", "kcal": 400, "carbs_g": 60, "protein_g": 12, "fat_g": 8, "source": "coach"}}
         elif current_message == "E2E nutrition: half portion":
@@ -77,6 +83,7 @@ def fixture_coach_response(payload, **kwargs):
             name = "save_nutrition_template"
             arguments = {"payload": {**templates[0], "kcal": 600}}
             arguments["payload"].pop("updated_at", None)
+            arguments["payload"].pop("nutrition_basis", None)
         else:
             name = "delete_nutrition_template"
             arguments = {"id": templates[0]["id"]}

@@ -247,6 +247,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "updated_at",
     },
     "nutrition_logs": {
+        "nutrition_basis",
         "id",
         "meal_date",
         "logged_at",
@@ -572,6 +573,7 @@ def initialize_schema(db: Any) -> None:
     );
     CREATE TABLE nutrition_logs (
         id TEXT PRIMARY KEY,
+        nutrition_basis TEXT NOT NULL DEFAULT '{}',
         meal_date TEXT NOT NULL,
         logged_at TEXT NOT NULL,
         meal_type TEXT NOT NULL CHECK(meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')),
