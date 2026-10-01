@@ -2,7 +2,14 @@ function escapeHtml(value) {
   return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]));
 }
 
-function replaceMarkdownLinks(value) {
+function markdownEmphasis(value) {
+  return value.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/__(.+?)__/g, "<strong>$1</strong>")
+    .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
+    .replace(/_([^_\n]+)_/g, "<em>$1</em>");
+}
+
+function replaceMarkdownLinks(value, linkSpans) {
   let html = "";
   let cursor = 0;
   while (cursor < value.length) {
@@ -22,7 +29,9 @@ function replaceMarkdownLinks(value) {
       continue;
     }
     html += value.slice(cursor, labelStart);
-    html += `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    const token = `\uE000COACHLINKSPAN${linkSpans.length}\uE001`;
+    linkSpans.push(`<a href="${url}" target="_blank" rel="noopener noreferrer">${markdownEmphasis(label)}</a>`);
+    html += token;
     cursor = urlEnd + 1;
   }
   return html;
@@ -36,11 +45,9 @@ function inlineMarkdown(value) {
     codeSpans.push(`<code>${code}</code>`);
     return token;
   });
-  html = replaceMarkdownLinks(html);
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/__(.+?)__/g, "<strong>$1</strong>");
-  html = html.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
-  html = html.replace(/_([^_\n]+)_/g, "<em>$1</em>");
+  const linkSpans = [];
+  html = markdownEmphasis(replaceMarkdownLinks(html, linkSpans));
+  html = html.replace(/\uE000COACHLINKSPAN(\d+)\uE001/g, (_, index) => linkSpans[Number(index)]);
   return html.replace(/\uE000COACHCODESPAN(\d+)\uE001/g, (_, index) => codeSpans[Number(index)]);
 }
 

@@ -18,10 +18,29 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from backend import observability
 from backend.errors import COACH_ABORTED_ERROR, AppError, provider_error
+
+
+class _RejectProviderRedirects(HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> None:
+        return None
+
+
+def urlopen(request: Any, timeout: float) -> Any:
+    """Open a provider request without forwarding credentials through redirects."""
+    return build_opener(_RejectProviderRedirects()).open(request, timeout=timeout)
+
 
 _SECRET_PATTERNS = (
     (re.compile(r"(?i)https?://[^\s<>\"'`]+"), "[REDACTED_URL]"),

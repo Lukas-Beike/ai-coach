@@ -10,11 +10,12 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from backend import observability
 from backend.errors import COACH_ABORTED_ERROR, GEMINI_API_KEY_ERROR, AppError
 from backend.providers import http as provider_http
+from backend.providers.http import urlopen
 
 _STREAMING_EVENT_ERROR = "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben."
 _STREAMING_RESPONSE_TOO_LARGE = "Die Streaming-Antwort von Gemini ist zu\\u00df."

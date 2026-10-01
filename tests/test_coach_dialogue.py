@@ -115,6 +115,65 @@ class DialogueHarness:
 
 class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
+    def test_clarification_blocks_writes_in_either_tool_order(self):
+        for write_first in (True, False):
+            with self.subTest(write_first=write_first):
+                before = self.state()
+
+                def mixed_response(_payload, before=before, write_first=write_first):
+                    current = server.COACH_CONVERSATION.message_service().list()[-1]["id"]
+                    clarification = self.call("clarify_coach_request", {
+                        "source_message_ids": [current],
+                        "summary": "Synthetic ambiguous planning request",
+                        "question": "Samstag oder Sonntag?",
+                    })["output"][0]
+                    write = self.call("apply_training_patch", {
+                        "workouts": [self.workout("2026-09-12")], "changes": [],
+                        "expected_revision": before["planning_revision"],
+                    }, ["local_plan"], {
+                        "start": "2026-09-12", "end": "2026-09-12",
+                    })["output"][0]
+                    return {"output": [write, clarification] if write_first else [clarification, write]}
+
+                result, _ = self.turn("Plane das Wochenende", [
+                    mixed_response, {"output_text": "Synthetic ignored final wording"},
+                ])
+                self.assertEqual(self.state(), before)
+                self.assertTrue(result["awaiting_clarification"])
+                self.assertEqual(result["message"]["content"], "Samstag oder Sonntag?")
+                writes = [step for step in result["command_receipts"]
+                          if step["tool"] == "apply_training_patch"]
+                self.assertEqual(len(writes), 1)
+                self.assertEqual(writes[0]["result"]["reason"], "request_paused")
+
+    def test_clarification_reply_can_apply_local_request_without_buttons(self):
+        def clarification(_payload):
+            return self.call("clarify_coach_request", {
+                "source_message_ids": [server.COACH_CONVERSATION.message_service().list()[-1]["id"]],
+                "summary": "Plan a weekend workout locally, no synchronization",
+                "question": "Samstag oder Sonntag?",
+            })
+
+        result, _ = self.turn("Plane das Wochenende lokal", [
+            clarification, {"output_text": "Samstag oder Sonntag?"},
+        ])
+        self.assertTrue(result["awaiting_clarification"])
+        before = self.state()
+
+        def continuation(payload):
+            pending = json.loads(payload["input"])["dialogue"]["pending_request"]
+            self.assertEqual(pending["summary"], "Plan a weekend workout locally, no synchronization")
+            return self.call("apply_training_patch", {
+                "workouts": [self.workout("2026-09-12")], "changes": [],
+                "expected_revision": before["planning_revision"],
+            }, ["local_plan"], {"start": "2026-09-12", "end": "2026-09-12"})
+
+        result, _ = self.turn("Samstag", [continuation, {"output_text": "Lokal gespeichert."}])
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(self.state()["planned_units"]), 1)
+        self.assertTrue(result["command_receipts"][0]["result"]["ok"])
+        self.assertEqual(result.get("sync_job_ids", []), [])
+
     def test_clarification_service_persists_valid_user_provenance_and_limits(self):
         messages = [{"id": item, "role": "user"} for item in range(1, 25)]
         context = {"messages": messages, "current_user_message_id": 24}

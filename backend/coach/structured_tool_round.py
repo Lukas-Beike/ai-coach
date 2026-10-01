@@ -93,6 +93,7 @@ class CoachStructuredToolRoundService:
         state: StructuredCoachRoundState,
         question: str,
         cancelled: bool,
+        paused: bool = False,
     ) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
         name = str(item.get("name") or "")
         call_id = str(item.get("call_id") or "")
@@ -125,6 +126,7 @@ class CoachStructuredToolRoundService:
                     cancelled=cancelled,
                     context=state.context,
                     allow_mutations=state.allow_mutations,
+                    paused=paused,
                 )
                 local_transaction = name not in {
                     "start_provider_refresh",
@@ -174,7 +176,16 @@ class CoachStructuredToolRoundService:
                 model_instructions = (
                     self._training_context.build(
                         selection=select_coach_context(
-                            state.message, state.context, has_receipts=True
+                            state.message,
+                            state.context,
+                            attachments=bool(
+                                state.attachments
+                                or (
+                                    state.ai_provider == "openai"
+                                    and state.request_payload.get("conversation")
+                                )
+                            ),
+                            has_receipts=True,
                         ),
                         local_date=state.context.get("local_date", ""),
                     )
@@ -275,6 +286,10 @@ class CoachStructuredToolRoundService:
             if not calls:
                 break
             pending = self._journal.start_round(state.client_turn_id, calls)
+            paused = any(
+                item.get("name") in {"clarify_coach_request", "cancel_coach_request"}
+                for item in calls
+            )
             outputs: list[dict[str, Any]] = []
             for item in calls:
                 raise_if_chat_cancelled(state.cancel_event)
@@ -283,6 +298,7 @@ class CoachStructuredToolRoundService:
                     state=state,
                     question=question,
                     cancelled=cancelled,
+                    paused=paused,
                 )
                 question, cancelled, pending = self._journal.record_output(
                     client_turn_id=state.client_turn_id,

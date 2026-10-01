@@ -40,11 +40,18 @@ class CoachStructuredToolPreparationService:
         cancelled: bool,
         context: dict[str, Any],
         allow_mutations: bool,
+        paused: bool = False,
     ) -> dict[str, Any]:
         name = metadata["name"]
         arguments = metadata["arguments"]
         action = metadata["action"]
-        if (question or cancelled) and name not in self._read_only_tools:
+        if (
+            question
+            or cancelled
+            or (
+                paused and name not in {"clarify_coach_request", "cancel_coach_request"}
+            )
+        ) and name not in self._read_only_tools:
             raise AppError(
                 409,
                 "Der Auftrag wartet auf deine Antwort oder wurde abgebrochen.",

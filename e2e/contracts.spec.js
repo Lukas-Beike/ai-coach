@@ -57,6 +57,33 @@ async function controlled(page) {
   });
 }
 
+test("Markdown links preserve URLs and format labels without interpreting markup", async ({ page }) => {
+  await ready(page);
+  const urls = [
+    "https://example.invalid/a_b_c",
+    "https://example.invalid/a__b__c?first=a*b*c&second=__value__",
+    "https://example.invalid/code_path",
+  ];
+  await page.evaluate((urls) => renderMessages([{
+    id: 900001,
+    role: "assistant",
+    content: `[**Strong label**](${urls[0]}) [_Emphasis label_](${urls[1]}) [\`Code label\`](${urls[2]})\n\n<script id="markdown-injection">window.markdownInjection = true</script>\n\n[Unsafe](javascript:alert(1))`,
+  }]), urls);
+  const message = page.locator('[data-message-id="900001"]');
+  for (const [index, label] of ["Strong label", "Emphasis label", "Code label"].entries()) {
+    const link = message.getByRole("link", { name: label, exact: true });
+    await expect(link).toHaveAttribute("href", urls[index]);
+    await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    await expect(link).toHaveAttribute("target", "_blank");
+  }
+  await expect(message.locator("a strong")).toHaveText("Strong label");
+  await expect(message.locator("a em")).toHaveText("Emphasis label");
+  await expect(message.locator("a code")).toHaveText("Code label");
+  await expect(message.getByRole("link")).toHaveCount(3);
+  await expect(page.locator("#markdown-injection")).toHaveCount(0);
+  expect(await page.evaluate(() => window.markdownInjection)).toBeUndefined();
+});
+
 test("appearance choice updates the theme and survives reload on this device", { tag: "@responsive" }, async ({ page }) => {
   await ready(page);
   await page.getByRole("link", { name: "Mehr", exact: true }).click();

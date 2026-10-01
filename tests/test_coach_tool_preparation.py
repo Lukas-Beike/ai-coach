@@ -81,6 +81,24 @@ class StructuredToolPreparationTests(unittest.TestCase):
                 self.assertIs(result, metadata["action"])
         self.dialogue_action.classify.assert_not_called()
 
+    def test_round_pause_blocks_writes_but_allows_reads_and_dialogue_controls(self) -> None:
+        self.assert_app_error(
+            self, 409, "request_paused",
+            lambda: self.service.prepare(
+                self.metadata("save_checkin"), [], question="", cancelled=False,
+                context={}, allow_mutations=True, paused=True,
+            ),
+        )
+        for name in ("get_profile", "clarify_coach_request", "cancel_coach_request"):
+            with self.subTest(name=name):
+                metadata = self.metadata(name)
+                result = self.service.prepare(
+                    metadata, [], question="", cancelled=False,
+                    context={}, allow_mutations=True, paused=True,
+                )
+                self.assertIs(result, metadata["action"])
+        self.dialogue_action.classify.assert_not_called()
+
     def test_allow_mutations_is_forwarded_to_dialogue_authorization(self) -> None:
         self.dialogue_action.classify.side_effect = AppError(
             403, "denied", reason="intent_scope_denied"

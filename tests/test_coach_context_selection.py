@@ -16,7 +16,9 @@ class CoachContextSelectionTests(unittest.TestCase):
         ):
             with self.subTest(message=message):
                 selection = select_coach_context(message, {})
-                self.assertEqual(selection.sections, CoachContextSelection("fallback").sections)
+                self.assertEqual(
+                    selection.sections, CoachContextSelection("fallback").sections
+                )
                 self.assertIsNone(selection.horizon_days)
 
     def test_profiles(self):
@@ -34,10 +36,16 @@ class CoachContextSelectionTests(unittest.TestCase):
             with self.subTest(profile=expected):
                 self.assertEqual(select_coach_context(message, {}).name, expected)
 
-    def test_pending_receipts_and_continuations_use_full_fallback(self):
+    def test_pending_requests_and_short_continuations_use_full_fallback(self):
         cases = [
             ("Ja", {}, {}),
             ("Mach das", {}, {}),
+            ("Mach den Plan", {}, {}),
+            (
+                "Was ist das Training fuer heute?",
+                {"pending_request": {"source_message_ids": [1]}},
+                {},
+            ),
             ("Auf Freitag", {"pending_request": {"source_message_ids": [1]}}, {}),
             ("Plan fortsetzen", {}, {"has_receipts": True}),
         ]
@@ -47,16 +55,71 @@ class CoachContextSelectionTests(unittest.TestCase):
                 self.assertEqual(selection.name, "fallback")
                 self.assertIsNone(selection.horizon_days)
 
+    def test_explicit_topics_with_pronouns_keep_compact_context_and_full_dialogue(self):
+        examples = {
+            "Was ist das Training fuer heute?": "today_training",
+            "Kannst du diese letzte Einheit analysieren?": "activity_analysis",
+            "Kannst du das Training fuer naechste Woche planen?": "weekly_planning",
+            "Please analyse that latest activity": "activity_analysis",
+        }
+        for message, expected in examples.items():
+            with self.subTest(message=message):
+                selection = select_coach_context(message, {})
+                self.assertEqual(selection.name, expected)
+                self.assertIsNotNone(selection.horizon_days)
+                self.assertTrue(selection.retain_dialogue)
+
+    def test_receipts_preserve_profile_and_dialogue_without_expanding_training_data(
+        self,
+    ):
+        for message in (
+            "How is recovery?",
+            "Was trainiere ich heute?",
+            "Analysiere meine letzte Einheit",
+            "Plan next week",
+        ):
+            with self.subTest(message=message):
+                original = select_coach_context(message, {})
+                selected = select_coach_context(message, {}, has_receipts=True)
+                self.assertEqual(selected.name, original.name)
+                self.assertEqual(selected.sections, original.sections)
+                self.assertEqual(selected.horizon_days, original.horizon_days)
+                self.assertTrue(selected.retain_dialogue)
+
     def test_attachments_preserve_full_tool_availability(self):
         selection = select_coach_context("Prüfe die Route", {}, attachments=True)
         self.assertEqual(selection.name, "attachment_analysis")
         tools = [{"name": "read_coach_context"}, {"name": "save_nutrition_entry"}]
         self.assertEqual(select_coach_tools(tools, selection), tools)
 
+    def test_food_keyword_does_not_match_latest_or_weather(self):
+        for message, expected in (
+            ("Analyse the latest activity", "activity_analysis"),
+            ("How is the weather today?", "today_training"),
+            ("I ate lunch", "profile_or_checkin"),
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(select_coach_context(message, {}).name, expected)
+
     def test_long_range_planning_uses_complete_context(self):
-        for message in ("Plane 8 Wochen", "Plane bis 2026-12-01", "Plan next month"):
+        for message in (
+            "Plane 8 Wochen",
+            "Plane bis 2026-12-01",
+            "Plan next month",
+            "Kannst du das Training fuer drei Wochen planen?",
+            "Please plan that for three weeks",
+            "Plane das Training fuer die kommenden Tage",
+        ):
             with self.subTest(message=message):
                 self.assertIsNone(select_coach_context(message, {}).horizon_days)
+
+    def test_pronoun_requests_with_multiple_topics_keep_conservative_context(self):
+        for message in (
+            "Kannst du das letzte Rennen analysieren?",
+            "Kannst du das Training planen und meinen Check-in speichern?",
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(select_coach_context(message, {}).name, "fallback")
 
     def test_date_window_and_activity_limits_preserve_provenance(self):
         selection = select_coach_context("Was trainiere ich heute?", {})
@@ -100,8 +163,35 @@ class CoachContextSelectionTests(unittest.TestCase):
         self.assertEqual(len(compact["confirmed_results"]), 3)
         self.assertEqual(len(context["messages"]), 25)
         self.assertEqual(
-            compact_coach_dialogue(context, CoachContextSelection("fallback")), context
+            compact_coach_dialogue(context, CoachContextSelection("fallback")),
+            {**context, "messages": context["messages"][:-1]},
         )
+
+    def test_compact_training_selection_keeps_referenced_dialogue_and_receipts(self):
+        pending = {"source_message_ids": [1], "question": "Which date?"}
+        context = {
+            "current_user_message_id": 24,
+            "messages": [{"id": index, "role": "user"} for index in range(25)],
+            "confirmed_results": list(range(12)),
+            "pending_request": pending,
+            "attachment_evidence": [{"source_message_id": 1}],
+        }
+        selection = select_coach_context("Was ist das Training fuer heute?", {})
+        compact = compact_coach_dialogue(context, selection)
+        self.assertEqual(compact["messages"], context["messages"][:-1])
+        self.assertEqual(compact["confirmed_results"], context["confirmed_results"])
+        self.assertEqual(compact["pending_request"], pending)
+        self.assertEqual(compact["attachment_evidence"], context["attachment_evidence"])
+        self.assertEqual(len(context["messages"]), 25)
+
+    def test_missing_current_message_id_does_not_remove_unidentified_messages(self):
+        context = {
+            "messages": [{"role": "user", "content": "Synthetic earlier message"}]
+        }
+        compact = compact_coach_dialogue(
+            context, select_coach_context("How is recovery?", {})
+        )
+        self.assertEqual(compact["messages"], context["messages"])
 
     def test_tool_filter_keeps_detail_read_but_no_remote_write(self):
         tools = [

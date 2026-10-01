@@ -143,6 +143,53 @@ class CoachContextReductionTests(unittest.TestCase):
         self.assertEqual(followup["previous_response_id"], "response-one")
         self.assertFalse(state.allow_mutations)
 
+    def test_topical_request_with_receipts_keeps_scoped_tools_and_dialogue_provenance(
+        self,
+    ):
+        fixture = payload_tests.CoachRequestPayloadTests()
+        fixture.setUp()
+        context = {
+            **fixture.context,
+            "current_user_message_id": 24,
+            "messages": [
+                {"id": index, "role": "user", "content": "Synthetic local-only request"}
+                for index in range(1, 25)
+            ],
+        }
+        tools = [
+            {"name": name}
+            for name in (
+                "read_coach_context",
+                "get_activity_details",
+                "apply_training_patch",
+                "start_intervals_plan_sync",
+            )
+        ]
+        receipts = [{"tool": "read_training_state", "result": {"ok": True}}]
+        for provider in ("openai", "gemini"):
+            with self.subTest(provider=provider):
+                _, payload = fixture.build(
+                    provider=provider,
+                    message="Was ist das Training fuer heute?",
+                    context=context,
+                    tools=tools,
+                    command_receipts=receipts,
+                )
+                selected = fixture.training_context.build.call_args.kwargs["selection"]
+                self.assertEqual(selected.name, "today_training")
+                self.assertEqual(selected.horizon_days, 3)
+                self.assertEqual(
+                    {tool["name"] for tool in payload["tools"]},
+                    {"read_coach_context", "get_activity_details"},
+                )
+                parsed = json.loads(payload["input"])
+                self.assertEqual(
+                    parsed["dialogue"]["messages"], context["messages"][:-1]
+                )
+                self.assertEqual(parsed["dialogue"]["current_user_message_id"], 24)
+                self.assertEqual(parsed["confirmed_steps"], receipts)
+        self.assertEqual(len(context["messages"]), 24)
+
     def test_routine_context_reduction_preserves_sources_and_illness(self):
         structured = {
             "durable_profile": {"constraints": "no intensity while ill"},
