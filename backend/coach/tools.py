@@ -185,11 +185,16 @@ def build_tool_contracts(
                                     "duration_minutes",
                                     "target",
                                     "rationale",
+                                    "start_date_local",
                                 ],
                                 "properties": {
                                     "date": {
                                         "type": "string",
                                         "description": "Local workout date in YYYY-MM-DD format; plan span at most 730 days.",
+                                    },
+                                    "start_date_local": {
+                                        "type": ["string", "null"],
+                                        "description": "Optional ISO-8601 local start timestamp on the workout date.",
                                     },
                                     "sport": {
                                         "type": "string",
@@ -251,11 +256,16 @@ def build_tool_contracts(
                                     "duration_minutes",
                                     "target",
                                     "rationale",
+                                    "start_date_local",
                                 ],
                                 "properties": {
                                     "date": {
                                         "type": "string",
                                         "description": "Local workout date in YYYY-MM-DD format.",
+                                    },
+                                    "start_date_local": {
+                                        "type": ["string", "null"],
+                                        "description": "Optional ISO-8601 local start timestamp on the workout date.",
                                     },
                                     "sport": {"type": "string"},
                                     "name": {"type": "string"},
@@ -298,6 +308,7 @@ def build_tool_contracts(
                                 "description": "Moving a workout uses update with its new date.",
                             },
                             "date": {"type": "string"},
+                            "start_date_local": {"type": "string"},
                             "name": {"type": "string"},
                             "description": {"type": "string"},
                             "duration_minutes": {"type": "integer"},

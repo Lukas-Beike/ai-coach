@@ -40,8 +40,18 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
 
     def test_duplicate_calendar_day_rolls_back_plan_and_revision(self):
         before = self.state()["planning_revision"]
-        w1 = {**self.workout(name="One"), "start_date_local": "2026-09-08T08:00:00", "duration_minutes": 60}
-        w2 = {**self.workout(name="Two"), "start_date_local": "2026-09-08T08:30:00", "duration_minutes": 30}
+        w1 = {
+            **self.workout(name="One"),
+            "date": "2026-09-08",
+            "start_date_local": "2026-09-08T08:00:00",
+            "duration_minutes": 60,
+        }
+        w2 = {
+            **self.workout(name="Two"),
+            "date": "2026-09-08",
+            "start_date_local": "2026-09-08T08:30:00",
+            "duration_minutes": 30,
+        }
         with self.assertRaises(server.AppError) as error:
             server.COACH_PLANNING_TOOLS.training_patch_service().apply(
                 {"expected_revision": before, "changes": [],

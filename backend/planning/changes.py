@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from backend.db.repositories import PlanningStateRepository
@@ -88,7 +88,9 @@ def prepare_structured_training_change(
                 "duration_minutes",
                 "target",
                 "rationale",
+                "start_date_local",
             )
+            if key != "start_date_local" or key in normalized
         },
     }
     if "plan_id" in change:
@@ -156,6 +158,7 @@ class StructuredTrainingChangeValidator:
         final_dates: dict[str, str],
         final_active: dict[str, bool],
         restore_identities: set[str],
+        changes_by_identity: dict[str, dict[str, Any]],
     ) -> None:
         action = str(change.get("action") or "update").strip().casefold()
         if action == "restore":
@@ -180,6 +183,7 @@ class StructuredTrainingChangeValidator:
         )
         if action in {"delete", "archive"}:
             final_active[change_identity] = False
+            changes_by_identity[change_identity] = {**current, **change}
             return
         if action == "restore":
             final_active[change_identity] = True
@@ -191,6 +195,21 @@ class StructuredTrainingChangeValidator:
         ).strip()[:10]
         if candidate_date:
             final_dates[change_identity] = validated_training_date(candidate_date)
+        candidate = {**current, **change, "date": candidate_date}
+        start_date_local = current.get("start_date_local")
+        if start_date_local and not change.get("start_date_local"):
+            try:
+                parsed_start = datetime.fromisoformat(
+                    str(start_date_local).strip().replace("Z", "+00:00")
+                )
+                candidate["start_date_local"] = parsed_start.replace(
+                    year=int(candidate_date[:4]),
+                    month=int(candidate_date[5:7]),
+                    day=int(candidate_date[8:10]),
+                ).isoformat()
+            except (TypeError, ValueError):
+                candidate.pop("start_date_local", None)
+        changes_by_identity[change_identity] = candidate
 
     @staticmethod
     def _validate_batch_time_windows(
@@ -272,6 +291,7 @@ class StructuredTrainingChangeValidator:
         final_dates: dict[str, str] = {}
         final_active: dict[str, bool] = {}
         restore_identities: set[str] = set()
+        changes_by_identity: dict[str, dict[str, Any]] = {}
         for index, change in enumerate(changes):
             local_id = str(change.get("local_id") or "").strip()
             change_identity = local_id or f"create:{index}"
@@ -279,6 +299,7 @@ class StructuredTrainingChangeValidator:
                 self._record_created_training_change(
                     change, change_identity, final_dates, final_active
                 )
+                changes_by_identity[change_identity] = change
                 continue
             self._record_existing_training_change(
                 change,
@@ -288,11 +309,8 @@ class StructuredTrainingChangeValidator:
                 final_dates,
                 final_active,
                 restore_identities,
+                changes_by_identity,
             )
-        changes_by_identity = {
-            (str(change.get("local_id") or "").strip() or f"create:{idx}"): change
-            for idx, change in enumerate(changes)
-        }
         self._validate_training_change_dates(
             final_dates,
             final_active,

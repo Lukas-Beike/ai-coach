@@ -211,6 +211,31 @@ class PlanningWorkoutTests(unittest.TestCase):
             message="Die Trainingsdauer muss eine ganze Zahl sein.",
         )
 
+    def test_normalize_requires_start_timestamp_to_match_workout_date(self):
+        normalized = normalize_workout(
+            workout(
+                date="2031-06-10",
+                start_date_local="2031-06-10T08:30:00+02:00",
+            ),
+            today=TODAY,
+        )
+        self.assertEqual(
+            normalized["start_date_local"], "2031-06-10T08:30:00+02:00"
+        )
+        for start_date_local in ("not-a-timestamp", "2031-06-09T08:00:00"):
+            with self.subTest(start_date_local=start_date_local):
+                self.assert_app_error(
+                    lambda start_date_local=start_date_local: normalize_workout(
+                        workout(
+                            date="2031-06-10",
+                            start_date_local=start_date_local,
+                        ),
+                        today=TODAY,
+                    ),
+                    status=400,
+                    reason="invalid_workout_start_date",
+                )
+
     def test_normalize_and_payload_keep_existing_text_limits_and_unknown_sport(self):
         normalized = normalize_workout(
             workout(
