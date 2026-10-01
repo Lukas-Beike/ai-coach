@@ -35,17 +35,26 @@ function nutritionCard(item, template, date) {
   const card = document.createElement("article");
   card.className = "nutrition-card";
   const title = document.createElement("h3");
-  title.textContent = template ? item.name : `${String(item.logged_at).split("T")[1]?.slice(0, 5) || ""} · ${({ breakfast: "Frühstück", lunch: "Mittagessen", dinner: "Abendessen", snack: "Snack" })[item.meal_type] || "Mahlzeit"}`;
+  const mealLabels = { breakfast: "Frühstück", lunch: "Mittagessen", dinner: "Abendessen", snack: "Snack" };
+  const mealLabel = mealLabels[item.meal_type] || "Mahlzeit";
+  const mealTime = String(item.logged_at).split("T")[1]?.slice(0, 5) || "";
+  title.textContent = template ? item.name : `${mealTime} · ${mealLabel}`;
   const description = document.createElement("p");
   description.textContent = item.description;
   const values = document.createElement("p");
   values.textContent = `${item.kcal} kcal · KH ${item.carbs_g ?? "–"} g · Protein ${item.protein_g ?? "–"} g · Fett ${item.fat_g ?? "–"} g${template ? " / Portion" : ""}`;
   const source = document.createElement("small");
-  source.textContent = `${({ coach: "Coach-Schätzung", photo: "Foto-Schätzung", voice: "Spracheingabe", manual: "Manuelle Angabe" })[item.source] || "Erfasst"}${template ? "" : item.sync_state === "synced" ? " · Synchronisiert" : " · Lokal"}`;
+  const sourceLabels = { coach: "Coach-Schätzung", photo: "Foto-Schätzung", voice: "Spracheingabe", manual: "Manuelle Angabe" };
+  const sourceLabel = sourceLabels[item.source] || "Erfasst";
+  const syncLabel = item.sync_state === "synced" ? " · Synchronisiert" : " · Lokal";
+  source.textContent = sourceLabel + (template ? "" : syncLabel);
   const actions = document.createElement("div");
   actions.className = "nutrition-actions";
   if (template) actions.append(nutritionButton("Beim Coach erfassen", `Ich habe am ${date} die gespeicherte Mahlzeit ${JSON.stringify(item.name)} (Vorlagen-ID ${item.id}) gegessen. Bitte kläre die Portionsanzahl mit mir.`));
-  actions.append(nutritionButton("Ändern beim Coach", template ? `Ich möchte die gespeicherte Mahlzeit ${JSON.stringify(item.name)} (Vorlagen-ID ${item.id}) dauerhaft ändern. Bitte frage mich nach den Änderungen und zeige die neue Vorlage zur Bestätigung.` : `Ich möchte den Ernährungseintrag vom ${date} (Eintrags-ID ${item.id}) korrigieren. Bitte frage mich nach der Änderung.`));
+  const changePrompt = template
+    ? `Ich möchte die gespeicherte Mahlzeit ${JSON.stringify(item.name)} (Vorlagen-ID ${item.id}) dauerhaft ändern. Bitte frage mich nach den Änderungen und zeige die neue Vorlage zur Bestätigung.`
+    : `Ich möchte den Ernährungseintrag vom ${date} (Eintrags-ID ${item.id}) korrigieren. Bitte frage mich nach der Änderung.`;
+  actions.append(nutritionButton("Ändern beim Coach", changePrompt));
   actions.append(nutritionButton("Löschen beim Coach", `Ich möchte ${template ? "die Mahlzeitvorlage" : "den Ernährungseintrag"} mit ID ${item.id} löschen. Bitte bestätige vorher mit mir, dass du den richtigen Eintrag gefunden hast.`));
   card.append(title, description, values, source, actions);
   return card;

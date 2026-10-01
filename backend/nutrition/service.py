@@ -21,6 +21,7 @@ from backend.nutrition.models import (
     validate_iso_date,
 )
 
+SAVED_MEAL_NOT_FOUND = "Gespeicherte Mahlzeit nicht gefunden."
 INVALID_ENTRY_ID = "Ungültige Eintrags-ID."
 ENTRY_NOT_FOUND = "Ernährungseintrag nicht gefunden."
 
@@ -101,7 +102,7 @@ class NutritionService:
         with self._db_lock, self._database_manager.unit_of_work() as db:
             existing = self._templates.get(db, template_id) if template_id else None
             if template_id and not existing:
-                raise AppError(404, "Gespeicherte Mahlzeit nicht gefunden.")
+                raise AppError(404, SAVED_MEAL_NOT_FOUND)
             if any(
                 t["name"].casefold() == name.casefold() and t["id"] != template_id
                 for t in self._templates.list(db)
@@ -138,7 +139,7 @@ class NutritionService:
     def delete_template(self, template_id: str) -> dict[str, Any]:
         with self._db_lock, self._database_manager.unit_of_work() as db:
             if not self._templates.delete(db, template_id):
-                raise AppError(404, "Gespeicherte Mahlzeit nicht gefunden.")
+                raise AppError(404, SAVED_MEAL_NOT_FOUND)
         return {"deleted_id": template_id}
 
     def log_template(
@@ -161,7 +162,7 @@ class NutritionService:
         with self._db_lock, self._database_manager.unit_of_work() as db:
             template = self._templates.get(db, template_id)
             if not template:
-                raise AppError(404, "Gespeicherte Mahlzeit nicht gefunden.")
+                raise AppError(404, SAVED_MEAL_NOT_FOUND)
             payload = {
                 **template,
                 "description": f"{template['name']} · {amount:g} Portion(en): {template['description']}",
