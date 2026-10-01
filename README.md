@@ -540,9 +540,17 @@ Execute full SQLCipher container tests without exposing local host `.env` or dat
 #### Playwright Browser E2E Tests
 End-to-end browser testing validates PWA responsiveness, keyboard navigation, and UI flows across 5 device viewports:
 ```sh
-npm install
+npm ci
 npm run test:e2e
 ```
+Functional contracts run once on desktop. Tests tagged `@responsive` also run on
+all four smaller viewports. CI runs the five projects in independent jobs, with
+a fresh disposable SQLCipher fixture per spec and one worker per invocation.
+Chromium downloads are cached by the locked dependency version; system
+dependencies are installed on every runner. Follow
+`.agents/skills/ai-coach-pwa-e2e/references/browser-validation.md` for safe local
+fixture setup; never target a connected installation.
+
 Configured viewports in `playwright.config.cjs`:
 - `mobile-small`: 320x568 (Compact mobile)
 - `mobile`: 390x844 (Standard mobile)

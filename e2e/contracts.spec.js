@@ -57,7 +57,7 @@ async function controlled(page) {
   });
 }
 
-test("appearance choice updates the theme and survives reload on this device", async ({ page }) => {
+test("appearance choice updates the theme and survives reload on this device", { tag: "@responsive" }, async ({ page }) => {
   await ready(page);
   await page.getByRole("link", { name: "Mehr", exact: true }).click();
   await page.locator("#settingsPanel").getByRole("link", { name: "Darstellung", exact: true }).click();
@@ -69,7 +69,7 @@ test("appearance choice updates the theme and survives reload on this device", a
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });
 
-test("a prior user message can be copied or edited as a regular draft", async ({ page }) => {
+test("a prior user message can be copied or edited as a regular draft", { tag: "@responsive" }, async ({ page }) => {
   await ready(page);
   await page.evaluate(() => {
     state.data.messages = [{ id: 9001, role: "user", content: "Review this interval session", attachment_names: "[]" }];
@@ -95,7 +95,7 @@ test("a prior user message can be copied or edited as a regular draft", async ({
   await expect(page.locator("#chatAttachments")).toContainText("current.gpx");
 });
 
-test("light mode keeps performance source badges readable", async ({ page }) => {
+test("light mode keeps performance source badges readable", { tag: "@responsive" }, async ({ page }) => {
   await ready(page);
   await page.evaluate(() => {
     document.documentElement.dataset.theme = "light";
@@ -344,7 +344,7 @@ test("reload recovers a partial write receipt and executable undo proposal", asy
   expect(await page.evaluate(() => sessionStorage.getItem("coachPendingTurn"))).toBe(null);
 });
 
-test("progress and cancel remain reachable while the composer is hidden", async ({ page }) => {
+test("progress and cancel remain reachable while the composer is hidden", { tag: "@responsive" }, async ({ page }) => {
   await ready(page);
   await controlled(page);
   await page.locator("#messageInput").fill("Long fixture task");
@@ -421,7 +421,7 @@ test("fresh service worker keeps the current shell available offline", async ({ 
   } finally { await page.context().setOffline(false); }
 });
 
-test("plan overview deep link focuses and reveals today after loading", async ({ page }) => {
+test("plan overview deep link focuses and reveals today after loading", { tag: "@responsive" }, async ({ page }) => {
   await page.goto("/#plan/overview");
   await expect(page.locator("#appShell")).toBeVisible();
   await expect.poll(() => page.evaluate(() => state.loadPromise === null && state.loadedAreas.has("plan"))).toBe(true);
@@ -456,7 +456,7 @@ test("current plan payload displays each requested sport exactly", async ({ page
   }
 });
 
-test("planned agenda prioritizes dates and sessions with compact weather and expandable details", async ({ page }, testInfo) => {
+test("planned agenda prioritizes dates and sessions with compact weather and expandable details", { tag: "@responsive" }, async ({ page }, testInfo) => {
   await ready(page);
   await page.getByRole("link", { name: "Geplant", exact: true }).click();
   await expect.poll(() => page.evaluate(() => state.loadPromise === null)).toBe(true);

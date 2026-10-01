@@ -23,11 +23,12 @@ module.exports = defineConfig({
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },
+  // Functional contracts run once; responsive journeys retain every viewport.
   projects: [
-    { name: "mobile-small", use: { ...devices["Pixel 5"], viewport: { width: 320, height: 568 } } },
-    { name: "mobile", use: { ...devices["Pixel 5"], viewport: { width: 390, height: 844 } } },
-    { name: "tablet", use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 } } },
-    { name: "tablet-landscape", use: { ...devices["Desktop Chrome"], viewport: { width: 844, height: 390 } } },
+    { name: "mobile-small", grep: /@responsive/, use: { ...devices["Pixel 5"], viewport: { width: 320, height: 568 } } },
+    { name: "mobile", grep: /@responsive/, use: { ...devices["Pixel 5"], viewport: { width: 390, height: 844 } } },
+    { name: "tablet", grep: /@responsive/, use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 } } },
+    { name: "tablet-landscape", grep: /@responsive/, use: { ...devices["Desktop Chrome"], viewport: { width: 844, height: 390 } } },
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1000 } } },
   ],
 });

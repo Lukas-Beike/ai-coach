@@ -86,7 +86,7 @@ for (const [scenario, prompt, message] of [
   ["access", "E2E fixture: OpenAI access denied", "Der KI-Dienst hat den Zugriff abgelehnt. Bitte prüfe den API-Zugang in den Einstellungen."],
   ["timeout", "E2E fixture: OpenAI timeout", "Der KI-Dienst hat nicht rechtzeitig geantwortet. Bitte versuche es erneut."],
 ]) {
-  test(`OpenAI ${scenario} failures remain visible in the chat after reload`, async ({ page }, testInfo) => {
+  test(`OpenAI ${scenario} failures remain visible in the chat after reload`, { tag: "@responsive" }, async ({ page }, testInfo) => {
     const browserErrors = installBrowserGuards(page);
     await openAuthenticatedApp(page);
     await page.getByRole("link", { name: "Coach", exact: true }).click();
@@ -145,7 +145,7 @@ test("provider-backed API calls outlast their server deadlines", async ({ page }
   expect(timeouts).toEqual([25_000, 55_000, 100_000]);
 });
 
-test.describe("critical browser states", () => {
+test.describe("critical browser states", { tag: "@responsive" }, () => {
   test("login, main views, dialog and profile form state", async ({ page }, testInfo) => {
     const browserErrors = installBrowserGuards(page);
 

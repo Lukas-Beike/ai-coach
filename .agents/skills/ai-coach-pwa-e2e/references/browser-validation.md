@@ -18,9 +18,11 @@ Run from the repository root. Follow the current isolated runtime commands in
 5. The configured projects are `mobile-small`, `mobile`, `tablet`,
    `tablet-landscape`, and `desktop`. Run `npm run test:e2e` for a normal full
    matrix, or run the CI-equivalent isolated loop when a spec mutates state:
-   execute each `e2e/*.spec.js` once per project, recreating the disposable
-   fixture runtime before every pair. Keep the configured single worker within
-   each run; the CI loop provides isolation across runs, not parallel safety.
+   execute every `e2e/*.spec.js` on desktop and only files containing
+   `@responsive` on the other projects, recreating the disposable fixture runtime
+   before every pair. The non-desktop projects select only `@responsive` tests.
+   Keep the configured single worker within each run; the CI loop provides
+   isolation across runs, not parallel safety.
 6. Use the product-native preview for manual inspection when available. Inspect
    DOM, console/network failures, screenshot-level alignment, reduced motion,
    login, fresh PWA/offline assets, safe Markdown, keyboard behavior, opt-in
