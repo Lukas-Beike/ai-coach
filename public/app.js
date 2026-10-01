@@ -2697,6 +2697,54 @@ function appendPlannedCalendarComparison(details, entry, actual) {
   details.append(comparison);
 }
 
+function appendPlannedSessionHeader(cardSummary, entry, actual) {
+  const displayed = actual || entry;
+  const header = document.createElement("span");
+  header.className = "planned-session-header";
+  const sport = document.createElement("span");
+  sport.textContent = [activitySportLabel(displayed), calendarStartTime(displayed.start_date_local)].filter(Boolean).join(" · ");
+  const duration = document.createElement("strong");
+  duration.textContent = plannedEntryDurationLabel(actual, entry);
+  const distance = document.createElement("span");
+  distance.textContent = displayed.distance > 0 ? distanceLabel(displayed.distance) : "";
+  header.append(sport, duration, distance);
+  const metrics = document.createElement("span");
+  metrics.className = "planned-session-metrics";
+  metrics.textContent = [
+    actual ? calendarMetricNumber(actual.average_heartrate, " bpm") : null,
+    actual ? calendarMetricNumber(actual.average_watts ?? actual.weighted_average_watts, " W") : null,
+    calendarMetricNumber(displayed.icu_training_load) != null ? `Belastung ${calendarMetricNumber(displayed.icu_training_load)}` : null,
+  ].filter(Boolean).join(" · ");
+  cardSummary.append(header);
+  if (metrics.textContent) cardSummary.append(metrics);
+}
+
+function appendPlannedExecution(cardSummary, entry, status) {
+  const percentage = calendarMetricNumber(entry.compliance?.percentage);
+  const measurable = percentage != null && ["training_load", "duration"].includes(entry.compliance?.basis);
+  if (entry.is_completed_activity || (status !== "missed" && !measurable)) return;
+  const execution = document.createElement("span");
+  const value = status === "missed" ? 0 : Number(entry.compliance.percentage);
+  let executionState = "is-on-target";
+  if (value < 80 || value > 120) executionState = "is-deviation";
+  if (value === 0) executionState = "is-zero";
+  execution.className = `planned-execution ${executionState}`;
+  execution.textContent = `${value === 0 ? "✕" : "✓"} ${status === "missed" ? "0" : percentage} %`;
+  const basis = { training_load: "Belastung", duration: "Dauer" }[entry.compliance?.basis];
+  execution.title = basis ? `Ausführung gegenüber Plan (${basis})` : "Ausführung gegenüber Plan";
+  execution.setAttribute("aria-label", [`${value} Prozent des Plans`, basis].filter(Boolean).join(" · "));
+  cardSummary.append(execution);
+  if (status !== "missed") {
+    const meter = document.createElement("span");
+    meter.className = "planned-execution-track";
+    meter.setAttribute("aria-hidden", "true");
+    const fill = document.createElement("span");
+    fill.style.width = `${Math.max(0, Math.min(100, value))}%`;
+    meter.append(fill);
+    cardSummary.append(meter);
+  }
+}
+
 function renderPlannedEntry(entry, dateKey, todayKey) {
   const actual = calendarActualActivity(entry);
   const status = calendarEntryStatus(entry, dateKey, todayKey);
@@ -2714,55 +2762,22 @@ function renderPlannedEntry(entry, dateKey, todayKey) {
     calendarStartTime(displayed.start_date_local),
     plannedEntryDurationLabel(actual, entry),
   ].filter(Boolean).join(" · ");
-  const header = document.createElement("span");
-  header.className = "planned-session-header";
-  const sport = document.createElement("span");
-  sport.textContent = activitySportLabel(displayed);
-  const duration = document.createElement("strong");
-  duration.textContent = plannedEntryDurationLabel(actual, entry);
-  const distance = document.createElement("span");
-  distance.textContent = displayed.distance > 0 ? distanceLabel(displayed.distance) : "";
-  header.append(sport, duration, distance);
-  const metrics = document.createElement("span");
-  metrics.className = "planned-session-metrics";
-  metrics.textContent = [
-    actual ? calendarMetricNumber(actual.average_heartrate, " bpm") : null,
-    actual ? calendarMetricNumber(actual.average_watts ?? actual.weighted_average_watts, " W") : null,
-    calendarMetricNumber(displayed.icu_training_load) != null ? `Belastung ${calendarMetricNumber(displayed.icu_training_load)}` : null,
-  ].filter(Boolean).join(" · ");
-  cardSummary.append(header, meta);
-  if (metrics.textContent) cardSummary.append(metrics);
+  appendPlannedSessionHeader(cardSummary, entry, actual);
+  cardSummary.append(meta);
   if (status === "completed" || status === "missed") {
     const statusText = document.createElement("span");
     statusText.className = "planned-entry-status";
     statusText.textContent = calendarStatusLabel(entry, dateKey, todayKey);
     cardSummary.append(statusText);
   }
-  const percentage = calendarMetricNumber(entry.compliance?.percentage);
-  if (!entry.is_completed_activity && (status === "missed" || (percentage != null && ["training_load", "duration"].includes(entry.compliance?.basis)))) {
-    const execution = document.createElement("span");
-    const value = status === "missed" ? 0 : Number(entry.compliance.percentage);
-    execution.className = `planned-execution ${value === 0 ? "is-zero" : value < 80 || value > 120 ? "is-deviation" : "is-on-target"}`;
-    execution.textContent = `${value === 0 ? "✕" : "✓"} ${status === "missed" ? "0" : percentage} %`;
-    const basis = entry.compliance?.basis === "training_load" ? "Belastung" : "Dauer";
-    execution.title = `Ausführung gegenüber Plan (${basis})`;
-    execution.setAttribute("aria-label", `${value} Prozent des Plans · ${basis}`);
-    cardSummary.append(execution);
-    if (status !== "missed") {
-      const meter = document.createElement("span");
-      meter.className = "planned-execution-track";
-      meter.setAttribute("aria-hidden", "true");
-      const fill = document.createElement("span");
-      fill.style.width = `${Math.max(0, Math.min(100, value))}%`;
-      meter.append(fill);
-      cardSummary.append(meter);
-    }
-  }
+  appendPlannedExecution(cardSummary, entry, status);
   cardSummary.append(cardTitle);
   if (actual && !entry.is_completed_activity) {
     const target = document.createElement("span");
     target.className = "planned-session-target";
-    target.textContent = `Plan: ${entry.name || "Training"} · ${plannedEntryDurationLabel(null, entry)}${entry.icu_training_load != null ? ` · Belastung ${calendarMetricNumber(entry.icu_training_load)}` : ""}`;
+    const targetParts = [entry.name || "Training", plannedEntryDurationLabel(null, entry)];
+    if (entry.icu_training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.icu_training_load)}`);
+    target.textContent = `Plan: ${targetParts.join(" · ")}`;
     cardSummary.append(target);
   }
   const details = document.createElement("div");

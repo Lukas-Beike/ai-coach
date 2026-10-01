@@ -501,9 +501,9 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
       checkin: { stress: 5, illness: "Magen-Darm" },
     }];
     state.data.training_calendar = [
-      { id: "agenda-run", date, name: "Lockerer Dauerlauf mit Steigerungen", type: "Run", duration_minutes: 45, description: "Locker laufen. <img src=x onerror=alert(1)>" },
+      { id: "agenda-run", date, start_date_local: `${date}T18:30:00`, name: "Lockerer Dauerlauf mit Steigerungen", type: "Run", duration_minutes: 45, description: "Locker laufen. <img src=x onerror=alert(1)>" },
       { id: "agenda-strength", date, name: "Mobilität und Rumpfstabilität", type: "WeightTraining", duration_minutes: 20 },
-      { id: "agenda-completed", date: addDateKey(date, 1), name: "Grundlagenausfahrt", type: "Ride", is_completed_activity: true, moving_time: 3600, distance: 28000, icu_training_load: 42, icu_rpe: 3 },
+      { id: "agenda-completed", date: addDateKey(date, 1), start_date_local: `${addDateKey(date, 1)}T07:15:00`, name: "Grundlagenausfahrt", type: "Ride", is_completed_activity: true, moving_time: 3600, distance: 28000, icu_training_load: 42, icu_rpe: 3 },
       { id: "agenda-matched", date: addDateKey(date, -2), name: "Aktivierung", type: "Ride", duration_minutes: 45, icu_training_load: 25,
         compliance: { status: "completed", percentage: 136, basis: "training_load", actual_activity: { name: "Aktivierung absolviert", type: "Ride", moving_time: 3600, distance: 24000, icu_training_load: 34, average_heartrate: 125, average_watts: 201 } } },
       { id: "agenda-missed", date: addDateKey(date, -3), name: "Ausgefallene Einheit", type: "Ride", duration_minutes: 45, compliance: { status: "missed", percentage: 0 } },
@@ -544,12 +544,16 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(matched.locator(".planned-session-target")).toContainText("Plan: Aktivierung · 45 Min. · Belastung 25");
   await expect(matched.locator(".planned-session-metrics")).toContainText("125 bpm · 201 W · Belastung 34");
   await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveText("✕ 0 %");
+  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveAttribute("aria-label", "0 Prozent des Plans");
+  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveAttribute("title", "Ausführung gegenüber Plan");
   await expect(page.locator(".planned-entry").filter({ hasText: "Grundlagenausfahrt" }).locator(".planned-execution")).toHaveCount(0);
   await expect(day.locator("xpath=ancestor::details[contains(@class,'planned-week')]//span[@class='planned-week-metrics']")).toContainText("Geplant");
   await expect(previous.locator(".planned-weather-detail")).toHaveAttribute("title", /Gespeicherte Wettervorhersage/);
   await expect(previous.locator(".planned-weather-metrics")).toHaveText("75 % Regen (max. 14:00 Uhr) · 21,1 km/h Wind");
-  const workout = day.locator(".planned-entry").first();
-  await expect(workout.locator(".planned-meta")).toHaveText("Laufen · 45 Min.");
+  const workout = day.locator(".planned-entry").filter({ hasText: "Lockerer Dauerlauf mit Steigerungen" });
+  await expect(workout.locator(".planned-meta")).toHaveText("Laufen · 18:30 · 45 Min.");
+  await expect(workout.locator(".planned-session-header")).toContainText("Laufen · 18:30");
+  await expect(workout.locator(".planned-session-header")).toBeVisible();
   await expect(workout.locator(".planned-description")).toBeHidden();
   await workout.locator("summary").focus();
   await page.keyboard.press("Enter");
@@ -557,6 +561,7 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(workout.locator("img")).toHaveCount(0);
   await page.keyboard.press("Enter");
   const completed = page.locator(".planned-entry.is-completed").filter({ hasText: "Grundlagenausfahrt" });
+  await expect(completed.locator(".planned-session-header")).toContainText("Radfahren · 07:15");
   await expect(completed.locator(".planned-entry-status")).toBeVisible();
   await expect(completed.locator(".planned-actual-facts")).toBeHidden();
   await completed.locator("summary").click();
