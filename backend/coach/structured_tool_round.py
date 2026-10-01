@@ -132,7 +132,28 @@ class CoachStructuredToolRoundService:
                     paused=paused,
                 )
 
-                def persist_receipt(tool_result: dict[str, Any]) -> None:
+                local_transaction = name not in {
+                    "start_provider_refresh",
+                    "apply_adaptive_replan",
+                    "delete_duplicate_intervals_activity",
+                    *COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
+                }
+                with (
+                    self._database_lock if local_transaction else nullcontext(),
+                    self._database_manager().unit_of_work()
+                    if local_transaction
+                    else nullcontext(),
+                ):
+                    result = self._execution.execute(
+                        metadata,
+                        action=action,
+                        context=state.context,
+                        conversation_id=state.conversation_id,
+                        client_turn_id=state.client_turn_id,
+                        session_csrf_hash=state.session_csrf_hash,
+                        sync_job_ids=state.sync_job_ids,
+                        cancel_event=state.cancel_event,
+                    )
                     state.command_receipts.append(
                         {
                             "call_id": call_id,
@@ -144,7 +165,7 @@ class CoachStructuredToolRoundService:
                             "request_binding_key": request_binding_key,
                             "plan_effect_key": plan_effect_key,
                             "request": action.get("request"),
-                            "result": tool_result,
+                            "result": result,
                         }
                     )
                     self._jobs.merge_receipt(
@@ -154,42 +175,6 @@ class CoachStructuredToolRoundService:
                             "sync_job_ids": state.sync_job_ids,
                         },
                     )
-
-                if name in COACH_EXTERNAL_FOOD_LOOKUP_TOOLS:
-                    result = self._execution.execute(
-                        metadata,
-                        action=action,
-                        context=state.context,
-                        conversation_id=state.conversation_id,
-                        client_turn_id=state.client_turn_id,
-                        session_csrf_hash=state.session_csrf_hash,
-                        sync_job_ids=state.sync_job_ids,
-                        cancel_event=state.cancel_event,
-                    )
-                    persist_receipt(result)
-                else:
-                    local_transaction = name not in {
-                        "start_provider_refresh",
-                        "apply_adaptive_replan",
-                        "delete_duplicate_intervals_activity",
-                    }
-                    with (
-                        self._database_lock if local_transaction else nullcontext(),
-                        self._database_manager().unit_of_work()
-                        if local_transaction
-                        else nullcontext(),
-                    ):
-                        result = self._execution.execute(
-                            metadata,
-                            action=action,
-                            context=state.context,
-                            conversation_id=state.conversation_id,
-                            client_turn_id=state.client_turn_id,
-                            session_csrf_hash=state.session_csrf_hash,
-                            sync_job_ids=state.sync_job_ids,
-                            cancel_event=state.cancel_event,
-                        )
-                        persist_receipt(result)
             if result.get("synchronous_refresh") or (
                 name == "get_sync_job" and result.get("ok")
             ):
