@@ -192,38 +192,40 @@ class StructuredTrainingChangeValidator:
         if candidate_date:
             final_dates[change_identity] = validated_training_date(candidate_date)
 
-    def _validate_training_change_dates(
-        self,
+    @staticmethod
+    def _validate_batch_time_windows(
+        changes_by_identity: dict[str, dict[str, Any]],
+        final_dates: dict[str, str],
+        final_active: dict[str, bool],
+    ) -> None:
+        from backend.planning import calendar as planning_calendar
+
+        active_ids = [ident for ident in final_dates if final_active.get(ident, True)]
+        for i, id_a in enumerate(active_ids):
+            date_a = final_dates[id_a]
+            change_a = changes_by_identity.get(id_a, {"date": date_a})
+            for id_b in active_ids[i + 1 :]:
+                if final_dates[id_b] != date_a:
+                    continue
+                change_b = changes_by_identity.get(id_b, {"date": date_a})
+                matches, match = planning_calendar._calendar_items_conflict(
+                    change_a, change_b
+                )
+                if matches and match == "time_window":
+                    raise AppError(
+                        409,
+                        f"Der Plan enthält zeitlich überschneidende Einheiten für den {date_a}.",
+                        reason="plan_date_conflict",
+                    )
+
+    @staticmethod
+    def _dates_needing_calendar_check(
         final_dates: dict[str, str],
         final_active: dict[str, bool],
         original_dates: dict[str, str],
         restore_identities: set[str],
-        batch_ids: set[str],
-        changes_by_identity: dict[str, dict[str, Any]] | None = None,
-    ) -> None:
-        from backend.planning import calendar as planning_calendar
-
-        if changes_by_identity:
-            active_ids = [
-                ident for ident in final_dates if final_active.get(ident, True)
-            ]
-            for i, id_a in enumerate(active_ids):
-                date_a = final_dates[id_a]
-                change_a = changes_by_identity.get(id_a, {"date": date_a})
-                for id_b in active_ids[i + 1 :]:
-                    if final_dates[id_b] != date_a:
-                        continue
-                    change_b = changes_by_identity.get(id_b, {"date": date_a})
-                    matches, match = planning_calendar._calendar_items_conflict(
-                        change_a, change_b
-                    )
-                    if matches and match == "time_window":
-                        raise AppError(
-                            409,
-                            f"Der Plan enthält zeitlich überschneidende Einheiten für den {date_a}.",
-                            reason="plan_date_conflict",
-                        )
-        dates_needing_calendar_check = {
+    ) -> set[str]:
+        return {
             candidate_date
             for change_identity, candidate_date in final_dates.items()
             if final_active.get(change_identity, True)
@@ -233,7 +235,24 @@ class StructuredTrainingChangeValidator:
                 or change_identity in restore_identities
             )
         }
-        for candidate_date in dates_needing_calendar_check:
+
+    def _validate_training_change_dates(
+        self,
+        final_dates: dict[str, str],
+        final_active: dict[str, bool],
+        original_dates: dict[str, str],
+        restore_identities: set[str],
+        batch_ids: set[str],
+        changes_by_identity: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        if changes_by_identity:
+            self._validate_batch_time_windows(
+                changes_by_identity, final_dates, final_active
+            )
+        dates_to_check = self._dates_needing_calendar_check(
+            final_dates, final_active, original_dates, restore_identities
+        )
+        for candidate_date in dates_to_check:
             if self.calendar_conflict_service.conflicts(
                 {"date": candidate_date}, batch_ids
             ):
