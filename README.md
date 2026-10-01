@@ -46,7 +46,7 @@ Intervals Coach adheres to a clean-slate installation and maintenance model:
 - **Structured Error Recovery**: Robust recovery from provider rate limits and transient network errors with transparent diagnostic reporting and safe rollback of incomplete actions.
 
 ### Training Calendar & Workout Planning
-- **Collapsible Weekly Calendar**: Mobile-optimized calendar displaying complete training weeks with collapsible volume summaries, planned workouts, and completed sessions.
+- **Collapsible Weekly Calendar**: Mobile-optimized weekly agenda with a date rail, visible planned and completed volume totals, and separate cards for planned and completed sessions. Illness and pain from saved check-ins appear as day notices; days without sessions remain visible. Matched sessions show execution percentages based on load or duration and the original target directly on the card; missed sessions show 0%, while additional activities have no invented target percentage.
 - **Configurable Planning Horizon**: User-adjustable calendar display settings controlling past lookback and future planning horizons through the More tab.
 - **Plan vs. Actual Pairing**: Intelligent pairing of planned workouts to completed activities using provider pairing IDs with a conservative same-day sport fallback.
 - **Visual Volume Comparisons**: Accurate plan-versus-actual volume matching evaluated by training load (TSS) when available, falling back to moving or elapsed duration.
