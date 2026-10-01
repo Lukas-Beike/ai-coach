@@ -22,6 +22,7 @@ from backend.http_api.requests import (
     read_json as read_request_json,
 )
 from backend.http_api.static_assets import StaticAssetService
+from backend.runtime.socket_deadline import SocketDeadline
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class HttpRequestHandlerDependencies:
 
 
 class RequestHandler(BaseHTTPRequestHandler):
+    input_timeout_seconds = 20
     dependencies: HttpRequestHandlerDependencies
     server_version: str
     client_disconnect_errors = (
@@ -74,6 +76,26 @@ class RequestHandler(BaseHTTPRequestHandler):
     def setup(self) -> None:
         super().setup()
         self.connection.settimeout(20)
+
+    def handle_one_request(self) -> None:
+        try:
+            with SocketDeadline(
+                self.connection, self.input_timeout_seconds
+            ) as deadline:
+                self._header_deadline = deadline
+                super().handle_one_request()
+        except TimeoutError:
+            self.close_connection = True
+
+    def parse_request(self) -> bool:
+        try:
+            return super().parse_request()
+        finally:
+            self._header_deadline.cancel()
+
+    def _read_input(self, size: int) -> bytes:
+        with SocketDeadline(self.connection, self.input_timeout_seconds):
+            return self.rfile.read(size)
 
     def log_client_disconnect(self) -> None:
         context = {
@@ -258,7 +280,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             max_bytes = self.dependencies.max_body_bytes
         return read_request_body(
             self.headers,
-            self.rfile.read,
+            self._read_input,
             max_bytes,
             error=AppError,
             too_large_status_threshold=self.dependencies.max_body_bytes,
@@ -267,7 +289,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     def read_audio_body(self) -> bytes:
         return read_request_audio_body(
             self.headers,
-            self.rfile.read,
+            self._read_input,
             allowed_types=self.dependencies.voice_audio_types,
             normalize_type=self.dependencies.normalize_audio_type,
             max_bytes=self.dependencies.max_audio_body_bytes,
@@ -279,7 +301,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             max_bytes = self.dependencies.max_body_bytes
         return read_request_json(
             self.headers,
-            self.rfile.read,
+            self._read_input,
             max_bytes,
             error=AppError,
             too_large_status_threshold=self.dependencies.max_body_bytes,

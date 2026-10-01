@@ -130,7 +130,9 @@ class SessionAuthService:
         except (TypeError, ValueError, OverflowError):
             return None
 
-    def cleanup_expired_sessions(self, db: Any, now: float, *, force: bool = False) -> int:
+    def cleanup_expired_sessions(
+        self, db: Any, now: float, *, force: bool = False
+    ) -> int:
         current_monotonic = time.monotonic()
         if (
             not force
@@ -153,7 +155,11 @@ class SessionAuthService:
             return None
         now = time.time()
         token_hash = self.session_token_hash(token)
-        with self._session_lock, self._database_lock, self._database_manager.unit_of_work() as db:
+        with (
+            self._session_lock,
+            self._database_lock,
+            self._database_manager.unit_of_work() as db,
+        ):
             self.cleanup_expired_sessions(db, now)
             row = db.execute(
                 "SELECT csrf_hash, expires_at, last_seen FROM sessions WHERE token_hash = ?",
@@ -170,9 +176,12 @@ class SessionAuthService:
                     "UPDATE sessions SET last_seen = ? WHERE token_hash = ?",
                     (datetime.now(timezone.utc).isoformat(), token_hash),
                 )
-            return {"csrf_hash": row["csrf_hash"], "expires_at": float(row["expires_at"])}
+            return {
+                "csrf_hash": row["csrf_hash"],
+                "expires_at": float(row["expires_at"]),
+            }
 
-    def login_user(self, handler: Any, password: str) -> dict[str, Any]:
+    def login_user(self, handler: Any, password: str | None = None) -> dict[str, Any]:
         if app_config.security_configuration_error(
             self._config, sqlcipher_available=self._sqlcipher_available
         ):
@@ -181,28 +190,55 @@ class SessionAuthService:
             f"login:{self.client_ip(handler)}", 5, 900
         )
         if not allowed:
-            raise AppError(429, f"Zu viele Anmeldeversuche. Erneut versuchen in etwa {retry_after} Sekunden.", reason="rate_limited", retry_after=retry_after)
-        if not hmac.compare_digest(str(password).encode("utf-8"), self._config.app_password.encode("utf-8")):
+            raise AppError(
+                429,
+                f"Zu viele Anmeldeversuche. Erneut versuchen in etwa {retry_after} Sekunden.",
+                reason="rate_limited",
+                retry_after=retry_after,
+            )
+        if password is None:
+            payload = handler.read_json()
+            password = (
+                str(payload.get("password") or "") if isinstance(payload, dict) else ""
+            )
+        if not hmac.compare_digest(
+            str(password).encode("utf-8"), self._config.app_password.encode("utf-8")
+        ):
             raise AppError(401, "Ungültiges Passwort.")
         token = secrets.token_urlsafe(32)
         csrf = secrets.token_urlsafe(32)
         now = time.time()
-        with self._session_lock, self._database_lock, self._database_manager.unit_of_work() as db:
+        with (
+            self._session_lock,
+            self._database_lock,
+            self._database_manager.unit_of_work() as db,
+        ):
             db.execute(
                 "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                 (
-                    self.session_token_hash(token), self.session_token_hash(csrf),
-                    now + SESSION_TTL_SECONDS, datetime.now(timezone.utc).isoformat(),
+                    self.session_token_hash(token),
+                    self.session_token_hash(csrf),
+                    now + SESSION_TTL_SECONDS,
+                    datetime.now(timezone.utc).isoformat(),
                     datetime.now(timezone.utc).isoformat(),
                 ),
             )
-        return {"status": "ok", "authenticated": True, "csrf": csrf, "session_token": token}
+        return {
+            "status": "ok",
+            "authenticated": True,
+            "csrf": csrf,
+            "session_token": token,
+        }
 
     def logout_user(self, handler: Any) -> None:
         token = self.cookie_value(handler, SESSION_COOKIE)
         if not token:
             return
-        with self._session_lock, self._database_lock, self._database_manager.unit_of_work() as db:
+        with (
+            self._session_lock,
+            self._database_lock,
+            self._database_manager.unit_of_work() as db,
+        ):
             db.execute(
                 "DELETE FROM sessions WHERE token_hash = ?",
                 (self.session_token_hash(token),),
@@ -220,7 +256,12 @@ class SessionAuthService:
             f"api:{self.client_ip(handler)}", 180, 60
         )
         if not allowed:
-            raise AppError(429, f"Zu viele Anfragen. Erneut versuchen in etwa {retry_after} Sekunden.", reason="rate_limited", retry_after=retry_after)
+            raise AppError(
+                429,
+                f"Zu viele Anfragen. Erneut versuchen in etwa {retry_after} Sekunden.",
+                reason="rate_limited",
+                retry_after=retry_after,
+            )
         return session
 
     def require_csrf(self, handler: Any, session: dict[str, Any]) -> None:
@@ -234,7 +275,10 @@ class SessionAuthService:
         self, token: str = "", csrf: str = "", *, clear: bool = False
     ) -> list[str]:
         return session_cookies(
-            SESSION_COOKIE, CSRF_COOKIE, token, csrf,
+            SESSION_COOKIE,
+            CSRF_COOKIE,
+            token,
+            csrf,
             ttl_seconds=SESSION_TTL_SECONDS,
             secure=bool(getattr(self._config, "secure_cookies", False)),
             clear=clear,
@@ -245,7 +289,11 @@ class SessionAuthService:
         if not normalized_key:
             return ""
         now = time.time()
-        with self._session_lock, self._database_lock, self._database_manager.unit_of_work() as db:
+        with (
+            self._session_lock,
+            self._database_lock,
+            self._database_manager.unit_of_work() as db,
+        ):
             rows = db.execute("SELECT csrf_hash, expires_at FROM sessions").fetchall()
         for row in rows:
             csrf_hash = str(row.get("csrf_hash") or "")
