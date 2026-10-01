@@ -29,15 +29,25 @@ class NutritionGetRoutes:
         self._local_now = local_now
 
     def handle(self, handler: Any, path: str) -> bool:
-        if path not in {"/api/nutrition/day", "/api/nutrition/range"}:
+        if path not in {
+            "/api/nutrition/day",
+            "/api/nutrition/range",
+            "/api/nutrition/templates",
+        }:
             return False
 
         self._session_auth_service().require_auth(handler)
         query = parse_qs(urlparse(handler.path).query)
         svc = self._nutrition_service()
 
+        if path == "/api/nutrition/templates":
+            handler.send_json(200, {"ok": True, "templates": svc.list_templates()})
+            return True
+
         if path == "/api/nutrition/day":
-            date_param = query.get("date", [None])[0] or self._local_now().date().isoformat()
+            date_param = (
+                query.get("date", [None])[0] or self._local_now().date().isoformat()
+            )
             summary = svc.get_day_summary(date_param)
             handler.send_json(200, {"ok": True, **summary})
             return True
@@ -99,9 +109,14 @@ class NutritionPostRoutes:
         job = self._sync_job_queue().enqueue(
             "intervals", "nutrition_sync", job_payload, requested_by="http_api"
         )
-        handler.send_json(202, {
-            "ok": True, "status": "queued", "sync_job_id": job["id"],
-        })
+        handler.send_json(
+            202,
+            {
+                "ok": True,
+                "status": "queued",
+                "sync_job_id": job["id"],
+            },
+        )
 
 
 class NutritionPutRoutes:

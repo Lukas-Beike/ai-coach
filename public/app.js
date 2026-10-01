@@ -181,6 +181,7 @@ function updateNavigationHistory(panelRoute, historyMode) {
 function renderActiveRoute(mainRoute, panelRoute) {
   if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
   if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
+  if (mainRoute === "nutrition") { renderNutritionSegments(panelRoute); if (state.data) void loadNutrition(); }
   if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
   if (state.data && mainRoute === "more") {
     void loadContextPreview();
@@ -313,6 +314,7 @@ function showLogin() {
   state.stateEventLastId = 0;
   state.stateEventBackoff = 1000;
   state.data = null;
+  resetNutritionView();
   state.busy = false;
   state.chatRequest = null;
   state.chatStreamText = "";
@@ -3989,6 +3991,7 @@ async function deleteServerLogs() {
 }
 
 function render(data) {
+  if (baseRoute() === "nutrition") void loadNutrition();
   const firstRender = !state.data;
   state.data = data;
   renderAppVersion(data.app);

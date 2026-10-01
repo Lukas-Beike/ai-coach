@@ -2,9 +2,48 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 from collections.abc import Callable
 from typing import Any
+
+
+class NutritionTemplateRepository:
+    """Persist reusable meals separately from consumed nutrition records."""
+
+    def list(self, db: Any) -> list[dict[str, Any]]:
+        return [
+            json.loads(row["payload"])
+            for row in db.execute(
+                "SELECT payload FROM nutrition_templates ORDER BY name COLLATE NOCASE"
+            ).fetchall()
+        ]
+
+    def get(self, db: Any, template_id: str) -> dict[str, Any] | None:
+        row = db.execute(
+            "SELECT payload FROM nutrition_templates WHERE id=?", (template_id,)
+        ).fetchone()
+        return json.loads(row["payload"]) if row else None
+
+    def save(self, db: Any, template: dict[str, Any]) -> None:
+        db.execute(
+            "INSERT INTO nutrition_templates(id, name, payload, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET name=excluded.name, payload=excluded.payload, updated_at=excluded.updated_at",
+            (
+                template["id"],
+                template["name"],
+                json.dumps(template, ensure_ascii=False),
+                template["updated_at"],
+            ),
+        )
+
+    def delete(self, db: Any, template_id: str) -> bool:
+        return (
+            db.execute(
+                "DELETE FROM nutrition_templates WHERE id=?", (template_id,)
+            ).rowcount
+            > 0
+        )
 
 
 class KeyValueRepository:
@@ -253,7 +292,9 @@ class PlanningStateRepository:
 class PlanAdjustmentRepository:
     """Persist adaptive-replanning previews and their application status."""
 
-    def create_preview(self, db: Any, adjustment_id: str, payload: str, created_at: str) -> None:
+    def create_preview(
+        self, db: Any, adjustment_id: str, payload: str, created_at: str
+    ) -> None:
         db.execute(
             "INSERT INTO plan_adjustments(id, payload, status, created_at) VALUES (?, ?, 'preview', ?)",
             (adjustment_id, payload, created_at),
@@ -267,15 +308,21 @@ class PlanAdjustmentRepository:
 
     def list_recent(self, db: Any, limit: int = 100) -> list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT payload, status FROM plan_adjustments ORDER BY created_at DESC LIMIT ?", (limit,)
+            "SELECT payload, status FROM plan_adjustments ORDER BY created_at DESC LIMIT ?",
+            (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
 
     def get(self, db: Any, adjustment_id: str) -> dict[str, Any] | None:
-        row = db.execute("SELECT payload, status FROM plan_adjustments WHERE id = ?", (adjustment_id,)).fetchone()
+        row = db.execute(
+            "SELECT payload, status FROM plan_adjustments WHERE id = ?",
+            (adjustment_id,),
+        ).fetchone()
         return dict(row) if row else None
 
-    def mark_applied(self, db: Any, adjustment_id: str, payload: str, status: str, applied_at: str) -> None:
+    def mark_applied(
+        self, db: Any, adjustment_id: str, payload: str, status: str, applied_at: str
+    ) -> None:
         db.execute(
             "UPDATE plan_adjustments SET payload=?, status=?, applied_at=? WHERE id=?",
             (payload, status, applied_at, adjustment_id),
@@ -288,7 +335,9 @@ class ChatRepository:
     def __init__(self, now: Callable[[], str]):
         self._now = now
 
-    def add(self, db: Any, role: str, content: str, *, client_turn_id: str | None = None) -> dict[str, Any]:
+    def add(
+        self, db: Any, role: str, content: str, *, client_turn_id: str | None = None
+    ) -> dict[str, Any]:
         if role not in {"user", "assistant"}:
             raise ValueError("Chat role must be user or assistant")
         created_at = self._now()
@@ -297,13 +346,28 @@ class ChatRepository:
             "INSERT INTO messages(role, content, client_turn_id, created_at) VALUES (?, ?, ?, ?)",
             (role, clean_content, client_turn_id, created_at),
         )
-        return {"id": cursor.lastrowid, "role": role, "content": clean_content, "client_turn_id": client_turn_id, "created_at": created_at}
+        return {
+            "id": cursor.lastrowid,
+            "role": role,
+            "content": clean_content,
+            "client_turn_id": client_turn_id,
+            "created_at": created_at,
+        }
 
     def list(self, db: Any, limit: int = 100) -> list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT id, role, content, client_turn_id, created_at, (SELECT json_group_array(json_extract(value, '$.name')) FROM json_each(messages.attachments)) AS attachment_names FROM messages ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT id, role, content, client_turn_id, created_at, (SELECT json_group_array(json_extract(value, '$.name')) FROM json_each(messages.attachments)) AS attachment_names FROM messages ORDER BY id DESC LIMIT ?",
+            (limit,),
         ).fetchall()
-        return [{key: value for key, value in row.items() if (key != "client_turn_id" or value is not None) and (key != "attachment_names" or value != "[]")} for row in reversed(rows)]
+        return [
+            {
+                key: value
+                for key, value in row.items()
+                if (key != "client_turn_id" or value is not None)
+                and (key != "attachment_names" or value != "[]")
+            }
+            for row in reversed(rows)
+        ]
 
     def list_page(
         self,
@@ -312,12 +376,14 @@ class ChatRepository:
         before_message_id: int | None,
         search: str,
         limit: int,
-    ) -> list[dict[str, Any]]:
+    ) -> builtins.list[dict[str, Any]]:
         params: list[Any] = []
         clauses: list[str] = []
         if search:
             clauses.append("content LIKE ? ESCAPE '\\'")
-            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            escaped = (
+                search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
             params.append(f"%{escaped}%")
         if before_message_id is not None:
             clauses.append("id < ?")
@@ -376,9 +442,19 @@ class CheckinRepository:
             "pain=excluded.pain, available_minutes=excluded.available_minutes, "
             "availability_notes=excluded.availability_notes, notes=excluded.notes, updated_at=excluded.updated_at",
             (
-                checkin["checkin_date"], checkin["soreness"], checkin["stress"], checkin["motivation"],
-                checkin["session_rpe"], checkin["day_form"], checkin["illness"], checkin["pain"], checkin["available_minutes"],
-                checkin["availability_notes"], checkin["notes"], now, now,
+                checkin["checkin_date"],
+                checkin["soreness"],
+                checkin["stress"],
+                checkin["motivation"],
+                checkin["session_rpe"],
+                checkin["day_form"],
+                checkin["illness"],
+                checkin["pain"],
+                checkin["available_minutes"],
+                checkin["availability_notes"],
+                checkin["notes"],
+                now,
+                now,
             ),
         )
 
@@ -398,7 +474,9 @@ class ActivityFeedbackRepository:
         return [dict(row) for row in rows]
 
     def delete(self, db: Any, activity_id: str) -> None:
-        db.execute("DELETE FROM activity_feedback WHERE activity_id = ?", (activity_id,))
+        db.execute(
+            "DELETE FROM activity_feedback WHERE activity_id = ?", (activity_id,)
+        )
 
     def upsert(self, db: Any, feedback: dict[str, str]) -> None:
         now = self._now()
@@ -407,14 +485,23 @@ class ActivityFeedbackRepository:
             "VALUES (?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(activity_id) DO UPDATE SET activity_name=excluded.activity_name, "
             "activity_date=excluded.activity_date, notes=excluded.notes, updated_at=excluded.updated_at",
-            (feedback["activity_id"], feedback["activity_name"], feedback["activity_date"], feedback["notes"], now, now),
+            (
+                feedback["activity_id"],
+                feedback["activity_name"],
+                feedback["activity_date"],
+                feedback["notes"],
+                now,
+                now,
+            ),
         )
 
 
 class SnapshotRepository:
     """Persist bounded provider snapshots without owning a connection."""
 
-    def save(self, db: Any, snapshot: dict[str, Any], created_at: str, *, keep: int = 12) -> None:
+    def save(
+        self, db: Any, snapshot: dict[str, Any], created_at: str, *, keep: int = 12
+    ) -> None:
         recent = snapshot.get("recent_activities")
         db.execute(
             "INSERT INTO snapshots(payload, created_at, synced_at, recent_activity_count) "
@@ -426,7 +513,10 @@ class SnapshotRepository:
                 len(recent) if isinstance(recent, list) else 0,
             ),
         )
-        db.execute("DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT ?)", (keep,))
+        db.execute(
+            "DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT ?)",
+            (keep,),
+        )
 
     def latest_metadata(self, db: Any) -> dict[str, Any]:
         row = db.execute(
@@ -435,7 +525,9 @@ class SnapshotRepository:
         return dict(row) if row else {}
 
     def latest_payload(self, db: Any) -> str | None:
-        row = db.execute("SELECT payload FROM snapshots ORDER BY id DESC LIMIT 1").fetchone()
+        row = db.execute(
+            "SELECT payload FROM snapshots ORDER BY id DESC LIMIT 1"
+        ).fetchone()
         return row["payload"] if row else None
 
 
@@ -478,7 +570,9 @@ class NutritionRepository:
         ).fetchone()
         return dict(row) if row else None
 
-    def update(self, db: Any, entry_id: str, entry: dict[str, Any]) -> dict[str, Any] | None:
+    def update(
+        self, db: Any, entry_id: str, entry: dict[str, Any]
+    ) -> dict[str, Any] | None:
         now = self._now()
         existing = self.get(db, entry_id)
         if not existing:
@@ -524,7 +618,9 @@ class NutritionRepository:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def list_by_range(self, db: Any, start_date: str, end_date: str) -> list[dict[str, Any]]:
+    def list_by_range(
+        self, db: Any, start_date: str, end_date: str
+    ) -> list[dict[str, Any]]:
         rows = db.execute(
             "SELECT id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, sync_state, created_at, updated_at "
             "FROM nutrition_logs WHERE meal_date >= ? AND meal_date <= ? ORDER BY meal_date ASC, logged_at ASC",
@@ -535,9 +631,18 @@ class NutritionRepository:
     def day_summary(self, db: Any, meal_date: str) -> dict[str, Any]:
         entries = self.list_by_date(db, meal_date)
         total_kcal = sum(int(e["kcal"]) for e in entries)
-        total_carbs = round(sum(float(e["carbs_g"]) for e in entries if e.get("carbs_g") is not None), 1)
-        total_protein = round(sum(float(e["protein_g"]) for e in entries if e.get("protein_g") is not None), 1)
-        total_fat = round(sum(float(e["fat_g"]) for e in entries if e.get("fat_g") is not None), 1)
+        total_carbs = round(
+            sum(float(e["carbs_g"]) for e in entries if e.get("carbs_g") is not None), 1
+        )
+        total_protein = round(
+            sum(
+                float(e["protein_g"]) for e in entries if e.get("protein_g") is not None
+            ),
+            1,
+        )
+        total_fat = round(
+            sum(float(e["fat_g"]) for e in entries if e.get("fat_g") is not None), 1
+        )
         return {
             "date": meal_date,
             "total_kcal": total_kcal,
@@ -576,12 +681,15 @@ class NutritionRepository:
             else:
                 snapshot[total_field] = None
         row = db.execute(
-            "SELECT revision FROM nutrition_sync_dates WHERE meal_date = ?", (meal_date,)
+            "SELECT revision FROM nutrition_sync_dates WHERE meal_date = ?",
+            (meal_date,),
         ).fetchone()
         snapshot["sync_revision"] = int(row["revision"]) if row else 0
         return snapshot
 
-    def mark_date_synced(self, db: Any, meal_date: str, revision: int, updated_at: str) -> bool:
+    def mark_date_synced(
+        self, db: Any, meal_date: str, revision: int, updated_at: str
+    ) -> bool:
         cursor = db.execute(
             "UPDATE nutrition_sync_dates SET sync_state = 'synced', updated_at = ? "
             "WHERE meal_date = ? AND revision = ?",

@@ -35,7 +35,12 @@ class CoachAthleteRecordToolService:
         self, name: str, arguments: dict[str, Any], intent: dict[str, Any]
     ) -> dict[str, Any] | None:
         if name in {
-            "save_nutrition_entry", "update_nutrition_entry", "delete_nutrition_entry"
+            "save_nutrition_template",
+            "delete_nutrition_template",
+            "log_nutrition_template",
+            "save_nutrition_entry",
+            "update_nutrition_entry",
+            "delete_nutrition_entry",
         }:
             return self._execute_nutrition(name, arguments, intent)
         if name == "save_checkin":
@@ -120,6 +125,28 @@ class CoachAthleteRecordToolService:
         require_coach_scope(intent, "local_nutrition")
         if not self._nutrition:
             raise AppError(500, "NutritionService ist nicht verfügbar.")
+        if name == "save_nutrition_template":
+            return {
+                "ok": True,
+                "template": self._nutrition.save_template(
+                    structured_action_payload(arguments)
+                ),
+            }
+        if name == "delete_nutrition_template":
+            return {
+                "ok": True,
+                **self._nutrition.delete_template(str(arguments.get("id") or "")),
+            }
+        if name == "log_nutrition_template":
+            return {
+                "ok": True,
+                "entry": self._nutrition.log_template(
+                    str(arguments.get("id") or ""),
+                    arguments.get("portions", 1),
+                    meal_date=arguments.get("meal_date"),
+                    meal_time=arguments.get("meal_time"),
+                ),
+            }
         if name == "save_nutrition_entry":
             payload = structured_action_payload(arguments)
             return {"ok": True, "entry": self._nutrition.log_meal(payload)}

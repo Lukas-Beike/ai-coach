@@ -762,6 +762,54 @@ def build_tool_contracts(
         ),
     ]
 
+    meal_properties = next(
+        tool
+        for tool in COACH_STRUCTURED_TOOLS
+        if tool["name"] == "save_nutrition_entry"
+    )["parameters"]["properties"]["payload"]["properties"]
+    template_properties = {
+        key: value
+        for key, value in meal_properties.items()
+        if key not in {"meal_date", "meal_time"}
+    }
+    template_properties.update(
+        name={"type": "string", "maxLength": 120}, id={"type": "string"}
+    )
+    COACH_STRUCTURED_TOOLS.extend(
+        [
+            _canonical_coach_tool(
+                "save_nutrition_template",
+                "Save or update a reusable meal for ONE portion, only after the athlete confirms its shown ingredients, quantities and nutrition. This does NOT log consumption. Read templates first; use id for updates. Ingredients and quantities belong in description.",
+                {
+                    "payload": {
+                        "type": "object",
+                        "properties": template_properties,
+                        "additionalProperties": False,
+                    }
+                },
+            ),
+            _canonical_coach_tool(
+                "delete_nutrition_template",
+                "Delete a reusable meal by its exact read ID. Existing consumption records are preserved.",
+                {"id": {"type": "string"}},
+            ),
+            _canonical_coach_tool(
+                "log_nutrition_template",
+                "Record consumption of an unchanged saved meal, scaling its stored nutrition by portions. Read the exact template ID first. For ingredient substitutions use save_nutrition_entry with adjusted estimates; do not change the template.",
+                {
+                    "id": {"type": "string"},
+                    "portions": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                    },
+                    "meal_date": {"type": "string"},
+                    "meal_time": {"type": "string"},
+                },
+            ),
+        ]
+    )
+
     COACH_CANONICAL_TOOL_NAMES = tuple(tool["name"] for tool in COACH_STRUCTURED_TOOLS)
     STRUCTURED_READ_ONLY_TOOLS = {
         "read_coach_context",

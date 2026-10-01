@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractContextManager
@@ -11,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import NutritionRepository
+from backend.db.repositories import NutritionRepository, NutritionTemplateRepository
 from backend.errors import AppError
 from backend.nutrition.models import (
     NutritionDaySummary,
@@ -25,8 +26,13 @@ ENTRY_NOT_FOUND = "Ernährungseintrag nicht gefunden."
 
 
 NUTRITION_APPROVAL_FIELDS = (
-    "date", "revision", "total_kcal", "total_carbs_g", "total_protein_g",
-    "total_fat_g", "entry_count",
+    "date",
+    "revision",
+    "total_kcal",
+    "total_carbs_g",
+    "total_protein_g",
+    "total_fat_g",
+    "entry_count",
 )
 
 
@@ -78,6 +84,98 @@ class NutritionService:
         self._nutrition_repository = nutrition_repository
         self._utc_now = utc_now
         self._local_now = local_now
+        self._templates = NutritionTemplateRepository()
+
+    def list_templates(self) -> list[dict[str, Any]]:
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            return self._templates.list(db)
+
+    def save_template(self, payload: Any) -> dict[str, Any]:
+        """Save a confirmed recipe for one portion without recording consumption."""
+        if not isinstance(payload, dict):
+            raise AppError(400, "Mahlzeit muss ein Objekt sein.")
+        name = str(payload.get("name") or "").strip()
+        if not name or len(name) > 120:
+            raise AppError(400, "Mahlzeitname muss 1 bis 120 Zeichen enthalten.")
+        template_id = str(payload.get("id") or "").strip()
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            existing = self._templates.get(db, template_id) if template_id else None
+            if template_id and not existing:
+                raise AppError(404, "Gespeicherte Mahlzeit nicht gefunden.")
+            if any(
+                t["name"].casefold() == name.casefold() and t["id"] != template_id
+                for t in self._templates.list(db)
+            ):
+                raise AppError(
+                    409,
+                    "Dieser Mahlzeitname ist bereits vergeben. Lies die Vorlage und ändere sie gezielt.",
+                )
+            if not existing and len(self._templates.list(db)) >= 200:
+                raise AppError(400, "Maximal 200 gespeicherte Mahlzeiten sind möglich.")
+            normalized = normalize_nutrition_entry(
+                {**(existing or {}), **payload}, local_now_factory=self._local_now
+            )
+            template = {
+                key: normalized[key]
+                for key in (
+                    "description",
+                    "meal_type",
+                    "kcal",
+                    "carbs_g",
+                    "protein_g",
+                    "fat_g",
+                    "source",
+                )
+            }
+            template.update(
+                id=template_id or uuid.uuid4().hex,
+                name=name,
+                updated_at=self._utc_now(),
+            )
+            self._templates.save(db, template)
+            return template
+
+    def delete_template(self, template_id: str) -> dict[str, Any]:
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            if not self._templates.delete(db, template_id):
+                raise AppError(404, "Gespeicherte Mahlzeit nicht gefunden.")
+        return {"deleted_id": template_id}
+
+    def log_template(
+        self,
+        template_id: str,
+        portions: Any = 1,
+        *,
+        meal_date: str | None = None,
+        meal_time: str | None = None,
+    ) -> dict[str, Any]:
+        """Copy current per-portion values; later recipe edits never affect the log."""
+        try:
+            amount = float(portions)
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, "Ungültige Portionsanzahl.") from exc
+        if not math.isfinite(amount) or not 0 < amount <= 20:
+            raise AppError(
+                400, "Portionsanzahl muss größer als 0 und höchstens 20 sein."
+            )
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            template = self._templates.get(db, template_id)
+            if not template:
+                raise AppError(404, "Gespeicherte Mahlzeit nicht gefunden.")
+            payload = {
+                **template,
+                "description": f"{template['name']} · {amount:g} Portion(en): {template['description']}",
+                "meal_date": meal_date,
+                "meal_time": meal_time,
+            }
+            payload.pop("id")
+            for key in ("kcal", "carbs_g", "protein_g", "fat_g"):
+                payload[key] = None if template[key] is None else template[key] * amount
+            entry = normalize_nutrition_entry(
+                payload, local_now_factory=self._local_now
+            )
+            entry["id"] = uuid.uuid4().hex
+            return self._nutrition_repository.create(db, entry)
 
     def log_meal(self, payload: Any) -> dict[str, Any]:
         """Normalize, validate and store a meal entry."""
@@ -123,12 +221,26 @@ class NutritionService:
         if not clean_id:
             raise AppError(400, INVALID_ENTRY_ID)
         editable = {
-            "meal_date", "date", "logged_at", "meal_time", "meal_type",
-            "description", "kcal", "calories", "carbs_g", "carbs",
-            "carbohydrates", "protein_g", "protein", "fat_g", "fat",
+            "meal_date",
+            "date",
+            "logged_at",
+            "meal_time",
+            "meal_type",
+            "description",
+            "kcal",
+            "calories",
+            "carbs_g",
+            "carbs",
+            "carbohydrates",
+            "protein_g",
+            "protein",
+            "fat_g",
+            "fat",
         }
         if not isinstance(changes, dict) or not changes or set(changes) - editable:
-            raise AppError(400, "Korrektur muss mindestens ein gültiges Ernährungsfeld enthalten.")
+            raise AppError(
+                400, "Korrektur muss mindestens ein gültiges Ernährungsfeld enthalten."
+            )
         with self._db_lock, self._database_manager.unit_of_work() as db:
             existing = self._nutrition_repository.get(db, clean_id)
             if not existing:
@@ -142,8 +254,8 @@ class NutritionService:
                 "protein": "protein_g",
                 "fat": "fat_g",
             }
-            canonical_changes = {
-                aliases.get(key, key): value for key, value in changes.items()
+            canonical_changes: dict[str, Any] = {
+                str(aliases.get(key, key)): value for key, value in changes.items()
             }
             merged = {**existing, **canonical_changes}
             entry = normalize_nutrition_entry(merged, local_now_factory=self._local_now)
@@ -185,7 +297,9 @@ class NutritionService:
         dates: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Read exact nutrition revisions and totals without changing sync state."""
-        selectors = sum(value is not None for value in (meal_date, pending_limit, dates))
+        selectors = sum(
+            value is not None for value in (meal_date, pending_limit, dates)
+        )
         if selectors != 1:
             raise AppError(400, "Choose one date or an approved date range.")
         with self._db_lock, self._database_manager.unit_of_work() as db:
@@ -193,18 +307,25 @@ class NutritionService:
                 selected_dates = [validate_iso_date(meal_date)]
             elif pending_limit is not None:
                 if type(pending_limit) is not int or not 1 <= pending_limit <= 31:
-                    raise AppError(400, "Die Anzahl ausstehender Tage muss zwischen 1 und 31 liegen.")
+                    raise AppError(
+                        400,
+                        "Die Anzahl ausstehender Tage muss zwischen 1 und 31 liegen.",
+                    )
                 selected_dates = self._nutrition_repository.list_unsynced_dates(
                     db, limit=pending_limit
                 )
             else:
-                if not isinstance(dates, list) or len(dates) > 31 or any(
-                    not isinstance(value, str) for value in dates
+                if (
+                    not isinstance(dates, list)
+                    or len(dates) > 31
+                    or any(not isinstance(value, str) for value in dates)
                 ):
                     raise AppError(400, "Invalid nutrition approval manifest.")
                 selected_dates = [validate_iso_date(value) for value in dates]
                 if len(selected_dates) != len(set(selected_dates)):
-                    raise AppError(400, "Nutrition approval manifest contains duplicate dates.")
+                    raise AppError(
+                        400, "Nutrition approval manifest contains duplicate dates."
+                    )
             return [
                 nutrition_approval_item(
                     self._nutrition_repository.day_sync_snapshot(
@@ -226,7 +347,9 @@ class NutritionService:
             raise AppError(400, "Startdatum muss vor oder am Enddatum liegen.")
 
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            entries = self._nutrition_repository.list_by_range(db, valid_start, valid_end)
+            entries = self._nutrition_repository.list_by_range(
+                db, valid_start, valid_end
+            )
 
         by_date: dict[str, list[dict[str, Any]]] = {}
         for entry in entries:
@@ -237,9 +360,28 @@ class NutritionService:
         for date_key in sorted(by_date.keys()):
             day_entries = by_date[date_key]
             total_kcal = sum(int(e["kcal"]) for e in day_entries)
-            total_carbs = round(sum(float(e["carbs_g"]) for e in day_entries if e.get("carbs_g") is not None), 1)
-            total_protein = round(sum(float(e["protein_g"]) for e in day_entries if e.get("protein_g") is not None), 1)
-            total_fat = round(sum(float(e["fat_g"]) for e in day_entries if e.get("fat_g") is not None), 1)
+            total_carbs = round(
+                sum(
+                    float(e["carbs_g"])
+                    for e in day_entries
+                    if e.get("carbs_g") is not None
+                ),
+                1,
+            )
+            total_protein = round(
+                sum(
+                    float(e["protein_g"])
+                    for e in day_entries
+                    if e.get("protein_g") is not None
+                ),
+                1,
+            )
+            total_fat = round(
+                sum(
+                    float(e["fat_g"]) for e in day_entries if e.get("fat_g") is not None
+                ),
+                1,
+            )
             summaries.append(
                 NutritionDaySummary(
                     date=date_key,
@@ -248,7 +390,9 @@ class NutritionService:
                     total_protein_g=total_protein,
                     total_fat_g=total_fat,
                     entry_count=len(day_entries),
-                    entries=[NutritionEntry.from_dict(e).to_dict() for e in day_entries],
+                    entries=[
+                        NutritionEntry.from_dict(e).to_dict() for e in day_entries
+                    ],
                 ).to_dict()
             )
         return summaries
@@ -273,7 +417,9 @@ class NutritionService:
         past_week = (self._local_now().date() - timedelta(days=6)).isoformat()
         with self._db_lock, self._database_manager.unit_of_work() as db:
             today_summary = self._nutrition_repository.day_summary(db, today)
-            recent_entries = self._nutrition_repository.list_by_range(db, past_week, today)
+            recent_entries = self._nutrition_repository.list_by_range(
+                db, past_week, today
+            )
         return {
             "today": today_summary,
             "recent_entries_count": len(recent_entries),

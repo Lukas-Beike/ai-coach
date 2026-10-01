@@ -53,6 +53,9 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `save_checkin` | `success` | `test_daily_feedback_and_activity_feedback_are_separate_from_profile` |
 | `save_competition` | `create`, `update` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |
 | `save_nutrition_entry` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
+| `save_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
+| `log_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
+| `delete_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
 | `stage_training_plan` | `success` | `test_requested_draft_commit_and_metadata_lifecycle` |
 | `start_intervals_plan_sync` | `all_pending`, `created`, `selected` | `test_new_plan_sync_and_later_selected_sync_use_real_ids` |
 | `start_provider_refresh` | `calendar`, `garmin`, `intervals`, `weather` | `test_provider_reads_and_job_status_use_correct_provider` |

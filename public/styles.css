@@ -857,7 +857,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-bright); 
   left: 50%;
   bottom: max(12px, env(safe-area-inset-bottom));
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   width: min(calc(100% - 28px), 620px);
   padding: 6px;
   transform: translateX(-50%);
@@ -1111,3 +1111,20 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .chat-attachments { display: flex; gap: .4rem; flex-wrap: wrap; grid-column: 1 / -1; }
 .chat-attachments button { max-width: 100%; overflow-wrap: anywhere; font-size: .8rem; }
 
+
+.nutrition-toolbar { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; margin: 20px 0; }
+.nutrition-toolbar label { flex: 1; min-width: 140px; }
+.nutrition-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+.nutrition-total, .nutrition-card { padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.nutrition-total strong { display: block; font-size: 1.4rem; }
+.nutrition-list { display: grid; gap: 12px; margin: 18px 0; }
+.nutrition-card h3 { margin: 0 0 8px; overflow-wrap: anywhere; }
+.nutrition-card p { overflow-wrap: anywhere; white-space: pre-wrap; }
+.nutrition-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+@media (min-width: 700px) { .nutrition-totals { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+#nutritionPanel button { min-width: 44px; min-height: 44px; }
+#nutritionPanel .push-button { padding: 12px 16px; }
+#nutritionPanel .panel-heading { margin-bottom: 18px; }
+.nutrition-total span, .nutrition-card small { color: var(--muted); }
+.nutrition-card p { line-height: 1.5; }

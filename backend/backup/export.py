@@ -56,6 +56,7 @@ PRIVACY_EXPORT_JSONL_FILES = {
     "provider_sync_cursors.jsonl",
     "nutrition_logs.jsonl",
     "nutrition_sync_dates.jsonl",
+    "nutrition_templates.jsonl",
 }
 
 
@@ -316,6 +317,7 @@ class PrivacyArchiveExportService:
                     "public_event_candidates",
                     "nutrition_logs",
                     "nutrition_sync_dates",
+                    "nutrition_templates",
                 ):
                     self._write_jsonl(
                         archive,

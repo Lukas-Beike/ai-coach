@@ -21,7 +21,7 @@ from backend.backup.export import (
 from backend.calendar import public_events as public_event_calendar
 from backend.calendar.external import ExternalCalendarReader
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import KeyValueRepository
+from backend.db.repositories import KeyValueRepository, NutritionTemplateRepository
 from backend.errors import AppError
 from backend.planning import season as planning_season
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
@@ -105,6 +105,7 @@ class PrivacyDataExportService:
             ]
             public_calendar = public_event_calendar.state(db)
             kv_rows = db.execute("SELECT key, value FROM kv ORDER BY key").fetchall()
+            nutrition_templates = NutritionTemplateRepository().list(db)
 
         application_state: dict[str, Any] = {}
         excluded_state = {"profile", "garmin_snapshot", weather_cache.CACHE_KEY}
@@ -125,6 +126,7 @@ class PrivacyDataExportService:
             "exported_at": dependencies.utc_now(),
             "profile": dependencies.profile_service.get(),
             "application_state": application_state,
+            "nutrition_templates": nutrition_templates,
             "competitions": competitions,
             "competition_sync_tombstones": tombstones,
             "messages": messages,
@@ -177,7 +179,7 @@ PRIVACY_DELETE_SCOPE = (
     (
         "nutrition",
         "Ernährungsprotokolle und Kalorientracking",
-        ("nutrition_logs", "nutrition_sync_dates"),
+        ("nutrition_logs", "nutrition_sync_dates", "nutrition_templates"),
     ),
     ("adaptive", "Adaptive Plananpassungen", ("plan_adjustments",)),
     (
