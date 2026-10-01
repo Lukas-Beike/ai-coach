@@ -18,6 +18,10 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.sync.state import SyncStateRepository
 
+COACH_EXTERNAL_FOOD_LOOKUP_TOOLS = frozenset(
+    {"lookup_food", "calculate_food_nutrition"}
+)
+
 
 class CoachStructuredToolExecutionService:
     """Own tool-specific execution while reusing existing durable state owners."""
@@ -60,6 +64,7 @@ class CoachStructuredToolExecutionService:
             "start_provider_refresh",
             "apply_adaptive_replan",
             "delete_duplicate_intervals_activity",
+            *COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
         }
         lock = self._database_lock if local_transaction else nullcontext()
         transaction = (

@@ -42,14 +42,18 @@ class TrackingLock:
 
 class LockCheckingDatabaseManager(DatabaseManager):
     def __init__(self, path: Path, lock: TrackingLock) -> None:
-        super().__init__(path, sqlite3, row_factory=sqlite3.Row, persist_connections=False)
+        super().__init__(
+            path, sqlite3, row_factory=sqlite3.Row, persist_connections=False
+        )
         self._tracking_lock = lock
         self.uow_count = 0
 
     @contextmanager
     def unit_of_work(self) -> Iterator[Any]:
         if not self._tracking_lock.held:
-            raise AssertionError("database unit of work must run under the injected lock")
+            raise AssertionError(
+                "database unit of work must run under the injected lock"
+            )
         self.uow_count += 1
         with super().unit_of_work() as db:
             yield db
@@ -89,7 +93,9 @@ class StructuredToolExecutionTests(unittest.TestCase):
     def metadata(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
         return {"name": name, "arguments": arguments or {}}
 
-    def execute(self, name: str, arguments: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    def execute(
+        self, name: str, arguments: dict[str, Any] | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
         values: dict[str, Any] = {
             "action": {"operation": name, "authorization_scope": ["local_plan"]},
             "context": {"messages": [{"role": "user", "id": 3}]},
@@ -108,7 +114,9 @@ class StructuredToolExecutionTests(unittest.TestCase):
         context = {"messages": [{"role": "user", "id": 3}]}
         self.clarification.save_question.return_value = expected
 
-        self.assertIs(self.execute("clarify_coach_request", arguments, context=context), expected)
+        self.assertIs(
+            self.execute("clarify_coach_request", arguments, context=context), expected
+        )
         self.clarification.save_question.assert_called_once_with(arguments, context)
         self.assertEqual(self.lock.enter_count, 1)
         self.assertEqual(self.database_manager.uow_count, 1)
@@ -119,7 +127,9 @@ class StructuredToolExecutionTests(unittest.TestCase):
         )
         with closing(sqlite3.connect(self.database_manager.path)) as db:
             self.assertEqual(
-                db.execute("SELECT value FROM kv WHERE key = 'coach_pending_request'").fetchone()[0],
+                db.execute(
+                    "SELECT value FROM kv WHERE key = 'coach_pending_request'"
+                ).fetchone()[0],
                 "null",
             )
         self.assertEqual(self.lock.enter_count, 1)
@@ -127,11 +137,18 @@ class StructuredToolExecutionTests(unittest.TestCase):
 
     def test_training_patch_failure_rolls_back_and_releases_lock(self) -> None:
         arguments = {"changes": [{"local_id": "unit-1", "action": "update"}]}
-        action = {"operation": "apply_training_patch", "authorization_scope": ["local_plan"]}
+        action = {
+            "operation": "apply_training_patch",
+            "authorization_scope": ["local_plan"],
+        }
 
-        def write_then_fail(_arguments: dict[str, Any], _action: dict[str, Any]) -> None:
+        def write_then_fail(
+            _arguments: dict[str, Any], _action: dict[str, Any]
+        ) -> None:
             with self.database_manager.unit_of_work() as db:
-                db.execute("INSERT INTO synthetic_writes(value) VALUES ('should roll back')")
+                db.execute(
+                    "INSERT INTO synthetic_writes(value) VALUES ('should roll back')"
+                )
             raise AppError(409, "Revision changed", reason="revision_conflict")
 
         self.training_patch.apply.side_effect = write_then_fail
@@ -139,13 +156,17 @@ class StructuredToolExecutionTests(unittest.TestCase):
             self.execute("apply_training_patch", arguments, action=action)
 
         with closing(sqlite3.connect(self.database_manager.path)) as db:
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM synthetic_writes").fetchone()[0], 0)
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM synthetic_writes").fetchone()[0], 0
+            )
         self.assertFalse(self.lock.held)
         self.assertEqual(self.lock.enter_count, 1)
         self.assertEqual(self.database_manager.uow_count, 2)
         self.training_patch.apply.assert_called_once_with(arguments, action)
 
-    def test_duplicate_inspection_only_creates_session_bound_delete_proposal(self) -> None:
+    def test_duplicate_inspection_only_creates_session_bound_delete_proposal(
+        self,
+    ) -> None:
         duplicate = {
             "canonical_id": "900",
             "canonical_name": "Run A",
@@ -172,8 +193,13 @@ class StructuredToolExecutionTests(unittest.TestCase):
             "backend.coach.tool_execution_service.latest_wahoo_garmin_duplicate",
             return_value=duplicate,
         ):
-            result = self.execute("inspect_activity_duplicates", session_csrf_hash="bound-csrf")
-        self.assertEqual(result, {"ok": True, "duplicate": duplicate, "proposal": {"id": "proposal-1"}})
+            result = self.execute(
+                "inspect_activity_duplicates", session_csrf_hash="bound-csrf"
+            )
+        self.assertEqual(
+            result,
+            {"ok": True, "duplicate": duplicate, "proposal": {"id": "proposal-1"}},
+        )
         self.proposal_creation.create.assert_called_once_with(
             duplicate_delete_action(duplicate), "bound-csrf"
         )
@@ -209,7 +235,10 @@ class StructuredToolExecutionTests(unittest.TestCase):
 
     def test_dispatch_receives_complete_turn_and_cancellation_context(self) -> None:
         expected = {"ok": True, "status": "completed"}
-        arguments = {"target": "intervals", "_request": {"period": {"start": "2026-09-20"}}}
+        arguments = {
+            "target": "intervals",
+            "_request": {"period": {"start": "2026-09-20"}},
+        }
         action = {"operation": "start_provider_refresh", "remote_write": False}
         cancel_event = threading.Event()
         self.tool_dispatch.execute.return_value = expected
@@ -247,10 +276,26 @@ class StructuredToolExecutionTests(unittest.TestCase):
         self.assertEqual(self.lock.enter_count, 0)
         self.assertEqual(self.database_manager.uow_count, 0)
 
-    def test_delete_duplicate_intervals_activity_is_also_outside_local_database_transaction(self) -> None:
+    def test_delete_duplicate_intervals_activity_is_also_outside_local_database_transaction(
+        self,
+    ) -> None:
         self.tool_dispatch.execute.return_value = {"ok": True}
 
-        self.assertEqual(self.execute("delete_duplicate_intervals_activity"), {"ok": True})
+        self.assertEqual(
+            self.execute("delete_duplicate_intervals_activity"), {"ok": True}
+        )
+        self.assertEqual(self.lock.enter_count, 0)
+        self.assertEqual(self.database_manager.uow_count, 0)
+
+    def test_food_lookups_do_not_hold_a_local_database_transaction(self) -> None:
+        self.tool_dispatch.execute.side_effect = lambda *_args, **_kwargs: (
+            self.assertFalse(self.lock.held) or {"ok": True}
+        )
+
+        for name in ("lookup_food", "calculate_food_nutrition"):
+            with self.subTest(name=name):
+                self.assertEqual(self.execute(name), {"ok": True})
+
         self.assertEqual(self.lock.enter_count, 0)
         self.assertEqual(self.database_manager.uow_count, 0)
 

@@ -108,6 +108,43 @@ class StructuredToolRoundTests(unittest.TestCase):
             {"command_receipts": state.command_receipts, "sync_job_ids": []},
         )
 
+    def test_food_lookup_runs_outside_outer_transaction_and_persists_receipt(
+        self,
+    ) -> None:
+        state = self.state()
+        metadata = {
+            "name": "lookup_food",
+            "call_id": "food-call",
+            "arguments": {"query": "synthetic food"},
+            "action": {"operation": "lookup_food"},
+            "effect_key": "effect",
+            "step_key": "step",
+            "repair_key": None,
+            "scope_repair_key": None,
+            "request_binding_key": None,
+            "plan_effect_key": None,
+        }
+        self.execution.execute.return_value = {"ok": True, "foods": []}
+
+        with patch(
+            "backend.coach.structured_tool_round.structured_tool_call_metadata",
+            return_value=metadata,
+        ):
+            result = self.service._execute_tool_call(
+                self.call(), state=state, question="", cancelled=False
+            )
+
+        self.assertEqual(
+            result[:3], ("lookup_food", "food-call", {"ok": True, "foods": []})
+        )
+        self.lock.__enter__.assert_not_called()
+        self.manager.unit_of_work.assert_not_called()
+        self.execution.execute.assert_called_once()
+        self.jobs.merge_receipt.assert_called_once_with(
+            "synthetic-turn",
+            {"command_receipts": state.command_receipts, "sync_job_ids": []},
+        )
+
     def test_cached_tool_result_never_reexecutes_or_opens_transaction(self) -> None:
         state = self.state()
         self.replay.lookup.return_value = {"result": {"ok": True, "cached": True}}
