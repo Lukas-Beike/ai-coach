@@ -50,12 +50,17 @@ function nutritionCard(item, template, date) {
   source.textContent = sourceLabel + (template ? "" : syncLabel);
   const actions = document.createElement("div");
   actions.className = "nutrition-actions";
-  if (template) actions.append(nutritionButton("Beim Coach erfassen", `Ich habe am ${date} die gespeicherte Mahlzeit ${JSON.stringify(item.name)} (Vorlagen-ID ${item.id}) gegessen. Bitte kläre die Portionsanzahl mit mir.`));
+  if (template) {
+    const logPrompt = `Ich habe am ${date} die gespeicherte Mahlzeit ${JSON.stringify(item.name)} (Vorlagen-ID ${item.id}) gegessen. Bitte kläre die Portionsanzahl mit mir.`;
+    actions.append(nutritionButton("Beim Coach erfassen", logPrompt));
+  }
   const changePrompt = template
     ? `Ich möchte die gespeicherte Mahlzeit ${JSON.stringify(item.name)} (Vorlagen-ID ${item.id}) dauerhaft ändern. Bitte frage mich nach den Änderungen und zeige die neue Vorlage zur Bestätigung.`
     : `Ich möchte den Ernährungseintrag vom ${date} (Eintrags-ID ${item.id}) korrigieren. Bitte frage mich nach der Änderung.`;
   actions.append(nutritionButton("Ändern beim Coach", changePrompt));
-  actions.append(nutritionButton("Löschen beim Coach", `Ich möchte ${template ? "die Mahlzeitvorlage" : "den Ernährungseintrag"} mit ID ${item.id} löschen. Bitte bestätige vorher mit mir, dass du den richtigen Eintrag gefunden hast.`));
+  const deleteTarget = template ? "die Mahlzeitvorlage" : "den Ernährungseintrag";
+  const deletePrompt = `Ich möchte ${deleteTarget} mit ID ${item.id} löschen. Bitte bestätige vorher mit mir, dass du den richtigen Eintrag gefunden hast.`;
+  actions.append(nutritionButton("Löschen beim Coach", deletePrompt));
   card.append(title, description, values, source, actions);
   return card;
 }
