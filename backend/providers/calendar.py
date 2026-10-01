@@ -830,6 +830,29 @@ def _ical_overlaps(
     )
 
 
+def _ical_base_starts(
+    event: dict[str, Any],
+    duration: timedelta,
+    first: date,
+    last: date,
+    local_zone: tzinfo,
+) -> list[datetime]:
+    if not event.get("rrules"):
+        start = event["start"]
+        return [start] if _ical_overlaps(start, duration, first, last) else []
+    if event.get("unsupported_recurrence"):
+        raise AppError(400, "Diese Kalender-Wiederholung wird nicht unterstützt.")
+    starts = []
+    recurrence_first = first - timedelta(days=duration.days + 1)
+    for raw in event["rrules"]:
+        starts.extend(
+            _ical_recurrence_starts(
+                event, _ical_rrule(raw, local_zone), recurrence_first, last
+            )
+        )
+    return sorted(set(starts))
+
+
 def _ical_instances(
     event: dict[str, Any],
     first: date,
@@ -838,24 +861,7 @@ def _ical_instances(
     excluded: set[datetime] | None = None,
 ) -> Iterator[dict[str, Any]]:
     duration = _ical_duration(event)
-    if event.get("rrules"):
-        if event.get("unsupported_recurrence"):
-            raise AppError(400, "Diese Kalender-Wiederholung wird nicht unterstützt.")
-        starts: list[datetime] = []
-        recurrence_first = first - timedelta(days=duration.days + 1)
-        for raw in event["rrules"]:
-            starts.extend(
-                _ical_recurrence_starts(
-                    event, _ical_rrule(raw, local_zone), recurrence_first, last
-                )
-            )
-        starts = sorted(set(starts))
-    else:
-        starts = (
-            [event["start"]]
-            if _ical_overlaps(event["start"], duration, first, last)
-            else []
-        )
+    starts = _ical_base_starts(event, duration, first, last, local_zone)
     excluded_values = set(event.get("exdates", [])) | set(excluded or ())
     seen: set[datetime] = set()
     for start in chain(starts, event.get("rdates", [])):
