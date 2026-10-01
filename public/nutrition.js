@@ -44,10 +44,14 @@ function nutritionCard(item, template, date) {
   const values = document.createElement("p");
   values.textContent = `${item.kcal} kcal · KH ${item.carbs_g ?? "–"} g · Protein ${item.protein_g ?? "–"} g · Fett ${item.fat_g ?? "–"} g${template ? " / Portion" : ""}`;
   const source = document.createElement("small");
-  const sourceLabels = { coach: "Coach-Schätzung", photo: "Foto-Schätzung", voice: "Spracheingabe", manual: "Manuelle Angabe" };
+  const sourceLabels = { coach: "Coach-Schätzung", photo: "Foto-Schätzung", voice: "Sprach-Schätzung", manual: "Manuelle Angabe" };
   const sourceLabel = sourceLabels[item.source] || "Erfasst";
   const syncLabel = item.sync_state === "synced" ? " · Synchronisiert" : " · Lokal";
-  source.textContent = sourceLabel + (template ? "" : syncLabel);
+  const basis = item.nutrition_basis;
+  const basisLabel = basis?.kind === "database"
+    ? "Datenbankberechnung · " + basis.ingredients.map((food) => `${food.source}: ${food.name}, ${food.amount} ${food.unit} (Basis 100 ${food.basis_unit})`).join("; ")
+    : basis?.kind === "manual_correction" ? "Manuell korrigierte Nährwerte" : sourceLabel;
+  source.textContent = basisLabel + (template ? "" : syncLabel);
   const actions = document.createElement("div");
   const safeMealName = JSON.stringify(item.name);
   actions.className = "nutrition-actions";

@@ -228,6 +228,8 @@ def select_coach_tools(
         "list_training_plans",
         "get_sync_job",
         "read_nutrition",
+        "lookup_food",
+        "calculate_food_nutrition",
         "inspect_activity_duplicates",
         "clarify_coach_request",
         "cancel_coach_request",

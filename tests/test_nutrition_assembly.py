@@ -43,6 +43,7 @@ class NutritionAssemblyTests(unittest.TestCase):
             nutrition_repository=repository.return_value,
             utc_now=self.utc_now,
             local_now=self.local_now,
+            food_database=assembly.food_database(),
         )
 
     def test_intervals_sync_lazily_uses_current_config_and_shared_local_service_factory(self):

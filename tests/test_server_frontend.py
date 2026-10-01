@@ -139,7 +139,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('/coach.js?v=4', index)
         self.assertIn('/app.js?v=242', index)
         self.assertIn('/styles.css?v=233', index)
-        self.assertIn('intervals-coach-v248', service_worker)
+        self.assertIn('intervals-coach-v249', service_worker)
         self.assertIn('"/navigation.js?v=219"', service_worker)
         self.assertIn('"/appearance.js?v=218"', service_worker)
         self.assertIn('"/state.js?v=217"', service_worker)
@@ -324,7 +324,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split('app.js?v=', 1)[1].split('"', 1)[0]
         self.assertIn(f'app.js?v={asset_version}', markup)
-        self.assertIn('intervals-coach-v248', service_worker)
+        self.assertIn('intervals-coach-v249', service_worker)
         self.assertIn(f'/app.js?v={asset_version}', service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -395,7 +395,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertEqual(error.exception.status, 403)
 
     def test_nutrition_asset_is_served_as_immutable_javascript(self):
-        response = StaticAssetService(server.PUBLIC_DIR).render("/nutrition.js", "/nutrition.js?v=1", None)
+        response = StaticAssetService(server.PUBLIC_DIR).render("/nutrition.js", "/nutrition.js?v=2", None)
         self.assertEqual(response.status, 200)
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
         self.assertEqual(dict(response.headers)["Cache-Control"], "public, max-age=31536000, immutable")

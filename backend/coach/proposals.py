@@ -447,7 +447,7 @@ class CoachProposalCreationService:
             raise AppError(
                 403, "Die lokale Aktion ist nicht an eine Coach-Sitzung gebunden."
             )
-        payload = {
+        payload: dict[str, Any] = {
             "tool": tool,
             "arguments": dict(arguments),
             "intent": intent,
@@ -469,6 +469,14 @@ class CoachProposalCreationService:
             )
             if existing:
                 preview_values = {**existing, **preview_values}
+        if "food_ingredients" in values:
+            if self._nutrition_service is None:
+                raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
+            calculation = self._nutrition_service().food_database.calculate(
+                values["food_ingredients"]
+            )
+            preview_values.update(calculation)
+            payload["arguments"]["_food_calculation"] = calculation
         diff = [
             {
                 "name": preview_values.get("name", ""),
@@ -495,6 +503,11 @@ class CoachProposalCreationService:
                 ),
             }
         ]
+        if preview_values.get("nutrition_basis", {}).get("kind") == "database":
+            diff[0]["source"] = "; ".join(
+                f"{item['source']}: {item['name']}, {item['amount']:g} {item['unit']} (Basis 100 {item['basis_unit']})"
+                for item in preview_values["nutrition_basis"]["ingredients"]
+            )
         return self.create(
             {
                 "action_type": "local_coach_write",

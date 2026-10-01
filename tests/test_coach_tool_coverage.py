@@ -508,6 +508,14 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(
             changes_schema["properties"]["start_date_local"]["type"], "string"
         )
+    @covers("lookup_food:success", "calculate_food_nutrition:success")
+    def test_food_database_read_tools_calculate_without_writing(self):
+        foods = self.run_tool("lookup_food", {"query": "Haferflocken"})
+        self.assertTrue(foods["foods"])
+        result = self.run_tool("calculate_food_nutrition", {"ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]})
+        self.assertEqual(result["kcal"], 174)
+        self.assertEqual(result["nutrition_basis"]["kind"], "database")
+        self.assertEqual(server.NUTRITION_ASSEMBLY.service().get_today_summary()["entry_count"], 0)
 
     @covers("save_nutrition_template:success", "log_nutrition_template:success", "delete_nutrition_template:success")
     def test_saved_meals_run_through_authorized_coach_and_receipts(self):

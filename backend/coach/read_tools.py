@@ -139,6 +139,13 @@ class CoachReadToolService:
             }
         if name == "read_nutrition":
             return self._read_nutrition(arguments)
+        if name in {"lookup_food", "calculate_food_nutrition"}:
+            if self._nutrition_service is None:
+                raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
+            foods = self._nutrition_service().food_database
+            if name == "lookup_food":
+                return foods.lookup(arguments)
+            return {"ok": True, **foods.calculate(arguments.get("ingredients"))}
         return None
 
     def _read_nutrition(self, arguments: dict[str, Any]) -> dict[str, Any]:

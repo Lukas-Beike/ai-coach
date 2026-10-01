@@ -1796,7 +1796,7 @@ function coachActionDiff(proposal) {
       entry.name, entry.date, entry.sport, entry.scope, entry.units,
       entry.id && `ID: ${entry.id}`,
       entry.kcal, entry.entries && `${entry.entries} Einträge`,
-      entry.carbs, entry.protein, entry.fat,
+      entry.carbs, entry.protein, entry.fat, entry.source,
       entry.keep && `Behalten: ${entry.keep}`,
       entry.delete && `Löschen: ${entry.delete}`,
     ].filter(Boolean).join(" · ");

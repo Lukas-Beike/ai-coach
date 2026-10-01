@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from typing import Any
 
@@ -26,7 +26,9 @@ def validate_iso_date(value: Any) -> str:
         parsed = date.fromisoformat(text)
         return parsed.isoformat()
     except (ValueError, TypeError) as exc:
-        raise AppError(400, f"Ungültiges Datumsformat '{value}'. Erwartet wird YYYY-MM-DD.") from exc
+        raise AppError(
+            400, f"Ungültiges Datumsformat '{value}'. Erwartet wird YYYY-MM-DD."
+        ) from exc
 
 
 def meal_type_from_hour(hour: int) -> str:
@@ -78,6 +80,7 @@ class NutritionEntry:
     sync_state: str = "local"
     created_at: str = ""
     updated_at: str = ""
+    nutrition_basis: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -92,12 +95,15 @@ class NutritionEntry:
             description=str(data.get("description") or ""),
             kcal=int(data.get("kcal") or 0),
             carbs_g=float(data["carbs_g"]) if data.get("carbs_g") is not None else None,
-            protein_g=float(data["protein_g"]) if data.get("protein_g") is not None else None,
+            protein_g=float(data["protein_g"])
+            if data.get("protein_g") is not None
+            else None,
             fat_g=float(data["fat_g"]) if data.get("fat_g") is not None else None,
             source=str(data.get("source") or "manual"),
             sync_state=str(data.get("sync_state") or "local"),
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),
+            nutrition_basis=data.get("nutrition_basis") or {},
         )
 
 
@@ -154,6 +160,7 @@ def normalize_nutrition_entry(
         "fat_g": fat_g,
         "source": _normalize_source(raw.get("source")),
         "sync_state": "local",
+        "nutrition_basis": raw.get("nutrition_basis") or {"kind": "manual"},
         **({"id": str(raw["id"])} if raw.get("id") else {}),
     }
 
@@ -174,7 +181,9 @@ def _normalize_logged_at(meal_date: str, value: Any) -> str:
 def _normalize_meal_type(value: Any, logged_at: str) -> str:
     meal_type = str(value or "").strip().lower()
     if not meal_type:
-        meal_type = meal_type_from_hour(datetime.fromisoformat(logged_at.replace("Z", "+00:00")).hour)
+        meal_type = meal_type_from_hour(
+            datetime.fromisoformat(logged_at.replace("Z", "+00:00")).hour
+        )
     if meal_type not in VALID_MEAL_TYPES:
         raise AppError(
             400,
@@ -197,19 +206,25 @@ def _normalize_calories(raw: dict[str, Any], clamp: bool) -> int:
         calories = max(0.0, min(calories, float(MAX_KCAL)))
     elif calories < 0 or calories > MAX_KCAL:
         raise AppError(400, f"Kalorien müssen zwischen 0 und {MAX_KCAL} liegen.")
-    return int(round(calories))
+    return round(calories)
 
 
-def _normalize_macros(raw: dict[str, Any], clamp: bool) -> tuple[float | None, float | None, float | None]:
+def _normalize_macros(
+    raw: dict[str, Any], clamp: bool
+) -> tuple[float | None, float | None, float | None]:
     values = []
     for aliases, label in (
         (("carbs_g", "carbs", "carbohydrates"), "Kohlenhydrate"),
         (("protein_g", "protein"), "Protein"),
         (("fat_g", "fat"), "Fett"),
     ):
-        value = next((raw[key] for key in aliases if raw.get(key) is not None), None)
+        value = (
+            raw.get(aliases[0])
+            if raw.get("nutrition_basis", {}).get("kind") == "database"
+            else next((raw[key] for key in aliases if raw.get(key) is not None), None)
+        )
         values.append(_as_nonnegative_number(value, label, MAX_MACRO_G, clamp=clamp))
-    return tuple(values)
+    return values[0], values[1], values[2]
 
 
 def _normalize_source(value: Any) -> str:

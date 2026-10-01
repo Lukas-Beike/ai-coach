@@ -19,6 +19,7 @@ from backend.coach.proposals import (
 from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.nutrition.food_database import FoodDatabaseService
 
 
 class CoachProposalCreationTests(unittest.TestCase):
@@ -191,6 +192,23 @@ class CoachProposalCreationTests(unittest.TestCase):
             result["proposed_action"]["diff"][0],
             {"name": "Recovery bowl", "description": "Oats with berries", "kcal": "450", "carbs": "64", "protein": "22", "fat": "8"},
         )
+
+    def test_database_preview_uses_server_values_and_freezes_the_calculation(self) -> None:
+        nutrition = Mock()
+        nutrition.food_database = FoodDatabaseService()
+        args = {"payload": {"name": "Oats", "description": "50 g oats", "kcal": 999,
+                            "food_ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]}}
+        intent = {"operation": "save_nutrition_template", "target_system": "local", "authorization_scope": ["local_nutrition"], "request": {"source_message_ids": [7]}}
+        result = self._service(nutrition_service=lambda: nutrition).create_local_write(
+            "save_nutrition_template", args, intent, conversation_id="conversation-1",
+            client_turn_id="turn-1", session_csrf_hash="session-1",
+        )
+        diff = result["proposed_action"]["diff"][0]
+        self.assertEqual(diff["kcal"], "174")
+        self.assertIn("Max Rubner-Institut", diff["source"])
+        self.assertIn("50 g (Basis 100 g)", diff["source"])
+        stored = json.loads(self._rows()[0]["payload"])
+        self.assertEqual(stored["arguments"]["_food_calculation"]["kcal"], 174)
 
     def test_competition_remote_write_binds_dirty_rows_and_tombstones_to_approval(self) -> None:
         with self.database_manager.unit_of_work() as db:
