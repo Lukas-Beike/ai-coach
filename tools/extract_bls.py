@@ -16,6 +16,77 @@ from pathlib import Path
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
 
+def _cell_values(row: ET.Element, strings: list[str]) -> dict[str, str]:
+    cells = {}
+    for cell in row:
+        value = cell.find("m:v", NS)
+        if value is not None:
+            column = "".join(char for char in cell.attrib["r"] if char.isalpha())
+            cells[column] = (
+                strings[int(value.text)] if cell.get("t") == "s" else value.text
+            )
+    return cells
+
+
+def _validate_header(cells: dict[str, str]) -> None:
+    headers = {
+        "A": "BLS Code",
+        "B": "Lebensmittelbezeichnung",
+        "G": "ENERCC ",
+        "M": "PROT625 ",
+        "P": "FAT ",
+        "S": "CHO ",
+    }
+    if any(
+        not cells.get(column, "").startswith(prefix)
+        for column, prefix in headers.items()
+    ):
+        raise ValueError("Unexpected BLS column layout")
+
+
+def _nutrition_fields(
+    cells: dict[str, str],
+) -> tuple[dict[str, float | None], dict[str, str]]:
+    nutrients = {}
+    origins = {}
+    for key, column, origin in (
+        ("kcal", "G", "H"),
+        ("protein_g", "M", "N"),
+        ("fat_g", "P", "Q"),
+        ("carbs_g", "S", "T"),
+    ):
+        value = cells.get(column, "-")
+        nutrients[key] = (
+            None
+            if value in ("-", "", "TR") or value.startswith("<")
+            else round(float(value), 4)
+        )
+        origins[key] = cells.get(origin, "")
+    return nutrients, origins
+
+
+def _extract_rows(sheet: bytes, strings: list[str]) -> list[dict]:
+    foods = []
+    for _, row in ET.iterparse(io.BytesIO(sheet), events=("end",)):
+        if row.tag != f"{{{NS['m']}}}row":
+            continue
+        cells = _cell_values(row, strings)
+        if row.attrib["r"] == "1":
+            _validate_header(cells)
+        else:
+            nutrients, origins = _nutrition_fields(cells)
+            foods.append(
+                {
+                    "code": cells["A"],
+                    "name": cells["B"],
+                    "per_100": nutrients,
+                    "origins": origins,
+                }
+            )
+        row.clear()
+    return foods
+
+
 def extract(archive: Path) -> dict:
     with zipfile.ZipFile(archive) as outer:
         workbook = outer.read("BLS_4_0_2025_DE/BLS_4_0_Daten_2025_DE.xlsx")
@@ -24,56 +95,7 @@ def extract(archive: Path) -> dict:
             "".join(item.itertext())
             for item in ET.fromstring(inner.read("xl/sharedStrings.xml"))
         ]
-        foods = []
-        for _, row in ET.iterparse(
-            io.BytesIO(inner.read("xl/worksheets/sheet1.xml")), events=("end",)
-        ):
-            if row.tag != f"{{{NS['m']}}}row":
-                continue
-            cells = {}
-            for cell in row:
-                value = cell.find("m:v", NS)
-                if value is not None:
-                    column = "".join(c for c in cell.attrib["r"] if c.isalpha())
-                    cells[column] = (
-                        strings[int(value.text)] if cell.get("t") == "s" else value.text
-                    )
-            if row.attrib["r"] == "1":
-                for column, prefix in {
-                    "A": "BLS Code",
-                    "B": "Lebensmittelbezeichnung",
-                    "G": "ENERCC ",
-                    "M": "PROT625 ",
-                    "P": "FAT ",
-                    "S": "CHO ",
-                }.items():
-                    if not cells.get(column, "").startswith(prefix):
-                        raise ValueError("Unexpected BLS column layout")
-            else:
-                nutrients = {}
-                origins = {}
-                for key, column, origin in (
-                    ("kcal", "G", "H"),
-                    ("protein_g", "M", "N"),
-                    ("fat_g", "P", "Q"),
-                    ("carbs_g", "S", "T"),
-                ):
-                    value = cells.get(column, "-")
-                    nutrients[key] = (
-                        None
-                        if value in ("-", "", "TR") or value.startswith("<")
-                        else round(float(value), 4)
-                    )
-                    origins[key] = cells.get(origin, "")
-                foods.append(
-                    {
-                        "code": cells["A"],
-                        "name": cells["B"],
-                        "per_100": nutrients,
-                        "origins": origins,
-                    }
-                )
-            row.clear()
+        foods = _extract_rows(inner.read("xl/worksheets/sheet1.xml"), strings)
     if len(foods) != 7140:
         raise ValueError("Unexpected BLS 4.0 record count")
     return {

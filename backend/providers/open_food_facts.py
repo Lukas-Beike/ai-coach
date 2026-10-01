@@ -43,40 +43,53 @@ def _nutrition_values(
 ) -> tuple[dict[str, Any], Any, dict[str, str], str]:
     nutrition = raw.get("nutrition")
     if isinstance(nutrition, dict):
-        aggregate = nutrition.get("aggregated_set")
-        if not isinstance(aggregate, dict):
-            return {}, None, {}, "unknown"
-        nutrients = aggregate.get("nutrients")
-        if not isinstance(nutrients, dict):
-            return {}, None, {}, "unknown"
-        values = {}
-        origins = {}
-        for name, unit in (
-            ("energy-kcal", "kcal"),
-            ("energy", "kJ"),
-            ("carbohydrates", "g"),
-            ("proteins", "g"),
-            ("fat", "g"),
-        ):
-            entry = nutrients.get(name)
-            if not isinstance(entry, dict) or entry.get("unit") != unit:
-                continue
-            # OFF may fill gaps with AI estimates. Do not disguise these as label values.
-            if entry.get("source") == "estimate" or entry.get("modifier"):
-                continue
-            key = "energy-kj" if name == "energy" else name
-            values[key + "_100g"] = entry.get("value")
-            origins[key] = str(entry.get("source") or "unknown")[:40]
-        preparation = str(aggregate.get("preparation") or "unknown")[:40]
-        return values, aggregate.get("per"), origins, preparation
-    # The documented CGI text-search endpoint still returns the flat nutriments representation.
+        return _aggregated_nutrition_values(nutrition.get("aggregated_set"))
+    return _legacy_nutrition_values(raw)
+
+
+def _aggregated_nutrition_values(
+    aggregate: Any,
+) -> tuple[dict[str, Any], Any, dict[str, str], str]:
+    if not isinstance(aggregate, dict):
+        return {}, None, {}, "unknown"
+    nutrients = aggregate.get("nutrients")
+    if not isinstance(nutrients, dict):
+        return {}, None, {}, "unknown"
+    values: dict[str, Any] = {}
+    origins: dict[str, str] = {}
+    for name, unit in (
+        ("energy-kcal", "kcal"),
+        ("energy", "kJ"),
+        ("carbohydrates", "g"),
+        ("proteins", "g"),
+        ("fat", "g"),
+    ):
+        entry = nutrients.get(name)
+        if not isinstance(entry, dict) or entry.get("unit") != unit:
+            continue
+        if entry.get("source") == "estimate" or entry.get("modifier"):
+            continue
+        key = "energy-kj" if name == "energy" else name
+        values[key + "_100g"] = entry.get("value")
+        origins[key] = str(entry.get("source") or "unknown")[:40]
+    preparation = str(aggregate.get("preparation") or "unknown")[:40]
+    return values, aggregate.get("per"), origins, preparation
+
+
+def _legacy_nutrition_values(
+    raw: dict[str, Any],
+) -> tuple[dict[str, Any], Any, dict[str, str], str]:
     nutrients = raw.get("nutriments")
-    return (
-        nutrients if isinstance(nutrients, dict) else {},
-        raw.get("nutrition_data_per"),
-        {},
-        "as_sold",
-    )
+    values = nutrients if isinstance(nutrients, dict) else {}
+    return values, raw.get("nutrition_data_per"), {}, "as_sold"
+
+
+def _basis_unit(basis: Any) -> str | None:
+    if basis == "100ml":
+        return "ml"
+    if basis == "100g":
+        return "g"
+    return None
 
 
 def project_product(raw: Any) -> dict[str, Any] | None:
@@ -90,7 +103,7 @@ def project_product(raw: Any) -> dict[str, Any] | None:
         kj = _number(nutrients.get("energy-kj_100g"), 4200)
         kcal = round(kj / 4.184, 4) if kj is not None else None
     # OFF uses *_100g for both grams and millilitres. Never guess the unit.
-    unit = "ml" if basis == "100ml" else "g" if basis == "100g" else None
+    unit = _basis_unit(basis)
     return {
         "id": "off:" + str(raw["code"]),
         "name": str(raw.get("product_name_de") or raw.get("product_name") or "Produkt")[
@@ -199,40 +212,7 @@ class OpenFoodFactsClient:
                     "Accept": "application/json",
                 },
             )
-            try:
-                response = request_json(
-                    request, timeout=10, max_bytes=500_000, opener=self._opener
-                )
-            except HTTPError as exc:
-                if exc.code == 404:
-                    raise AppError(
-                        404, "Produkt nicht gefunden.", reason="food_not_found"
-                    ) from None
-                if exc.code in (429, 503):
-                    retry_after = _number(
-                        exc.headers.get("Retry-After")
-                        if exc.headers is not None
-                        else None,
-                        86400,
-                    )
-                    self._blocked_until = self._clock() + max(60, retry_after or 60)
-                    raise AppError(
-                        429,
-                        "Open Food Facts begrenzt die Anfragen. Bitte später erneut versuchen.",
-                        reason="food_database_rate_limited",
-                    ) from None
-                raise AppError(
-                    502, UNAVAILABLE, reason="food_database_unavailable"
-                ) from None
-            except (
-                URLError,
-                OSError,
-                ProviderInvalidResponse,
-                ProviderResponseTooLarge,
-            ):
-                raise AppError(
-                    502, UNAVAILABLE, reason="food_database_unavailable"
-                ) from None
+            response = self._request_response(request)
             if not isinstance(response.payload, dict):
                 raise AppError(
                     502, UNAVAILABLE, reason="food_database_invalid_response"
@@ -242,3 +222,33 @@ class OpenFoodFactsClient:
             while len(self._cache) > 256:
                 self._cache.popitem(last=False)
             return copy.deepcopy(response.payload)
+
+    def _request_response(self, request: Request) -> Any:
+        try:
+            return request_json(
+                request, timeout=10, max_bytes=500_000, opener=self._opener
+            )
+        except HTTPError as exc:
+            self._raise_http_error(exc)
+        except (URLError, OSError, ProviderInvalidResponse, ProviderResponseTooLarge):
+            raise AppError(
+                502, UNAVAILABLE, reason="food_database_unavailable"
+            ) from None
+
+    def _raise_http_error(self, exc: HTTPError) -> None:
+        if exc.code == 404:
+            raise AppError(
+                404, "Produkt nicht gefunden.", reason="food_not_found"
+            ) from None
+        if exc.code in (429, 503):
+            retry_after = _number(
+                exc.headers.get("Retry-After") if exc.headers is not None else None,
+                86400,
+            )
+            self._blocked_until = self._clock() + max(60, retry_after or 60)
+            raise AppError(
+                429,
+                "Open Food Facts begrenzt die Anfragen. Bitte sp￼ter erneut versuchen.",
+                reason="food_database_rate_limited",
+            ) from None
+        raise AppError(502, UNAVAILABLE, reason="food_database_unavailable") from None

@@ -47,6 +47,10 @@ LOGGER = logging.getLogger("intervals_coach")
 _MAX_REMOTE_APPROVAL_DETAILS = 5000
 
 
+def _preview_nutrient(value: Any) -> str:
+    return str(value) if value is not None else "unbekannt"
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -456,6 +460,22 @@ class CoachProposalCreationService:
         }
         _validate_local_coach_write(payload)
         values = arguments["payload"]
+        preview_values = self._local_write_preview_values(values, payload)
+        diff = [self._local_write_preview_diff(preview_values)]
+        return self.create(
+            {
+                "action_type": "local_coach_write",
+                "target_system": "local",
+                "object_ids": {"operation": tool, "template_id": values.get("id")},
+                "diff": diff,
+                "payload": payload,
+            },
+            session_csrf_hash,
+        )
+
+    def _local_write_preview_values(
+        self, values: dict[str, Any], payload: dict[str, Any]
+    ) -> dict[str, Any]:
         preview_values = dict(values)
         template_id = str(values.get("id") or "").strip()
         if template_id and self._nutrition_service:
@@ -477,47 +497,24 @@ class CoachProposalCreationService:
             )
             preview_values.update(calculation)
             payload["arguments"]["_food_calculation"] = calculation
-        diff = [
-            {
-                "name": preview_values.get("name", ""),
-                "description": str(preview_values.get("description") or "")[:500],
-                "kcal": str(
-                    preview_values.get("kcal")
-                    if preview_values.get("kcal") is not None
-                    else "unbekannt"
-                ),
-                "carbs": str(
-                    preview_values.get("carbs_g")
-                    if preview_values.get("carbs_g") is not None
-                    else "unbekannt"
-                ),
-                "protein": str(
-                    preview_values.get("protein_g")
-                    if preview_values.get("protein_g") is not None
-                    else "unbekannt"
-                ),
-                "fat": str(
-                    preview_values.get("fat_g")
-                    if preview_values.get("fat_g") is not None
-                    else "unbekannt"
-                ),
-            }
-        ]
+        return preview_values
+
+    @staticmethod
+    def _local_write_preview_diff(preview_values: dict[str, Any]) -> dict[str, str]:
+        diff = {
+            "name": preview_values.get("name", ""),
+            "description": str(preview_values.get("description") or "")[:500],
+            "kcal": _preview_nutrient(preview_values.get("kcal")),
+            "carbs": _preview_nutrient(preview_values.get("carbs_g")),
+            "protein": _preview_nutrient(preview_values.get("protein_g")),
+            "fat": _preview_nutrient(preview_values.get("fat_g")),
+        }
         if preview_values.get("nutrition_basis", {}).get("kind") == "database":
-            diff[0]["source"] = "; ".join(
+            diff["source"] = "; ".join(
                 f"{item['source']}: {item['name']}, {item['amount']:g} {item['unit']} (Basis 100 {item['basis_unit']})"
                 for item in preview_values["nutrition_basis"]["ingredients"]
             )
-        return self.create(
-            {
-                "action_type": "local_coach_write",
-                "target_system": "local",
-                "object_ids": {"operation": tool, "template_id": values.get("id")},
-                "diff": diff,
-                "payload": payload,
-            },
-            session_csrf_hash,
-        )
+        return diff
 
 
 def _approved_remote_arguments(

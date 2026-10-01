@@ -91,6 +91,48 @@ class FoodDatabaseService:
             return self._off.product(food_id[4:])
         raise AppError(404, "Lebensmittel nicht gefunden.", reason="food_not_found")
 
+    def _resolve_ingredient(self, item: Any) -> tuple[float, dict[str, Any]]:
+        if not isinstance(item, dict) or set(item) != {"food_id", "amount", "unit"}:
+            raise AppError(400, "Zutat muss food_id, amount und unit enthalten.")
+        try:
+            amount = float(item["amount"])
+        except (TypeError, ValueError):
+            raise AppError(400, "Ungültige Zutatenmenge.") from None
+        if (
+            isinstance(item["amount"], bool)
+            or not math.isfinite(amount)
+            or not 0 < amount <= 5000
+        ):
+            raise AppError(
+                400, "Zutatenmenge muss größer als 0 und höchstens 5000 sein."
+            )
+        food = self.resolve(item["food_id"])
+        if food["basis_unit"] is None or item["unit"] != food["basis_unit"]:
+            raise AppError(
+                400,
+                "Bezugsmenge oder Einheit ist unklar. Gramm und Milliliter nicht ohne Dichte umrechnen.",
+                reason="food_unit_mismatch",
+            )
+        if food["per_100"]["kcal"] is None:
+            raise AppError(
+                400,
+                "Kalorienwert fehlt. Verpackungswert verwenden oder Schätzung kennzeichnen.",
+                reason="food_energy_missing",
+            )
+        return amount, food
+
+    @staticmethod
+    def _accumulate_nutrients(
+        totals: dict[str, float | None], food: dict[str, Any], amount: float
+    ) -> None:
+        for key in NUTRIENTS:
+            value = food["per_100"][key]
+            totals[key] = (
+                None
+                if value is None or totals[key] is None
+                else totals[key] + value * amount / 100
+            )
+
     def calculate(self, ingredients: Any) -> dict[str, Any]:
         if not isinstance(ingredients, list) or not 1 <= len(ingredients) <= 20:
             raise AppError(
@@ -99,40 +141,8 @@ class FoodDatabaseService:
         totals: dict[str, float | None] = {key: 0.0 for key in NUTRIENTS}
         basis = []
         for item in ingredients:
-            if not isinstance(item, dict) or set(item) != {"food_id", "amount", "unit"}:
-                raise AppError(400, "Zutat muss food_id, amount und unit enthalten.")
-            try:
-                amount = float(item["amount"])
-            except (TypeError, ValueError):
-                raise AppError(400, "Ungültige Zutatenmenge.") from None
-            if (
-                isinstance(item["amount"], bool)
-                or not math.isfinite(amount)
-                or not 0 < amount <= 5000
-            ):
-                raise AppError(
-                    400, "Zutatenmenge muss größer als 0 und höchstens 5000 sein."
-                )
-            food = self.resolve(item["food_id"])
-            if food["basis_unit"] is None or item["unit"] != food["basis_unit"]:
-                raise AppError(
-                    400,
-                    "Bezugsmenge oder Einheit ist unklar. Gramm und Milliliter nicht ohne Dichte umrechnen.",
-                    reason="food_unit_mismatch",
-                )
-            if food["per_100"]["kcal"] is None:
-                raise AppError(
-                    400,
-                    "Kalorienwert fehlt. Verpackungswert verwenden oder Schätzung kennzeichnen.",
-                    reason="food_energy_missing",
-                )
-            for key in NUTRIENTS:
-                value = food["per_100"][key]
-                totals[key] = (
-                    None
-                    if value is None or totals[key] is None
-                    else totals[key] + value * amount / 100
-                )
+            amount, food = self._resolve_ingredient(item)
+            self._accumulate_nutrients(totals, food, amount)
             basis.append({**food, "amount": amount, "unit": item["unit"]})
         return {
             **{

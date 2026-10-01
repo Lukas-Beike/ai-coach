@@ -147,6 +147,11 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.assertEqual(self.service.get_today_summary()["entry_count"], 0)
         entry = self.service.log_meal({"description": "Estimate", "kcal": 100, "source": "coach", "nutrition_basis": {"kind": "database"}})
         self.assertEqual(entry["nutrition_basis"]["kind"], "estimate")
+        label_entry = self.service.log_meal({
+            "description": "Packaged snack", "kcal": 180, "source": "voice",
+            "packaging_label": True,
+        })
+        self.assertEqual(label_entry["nutrition_basis"]["kind"], "packaging_label")
 
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()

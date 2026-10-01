@@ -722,6 +722,10 @@ def build_tool_contracts(
                             "type": "string",
                             "enum": ["voice", "photo", "manual", "coach"],
                         },
+                        "packaging_label": {
+                            "type": "boolean",
+                            "description": "True only when the athlete supplied values copied from the product packaging",
+                        },
                     },
                 }
             },
@@ -762,6 +766,7 @@ def build_tool_contracts(
                             "minimum": 0,
                             "maximum": 1000,
                         },
+                        "packaging_label": {"type": "boolean"},
                     },
                 },
             },

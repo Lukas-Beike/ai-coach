@@ -91,8 +91,11 @@ class NutritionService:
         self.food_database = food_database or FoodDatabaseService()
 
     def _prepare_values(self, payload: dict[str, Any]) -> dict[str, Any]:
+        packaging_label = payload.get("packaging_label") is True
         payload = {
-            key: value for key, value in payload.items() if key != "nutrition_basis"
+            key: value
+            for key, value in payload.items()
+            if key not in {"nutrition_basis", "packaging_label"}
         }
         if "food_ingredients" in payload:
             return {
@@ -100,11 +103,19 @@ class NutritionService:
                 **self.food_database.calculate(payload["food_ingredients"]),
             }
         kind = (
+            "packaging_label"
+            if packaging_label
+            else self._nutrition_basis_kind(payload)
+        )
+        return {**payload, "nutrition_basis": {"kind": kind}}
+
+    @staticmethod
+    def _nutrition_basis_kind(payload: dict[str, Any]) -> str:
+        return (
             "estimate"
             if payload.get("source") in {"coach", "photo", "voice"}
             else "manual"
         )
-        return {**payload, "nutrition_basis": {"kind": kind}}
 
     def list_templates(self) -> list[dict[str, Any]]:
         with self._db_lock, self._database_manager.unit_of_work() as db:
@@ -136,42 +147,67 @@ class NutritionService:
                 payload.get("name") or (existing or {}).get("name") or ""
             ).strip()
             self._validate_template_name(db, name, template_id, existing)
-            values = {**(existing or {}), **payload}
-            values = (
-                {**values, **prepared}
-                if "food_ingredients" in payload
-                else self._prepare_values(values)
-            )
-            normalized = normalize_nutrition_entry(
-                values, local_now_factory=self._local_now
-            )
-            if existing and not (set(payload) & {*NUTRIENTS, "food_ingredients"}):
-                normalized["nutrition_basis"] = existing.get(
-                    "nutrition_basis", {"kind": "manual"}
-                )
-            template = {
-                key: normalized[key]
-                for key in (
-                    "description",
-                    "meal_type",
-                    "kcal",
-                    "carbs_g",
-                    "protein_g",
-                    "fat_g",
-                    "source",
-                    "nutrition_basis",
-                )
-            }
-            template["meal_type_explicit"] = "meal_type" in payload or bool(
-                existing and existing.get("meal_type_explicit")
-            )
-            template.update(
-                id=template_id or uuid.uuid4().hex,
-                name=name,
-                updated_at=self._utc_now(),
+            template = self._build_template(
+                payload, prepared, existing, name, template_id
             )
             self._templates.save(db, template)
             return template
+
+    def _prepare_template_values(
+        self, payload: dict[str, Any], expected: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        prepared = (
+            self._prepare_values(payload) if "food_ingredients" in payload else payload
+        )
+        if expected is not None and any(
+            prepared.get(key) != value for key, value in expected.items()
+        ):
+            raise AppError(
+                409,
+                "Datenbankwerte haben sich seit der Vorschau ge�ndert. Bitte neue Vorschau best�tigen.",
+                reason="food_calculation_changed",
+            )
+        return prepared
+
+    def _build_template(
+        self,
+        payload: dict[str, Any],
+        prepared: dict[str, Any],
+        existing: dict[str, Any] | None,
+        name: str,
+        template_id: str,
+    ) -> dict[str, Any]:
+        values = {**(existing or {}), **payload}
+        values = (
+            {**values, **prepared}
+            if "food_ingredients" in payload
+            else self._prepare_values(values)
+        )
+        normalized = normalize_nutrition_entry(
+            values, local_now_factory=self._local_now
+        )
+        if existing and not (set(payload) & {*NUTRIENTS, "food_ingredients"}):
+            normalized["nutrition_basis"] = existing.get(
+                "nutrition_basis", {"kind": "manual"}
+            )
+        fields = (
+            "description",
+            "meal_type",
+            "kcal",
+            "carbs_g",
+            "protein_g",
+            "fat_g",
+            "source",
+            "nutrition_basis",
+        )
+        template = {key: normalized[key] for key in fields}
+        template["meal_type_explicit"] = "meal_type" in payload or bool(
+            existing and existing.get("meal_type_explicit")
+        )
+        template.update(
+            id=template_id or uuid.uuid4().hex, name=name, updated_at=self._utc_now()
+        )
+        return template
 
     def _validate_template_name(
         self,
@@ -351,7 +387,10 @@ class NutritionService:
                     if calculation is not None
                     else self._prepare_values(merged)
                 )
-                if "food_ingredients" not in canonical_changes:
+                if (
+                    "food_ingredients" not in canonical_changes
+                    and canonical_changes.get("packaging_label") is not True
+                ):
                     merged["nutrition_basis"] = {"kind": "manual_correction"}
             entry = normalize_nutrition_entry(merged, local_now_factory=self._local_now)
             entry["id"] = clean_id

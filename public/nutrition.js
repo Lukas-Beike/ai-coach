@@ -48,9 +48,10 @@ function nutritionCard(item, template, date) {
   const sourceLabel = sourceLabels[item.source] || "Erfasst";
   const syncLabel = item.sync_state === "synced" ? " · Synchronisiert" : " · Lokal";
   const basis = item.nutrition_basis;
-  const basisLabel = basis?.kind === "database"
-    ? "Datenbankberechnung · " + basis.ingredients.map((food) => `${food.source}: ${food.name}, ${food.amount} ${food.unit} (Basis 100 ${food.basis_unit})`).join("; ")
-    : basis?.kind === "manual_correction" ? "Manuell korrigierte Nährwerte" : sourceLabel;
+  let basisLabel = sourceLabel;
+  if (basis?.kind === "database") basisLabel = "Datenbankberechnung · " + basis.ingredients.map((food) => `${food.source}: ${food.name}, ${food.amount} ${food.unit} (Basis 100 ${food.basis_unit})`).join("; ");
+  else if (basis?.kind === "manual_correction") basisLabel = "Manuell korrigierte Nährwerte";
+  else if (basis?.kind === "packaging_label") basisLabel = "Verpackungsangabe";
   source.textContent = basisLabel + (template ? "" : syncLabel);
   const actions = document.createElement("div");
   const safeMealName = JSON.stringify(item.name);
