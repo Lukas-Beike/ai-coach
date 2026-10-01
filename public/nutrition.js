@@ -56,8 +56,8 @@ function nutritionCard(item, template, date) {
     actions.append(nutritionButton("Beim Coach erfassen", logPrompt));
   }
   const changePrompt = template
-    ? `Ich möchte die gespeicherte Mahlzeit ${safeMealName} (Vorlagen-ID ${item.id}) dauerhaft ändern. Bitte frage mich nach den Änderungen und zeige die neue Vorlage zur Bestätigung.`
-    : `Ich möchte den Ernährungseintrag vom ${date} (Eintrags-ID ${item.id}) korrigieren. Bitte frage mich nach der Änderung.`;
+    ? "Ich möchte die gespeicherte Mahlzeit " + safeMealName + " (Vorlagen-ID " + item.id + ") dauerhaft ändern. Bitte frage mich nach den Änderungen und zeige die neue Vorlage zur Bestätigung."
+    : "Ich möchte den Ernährungseintrag vom " + date + " (Eintrags-ID " + item.id + ") korrigieren. Bitte frage mich nach der Änderung.";
   actions.append(nutritionButton("Ändern beim Coach", changePrompt));
   const deleteTarget = template ? "die Mahlzeitvorlage" : "den Ernährungseintrag";
   const deletePrompt = `Ich möchte ${deleteTarget} mit ID ${item.id} löschen. Bitte bestätige vorher mit mir, dass du den richtigen Eintrag gefunden hast.`;
