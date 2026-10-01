@@ -183,9 +183,9 @@ function renderActiveRoute(mainRoute, panelRoute) {
   if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
   if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
   if (state.data && mainRoute === "more") {
-    loadContextPreview();
-    loadLogs();
-    loadChangeHistory();
+    void loadContextPreview();
+    void loadLogs();
+    void loadChangeHistory();
   }
 }
 
@@ -401,7 +401,7 @@ function finishAppShellLoading() {
   // still loading. Re-render after removing that state so its placeholder is
   // replaced even if a deferred domain request has not settled yet.
   renderMessages(state.data?.messages || [], true);
-  applyNavigationRoute(routeFromHash(), { historyMode: hashContainsKnownRoute() ? "none" : "replace" });
+  void applyNavigationRoute(routeFromHash(), { historyMode: hashContainsKnownRoute() ? "none" : "replace" });
 }
 
 async function api(path, options = {}) {
@@ -627,7 +627,7 @@ function handleSyncStatus(status, broadcast = false) {
 
 function scheduleSyncPoll(delay = SYNC_POLL_IDLE_MS) {
   if (state.syncPoll.timer) clearTimeout(state.syncPoll.timer);
-  state.syncPoll.timer = setTimeout(() => { state.syncPoll.timer = null; pollSyncStatus(); }, delay);
+  state.syncPoll.timer = setTimeout(() => { state.syncPoll.timer = null; void pollSyncStatus(); }, delay);
 }
 
 async function pollSyncStatus() {
@@ -973,7 +973,7 @@ async function toggleVoiceInput() {
       const recordedType = recorder.mimeType || mimeType || "audio/webm";
       const blob = new Blob(chunks, { type: recordedType });
       stopVoiceCapture(recorder);
-      if (blob.size) transcribeVoice(blob);
+      if (blob.size) void transcribeVoice(blob);
       else setVoiceStatus("Es wurde keine Sprache aufgenommen.", true);
     }, { once: true });
     recorder.start();
@@ -1031,9 +1031,9 @@ async function showPwaNotification(title, options, key) {
 
 function notifyState(data) {
   const next = data.planning?.season?.next_event;
-  if (next && next.days_until >= 0 && next.days_until <= 3) showPwaNotification("Wettkampf steht bevor", { body: `${next.name} ist in ${next.days_until} Tag(en).`, tag: `competition:${next.id}` }, `competition:${next.id}:${next.event_date}`);
+  if (next && next.days_until >= 0 && next.days_until <= 3) void showPwaNotification("Wettkampf steht bevor", { body: `${next.name} ist in ${next.days_until} Tag(en).`, tag: `competition:${next.id}` }, `competition:${next.id}:${next.event_date}`);
   const error = data.sync?.last_error || data.garmin_sync?.status?.includes("Fehler") && data.garmin_sync.status;
-  if (error) showPwaNotification("Intervals Coach benötigt Aufmerksamkeit", { body: String(error), tag: "sync-error" }, `error:${error}`);
+  if (error) void showPwaNotification("Intervals Coach benötigt Aufmerksamkeit", { body: String(error), tag: "sync-error" }, `error:${error}`);
 }
 
 function todayIso() { return timezoneDateKey(state.data?.profile?.timezone, new Date()); }
@@ -1921,7 +1921,7 @@ async function executeCoachActionProposal(proposal, button) {
     addCoachReceipt(receipt);
     toast(receipt.message);
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["activities"] : ["plan", "library", "profile", "feedback"]);
-    if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) applyNavigationRoute("plan", { historyMode: "push" });
+    if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) void applyNavigationRoute("plan", { historyMode: "push" });
   } catch (error) {
     addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
     if ([409, 410].includes(error.status)) { proposal.status = "expired"; renderCoachActionReview(); }
@@ -3233,13 +3233,13 @@ function askCoachAboutCompetitions() {
   const input = $("#messageInput");
   if (!input) return;
   if (input.value.trim()) {
-    applyNavigationRoute("coach", { historyMode: "push" });
+    void applyNavigationRoute("coach", { historyMode: "push" });
     requestAnimationFrame(() => input.focus());
     return;
   }
   input.value = "Ich möchte meine Zielwettkämpfe hinzufügen oder überarbeiten.";
   input.dispatchEvent(new Event("input"));
-  applyNavigationRoute("coach", { historyMode: "push" });
+  void applyNavigationRoute("coach", { historyMode: "push" });
   requestAnimationFrame(() => input.focus());
 }
 
@@ -3362,7 +3362,7 @@ function metricEditor(item, metric, label, value, editable) {
     edit.title = editing ? "Wert speichern" : `${label} bearbeiten`;
     edit.setAttribute("aria-label", edit.title);
     if (editing) { input.focus(); input.select(); }
-    else saveInlineMetric(editable.key, input.value, edit);
+    else void saveInlineMetric(editable.key, input.value, edit);
   });
   return { edit, input };
 }
@@ -4647,22 +4647,22 @@ document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
   const linkedRoute = String(link.getAttribute("href") || "").replace(/^#/, "").trim();
-  applyNavigationRoute(linkedRoute || link.dataset.route, { historyMode: "push" });
+  void applyNavigationRoute(linkedRoute || link.dataset.route, { historyMode: "push" });
 }));
 document.querySelectorAll("[data-analysis-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
-  applyNavigationRoute(`analysis/${link.dataset.analysisSegment}`, { historyMode: "push" });
+  void applyNavigationRoute(`analysis/${link.dataset.analysisSegment}`, { historyMode: "push" });
 }));
 document.querySelectorAll("[data-plan-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
-  applyNavigationRoute(`plan/${link.dataset.planSegment}`, { historyMode: "push" });
+  void applyNavigationRoute(`plan/${link.dataset.planSegment}`, { historyMode: "push" });
 }));
 document.querySelectorAll("[data-more-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
-  applyNavigationRoute(`more/${link.dataset.moreSegment}`, { historyMode: "push" });
+  void applyNavigationRoute(`more/${link.dataset.moreSegment}`, { historyMode: "push" });
 }));
 document.querySelectorAll("dialog").forEach((dialog) => dialog.addEventListener("close", () => restoreDialogFocus(dialog)));
 globalThis.addEventListener("hashchange", syncNavigationRoute);
@@ -4744,8 +4744,8 @@ $("#chatJumpToComposer").addEventListener("click", () => {
   jumpToChatComposer();
 });
 $("#headerActionButton").addEventListener("click", (event) => {
-  if (event.currentTarget.dataset.action === "performance") refreshPerformance();
-  else if (event.currentTarget.dataset.action === "activities") syncNow(event);
+  if (event.currentTarget.dataset.action === "performance") void refreshPerformance();
+  else if (event.currentTarget.dataset.action === "activities") void syncNow(event);
 });
 $("#systemIntervalsSyncButton").addEventListener("click", syncNow);
 $("#systemIntervalsFullResyncButton").addEventListener("click", () => fullResync("intervals"));
@@ -4779,7 +4779,7 @@ $("#backupRestoreButton").addEventListener("click", restoreDatabaseBackup);
 $("#logoutButton").addEventListener("click", logout);
 $("#systemContextPreviewButton").addEventListener("click", () => {
   $("#systemContextPreviewButton").dataset.loaded = "false";
-  loadContextPreview();
+  void loadContextPreview();
 });
 $("#messageInput").addEventListener("input", (event) => {
   const keepLatestVisible = $("#chatPanel")?.classList.contains("active") && chatIsNearBottom();
@@ -4850,5 +4850,5 @@ setupConnectivityStatus();
 renderNotificationStatus();
 setupSyncStatusMonitoring();
 scheduleMobileViewportLayout();
-syncNavigationRoute();
-bootstrapAuth();
+void syncNavigationRoute();
+void bootstrapAuth();
