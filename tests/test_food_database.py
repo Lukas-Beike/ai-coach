@@ -134,7 +134,7 @@ class OpenFoodFactsTests(unittest.TestCase):
         self.assertEqual(opener.call_count, 1)
         req = opener.call_args.args[0]
         self.assertTrue(
-            req.full_url.startswith("https://world.openfoodfacts.org/api/v3.6/product/")
+            req.full_url.startswith("https://world.openfoodfacts.org/api/v3/product/")
         )
         self.assertIn("IntervalsCoach", req.get_header("User-agent"))
         self.assertIsNone(req.get_header("Authorization"))

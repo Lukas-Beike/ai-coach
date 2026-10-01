@@ -186,7 +186,11 @@ class NutritionService:
         normalized = normalize_nutrition_entry(
             values, local_now_factory=self._local_now
         )
-        if existing and not (set(payload) & {*NUTRIENTS, "food_ingredients"}):
+        nutrients_unchanged = not any(
+            key in payload and payload[key] != (existing or {}).get(key)
+            for key in NUTRIENTS
+        )
+        if existing and "food_ingredients" not in payload and nutrients_unchanged:
             normalized["nutrition_basis"] = existing.get(
                 "nutrition_basis", {"kind": "manual"}
             )

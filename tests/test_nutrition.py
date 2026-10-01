@@ -133,7 +133,12 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         logged = self.service.log_template(template["id"], 0.5)
         self.assertEqual(logged["kcal"], 87)
         self.assertEqual(logged["nutrition_basis"]["ingredients"][0]["amount"], 25)
-        self.service.save_template({"id": template["id"], "kcal": 700})
+        renamed = self.service.save_template({
+            "id": template["id"], "name": "Oats breakfast", "kcal": template["kcal"],
+        })
+        self.assertEqual(renamed["nutrition_basis"], template["nutrition_basis"])
+        corrected = self.service.save_template({"id": template["id"], "kcal": 700})
+        self.assertEqual(corrected["nutrition_basis"]["kind"], "estimate")
         self.assertEqual(self.service.get_meal(logged["id"])["nutrition_basis"], logged["nutrition_basis"])
         calculation = self.service.food_database.calculate(payload["food_ingredients"])
         with self.assertRaises(AppError) as raised:
