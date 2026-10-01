@@ -51,7 +51,7 @@ class StructuredTrainingPlanReplacementService:
             "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
             "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
             "AND (? = '' OR json_extract(payload, '$.plan_id') = ?) "
-            "AND (? <> '' OR COALESCE(json_extract(payload, '$.source'), 'coach') IN ('coach', 'library')) "
+            "AND (? <> '' OR COALESCE(json_extract(payload, '$.source'), 'coach') IN ('coach', 'library', 'intervals')) "
             "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) BETWEEN ? AND ?",
             (
                 selected_plan_id or "",
