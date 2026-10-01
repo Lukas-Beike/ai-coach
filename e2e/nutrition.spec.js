@@ -15,6 +15,9 @@ test("@responsive nutrition diary and saved meals use the Coach and preserve con
     await expect.poll(() => page.evaluate(() => !state.busy && !state.chatServerOperationId && !state.chatRequest)).toBe(true);
   };
   await send("E2E nutrition: confirm meal");
+  await expect(page.locator("#coachActionReview")).toBeVisible();
+  await page.locator("#coachActionReview").getByRole("button", { name: "Mahlzeitvorlage speichern" }).click();
+  await expect(page.locator("#coachActionReview")).toBeHidden();
   await page.evaluate(() => applyNavigationRoute("nutrition/meals", { historyMode: "push" }));
   await expect(page.locator("#nutritionTemplates .nutrition-card")).toHaveCount(1);
   await expect(page.locator("#nutritionTemplates")).toContainText("400 kcal");
@@ -29,6 +32,9 @@ test("@responsive nutrition diary and saved meals use the Coach and preserve con
   await page.locator('[data-nutrition-segment="meals"]').click();
   await page.locator("#nutritionTemplates").getByRole("button", { name: "Ändern beim Coach" }).click();
   await send("E2E nutrition: update meal");
+  await expect(page.locator("#coachActionReview")).toBeVisible();
+  await page.locator("#coachActionReview").getByRole("button", { name: "Mahlzeitvorlage speichern" }).click();
+  await expect(page.locator("#coachActionReview")).toBeHidden();
   await page.evaluate(() => applyNavigationRoute("nutrition/meals", { historyMode: "push" }));
   await expect(page.locator("#nutritionTemplates")).toContainText("600 kcal");
   await page.locator("#nutritionTemplates").getByRole("button", { name: "Löschen beim Coach" }).click();

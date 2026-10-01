@@ -1910,7 +1910,7 @@ function coachActionReceipt(proposal, result) {
   if (!duplicateDelete && result.sync_job_ids?.length) details = result.sync_job_ids.map((id) => `Syncjob ${id} eingereiht`);
   else if (!duplicateDelete && result.sync_job_id) details = [`Syncjob ${result.sync_job_id} eingereiht`];
   else if (remoteWrite) details = ["Freigegebene Remote-Änderung direkt ausgeführt"];
-  return { title, message, details, duplicateDelete, undo, remoteWrite };
+  return { title, message, details, duplicateDelete, undo, remoteWrite, localWrite };
 }
 
 async function executeCoachActionProposal(proposal, button) {
