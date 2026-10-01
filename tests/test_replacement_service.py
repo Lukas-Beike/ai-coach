@@ -8,9 +8,10 @@ import json
 import sqlite3
 import unittest
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 from backend.db import row_factory
 from backend.db.repositories import (
@@ -20,6 +21,7 @@ from backend.db.repositories import (
 )
 from backend.db.schema import initialize_schema
 from backend.errors import STALE_PLANNING_REVISION_ERROR, AppError
+from backend.planning.calendar_service import CalendarConflictService
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.replacement_service import (
     StructuredTrainingPlanReplacementService,
@@ -383,13 +385,31 @@ class ReplacementServiceTest(unittest.TestCase):
                 "period": {"start": "2030-01-10", "end": "2030-01-11"},
             }
         )
-        self.assertEqual(second["archived_count"], 2)
+        self.assertEqual(second["archived_count"], 3)
         imported = json.loads(
             self.db.execute(
                 "SELECT payload FROM planned_units WHERE local_id='broad-imported'"
             ).fetchone()["payload"]
         )
-        self.assertFalse(imported["archived"])
+        self.assertTrue(imported["archived"])
+
+    def test_imported_local_unit_is_replaced_without_calendar_conflict(self):
+        self.add_unit("imported", source="intervals", external_id="remote-id")
+        calendar = CalendarConflictService(
+            SimpleNamespace(unit_of_work=lambda: nullcontext(self.db)),
+            SimpleNamespace(list_events=lambda *args, **kwargs: []),
+        )
+        self.assertTrue(calendar.conflicts({"date": "2030-01-03"}))
+        result = self.make_service(calendar_conflict_service=calendar).replace(
+            {**self.request(), "period": {"start": "2030-01-03", "end": "2030-01-03"}}
+        )
+        self.assertEqual(result["archived_count"], 1)
+        row = self.db.execute(
+            "SELECT external_id, payload, sync_dirty FROM planned_units WHERE local_id='imported'"
+        ).fetchone()
+        self.assertTrue(json.loads(row["payload"])["local_deleted"])
+        self.assertEqual(row["external_id"], "remote-id")
+        self.assertEqual(row["sync_dirty"], 1)
 
     def test_calendar_conflict_is_checked_before_plan_or_unit_writes(self):
         self.add_plan("old-plan")

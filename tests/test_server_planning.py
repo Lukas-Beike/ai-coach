@@ -1335,7 +1335,7 @@ class ServerPlanningTests(ServerTestCase):
         )
         self.assertNotEqual(metadata_history["before_hash"], metadata_history["after_hash"])
 
-    def test_broad_plan_replace_preserves_imported_provider_units(self):
+    def test_broad_plan_replace_archives_imported_local_units_on_same_date(self):
         remote_date = (date.today() + timedelta(days=2)).isoformat()
         server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile([{
             "id": "remote-future-workout", "category": "WORKOUT", "type": "Ride",
@@ -1346,15 +1346,15 @@ class ServerPlanningTests(ServerTestCase):
         result = server.PLANNING_WORKFLOWS.structured_training_plan_replacement_service().replace({
             "expected_revision": state["planning_revision"],
             "payload": {"plan_name": "Coach replacement", "goal": "", "workouts": [{
-                "date": (date.today() + timedelta(days=1)).isoformat(),
+                "date": remote_date,
                 "sport": "Ride", "name": "New", "description": "- 40m 60% easy",
                 "duration_minutes": 40, "target": "AUTO", "rationale": "Test",
             }]},
         })
         self.assertEqual(result["status"], "replaced")
         imported = next(item for item in server.PLANNING_DATA.planned_unit().list(include_archived=True) if item.get("remote_event_id") == "remote-future-workout")
-        self.assertFalse(imported.get("local_deleted", False))
-        self.assertFalse(imported.get("archived", False))
+        self.assertTrue(imported.get("local_deleted", False))
+        self.assertTrue(imported.get("archived", False))
 
     def test_planned_unit_undo_rejects_a_new_date_conflict(self):
         old = server.PLANNING_DATA.planned_unit().create({
