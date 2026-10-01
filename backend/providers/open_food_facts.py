@@ -171,8 +171,7 @@ class OpenFoodFactsClient:
             raise AppError(400, "Barcode muss 8 bis 14 Ziffern enthalten.")
         payload = self._get(
             "product",
-            f"/api/v3/product/{barcode}?"
-            + urlencode({"fields": FIELDS, "lc": "de"}),
+            f"/api/v3/product/{barcode}?" + urlencode({"fields": FIELDS, "lc": "de"}),
         )
         food = (
             project_product(payload.get("product"))
