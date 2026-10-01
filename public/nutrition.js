@@ -49,13 +49,14 @@ function nutritionCard(item, template, date) {
   const syncLabel = item.sync_state === "synced" ? " · Synchronisiert" : " · Lokal";
   source.textContent = sourceLabel + (template ? "" : syncLabel);
   const actions = document.createElement("div");
+  const safeMealName = JSON.stringify(item.name);
   actions.className = "nutrition-actions";
   if (template) {
-    const logPrompt = `Ich habe am ${date} die gespeicherte Mahlzeit ${JSON.stringify(item.name)} (Vorlagen-ID ${item.id}) gegessen. Bitte kläre die Portionsanzahl mit mir.`;
+    const logPrompt = `Ich habe am ${date} die gespeicherte Mahlzeit ${safeMealName} (Vorlagen-ID ${item.id}) gegessen. Bitte kläre die Portionsanzahl mit mir.`;
     actions.append(nutritionButton("Beim Coach erfassen", logPrompt));
   }
   const changePrompt = template
-    ? `Ich möchte die gespeicherte Mahlzeit ${JSON.stringify(item.name)} (Vorlagen-ID ${item.id}) dauerhaft ändern. Bitte frage mich nach den Änderungen und zeige die neue Vorlage zur Bestätigung.`
+    ? `Ich möchte die gespeicherte Mahlzeit ${safeMealName} (Vorlagen-ID ${item.id}) dauerhaft ändern. Bitte frage mich nach den Änderungen und zeige die neue Vorlage zur Bestätigung.`
     : `Ich möchte den Ernährungseintrag vom ${date} (Eintrags-ID ${item.id}) korrigieren. Bitte frage mich nach der Änderung.`;
   actions.append(nutritionButton("Ändern beim Coach", changePrompt));
   const deleteTarget = template ? "die Mahlzeitvorlage" : "den Ernährungseintrag";
