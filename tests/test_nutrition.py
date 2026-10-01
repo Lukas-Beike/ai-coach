@@ -122,6 +122,9 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         entry = self.service.log_meal(payload)
         self.assertEqual(entry["kcal"], 174)
         self.assertEqual(entry["nutrition_basis"]["ingredients"][0]["amount"], 50)
+        updated = self.service.update_meal(entry["id"], {"description": "Renamed oats"})
+        self.assertEqual(updated["description"], "Renamed oats")
+        self.assertEqual(updated["nutrition_basis"], entry["nutrition_basis"])
         self.assertEqual(self.service.get_today_summary()["entries"][0]["nutrition_basis"], entry["nutrition_basis"])
         changed = self.service.correct_meal(entry["id"], {"meal_time": "09:00"})
         self.assertEqual(changed["nutrition_basis"], entry["nutrition_basis"])
@@ -137,6 +140,10 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
             "id": template["id"], "name": "Oats breakfast", "kcal": template["kcal"],
         })
         self.assertEqual(renamed["nutrition_basis"], template["nutrition_basis"])
+        packaged = self.service.save_template({
+            "id": template["id"], "kcal": template["kcal"], "packaging_label": True,
+        })
+        self.assertEqual(packaged["nutrition_basis"]["kind"], "packaging_label")
         corrected = self.service.save_template({"id": template["id"], "kcal": 700})
         self.assertEqual(corrected["nutrition_basis"]["kind"], "estimate")
         self.assertEqual(self.service.get_meal(logged["id"])["nutrition_basis"], logged["nutrition_basis"])

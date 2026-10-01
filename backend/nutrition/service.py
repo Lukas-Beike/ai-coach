@@ -190,7 +190,12 @@ class NutritionService:
             key in payload and payload[key] != (existing or {}).get(key)
             for key in NUTRIENTS
         )
-        if existing and "food_ingredients" not in payload and nutrients_unchanged:
+        if (
+            existing
+            and "food_ingredients" not in payload
+            and nutrients_unchanged
+            and payload.get("packaging_label") is not True
+        ):
             normalized["nutrition_basis"] = existing.get(
                 "nutrition_basis", {"kind": "manual"}
             )
@@ -322,15 +327,21 @@ class NutritionService:
             raise AppError(400, INVALID_ENTRY_ID)
         if not isinstance(payload, dict):
             raise AppError(400, "Ernährungseintrag muss ein Objekt sein.")
-        entry = normalize_nutrition_entry(
-            self._prepare_values(payload), local_now_factory=self._local_now
-        )
-        entry["id"] = clean_id
-
         with self._db_lock, self._database_manager.unit_of_work() as db:
             existing = self._nutrition_repository.get(db, clean_id)
             if not existing:
                 raise AppError(404, ENTRY_NOT_FOUND)
+            prepared = self._prepare_values({**existing, **payload})
+            entry = normalize_nutrition_entry(
+                prepared, local_now_factory=self._local_now
+            )
+            if "food_ingredients" not in payload and not any(
+                entry.get(key) != existing.get(key) for key in NUTRIENTS
+            ):
+                entry["nutrition_basis"] = existing.get(
+                    "nutrition_basis", {"kind": "manual"}
+                )
+            entry["id"] = clean_id
             updated = self._nutrition_repository.update(db, clean_id, entry)
         if not updated:
             raise AppError(404, ENTRY_NOT_FOUND)
