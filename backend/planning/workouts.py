@@ -299,7 +299,7 @@ def validate_workout_description(workout: dict[str, Any]) -> float | None:
     """Require quantity-first endurance steps; never guess intent from prose."""
     sport = intervals_workout_sport(workout.get("sport") or workout.get("type"))
     if sport not in INTERVALS_ENDURANCE_WORKOUT_TYPES:
-        return
+        return None
     description = str(workout.get("description") or "")[:12000]
     _validate_endurance_workout_steps(description)
     seconds, has_distance = _structured_workout_duration(
