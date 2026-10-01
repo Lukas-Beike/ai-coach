@@ -158,25 +158,31 @@ def planned_workout_update_candidate(
         if action == "restore":
             candidate["local_deleted"] = False
     elif action == "update":
-        for key in (
-            "date",
-            "start_date_local",
-            "name",
-            "description",
-            "duration_minutes",
-            "target",
-        ):
-            if key in values:
-                candidate[key] = values.get(key)
-        if "start_date_local" in values:
-            candidate["start_date_local"] = planning_workouts.validate_workout_start_date(
-                values["start_date_local"], str(candidate.get("date") or "")
-            )
-        if "type" in values or "sport" in values:
-            candidate["sport"] = values.get("sport") or values.get("type")
+        _apply_planned_workout_update(candidate, values)
     else:
         raise AppError(400, "Unbekannte Aktion für lokale Planung.")
     return candidate
+
+
+def _apply_planned_workout_update(
+    candidate: dict[str, Any], values: dict[str, Any]
+) -> None:
+    for key in (
+        "date",
+        "start_date_local",
+        "name",
+        "description",
+        "duration_minutes",
+        "target",
+    ):
+        if key in values:
+            candidate[key] = values.get(key)
+    if "start_date_local" in values:
+        candidate["start_date_local"] = planning_workouts.validate_workout_start_date(
+            values["start_date_local"], str(candidate.get("date") or "")
+        )
+    if "type" in values or "sport" in values:
+        candidate["sport"] = values.get("sport") or values.get("type")
 
 
 def prepare_planned_workout_date(

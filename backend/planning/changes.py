@@ -22,6 +22,27 @@ _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL = (
 )
 
 
+def _project_existing_training_change(
+    current: dict[str, Any], change: dict[str, Any], candidate_date: str
+) -> dict[str, Any]:
+    candidate = {**current, **change, "date": candidate_date}
+    start_date_local = current.get("start_date_local")
+    if not start_date_local or change.get("start_date_local"):
+        return candidate
+    try:
+        parsed_start = datetime.fromisoformat(
+            str(start_date_local).strip().replace("Z", "+00:00")
+        )
+        candidate["start_date_local"] = parsed_start.replace(
+            year=int(candidate_date[:4]),
+            month=int(candidate_date[5:7]),
+            day=int(candidate_date[8:10]),
+        ).isoformat()
+    except (TypeError, ValueError):
+        candidate.pop("start_date_local", None)
+    return candidate
+
+
 def validated_training_date(value: Any) -> str:
     candidate_date = str(value or "").strip()[:10]
     try:
@@ -195,21 +216,9 @@ class StructuredTrainingChangeValidator:
         ).strip()[:10]
         if candidate_date:
             final_dates[change_identity] = validated_training_date(candidate_date)
-        candidate = {**current, **change, "date": candidate_date}
-        start_date_local = current.get("start_date_local")
-        if start_date_local and not change.get("start_date_local"):
-            try:
-                parsed_start = datetime.fromisoformat(
-                    str(start_date_local).strip().replace("Z", "+00:00")
-                )
-                candidate["start_date_local"] = parsed_start.replace(
-                    year=int(candidate_date[:4]),
-                    month=int(candidate_date[5:7]),
-                    day=int(candidate_date[8:10]),
-                ).isoformat()
-            except (TypeError, ValueError):
-                candidate.pop("start_date_local", None)
-        changes_by_identity[change_identity] = candidate
+        changes_by_identity[change_identity] = _project_existing_training_change(
+            current, change, candidate_date
+        )
 
     @staticmethod
     def _validate_batch_time_windows(
