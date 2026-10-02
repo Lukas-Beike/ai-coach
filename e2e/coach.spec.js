@@ -214,7 +214,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await settingsNav.getByRole("link", { name: "Betrieb & Diagnose", exact: true }).click();
     await expect(page).toHaveURL(/#more\/operations$/);
     await expect(page.locator('[data-more-segment-panel="operations"]').first()).toBeVisible();
-    await settingsNav.getByRole("link", { name: "Athletenprofil", exact: true }).click();
+    await settingsNav.getByRole("link", { name: "Profil", exact: true }).click();
     await expect(page).toHaveURL(/#more\/profile$/);
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
     await expect(page.locator("#profileContextNotice")).toBeVisible();

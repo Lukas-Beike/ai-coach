@@ -346,7 +346,7 @@ function weeklyLoadTooltip(section, marker, title, lines) {
 }
 
 function weeklyPointGroup(point, index, chart) {
-  const {weekly, x, y, section} = chart;
+  const {weekly, x, y} = chart;
   const value = point.metric.value;
   const partial = point.metric.measured_sessions < point.metric.total_sessions;
     const group = analysisSvg("g", { [weekly ? "data-week" : "data-day"]: point.date, opacity: point.future ? .4 : 1 });
@@ -357,7 +357,7 @@ function weeklyPointGroup(point, index, chart) {
       const markerY = value == null ? 152 : y(value);
       group.append(analysisSvg("circle", { cx: x(index), cy: markerY, r: 12, fill: "transparent" }));
       group.append(analysisSvg("circle", { cx: x(index), cy: markerY, r: 4, class: "weekly-load-point", ...(point.partial_period || partial || value == null ? { "stroke-dasharray": "2 2", fill: "var(--surface)" } : {}) }));
-      let valueText = String.fromCharCode(8211);
+      let valueText = String.fromCodePoint(8211);
       if (value != null) valueText = String(Math.round(value)) + (partial ? "?" : "");
       group.append(analysisSvg("text", { x: x(index), y: markerY - 12, "text-anchor": "middle" }, valueText));
       appendWeeklyPointTooltip(point, group, chart);
