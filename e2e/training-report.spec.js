@@ -1,6 +1,10 @@
 const { test, expect } = require("@playwright/test");
 
 test("@responsive current week report is shown automatically without controls", async ({ page, request }) => {
+  let chatWrites = 0;
+  page.on("request", (outgoing) => {
+    if (outgoing.method() === "POST" && new URL(outgoing.url()).pathname.startsWith("/api/chat")) chatWrites += 1;
+  });
   expect((await request.get("/api/fixture/activity")).ok()).toBeTruthy();
   await page.goto("/#analysis/review");
   await expect(page.locator("#appShell")).toBeVisible();
@@ -50,7 +54,7 @@ test("@responsive current week report is shown automatically without controls", 
   await expect(page.locator("#analysisPerformanceSegment")).toBeHidden();
   await expect(page.locator("[data-analysis-segment=review]")).toHaveAttribute("aria-current", "page");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-  await expect(page.locator("#messages .message.user")).toHaveCount(0);
+  expect(chatWrites).toBe(0);
 });
 
 test("@responsive analysis sections preserve report placement through browser history", async ({ page }) => {
