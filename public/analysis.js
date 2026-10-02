@@ -216,6 +216,7 @@ async function renderTrainingRecords() {
     for (const item of items) {
       gear.append(garminEquipmentCard(item));
     }
+    appendLocalEquipment(equipment.items || [], gear);
     if (equipment.garmin_synced_at) gear.append(reportNode("p", `Garmin \u00b7 Stand ${new Date(equipment.garmin_synced_at).toLocaleString("de-DE")}${equipment.garmin_freshness === "stale" ? " \u00b7 letzter erfolgreicher Abruf" : ""}`, "muted"));
   } catch (error) {
     if (generation === trainingRecordsGeneration && session === state.sessionGeneration) {
@@ -489,6 +490,31 @@ function renderTrainingFocus(report) {
   chevron.append(analysisSvg("path", { d: "m6 9 6 6 6-6" }));
   disclosure.append(chevron); details.append(disclosure); root.append(details);
   appendTrainingFocusZones(report, details);
+}
+
+function appendLocalEquipment(items, root) {
+  if (!items.length) return;
+  const details = reportNode("details", null, "training-focus-details");
+  details.append(reportNode("summary", "Lokale Ausr\u00fcstung und Wartung"));
+  for (const item of items) details.append(localEquipmentCard(item));
+  root.append(details);
+}
+
+function localEquipmentCard(item) {
+  const card = reportNode("section", null, "garmin-equipment-card");
+  const usage = item.usage || {};
+  card.append(reportNode("h4", item.name));
+  card.append(reportNode("p", `${item.kind} \u00b7 Revision ${item.revision}`));
+  card.append(reportNode("p", `${analysisValue(usage.distance_km, "km")} \u00b7 ${analysisValue(usage.hours, "h")} \u00b7 ${usage.assigned_sessions || 0} zugeordnete Einheiten`));
+  card.append(reportNode("p", `Seit letzter Wartung: ${analysisValue(usage.maintenance_distance_km, "km")} \u00b7 ${analysisValue(usage.maintenance_hours, "h")}`));
+  const status = new Map([[true, "Wartung f\u00e4llig"], [false, "Wartung nicht f\u00e4llig"]]);
+  card.append(reportNode("p", status.get(usage.maintenance_due) || "Wartungsstand unklar"));
+  if (usage.maintenance_coverage === "partial") card.append(reportNode("p", "Nutzung unvollst\u00e4ndig bekannt.", "muted"));
+  const history = reportNode("ul");
+  for (const event of item.maintenance || []) history.append(reportNode("li", `${dateLabel(event.date)} \u00b7 ${event.notes || "Wartung erfasst"}`));
+  if (history.childElementCount) card.append(history);
+  else card.append(reportNode("p", "Keine Wartung erfasst.", "muted"));
+  return card;
 }
 
 function garminEquipmentCard(item) {

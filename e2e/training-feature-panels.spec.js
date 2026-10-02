@@ -81,6 +81,13 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.locator("#equipmentItems").getByRole("heading", { name: "Fixture Garmin bike" })).toBeVisible();
   await expect(page.locator("#equipmentItems").getByText("25 km", { exact: true })).toBeVisible();
   await expect(page.locator("#equipmentItems progress")).toHaveAttribute("value", "25");
+  const localGear = page.locator("#equipmentItems details");
+  await localGear.locator("summary").click();
+  await expect(localGear.getByRole("heading", { name: "Fixture road bike" })).toBeVisible();
+  await expect(localGear).toContainText("Revision 1");
+  await expect(localGear).toContainText("1 zugeordnete Einheiten");
+  await expect(localGear).toContainText("Keine Wartung erfasst.");
+
   await page.evaluate(async () => { await applyNavigationRoute("more/profile", { historyMode: "replace" }); });
   await expect(page.locator("#profilePanel").getByRole("heading", { name: "Profil", exact: true })).toBeVisible();
   await expect(page.locator("#equipmentItems")).toBeHidden();
@@ -95,4 +102,24 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.locator('[data-nutrition-segment="fueling"], #trainingFueling, #nutritionLog, #nutritionDefine')).toHaveCount(0);
   await expect(page.locator("#nutritionPanel").getByRole("button", { name: /Coach/ })).toHaveCount(0);
   await expect(page.locator("#seasonPreparation").getByRole("button", { name: /Vorbereitung besprechen|Vorschau anfragen/ })).toHaveCount(0);
+});
+
+test("@responsive local equipment and maintenance remain visible without Garmin inventory", async ({ page }) => {
+  await page.route("**/api/analysis/training-records", route => route.fulfill({ json: { equipment: {
+    garmin_items: [], items: [{name: "Saved bike", kind: "bike", revision: 3,
+      usage: {distance_km: 120, hours: 6, assigned_sessions: 4, maintenance_distance_km: 20,
+        maintenance_hours: 1, maintenance_due: null, maintenance_coverage: "partial"},
+      maintenance: [{date: "2026-09-30", notes: "<img src=x> Chain replaced"}] }],
+  } } }));
+  await page.goto("/#more/equipment");
+  const gear = page.locator("#equipmentItems");
+  await expect(gear.locator("details summary")).toBeVisible();
+  await gear.locator("details summary").click();
+  await expect(gear.getByRole("heading", {name: "Saved bike"})).toBeVisible();
+  await expect(gear).toContainText("Revision 3");
+  await expect(gear).toContainText("120 km");
+  await expect(gear).toContainText("4 zugeordnete Einheiten");
+  await expect(gear).toContainText("Wartungsstand unklar");
+  await expect(gear).toContainText("Chain replaced");
+  await expect(gear.locator("img")).toHaveCount(0);
 });
