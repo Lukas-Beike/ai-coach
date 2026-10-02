@@ -10,6 +10,9 @@ from typing import Any
 from backend.errors import AppError
 from backend.performance.training_report import canonical_rows, number
 
+EQUIPMENT_PREFIX = "equipment:"
+SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
+
 
 class EquipmentService:
     def __init__(
@@ -49,7 +52,7 @@ class EquipmentService:
             items = self._records(db, "equipment", 100)
             if item_id:
                 selected = db.execute(
-                    "SELECT value FROM kv WHERE key=?", ("equipment:" + item_id,)
+                    SELECT_VALUE, (EQUIPMENT_PREFIX + item_id,)
                 ).fetchone()
                 if not selected:
                     raise AppError(404, "Ausrüstung nicht gefunden.")
@@ -60,71 +63,7 @@ class EquipmentService:
             }
             maintenance = self._records(db, "equipment_maintenance", 1000)
         for item in items:
-            eligible = [
-                row
-                for row in rows
-                if (assignments.get(str(row.get("id"))) or {}).get("equipment_id")
-                == (item.get("parent_id") or item["id"])
-                and item["start_date"]
-                <= str(row.get("start_date_local") or "")[:10]
-                <= self._today().isoformat()
-            ]
-            events = sorted(
-                [row for row in maintenance if row["equipment_id"] == item["id"]],
-                key=lambda row: (row["date"], row["observed_at"]),
-            )
-            latest = events[-1] if events else None
-            ambiguous = [
-                row
-                for row in eligible
-                if latest
-                and str(row.get("start_date_local") or "")[:10] == latest["date"]
-            ]
-            since = [
-                row
-                for row in eligible
-                if not latest
-                or str(row.get("start_date_local") or "")[:10] > latest["date"]
-            ]
-            distance = sum(number(row.get("distance")) or 0 for row in eligible) / 1000
-            hours = sum(number(row.get("moving_time")) or 0 for row in eligible) / 3600
-            distance_since = sum(
-                number(row.get("distance")) or 0 for row in since
-            ) / 1000 + (item["initial_distance_km"] if not latest else 0)
-            hours_since = sum(
-                number(row.get("moving_time")) or 0 for row in since
-            ) / 3600 + (item["initial_hours"] if not latest else 0)
-            reached = bool(
-                item.get("maintenance_km")
-                and distance_since >= item["maintenance_km"]
-                or item.get("maintenance_hours")
-                and hours_since >= item["maintenance_hours"]
-            )
-            uncertain = bool(ambiguous) or any(
-                item.get(interval)
-                and any(number(row.get(measure)) is None for row in since)
-                for interval, measure in (
-                    ("maintenance_km", "distance"),
-                    ("maintenance_hours", "moving_time"),
-                )
-            )
-            item["usage"] = {
-                "distance_km": round(item["initial_distance_km"] + distance, 2),
-                "hours": round(item["initial_hours"] + hours, 2),
-                "assigned_sessions": len(eligible),
-                "distance_known_sessions": sum(
-                    number(row.get("distance")) is not None for row in eligible
-                ),
-                "time_known_sessions": sum(
-                    number(row.get("moving_time")) is not None for row in eligible
-                ),
-                "maintenance_distance_km": round(distance_since, 2),
-                "maintenance_hours": round(hours_since, 2),
-                "maintenance_due": True if reached else None if uncertain else False,
-                "maintenance_same_day_sessions": len(ambiguous),
-                "maintenance_coverage": "partial" if uncertain else "known_assignments",
-            }
-            item["maintenance"] = events
+            _update_usage(item, rows, assignments, maintenance, self._today())
         return {
             "items": items,
             "garmin_items": self._garmin_items(garmin),
@@ -139,35 +78,11 @@ class EquipmentService:
 
     @staticmethod
     def _garmin_items(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-        items = []
-        for row in snapshot.get("gear") or []:
-            if not isinstance(row, dict):
-                continue
-            stats = row.get("stats") or {}
-            distance = (
-                number(stats.get("totalDistance")) if isinstance(stats, dict) else None
-            )
-            goal = number(row.get("maximumMeters"))
-            items.append(
-                {
-                    "id": str(row.get("gearUUID") or ""),
-                    "name": str(row.get("gearName") or "Ausrüstung")[:200],
-                    "kind": str(row.get("gearTypeName") or "")[:100],
-                    "status": str(row.get("gearStatusName") or "")[:100],
-                    "distance_km": round(distance / 1000, 2)
-                    if distance is not None
-                    else None,
-                    "goal_km": round(goal / 1000, 2) if goal else None,
-                    "usage_percent": round(distance / goal * 100, 1)
-                    if distance is not None and goal
-                    else None,
-                    "sessions": number(stats.get("totalActivities"))
-                    if isinstance(stats, dict)
-                    else None,
-                    "source": "Garmin Connect",
-                }
-            )
-        return items
+        return [
+            _garmin_item(row)
+            for row in snapshot.get("gear") or []
+            if isinstance(row, dict)
+        ]
 
     def save(self, payload: dict[str, Any]) -> dict[str, Any]:
         allowed = {
@@ -186,76 +101,16 @@ class EquipmentService:
         }
         if not isinstance(payload, dict) or set(payload) - allowed:
             raise AppError(400, "Ungültige Ausrüstung.")
-        name = str(payload.get("name") or "").strip()
-        if (
-            not name
-            or len(name) > 200
-            or payload.get("sport")
-            not in {"Ride", "VirtualRide", "Run", "Swim", "WeightTraining"}
-            or payload.get("kind") not in {"shoes", "bike", "component", "other"}
-            or payload.get("status", "active") not in {"active", "archived"}
-        ):
-            raise AppError(400, "Name, Sport, Art oder Status der Ausrüstung ungültig.")
-        try:
-            start = date.fromisoformat(str(payload.get("start_date")))
-            item_id = str(payload.get("id") or uuid.uuid4())
-            uuid.UUID(item_id)
-        except ValueError as exc:
-            raise AppError(400, "Startdatum oder Ausrüstungs-ID ungültig.") from exc
-        if not date(2010, 1, 1) <= start <= self._today():
-            raise AppError(
-                400, "Ausrüstungsbeginn liegt außerhalb des gültigen Zeitraums."
-            )
-        amounts = {}
-        for field, maximum in (
-            ("initial_distance_km", 1000000),
-            ("initial_hours", 100000),
-            ("maintenance_km", 1000000),
-            ("maintenance_hours", 100000),
-        ):
-            value = payload.get(field)
-            if value is not None and (
-                not isinstance(value, (int, float))
-                or isinstance(value, bool)
-                or not math.isfinite(value)
-                or not 0 <= value <= maximum
-            ):
-                raise AppError(
-                    400, "Ausrüstungszähler oder Wartungsintervall ungültig."
-                )
-            if field.startswith("initial") and value is None:
-                raise AppError(
-                    400, "Anfangsstand muss ausdrücklich als Zahl angegeben werden."
-                )
-            amounts[field] = value
+        name, start, item_id = _equipment_identity(payload, self._today())
+        amounts = _equipment_amounts(payload)
         with self._manager.unit_of_work() as db:
-            old = db.execute(
-                "SELECT value FROM kv WHERE key=?", ("equipment:" + item_id,)
-            ).fetchone()
+            old = db.execute(SELECT_VALUE, (EQUIPMENT_PREFIX + item_id,)).fetchone()
             previous = json.loads(old["value"]) if old else None
             if payload.get("id") and not previous:
                 raise AppError(404, "Ausrüstung nicht gefunden.")
             if previous and payload.get("expected_revision") != previous["revision"]:
                 raise AppError(409, "Ausrüstung geändert; neu lesen.")
-            parent_id = payload.get("parent_id") or None
-            if payload["kind"] == "component" and not parent_id:
-                raise AppError(400, "Eine Komponente benötigt einen Hauptgegenstand.")
-            if parent_id:
-                parent = db.execute(
-                    "SELECT value FROM kv WHERE key=?", ("equipment:" + str(parent_id),)
-                ).fetchone()
-                if (
-                    payload["kind"] != "component"
-                    or not parent
-                    or parent_id == item_id
-                    or json.loads(parent["value"]).get("parent_id")
-                    or json.loads(parent["value"])["kind"] == "component"
-                    or json.loads(parent["value"])["sport"] != payload["sport"]
-                ):
-                    raise AppError(
-                        400,
-                        "Komponente benötigt einen vorhandenen Hauptgegenstand ohne Elternkomponente.",
-                    )
+            parent_id = _equipment_parent(db, payload, item_id)
             children = [
                 json.loads(row["value"])
                 for row in db.execute(
@@ -288,7 +143,7 @@ class EquipmentService:
             db.execute(
                 "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
                 (
-                    "equipment:" + item_id,
+                    EQUIPMENT_PREFIX + item_id,
                     json.dumps(saved, allow_nan=False),
                     saved["updated_at"],
                 ),
@@ -310,8 +165,8 @@ class EquipmentService:
             raise AppError(404, "Kanonische Aktivität nicht gefunden.")
         with self._manager.unit_of_work() as db:
             item = db.execute(
-                "SELECT value FROM kv WHERE key=?",
-                ("equipment:" + str(payload["equipment_id"]),),
+                SELECT_VALUE,
+                (EQUIPMENT_PREFIX + str(payload["equipment_id"]),),
             ).fetchone()
             equipment = json.loads(item["value"]) if item else None
             if payload["equipment_id"] is not None and (
@@ -377,3 +232,184 @@ class EquipmentService:
                 ),
             )
         return {"ok": True, "stored_locally": True, "maintenance": saved}
+
+
+def _garmin_item(row: dict) -> dict[str, Any]:
+    stats = row.get("stats") or {}
+    distance = number(stats.get("totalDistance")) if isinstance(stats, dict) else None
+    goal = number(row.get("maximumMeters"))
+    return {
+        "id": str(row.get("gearUUID") or ""),
+        "name": str(row.get("gearName") or "Ausrüstung")[:200],
+        "kind": str(row.get("gearTypeName") or "")[:100],
+        "status": str(row.get("gearStatusName") or "")[:100],
+        "distance_km": round(distance / 1000, 2) if distance is not None else None,
+        "goal_km": round(goal / 1000, 2) if goal else None,
+        "usage_percent": round(distance / goal * 100, 1)
+        if distance is not None and goal
+        else None,
+        "sessions": number(stats.get("totalActivities"))
+        if isinstance(stats, dict)
+        else None,
+        "source": "Garmin Connect",
+    }
+
+
+def _equipment_identity(payload: dict, today: date) -> tuple[str, date, str]:
+    name = str(payload.get("name") or "").strip()
+    if (
+        not name
+        or len(name) > 200
+        or payload.get("sport")
+        not in {"Ride", "VirtualRide", "Run", "Swim", "WeightTraining"}
+        or payload.get("kind") not in {"shoes", "bike", "component", "other"}
+        or payload.get("status", "active") not in {"active", "archived"}
+    ):
+        raise AppError(400, "Name, Sport, Art oder Status der Ausrüstung ungültig.")
+    try:
+        start = date.fromisoformat(str(payload.get("start_date")))
+        item_id = str(payload.get("id") or uuid.uuid4())
+        uuid.UUID(item_id)
+    except ValueError as exc:
+        raise AppError(400, "Startdatum oder Ausrüstungs-ID ungültig.") from exc
+    if not date(2010, 1, 1) <= start <= today:
+        raise AppError(400, "Ausrüstungsbeginn liegt außerhalb des gültigen Zeitraums.")
+
+    return name, start, item_id
+
+
+def _equipment_amounts(payload: dict) -> dict[str, Any]:
+    amounts = {}
+    for field, maximum in (
+        ("initial_distance_km", 1000000),
+        ("initial_hours", 100000),
+        ("maintenance_km", 1000000),
+        ("maintenance_hours", 100000),
+    ):
+        value = payload.get(field)
+        if value is not None and (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(value)
+            or not 0 <= value <= maximum
+        ):
+            raise AppError(400, "Ausrüstungszähler oder Wartungsintervall ungültig.")
+        if field.startswith("initial") and value is None:
+            raise AppError(
+                400, "Anfangsstand muss ausdrücklich als Zahl angegeben werden."
+            )
+        amounts[field] = value
+
+    return amounts
+
+
+def _equipment_parent(db: Any, payload: dict, item_id: str) -> str | None:
+    parent_id = payload.get("parent_id") or None
+    if payload["kind"] == "component" and not parent_id:
+        raise AppError(400, "Eine Komponente benötigt einen Hauptgegenstand.")
+    if parent_id:
+        parent = db.execute(
+            SELECT_VALUE, (EQUIPMENT_PREFIX + str(parent_id),)
+        ).fetchone()
+        if (
+            payload["kind"] != "component"
+            or not parent
+            or parent_id == item_id
+            or json.loads(parent["value"]).get("parent_id")
+            or json.loads(parent["value"])["kind"] == "component"
+            or json.loads(parent["value"])["sport"] != payload["sport"]
+        ):
+            raise AppError(
+                400,
+                "Komponente benötigt einen vorhandenen Hauptgegenstand ohne Elternkomponente.",
+            )
+
+    return parent_id
+
+
+def _update_usage(
+    item: dict,
+    rows: list[dict],
+    assignments: dict,
+    maintenance: list[dict],
+    today: date,
+) -> None:
+    eligible = [
+        row
+        for row in rows
+        if (assignments.get(str(row.get("id"))) or {}).get("equipment_id")
+        == (item.get("parent_id") or item["id"])
+        and item["start_date"]
+        <= str(row.get("start_date_local") or "")[:10]
+        <= today.isoformat()
+    ]
+    events = sorted(
+        [row for row in maintenance if row["equipment_id"] == item["id"]],
+        key=lambda row: (row["date"], row["observed_at"]),
+    )
+    distance = sum(number(row.get("distance")) or 0 for row in eligible) / 1000
+    hours = sum(number(row.get("moving_time")) or 0 for row in eligible) / 3600
+    item["usage"] = {
+        "distance_km": round(item["initial_distance_km"] + distance, 2),
+        "hours": round(item["initial_hours"] + hours, 2),
+        "assigned_sessions": len(eligible),
+        "distance_known_sessions": sum(
+            number(row.get("distance")) is not None for row in eligible
+        ),
+        "time_known_sessions": sum(
+            number(row.get("moving_time")) is not None for row in eligible
+        ),
+        **_maintenance_usage(item, eligible, events),
+    }
+    item["maintenance"] = events
+
+
+def _maintenance_usage(
+    item: dict, eligible: list[dict], events: list[dict]
+) -> dict[str, Any]:
+    latest = events[-1] if events else None
+    ambiguous = [
+        row
+        for row in eligible
+        if latest and str(row.get("start_date_local") or "").startswith(latest["date"])
+    ]
+    since = [
+        row
+        for row in eligible
+        if not latest or str(row.get("start_date_local") or "")[:10] > latest["date"]
+    ]
+    distance = sum(number(row.get("distance")) or 0 for row in since) / 1000 + (
+        item["initial_distance_km"] if not latest else 0
+    )
+    hours = sum(number(row.get("moving_time")) or 0 for row in since) / 3600 + (
+        item["initial_hours"] if not latest else 0
+    )
+    reached = bool(
+        item.get("maintenance_km")
+        and distance >= item["maintenance_km"]
+        or item.get("maintenance_hours")
+        and hours >= item["maintenance_hours"]
+    )
+    uncertain = _maintenance_uncertain(item, since, ambiguous)
+    due = None if uncertain else False
+    if reached:
+        due = True
+    return {
+        "maintenance_distance_km": round(distance, 2),
+        "maintenance_hours": round(hours, 2),
+        "maintenance_due": due,
+        "maintenance_same_day_sessions": len(ambiguous),
+        "maintenance_coverage": "partial" if uncertain else "known_assignments",
+    }
+
+
+def _maintenance_uncertain(
+    item: dict, since: list[dict], ambiguous: list[dict]
+) -> bool:
+    return bool(ambiguous) or any(
+        item.get(interval) and any(number(row.get(measure)) is None for row in since)
+        for interval, measure in (
+            ("maintenance_km", "distance"),
+            ("maintenance_hours", "moving_time"),
+        )
+    )

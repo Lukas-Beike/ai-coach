@@ -172,34 +172,7 @@ class ActivityReadService:
                 reason="invalid_activity_request",
             )
         snapshot = self._snapshot()
-        raw_provider_data = snapshot.get("raw_provider_data")
-        raw_activities = (
-            raw_provider_data.get("activities")
-            if isinstance(raw_provider_data, dict)
-            else None
-        )
-        activity = (
-            next(
-                (
-                    item
-                    for item in raw_activities
-                    if isinstance(item, dict)
-                    and str(
-                        _first_present(item, ("id", "activityId", "external_id")) or ""
-                    )
-                    == normalized_id
-                ),
-                None,
-            )
-            if isinstance(raw_activities, list)
-            else None
-        )
-        if activity is None:
-            raise AppError(
-                404,
-                "Die vollständigen Rohdaten dieser Aktivität sind im lokalen Intervals.icu-Snapshot nicht vorhanden.",
-                reason="activity_details_not_found",
-            )
+        activity = _raw_activity(snapshot, normalized_id)
         cached = self._detail_store.get(normalized_id) if self._detail_store else None
         stale = bool(
             cached
@@ -219,16 +192,7 @@ class ActivityReadService:
         performance = performance_context.current_performance_context(
             snapshot, garmin_snapshot, profile, today
         )
-        equipment = self._read_equipment()
-        assignment = next(
-            (
-                row
-                for row in equipment.get("assignments", [])
-                if row["activity_id"] == normalized_id
-            ),
-            None,
-        )
-        equipment_ids = {assignment["equipment_id"]} if assignment else set()
+        equipment = _activity_equipment(self._read_equipment(), normalized_id)
         return {
             "ok": True,
             "snapshot_synced_at": snapshot.get("synced_at"),
@@ -239,33 +203,80 @@ class ActivityReadService:
                 performance.get("comparisons", {}),
             ),
             "activity_feedback": feedback,
-            "equipment": [
-                row
-                for row in equipment.get("items", [])
-                if row["id"] in equipment_ids or row.get("parent_id") in equipment_ids
-            ],
+            "equipment": equipment,
             "session_analysis": cached.get("session_analysis", {})
             if cached and not stale
             else {},
             "activity_id": normalized_id,
-            "detail_data": {
-                "source": "Intervals.icu",
-                "observed_at": cached.get("observed_at") if cached else None,
-                "full_resolution": bool(cached and cached.get("full_resolution")),
-                "stale": stale,
-                "content_sha256": cached.get("content_sha256") if cached else None,
-                "coverage": cached.get("coverage", {}) if cached else {},
-                "available_streams": cached.get("available_streams", [])
-                if cached
-                else [],
-                "display_sampled": bool(
-                    cached
-                    and any(
-                        len(series)
-                        > detail_projection.COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS
-                        for series in activity.get("streams", {}).values()
-                    )
-                ),
-            },
+            "detail_data": _detail_metadata(cached, stale, activity),
             "data_scope": "bounded sanitized detail projection of exactly one Intervals.icu activity",
         }
+
+
+def _raw_activity(snapshot: dict, normalized_id: str) -> dict:
+    raw_provider_data = snapshot.get("raw_provider_data")
+    raw_activities = (
+        raw_provider_data.get("activities")
+        if isinstance(raw_provider_data, dict)
+        else None
+    )
+    activity = (
+        next(
+            (
+                item
+                for item in raw_activities
+                if isinstance(item, dict)
+                and str(_first_present(item, ("id", "activityId", "external_id")) or "")
+                == normalized_id
+            ),
+            None,
+        )
+        if isinstance(raw_activities, list)
+        else None
+    )
+    if activity is None:
+        raise AppError(
+            404,
+            "Die vollständigen Rohdaten dieser Aktivität sind im lokalen Intervals.icu-Snapshot nicht vorhanden.",
+            reason="activity_details_not_found",
+        )
+
+    return activity
+
+
+def _detail_metadata(
+    cached: dict | None, stale: bool, activity: dict
+) -> dict[str, Any]:
+    return {
+        "source": "Intervals.icu",
+        "observed_at": cached.get("observed_at") if cached else None,
+        "full_resolution": bool(cached and cached.get("full_resolution")),
+        "stale": stale,
+        "content_sha256": cached.get("content_sha256") if cached else None,
+        "coverage": cached.get("coverage", {}) if cached else {},
+        "available_streams": cached.get("available_streams", []) if cached else [],
+        "display_sampled": bool(
+            cached
+            and any(
+                len(series) > detail_projection.COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS
+                for series in activity.get("streams", {}).values()
+            )
+        ),
+    }
+
+
+def _activity_equipment(equipment: dict, activity_id: str) -> list[dict]:
+    assignment = next(
+        (
+            row
+            for row in equipment.get("assignments", [])
+            if row["activity_id"] == activity_id
+        ),
+        None,
+    )
+    equipment_ids = {assignment["equipment_id"]} if assignment else set()
+    return [
+        row
+        for row in equipment.get("items", [])
+        if row["id"] in equipment_ids or row.get("parent_id") in equipment_ids
+    ]

@@ -36,36 +36,7 @@ def season_preparation(
             key=lambda row: number(row.get("moving_time")) or -1,
             reverse=True,
         )[:3]
-        weeks = []
-        for offset in range(12):
-            start = today - timedelta(days=83 - 7 * offset)
-            end = start + timedelta(days=6)
-            measured = [
-                row
-                for row in eligible
-                if start.isoformat() <= activity_day(row, timezone) <= end.isoformat()
-            ]
-            durations = [
-                value
-                for row in measured
-                if (value := number(row.get("moving_time"))) is not None
-            ]
-            distances = [
-                value
-                for row in measured
-                if (value := number(row.get("distance"))) is not None
-            ]
-            weeks.append(
-                {
-                    "start": start.isoformat(),
-                    "end": end.isoformat(),
-                    "sessions": len(measured),
-                    "duration_seconds": sum(durations) if durations else None,
-                    "duration_known_sessions": len(durations),
-                    "distance_meters": sum(distances) if distances else None,
-                    "distance_known_sessions": len(distances),
-                }
-            )
+        weeks = _preparation_weeks(eligible, today, timezone)
         analyses = {row["activity_id"]: row for row in (observations or [])}
         event["preparation"] = {
             "status": "observations" if eligible else "insufficient_data",
@@ -103,26 +74,11 @@ def load_scenarios(
     values: dict[str, Any],
     timezone: str = "UTC",
 ) -> dict[str, Any]:
-    try:
-        end = date.fromisoformat(str(values.get("end")))
-        scale = float(values.get("load_scale", 1))
-        taper = int(values.get("taper_days", 0))
-    except (TypeError, ValueError) as exc:
-        raise AppError(400, "Ungültiges Szenario.") from exc
-    if (
-        set(values) - {"end", "load_scale", "taper_days"}
-        or not today < end <= today + timedelta(days=180)
-        or not math.isfinite(scale)
-        or not 0.5 <= scale <= 1.5
-        or not 0 <= taper <= 21
-    ):
-        raise AppError(
-            400, "Szenario: maximal 180 Tage, Faktor 0,5–1,5, Entlastung 0–21 Tage."
-        )
+    end, scale, taper = _scenario_values(values, today)
     wellness = [
         row
         for row in snapshot.get("recent_wellness", [])
-        if str(row.get("id") or "")[:10] == (today - timedelta(days=1)).isoformat()
+        if str(row.get("id") or "").startswith((today - timedelta(days=1)).isoformat())
     ]
     latest = wellness[-1] if wellness else {}
     ctl, atl = number(latest.get("ctl")), number(latest.get("atl"))
@@ -183,35 +139,16 @@ def load_scenarios(
             "reason": "Eine heute absolvierte Einheit hat keine bekannte Belastung.",
         }
     actual_today_load = sum(float(row["icu_training_load"]) for row in completed_today)
-    curves = []
-    for label, multiplier in (("current", 1.0), ("alternative", scale)):
-        fitness, fatigue, points = ctl, atl, []
-        day = today
-        while day <= end:
-            load = sum(
-                float(row["icu_training_load"])
-                for row in calendar
-                if str(row.get("start_date_local") or row.get("date") or "")[:10]
-                == day.isoformat()
-            )
-            load *= multiplier
-            if label == "alternative" and taper and 0 <= (end - day).days < taper:
-                load *= 0.5
-            if day == today:
-                load += actual_today_load
-            fitness += (load - fitness) * (1 - math.exp(-1 / 42))
-            fatigue += (load - fatigue) * (1 - math.exp(-1 / 7))
-            points.append(
-                {
-                    "date": day.isoformat(),
-                    "load": round(load, 2),
-                    "ctl": round(fitness, 2),
-                    "atl": round(fatigue, 2),
-                    "tsb": round(fitness - fatigue, 2),
-                }
-            )
-            day += timedelta(days=1)
-        curves.append({"name": label, "points": points})
+    curves = [
+        _scenario_curve(
+            calendar,
+            (today, end),
+            (ctl, atl),
+            (label, multiplier, taper),
+            actual_today_load,
+        )
+        for label, multiplier in (("current", 1.0), ("alternative", scale))
+    ]
     return {
         **base,
         "status": "ok",
@@ -223,3 +160,100 @@ def load_scenarios(
         },
         "apply": "Request an adaptive preview using current planning state, then explicitly approve. Simulation does not change local or remote workouts.",
     }
+
+
+def _preparation_weeks(eligible: list[dict], today: date, timezone: str) -> list[dict]:
+    weeks = []
+    for offset in range(12):
+        start = today - timedelta(days=83 - 7 * offset)
+        end = start + timedelta(days=6)
+        measured = [
+            row
+            for row in eligible
+            if start.isoformat() <= activity_day(row, timezone) <= end.isoformat()
+        ]
+        durations = [
+            value
+            for row in measured
+            if (value := number(row.get("moving_time"))) is not None
+        ]
+        distances = [
+            value
+            for row in measured
+            if (value := number(row.get("distance"))) is not None
+        ]
+        weeks.append(
+            {
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "sessions": len(measured),
+                "duration_seconds": sum(durations) if durations else None,
+                "duration_known_sessions": len(durations),
+                "distance_meters": sum(distances) if distances else None,
+                "distance_known_sessions": len(distances),
+            }
+        )
+
+    return weeks
+
+
+def _scenario_values(values: dict, today: date) -> tuple[date, float, int]:
+    try:
+        end = date.fromisoformat(str(values.get("end")))
+        scale = float(values.get("load_scale", 1))
+        taper = int(values.get("taper_days", 0))
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, "Ungültiges Szenario.") from exc
+    if (
+        set(values) - {"end", "load_scale", "taper_days"}
+        or not today < end <= today + timedelta(days=180)
+        or not math.isfinite(scale)
+        or not 0.5 <= scale <= 1.5
+        or not 0 <= taper <= 21
+    ):
+        raise AppError(
+            400, "Szenario: maximal 180 Tage, Faktor 0,5–1,5, Entlastung 0–21 Tage."
+        )
+
+    return end, scale, taper
+
+
+def _scenario_curve(
+    calendar: list[dict],
+    dates: tuple[date, date],
+    basis: tuple[float, float],
+    scenario: tuple[str, float, int],
+    actual_today_load: float,
+) -> dict[str, Any]:
+    today, end = dates
+    ctl, atl = basis
+    label, multiplier, taper = scenario
+    fitness, fatigue, points = ctl, atl, []
+    day = today
+    while day <= end:
+        load = sum(
+            float(row["icu_training_load"])
+            for row in calendar
+            if str(row.get("start_date_local") or row.get("date") or "").startswith(
+                day.isoformat()
+            )
+        )
+        load *= multiplier
+        if label == "alternative" and taper and 0 <= (end - day).days < taper:
+            load *= 0.5
+        if day == today:
+            load += actual_today_load
+        fitness += (load - fitness) * (1 - math.exp(-1 / 42))
+        fatigue += (load - fatigue) * (1 - math.exp(-1 / 7))
+        points.append(
+            {
+                "date": day.isoformat(),
+                "load": round(load, 2),
+                "ctl": round(fitness, 2),
+                "atl": round(fatigue, 2),
+                "tsb": round(fitness - fatigue, 2),
+            }
+        )
+        day += timedelta(days=1)
+
+    return {"name": label, "points": points}

@@ -46,6 +46,24 @@
     content.replaceChildren();
     const activity = payload.activity || {};
     const metadata = payload.detail_data || {};
+    renderMetadata(activity, metadata, content);
+    renderSeries(activity, content);
+    renderLaps(activity, content);
+    renderIntervalQuality(payload, content);
+    renderAerobic(payload, content);
+    renderPower(payload, content);
+    const feedback = payload.activity_feedback;
+    for (const item of payload.equipment || []) content.append(node("p", `Ausrüstung: ${item.name} · ${item.usage.distance_km} km${item.usage.maintenance_due ? " · persönliches Wartungsintervall erreicht" : ""}`));
+    if (feedback && (feedback.notes || feedback.session_rpe != null || feedback.deviation_reason)) {
+      content.append(node("h3", "Dein Feedback"));
+      if (feedback.notes) content.append(node("p", feedback.notes));
+      if (feedback.session_rpe != null) content.append(node("p", `Session-RPE: ${feedback.session_rpe}/10`));
+      if (feedback.deviation_reason) content.append(node("p", feedback.deviation_reason));
+    }
+  }
+
+
+  function renderMetadata(activity, metadata, content) {
     const values = [
       activity.type,
       activity.start_date_local?.replace("T", " "),
@@ -54,18 +72,29 @@
       activity.icu_training_load != null ? `Belastung ${activity.icu_training_load}` : null,
     ].filter(Boolean);
     content.append(node("p", values.join(" · ")));
-    content.append(node("p", metadata.observed_at
-      ? `${metadata.source} · Detaildaten geladen: ${new Date(metadata.observed_at).toLocaleString("de-DE")}${metadata.display_sampled ? " · Diagramme vereinfacht dargestellt" : ""}`
-      : "Zusammenfassung aus dem lokalen Snapshot. Detaildaten wurden noch nicht geladen.", "muted"));
+    let description = "Zusammenfassung aus dem lokalen Snapshot. Detaildaten wurden noch nicht geladen.";
+    if (metadata.observed_at) {
+      const sampled = metadata.display_sampled ? " \u00b7 Diagramme vereinfacht dargestellt" : "";
+      description = `${metadata.source} \u00b7 Detaildaten geladen: ${new Date(metadata.observed_at).toLocaleString("de-DE")}${sampled}`;
+    }
+    content.append(node("p", description, "muted"));
     if (metadata.stale) content.append(node("p", "Die Zusammenfassung hat sich seit dem Laden geändert. Aktualisiere die Detaildaten vor einer neuen Bewertung.", "muted"));
     const channels = Object.entries(metadata.coverage || {}).map(([name, coverage]) => `${name}: ${coverage.valid_points}/${coverage.points} Messwerte`);
     if (channels.length) content.append(node("p", `Datenabdeckung · ${channels.join(" · ")}`, "muted"));
+  }
+
+
+  function renderSeries(activity, content) {
     let charts = 0;
     for (const [key, label, unit] of [["watts", "Leistung", "W"], ["heartrate", "Herzfrequenz", "bpm"], ["velocity_smooth", "Geschwindigkeit", "m/s"], ["speed", "Geschwindigkeit", "m/s"], ["altitude", "Höhe", "m"], ["cadence", "Kadenz", "rpm"]]) {
       const series = chart(activity.streams || {}, key, label, unit);
       if (series) { content.append(series); charts += 1; }
     }
     if (!charts) content.append(node("p", "Keine darstellbaren Messreihen vorhanden. Fehlende Sensorwerte werden nicht als Null interpretiert."));
+  }
+
+
+  function renderLaps(activity, content) {
     if (activity.laps?.length) {
       content.append(node("h3", "Intervalle / Runden"));
       const list = node("ol", null, "activity-laps");
@@ -77,6 +106,10 @@
       ].filter(Boolean).join(" · "))));
       content.append(list);
     }
+  }
+
+
+  function renderIntervalQuality(payload, content) {
     const quality = payload.session_analysis?.interval_quality;
     if (quality) {
       content.append(node("h3", "Trainingsqualität"));
@@ -92,28 +125,35 @@
       }
       content.append(node("p", "Einzelziele verwenden ±5%; vorgegebene Bereiche bleiben unverändert. Ziele stammen aus der ersten Detailabfrage. Frühere Vorlagenänderungen sind nicht rekonstruierbar.", "muted"));
     }
+  }
+
+
+  function renderAerobic(payload, content) {
     const aerobic = payload.session_analysis?.aerobic;
     if (aerobic) {
       content.append(node("h3", "Aerobe Effizienz"));
       if (aerobic.provider_decoupling?.value != null) content.append(node("p", `Intervals.icu Decoupling: ${aerobic.provider_decoupling.value}% (Anbieterberechnung)`));
-      content.append(node("p", aerobic.status === "ok"
-        ? `${aerobic.efficiency} ${aerobic.unit} · lokale Herzfrequenzdrift ${aerobic.drift_percent}%${aerobic.long_session ? " · lange Einheit" : ""}`
-        : aerobic.reason));
+      let description = aerobic.reason;
+      if (aerobic.status === "ok") {
+        const longSession = aerobic.long_session ? " \u00b7 lange Einheit" : "";
+        description = `${aerobic.efficiency} ${aerobic.unit} \u00b7 lokale Herzfrequenzdrift ${aerobic.drift_percent}%${longSession}`;
+      }
+      content.append(node("p", description));
       content.append(node("p", "Lokale Methode: zehn Minuten Aufwärmen ausgeschlossen, danach zwei gleich lange Hälften bei gleichmäßiger Belastung und mindestens 85% Messabdeckung. Temperatur, Gelände und Indoor/Outdoor beeinflussen den Vergleich; keine pauschale Fitnessbewertung.", "muted"));
     }
+  }
+
+
+  function renderPower(payload, content) {
     const power = payload.session_analysis?.power_profile;
     if (power) {
       content.append(node("h3", "Beobachtete Bestleistung"));
-      for (const point of power.points || []) content.append(node("p", `${point.duration_seconds < 60 ? `${point.duration_seconds} s` : `${point.duration_seconds / 60} min`}: ${point.watts == null ? "keine lückenlose Messung" : `${point.watts} W`}`));
+      for (const point of power.points || []) {
+        const duration = point.duration_seconds < 60 ? `${point.duration_seconds} s` : `${point.duration_seconds / 60} min`;
+        const measurement = point.watts == null ? "keine l\u00fcckenlose Messung" : `${point.watts} W`;
+        content.append(node("p", `${duration}: ${measurement}`));
+      }
       content.append(node("p", "Zeitgewichtete Mittelwerte aus den Originaldaten dieser Aufzeichnung. Keine FTP-, Critical-Power- oder W′-Schätzung; Nullleistung zählt, Sensorausfälle und Stopps unterbrechen das Fenster.", "muted"));
-    }
-    const feedback = payload.activity_feedback;
-    for (const item of payload.equipment || []) content.append(node("p", `Ausrüstung: ${item.name} · ${item.usage.distance_km} km${item.usage.maintenance_due ? " · persönliches Wartungsintervall erreicht" : ""}`));
-    if (feedback && (feedback.notes || feedback.session_rpe != null || feedback.deviation_reason)) {
-      content.append(node("h3", "Dein Feedback"));
-      if (feedback.notes) content.append(node("p", feedback.notes));
-      if (feedback.session_rpe != null) content.append(node("p", `Session-RPE: ${feedback.session_rpe}/10`));
-      if (feedback.deviation_reason) content.append(node("p", feedback.deviation_reason));
     }
   }
 
@@ -122,7 +162,7 @@
     const activityId = String(activity.id ?? activity.activity_id ?? "");
     if (!activityId) return;
     const token = ++generation;
-    const navigationState = { ...(history.state || {}) };
+    const navigationState = { ...history.state };
     delete navigationState.activityDetail;
     history.replaceState(navigationState, "", location.href);
     history.pushState({ ...navigationState, activityDetail: activityId }, "", location.href);

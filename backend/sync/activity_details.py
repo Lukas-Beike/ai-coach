@@ -39,28 +39,11 @@ def normalize_streams(value: Any) -> dict[str, list[Any]]:
         raise AppError(502, "Ungültige Messreihen vom Anbieter.")
     streams: dict[str, list[Any]] = {}
     for stream in value:
-        if not isinstance(stream, dict):
-            raise AppError(502, "Ungültige Messreihe vom Anbieter.")
-        name = stream.get("type")
-        if not isinstance(name, str) or name not in COACH_ACTIVITY_DETAIL_STREAM_FIELDS:
-            continue
-        data = stream.get("data")
-        if not isinstance(data, list) or len(data) > MAX_STREAM_POINTS:
-            raise AppError(502, "Die Messreihe überschreitet die unterstützte Größe.")
-        streams[name] = [
-            point
-            if type(point) in {int, float, bool} and math.isfinite(point)
-            else None
-            for point in data
-        ]
-    time = streams.get("time", [])
-    if time and (
-        any(type(point) not in {int, float} or point < 0 for point in time)
-        or time[-1] - time[0] > 172_800
-        or any(right <= left for left, right in pairwise(time))
-        or any(len(data) != len(time) for data in streams.values())
-    ):
-        raise AppError(502, "Die Zeitachse der Messreihen ist nicht konsistent.")
+        normalized = _normalize_stream(stream)
+        if normalized is not None:
+            name, data = normalized
+            streams[name] = data
+    _validate_time_axis(streams)
     return streams
 
 
@@ -152,3 +135,31 @@ class ActivityDetailRefreshService:
             raise AppError(502, "Die Detaildaten überschreiten die unterstützte Größe.")
         self._store.save(activity_id, record)
         return {"status": "completed", "activity_id": activity_id}
+
+
+def _validate_time_axis(streams: dict[str, list[Any]]) -> None:
+    time = streams.get("time", [])
+    if time and (
+        any(type(point) not in {int, float} or point < 0 for point in time)
+        or time[-1] - time[0] > 172_800
+        or any(right <= left for left, right in pairwise(time))
+        or any(len(data) != len(time) for data in streams.values())
+    ):
+        raise AppError(502, "Die Zeitachse der Messreihen ist nicht konsistent.")
+
+
+def _normalize_stream(stream: Any) -> tuple[str, list[Any]] | None:
+    if not isinstance(stream, dict):
+        raise AppError(502, "Ungültige Messreihe vom Anbieter.")
+    name = stream.get("type")
+    if not isinstance(name, str) or name not in COACH_ACTIVITY_DETAIL_STREAM_FIELDS:
+        return None
+    data = stream.get("data")
+    if not isinstance(data, list) or len(data) > MAX_STREAM_POINTS:
+        raise AppError(502, "Die Messreihe überschreitet die unterstützte Größe.")
+    normalized = [
+        point if type(point) in {int, float, bool} and math.isfinite(point) else None
+        for point in data
+    ]
+
+    return name, normalized

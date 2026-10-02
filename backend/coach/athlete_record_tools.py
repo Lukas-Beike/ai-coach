@@ -159,20 +159,7 @@ class CoachAthleteRecordToolService:
         if name == "save_fueling_plan":
             return self._nutrition.fueling().save(structured_action_payload(arguments))
         if name == "save_nutrition_template":
-            template_payload = structured_action_payload(arguments)
-            if not template_payload.get("id"):
-                template_payload.setdefault("source", "coach")
-            return {
-                "ok": True,
-                "template": self._nutrition.save_template(
-                    template_payload,
-                    **(
-                        {"expected_calculation": arguments["_food_calculation"]}
-                        if "_food_calculation" in arguments
-                        else {}
-                    ),
-                ),
-            }
+            return self._save_nutrition_template(arguments)
         if name == "delete_nutrition_template":
             return {
                 "ok": True,
@@ -205,3 +192,20 @@ class CoachAthleteRecordToolService:
     def _authorize(intent: dict[str, Any], operation: str, message: str) -> None:
         if not require_operation(intent, operation):
             raise AppError(403, message, reason="intent_scope_denied")
+
+    def _save_nutrition_template(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        assert self._nutrition is not None
+        template_payload = structured_action_payload(arguments)
+        if not template_payload.get("id"):
+            template_payload.setdefault("source", "coach")
+        return {
+            "ok": True,
+            "template": self._nutrition.save_template(
+                template_payload,
+                **(
+                    {"expected_calculation": arguments["_food_calculation"]}
+                    if "_food_calculation" in arguments
+                    else {}
+                ),
+            ),
+        }

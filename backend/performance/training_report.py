@@ -114,30 +114,7 @@ def zone_distribution(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             ("icu_hr_zone_times", "heart_rate"),
             ("pace_zone_times", "pace"),
         ):
-            zones: dict[str, float] = defaultdict(float)
-            measured_sessions = 0
-            for row in sport_rows:
-                values = row.get(key)
-                if not isinstance(values, list):
-                    continue
-                normalized = [
-                    {"id": f"Z{index + 1}", "secs": value}
-                    if sensor == "heart_rate" and number(value) is not None
-                    else value
-                    for index, value in enumerate(values)
-                ]
-                valid = [
-                    value
-                    for value in normalized
-                    if isinstance(value, dict)
-                    and number(value.get("secs")) is not None
-                    and float(value["secs"]) >= 0
-                    and str(value.get("id", "")).startswith("Z")
-                ]
-                if valid:
-                    measured_sessions += 1
-                    for value in valid:
-                        zones[str(value["id"])[:20]] += float(value["secs"])
+            zones, measured_sessions = _sensor_zones(sport_rows, key, sensor)
             if zones:
                 reports.append(
                     {
@@ -183,26 +160,8 @@ def training_report(
         for row in eligible
         if previous_start.isoformat() <= activity_day(row, timezone) < start.isoformat()
     ]
-    sports = {
-        name: _totals(
-            [row for row in current if str(row.get("type") or "Unknown") == name]
-        )
-        for name in sorted({str(row.get("type") or "Unknown") for row in current})
-    }
-    refs = [
-        {
-            "activity_id": str(row.get("id") or ""),
-            "name": str(row.get("name") or "Training")[:200],
-            "date": activity_day(row, timezone),
-            "sport": row.get("type"),
-            "training_load": number(row.get("icu_training_load")),
-        }
-        for row in sorted(
-            current,
-            key=lambda row: number(row.get("icu_training_load")) or -1,
-            reverse=True,
-        )[:3]
-    ]
+    sports = _sport_totals(current)
+    refs = _key_sessions(current, timezone)
     planned = [
         row
         for row in (plan or {}).get("training_calendar", [])
@@ -237,49 +196,8 @@ def training_report(
         "sports": sports,
         "weekly_load": _weekly_load_history(eligible, today, timezone),
         "daily": [
-            {
-                "date": day.isoformat(),
-                "future": day > today,
-                "cumulative_training_load": _cumulative_load(current, day, timezone)
-                if day <= today
-                else {"value": None, "measured_sessions": 0, "total_sessions": 0},
-                "activities": [
-                    {
-                        "activity_id": str(row.get("id") or ""),
-                        "name": str(row.get("name") or "Training")[:200],
-                        "sport": str(row.get("type") or "Unknown"),
-                        "training_load": number(row.get("icu_training_load")),
-                    }
-                    for row in current
-                    if activity_day(row, timezone) == day.isoformat()
-                ],
-                "totals": _totals(
-                    [
-                        row
-                        for row in current
-                        if activity_day(row, timezone) == day.isoformat()
-                    ]
-                ),
-                "sports": {
-                    name: _totals(
-                        [
-                            row
-                            for row in current
-                            if activity_day(row, timezone) == day.isoformat()
-                            and str(row.get("type") or "Unknown") == name
-                        ]
-                    )
-                    for name in sorted(
-                        {
-                            str(row.get("type") or "Unknown")
-                            for row in current
-                            if activity_day(row, timezone) == day.isoformat()
-                        }
-                    )
-                },
-            }
+            _daily_report(current, start + timedelta(days=offset), today, timezone)
             for offset in range(days)
-            for day in [start + timedelta(days=offset)]
         ],
         "zones": zone_distribution(current),
         "key_sessions": refs,
@@ -319,4 +237,95 @@ def training_report(
             if str(item.get("activity_id")) == str(activity.get("id"))
         ][:100],
         "coverage_note": "Totals include known local records only. Missing loads remain unknown; an empty day does not prove rest or a confirmed training pause. The current period is not comparable to a complete previous period.",
+    }
+
+
+def _valid_zones(values: Any, sensor: str) -> list[dict]:
+    if not isinstance(values, list):
+        return []
+    normalized = [
+        {"id": f"Z{index + 1}", "secs": value}
+        if sensor == "heart_rate" and number(value) is not None
+        else value
+        for index, value in enumerate(values)
+    ]
+    valid = [
+        value
+        for value in normalized
+        if isinstance(value, dict)
+        and number(value.get("secs")) is not None
+        and float(value["secs"]) >= 0
+        and str(value.get("id", "")).startswith("Z")
+    ]
+
+    return valid
+
+
+def _sensor_zones(
+    sport_rows: list[dict], key: str, sensor: str
+) -> tuple[dict[str, float], int]:
+    zones: dict[str, float] = defaultdict(float)
+    measured_sessions = 0
+    for row in sport_rows:
+        valid = _valid_zones(row.get(key), sensor)
+        if valid:
+            measured_sessions += 1
+            for value in valid:
+                zones[str(value["id"])[:20]] += float(value["secs"])
+
+    return zones, measured_sessions
+
+
+def _sport_totals(rows: list[dict]) -> dict[str, Any]:
+    sports = {
+        name: _totals(
+            [row for row in rows if str(row.get("type") or "Unknown") == name]
+        )
+        for name in sorted({str(row.get("type") or "Unknown") for row in rows})
+    }
+
+    return sports
+
+
+def _key_sessions(current: list[dict], timezone: str) -> list[dict]:
+    refs = [
+        {
+            "activity_id": str(row.get("id") or ""),
+            "name": str(row.get("name") or "Training")[:200],
+            "date": activity_day(row, timezone),
+            "sport": row.get("type"),
+            "training_load": number(row.get("icu_training_load")),
+        }
+        for row in sorted(
+            current,
+            key=lambda row: number(row.get("icu_training_load")) or -1,
+            reverse=True,
+        )[:3]
+    ]
+
+    return refs
+
+
+def _daily_report(
+    rows: list[dict], day: date, today: date, timezone: str
+) -> dict[str, Any]:
+    activities = [row for row in rows if activity_day(row, timezone) == day.isoformat()]
+    cumulative = {"value": None, "measured_sessions": 0, "total_sessions": 0}
+    if day <= today:
+        cumulative = _cumulative_load(rows, day, timezone)
+    return {
+        "date": day.isoformat(),
+        "future": day > today,
+        "cumulative_training_load": cumulative,
+        "activities": [
+            {
+                "activity_id": str(row.get("id") or ""),
+                "name": str(row.get("name") or "Training")[:200],
+                "sport": str(row.get("type") or "Unknown"),
+                "training_load": number(row.get("icu_training_load")),
+            }
+            for row in activities
+        ],
+        "totals": _totals(activities),
+        "sports": _sport_totals(activities),
     }

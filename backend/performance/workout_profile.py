@@ -37,39 +37,75 @@ def planned_profile(workout: dict[str, Any]) -> dict[str, Any] | None:
     segments = []
     units = set()
     for step in steps:
-        target = step["target"]
-        zone = re.fullmatch(r"Z([1-7])(?:\s+(?:HR|PACE))?", target)
-        numbers = re.findall(r"\d+(?:\.\d+)?", target)
-        if not numbers:
+        result = _planned_segment(step)
+        if result is None:
             return None
-        low, high = float(numbers[0]), float(numbers[-1])
-        value = (low + high) / 2
-        if zone:
-            color = int(zone[1])
-            units.add("zone")
-        elif step["kind"] == "power" and "%" in target:
-            color = _power_zone(value)
-            units.add("%FTP")
-        else:
-            color = None
-            units.add(
-                "bpm" if "BPM" in target else "W" if "W" in target else step["kind"]
-            )
-        segments.append(
-            {
-                "duration": step["duration"],
-                "value": low if step["ramp"] else value,
-                "end_value": high if step["ramp"] else value,
-                "zone": color,
-                "label": target,
-            }
-        )
+        segment, unit = result
+        segments.append(segment)
+        units.add(unit)
     if len(units) != 1:
         return None
     return {"source": "planned", "unit": units.pop(), "segments": segments}
 
 
 def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
+    streams = _profile_streams(activity)
+    if streams is None:
+        return None
+    times, values, kind, start, end = streams
+    width = (end - start) / 60
+    totals, known = _bucket_totals(times, values, kind, start, end)
+    ftp = _number(activity.get("icu_ftp"))
+    segments = [
+        _recorded_segment(total, coverage, width, kind, ftp)
+        for total, coverage in zip(totals, known, strict=True)
+    ]
+    return (
+        {
+            "source": "recorded",
+            "unit": "W" if kind == "watts" else "bpm",
+            "segments": segments,
+        }
+        if any(item["value"] is not None for item in segments)
+        else None
+    )
+
+
+def _planned_segment(step: dict[str, Any]) -> tuple[dict[str, Any], str] | None:
+    target = step["target"]
+    zone = re.fullmatch(r"Z([1-7])(?:\s+(?:HR|PACE))?", target)
+    numbers = re.findall(r"\d+(?:\.\d+)?", target)
+    if not numbers:
+        return None
+    low, high = float(numbers[0]), float(numbers[-1])
+    value = (low + high) / 2
+    if zone:
+        color = int(zone[1])
+        unit = "zone"
+    elif step["kind"] == "power" and "%" in target:
+        color = _power_zone(value)
+        unit = "%FTP"
+    else:
+        color = None
+        unit = step["kind"]
+        if "BPM" in target:
+            unit = "bpm"
+        elif "W" in target:
+            unit = "W"
+    segment = {
+        "duration": step["duration"],
+        "value": low if step["ramp"] else value,
+        "end_value": high if step["ramp"] else value,
+        "zone": color,
+        "label": target,
+    }
+
+    return segment, unit
+
+
+def _profile_streams(
+    activity: dict[str, Any],
+) -> tuple[list, list, str, float, float] | None:
     streams = activity.get("streams")
     if not isinstance(streams, dict):
         return None
@@ -86,6 +122,13 @@ def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
     start, end = _number(times[0]), _number(times[-1])
     if start is None or end is None or not 0 < end - start <= 86400:
         return None
+
+    return times, values, kind, start, end
+
+
+def _bucket_totals(
+    times: list, values: list, kind: str, start: float, end: float
+) -> tuple[list[float], list[float]]:
     width = (end - start) / 60
     totals, known = [0.0] * 60, [0.0] * 60
     for index in range(len(times) - 1):
@@ -115,29 +158,25 @@ def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
             )
             totals[bucket] += value * seconds
             known[bucket] += seconds
-    ftp = _number(activity.get("icu_ftp"))
-    segments = []
-    for total, coverage in zip(totals, known, strict=True):
-        value = total / coverage if coverage >= width * 0.8 else None
-        segments.append(
-            {
-                "duration": width,
-                "value": value,
-                "end_value": value,
-                "zone": _power_zone(value / ftp * 100)
-                if value is not None and kind == "watts" and ftp and ftp > 0
-                else None,
-                "label": f"{value:.0f} {'W' if kind == 'watts' else 'bpm'}"
-                if value is not None
-                else "Missing",
-            }
-        )
-    return (
-        {
-            "source": "recorded",
-            "unit": "W" if kind == "watts" else "bpm",
-            "segments": segments,
-        }
-        if any(item["value"] is not None for item in segments)
-        else None
-    )
+
+    return totals, known
+
+
+def _recorded_segment(
+    total: float, coverage: float, width: float, kind: str, ftp: float | None
+) -> dict[str, Any]:
+    value = total / coverage if coverage >= width * 0.8 else None
+    zone = None
+    if value is not None and kind == "watts" and ftp and ftp > 0:
+        zone = _power_zone(value / ftp * 100)
+    label = "Missing"
+    if value is not None:
+        unit = "W" if kind == "watts" else "bpm"
+        label = f"{value:.0f} {unit}"
+    return {
+        "duration": width,
+        "value": value,
+        "end_value": value,
+        "zone": zone,
+        "label": label,
+    }

@@ -89,15 +89,7 @@ class FuelingService:
             else None
         )
         known = hours is not None
-        carbs = (
-            [0, 30]
-            if hours is not None and hours <= 1
-            else [30, 60]
-            if hours is not None and hours <= 2.5
-            else [60, 90]
-            if known
-            else None
-        )
+        carbs = _carb_range(hours)
         templates = [
             {
                 key: row.get(key)
@@ -218,3 +210,13 @@ class FuelingService:
             "consumption_logged": False,
             "fueling_plan": saved,
         }
+
+
+def _carb_range(hours: float | None) -> list[int] | None:
+    if hours is None:
+        return None
+    if hours <= 1:
+        return [0, 30]
+    if hours <= 2.5:
+        return [30, 60]
+    return [60, 90]

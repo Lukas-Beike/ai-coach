@@ -43,43 +43,12 @@ def _target(
     text = str(step.get("target") or "").upper()
     if step.get("ramp") or text.startswith("Z"):
         return None
+    parsed = _numeric_target(step, basis, text)
     if step.get("kind") == "pace" and ":" in text:
-        parts = re.findall(r"(\d+):([0-5]\d)", text)
-        distances = {
-            "/KM": 1000,
-            "/MI": 1609.344,
-            "/100M": 100,
-            "/100Y": 91.44,
-            "/500M": 500,
-            "/400M": 400,
-            "/250M": 250,
-        }
-        distance = next(
-            (value for unit, value in distances.items() if unit in text), 1000
-        )
-        speeds = [
-            distance / (int(minutes) * 60 + int(seconds))
-            for minutes, seconds in parts
-            if int(minutes) * 60 + int(seconds) > 0
-        ]
-        if not speeds:
-            return None
-        sensor, values, unit = "velocity_smooth", speeds, "m/s"
-    else:
-        values = [float(value) for value in re.findall(r"\d+(?:\.\d+)?", text)]
-        if not values:
-            return None
-        if step.get("kind") == "power":
-            sensor, unit = "watts", "W"
-            if "%" in text:
-                ftp = _number(basis.get("icu_ftp"))
-                if ftp is None or ftp <= 0:
-                    return None
-                values = [value * ftp / 100 for value in values]
-        elif step.get("kind") == "hr" and "BPM" in text:
-            sensor, unit = "heartrate", "bpm"
-        else:
-            return None
+        parsed = _pace_target(text)
+    if parsed is None:
+        return None
+    sensor, values, unit = parsed
     low, high = min(values), max(values)
     if len(values) == 1:
         low, high = low * 0.95, high * 1.05
@@ -112,6 +81,146 @@ def interval_quality(
             "status": "insufficient_data",
             "reason": "Runden fehlen oder die zeitbasierte Zuordnung ist mehrdeutig. Distanzschritte werden noch nicht bewertet.",
         }
+    results = _interval_steps(activity, targets, laps, steps, base)
+    if isinstance(results, dict):
+        return results
+    groups = _repeat_groups(results)
+    return {
+        **base,
+        "status": "ok"
+        if len(laps) == len(steps) and all(row["status"] == "ok" for row in results)
+        else "partial",
+        "planned_steps": len(steps),
+        "aligned_steps": len(laps),
+        "missing_steps": len(steps) - len(laps),
+        "steps": results,
+        "repeat_groups": groups,
+        "target_snapshot": {
+            key: targets.get(key)
+            for key in ("planned_unit_id", "observed_at", "basis", "matching")
+        },
+    }
+
+
+def aerobic_analysis(activity: dict[str, Any]) -> dict[str, Any]:
+    provider = _number(activity.get("decoupling"))
+    base = {
+        "method": METHOD,
+        "provider_decoupling": {
+            "value": provider,
+            "unit": "%",
+            "source": "Intervals.icu",
+        },
+        "source": "derived from Intervals.icu original streams",
+        "warmup_excluded_seconds": 600,
+        "eligibility": "At least 20 minutes after a 10-minute warm-up; >=85% paired data coverage; output variation <=15%; gaps >5 seconds, stops and non-positive output excluded. No universal fitness cutoff.",
+    }
+    kind = str(activity.get("type") or activity.get("sport") or "")
+    sensor = {
+        "Ride": "watts",
+        "VirtualRide": "watts",
+        "Run": "velocity_smooth",
+        "VirtualRun": "velocity_smooth",
+    }.get(kind)
+    times = (activity.get("streams") or {}).get("time") or []
+    if sensor is None or len(times) < 2 or times[-1] - times[0] < 1800:
+        return {
+            **base,
+            "status": "insufficient_data",
+            "reason": "Geeignete Sportart oder ausreichend lange Messreihe fehlt.",
+        }
+    start, end = float(times[0]) + 600, float(times[-1])
+    output = _samples(activity, sensor, start, end)
+    hr = {
+        timestamp: (weight, value)
+        for timestamp, weight, value in _samples(activity, "heartrate", start, end)
+    }
+    paired = [
+        (timestamp, min(weight, hr[timestamp][0]), value, hr[timestamp][1])
+        for timestamp, weight, value in output
+        if value > 0 and timestamp in hr and 30 <= hr[timestamp][1] <= 240
+    ]
+    halves = _aerobic_halves(paired, start, end, base)
+    if isinstance(halves, dict):
+        return halves
+    if abs(halves[1]["mean_output"] / halves[0]["mean_output"] - 1) > 0.1:
+        return {
+            **base,
+            "status": "insufficient_data",
+            "reason": "Die Belastung der frühen und späten Hälfte ist nicht ausreichend vergleichbar.",
+        }
+    drift = (
+        100
+        * (halves[0]["efficiency"] - halves[1]["efficiency"])
+        / halves[0]["efficiency"]
+    )
+    return {
+        **base,
+        "status": "ok",
+        "unit": "W/bpm" if sensor == "watts" else "(m/s)/bpm",
+        "sensor": sensor,
+        "efficiency": round(
+            sum(half["mean_output"] for half in halves)
+            / sum(half["mean_hr"] for half in halves),
+            4,
+        ),
+        "drift_percent": round(drift, 2),
+        "halves": [
+            {key: round(value, 4) for key, value in half.items()} for half in halves
+        ],
+        "long_session": end - times[0] >= 5400,
+        "interpretation": "A steady-output efficiency comparison, not a medical readiness score or measured running economy. Temperature, terrain and indoor/outdoor conditions can affect the result.",
+    }
+
+
+def _pace_target(text: str) -> tuple[str, list[float], str] | None:
+    parts = re.findall(r"(?<!\d)(\d++):([0-5]\d)", text)
+    distances = {
+        "/KM": 1000,
+        "/MI": 1609.344,
+        "/100M": 100,
+        "/100Y": 91.44,
+        "/500M": 500,
+        "/400M": 400,
+        "/250M": 250,
+    }
+    distance = next((value for unit, value in distances.items() if unit in text), 1000)
+    speeds = [
+        distance / (int(minutes) * 60 + int(seconds))
+        for minutes, seconds in parts
+        if int(minutes) * 60 + int(seconds) > 0
+    ]
+    if not speeds:
+        return None
+    sensor, values, unit = "velocity_smooth", speeds, "m/s"
+
+    return sensor, values, unit
+
+
+def _numeric_target(
+    step: dict, basis: dict, text: str
+) -> tuple[str, list[float], str] | None:
+    values = [float(value) for value in re.findall(r"\d+(?:\.\d+)?", text)]
+    if not values:
+        return None
+    if step.get("kind") == "power":
+        sensor, unit = "watts", "W"
+        if "%" in text:
+            ftp = _number(basis.get("icu_ftp"))
+            if ftp is None or ftp <= 0:
+                return None
+            values = [value * ftp / 100 for value in values]
+    elif step.get("kind") == "hr" and "BPM" in text:
+        sensor, unit = "heartrate", "bpm"
+    else:
+        return None
+
+    return sensor, values, unit
+
+
+def _interval_steps(
+    activity: dict, targets: dict, laps: list[dict], steps: list[dict], base: dict
+) -> list[dict] | dict:
     results = []
     previous_end = -1.0
     for index, lap in enumerate(laps):
@@ -173,6 +282,11 @@ def interval_quality(
                 else None,
             }
         )
+
+    return results
+
+
+def _repeat_groups(results: list[dict]) -> list[dict]:
     groups = []
     for target_text in dict.fromkeys(str(row["target"]) for row in results):
         repeats = [
@@ -201,62 +315,13 @@ def interval_quality(
                     ),
                 }
             )
-    return {
-        **base,
-        "status": "ok"
-        if len(laps) == len(steps) and all(row["status"] == "ok" for row in results)
-        else "partial",
-        "planned_steps": len(steps),
-        "aligned_steps": len(laps),
-        "missing_steps": len(steps) - len(laps),
-        "steps": results,
-        "repeat_groups": groups,
-        "target_snapshot": {
-            key: targets.get(key)
-            for key in ("planned_unit_id", "observed_at", "basis", "matching")
-        },
-    }
+
+    return groups
 
 
-def aerobic_analysis(activity: dict[str, Any]) -> dict[str, Any]:
-    provider = _number(activity.get("decoupling"))
-    base = {
-        "method": METHOD,
-        "provider_decoupling": {
-            "value": provider,
-            "unit": "%",
-            "source": "Intervals.icu",
-        },
-        "source": "derived from Intervals.icu original streams",
-        "warmup_excluded_seconds": 600,
-        "eligibility": "At least 20 minutes after a 10-minute warm-up; >=85% paired data coverage; output variation <=15%; gaps >5 seconds, stops and non-positive output excluded. No universal fitness cutoff.",
-    }
-    kind = str(activity.get("type") or activity.get("sport") or "")
-    sensor = (
-        "watts"
-        if kind in {"Ride", "VirtualRide"}
-        else "velocity_smooth"
-        if kind in {"Run", "VirtualRun"}
-        else None
-    )
-    times = (activity.get("streams") or {}).get("time") or []
-    if sensor is None or len(times) < 2 or times[-1] - times[0] < 1800:
-        return {
-            **base,
-            "status": "insufficient_data",
-            "reason": "Geeignete Sportart oder ausreichend lange Messreihe fehlt.",
-        }
-    start, end = float(times[0]) + 600, float(times[-1])
-    output = _samples(activity, sensor, start, end)
-    hr = {
-        timestamp: (weight, value)
-        for timestamp, weight, value in _samples(activity, "heartrate", start, end)
-    }
-    paired = [
-        (timestamp, min(weight, hr[timestamp][0]), value, hr[timestamp][1])
-        for timestamp, weight, value in output
-        if value > 0 and timestamp in hr and 30 <= hr[timestamp][1] <= 240
-    ]
+def _aerobic_halves(
+    paired: list, start: float, end: float, base: dict
+) -> list[dict] | dict:
     midpoint = (start + end) / 2
     halves = []
     for left, right in ((start, midpoint), (midpoint, end)):
@@ -298,31 +363,5 @@ def aerobic_analysis(activity: dict[str, Any]) -> dict[str, Any]:
                 "variation": cv,
             }
         )
-    if abs(halves[1]["mean_output"] / halves[0]["mean_output"] - 1) > 0.1:
-        return {
-            **base,
-            "status": "insufficient_data",
-            "reason": "Die Belastung der frühen und späten Hälfte ist nicht ausreichend vergleichbar.",
-        }
-    drift = (
-        100
-        * (halves[0]["efficiency"] - halves[1]["efficiency"])
-        / halves[0]["efficiency"]
-    )
-    return {
-        **base,
-        "status": "ok",
-        "unit": "W/bpm" if sensor == "watts" else "(m/s)/bpm",
-        "sensor": sensor,
-        "efficiency": round(
-            sum(half["mean_output"] for half in halves)
-            / sum(half["mean_hr"] for half in halves),
-            4,
-        ),
-        "drift_percent": round(drift, 2),
-        "halves": [
-            {key: round(value, 4) for key, value in half.items()} for half in halves
-        ],
-        "long_session": end - times[0] >= 5400,
-        "interpretation": "A steady-output efficiency comparison, not a medical readiness score or measured running economy. Temperature, terrain and indoor/outdoor conditions can affect the result.",
-    }
+
+    return halves

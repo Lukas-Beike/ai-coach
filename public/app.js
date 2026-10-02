@@ -2872,9 +2872,10 @@ function selectedCheckin(rows, timeZone) {
 }
 
 function checkinSummary(row) {
+  const dayStatus = { rest: "Best\u00e4tigter Ruhetag", pause: "Best\u00e4tigte Trainingspause" }[row.day_status] || null;
   return [
     row.day_form ? `Tagesform: ${row.day_form}` : null,
-    row.day_status === "rest" ? "Bestätigter Ruhetag" : row.day_status === "pause" ? "Bestätigte Trainingspause" : null,
+    dayStatus,
     row.soreness != null ? `Schmerz/Muskelkater ${row.soreness}/10` : null,
     row.stress != null ? `Stress ${row.stress}/10` : null,
     row.motivation != null ? `Motivation ${row.motivation}/10` : null,

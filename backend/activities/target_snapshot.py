@@ -26,40 +26,9 @@ def freeze_targets(
     if len(candidates) != 1:
         return None
     event, row = candidates[0]
-    paired = str(row.get("paired_event_id") or "")
-    if paired:
-        if (
-            paired != str(event.get("id"))
-            or sum(
-                str(item.get("paired_event_id") or "") == paired for item in activities
-            )
-            != 1
-        ):
-            return None
-        matching = "provider paired_event_id"
-    else:
-        day = record_date(row.get("start_date_local"))
-        kind = activity_kind(row)
-        if (
-            kind == "other"
-            or sum(
-                record_date(item.get("start_date_local")) == day
-                and activity_kind(item) == kind
-                for item in activities
-            )
-            != 1
-        ):
-            return None
-        if (
-            sum(
-                record_date(item.get("start_date_local")) == day
-                and activity_kind(item) == kind
-                for item in planned
-            )
-            != 1
-        ):
-            return None
-        matching = "unique local date and sport"
+    matching = _matching_basis(event, row, activities, planned)
+    if matching is None:
+        return None
     description = str(event.get("description") or "")
     if len(description) > 20000:
         return None
@@ -77,3 +46,48 @@ def freeze_targets(
         "matching": matching,
         "scope": "Local targets observed at first detail refresh; earlier edits cannot be reconstructed.",
     }
+
+
+def _matching_basis(
+    event: dict, row: dict, activities: list[dict], planned: list[dict]
+) -> str | None:
+    paired = str(row.get("paired_event_id") or "")
+    if paired:
+        if (
+            paired != str(event.get("id"))
+            or sum(
+                str(item.get("paired_event_id") or "") == paired for item in activities
+            )
+            != 1
+        ):
+            return None
+        matching = "provider paired_event_id"
+    else:
+        if not _unique_local_match(row, activities, planned):
+            return None
+        matching = "unique local date and sport"
+
+    return matching
+
+
+def _unique_local_match(row: dict, activities: list[dict], planned: list[dict]) -> bool:
+    day = record_date(row.get("start_date_local"))
+    kind = activity_kind(row)
+    if (
+        kind == "other"
+        or sum(
+            record_date(item.get("start_date_local")) == day
+            and activity_kind(item) == kind
+            for item in activities
+        )
+        != 1
+    ):
+        return False
+    return (
+        sum(
+            record_date(item.get("start_date_local")) == day
+            and activity_kind(item) == kind
+            for item in planned
+        )
+        == 1
+    )

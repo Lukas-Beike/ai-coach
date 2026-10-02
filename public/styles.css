@@ -568,9 +568,8 @@ h2 {
 .training-focus-row[data-zone="Z5"] { --zone-color: #e83b76; }
 .training-focus-row[data-zone="Z6"] { --zone-color: #8b5fe7; }
 .training-focus-row[data-zone="Z7"] { --zone-color: #7b7389; }
-.calendar-workout-profile { display: block; width: 100%; height: 48px; margin: 5px 0 2px; overflow: hidden; }
+.calendar-workout-profile { color: #8c9895; display: block; width: 100%; height: 48px; margin: 5px 0 2px; overflow: hidden; }
 .calendar-profile-baseline { stroke: var(--line-strong); stroke-width: 1; }
-.calendar-workout-profile { color: #8c9895; }
 .calendar-workout-profile polygon { stroke: none; }
 .calendar-workout-profile [data-zone="1"] { color: #3db3a0; }
 .calendar-workout-profile [data-zone="2"] { color: #37b43c; }
@@ -708,7 +707,7 @@ h2 {
 .planned-day-calendar { color: var(--link); }
 .planned-day-health { padding: 10px 12px; border: 1px solid var(--orange); border-radius: 10px; color: var(--ink); background: var(--surface); text-align: center; font-weight: 650; }
 .planned-day-empty { margin: 2px 0; color: var(--subtle); font-size: .85rem; line-height: 1.5; }
-.planned-entry { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 3px 8px rgb(0 0 0 / 8%); }
+.planned-entry { --session-color: #64748b; --session-soft: #64748b20; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 3px 8px rgb(0 0 0 / 8%); }
 .planned-entry + .planned-entry { margin-top: 12px; }
 .planned-entry > summary { position: relative; display: grid; gap: 8px; min-height: 48px; padding: 0 0 12px; cursor: pointer; list-style: none; text-align: center; }
 .planned-entry > summary::-webkit-details-marker { display: none; }
@@ -716,7 +715,6 @@ h2 {
 .planned-entry[open] > summary::after { transform: rotate(90deg); }
 .planned-entry > summary:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 4px; border-radius: 4px; }
 .planned-entry > summary > strong { padding: 0 24px 0 12px; color: var(--ink); font-size: .95rem; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
-.planned-entry { --session-color: #64748b; --session-soft: #64748b20; }
 .planned-entry[data-sport="Radfahren"], .planned-entry[data-sport="Rad indoor"] { --session-color: #086bbd; --session-soft: #086bbd20; }
 .planned-entry[data-sport="Laufen"] { --session-color: #288b38; --session-soft: #288b3820; }
 .planned-entry[data-sport="Schwimmen"] { --session-color: #8455bd; --session-soft: #8455bd20; }

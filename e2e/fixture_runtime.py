@@ -189,6 +189,9 @@ def initialise_fixture():
     initialise()
 
 
+FIXTURE_ACTIVITY_TIME = "T08:00:00"
+
+
 def seed_training_features():
     from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
     from backend.performance.power_profile import power_profile
@@ -197,9 +200,9 @@ def seed_training_features():
     now = server.ATHLETE_CLOCK.now()
     rows = [
         {"id": "feature-ride-1", "name": "Fixture steady ride", "type": "Ride", "device_name": "Fixture meter",
-         "start_date_local": now.date().isoformat() + "T08:00:00", "moving_time": 3600, "distance": 25000, "icu_training_load": 50},
+         "start_date_local": now.date().isoformat() + FIXTURE_ACTIVITY_TIME, "moving_time": 3600, "distance": 25000, "icu_training_load": 50},
         {"id": "feature-ride-2", "name": "Fixture previous ride", "type": "Ride", "device_name": "Fixture meter",
-         "start_date_local": (now.date() - timedelta(days=7)).isoformat() + "T08:00:00", "moving_time": 3600, "distance": 25000, "icu_training_load": 50},
+         "start_date_local": (now.date() - timedelta(days=7)).isoformat() + FIXTURE_ACTIVITY_TIME, "moving_time": 3600, "distance": 25000, "icu_training_load": 50},
     ]
     for row in rows:
         row["icu_hr_zone_times"] = [600, 1800, 600, 450, 150]
@@ -214,13 +217,13 @@ def seed_training_features():
     week_start = now.date() - timedelta(days=now.date().weekday())
     for weeks_ago in range(2, 8):
         rows.append({"id": f"feature-history-{weeks_ago}", "name": "Fixture historical ride", "type": "Ride",
-                     "start_date_local": (week_start - timedelta(weeks=weeks_ago)).isoformat() + "T08:00:00",
+                     "start_date_local": (week_start - timedelta(weeks=weeks_ago)).isoformat() + FIXTURE_ACTIVITY_TIME,
                      "moving_time": 3600, "distance": 25000, "icu_training_load": 60 + (weeks_ago % 3) * 30})
     for offset, sport, duration, distance in [(0, "Run", 2400, 6000), (2, "Ride", 4500, 32000), (3, "Run", 1800, 4200)]:
         day = week_start + timedelta(days=offset)
         if day < now.date():
             rows.append({"id": f"feature-week-{offset}", "name": f"Fixture {sport}", "type": sport,
-                         "start_date_local": day.isoformat() + "T08:00:00", "moving_time": duration,
+                         "start_date_local": day.isoformat() + FIXTURE_ACTIVITY_TIME, "moving_time": duration,
                          "distance": distance, "icu_training_load": 30})
     snapshot = {"synced_at": server.runtime_clock.utc_now(), "athlete": {}, "recent_wellness": wellness,
                 "recent_activities": rows, "raw_provider_data": {"activities": rows}}
@@ -231,7 +234,7 @@ def seed_training_features():
                 {"date": (now.date() - timedelta(days=55)).isoformat(), "metrics": {"cycling_ftp_watts": 200}},
                 {"date": now.date().isoformat(), "metrics": {"cycling_ftp_watts": 210}},
             ],
-            "activities": [{"activityId": f"demo-{index}", "startTimeLocal": now.date().isoformat() + "T08:00:00",
+            "activities": [{"activityId": f"demo-{index}", "startTimeLocal": now.date().isoformat() + FIXTURE_ACTIVITY_TIME,
                 "trainingEffectLabel": label, "activityTrainingLoad": load}
                 for index, (label, load) in enumerate([("AEROBIC_BASE", 40), ("TEMPO", 80), ("ANAEROBIC_CAPACITY", 30)])],
             "gear": [{"gearUUID": "11111111-1111-4111-8111-111111111111", "gearName": "Fixture Garmin bike",
@@ -307,7 +310,7 @@ def seed_preview_demo():
         "run_threshold_pace_seconds_per_km": 270 - (42 - offset) / 2}}
         for offset in range(42, -1, -1)]
     garmin = {"synced_at": server.runtime_clock.utc_now(), "performance_history": history,
-        "activities": [{"activityId": f"demo-{index}", "startTimeLocal": today.isoformat() + "T08:00:00",
+        "activities": [{"activityId": f"demo-{index}", "startTimeLocal": today.isoformat() + FIXTURE_ACTIVITY_TIME,
             "trainingEffectLabel": label, "activityTrainingLoad": load}
             for index, (label, load) in enumerate([("AEROBIC_BASE", 40), ("TEMPO", 80), ("ANAEROBIC_CAPACITY", 30)])],
         "gear": [{"gearUUID": "11111111-1111-4111-8111-111111111111", "gearName": "Demo-Rennrad", "gearTypeName": "Fahrrad", "gearStatusName": "Aktiv", "maximumMeters": 10000000, "stats": {"totalDistance": 4250000, "totalActivities": 128}},
