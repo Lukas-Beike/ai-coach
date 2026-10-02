@@ -5,7 +5,7 @@ import json
 import math
 import uuid
 from datetime import date
-from typing import Any, TypedDict
+from typing import Any
 
 from backend.errors import (
     CORRUPT_PLANNING_ERROR,
@@ -20,21 +20,9 @@ from backend.providers.workout_text import canonical_workout_zones
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 
 
-class NormalizedRemotePlannedUnit(TypedDict, total=False):
-    """Provider workout after normalization for local conflict persistence."""
-
-    id: str
-    date: str
-    source: str
-    category: str
-    remote_event_id: str
-    remote_event_external_id: str
-    external_id: str
-
-
 def adopt_normalized_remote_planned_unit(
-    remote: NormalizedRemotePlannedUnit,
-) -> tuple[NormalizedRemotePlannedUnit, str] | None:
+    remote: dict[str, Any],
+) -> tuple[dict[str, Any], str] | None:
     """Validate a persisted normalized snapshot without treating its local ID as remote."""
     if remote.get("source") != "intervals" or remote.get("category") != "WORKOUT":
         return None
@@ -253,10 +241,10 @@ def _reconcile_updated_planned_workout_content(
         )
     seconds = planning_workouts.validate_workout_description(normalized)
     minutes = _as_number(normalized.get("duration_minutes"))
-    if seconds is not None or minutes is not None:
-        normalized["moving_time"] = round(
-            seconds if seconds is not None else minutes * 60
-        )
+    if seconds is not None:
+        normalized["moving_time"] = round(seconds)
+    elif minutes is not None:
+        normalized["moving_time"] = round(minutes * 60)
     if any(
         key in values
         for key in ("description", "duration_minutes", "target", "type", "sport")
