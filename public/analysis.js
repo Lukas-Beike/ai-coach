@@ -133,10 +133,11 @@ function renderAnalysisHistory(history) {
     "CTL: langfristige Belastung (üblich 42 Tage), ATL: kurzfristige Belastung (7 Tage). Die Providerkonfiguration gilt. TSB = CTL − ATL am selben Tag. Historische Werte bis gestern; CTL ist kein Leistungstest."));
   const performanceSeries = [
     ["cycling_ftp_watts", "Rad · FTP", "W"],
+    ["cycling_eftp_watts", "Rad · eFTP", "W"],
     ["run_threshold_pace_seconds_per_km", "Lauf · Schwellenpace", "s/km"],
     ["cycling_vo2max_ml_kg_min", "Rad · VO₂max", "ml/kg/min"],
     ["running_vo2max_ml_kg_min", "Lauf · VO₂max", "ml/kg/min"],
-  ].flatMap(([key, label, unit], color) => (history.metrics?.[key] || []).map((item) => {
+  ].flatMap(([key, label, unit], color) => (history.metrics?.[key] || []).filter((item) => item.source === (key === "cycling_eftp_watts" ? "Intervals.icu" : "Garmin Connect")).map((item) => {
     const baseline = item.points.find((point) => point.value != null && Number(point.value) > 0);
     return {
       label: `${label} · ${item.source}`, unit, color,
@@ -150,5 +151,5 @@ function renderAnalysisHistory(history) {
     };
   }));
   root.append(analysisChart("Leistungsentwicklung", performanceSeries, "%", history.start, history.end,
-    "Relative Veränderung ab dem ersten vorhandenen Wert je Reihe (0 %). Bei Schwellenpace bedeutet positives Wachstum eine kürzere Zeit pro Kilometer. Originalwerte und Basisdatum stehen in der Legende. VO₂max ist eine Schätzung. Durchgezogen: Intervals.icu; gestrichelt: Garmin. Quellen und Datenlücken bleiben getrennt."));
+    "Relative Veränderung ab dem ersten vorhandenen Wert je Reihe (0 %). Bei Schwellenpace bedeutet positives Wachstum eine kürzere Zeit pro Kilometer. Originalwerte und Basisdatum stehen in der Legende. Leistungswerte: Garmin; nur eFTP: Intervals.icu. VO₂max und eFTP sind Schätzungen. Datenlücken bleiben sichtbar."));
 }

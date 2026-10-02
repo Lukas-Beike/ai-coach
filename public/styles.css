@@ -263,6 +263,7 @@ h2 {
 .analysis-chart-legend [data-color="1"]::before { background: #cc7c00; }
 .analysis-chart-legend [data-color="2"]::before { background: #a78bfa; }
 .analysis-chart-legend [data-color="3"]::before { background: #38bdf8; }
+.analysis-chart-legend [data-color="4"]::before { background: #fb7185; }
 .analysis-chart-card svg { display: block; width: 100%; height: auto; overflow: visible; }
 .analysis-chart-card svg text { fill: var(--muted); font-size: 12px; }
 .analysis-chart-card svg [data-series] { stroke: var(--accent-bright); stroke-width: 2; }
@@ -271,6 +272,7 @@ h2 {
 .analysis-chart-card svg path[data-series="1"] { stroke-dasharray: 6 3; }
 .analysis-chart-card svg [data-color="2"] { stroke: #a78bfa; }
 .analysis-chart-card svg [data-color="3"] { stroke: #38bdf8; }
+.analysis-chart-card svg [data-color="4"] { stroke: #fb7185; }
 .analysis-chart-card svg path[data-series="2"] { stroke-dasharray: 2 3; }
 .analysis-chart-card svg path[data-line="solid"] { stroke-dasharray: none; }
 .analysis-chart-card svg path[data-line="dashed"] { stroke-dasharray: 6 3; }
@@ -280,6 +282,8 @@ h2 {
 :root[data-theme="light"] .analysis-chart-legend [data-color="1"]::before { background: #b45309; }
 :root[data-theme="light"] .analysis-chart-legend [data-color="2"]::before { background: #7c3aed; }
 :root[data-theme="light"] .analysis-chart-legend [data-color="3"]::before { background: #0369a1; }
+:root[data-theme="light"] .analysis-chart-card svg [data-color="4"] { stroke: #be123c; }
+:root[data-theme="light"] .analysis-chart-legend [data-color="4"]::before { background: #be123c; }
 .analysis-grid-line { stroke: var(--line); }
 .analysis-zero-line { stroke: var(--muted); stroke-dasharray: 3 3; }
 .analysis-chart-card summary { display: flex; align-items: center; min-height: 44px; color: var(--ink); cursor: pointer; font-size: .8rem; }

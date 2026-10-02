@@ -654,7 +654,7 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
       tsb: i === 40 || i === 89 ? null : -10 + Math.cos(i / 5) * 10,
     }));
     const metrics = Object.fromEntries([
-      ["cycling_ftp_watts", 250], ["run_threshold_pace_seconds_per_km", 300],
+      ["cycling_ftp_watts", 250], ["cycling_eftp_watts", 260], ["run_threshold_pace_seconds_per_km", 300],
       ["cycling_vo2max_ml_kg_min", 52], ["running_vo2max_ml_kg_min", 54],
     ].map(([key, value]) => [key, ["Intervals.icu", "Garmin Connect"].map((source, index) => ({
       source, points: points.map((point, i) => ({ date: point.date, value: i === 40 ? null : value + index + i / 20 })),
@@ -671,9 +671,9 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await expect(charts.locator("svg")).toHaveCount(2);
   await expect(charts.getByRole("heading", { name: "Belastung und Form" })).toBeVisible();
   const ftp = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: "Leistungsentwicklung" }) });
-  await expect(ftp.locator(".analysis-chart-legend")).toContainText("Intervals.icu: 254,5 W");
+  await expect(ftp.locator(".analysis-chart-legend")).toContainText("Intervals.icu: 264,5 W");
   await expect(ftp.locator(".analysis-chart-legend")).toContainText("Garmin Connect: 255,5 W");
-  await expect(ftp.locator("path[data-series]")).toHaveCount(8);
+  await expect(ftp.locator("path[data-series]")).toHaveCount(5);
   await expect(ftp.locator(".analysis-chart-legend")).toContainText("1,8 %");
   await expect(ftp.locator(".analysis-chart-legend")).toContainText("-1,5 %");
   expect((await ftp.locator('path[data-series="0"]').getAttribute("d")).match(/M/g)).toHaveLength(2);

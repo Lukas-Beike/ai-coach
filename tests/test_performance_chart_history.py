@@ -53,7 +53,7 @@ class AnalysisHistoryTests(unittest.TestCase):
                 {
                     "id": "2026-10-01",
                     "sport_info": [
-                        {"types": ["Ride"], "ftp": 250, "vo2max": 52},
+                        {"types": ["Ride"], "ftp": 250, "eftp": 255, "vo2max": 52},
                         {"types": ["Run"], "threshold_pace": 4, "vo2max": 54},
                     ],
                 }
@@ -67,13 +67,58 @@ class AnalysisHistoryTests(unittest.TestCase):
         }
         series = analysis_history(snapshot, garmin, date(2026, 10, 2))["metrics"]
         ftp = series["cycling_ftp_watts"]
-        self.assertEqual(
-            [item["source"] for item in ftp], ["Intervals.icu", "Garmin Connect"]
-        )
-        self.assertEqual([item["points"][-2]["value"] for item in ftp], [250, 260])
+        self.assertEqual([item["source"] for item in ftp], ["Garmin Connect"])
+        self.assertEqual([item["points"][-2]["value"] for item in ftp], [260])
         self.assertTrue(all(item["points"][-1]["value"] is None for item in ftp))
         self.assertEqual(
-            series["run_threshold_pace_seconds_per_km"][0]["points"][-2]["value"], 250
+            series["run_threshold_pace_seconds_per_km"][0]["points"][-2]["value"], None
+        )
+
+    def test_eftp_uses_only_intervals_estimates_and_never_plain_ftp(self):
+        snapshot = {
+            "recent_wellness": [
+                {"id": "2026-09-30", "sport_info": [{"types": ["Ride"], "ftp": 900}]},
+                {
+                    "id": "2026-10-01",
+                    "sport_info": [{"types": ["Ride"], "mmp_model": {"ftp": 270}}],
+                },
+            ],
+            "recent_activities": [
+                {
+                    "start_date_local": "2026-10-01T10:00:00",
+                    "type": "Ride",
+                    "icu_eftp": 250,
+                },
+                {
+                    "start_date_local": "2026-10-02T10:00:00",
+                    "type": "Ride",
+                    "icu_eftp": 260,
+                },
+                {
+                    "start_date_local": "2026-10-02T12:00:00",
+                    "type": "VirtualRide",
+                    "icu_eftp": 265,
+                },
+                {
+                    "start_date_local": "2026-10-02T13:00:00",
+                    "type": "Run",
+                    "icu_eftp": 999,
+                },
+            ],
+        }
+        garmin = {
+            "performance_history": [
+                {"date": "2026-10-01", "metrics": {"cycling_eftp_watts": 999}}
+            ]
+        }
+        result = analysis_history(snapshot, garmin, date(2026, 10, 2))["metrics"]
+        points = result["cycling_eftp_watts"][0]["points"]
+        self.assertEqual(result["cycling_eftp_watts"][0]["source"], "Intervals.icu")
+        self.assertIsNone(points[-3]["value"])
+        self.assertEqual(points[-2]["value"], 270)
+        self.assertEqual(points[-1]["value"], 265)
+        self.assertTrue(
+            all(p["value"] is None for p in result["cycling_ftp_watts"][0]["points"])
         )
 
     def test_invalid_values_are_missing_and_empty_history_is_safe(self):
@@ -92,7 +137,7 @@ class AnalysisHistoryTests(unittest.TestCase):
         result = analysis_history(snapshot, garmin, date(2026, 10, 2))
         self.assertIsNone(result["load"]["points"][-2]["tsb"])
         self.assertIsNone(
-            result["metrics"]["cycling_ftp_watts"][1]["points"][-2]["value"]
+            result["metrics"]["cycling_ftp_watts"][0]["points"][-2]["value"]
         )
         self.assertEqual(
             len(analysis_history(None, {}, date(2026, 10, 2))["load"]["points"]), 90

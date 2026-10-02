@@ -3,10 +3,11 @@
 from datetime import date, timedelta
 from typing import Any
 
-from backend.performance import activity_validation, trends
+from backend.performance import activity_validation, eftp
 
 METRIC_KEYS = (
     "cycling_ftp_watts",
+    "cycling_eftp_watts",
     "run_threshold_pace_seconds_per_km",
     "cycling_vo2max_ml_kg_min",
     "running_vo2max_ml_kg_min",
@@ -64,13 +65,18 @@ def analysis_history(
 
     series: dict[str, list[dict[str, Any]]] = {key: [] for key in METRIC_KEYS}
     for key in METRIC_KEYS:
-        for source in ("Intervals.icu", "Garmin Connect"):
+        for source in (
+            ("Intervals.icu",) if key == "cycling_eftp_watts" else ("Garmin Connect",)
+        ):
             observations = {}
             if source == "Intervals.icu":
-                for day, row in wellness.items():
-                    value = trends.intervals_performance_average([row], key, 1, day)
-                    if value is not None:
-                        observations[day.isoformat()] = value
+                observations = eftp.eftp_daily_values(
+                    list(wellness.values()),
+                    _rows(raw.get("activities"))
+                    + _rows(snapshot.get("recent_activities")),
+                    start,
+                    today,
+                )
             else:
                 for row in _rows(garmin.get("performance_history")):
                     day = _day(row.get("date"))
