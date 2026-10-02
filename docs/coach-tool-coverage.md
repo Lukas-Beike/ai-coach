@@ -33,6 +33,12 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `delete_competition` | `success` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |
 | `get_sync_job` | `success` | `test_provider_reads_and_job_status_use_correct_provider` |
 | `get_activity_details` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
+| `get_training_report` | `success` | `test_training_report_returns_same_local_facts_without_mutation` |
+| `read_training_records` | `success` | `test_training_records_fueling_and_equipment_tools_use_confirmed_local_state` |
+| `save_fueling_plan` | `success` | `test_training_records_fueling_and_equipment_tools_use_confirmed_local_state` |
+| `save_equipment` | `success` | `test_training_records_fueling_and_equipment_tools_use_confirmed_local_state` |
+| `assign_activity_equipment` | `success` | `test_training_records_fueling_and_equipment_tools_use_confirmed_local_state` |
+| `log_equipment_maintenance` | `success` | `test_training_records_fueling_and_equipment_tools_use_confirmed_local_state` |
 | `inspect_activity_duplicates` | `success` | `test_duplicate_inspection_returns_preview_without_deleting_provider_data` |
 | `list_change_history` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_competitions` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |

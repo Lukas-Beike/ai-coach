@@ -221,6 +221,8 @@ def select_coach_tools(
         "read_training_state",
         "list_recent_activities",
         "get_activity_details",
+        "get_training_report",
+        "read_training_records",
         "list_workout_library",
         "list_planned_workouts",
         "list_change_history",

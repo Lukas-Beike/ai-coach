@@ -1,5 +1,6 @@
 """Pure athlete check-in validation and normalization helpers."""
 
+import json
 from collections.abc import Callable
 from datetime import date
 from typing import Any
@@ -15,6 +16,7 @@ CHECKIN_TEXT_LIMITS = {
     "notes": 4000,
 }
 CHECKIN_SCORE_FIELDS = ("soreness", "stress", "motivation", "session_rpe")
+CHECKIN_TAGS = ("travel", "late_meal", "high_stress")
 
 
 def bounded_score(value: Any) -> int | None:
@@ -56,6 +58,24 @@ def normalize_checkin(value: Any, *, today: date) -> dict[str, Any]:
     if checkin_date > today.isoformat():
         raise AppError(400, "Ein Tages-Check-in kann nicht in der Zukunft liegen.")
     result: dict[str, Any] = {"checkin_date": checkin_date}
+    if "day_status" in value:
+        if value["day_status"] not in ("unknown", "rest", "pause"):
+            raise AppError(
+                400,
+                "Tagesstatus muss unbekannt, Ruhetag oder bestätigte Trainingspause sein.",
+            )
+        result["day_status"] = value["day_status"]
+    if "tag_answers" in value:
+        answers = value["tag_answers"]
+        if (
+            not isinstance(answers, dict)
+            or set(answers) - set(CHECKIN_TAGS)
+            or any(type(answer) is not bool for answer in answers.values())
+        ):
+            raise AppError(
+                400, "Tags benötigen ausdrücklich bestätigte Ja-/Nein-Angaben."
+            )
+        result["tag_answers"] = dict(answers)
     for field in CHECKIN_SCORE_FIELDS:
         result[field] = bounded_score(value.get(field))
     result["available_minutes"] = bounded_minutes(value.get("available_minutes"))
@@ -80,11 +100,43 @@ class CheckinService:
     def list(self, limit: int = 30) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit), 365))
         with self._manager.unit_of_work() as db:
-            return self._repository.list(db, bounded_limit)
+            rows = self._repository.list(db, bounded_limit)
+            for row in rows:
+                tags = db.execute(
+                    "SELECT value FROM kv WHERE key=?",
+                    ("checkin_tags:" + row["checkin_date"],),
+                ).fetchone()
+                if tags:
+                    row["tag_answers"] = json.loads(tags["value"])
+                status = db.execute(
+                    "SELECT value FROM kv WHERE key=?",
+                    ("checkin_day_status:" + row["checkin_date"],),
+                ).fetchone()
+                if status:
+                    row["day_status"] = json.loads(status["value"])
+            return rows
 
     def _save_normalized(self, checkin: dict[str, Any]) -> dict[str, Any]:
         with self._manager.unit_of_work() as db:
             self._repository.upsert(db, checkin)
+            if "day_status" in checkin:
+                db.execute(
+                    "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+                    (
+                        "checkin_day_status:" + checkin["checkin_date"],
+                        json.dumps(checkin["day_status"]),
+                        self._today().isoformat(),
+                    ),
+                )
+            if "tag_answers" in checkin:
+                db.execute(
+                    "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+                    (
+                        "checkin_tags:" + checkin["checkin_date"],
+                        json.dumps(checkin["tag_answers"]),
+                        self._today().isoformat(),
+                    ),
+                )
         saved = next(
             (
                 item

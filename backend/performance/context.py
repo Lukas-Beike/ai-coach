@@ -14,6 +14,8 @@ from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import load as performance_load
 from backend.performance import load_context as performance_load_context
 from backend.performance import recovery_context as performance_recovery_context
+from backend.performance.personal_recovery import personal_recovery
+from backend.performance.training_focus import training_focus
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -39,16 +41,16 @@ def current_performance_context(
             "source": performance_current_metrics.PROVIDER_INTERVALS_NAME,
             "as_of": None,
             "metrics": {},
+            "personal_recovery": personal_recovery([], garmin, profile, today),
+            "training_focus": training_focus(
+                None, garmin, today, str(profile.get("timezone") or "UTC")
+            ),
         }
 
-    athlete = (
-        snapshot.get("athlete") if isinstance(snapshot.get("athlete"), dict) else {}
-    )
-    activities = (
-        snapshot.get("recent_activities")
-        if isinstance(snapshot.get("recent_activities"), list)
-        else []
-    )
+    athlete_value = snapshot.get("athlete")
+    athlete: dict[str, Any] = athlete_value if isinstance(athlete_value, dict) else {}
+    raw_activities = snapshot.get("recent_activities")
+    activities = raw_activities if isinstance(raw_activities, list) else []
     wellness_rows = (
         [row for row in snapshot.get("recent_wellness", []) if isinstance(row, dict)]
         if isinstance(snapshot.get("recent_wellness"), list)
@@ -113,6 +115,10 @@ def current_performance_context(
     )
     return {
         "available": True,
+        "personal_recovery": personal_recovery(wellness_rows, garmin, profile, today),
+        "training_focus": training_focus(
+            snapshot, garmin, today, str(profile.get("timezone") or "UTC")
+        ),
         "source": "Letzter gespeicherter Intervals.icu-Snapshot",
         "as_of": snapshot.get("synced_at"),
         "metrics": metrics,

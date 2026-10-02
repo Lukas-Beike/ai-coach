@@ -1,6 +1,7 @@
 """Athlete profile normalization and persistence use cases."""
 
 import json
+import math
 import os
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -28,6 +29,8 @@ DEFAULT_PROFILE = {
     "coaching_style": "Supportive, direct, and evidence-aware",
     "timezone": os.environ.get("TZ", DEFAULT_TIMEZONE),
     "weather_location": "",
+    "sleep_target_hours": "",
+    "fueling_tolerance": "",
 }
 
 
@@ -52,6 +55,15 @@ def normalize_profile(
         if key in value:
             result[key] = str(value[key]).strip()[:4000]
     result["timezone"] = timezone_name(result.get("timezone"), strict=validate_timezone)
+    if result["sleep_target_hours"]:
+        try:
+            target = float(result["sleep_target_hours"])
+        except ValueError as exc:
+            raise AppError(
+                400, "Das Schlafziel muss zwischen 4 und 12 Stunden liegen."
+            ) from exc
+        if not math.isfinite(target) or not 4 <= target <= 12:
+            raise AppError(400, "Das Schlafziel muss zwischen 4 und 12 Stunden liegen.")
     return result
 
 

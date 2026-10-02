@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from types import SimpleNamespace
 from datetime import date
 from pathlib import Path
 
@@ -10,9 +11,34 @@ from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.state import SyncStateRepository
+from backend.providers.garmin import _gear_inventory
 
 
 class GarminPayloadServiceTests(unittest.TestCase):
+    def test_gear_collection_uses_reported_stats_and_does_not_publish_partial_inventory(self):
+        client = SimpleNamespace(
+            get_user_profile=lambda: {"userData": {"userProfilePk": 123}},
+            get_gear=lambda profile: [{"gearUUID": "one", "gearName": "Bike"}, {"gearUUID": "two", "gearName": "Shoes"}],
+            get_gear_stats=lambda identity: {"totalDistance": 2000 if identity == "one" else 3000},
+        )
+        call = lambda service, operation, fetch, details: fetch()
+        result = _gear_inventory(client, call)
+        self.assertEqual([row["stats"]["totalDistance"] for row in result], [2000, 3000])
+        def fail_stats(identity):
+            raise RuntimeError("Synthetic unavailable")
+        client.get_gear_stats = fail_stats
+        with self.assertRaises(RuntimeError):
+            _gear_inventory(client, call)
+
+    def test_garmin_gear_empty_inventory_replaces_old_and_failed_read_preserves_it(self):
+        self.store_garmin_snapshot({"gear": [{"gearUUID": "one", "stats": {"totalDistance": 2000}}]})
+        failed = self.service.prepare_remote({"synced_at": "2026-09-20T10:00:00", "errors": [{"source": "gear", "message": "Synthetic failure"}]})
+        self.assertEqual(failed["gear"][0]["gearUUID"], "one")
+        self.assertEqual(failed["source_freshness"]["gear"]["freshness"], "stale")
+        empty = self.service.prepare_remote({"synced_at": "2026-09-20T11:00:00", "gear": [], "errors": []})
+        self.assertEqual(empty["gear"], [])
+        self.assertEqual(empty["source_freshness"]["gear"]["freshness"], "current")
+
     def setUp(self):
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)

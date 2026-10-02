@@ -37,6 +37,7 @@ GARMIN_COLLECTION_SOURCES = (
     "resting_hr",
 )
 GARMIN_METRIC_SOURCES = (
+    "gear",
     "heart_rate_zones",
     "readiness",
     "race_predictions",
@@ -200,6 +201,13 @@ def _merge_garmin_source(
 ) -> None:
     incoming = payload.get(source)
     complete = source not in failed and pagination.get(source, {}).get("complete", True)
+    if source == "gear" and isinstance(incoming, list) and complete:
+        freshness[source] = {
+            "freshness": "current",
+            "fetched_at": payload["synced_at"],
+            "observed_at": payload["synced_at"],
+        }
+        return
     if incoming:
         freshness[source] = {
             "freshness": "current" if complete else "partial",

@@ -81,6 +81,7 @@ class NutritionService:
         utc_now: Callable[[], str],
         local_now: Callable[[], datetime],
         food_database: FoodDatabaseService | None = None,
+        fueling_service: Callable[[], Any] | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._db_lock = db_lock
@@ -89,6 +90,12 @@ class NutritionService:
         self._local_now = local_now
         self._templates = NutritionTemplateRepository()
         self.food_database = food_database or FoodDatabaseService()
+        self._fueling_service = fueling_service
+
+    def fueling(self) -> Any:
+        if not self._fueling_service:
+            raise AppError(503, "Trainingsverpflegung ist nicht verfügbar.")
+        return self._fueling_service()
 
     def _prepare_values(self, payload: dict[str, Any]) -> dict[str, Any]:
         packaging_label = payload.get("packaging_label") is True

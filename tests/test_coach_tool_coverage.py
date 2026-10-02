@@ -1,5 +1,4 @@
 """Executable tool coverage, not an evaluation of language-model recognition.
-
 Model responses and provider reads are scripted; the real chat loop, request
 validation, tools, transactions and receipts execute against disposable state.
 Each coverage claim must be observed as a successful tool receipt at runtime.
@@ -78,6 +77,14 @@ def variants(name, arguments, result):
 
 
 class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
+    @covers("get_training_report:success")
+    def test_training_report_returns_same_local_facts_without_mutation(self):
+        self.seed_activity()
+        before = self.athlete_state()
+        result = self.run_tool("get_training_report", {"start": "2026-09-01", "days": 7, "sport": "Run"})
+        self.assertEqual(1, result["report"]["totals"]["sessions"])
+        self.assertEqual(before, self.athlete_state())
+
     def test_garmin_catch_up_tool_schema_requires_explicit_history_window(self):
         refresh = next(tool for tool in server.COACH_DIALOGUE_TOOLS if tool["name"] == "start_provider_refresh")
         self.assertIn("read-only provider refresh", refresh["description"])
@@ -127,7 +134,17 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                   "athlete_checkins", "activity_feedback", "plan_adjustments", "change_history", "sync_jobs",
                   "sync_job_items", "coach_plan_artifacts", "coach_action_proposals", "planning_state", "snapshots")
         with server.database_manager().unit_of_work() as db:
-            return {"profile": server.ATHLETE_DATA.profile().get(), **{table: [dict(row) for row in db.execute("SELECT * FROM " + table)] for table in tables}}
+            feature_records = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT key, value, updated_at FROM kv WHERE key LIKE 'fueling:%' "
+
+                    "OR key LIKE 'equipment:%' OR key LIKE 'equipment_assignment:%' "
+                    "OR key LIKE 'equipment_maintenance:%' OR key LIKE 'checkin_tags:%' OR key LIKE 'checkin_day_status:%'"
+                )
+            ]
+            return {"profile": server.ATHLETE_DATA.profile().get(), "feature_records": feature_records,
+                    **{table: [dict(row) for row in db.execute("SELECT * FROM " + table)] for table in tables}}
 
     def seed_activity(self):
         activity = {"id": "synthetic-run", "type": "Run", "name": "Synthetic run", "start_date_local": "2026-09-06T10:00:00",
@@ -594,6 +611,58 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual([item["date"] for item in manifests[0]], ["2026-09-08"])
         self.assertEqual(manifests[0][0]["total_kcal"], 600)
         self.assertEqual(manifests[0][0]["entry_count"], 1)
+
+    @covers("read_training_records:success",
+            "save_equipment:success", "assign_activity_equipment:success", "log_equipment_maintenance:success",
+            "read_nutrition:success", "save_fueling_plan:success")
+    def test_training_records_fueling_and_equipment_tools_use_confirmed_local_state(self):
+        self.seed_activity()
+        planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [{"date": "2026-10-03", "name": "Synthetic endurance", "sport": "Run",
+              "description": "- 90m 60% Easy endurance", "duration_minutes": 90, "target": "AUTO",
+              "rationale": "Synthetic local test"}]
+        )[0]
+        server.SYNC_PERSISTENCE.state_repository().save_view({
+            "recent_activities": [
+                {"id": "synthetic-run", "type": "Run", "name": "Synthetic run",
+                 "start_date_local": "2026-09-06T10:00:00", "moving_time": 1800, "distance": 5000},
+            ],
+            "recent_wellness": [], "planned_workouts": [],
+            "raw_provider_data": {"activities": [
+                {"id": "synthetic-run", "type": "Run", "name": "Synthetic run",
+                 "start_date_local": "2026-09-06T10:00:00", "moving_time": 1800, "distance": 5000},
+            ]},
+        })
+        before = self.athlete_state()
+        records = self.run_tool("read_training_records", {})
+        self.assertEqual(records["ok"], True)
+        self.assertEqual(before, self.athlete_state())
+        equipment = self.run_tool(
+            "save_equipment",
+            {"payload": {"name": "Synthetic shoes", "sport": "Run", "kind": "shoes",
+                          "start_date": "2026-09-01", "initial_distance_km": 0, "initial_hours": 0}},
+            ["local_equipment"], message="Lege die Laufschuhe lokal an.",
+        )["equipment"]
+        assigned = self.run_tool(
+            "assign_activity_equipment",
+            {"payload": {"activity_id": "synthetic-run", "equipment_id": equipment["id"]}},
+            ["local_equipment"], message="Ordne die Laufschuhe dieser Einheit zu.",
+        )
+        self.assertEqual(assigned["assignment"]["equipment_id"], equipment["id"])
+        maintenance = self.run_tool(
+            "log_equipment_maintenance",
+            {"payload": {"equipment_id": equipment["id"], "date": "2026-09-07", "notes": "Synthetic"}},
+            ["local_equipment"], message="Protokolliere die Wartung.",
+        )
+        self.assertTrue(maintenance["stored_locally"])
+        fueling = self.run_tool("read_nutrition", {"planned_unit_id": planned["id"]})["fueling"]
+        saved_fueling = self.run_tool(
+            "save_fueling_plan",
+            {"payload": {"planned_unit_id": planned["id"], "unit_sha256": fueling["unit_sha256"],
+                          "carbs_g_per_hour": 60, "fluid_ml_per_hour": 500}},
+            ["local_nutrition"], message="Speichere diesen bestätigten Verpflegungsplan lokal.",
+        )
+        self.assertFalse(saved_fueling["consumption_logged"])
 
     def test_every_mutating_tool_rejects_missing_user_authorization_without_effect(self):
         exceptions = server.STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}

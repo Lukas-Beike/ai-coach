@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.calendar import canonical as calendar_canonical
 from backend.db.manager import DatabaseManager
 from backend.planning import calendar_read_model
@@ -78,8 +79,19 @@ class PublicPlanStateService:
         weather = self._weather.state(canonical_planned, refresh=not local_only)
         if weather.pop("_refreshed", False):
             self._adaptive_followup.check("weather")
-        with self._db_lock, self._database_manager_factory().unit_of_work() as db:
-            history = self._key_values.get(db, weather_cache.HISTORY_KEY)
+        with self._db_lock:
+            manager = self._database_manager_factory()
+            with manager.unit_of_work() as db:
+                history = self._key_values.get(db, weather_cache.HISTORY_KEY)
+            profiles = ActivityDetailStore(manager).calendar_profiles()
+        activities = [
+            {**row, "workout_profile": profiles[str(row.get("id"))]["profile"]}
+            if isinstance(row, dict)
+            and str(row.get("id")) in profiles
+            and profiles[str(row.get("id"))]["fingerprint"] == summary_fingerprint(row)
+            else row
+            for row in activities
+        ]
         weather = weather_history.calendar_state(history, weather, today=self._today())
         provider_sync = (
             snapshot.get("provider_sync", {}) if isinstance(snapshot, dict) else {}

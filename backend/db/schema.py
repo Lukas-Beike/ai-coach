@@ -165,6 +165,8 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "activity_name",
         "activity_date",
         "notes",
+        "session_rpe",
+        "deviation_reason",
         "created_at",
         "updated_at",
     },
@@ -471,6 +473,8 @@ def initialize_schema(db: Any) -> None:
         activity_name TEXT NOT NULL DEFAULT '',
         activity_date TEXT NOT NULL DEFAULT '',
         notes TEXT NOT NULL DEFAULT '',
+        session_rpe REAL CHECK (session_rpe IS NULL OR (session_rpe >= 0 AND session_rpe <= 10)),
+        deviation_reason TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     );

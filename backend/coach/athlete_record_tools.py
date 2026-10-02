@@ -25,15 +25,35 @@ class CoachAthleteRecordToolService:
         activity_feedback: ActivityFeedbackService,
         competitions: CompetitionService,
         nutrition: NutritionService | None = None,
+        *,
+        equipment: Any = None,
     ) -> None:
         self._checkins = checkins
         self._activity_feedback = activity_feedback
         self._competitions = competitions
         self._nutrition = nutrition
+        self._equipment = equipment
 
     def execute(
         self, name: str, arguments: dict[str, Any], intent: dict[str, Any]
     ) -> dict[str, Any] | None:
+        if name in {
+            "save_equipment",
+            "assign_activity_equipment",
+            "log_equipment_maintenance",
+        }:
+            self._authorize(
+                intent, name, "Diese lokale Erfassung ist nicht autorisiert."
+            )
+            require_coach_scope(intent, "local_equipment")
+            if self._equipment is None:
+                raise AppError(503, "Ausrüstung ist nicht verfügbar.")
+            method = {
+                "save_equipment": self._equipment.save,
+                "assign_activity_equipment": self._equipment.assign,
+                "log_equipment_maintenance": self._equipment.maintain,
+            }[name]
+            return method(structured_action_payload(arguments))
         if name in {
             "save_nutrition_template",
             "delete_nutrition_template",
@@ -41,6 +61,7 @@ class CoachAthleteRecordToolService:
             "save_nutrition_entry",
             "update_nutrition_entry",
             "delete_nutrition_entry",
+            "save_fueling_plan",
         }:
             return self._execute_nutrition(name, arguments, intent)
         if name == "save_checkin":
@@ -69,7 +90,14 @@ class CoachAthleteRecordToolService:
                     payload.get("activity_id"),
                     {
                         key: payload.get(key)
-                        for key in ("activity_name", "activity_date", "notes")
+                        for key in (
+                            "activity_name",
+                            "activity_date",
+                            "notes",
+                            "session_rpe",
+                            "deviation_reason",
+                        )
+                        if key in payload
                     },
                 ),
             }
@@ -84,7 +112,10 @@ class CoachAthleteRecordToolService:
             return {
                 "ok": True,
                 "stored_locally": True,
-                **self._activity_feedback.save(activity_id, {"notes": ""}),
+                **self._activity_feedback.save(
+                    activity_id,
+                    {"notes": "", "session_rpe": None, "deviation_reason": ""},
+                ),
             }
         if name == "save_competition":
             self._authorize(
@@ -125,21 +156,10 @@ class CoachAthleteRecordToolService:
         require_coach_scope(intent, "local_nutrition")
         if not self._nutrition:
             raise AppError(500, "NutritionService ist nicht verfügbar.")
+        if name == "save_fueling_plan":
+            return self._nutrition.fueling().save(structured_action_payload(arguments))
         if name == "save_nutrition_template":
-            template_payload = structured_action_payload(arguments)
-            if not template_payload.get("id"):
-                template_payload.setdefault("source", "coach")
-            return {
-                "ok": True,
-                "template": self._nutrition.save_template(
-                    template_payload,
-                    **(
-                        {"expected_calculation": arguments["_food_calculation"]}
-                        if "_food_calculation" in arguments
-                        else {}
-                    ),
-                ),
-            }
+            return self._save_nutrition_template(arguments)
         if name == "delete_nutrition_template":
             return {
                 "ok": True,
@@ -172,3 +192,20 @@ class CoachAthleteRecordToolService:
     def _authorize(intent: dict[str, Any], operation: str, message: str) -> None:
         if not require_operation(intent, operation):
             raise AppError(403, message, reason="intent_scope_denied")
+
+    def _save_nutrition_template(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        assert self._nutrition is not None
+        template_payload = structured_action_payload(arguments)
+        if not template_payload.get("id"):
+            template_payload.setdefault("source", "coach")
+        return {
+            "ok": True,
+            "template": self._nutrition.save_template(
+                template_payload,
+                **(
+                    {"expected_calculation": arguments["_food_calculation"]}
+                    if "_food_calculation" in arguments
+                    else {}
+                ),
+            ),
+        }

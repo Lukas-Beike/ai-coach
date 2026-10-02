@@ -7,10 +7,11 @@ duplicating validation and retry decisions in request handlers.
 
 from __future__ import annotations
 
+import builtins
 import hashlib
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -19,6 +20,7 @@ JOB_TYPES = frozenset(
     {
         "refresh",
         "performance_refresh",
+        "activity_details",
         "plan_push",
         "competition_push",
         "nutrition_sync",
@@ -46,8 +48,14 @@ SYNC_JOB_MAX_ATTEMPTS = 3
 INVALID_NUTRITION_MANIFEST_ERROR = "Invalid nutrition approval manifest."
 NUTRITION_MANIFEST_FIELDS = frozenset(
     {
-        "date", "revision", "total_kcal", "total_carbs_g", "total_protein_g",
-        "total_fat_g", "entry_count", "sha256",
+        "date",
+        "revision",
+        "total_kcal",
+        "total_carbs_g",
+        "total_protein_g",
+        "total_fat_g",
+        "entry_count",
+        "sha256",
     }
 )
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
@@ -80,8 +88,12 @@ def decode_job_payload(value: Any) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def job_dto(job: Mapping[str, Any], items: list[Mapping[str, Any]]) -> dict[str, Any]:
+def job_dto(
+    job: Mapping[str, Any] | None, items: Sequence[Mapping[str, Any]]
+) -> dict[str, Any]:
     """Build the public, credential-free representation of one sync job."""
+    if job is None:
+        raise SyncJobInvalidStateError("The persisted job is missing.")
     if not hasattr(job, "get"):
         job = dict(job)
     normalized_items = [item if hasattr(item, "get") else dict(item) for item in items]
@@ -120,7 +132,7 @@ def job_dto(job: Mapping[str, Any], items: list[Mapping[str, Any]]) -> dict[str,
     }
 
 
-def read_job(db: Any, job_id: str) -> tuple[Any | None, list[Any]]:
+def read_job(db: Any, job_id: str) -> tuple[Any | None, builtins.list[Any]]:
     """Read one job and its ordered items through a caller-owned connection."""
     job = db.execute("SELECT * FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
     if job is None:
@@ -131,7 +143,7 @@ def read_job(db: Any, job_id: str) -> tuple[Any | None, list[Any]]:
     return job, items
 
 
-def list_jobs(db: Any, limit: int) -> list[dict[str, Any]]:
+def list_jobs(db: Any, limit: int) -> builtins.list[dict[str, Any]]:
     """Project recent jobs without taking ownership of the database scope."""
     jobs = db.execute(
         "SELECT * FROM sync_jobs ORDER BY created_at DESC LIMIT ?", (limit,)
@@ -192,7 +204,9 @@ def normalize_sync_job_request(
         raise JobValidationError(
             "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig."
         )
-    if type_value == "nutrition_sync":
+    if type_value == "activity_details":
+        normalized_payload = _normalize_activity_details_job(provider_value, values)
+    elif type_value == "nutrition_sync":
         normalized_payload = _normalize_nutrition_sync_job(provider_value, values)
     elif type_value == "competition_push":
         normalized_payload = _normalize_competition_push_job(provider_value, values)
@@ -201,11 +215,30 @@ def normalize_sync_job_request(
     elif type_value == "plan_push":
         normalized_payload = _normalize_plan_push_job(provider_value, values)
     else:
-        normalized_payload = _normalize_refresh_job(provider_value, values, all_sync_days)
-    return {"provider": provider_value, "type": type_value, "payload": normalized_payload}
+        normalized_payload = _normalize_refresh_job(
+            provider_value, values, all_sync_days
+        )
+    return {
+        "provider": provider_value,
+        "type": type_value,
+        "payload": normalized_payload,
+    }
 
 
-def _normalize_nutrition_sync_job(provider: str, values: dict[str, Any]) -> dict[str, Any]:
+def _normalize_activity_details_job(
+    provider: str, values: dict[str, Any]
+) -> dict[str, Any]:
+    if provider != "intervals" or set(values) != {"activity_id"}:
+        raise JobValidationError("Ungültiger Aktivitätsdetailauftrag.")
+    value = values.get("activity_id")
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", value):
+        raise JobValidationError("Die Aktivitäts-ID ist ungültig.")
+    return {"activity_id": value}
+
+
+def _normalize_nutrition_sync_job(
+    provider: str, values: dict[str, Any]
+) -> dict[str, Any]:
     allowed_fields = {"date", "pending_limit", "approval_manifest"}
     if provider != "intervals" or set(values) - allowed_fields:
         raise JobValidationError("Ungültiger Ernährungssynchronisierungsauftrag.")
@@ -216,9 +249,7 @@ def _normalize_nutrition_sync_job(provider: str, values: dict[str, Any]) -> dict
     if "date" in values:
         return {"date": _normalize_nutrition_date(values["date"])}
     return {
-        "pending_limit": _normalize_nutrition_pending_limit(
-            values.get("pending_limit")
-        )
+        "pending_limit": _normalize_nutrition_pending_limit(values.get("pending_limit"))
     }
 
 
@@ -252,10 +283,10 @@ def _normalize_nutrition_pending_limit(value: Any) -> int:
     return value
 
 
-def _normalize_nutrition_approval_manifest(value: Any) -> list[dict[str, Any]]:
+def _normalize_nutrition_approval_manifest(value: Any) -> builtins.list[dict[str, Any]]:
     if not isinstance(value, list) or len(value) > 31:
         raise JobValidationError(INVALID_NUTRITION_MANIFEST_ERROR)
-    normalized: list[dict[str, Any]] = []
+    normalized: builtins.list[dict[str, Any]] = []
     seen_dates: set[str] = set()
     for entry in value:
         normalized.append(_normalize_nutrition_approval_entry(entry, seen_dates))
@@ -308,6 +339,7 @@ def _validate_nutrition_approval_hash(entry: dict[str, Any]) -> None:
     if digest != entry["sha256"]:
         raise JobValidationError("Nutrition approval hash does not match its totals.")
 
+
 def _normalize_reason_only_job(provider: str, values: dict[str, Any]) -> dict[str, str]:
     if provider != "intervals":
         raise JobValidationError("Dieser Job ist nur für Intervals.icu zulässig.")
@@ -316,13 +348,17 @@ def _normalize_reason_only_job(provider: str, values: dict[str, Any]) -> dict[st
     return {"reason": str(values.get("reason") or "job").strip()[:80] or "job"}
 
 
-def _normalize_competition_push_job(provider: str, values: dict[str, Any]) -> dict[str, Any]:
+def _normalize_competition_push_job(
+    provider: str, values: dict[str, Any]
+) -> dict[str, Any]:
     if provider != "intervals":
         raise JobValidationError("Dieser Job ist nur für Intervals.icu zulässig.")
     if set(values) - {"reason", "approval_manifest"}:
         raise JobValidationError(UNSUPPORTED_JOB_FIELDS_ERROR)
     if "approval_manifest" not in values:
-        raise JobValidationError("Der Wettkampf-Sync benötigt eine bestätigte Vorschau.")
+        raise JobValidationError(
+            "Der Wettkampf-Sync benötigt eine bestätigte Vorschau."
+        )
     normalized: dict[str, Any] = {
         "reason": str(values.get("reason") or "job").strip()[:80] or "job"
     }
@@ -355,7 +391,9 @@ def _normalize_plan_push_entry(entry: Any) -> dict[str, str]:
         raise JobValidationError("Jede Plan-Push-Einheit benötigt eine lokale UUID.")
     payload_hash = str(entry.get("expected_payload_hash") or "").strip().lower()
     if not SHA256_PATTERN.fullmatch(payload_hash):
-        raise JobValidationError("Jede Plan-Push-Einheit benötigt einen aktuellen Payload-Hash.")
+        raise JobValidationError(
+            "Jede Plan-Push-Einheit benötigt einen aktuellen Payload-Hash."
+        )
     return {"library_workout_id": workout_id, "expected_payload_hash": payload_hash}
 
 
@@ -366,7 +404,9 @@ def _normalize_plan_push_job(provider: str, values: dict[str, Any]) -> dict[str,
         raise JobValidationError("Ein Plan-Push-Job enthält nicht unterstützte Felder.")
     entries = values.get("entries")
     if not isinstance(entries, list) or not 1 <= len(entries) <= 28:
-        raise JobValidationError("Ein Plan-Push-Job benötigt 1 bis 28 ausgewählte Einheiten.")
+        raise JobValidationError(
+            "Ein Plan-Push-Job benötigt 1 bis 28 ausgewählte Einheiten."
+        )
     normalized_entries = [_normalize_plan_push_entry(entry) for entry in entries]
     if "repair" in values and type(values["repair"]) is not bool:
         raise JobValidationError("repair muss ein Boolean sein.")
@@ -412,9 +452,7 @@ def _normalize_refresh_days(value: Any, all_sync_days: int) -> int:
     try:
         days = int(value)
     except (TypeError, ValueError) as exc:
-        raise JobValidationError(
-            "Der Synchronisationszeitraum ist ungültig."
-        ) from exc
+        raise JobValidationError("Der Synchronisationszeitraum ist ungültig.") from exc
     if days != all_sync_days and (days < 1 or days > 3660):
         raise JobValidationError("Der Synchronisationszeitraum ist zu groß.")
     return days
@@ -430,9 +468,7 @@ def _normalize_refresh_end_date(value: Any) -> str:
     try:
         return date.fromisoformat(str(value)[:10]).isoformat()
     except (TypeError, ValueError) as exc:
-        raise JobValidationError(
-            "Das Backfill-Enddatum ist ungültig."
-        ) from exc
+        raise JobValidationError("Das Backfill-Enddatum ist ungültig.") from exc
 
 
 def _normalize_refresh_reason(value: Any) -> str:
@@ -452,7 +488,7 @@ def is_retryable_error(error_class: Any) -> bool:
     return str(error_class or "").strip().casefold() in RETRYABLE_ERROR_CLASSES
 
 
-def aggregate_job_status(items: list[Mapping[str, Any]]) -> str:
+def aggregate_job_status(items: Sequence[Mapping[str, Any]]) -> str:
     """Derive the public job status from item states."""
     if not items:
         return "completed"
@@ -468,7 +504,7 @@ def aggregate_job_status(items: list[Mapping[str, Any]]) -> str:
     return "completed"
 
 
-def bounded_progress(items: list[Mapping[str, Any]]) -> tuple[int, int]:
+def bounded_progress(items: Sequence[Mapping[str, Any]]) -> tuple[int, int]:
     """Return completed item count and total, ignoring malformed rows safely."""
     total = len(items)
     completed = sum(
@@ -495,7 +531,7 @@ class SyncJobStore:
             job, items = read_job(db, job_id)
             return job_dto(job, items) if job else None
 
-    def list(self, limit: int) -> list[dict[str, Any]]:
+    def list(self, limit: int) -> builtins.list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit), SYNC_JOB_LIST_LIMIT))
         with self._database_manager.unit_of_work() as db:
             return list_jobs(db, bounded_limit)
@@ -516,7 +552,7 @@ class SyncJobStore:
         self,
         envelope: Mapping[str, Any],
         requested_by: str,
-        operations: list[dict[str, Any]] | None,
+        operations: builtins.list[dict[str, Any]] | None,
         available_at: str | None,
     ) -> tuple[dict[str, Any], bool]:
         """Persist a normalized, credential-free envelope and its items atomically."""
@@ -732,12 +768,14 @@ class SyncJobStore:
         db: Any,
         item: dict[str, Any],
         index: int,
-        stored_items: list[dict[str, Any]],
+        stored_items: builtins.list[dict[str, Any]],
         stored_by_key: dict[str, dict[str, Any]],
         redact: Callable[[str], str],
         now: str,
     ) -> None:
-        item_key = str(item.get("library_workout_id") or item.get("item_key") or "").strip()
+        item_key = str(
+            item.get("library_workout_id") or item.get("item_key") or ""
+        ).strip()
         target = stored_by_key.get(item_key)
         if target is None and len(stored_items) == 1:
             target = stored_items[0]
@@ -746,7 +784,11 @@ class SyncJobStore:
         if target is None:
             return
         outcome = str(item.get("status") or "error").strip().casefold()
-        item_state = "completed" if outcome in {"synced", "already_synced", "skipped"} else "failed"
+        item_state = (
+            "completed"
+            if outcome in {"synced", "already_synced", "skipped"}
+            else "failed"
+        )
         detail = str(redact(str(item.get("error") or "")) or "")[:500] or None
         db.execute(
             "UPDATE sync_job_items SET status=?, remote_id=COALESCE(?, remote_id), "
@@ -832,8 +874,8 @@ class SyncJobStore:
 
     @staticmethod
     def _normalize_operations(
-        envelope: dict[str, Any], operations: list[dict[str, Any]] | None
-    ) -> list[dict[str, str]]:
+        envelope: dict[str, Any], operations: builtins.list[dict[str, Any]] | None
+    ) -> builtins.list[dict[str, str]]:
         values = operations or [
             {
                 "item_key": f"{envelope['provider']}:{envelope['type']}",
@@ -844,7 +886,7 @@ class SyncJobStore:
             raise SyncJobInvalidOperationError(
                 "A job must contain between 1 and 1000 operations."
             )
-        normalized: list[dict[str, str]] = []
+        normalized: builtins.list[dict[str, str]] = []
         keys: set[str] = set()
         for index, operation in enumerate(values):
             normalized.append(
@@ -866,9 +908,7 @@ class SyncJobStore:
             :80
         ]
         if not item_key or not item_operation:
-            raise SyncJobInvalidOperationError(
-                "Job operations require a key and type."
-            )
+            raise SyncJobInvalidOperationError("Job operations require a key and type.")
         if item_key in keys:
             raise SyncJobInvalidOperationError("Job operation keys must be unique.")
         keys.add(item_key)
@@ -900,7 +940,7 @@ class SyncJobStore:
 
     @staticmethod
     def _event_snapshot(
-        job: Mapping[str, Any] | None, items: list[Mapping[str, Any]]
+        job: Mapping[str, Any] | None, items: builtins.list[Mapping[str, Any]]
     ) -> dict[str, Any] | None:
         if job is None:
             return None

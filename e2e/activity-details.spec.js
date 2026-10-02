@@ -1,0 +1,34 @@
+const { test, expect } = require("@playwright/test");
+
+test("@responsive activity details preserve calendar without Coach shortcuts", async ({ page, request }) => {
+  const seed = await request.get("/api/fixture/activity");
+  expect(seed.ok()).toBeTruthy();
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.evaluate(async () => { await applyNavigationRoute("plan/overview", { historyMode: "replace" }); });
+  const entry = page.locator(".planned-entry").filter({ hasText: "Synthetic ride <img src=x>" }).first();
+  await entry.locator("summary").click();
+  const open = entry.getByRole("button", { name: "Aktivität analysieren" });
+  await open.click();
+  const dialog = page.getByRole("dialog", { name: "Synthetic ride <img src=x>" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("img", { name: "Leistung, Zeitachse in Minuten" })).toBeVisible();
+  await expect(dialog.getByText(/Diagramme vereinfacht/)).toBeVisible();
+  expect(await dialog.locator("img").count()).toBe(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await dialog.getByRole("button", { name: "Zurück zum Kalender" }).click();
+  await expect(entry).toHaveAttribute("open", "");
+  await expect(open).toBeFocused();
+  await open.click();
+  await page.goBack();
+  await expect(dialog).not.toBeVisible();
+  await expect(entry).toHaveAttribute("open", "");
+  await open.click();
+  await expect(dialog.getByRole("button", { name: /Coach|Feedback|zuordnen/ })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Zurück zum Kalender" }).click();
+  await page.reload();
+  const response = await request.get("/api/activities/FixtureCase-1");
+  const payload = await response.json();
+  expect(payload.detail_data.full_resolution).toBe(true);
+  expect(payload.activity.streams.time.length).toBe(2000);
+});

@@ -17,6 +17,14 @@ from backend.errors import AppError
 
 
 class ActivityFeedbackNormalizationTests(unittest.TestCase):
+    def test_rpe_zero_and_bounds(self):
+        self.assertEqual(
+            0, normalize_activity_feedback("one", {"session_rpe": 0})["session_rpe"]
+        )
+        for value in (-1, 11, float("nan"), float("inf"), True, "5"):
+            with self.subTest(value=value), self.assertRaises(AppError):
+                normalize_activity_feedback("one", {"session_rpe": value})
+
     def test_normalizes_id_and_known_text_fields(self) -> None:
         result = normalize_activity_feedback(
             "  activity-1  ",
@@ -101,6 +109,23 @@ class ActivityFeedbackNormalizationTests(unittest.TestCase):
 
 
 class ActivityFeedbackServiceTests(unittest.TestCase):
+    def test_rpe_only_preserves_notes_and_explicit_clear_deletes(self):
+        self.service.save(
+            "one", {"notes": "kept", "session_rpe": 4, "deviation_reason": "heat"}
+        )
+        result = self.service.save("one", {"session_rpe": 0})["activity_feedback"]
+        self.assertEqual(
+            ("kept", 0, "heat"),
+            (result["notes"], result["session_rpe"], result["deviation_reason"]),
+        )
+        self.service.save("one", {"notes": ""})
+        self.assertEqual(0, self.service.list()[0]["session_rpe"])
+        self.assertIsNone(
+            self.service.save("one", {"session_rpe": None, "deviation_reason": ""})[
+                "activity_feedback"
+            ]
+        )
+
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.manager = DatabaseManager(
@@ -115,6 +140,7 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
                 "CREATE TABLE activity_feedback ("
                 "activity_id TEXT PRIMARY KEY, activity_name TEXT NOT NULL, "
                 "activity_date TEXT NOT NULL, notes TEXT NOT NULL, "
+                "session_rpe REAL, deviation_reason TEXT NOT NULL DEFAULT '', "
                 "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
             )
             db.execute(
@@ -206,7 +232,7 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         self.assertEqual(self.service.context()["recent"], self.service.list())
         self.assertEqual(
             self.service.context()["scope"],
-            "Only athlete-entered notes about completed activities; this feedback is separate from daily check-ins and provider values.",
+            "Only athlete-entered notes, session RPE and deviation reasons about completed activities; this feedback is separate from daily check-ins and provider values.",
         )
 
     def test_attach_projects_only_dict_activities_without_mutating_input(self) -> None:

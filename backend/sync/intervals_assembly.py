@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import logging
-import time
-import uuid
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+from backend.activities.detail_store import ActivityDetailStore
 from backend.athlete.clock import AthleteLocalClock
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.providers.intervals import IntervalsApiClient
+from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.intervals import (
@@ -67,6 +66,7 @@ class IntervalsLibraryDependencies:
     remote_planned_unit_reconciler: Callable[[], Any]
     workout_library_refresh_service: Callable[[], Any]
     workout_library_service: Callable[[], Any]
+    planned_unit_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -97,7 +97,7 @@ class IntervalsSyncAssembly:
         window: IntervalsWindowSettings
         waits: IntervalsWaitSettings
 
-    def __init__(self, *, dependencies: "IntervalsSyncAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: IntervalsSyncAssembly.Inputs) -> None:
         provider = dependencies.provider
         persistence = dependencies.persistence
         operations = dependencies.operations
@@ -122,6 +122,7 @@ class IntervalsSyncAssembly:
         self._remote_planned_unit_reconciler = library.remote_planned_unit_reconciler
         self._workout_library_refresh_service = library.workout_library_refresh_service
         self._workout_library_service = library.workout_library_service
+        self._planned_unit_service = library.planned_unit_service
         self._sync_period_defaults = window.sync_period_defaults
         self._all_sync_days = window.all_sync_days
         self._sync_chunk_days = window.sync_chunk_days
@@ -130,6 +131,23 @@ class IntervalsSyncAssembly:
         self._calendar_future_days = window.calendar_future_days
         self._performance_wait_seconds = waits.performance_wait_seconds
         self._poll_seconds = waits.poll_seconds
+
+    def activity_detail_service(self) -> ActivityDetailRefreshService:
+        config = self._config()
+        return ActivityDetailRefreshService(
+            api_client=IntervalsApiClient(
+                api_key=config.intervals_api_key, request=self._request()
+            ),
+            state_repository=self._state_repository(),
+            store=ActivityDetailStore(self._database_manager()),
+            utc_now=self._utc_now,
+            configured=bool(config.intervals_api_key),
+            read_planned_units=lambda: (
+                self._planned_unit_service().list(500)
+                if self._planned_unit_service
+                else []
+            ),
+        )
 
     def performance_service(self) -> PerformanceRefreshService:
         """Create targeted Intervals performance refresh persistence."""

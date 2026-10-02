@@ -2,12 +2,52 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import date
 from typing import Any
 
 from backend.performance import eftp, garmin_metrics, garmin_weight, trends, wellness
 
 VO2MAX_UNIT = "ml/kg/min"
+
+
+def recurring_training_comparisons(
+    observations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Group only recordings with identical observed targets, sport and device label."""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in observations:
+        targets = row.get("target_snapshot") or {}
+        quality = row.get("interval_quality") or {}
+        if not targets.get("steps") or quality.get("status") != "ok":
+            continue
+        identity = {
+            "sport": row["sport"],
+            "steps": targets["steps"],
+            "basis": targets.get("basis"),
+            "device": row.get("device"),
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(identity, sort_keys=True).encode()
+        ).hexdigest()
+        groups.setdefault(fingerprint, []).append(row)
+    comparable = [
+        {
+            "target_sha256": key,
+            "sport": rows[0]["sport"],
+            "device": rows[0].get("device"),
+            "observations": sorted(rows, key=lambda row: row["date"]),
+        }
+        for key, rows in groups.items()
+        if len(rows) >= 2
+    ]
+    return {
+        "status": "observations" if comparable else "insufficient_data",
+        "groups": comparable,
+        "method": "identical-observed-targets-v1",
+        "scope": "Up to 100 current local recordings. Identical sport, observed target steps, historical basis and device label; targets were captured at first detail load, not necessarily before training. Different terrain, heat, effort and unknown sensor identity can still prevent a performance comparison. No automatic improvement score.",
+    }
 
 
 def performance_trend_average(
@@ -23,11 +63,8 @@ def performance_trend_average(
         if key == "weight_kg":
             return garmin_weight.garmin_weight_average(garmin, days, end_date)
         return trends.garmin_history_average(garmin, key, days, end_date)
-    rows = (
-        snapshot.get("recent_wellness")
-        if isinstance(snapshot.get("recent_wellness"), list)
-        else []
-    )
+    raw_rows = snapshot.get("recent_wellness")
+    rows = raw_rows if isinstance(raw_rows, list) else []
     return trends.intervals_performance_average(
         [row for row in rows if isinstance(row, dict)], key, days, end_date
     )

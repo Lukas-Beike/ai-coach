@@ -9,6 +9,7 @@ from typing import Any
 from backend.config import Config
 from backend.db.repositories import NutritionRepository
 from backend.nutrition.food_database import FoodDatabaseService
+from backend.nutrition.fueling import FuelingService
 from backend.nutrition.service import NutritionService
 from backend.nutrition.sync import IntervalsNutritionSyncService
 from backend.providers.intervals import IntervalsApiClient
@@ -26,6 +27,8 @@ class NutritionRuntime:
     utc_now: Callable[[], Any]
     local_now: Callable[[], Any]
     intervals_request: Callable[[], Callable[..., Any]]
+    read_planned_units: Callable[[], list[dict[str, Any]]] = list
+    read_profile: Callable[[], dict[str, Any]] = dict
 
 
 class NutritionAssembly:
@@ -48,6 +51,17 @@ class NutritionAssembly:
         self._local_now = dependencies.runtime.local_now
         self._intervals_request = dependencies.runtime.intervals_request
         self._food_database = FoodDatabaseService()
+        self._read_planned_units = dependencies.runtime.read_planned_units
+        self._read_profile = dependencies.runtime.read_profile
+
+    def fueling(self) -> FuelingService:
+        return FuelingService(
+            self._database_manager(),
+            self._read_planned_units,
+            lambda: self.service().list_templates(),
+            self._read_profile,
+            self._utc_now,
+        )
 
     def food_database(self) -> FoodDatabaseService:
         return self._food_database
@@ -60,6 +74,7 @@ class NutritionAssembly:
             utc_now=self._utc_now,
             local_now=self._local_now,
             food_database=self._food_database,
+            fueling_service=self.fueling,
         )
 
     def intervals_sync_service(self) -> IntervalsNutritionSyncService:

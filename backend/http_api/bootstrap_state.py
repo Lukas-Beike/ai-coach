@@ -90,7 +90,18 @@ class PublicBootstrapService:
                 "state_versions": state_version_values,
                 "plan_revision": state_version_values.get("plan"),
                 "app": {"name": deps.app_name, "version": deps.app_version},
-                "skeleton": dict.fromkeys(("chat", "activities", "plan", "library", "performance", "feedback", "profile"), True),
+                "skeleton": dict.fromkeys(
+                    (
+                        "chat",
+                        "activities",
+                        "plan",
+                        "library",
+                        "performance",
+                        "feedback",
+                        "profile",
+                    ),
+                    True,
+                ),
                 "messages": deps.coach_message_service().list(limit=100),
                 "messages_next_cursor": None,
                 "plans": deps.training_plan_service().list(limit=30),
@@ -98,16 +109,31 @@ class PublicBootstrapService:
                 "activities": [],
                 "planned": local_planned,
                 "training_calendar": local_planned,
-                "calendar": deps.local_calendar_events(local_planned, competitions, relevant_external),
-                "planning_view": {"source": "local", "local_count": len(local_planned), "remote_count": 0, "items": local_planned, "provider_window": {}},
+                "calendar": deps.local_calendar_events(
+                    local_planned, competitions, relevant_external
+                ),
+                "planning_view": {
+                    "source": "local",
+                    "local_count": len(local_planned),
+                    "remote_count": 0,
+                    "items": local_planned,
+                    "provider_window": {},
+                },
                 "planning_compliance": [],
                 "weather": {},
                 "parallel_cycling": [],
                 "profile": profile,
                 "competitions": competitions,
                 "checkins": [],
-                "local_feedback": {"today": None, "recent": [], "scope": "Only athlete-entered subjective feedback and constraints; wearable/provider values remain in their source sections."},
-                "activity_feedback": {"recent": [], "scope": "Only athlete-entered notes about completed activities; this feedback is separate from daily check-ins and provider values."},
+                "local_feedback": {
+                    "today": None,
+                    "recent": [],
+                    "scope": "Only athlete-entered subjective feedback and constraints; wearable/provider values remain in their source sections.",
+                },
+                "activity_feedback": {
+                    "recent": [],
+                    "scope": "Only athlete-entered notes, session RPE and deviation reasons about completed activities; this feedback is separate from daily check-ins and provider values.",
+                },
                 "planning": deps.planning_state(
                     deps.competition_service().list(),
                     deps.local_date(),
@@ -125,12 +151,18 @@ class PublicBootstrapService:
                 "diagnostic_capture": deps.diagnostic_capture.status(),
                 "intervals": deps.intervals_public_state(
                     configured=bool(deps.config.intervals_api_key),
-                    running=deps.intervals_sync_lock.locked() or deps.workout_library_sync_running(),
+                    running=deps.intervals_sync_lock.locked()
+                    or deps.workout_library_sync_running(),
                     status=deps.key_values.get(db, "sync_status") or None,
                     last_sync_at=deps.key_values.get(db, "last_sync_at"),
                     last_sync_error=deps.key_values.get(db, "last_sync_error") or None,
-                    last_library_sync_at=deps.key_values.get(db, "last_library_sync_at"),
-                    last_library_sync_error=deps.key_values.get(db, "last_library_sync_error") or None,
+                    last_library_sync_at=deps.key_values.get(
+                        db, "last_library_sync_at"
+                    ),
+                    last_library_sync_error=deps.key_values.get(
+                        db, "last_library_sync_error"
+                    )
+                    or None,
                     pagination_value=deps.key_values.get(db, "last_sync_pagination"),
                     snapshot=snapshot,
                     library_sync_state=deps.workout_library_sync_state_service().summary(),
@@ -145,7 +177,9 @@ class PublicBootstrapService:
                     "status": deps.key_values.get(db, "garmin_sync_status") or None,
                 },
                 "provider_resync": {
-                    "intervals": deps.full_provider_resync_service().state("intervals", db),
+                    "intervals": deps.full_provider_resync_service().state(
+                        "intervals", db
+                    ),
                     "garmin": deps.full_provider_resync_service().state("garmin", db),
                 },
                 "sync": deps.sync_public_state_service().browser_state(
@@ -153,8 +187,15 @@ class PublicBootstrapService:
                     jobs=jobs,
                     state_versions=state_version_values,
                 ),
-                "running_jobs": [job for job in jobs if job.get("status") in {"queued", "running"}],
-                "library_sync": {"last_sync_at": deps.key_values.get(db, "last_library_sync_at"), "last_error": deps.key_values.get(db, "last_library_sync_error") or None, "state": deps.workout_library_sync_state_service().summary()},
+                "running_jobs": [
+                    job for job in jobs if job.get("status") in {"queued", "running"}
+                ],
+                "library_sync": {
+                    "last_sync_at": deps.key_values.get(db, "last_library_sync_at"),
+                    "last_error": deps.key_values.get(db, "last_library_sync_error")
+                    or None,
+                    "state": deps.workout_library_sync_state_service().summary(),
+                },
                 "sync_settings": {
                     "intervals_days": deps.sync_state_repository().sync_period(
                         "intervals", deps.sync_period_defaults, deps.all_sync_days
@@ -165,27 +206,55 @@ class PublicBootstrapService:
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {
-                    "last_sync_at": deps.key_values.get(db, "last_competition_sync_at"), "last_error": deps.key_values.get(db, "last_competition_sync_error") or None,
-                    "running": deps.key_values.get(db, "competition_sync_running") == "1", "status": deps.key_values.get(db, "competition_sync_status") or None,
+                    "last_sync_at": deps.key_values.get(db, "last_competition_sync_at"),
+                    "last_error": deps.key_values.get(db, "last_competition_sync_error")
+                    or None,
+                    "running": deps.key_values.get(db, "competition_sync_running")
+                    == "1",
+                    "status": deps.key_values.get(db, "competition_sync_status")
+                    or None,
                 },
                 "performance_refresh": {
-                    "last_refresh_at": deps.key_values.get(db, "last_performance_refresh_at"), "last_error": deps.key_values.get(db, "last_performance_error") or None,
-                    "running": deps.key_values.get(db, "performance_refresh_running") == "1",
+                    "last_refresh_at": deps.key_values.get(
+                        db, "last_performance_refresh_at"
+                    ),
+                    "last_error": deps.key_values.get(db, "last_performance_error")
+                    or None,
+                    "running": deps.key_values.get(db, "performance_refresh_running")
+                    == "1",
                 },
                 "morning_checkin": deps.morning_checkin_state_service().state(),
                 "coach_quick_actions": deps.coach_quick_actions_service().state(),
-                "ai_provider": {"selected": deps.settings.selected_ai_provider(), "options": deps.settings.available_ai_providers()},
-                "model": {"selected": deps.settings.selected_model(), "options": deps.settings.available_model_options()},
-                "thinking_level": {"selected": deps.settings.selected_thinking_level(), "options": deps.settings.available_thinking_level_options()},
-                "configured": {
-                    "openai": bool(deps.config.openai_api_key), "gemini": bool(deps.config.gemini_api_key), "intervals": bool(deps.config.intervals_api_key),
-                    "weather": bool(deps.profile_service().get().get("weather_location")), "external_calendar": bool(deps.config.calendar_ical_url),
+                "ai_provider": {
+                    "selected": deps.settings.selected_ai_provider(),
+                    "options": deps.settings.available_ai_providers(),
                 },
-                "usage": deps.provider_state_service().summary(deps.settings.selected_ai_provider() or "openai"),
+                "model": {
+                    "selected": deps.settings.selected_model(),
+                    "options": deps.settings.available_model_options(),
+                },
+                "thinking_level": {
+                    "selected": deps.settings.selected_thinking_level(),
+                    "options": deps.settings.available_thinking_level_options(),
+                },
+                "configured": {
+                    "openai": bool(deps.config.openai_api_key),
+                    "gemini": bool(deps.config.gemini_api_key),
+                    "intervals": bool(deps.config.intervals_api_key),
+                    "weather": bool(
+                        deps.profile_service().get().get("weather_location")
+                    ),
+                    "external_calendar": bool(deps.config.calendar_ical_url),
+                },
+                "usage": deps.provider_state_service().summary(
+                    deps.settings.selected_ai_provider() or "openai"
+                ),
             }
 
 
-def bootstrap_provider_states(freshness: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def bootstrap_provider_states(
+    freshness: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
     """Project provider freshness into the small, stable bootstrap contract."""
     grouped: dict[str, list[dict[str, Any]]] = {}
     for item in freshness:
@@ -202,10 +271,21 @@ def bootstrap_provider_states(freshness: list[dict[str, Any]]) -> dict[str, dict
         "error": "error",
     }
     result: dict[str, dict[str, Any]] = {}
-    priority = {"error": 5, "stale": 4, "degraded": 3, "loading": 2, "ready": 1, "not_configured": 0}
+    priority = {
+        "error": 5,
+        "stale": 4,
+        "degraded": 3,
+        "loading": 2,
+        "ready": 1,
+        "not_configured": 0,
+    }
     for provider, areas in grouped.items():
         projected = [state_map.get(str(item.get("state")), "error") for item in areas]
-        status = max(projected, key=lambda value: priority[value]) if projected else "not_configured"
+        status = (
+            max(projected, key=lambda value: priority[value])
+            if projected
+            else "not_configured"
+        )
         result[provider] = {
             "status": status,
             "areas": {
