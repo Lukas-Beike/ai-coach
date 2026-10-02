@@ -9,7 +9,21 @@ function analysisSvg(tag, attributes = {}, content = "") {
 
 function analysisValue(value, unit) {
   if (unit === "s/km") return formatPace(value);
-  return `${Number(value).toLocaleString("de-DE", { maximumFractionDigits: 1 })}${unit ? ` ${unit}` : ""}`;
+  const suffix = unit ? ` ${unit}` : "";
+  return `${Number(value).toLocaleString("de-DE", { maximumFractionDigits: 1 })}${suffix}`;
+}
+
+function analysisLegendText(item, latest, unit) {
+  if (!latest) return `${item.label}: keine Werte`;
+  const baseline = item.baselineDate ? ` · Basis ${dateLabel(item.baselineDate)}` : "";
+  return `${item.label}: ${analysisPointValue(item, latest, unit)} · ${dateLabel(latest.date)}${baseline}`;
+}
+
+function analysisRelativeValue(value, baseline, unit) {
+  if (value == null || !baseline) return null;
+  const current = Number(value);
+  const initial = Number(baseline.value);
+  return (unit === "s/km" ? 1 - current / initial : current / initial - 1) * 100;
 }
 
 function analysisPointValue(item, point, unit) {
@@ -39,13 +53,11 @@ function analysisChart(title, series, unit, start, end, note) {
   const legend = document.createElement("ul");
   legend.className = "analysis-chart-legend";
   series.forEach((item, index) => {
-    const latest = item.points.filter(valid).at(-1);
+    const latest = item.points.findLast(valid);
     const entry = document.createElement("li");
     entry.dataset.series = String(index);
     entry.dataset.color = String(item.color ?? index);
-    entry.textContent = latest
-      ? `${item.label}: ${analysisPointValue(item, latest, unit)} · ${dateLabel(latest.date)}${item.baselineDate ? ` · Basis ${dateLabel(item.baselineDate)}` : ""}`
-      : `${item.label}: keine Werte`;
+    entry.textContent = analysisLegendText(item, latest, unit);
     legend.append(entry);
   });
   section.append(legend);
@@ -123,6 +135,7 @@ globalThis.matchMedia("(max-width: 599px)").addEventListener("change", () => {
 
 function renderAnalysisHistory(history) {
   const root = document.querySelector("#analysisHistoryCharts");
+  const expandedDetails = Array.from(root.querySelectorAll(".analysis-chart-card details"), (details) => details.open);
   root.replaceChildren();
   if (!history?.start || !history?.end) return;
   const load = history.load || { points: [] };
@@ -145,11 +158,13 @@ function renderAnalysisHistory(history) {
       baselineDate: baseline?.date,
       points: item.points.map((point) => ({
         date: point.date, actual: point.value,
-        value: point.value == null || !baseline ? null
-          : (unit === "s/km" ? 1 - Number(point.value) / Number(baseline.value) : Number(point.value) / Number(baseline.value) - 1) * 100,
+        value: analysisRelativeValue(point.value, baseline, unit),
       })),
     };
   }));
   root.append(analysisChart("Leistungsentwicklung", performanceSeries, "%", history.start, history.end,
     "Relative Veränderung ab dem ersten vorhandenen Wert je Reihe (0 %). Bei Schwellenpace bedeutet positives Wachstum eine kürzere Zeit pro Kilometer. Originalwerte und Basisdatum stehen in der Legende. Leistungswerte: Garmin; nur eFTP: Intervals.icu. VO₂max und eFTP sind Schätzungen. Datenlücken bleiben sichtbar."));
+  root.querySelectorAll(".analysis-chart-card details").forEach((details, index) => {
+    details.open = expandedDetails[index] ?? false;
+  });
 }

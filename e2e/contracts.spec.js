@@ -677,7 +677,9 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await expect(ftp.locator(".analysis-chart-legend")).toContainText("1,8 %");
   await expect(ftp.locator(".analysis-chart-legend")).toContainText("-1,5 %");
   expect((await ftp.locator('path[data-series="0"]').getAttribute("d")).match(/M/g)).toHaveLength(2);
-  await ftp.getByText("Werte ansehen", { exact: true }).click();
+  const details = ftp.locator("details");
+  await details.locator(":scope > summary").click();
+  await expect(details).toHaveAttribute("open", "");
   await expect(ftp.getByRole("table")).toBeVisible();
   await expect(ftp.getByRole("columnheader", { name: /Rad.*FTP.*Garmin Connect/ })).toBeVisible();
   const AxeBuilder = require("@axe-core/playwright").default;
