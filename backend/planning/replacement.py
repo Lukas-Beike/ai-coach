@@ -18,7 +18,10 @@ def prepare_structured_plan_replacement(
     payload = structured_artifact_payload(arguments)
     validate_structured_plan_limits(payload)
     try:
-        expected_revision = int(arguments.get("expected_revision"))
+        revision = arguments.get("expected_revision")
+        if revision is None:
+            raise ValueError("missing planning revision")
+        expected_revision = int(revision)
     except (TypeError, ValueError) as exc:
         raise AppError(
             400,

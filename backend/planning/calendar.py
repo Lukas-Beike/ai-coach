@@ -68,10 +68,12 @@ def _calendar_interval(
     raw_start = str(raw_start).strip()
     if len(raw_start) == 10:
         try:
-            start = datetime.combine(date.fromisoformat(raw_start), datetime.min.time())
+            day_start = datetime.combine(
+                date.fromisoformat(raw_start), datetime.min.time()
+            )
         except ValueError:
             return None
-        return start, start + timedelta(days=1), False
+        return day_start, day_start + timedelta(days=1), False
     start = _naive_calendar_datetime(raw_start)
     if start is None:
         return None
