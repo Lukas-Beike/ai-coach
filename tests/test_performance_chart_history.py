@@ -20,10 +20,11 @@ class AnalysisHistoryTests(unittest.TestCase):
         points = result["load"]["points"]
         self.assertEqual(len(points), 90)
         self.assertEqual(
-            points[-2], {"date": "2026-10-01", "ctl": 42, "atl": 50, "tsb": -8}
+            points[-1], {"date": "2026-10-01", "ctl": 42, "atl": 50, "tsb": -8}
         )
-        self.assertIsNone(points[-1]["ctl"])
-        self.assertIsNone(points[-3]["atl"])
+        self.assertEqual(result["load"]["start"], "2026-07-04")
+        self.assertEqual(result["load"]["end"], "2026-10-01")
+        self.assertIsNone(points[-2]["atl"])
         self.assertEqual(result["start"], "2026-07-05")
 
     def test_raw_history_retains_older_dates_and_compact_rows_take_precedence(self):
@@ -42,8 +43,8 @@ class AnalysisHistoryTests(unittest.TestCase):
             "recent_wellness": [{"id": "2026-10-01", "ctl": 40, "atl": 50}],
         }
         result = analysis_history(snapshot, {}, date(2026, 10, 2))
-        self.assertEqual(result["load"]["points"][5]["ctl"], 30)
-        self.assertEqual(result["load"]["points"][-2]["ctl"], 40)
+        self.assertEqual(result["load"]["points"][6]["ctl"], 30)
+        self.assertEqual(result["load"]["points"][-1]["ctl"], 40)
         self.assertNotIn("untrusted content", str(result))
 
     def test_sources_remain_separate_with_no_backdating_of_current_settings(self):

@@ -53,15 +53,11 @@ def _load_values(row: dict[str, Any]) -> dict[str, float | None]:
 
 
 def _load_history(
-    dates: list[str], wellness: dict[date, dict[str, Any]], today: date
+    dates: list[str], wellness: dict[date, dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    today_key = today.isoformat()
     load = []
     for date_key in dates:
         row = wellness.get(date.fromisoformat(date_key), {})
-        # Today's provider load can include planned workouts, so end at yesterday.
-        if date_key == today_key:
-            row = {}
         load.append({"date": date_key, **_load_values(row)})
     return load
 
@@ -117,11 +113,14 @@ def analysis_history(
     snapshot = snapshot or {}
     start = today - timedelta(days=89)
     dates = [(start + timedelta(days=i)).isoformat() for i in range(90)]
+    load_end = today - timedelta(days=1)
+    load_start = load_end - timedelta(days=89)
+    load_dates = [(load_start + timedelta(days=i)).isoformat() for i in range(90)]
     raw = snapshot.get("raw_provider_data")
     raw = raw if isinstance(raw, dict) else {}
     # Raw provider rows retain the history that the compact Coach projection trims.
-    wellness = _wellness_history(raw, snapshot, start, today)
-    load = _load_history(dates, wellness, today)
+    wellness = _wellness_history(raw, snapshot, load_start, today)
+    load = _load_history(load_dates, wellness)
     series = {
         key: _metric_series(key, raw, snapshot, garmin, wellness, dates, start, today)
         for key in METRIC_KEYS
@@ -130,6 +129,11 @@ def analysis_history(
         "start": dates[0],
         "end": dates[-1],
         "days": 90,
-        "load": {"source": INTERVALS_SOURCE, "points": load},
+        "load": {
+            "source": INTERVALS_SOURCE,
+            "start": load_dates[0],
+            "end": load_dates[-1],
+            "points": load,
+        },
         "metrics": series,
     }

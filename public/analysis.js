@@ -142,7 +142,7 @@ function renderAnalysisHistory(history) {
   const loadSeries = [["ctl", "Fitness / CTL"], ["atl", "Ermüdung / ATL"], ["tsb", "Form / TSB"]].map(([key, label]) => ({
     label, points: load.points.map((point) => ({ date: point.date, value: point[key] })),
   }));
-  root.append(analysisChart("Belastung und Form", loadSeries, "", history.start, history.end,
+  root.append(analysisChart("Belastung und Form", loadSeries, "", load.start || history.start, load.end || history.end,
     "CTL: langfristige Belastung (üblich 42 Tage), ATL: kurzfristige Belastung (7 Tage). Die Providerkonfiguration gilt. TSB = CTL − ATL am selben Tag. Historische Werte bis gestern; CTL ist kein Leistungstest."));
   const performanceSeries = [
     ["cycling_ftp_watts", "Rad · FTP", "W"],
