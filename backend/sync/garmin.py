@@ -27,6 +27,8 @@ from backend.sync.state import SyncStateRepository
 
 GARMIN_CAPABILITY_FAILURE_LIMIT = 3
 GARMIN_CAPABILITY_PAUSE_SECONDS = 24 * 60 * 60
+GARMIN_INITIAL_SYNC_DAYS = 60
+GARMIN_CATCHUP_MAX_DAYS = 90
 
 GARMIN_COLLECTION_SOURCES = (
     "sleep",
@@ -136,6 +138,28 @@ class GarminPayloadService:
             return {}
         return value if isinstance(value, dict) else {}
 
+    def automatic_sync_days(self, minimum_days: int) -> int:
+        """Seed recent analysis history, then catch up each collection separately."""
+        snapshot = self.snapshot()
+        freshness = snapshot.get("source_freshness") or {}
+        sources = {"activities", "sleep", "hrv"} | (
+            set(freshness) & {"daily_stats", "resting_hr"}
+        )
+        days = minimum_days
+        today = self._local_today()
+        for source in sources:
+            coverage = freshness.get(source, {})
+            try:
+                start = date.fromisoformat(coverage["synced_start"])
+                end = date.fromisoformat(coverage["synced_end"])
+            except (KeyError, TypeError, ValueError):
+                days = max(days, GARMIN_INITIAL_SYNC_DAYS)
+                continue
+            if (end - start).days + 1 < GARMIN_INITIAL_SYNC_DAYS:
+                days = max(days, GARMIN_INITIAL_SYNC_DAYS)
+            days = max(days, (today - end).days + 1)
+        return min(days, GARMIN_CATCHUP_MAX_DAYS)
+
     def prepare_fixture(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._prepare(payload, self.snapshot(), fixture=True)
 
@@ -200,6 +224,7 @@ def _merge_garmin_source(
     source: str,
 ) -> None:
     incoming = payload.get(source)
+    previous_freshness = freshness.get(source, {})
     complete = source not in failed and pagination.get(source, {}).get("complete", True)
     if source == "gear" and isinstance(incoming, list) and complete:
         freshness[source] = {
@@ -216,12 +241,43 @@ def _merge_garmin_source(
         }
     elif source in previous:
         freshness[source] = {**freshness.get(source, {}), "freshness": "stale"}
+    if source in GARMIN_COLLECTION_SOURCES:
+        coverage = {
+            key: previous_freshness[key]
+            for key in ("synced_start", "synced_end")
+            if key in previous_freshness
+        }
+        if source in pagination and complete:
+            coverage = _merge_collection_coverage(coverage, payload)
+        if source in freshness or source in pagination:
+            freshness[source] = {**freshness.get(source, {}), **coverage}
     if source in GARMIN_COLLECTION_SOURCES and (
         source in previous or source in payload
     ):
         payload[source] = merge_garmin_records(incoming, previous.get(source))
     elif not incoming and source in previous:
         payload[source] = previous[source]
+
+
+def _merge_collection_coverage(
+    previous: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, str]:
+    """Keep the latest continuous successfully read window, including empty reads."""
+    try:
+        start = date.fromisoformat(payload["start"])
+        end = date.fromisoformat(payload["end"])
+    except (KeyError, TypeError, ValueError):
+        return previous
+    if previous:
+        prior_start = date.fromisoformat(previous["synced_start"])
+        prior_end = date.fromisoformat(previous["synced_end"])
+        if start <= prior_end + timedelta(days=1) and end >= prior_start - timedelta(
+            days=1
+        ):
+            start, end = min(start, prior_start), max(end, prior_end)
+        elif end < prior_end:
+            start, end = prior_start, prior_end
+    return {"synced_start": start.isoformat(), "synced_end": end.isoformat()}
 
 
 def collection_complete(payload: dict[str, Any]) -> bool:

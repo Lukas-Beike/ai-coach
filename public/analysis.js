@@ -594,8 +594,13 @@ function recoverySeries([metric, title, unit], item, dates, weekly, color) {
   const values = new Map(item.history.map((point) => [point.date, point.value]));
   const points = dates.map((date) => recoveryPoint(date, values, weekly));
   const baseline = points.find((point) => point.actual != null && Number(point.actual) > 0);
-  const method = metric === "hrv" ? " \u00b7 " + item.measurement : "";
-  return { label: `${title} \u00b7 ${item.source}${method}`, legendLabel: title, unit, color, baselineDate: baseline?.date,
+  const method = metric === "hrv" ? " \\u00b7 " + item.measurement : "";
+  const today = new Date().toISOString().slice(0, 10);
+  const coverageEnd = weekly ? today : (today < dates.at(-1) ? today : dates.at(-1));
+  const readings = item.history.filter((point) => point.date >= dates[0] && point.date <= coverageEnd);
+  const expectedDays = Math.max(0, Math.round((Date.parse(coverageEnd) - Date.parse(dates[0])) / 86400000) + 1);
+  return { label: `${title} \\u00b7 ${item.source}${method}`, legendLabel: title, unit, color, baselineDate: baseline?.date,
+    coverage: `${readings.length}/${expectedDays} Tage mit Messung \\u00b7 42-Tage-Normalbereich: ${item.nights} fr\\u00fchere Messn\\u00e4chte${readings.length ? ` \\u00b7 ${dateLabel(readings[0].date)} bis ${dateLabel(readings.at(-1).date)}` : ""}`,
     points: points.map((point) => ({ ...point, value: point.actual == null || !baseline ? null : (point.actual / baseline.actual - 1) * 100 })) };
 }
 

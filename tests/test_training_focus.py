@@ -19,6 +19,7 @@ class TrainingFocusTests(unittest.TestCase):
         result = training_focus({}, {"activities": rows}, date(2026, 10, 2))
         self.assertEqual(3, result["classified_sessions"])
         self.assertEqual(2, result["unclassified_sessions"])
+        self.assertEqual({"known_sessions": 5, "observed_start": "2026-10-02", "observed_end": "2026-10-02"}, result["coverage"])
         self.assertEqual(40, result["categories"]["low_aerobic"]["load"])
         self.assertEqual(80, result["categories"]["high_aerobic"]["load"])
         self.assertEqual(30, result["categories"]["anaerobic"]["load"])

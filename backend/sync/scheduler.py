@@ -109,7 +109,9 @@ class DailySyncScheduler:
             "garmin",
             "refresh",
             {
-                "days": self._config.garmin_automatic_sync_days,
+                "days": self._garmin.automatic_sync_days(
+                    self._config.garmin_automatic_sync_days
+                ),
                 "reason": self._config.auto_update_label,
             },
             requested_by="scheduler",
@@ -264,7 +266,9 @@ class StartupSyncScheduler:
                 "garmin",
                 "refresh",
                 {
-                    "days": self._config.garmin_automatic_sync_days,
+                    "days": self._garmin.automatic_sync_days(
+                        self._config.garmin_automatic_sync_days
+                    ),
                     "reason": "startup",
                 },
                 requested_by="startup",

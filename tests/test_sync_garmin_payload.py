@@ -15,6 +15,70 @@ from backend.providers.garmin import _gear_inventory
 
 
 class GarminPayloadServiceTests(unittest.TestCase):
+    def collection_payload(self, start, end, *, failed=None):
+        sources = ("activities", "sleep", "hrv", "daily_stats", "resting_hr")
+        return {
+            "start": start, "end": end, "synced_at": f"{end}T12:00:00",
+            "errors": [{"source": failed}] if failed else [],
+            "provider_sync": {"pagination": {
+                source: {"complete": source != failed} for source in sources
+            }},
+            **{source: [] for source in sources},
+        }
+
+    def test_initial_recent_import_then_regular_two_day_refresh(self):
+        self.assertEqual(self.service.automatic_sync_days(2), 60)
+        seed = self.service.prepare_remote(self.collection_payload("2026-07-23", "2026-09-20"))
+        self.store_garmin_snapshot(seed)
+        self.assertEqual(self.service.automatic_sync_days(2), 2)
+        self.assertEqual(seed["source_freshness"]["sleep"]["synced_start"], "2026-07-23")
+
+    def test_partial_success_does_not_advance_failed_collection(self):
+        seed = self.service.prepare_remote(self.collection_payload("2026-07-13", "2026-09-10"))
+        self.store_garmin_snapshot(seed)
+        self.assertEqual(self.service.automatic_sync_days(2), 11)
+        partial = self.service.prepare_remote(self.collection_payload("2026-09-09", "2026-09-20", failed="sleep"))
+        self.store_garmin_snapshot(partial)
+        self.assertEqual(partial["source_freshness"]["hrv"]["synced_end"], "2026-09-20")
+        self.assertEqual(partial["source_freshness"]["sleep"]["synced_end"], "2026-09-10")
+        self.assertEqual(self.service.automatic_sync_days(2), 11)
+        completed = self.service.prepare_remote(self.collection_payload("2026-09-09", "2026-09-20"))
+        self.store_garmin_snapshot(completed)
+        self.assertEqual(self.service.automatic_sync_days(2), 2)
+
+    def test_next_calendar_day_still_needs_only_two_days(self):
+        seed = self.service.prepare_remote(self.collection_payload("2026-07-22", "2026-09-19"))
+        self.store_garmin_snapshot(seed)
+        self.assertEqual(self.service.automatic_sync_days(2), 2)
+
+    def test_unavailable_optional_collection_does_not_force_repeated_initial_import(self):
+        payload = self.collection_payload("2026-07-23", "2026-09-20")
+        for source in ("daily_stats", "resting_hr"):
+            del payload[source]
+            del payload["provider_sync"]["pagination"][source]
+        self.store_garmin_snapshot(self.service.prepare_remote(payload))
+        self.assertEqual(self.service.automatic_sync_days(2), 2)
+
+    def test_failed_initial_recovery_is_retried_despite_activity_backfill(self):
+        seed = self.service.prepare_remote(self.collection_payload("2026-07-23", "2026-09-20", failed="hrv"))
+        self.store_garmin_snapshot(seed)
+        historical = self.service.prepare_remote({
+            "start": "2026-01-01", "end": "2026-03-31", "synced_at": "2026-09-20T13:00:00",
+            "activities": [], "provider_sync": {"pagination": {"activities": {"complete": True}}},
+        })
+        self.store_garmin_snapshot(historical)
+        self.assertEqual(self.service.automatic_sync_days(2), 60)
+        self.assertEqual(historical["source_freshness"]["activities"]["synced_end"], "2026-09-20")
+
+    def test_long_outage_is_bounded_and_disjoint_windows_are_not_called_continuous(self):
+        seed = self.service.prepare_remote(self.collection_payload("2025-01-01", "2025-03-01"))
+        self.store_garmin_snapshot(seed)
+        self.assertEqual(self.service.automatic_sync_days(2), 90)
+        refreshed = self.service.prepare_remote(self.collection_payload("2026-06-23", "2026-09-20"))
+        self.store_garmin_snapshot(refreshed)
+        self.assertEqual(refreshed["source_freshness"]["sleep"]["synced_start"], "2026-06-23")
+        self.assertEqual(self.service.automatic_sync_days(2), 2)
+
     def test_gear_collection_uses_reported_stats_and_does_not_publish_partial_inventory(self):
         client = SimpleNamespace(
             get_user_profile=lambda: {"userData": {"userProfilePk": 123}},

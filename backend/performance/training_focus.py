@@ -44,6 +44,7 @@ def training_focus(
     }
     seen: set[str] = set()
     unknown = 0
+    observed_dates = []
     rows = garmin.get("activities")
     for row in rows if isinstance(rows, list) else []:
         if not isinstance(row, dict):
@@ -59,6 +60,7 @@ def training_focus(
         if not identity or identity in seen or not start <= day <= end:
             continue
         seen.add(identity)
+        observed_dates.append(day)
         label = str(row.get("trainingEffectLabel") or "").upper()
         category = _CATEGORIES.get(label)
         load = number(row.get("activityTrainingLoad"))
@@ -75,4 +77,9 @@ def training_focus(
         "unclassified_sessions": unknown,
         "classified_sessions": len(seen) - unknown,
         "category_source": "Garmin Connect",
+        "coverage": {
+            "known_sessions": len(seen),
+            "observed_start": min(observed_dates) if observed_dates else None,
+            "observed_end": max(observed_dates) if observed_dates else None,
+        },
     }

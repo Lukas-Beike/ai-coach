@@ -41,6 +41,9 @@ class _Garmin:
         self.checks += 1
         return self.is_configured
 
+    def automatic_sync_days(self, minimum_days):
+        return getattr(self, "refresh_days", minimum_days)
+
 
 class _SyncState:
     def __init__(self, cursors=None, period: int = 17):
@@ -59,6 +62,16 @@ class _SyncState:
 
 
 class StartupSyncSchedulerTests(unittest.TestCase):
+    def test_startup_uses_initial_or_catchup_window_from_garmin(self):
+        for days in (60, 7):
+            with self.subTest(days=days):
+                garmin = _Garmin()
+                garmin.refresh_days = days
+                scheduler = self.make_scheduler(garmin=garmin)
+                scheduler.schedule()
+                job = next(job for job in self.queue.jobs if job[:2] == ("garmin", "refresh"))
+                self.assertEqual(job[2]["days"], days)
+
     def make_scheduler(
         self,
         *,

@@ -1,5 +1,40 @@
 const { test, expect } = require("@playwright/test");
 
+test("@responsive recovery exposes partial measured history without counting future days", async ({ page }) => {
+  const report = {
+    as_of: "2026-10-02",
+    baselines: [{ metric: "sleep", source: "Garmin Connect", measurement: "sleepTimeSeconds",
+      observed_at: "2026-10-01", nights: 1, history: [
+        { date: "2026-09-30", value: 7 }, { date: "2026-10-01", value: 8 },
+      ] }],
+  };
+  await page.route("**/api/performance", async (route) => {
+    const response = await route.fetch();
+    const data = await response.json();
+    data.performance.personal_recovery = report;
+    await route.fulfill({ response, json: data });
+  });
+  await page.goto("/#analysis/recovery");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.waitForFunction(() => state.data?.performance?.personal_recovery?.baselines?.length === 1);
+  await page.evaluate(async () => {
+    await applyNavigationRoute("analysis/recovery", { historyMode: "replace" });
+  });
+  const charts = page.locator("#personalRecovery .analysis-chart-card");
+  await expect(charts).toHaveCount(2);
+  await charts.first().getByText("Datenabdeckung", { exact: true }).click();
+  await expect(charts.first().locator(".analysis-coverage")).toContainText("2/5 Tage mit Messung");
+  await charts.last().getByText("Datenabdeckung", { exact: true }).click();
+  await expect(charts.last().locator(".analysis-coverage")).toContainText("2/54 Tage mit Messung");
+  await expect(charts.last().locator(".analysis-coverage")).toContainText("42-Tage-Normalbereich: 1 frühere Messnächte");
+  await expect(charts.last().locator(".analysis-coverage")).toContainText("keine Nullwerte oder bestätigten Ruhetage");
+  expect(await page.locator("#personalRecovery").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  report.baselines = [];
+  await page.evaluate(() => renderPersonalRecovery({ as_of: "2026-10-02", baselines: [] }));
+  await page.locator("#personalRecovery .analysis-chart-card").last().getByText("Datenabdeckung", { exact: true }).click();
+  await expect(page.locator("#personalRecovery .analysis-chart-card").last()).toContainText("Keine Messhistorie vorhanden.");
+});
+
 test("@responsive performance legend opens source information on demand", async ({ page }) => {
   const history = {
     start: "2026-09-01", end: "2026-09-02",

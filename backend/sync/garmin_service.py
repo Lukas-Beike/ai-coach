@@ -15,8 +15,8 @@ from backend.athlete.profile import timezone_name
 from backend.config import Config
 from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.performance import morning_battery as performance_morning_battery
-from backend.providers import http as provider_http
 from backend.providers import garmin_morning
+from backend.providers import http as provider_http
 from backend.providers.garmin import (
     GarminClientFactory,
     GarminCollectionOptions,
@@ -197,8 +197,7 @@ class GarminMorningRemoteReader:
 
     def configured(self) -> bool:
         return self._client_factory.available() and bool(
-            self._config.garmin_email
-            or Path(self._config.garmin_tokenstore).exists()
+            self._config.garmin_email or Path(self._config.garmin_tokenstore).exists()
         )
 
     def fetch(self, checkin_date: date) -> tuple[Any, Any]:
@@ -206,9 +205,7 @@ class GarminMorningRemoteReader:
             self._config.garmin_email or None,
             self._config.garmin_password or None,
         )
-        profile_timezone = timezone_name(
-            self._profile_service.get().get("timezone")
-        )
+        profile_timezone = timezone_name(self._profile_service.get().get("timezone"))
         fallback_zone = self._athlete_clock.now().tzinfo or timezone.utc
         return garmin_morning.fetch_morning_body_battery(
             client,
@@ -256,10 +253,14 @@ class GarminSyncSource:
         self._local_today = local_today
 
     def available(self) -> bool:
-        return self._fixture_loader.path() is not None or self._remote_reader.available()
+        return (
+            self._fixture_loader.path() is not None or self._remote_reader.available()
+        )
 
     def configured(self) -> bool:
-        return self._fixture_loader.path() is not None or self._remote_reader.configured()
+        return (
+            self._fixture_loader.path() is not None or self._remote_reader.configured()
+        )
 
     def fixture_enabled(self) -> bool:
         return self._fixture_loader.path() is not None
@@ -416,6 +417,9 @@ class GarminSyncService:
     def snapshot(self) -> dict[str, Any]:
         return self._payload_service.snapshot()
 
+    def automatic_sync_days(self, minimum_days: int) -> int:
+        return self._payload_service.automatic_sync_days(minimum_days)
+
     def sync(
         self,
         days: int = 30,
@@ -536,9 +540,7 @@ class GarminSyncService:
         deadline = self._coordination.wait_deadline()
         while self._coordination.monotonic() < deadline:
             self._raise_if_cancelled(cancel_event)
-            remaining = max(
-                0.05, min(1.0, deadline - self._coordination.monotonic())
-            )
+            remaining = max(0.05, min(1.0, deadline - self._coordination.monotonic()))
             if not self._coordination.acquire(timeout=remaining):
                 continue
             try:
