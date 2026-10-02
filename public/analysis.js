@@ -512,6 +512,11 @@ function renderTrainingFocus(report) {
   const explanation = reportNode("div", `Letzte 8 Wochen: ${dateLabel(report.start)} bis ${dateLabel(report.end)}. Garmin: aufgezeichnete Belastung nach der Hauptwirkung der Einheit (Training Effect). Keine aus Zonen abgeleitete Einteilung und nicht Garmins separat berechnete Load-Focus-Metrik. ${report.unclassified_sessions || 0} Einheiten ohne bekannte Wirkung oder Belastung bleiben ausgeschlossen.`, "analysis-info-tooltip");
   explanation.id = `focus-info-${++analysisInfoId}`; explanation.setAttribute("popover", "auto"); explanation.setAttribute("role", "tooltip");
   info.setAttribute("popovertarget", explanation.id); root.firstChild.append(info); root.append(explanation);
+  const coverage = report.coverage || {};
+  const coverageRange = coverage.observed_start && coverage.observed_end
+    ? ` · erfasste Daten ${dateLabel(coverage.observed_start)} bis ${dateLabel(coverage.observed_end)}`
+    : "";
+  root.append(reportNode("p", `${coverage.known_sessions ?? 0} erfasste Garmin-Einheiten im Zeitraum${coverageRange}.`, "muted training-focus-coverage"));
   appendTrainingFocusShare(report, categories, root);
   const details = reportNode("details", null, "training-focus-details");
   const disclosure = reportNode("summary", "Zonen im Detail");
