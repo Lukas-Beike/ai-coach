@@ -6,6 +6,9 @@ test.beforeAll(async ({ request }) => { fixture = await captureReadFixture(reque
 test.beforeEach(async ({ page }) => { await installReadFixture(page, fixture); });
 
 async function ready(page) {
+  // These UI contracts don't exercise the SSE transport; abort it before the
+  // app starts so closed browser contexts don't hold fixture server slots.
+  await page.route("**/api/state/events*", (route) => route.abort());
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
   await expect.poll(() => page.evaluate(() => state.loadPromise === null)).toBe(true);
@@ -498,12 +501,15 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
     }, { date: addDateKey(date, -1),
       weather: { weather_code: 63, temperature_min: 10, temperature_max: 17, archived_forecast: true, forecast_location: "Emsdetten", precipitation_probability_max: 75, rain_peak_time: "14:00", wind_speed_max: 21.1 },
       recovery: { sleep_hours: 6.5, hrv: 42, resting_hr: 53 },
-      checkin: { stress: 5 },
+      checkin: { stress: 5, illness: "Magen-Darm" },
     }];
     state.data.training_calendar = [
-      { id: "agenda-run", date, name: "Lockerer Dauerlauf mit Steigerungen", type: "Run", duration_minutes: 45, description: "Locker laufen. <img src=x onerror=alert(1)>" },
+      { id: "agenda-run", date, start_date_local: `${date}T18:30:00`, name: "Lockerer Dauerlauf mit Steigerungen", type: "Run", duration_minutes: 45, description: "Locker laufen. <img src=x onerror=alert(1)>" },
       { id: "agenda-strength", date, name: "Mobilität und Rumpfstabilität", type: "WeightTraining", duration_minutes: 20 },
-      { id: "agenda-completed", date: addDateKey(date, 1), name: "Grundlagenausfahrt", type: "Ride", is_completed_activity: true, moving_time: 3600, distance: 28000, icu_training_load: 42, icu_rpe: 3 },
+      { id: "agenda-completed", date: addDateKey(date, 1), start_date_local: `${addDateKey(date, 1)}T07:15:00`, name: "Grundlagenausfahrt", type: "Ride", is_completed_activity: true, moving_time: 3600, distance: 28000, icu_training_load: 42, icu_rpe: 3 },
+      { id: "agenda-matched", date: addDateKey(date, -2), name: "Aktivierung", type: "Ride", duration_minutes: 45, icu_training_load: 25,
+        compliance: { status: "completed", percentage: 136, basis: "training_load", actual_activity: { name: "Aktivierung absolviert", type: "Ride", moving_time: 3600, distance: 24000, icu_training_load: 34, average_heartrate: 125, average_watts: 201 } } },
+      { id: "agenda-missed", date: addDateKey(date, -3), name: "Ausgefallene Einheit", type: "Ride", duration_minutes: 45, compliance: { status: "missed", percentage: 0 } },
     ];
     renderPlanned(state.data.training_calendar);
     document.querySelectorAll(".planned-week").forEach((week) => { week.open = true; });
@@ -533,17 +539,32 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(previous).toHaveCount(1);
   await expect(previous.locator(".planned-day-metrics")).not.toContainText("85/100");
   await expect(previous.locator(".planned-day-metrics")).toBeVisible();
+  await expect(previous.locator(".planned-day-health")).toHaveText("Krankheit: Magen-Darm");
+  await expect(previous.locator(".planned-day-empty")).toBeVisible();
+  const matched = page.locator(".planned-entry", { hasText: "Aktivierung absolviert" });
+  await expect(matched.locator(".planned-execution")).toHaveText("✓ 136 %");
+  await expect(matched.locator(".planned-execution")).toHaveAttribute("aria-label", "136 Prozent des Plans · Belastung");
+  await expect(matched.locator(".planned-session-target")).toContainText("Plan: Aktivierung · 45 Min. · Belastung 25");
+  await expect(matched.locator(".planned-session-metrics")).toContainText("125 bpm · 201 W · Belastung 34");
+  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveText("✕ 0 %");
+  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveAttribute("aria-label", "0 Prozent des Plans");
+  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveAttribute("title", "Ausführung gegenüber Plan");
+  await expect(page.locator(".planned-entry").filter({ hasText: "Grundlagenausfahrt" }).locator(".planned-execution")).toHaveCount(0);
+  await expect(day.locator("xpath=ancestor::details[contains(@class,'planned-week')]//span[@class='planned-week-metrics']")).toContainText("Geplant");
   await expect(previous.locator(".planned-weather-detail")).toHaveAttribute("title", /Gespeicherte Wettervorhersage/);
   await expect(previous.locator(".planned-weather-metrics")).toHaveText("75 % Regen (max. 14:00 Uhr) · 21,1 km/h Wind");
-  const workout = day.locator(".planned-entry").first();
-  await expect(workout.locator(".planned-meta")).toHaveText("Laufen · 45 Min.");
+  const workout = day.locator(".planned-entry").filter({ hasText: "Lockerer Dauerlauf mit Steigerungen" });
+  await expect(workout.locator(".planned-meta")).toHaveText("Laufen · 18:30 · 45 Min.");
+  await expect(workout.locator(".planned-session-header")).toContainText("Laufen · 18:30");
+  await expect(workout.locator(".planned-session-header")).toBeVisible();
   await expect(workout.locator(".planned-description")).toBeHidden();
   await workout.locator("summary").focus();
   await page.keyboard.press("Enter");
   await expect(workout.locator(".planned-description")).toBeVisible();
   await expect(workout.locator("img")).toHaveCount(0);
   await page.keyboard.press("Enter");
-  const completed = page.locator(".planned-entry.is-completed");
+  const completed = page.locator(".planned-entry.is-completed").filter({ hasText: "Grundlagenausfahrt" });
+  await expect(completed.locator(".planned-session-header")).toContainText("Radfahren · 07:15");
   await expect(completed.locator(".planned-entry-status")).toBeVisible();
   await expect(completed.locator(".planned-actual-facts")).toBeHidden();
   await completed.locator("summary").click();
@@ -554,10 +575,11 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
     const content = element.querySelector(".planned-day-content").getBoundingClientRect();
     const insights = element.querySelector(".planned-day-insights").getBoundingClientRect();
     return heading.right <= content.left && element.scrollWidth <= element.clientWidth
-      && insights.top >= content.bottom && insights.left < content.left;
+      && insights.bottom <= content.top && insights.left === content.left;
   })).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await day.screenshot({ path: testInfo.outputPath("planned-agenda.png") });
+  await matched.screenshot({ path: testInfo.outputPath("planned-execution.png") });
   const week = page.locator(".planned-week").first();
   await week.locator(":scope > summary").click();
   await page.evaluate(() => renderPlanned(state.data.training_calendar));

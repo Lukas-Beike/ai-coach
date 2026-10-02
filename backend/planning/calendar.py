@@ -68,10 +68,12 @@ def _calendar_interval(
     raw_start = str(raw_start).strip()
     if len(raw_start) == 10:
         try:
-            start = datetime.combine(date.fromisoformat(raw_start), datetime.min.time())
+            day_start = datetime.combine(
+                date.fromisoformat(raw_start), datetime.min.time()
+            )
         except ValueError:
             return None
-        return start, start + timedelta(days=1), False
+        return day_start, day_start + timedelta(days=1), False
     start = _naive_calendar_datetime(raw_start)
     if start is None:
         return None
@@ -141,5 +143,7 @@ def calendar_conflicts_for_items(
     for item in items:
         matches, match = _calendar_items_conflict(candidate, item)
         if matches:
+            if source == "local_library" and match != "time_window":
+                continue
             conflicts.append(_calendar_conflict_record(item, source, match))
     return conflicts

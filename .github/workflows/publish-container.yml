@@ -296,15 +296,16 @@ jobs:
               --env APP_PASSWORD="$E2E_APP_PASSWORD" --env COOKIE_SECURE=false \
               --volume "${GITHUB_WORKSPACE}/e2e:/app/e2e:ro" \
               ai-coach:e2e python /app/e2e/fixture_runtime.py >/dev/null
-            for attempt in {1..30}; do
-              if curl --fail --silent http://127.0.0.1:8090/api/health >/dev/null; then
+            for attempt in {1..90}; do
+              if curl --fail --silent http://127.0.0.1:8090/api/health >/dev/null && \
+                curl --fail --silent http://127.0.0.1:8090/ >/dev/null; then
                 break
               fi
-              if [[ "$attempt" == "30" ]]; then
+              if [[ "$attempt" == "90" ]]; then
                 echo "The isolated fixture application did not become healthy for $project ($spec)."
                 exit 1
               fi
-              sleep 2
+              sleep 0.5
             done
             spec_name="$(basename "$spec" .spec.js)"
             PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/$spec_name" \

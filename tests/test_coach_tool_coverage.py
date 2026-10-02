@@ -16,10 +16,10 @@ from backend.coach.training_patch import CoachTrainingPatchService
 from backend.planning import library as planning_library
 from backend.providers import gemini as gemini_provider
 from backend.providers import http as provider_http
-from backend.providers import openai as openai_provider
-from backend.sync.intervals import IntervalsSyncService
 from backend.providers import intervals_client as intervals_client_module
+from backend.providers import openai as openai_provider
 from backend.sync.adaptive import IllnessPauseSyncService
+from backend.sync.intervals import IntervalsSyncService
 
 
 def covers(*cases):
@@ -490,6 +490,43 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(catalog["apply_training_patch"]["surface"], "dialogue_only")
         self.assertIn("apply_training_changes", server.COACH_CANONICAL_TOOL_NAMES)
         self.assertEqual(catalog["apply_training_changes"]["surface"], "canonical_only")
+
+    def test_planning_tool_schemas_accept_local_start_times(self):
+        tools = {tool["name"]: tool for tool in server.COACH_STRUCTURED_TOOLS}
+        for name in ("stage_training_plan", "replace_training_plan"):
+            workout_schema = tools[name]["parameters"]["properties"]["payload"][
+                "properties"
+            ]["workouts"]["items"]
+            self.assertIn("start_date_local", workout_schema["required"])
+            self.assertEqual(
+                workout_schema["properties"]["start_date_local"]["type"],
+                ["string", "null"],
+            )
+        changes_schema = tools["apply_training_changes"]["parameters"]["properties"][
+            "changes"
+        ]["items"]
+        self.assertEqual(
+            changes_schema["properties"]["start_date_local"]["type"], "string"
+        )
+    @covers("lookup_food:success", "calculate_food_nutrition:success")
+    def test_food_database_read_tools_calculate_without_writing(self):
+        foods = self.run_tool("lookup_food", {"query": "Haferflocken"})
+        self.assertTrue(foods["foods"])
+        result = self.run_tool("calculate_food_nutrition", {"ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]})
+        self.assertEqual(result["kcal"], 174)
+        self.assertEqual(result["nutrition_basis"]["kind"], "database")
+        self.assertEqual(server.NUTRITION_ASSEMBLY.service().get_today_summary()["entry_count"], 0)
+
+    @covers("save_nutrition_template:success", "log_nutrition_template:success", "delete_nutrition_template:success")
+    def test_saved_meals_run_through_authorized_coach_and_receipts(self):
+        template = self.run_tool("save_nutrition_template", {"payload": {"name": "Synthetic breakfast", "description": "80 g oats", "kcal": 400}}, ["local_nutrition"], message="Ja, speichere diese Mahlzeitvorlage.")["template"]
+        read = self.run_tool("read_nutrition", {})
+        self.assertEqual(read["templates"][0]["id"], template["id"])
+        self.assertEqual(read["entry_count"], 0)
+        entry = self.run_tool("log_nutrition_template", {"id": template["id"], "portions": 0.5}, ["local_nutrition"], message="Ich habe eine halbe Portion gegessen, erfasse sie.")["entry"]
+        self.assertEqual(entry["kcal"], 200)
+        self.run_tool("delete_nutrition_template", {"id": template["id"]}, ["local_nutrition"], message="Lösche diese Mahlzeitvorlage.")
+        self.assertEqual(server.NUTRITION_ASSEMBLY.service().get_meal(entry["id"])["kcal"], 200)
 
     @covers("save_nutrition_entry:success", "read_nutrition:success", "delete_nutrition_entry:success")
     def test_nutrition_entries_can_be_saved_read_and_deleted(self):

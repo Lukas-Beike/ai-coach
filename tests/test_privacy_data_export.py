@@ -43,6 +43,8 @@ class _Database:
                     {"key": "sync_status", "value": "active"},
                 ]
             )
+        if "FROM nutrition_templates" in query:
+            return _Rows([{ "payload": '{"id":"template-1","name":"Synthetic breakfast"}' }])
         return _Rows([])
 
 
@@ -133,7 +135,9 @@ class PrivacyDataExportServiceTests(unittest.TestCase):
             exported = service.export()
 
         self.assertEqual(manager.entries, 3)
-        self.assertEqual(len(db.queries), 5)
+        self.assertEqual(len(db.queries), 6)
+        self.assertEqual(exported["nutrition_templates"][0]["id"], "template-1")
+        self.assertTrue(any("FROM nutrition_templates" in query for query in db.queries))
         self.assertEqual(exported["application_state"], {"ordinary": "{broken"})
         self.assertEqual(exported["garmin_snapshot"], {})
         self.assertEqual(exported["weather_cache"], [])

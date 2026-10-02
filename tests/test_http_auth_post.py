@@ -40,19 +40,23 @@ class AuthPostRoutesTests(unittest.TestCase):
     def test_login_success_dispatches_password_and_sets_cookies(self) -> None:
         handled = self.routes.handle(self.handler, "/api/login")
         self.assertTrue(handled)
-        self.handler.read_json.assert_called_once_with()
-        self.auth_service.login_user.assert_called_once_with(self.handler, "secret-password")
+        self.handler.read_json.assert_not_called()
+        self.auth_service.login_user.assert_called_once_with(self.handler)
         self.handler.send_json.assert_called_once_with(
             200,
             {"status": "ok", "csrf": "csrf-abc"},
             {"Set-Cookie": ["ic_session=token-xyz", "ic_csrf=csrf-abc"]},
         )
 
-    def test_logout_success_authenticates_operates_gate_and_clears_cookies(self) -> None:
+    def test_logout_success_authenticates_operates_gate_and_clears_cookies(
+        self,
+    ) -> None:
         handled = self.routes.handle(self.handler, "/api/logout")
         self.assertTrue(handled)
         self.auth_service.require_auth.assert_called_once_with(self.handler)
-        self.auth_service.require_csrf.assert_called_once_with(self.handler, {"user": "athlete"})
+        self.auth_service.require_csrf.assert_called_once_with(
+            self.handler, {"user": "athlete"}
+        )
         self.maintenance_gate.operation.assert_called_once_with()
         self.auth_service.logout_user.assert_called_once_with(self.handler)
         self.handler.send_json.assert_called_once_with(

@@ -181,6 +181,7 @@ function updateNavigationHistory(panelRoute, historyMode) {
 function renderActiveRoute(mainRoute, panelRoute) {
   if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
   if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
+  if (mainRoute === "nutrition") { renderNutritionSegments(panelRoute); if (state.data) void loadNutrition(); }
   if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
   if (state.data && mainRoute === "more") {
     void loadContextPreview();
@@ -313,6 +314,7 @@ function showLogin() {
   state.stateEventLastId = 0;
   state.stateEventBackoff = 1000;
   state.data = null;
+  resetNutritionView();
   state.busy = false;
   state.chatRequest = null;
   state.chatStreamText = "";
@@ -1773,6 +1775,7 @@ function createCoachWorkingIndicator() {
 
 function coachActionDescription(proposal) {
   if (proposal.action_type === "undo_change") return "Diese lokale Änderung zurücknehmen? Der aktuelle Stand wird vor der Ausführung erneut geprüft.";
+  if (proposal.action_type === "local_coach_write") return "Diese Mahlzeitvorlage wird lokal gespeichert. Sie wird erst nach deiner Bestätigung angelegt.";
   if (proposal.action_type === "remote_coach_write") {
     return "Diese Änderung wird an Intervals.icu gesendet. Sie wird erst ausgeführt, wenn du sie hier freigibst.";
   }
@@ -1793,7 +1796,7 @@ function coachActionDiff(proposal) {
       entry.name, entry.date, entry.sport, entry.scope, entry.units,
       entry.id && `ID: ${entry.id}`,
       entry.kcal, entry.entries && `${entry.entries} Einträge`,
-      entry.carbs, entry.protein, entry.fat,
+      entry.carbs, entry.protein, entry.fat, entry.source,
       entry.keep && `Behalten: ${entry.keep}`,
       entry.delete && `Löschen: ${entry.delete}`,
     ].filter(Boolean).join(" · ");
@@ -1804,15 +1807,16 @@ function coachActionDiff(proposal) {
 
 function coachActionButtons(proposal) {
   const undo = proposal.action_type === "undo_change";
+  const localWrite = proposal.action_type === "local_coach_write";
   const remoteWrite = proposal.action_type === "remote_coach_write";
   const actions = document.createElement("div");
   actions.className = "coach-action-card-actions";
   const later = document.createElement("button");
   later.type = "button";
   later.className = "secondary-button";
-  later.textContent = remoteWrite ? "Nicht freigeben" : "Später prüfen";
+  later.textContent = remoteWrite || localWrite ? "Nicht freigeben" : "Später prüfen";
   later.addEventListener("click", () => {
-    if (remoteWrite) {
+    if (remoteWrite || localWrite) {
       later.disabled = true;
       api("/api/coach/actions/cancel", {
         method: "POST",
@@ -1834,6 +1838,8 @@ function coachActionButtons(proposal) {
   confirm.type = "button";
   if (remoteWrite) {
     confirm.textContent = "Remote-Änderung freigeben";
+  } else if (localWrite) {
+    confirm.textContent = "Mahlzeitvorlage speichern";
   } else if (undo) {
     confirm.textContent = "Änderung zurücknehmen";
   } else {
@@ -1865,7 +1871,7 @@ function renderCoachActionReview() {
   const root = $("#coachActionReview");
   const content = $("#coachActionReviewContent");
   if (!root || !content) return;
-  const proposals = (state.coachActionProposals || []).filter((proposal) => ["undo_change", "delete_duplicate_intervals_activity", "remote_coach_write"].includes(proposal.action_type));
+  const proposals = (state.coachActionProposals || []).filter((proposal) => ["undo_change", "delete_duplicate_intervals_activity", "remote_coach_write", "local_coach_write"].includes(proposal.action_type));
   content.replaceChildren(...proposals.map(coachActionCard));
   root.hidden = proposals.length === 0;
   $("#coachActionReviewTitle").textContent = "Aktion prüfen";
@@ -1876,10 +1882,15 @@ function coachActionReceipt(proposal, result) {
     const undo = proposal.action_type === "undo_change";
     const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
     const remoteWrite = proposal.action_type === "remote_coach_write";
+    const localWrite = proposal.action_type === "local_coach_write";
   let message = "Planung lokal gespeichert.";
   let title = "Planung gespeichert";
   let details = ["Keine implizite Remote-Änderung"];
-  if (undo) {
+  if (localWrite) {
+    message = "Die Mahlzeitvorlage wurde lokal gespeichert.";
+    title = "Mahlzeitvorlage gespeichert";
+    details = ["Nur lokal gespeichert; keine Synchronisierung an Intervals.icu"];
+  } else if (undo) {
     message = "Die lokale Änderung wurde zurückgenommen.";
     title = "Änderung zurückgenommen";
   } else if (duplicateDelete) {
@@ -1899,7 +1910,7 @@ function coachActionReceipt(proposal, result) {
   if (!duplicateDelete && result.sync_job_ids?.length) details = result.sync_job_ids.map((id) => `Syncjob ${id} eingereiht`);
   else if (!duplicateDelete && result.sync_job_id) details = [`Syncjob ${result.sync_job_id} eingereiht`];
   else if (remoteWrite) details = ["Freigegebene Remote-Änderung direkt ausgeführt"];
-  return { title, message, details, duplicateDelete, undo, remoteWrite };
+  return { title, message, details, duplicateDelete, undo, remoteWrite, localWrite };
 }
 
 async function executeCoachActionProposal(proposal, button) {
@@ -1921,7 +1932,8 @@ async function executeCoachActionProposal(proposal, button) {
     addCoachReceipt(receipt);
     toast(receipt.message);
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["activities"] : ["plan", "library", "profile", "feedback"]);
-    if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) void applyNavigationRoute("plan", { historyMode: "push" });
+    if (receipt.localWrite) void applyNavigationRoute("nutrition/meals", { historyMode: "push" });
+    else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) void applyNavigationRoute("plan", { historyMode: "push" });
   } catch (error) {
     addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
     if ([409, 410].includes(error.status)) { proposal.status = "expired"; renderCoachActionReview(); }
@@ -2685,6 +2697,54 @@ function appendPlannedCalendarComparison(details, entry, actual) {
   details.append(comparison);
 }
 
+function appendPlannedSessionHeader(cardSummary, entry, actual) {
+  const displayed = actual || entry;
+  const header = document.createElement("span");
+  header.className = "planned-session-header";
+  const sport = document.createElement("span");
+  sport.textContent = [activitySportLabel(displayed), calendarStartTime(displayed.start_date_local)].filter(Boolean).join(" · ");
+  const duration = document.createElement("strong");
+  duration.textContent = plannedEntryDurationLabel(actual, entry);
+  const distance = document.createElement("span");
+  distance.textContent = displayed.distance > 0 ? distanceLabel(displayed.distance) : "";
+  header.append(sport, duration, distance);
+  const metrics = document.createElement("span");
+  metrics.className = "planned-session-metrics";
+  metrics.textContent = [
+    actual ? calendarMetricNumber(actual.average_heartrate, " bpm") : null,
+    actual ? calendarMetricNumber(actual.average_watts ?? actual.weighted_average_watts, " W") : null,
+    calendarMetricNumber(displayed.icu_training_load) != null ? `Belastung ${calendarMetricNumber(displayed.icu_training_load)}` : null,
+  ].filter(Boolean).join(" · ");
+  cardSummary.append(header);
+  if (metrics.textContent) cardSummary.append(metrics);
+}
+
+function appendPlannedExecution(cardSummary, entry, status) {
+  const percentage = calendarMetricNumber(entry.compliance?.percentage);
+  const measurable = percentage != null && ["training_load", "duration"].includes(entry.compliance?.basis);
+  if (status !== "missed" && !measurable) return;
+  const execution = document.createElement("span");
+  const value = status === "missed" ? 0 : Number(entry.compliance.percentage);
+  let executionState = "is-on-target";
+  if (value < 80 || value > 120) executionState = "is-deviation";
+  if (value === 0) executionState = "is-zero";
+  execution.className = `planned-execution ${executionState}`;
+  execution.textContent = `${value === 0 ? "✕" : "✓"} ${status === "missed" ? "0" : percentage} %`;
+  const basis = { training_load: "Belastung", duration: "Dauer" }[entry.compliance?.basis];
+  execution.title = basis ? `Ausführung gegenüber Plan (${basis})` : "Ausführung gegenüber Plan";
+  execution.setAttribute("aria-label", [`${value} Prozent des Plans`, basis].filter(Boolean).join(" · "));
+  cardSummary.append(execution);
+  if (status !== "missed") {
+    const meter = document.createElement("span");
+    meter.className = "planned-execution-track";
+    meter.setAttribute("aria-hidden", "true");
+    const fill = document.createElement("span");
+    fill.style.width = `${Math.max(0, Math.min(100, value))}%`;
+    meter.append(fill);
+    cardSummary.append(meter);
+  }
+}
+
 function renderPlannedEntry(entry, dateKey, todayKey) {
   const actual = calendarActualActivity(entry);
   const status = calendarEntryStatus(entry, dateKey, todayKey);
@@ -2702,12 +2762,23 @@ function renderPlannedEntry(entry, dateKey, todayKey) {
     calendarStartTime(displayed.start_date_local),
     plannedEntryDurationLabel(actual, entry),
   ].filter(Boolean).join(" · ");
-  cardSummary.append(cardTitle, meta);
+  appendPlannedSessionHeader(cardSummary, entry, actual);
+  cardSummary.append(meta);
   if (status === "completed" || status === "missed") {
     const statusText = document.createElement("span");
     statusText.className = "planned-entry-status";
     statusText.textContent = calendarStatusLabel(entry, dateKey, todayKey);
     cardSummary.append(statusText);
+  }
+  appendPlannedExecution(cardSummary, entry, status);
+  cardSummary.append(cardTitle);
+  if (actual && !entry.is_completed_activity) {
+    const target = document.createElement("span");
+    target.className = "planned-session-target";
+    const targetParts = [entry.name || "Training", plannedEntryDurationLabel(null, entry)];
+    if (entry.icu_training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.icu_training_load)}`);
+    target.textContent = `Plan: ${targetParts.join(" · ")}`;
+    cardSummary.append(target);
   }
   const details = document.createElement("div");
   details.className = "planned-entry-details";
@@ -2740,11 +2811,15 @@ function appendPlannedDayHeading(day, weather, dateKey, todayKey) {
   heading.className = "planned-day-heading";
   const title = document.createElement("h5");
   title.id = `planned-day-${dateKey}`;
-  title.textContent = new Intl.DateTimeFormat("de-DE", { weekday: "long" }).format(dateFromKey(dateKey));
+  title.textContent = new Intl.DateTimeFormat("de-DE", { weekday: "short" }).format(dateFromKey(dateKey));
   day.setAttribute("aria-labelledby", title.id);
   const dayDate = document.createElement("time");
   dayDate.dateTime = dateKey;
-  dayDate.textContent = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "short" }).format(dateFromKey(dateKey));
+  const dayNumber = document.createElement("strong");
+  dayNumber.textContent = new Intl.DateTimeFormat("de-DE", { day: "2-digit" }).format(dateFromKey(dateKey));
+  const month = document.createElement("span");
+  month.textContent = new Intl.DateTimeFormat("de-DE", { month: "short" }).format(dateFromKey(dateKey));
+  dayDate.append(dayNumber, month);
   heading.append(title, dayDate);
   if (dateKey === todayKey) {
     const today = document.createElement("span");
@@ -2811,6 +2886,8 @@ function renderPlannedDay(view, dateKey) {
   appendPlannedDayHeading(day, weather, dateKey, todayKey);
   const content = document.createElement("div");
   content.className = "planned-day-content";
+  const notes = plannedDayNotes(dayContext);
+  if (notes.childElementCount) content.append(notes);
   if (!dayEntries.length) {
     const empty = document.createElement("p");
     empty.className = "planned-day-empty";
@@ -2818,11 +2895,9 @@ function renderPlannedDay(view, dateKey) {
     content.append(empty);
   }
   dayEntries.forEach((entry) => content.append(renderPlannedEntry(entry, dateKey, todayKey)));
-  const notes = plannedDayNotes(dayContext);
-  if (notes.childElementCount) content.append(notes);
-  day.append(content);
   const insights = plannedDayInsights(dayContext, weather, dateKey, todayKey);
   if (insights) day.append(insights);
+  day.append(content);
   return day;
 }
 
@@ -2843,6 +2918,27 @@ function renderPlannedWeek(view, weekIndex) {
   count.className = "planned-week-summary";
   count.textContent = calendarCountLabel(weekEntries, todayKey) || "Keine Einheiten";
   heading.append(title, count);
+  const totals = document.createElement("span");
+  totals.className = "planned-week-metrics";
+  const sum = (items, metric) => items.reduce((total, item) => total + Math.max(0, Number(metric(item)) || 0), 0);
+  const planned = weekEntries.filter((entry) => !entry.is_completed_activity);
+  const actual = weekEntries.map(calendarActualActivity).filter(Boolean);
+  const plannedSeconds = sum(planned, (entry) => entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time);
+  const actualSeconds = sum(actual, (entry) => entry.moving_time ?? entry.elapsed_time);
+  for (const [label, value] of [
+    ["Geplant", formatDuration(plannedSeconds)],
+    ["Absolviert", formatDuration(actualSeconds)],
+    ["Distanz", actual.length && actual.every((entry) => entry.distance != null) ? distanceLabel(sum(actual, (entry) => entry.distance)) || "0 km" : "–"],
+    ["Belastung geplant", planned.length && planned.every((entry) => entry.icu_training_load != null) ? calendarMetricNumber(sum(planned, (entry) => entry.icu_training_load)) : "–"],
+    ["Belastung absolviert", actual.length && actual.every((entry) => entry.icu_training_load != null) ? calendarMetricNumber(sum(actual, (entry) => entry.icu_training_load)) : "–"],
+  ]) {
+    const metric = document.createElement("span");
+    const number = document.createElement("strong");
+    number.textContent = value;
+    metric.append(document.createTextNode(`${label} `), number);
+    totals.append(metric);
+  }
+  heading.append(totals);
   week.append(heading);
   const days = document.createElement("div");
   days.className = "planned-week-days";
@@ -3989,6 +4085,7 @@ async function deleteServerLogs() {
 }
 
 function render(data) {
+  if (baseRoute() === "nutrition") void loadNutrition();
   const firstRender = !state.data;
   state.data = data;
   renderAppVersion(data.app);

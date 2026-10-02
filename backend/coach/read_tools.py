@@ -139,14 +139,26 @@ class CoachReadToolService:
             }
         if name == "read_nutrition":
             return self._read_nutrition(arguments)
+        if name in {"lookup_food", "calculate_food_nutrition"}:
+            if self._nutrition_service is None:
+                raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
+            foods = self._nutrition_service().food_database
+            if name == "lookup_food":
+                return foods.lookup(arguments)
+            return {"ok": True, **foods.calculate(arguments.get("ingredients"))}
         return None
 
     def _read_nutrition(self, arguments: dict[str, Any]) -> dict[str, Any]:
         if not self._nutrition_service:
             return {"ok": False, "error": "NutritionService ist nicht verfügbar."}
         service = self._nutrition_service()
+        templates = service.list_templates()
         if arguments.get("date"):
-            return {"ok": True, **service.get_day_summary(str(arguments["date"]))}
+            return {
+                "ok": True,
+                "templates": templates,
+                **service.get_day_summary(str(arguments["date"])),
+            }
         if arguments.get("start") and arguments.get("end"):
             start = validate_iso_date(arguments["start"])
             end = validate_iso_date(arguments["end"])
@@ -158,9 +170,10 @@ class CoachReadToolService:
                 )
             return {
                 "ok": True,
+                "templates": templates,
                 "summaries": service.get_range_summary(start, end),
             }
-        return {"ok": True, **service.get_today_summary()}
+        return {"ok": True, "templates": templates, **service.get_today_summary()}
 
     @staticmethod
     def _bounded_integer(

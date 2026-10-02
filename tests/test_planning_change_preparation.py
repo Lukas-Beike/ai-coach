@@ -24,6 +24,7 @@ class PlanningChangePreparationTests(unittest.TestCase):
             "duration_minutes": "30",
             "target": "POWER",
             "rationale": "  Recovery  ",
+            "start_date_local": "2031-06-02T08:00:00",
         }
 
     def assert_app_error(
@@ -74,6 +75,7 @@ class PlanningChangePreparationTests(unittest.TestCase):
                 "duration_minutes": 30,
                 "target": "POWER",
                 "rationale": "Recovery",
+                "start_date_local": "2031-06-02T08:00:00",
             },
         )
         self.assertEqual(self.create_change, original)

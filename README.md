@@ -46,7 +46,7 @@ Intervals Coach adheres to a clean-slate installation and maintenance model:
 - **Structured Error Recovery**: Robust recovery from provider rate limits and transient network errors with transparent diagnostic reporting and safe rollback of incomplete actions.
 
 ### Training Calendar & Workout Planning
-- **Collapsible Weekly Calendar**: Mobile-optimized calendar displaying complete training weeks with collapsible volume summaries, planned workouts, and completed sessions.
+- **Collapsible Weekly Calendar**: Mobile-optimized weekly agenda with a date rail, visible planned and completed volume totals, and separate cards for planned and completed sessions. Illness and pain from saved check-ins appear as day notices; days without sessions remain visible. Matched sessions show execution percentages based on load or duration and the original target directly on the card; missed sessions show 0%, while additional activities have no invented target percentage.
 - **Configurable Planning Horizon**: User-adjustable calendar display settings controlling past lookback and future planning horizons through the More tab.
 - **Plan vs. Actual Pairing**: Intelligent pairing of planned workouts to completed activities using provider pairing IDs with a conservative same-day sport fallback.
 - **Visual Volume Comparisons**: Accurate plan-versus-actual volume matching evaluated by training load (TSS) when available, falling back to moving or elapsed duration.
@@ -99,6 +99,7 @@ Intervals Coach adheres to a clean-slate installation and maintenance model:
 - **Read-Only iCalendar (ICS) Sync**: Secure polling of private external iCalendar feeds (Google Calendar, Apple iCloud, Microsoft Outlook) without write permissions.
 - **Rolling 8-Week Event Horizon**: Bounded calendar expansion mapping external life events across an 8-week (56-day) forward-looking window.
 - **RFC 5545 Recurrence Engine**: Comprehensive expansion of standard recurring rules (daily, weekly, monthly, yearly) and Google Calendar recurrence exceptions capped at 1,000 instances.
+- **Bounded Calendar Processing**: Feeds are limited to 5 MB and 10,000 parsed event components; folded lines, RDATE deduplication and recurrence-exception lookup are processed linearly. Instance records are generated incrementally and feeds exceeding 1,000 unique events in the sync window are rejected. Connected calendar HTTP transfers have a 30-second total deadline.
 - **Actionable Calendar Description Tags**: Selective tag parsing recognizing `[NO_TRAINING]`, `[NO_INTENSITY]`, and `[SHORT_ONLY]` within event descriptions to steer adaptive planning.
 - **Visual Schedule Conflict Markers**: Distinctive visual indicators on the planned calendar alerting the athlete to busy days and potential scheduling conflicts.
 - **Adaptive Session Replanning**: Heuristic session adjustments that suggest shorter durations or lower-intensity replacements for scheduled workouts on congested days.
@@ -133,6 +134,7 @@ Intervals Coach adheres to a clean-slate installation and maintenance model:
 ### Privacy, Security & Data Management
 - **SQLCipher AES-256 Encryption**: Complete encryption of all athlete data, metrics, tokens, chat history, and attachments at rest using `APP_PASSWORD`.
 - **Strict Session Security**: High-security session cookies hardened with `HttpOnly`, `SameSite=Strict`, and optional `Secure` flags.
+- **Bounded HTTP Input**: At most 32 active handlers, with separate 20-second absolute limits for request headers and bodies. Login admission is checked before reading its body; these input limits do not shorten Coach responses or SSE streams.
 - **Zero Third-Party Trackers**: Self-hosted architecture containing zero tracking scripts, third-party analytics, external CDNs, or telemetry reporting.
 - **Comprehensive Privacy Export**: Single-click export producing a complete, unencrypted JSON archive of all profile records, workouts, metrics, and chat history.
 - **Confirmed Local Data Purge**: Irreversible deletion of all local athlete data guarded by an explicit typed confirmation phrase (`LOKALE DATEN LÖSCHEN`).
@@ -577,3 +579,17 @@ Always listen to your body. Do not follow workout intensity or duration recommen
 ## License
 
 Intervals Coach is open-source software licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. See [`LICENSE`](LICENSE) for the complete license terms.
+
+### Ernährung und gespeicherte Mahlzeiten
+
+Der Tab **Ernährung** zeigt das Tagebuch mit Kalorien und Makros sowie **Meine Mahlzeiten**. Erfassung, Korrekturen und Löschen laufen über den Coach per Text, Sprache oder Foto. Aktionen im Tab bereiten eine bearbeitbare Nachricht vor; sie speichern und senden nichts automatisch. Ein vorhandener Chatentwurf bleibt erhalten.
+
+Mit "Definiere mein Standardfrühstück" lassen sich wiederverwendbare Mahlzeiten mit Zutaten, Mengen und Nährwerten für eine Portion anlegen. Der Coach zeigt die Vorlage zur Bestätigung, bevor er sie speichert. Eine Vorlage zählt noch nicht als gegessen. "Ich habe eine halbe Portion meines Standardfrühstücks gegessen" erfasst den Verzehr mit entsprechend skalierten Nährwerten. Einmalige Abweichungen verändern nur den Tagebucheintrag; dauerhafte Änderungen verändern die Vorlage und niemals frühere Einträge.
+
+Der Coach bevorzugt **BLS 4.0** für Grundnahrungsmittel und **Open Food Facts** für Markenprodukte und Barcodes. Der Backend-Code berechnet Kalorien und Makros aus den ausgewählten Lebensmittel-IDs und Mengen; Datenbankquelle, Bezugsmenge und Zutatenmengen bleiben im Eintrag und in Mahlzeitvorlagen erhalten und werden im Ernährungstab angezeigt. Die aktuelle OFF-Produkt-API wird über ihre strukturierte Nährwertdarstellung gelesen; automatisch ergänzte OFF-Schätzwerte und Angaben wie „kleiner als“ werden nicht als exakte Etikettwerte übernommen. Rohes und gegartes Gewicht sind nicht austauschbar; Gramm und Milliliter werden nicht ohne Dichte umgerechnet. Mehrdeutige Produkte oder unbekannte Mengen müssen geklärt werden. Ohne passenden Treffer bleiben Verpackungswerte oder ausdrücklich gekennzeichnete KI-Schätzungen möglich. Fehlende Makros und nicht erfasste Tage werden nicht als vollständige Nullwerte dargestellt.
+
+**Zugang und Limits:** BLS ist als lokaler Datensatz eingebunden und funktioniert ohne API-Key, Konto oder laufende API-Abfragen. Open Food Facts benötigt für Lesezugriffe keinen API-Key; die Anwendung identifiziert sich mit einem User-Agent. Die aktuell dokumentierten IP-Limits sind 15 Produktabfragen und 10 Suchabfragen pro Minute. Die Anwendung begrenzt sich auf 14 bzw. 9 Abfragen pro Minute, speichert Antworten maximal 24 Stunden im begrenzten Arbeitsspeicher-Cache und pausiert bei 429/503. Andere Anwendungen hinter derselben öffentlichen IP teilen sich die Anbieterlimits. Keine Suche bei jedem Tastendruck. An Open Food Facts gehen nur Suchbegriffe/Barcodes für Lebensmittel, keine Mahlzeitmengen, Fotos, Profile oder Chatverläufe; der Anbieter sieht die Server-IP. Bei Ausfall oder Limit wird kein erfundener Datenbankwert verwendet.
+
+**Datenquellen:** Max Rubner-Institut (2025): *Bundeslebensmittelschlüssel (BLS), Version 4.0 — Deutsche Nährstoffdatenbank*, Karlsruhe, [DOI 10.25826/Data20251217-134202-0](https://doi.org/10.25826/Data20251217-134202-0), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de). Die eingebundene Ableitung enthält Lebensmittelbezeichnung, Energie, Kohlenhydrate, Protein, Fett und Datenherkunft pro 100 g essbarem Anteil; fehlende Werte, Spuren und Angaben unter der Nachweisgrenze bleiben unbekannt. Reproduzierbare Extraktion: `python tools/extract_bls.py <BLS_4_0_2025_DE.zip>` mit dem [offiziellen Download](https://www.blsdb.de/download). Open Food Facts: [Datenbank unter ODbL 1.0, Inhalte unter Database Contents License](https://openfoodfacts.github.io/openfoodfacts-server/api/); gemeinschaftlich gepflegte Produktwerte sind auf Produkt, Einheit und Vollständigkeit zu prüfen. BLS-Daten und OFF-Cache bleiben getrennt. Es werden keine Produktdaten oder Bilder zu Open Food Facts hochgeladen.
+
+Ernährungseinträge bleiben lokal; eine Übertragung der Tagessummen zu Intervals.icu erfolgt nur nach explizitem Auftrag und Freigabe. Vorlagen und Quellenangaben gehören zu Datenschutzexport, verschlüsseltem Backup und der Löschkategorie Ernährung. Das erweiterte Schema gilt für eine frische Installation mit leerem Datenverzeichnis; bestehende Installationen werden nicht konvertiert.

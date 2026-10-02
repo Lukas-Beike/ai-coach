@@ -23,9 +23,7 @@ class AuthPostRoutes:
     def handle(self, handler: Any, path: str) -> bool:
         if path == "/api/login":
             auth = self._session_auth_service()
-            payload = handler.read_json()
-            password = str(payload.get("password") or "") if isinstance(payload, dict) else ""
-            result = auth.login_user(handler, password)
+            result = auth.login_user(handler)
             token = result.pop("session_token")
             csrf = result["csrf"]
             handler.send_json(

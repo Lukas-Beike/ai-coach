@@ -157,26 +157,60 @@ class LocalPlanCreationServiceTests(unittest.TestCase):
         self.assertEqual(created[0]["created_at"], NOW)
         self.assertEqual(created[0]["updated_at"], NOW)
 
-    def test_validate_calendar_rejects_duplicate_date_with_exact_contract(self) -> None:
-        same_date = self.workout()
+    def test_validate_calendar_allows_multiple_workouts_on_same_date(self) -> None:
+        w1 = self.workout(name="Morning Ride")
+        w2 = self.workout(name="Evening Strength")
+
+        self.service.validate_calendar([w1, w2])
+        self.assertEqual(self.calendar_conflicts.conflicts.call_count, 2)
+
+    def test_validate_calendar_rejects_overlapping_time_windows(self) -> None:
+        w1 = {
+            **self.workout(),
+            "start_date_local": "2026-09-22T08:00:00",
+            "duration_minutes": 60,
+        }
+        w2 = {
+            **self.workout(),
+            "start_date_local": "2026-09-22T08:30:00",
+            "duration_minutes": 30,
+        }
 
         with self.assertRaises(AppError) as raised:
-            self.service.validate_calendar([same_date, same_date])
+            self.service.validate_calendar([w1, w2])
 
         self.assertEqual(raised.exception.status, 409)
         self.assertEqual(raised.exception.reason, "plan_date_conflict")
         self.assertEqual(
             raised.exception.message,
-            "Der Plan enthält mehrere Einheiten für den 2026-09-22; pro Tag ist eine Einheit möglich.",
+            "Der Plan enthält zeitlich überschneidende Einheiten für den 2026-09-22.",
         )
-        self.calendar_conflicts.conflicts.assert_called_once_with(
-            {"date": "2026-09-22"}
+
+    def test_save_creates_multiple_workouts_on_same_date(self) -> None:
+        w1 = self.workout(name="Morning Ride", duration=45, description="- 45m Z2")
+        w2 = self.workout(
+            name="Evening Strength",
+            sport="WeightTraining",
+            duration=30,
+            description="- 30m Core",
         )
+
+        created = self.service.save([w1, w2], plan_name="Two-a-day plan")
+
+        self.assertEqual(len(created), 2)
+        self.assertEqual(created[0]["date"], "2026-09-22")
+        self.assertEqual(created[1]["date"], "2026-09-22")
+        rows = self.db.execute(
+            "SELECT local_id, json_extract(payload, '$.name') AS name FROM planned_units WHERE json_extract(payload, '$.date') = '2026-09-22'"
+        ).fetchall()
+        self.assertEqual(len(rows), 2)
 
     def test_validate_calendar_rejects_existing_conflict_with_exact_contract(
         self,
     ) -> None:
-        self.calendar_conflicts.conflicts.return_value = [{"source": "local_library"}]
+        self.calendar_conflicts.conflicts.return_value = [
+            {"source": "local_competition"}
+        ]
 
         with self.assertRaises(AppError) as raised:
             self.service.validate_calendar([self.workout()])

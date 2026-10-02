@@ -18,6 +18,10 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.sync.state import SyncStateRepository
 
+COACH_EXTERNAL_FOOD_LOOKUP_TOOLS = frozenset(
+    {"lookup_food", "calculate_food_nutrition"}
+)
+
 
 class CoachStructuredToolExecutionService:
     """Own tool-specific execution while reusing existing durable state owners."""
@@ -60,6 +64,7 @@ class CoachStructuredToolExecutionService:
             "start_provider_refresh",
             "apply_adaptive_replan",
             "delete_duplicate_intervals_activity",
+            *COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
         }
         lock = self._database_lock if local_transaction else nullcontext()
         transaction = (
@@ -75,6 +80,16 @@ class CoachStructuredToolExecutionService:
                 return {"ok": True, "status": "cancelled"}
             if name == "apply_training_patch":
                 return self._training_patch.apply(arguments, action)
+            if name == "save_nutrition_template":
+                proposal = self._proposal_creation.create_local_write(
+                    name,
+                    arguments,
+                    action,
+                    conversation_id=conversation_id,
+                    client_turn_id=client_turn_id,
+                    session_csrf_hash=session_csrf_hash,
+                )
+                return {**proposal, "ok": True, "status": "approval_required"}
             if name == "inspect_activity_duplicates":
                 duplicate = latest_wahoo_garmin_duplicate(
                     self._sync_state.latest_snapshot() or {}

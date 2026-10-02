@@ -205,6 +205,10 @@ class CoachReviewTests(unittest.TestCase):
             "stage",
         )
         workouts[-1]["date"] = workouts[0]["date"]
+        workouts[-1]["start_date_local"] = workouts[0]["date"] + "T08:00:00"
+        workouts[-1]["duration_minutes"] = 60
+        workouts[0]["start_date_local"] = workouts[0]["date"] + "T08:30:00"
+        workouts[0]["duration_minutes"] = 30
         with server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE coach_plan_artifacts SET payload=? WHERE id=?",
@@ -219,7 +223,7 @@ class CoachReviewTests(unittest.TestCase):
 
     def test_plan_draft_rejects_an_occupied_date_before_storing_artifact(self):
         workout = self.workout()
-        server.PLANNING_DATA.planned_unit().create(workout)
+        server.ATHLETE_DATA.context().save({}, [{"name": "Race", "event_date": workout["date"], "sport": "Ride"}])
         intent = self.intent("stage_training_plan", ["local_plan"], ("commit_training_plan",))
         with self.assertRaises(server.AppError) as error:
             server.COACH_TOOL_DISPATCH.service().execute(

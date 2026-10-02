@@ -5,7 +5,7 @@ import json
 import math
 import uuid
 from datetime import date
-from typing import Any, TypedDict
+from typing import Any
 
 from backend.errors import (
     CORRUPT_PLANNING_ERROR,
@@ -20,21 +20,9 @@ from backend.providers.workout_text import canonical_workout_zones
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 
 
-class NormalizedRemotePlannedUnit(TypedDict, total=False):
-    """Provider workout after normalization for local conflict persistence."""
-
-    id: str
-    date: str
-    source: str
-    category: str
-    remote_event_id: str
-    remote_event_external_id: str
-    external_id: str
-
-
 def adopt_normalized_remote_planned_unit(
-    remote: NormalizedRemotePlannedUnit,
-) -> tuple[NormalizedRemotePlannedUnit, str] | None:
+    remote: dict[str, Any],
+) -> tuple[dict[str, Any], str] | None:
     """Validate a persisted normalized snapshot without treating its local ID as remote."""
     if remote.get("source") != "intervals" or remote.get("category") != "WORKOUT":
         return None
@@ -158,14 +146,31 @@ def planned_workout_update_candidate(
         if action == "restore":
             candidate["local_deleted"] = False
     elif action == "update":
-        for key in ("date", "name", "description", "duration_minutes", "target"):
-            if key in values:
-                candidate[key] = values.get(key)
-        if "type" in values or "sport" in values:
-            candidate["sport"] = values.get("sport") or values.get("type")
+        _apply_planned_workout_update(candidate, values)
     else:
         raise AppError(400, "Unbekannte Aktion für lokale Planung.")
     return candidate
+
+
+def _apply_planned_workout_update(
+    candidate: dict[str, Any], values: dict[str, Any]
+) -> None:
+    for key in (
+        "date",
+        "start_date_local",
+        "name",
+        "description",
+        "duration_minutes",
+        "target",
+    ):
+        if key in values:
+            candidate[key] = values.get(key)
+    if "start_date_local" in values:
+        candidate["start_date_local"] = planning_workouts.validate_workout_start_date(
+            values["start_date_local"], str(candidate.get("date") or "")
+        )
+    if "type" in values or "sport" in values:
+        candidate["sport"] = values.get("sport") or values.get("type")
 
 
 def prepare_planned_workout_date(
@@ -177,14 +182,18 @@ def prepare_planned_workout_date(
     except (TypeError, ValueError) as exc:
         raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
     date_changed = candidate["date"][:10] != str(current.get("date") or "")[:10]
-    if date_changed:
+    if date_changed and candidate.get("start_date_local") in (
+        None,
+        current.get("start_date_local"),
+    ):
         old_start = str(current.get("start_date_local") or "")
-        time_suffix = (
-            old_start[10:]
-            if len(old_start) > 10 and old_start[10] == "T"
-            else _ISO_MIDNIGHT_SUFFIX
-        )
-        candidate["start_date_local"] = candidate["date"][:10] + time_suffix
+        if old_start:
+            time_suffix = (
+                old_start[10:]
+                if len(old_start) > 10 and old_start[10] == "T"
+                else _ISO_MIDNIGHT_SUFFIX
+            )
+            candidate["start_date_local"] = candidate["date"][:10] + time_suffix
     return date_changed
 
 
@@ -232,10 +241,10 @@ def _reconcile_updated_planned_workout_content(
         )
     seconds = planning_workouts.validate_workout_description(normalized)
     minutes = _as_number(normalized.get("duration_minutes"))
-    if seconds is not None or minutes is not None:
-        normalized["moving_time"] = round(
-            seconds if seconds is not None else minutes * 60
-        )
+    if seconds is not None:
+        normalized["moving_time"] = round(seconds)
+    elif minutes is not None:
+        normalized["moving_time"] = round(minutes * 60)
     if any(
         key in values
         for key in ("description", "duration_minutes", "target", "type", "sport")

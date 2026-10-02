@@ -6,14 +6,13 @@ import threading
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import NutritionRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.nutrition import (
-    NutritionDaySummary,
-    NutritionEntry,
     NutritionService,
     meal_type_from_hour,
     normalize_nutrition_entry,
@@ -99,6 +98,77 @@ class NutritionModelTests(unittest.TestCase):
 
 
 class NutritionRepositoryAndServiceTests(unittest.TestCase):
+    def test_missing_database_macros_do_not_fall_back_to_supplied_aliases(self):
+        calculation = {
+            "kcal": 100, "carbs_g": None, "protein_g": None, "fat_g": None,
+            "nutrition_basis": {"kind": "database", "ingredients": []},
+        }
+        payload = {
+            "description": "Incomplete product label", "name": "Product",
+            "food_ingredients": [{"food_id": "off:12345678", "amount": 100, "unit": "g"}],
+            "carbs": 99, "protein": 99, "fat": 99,
+        }
+        with patch.object(self.service.food_database, "calculate", return_value=calculation):
+            entry = self.service.log_meal(payload)
+            template = self.service.save_template(payload)
+        for result in (entry, template, self.service.get_meal(entry["id"])):
+            self.assertEqual(result["kcal"], 100)
+            for nutrient in ("carbs_g", "protein_g", "fat_g"):
+                self.assertIsNone(result[nutrient])
+
+    def test_database_values_override_model_values_and_provenance_survives_corrections(self):
+        payload = {"description": "50 g oats", "kcal": 999,
+                   "food_ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}], "source": "coach"}
+        entry = self.service.log_meal(payload)
+        self.assertEqual(entry["kcal"], 174)
+        self.assertEqual(entry["nutrition_basis"]["ingredients"][0]["amount"], 50)
+        updated = self.service.update_meal(entry["id"], {"description": "Renamed oats"})
+        self.assertEqual(updated["description"], "Renamed oats")
+        self.assertEqual(updated["nutrition_basis"], entry["nutrition_basis"])
+        self.assertEqual(self.service.get_today_summary()["entries"][0]["nutrition_basis"], entry["nutrition_basis"])
+        changed = self.service.correct_meal(entry["id"], {"meal_time": "09:00"})
+        self.assertEqual(changed["nutrition_basis"], entry["nutrition_basis"])
+        changed = self.service.correct_meal(entry["id"], {"kcal": 200})
+        self.assertEqual(changed["nutrition_basis"]["kind"], "manual_correction")
+        changed = self.service.correct_meal(entry["id"], {"food_ingredients": [{"food_id": "bls:C133000", "amount": 100, "unit": "g"}]})
+        self.assertEqual(changed["kcal"], 348)
+        template = self.service.save_template({**payload, "name": "Oats"})
+        logged = self.service.log_template(template["id"], 0.5)
+        self.assertEqual(logged["kcal"], 87)
+        self.assertEqual(logged["nutrition_basis"]["ingredients"][0]["amount"], 25)
+        renamed = self.service.save_template({
+            "id": template["id"], "name": "Oats breakfast", "kcal": template["kcal"],
+        })
+        self.assertEqual(renamed["nutrition_basis"], template["nutrition_basis"])
+        packaged = self.service.save_template({
+            "id": template["id"], "kcal": template["kcal"], "packaging_label": True,
+        })
+        self.assertEqual(packaged["nutrition_basis"]["kind"], "packaging_label")
+        corrected = self.service.save_template({"id": template["id"], "kcal": 700})
+        self.assertEqual(corrected["nutrition_basis"]["kind"], "estimate")
+        self.assertEqual(self.service.get_meal(logged["id"])["nutrition_basis"], logged["nutrition_basis"])
+        calculation = self.service.food_database.calculate(payload["food_ingredients"])
+        with self.assertRaises(AppError) as raised:
+            self.service.save_template({**payload, "name": "Stale preview"}, expected_calculation={**calculation, "kcal": 999})
+        self.assertEqual(raised.exception.reason, "food_calculation_changed")
+        self.assertEqual(len(self.service.list_templates()), 1)
+
+    def test_failed_database_calculation_does_not_save_or_accept_forged_provenance(self):
+        with self.assertRaises(AppError):
+            self.service.log_meal({"description": "Unknown", "kcal": 100, "food_ingredients": [{"food_id": "bls:missing", "amount": 100, "unit": "g"}]})
+        self.assertEqual(self.service.get_today_summary()["entry_count"], 0)
+        entry = self.service.log_meal({"description": "Estimate", "kcal": 100, "source": "coach", "nutrition_basis": {"kind": "database"}})
+        self.assertEqual(entry["nutrition_basis"]["kind"], "estimate")
+        label_entry = self.service.log_meal({
+            "description": "Packaged snack", "kcal": 180, "source": "voice",
+            "packaging_label": True,
+        })
+        self.assertEqual(label_entry["nutrition_basis"]["kind"], "packaging_label")
+        corrected = self.service.correct_meal(
+            entry["id"], {"kcal": 110, "packaging_label": True}
+        )
+        self.assertEqual(corrected["nutrition_basis"]["kind"], "packaging_label")
+
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "test_nutrition.db"
@@ -120,6 +190,56 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.manager.close()
         self.temp_dir.cleanup()
+
+    def test_templates_are_not_consumption_and_logs_are_immutable_snapshots(self) -> None:
+        template = self.service.save_template({"name": "Breakfast", "description": "80 g oats", "kcal": 400, "carbs_g": 60, "protein_g": 12, "fat_g": 8, "source": "coach"})
+        self.assertEqual(self.service.get_today_summary()["entry_count"], 0)
+        self.assertEqual(self.service.list_unsynced_dates(), [])
+        entry = self.service.log_template(template["id"], 0.5, meal_date="2026-09-23", meal_time="08:15")
+        self.assertEqual(entry["kcal"], 200)
+        self.assertEqual(entry["carbs_g"], 30)
+        self.assertEqual(entry["logged_at"], "2026-09-23T08:15")
+        updated = self.service.save_template({"id": template["id"], "kcal": 600})
+        self.assertEqual(updated["name"], "Breakfast")
+        self.assertEqual(updated["kcal"], 600)
+        self.assertEqual(self.service.get_meal(entry["id"])["kcal"], 200)
+        self.service.delete_template(template["id"])
+        self.assertEqual(self.service.list_templates(), [])
+        self.assertEqual(self.service.get_meal(entry["id"])["kcal"], 200)
+
+    def test_logging_saved_meal_on_past_date_defaults_timestamp_to_that_date(self) -> None:
+        template = self.service.save_template({"name": "Snack", "description": "Fruit", "kcal": 120})
+        entry = self.service.log_template(template["id"], meal_date="2026-09-23")
+        self.assertEqual(entry["meal_date"], "2026-09-23")
+        self.assertEqual(entry["logged_at"], "2026-09-23T12:00")
+
+    def test_template_meal_type_defaults_from_consumption_time_and_keeps_explicit_type(self) -> None:
+        inferred = self.service.save_template({
+            "name": "Time inferred", "description": "Food", "kcal": 100, "source": "coach",
+        })
+        inferred_entry = self.service.log_template(inferred["id"], meal_time="19:10")
+        self.assertEqual(inferred_entry["meal_type"], "dinner")
+        self.assertEqual(inferred_entry["source"], "coach")
+
+        explicit = self.service.save_template({
+            "name": "Explicit breakfast", "description": "Food", "kcal": 100,
+            "meal_type": "breakfast", "source": "coach",
+        })
+        explicit_entry = self.service.log_template(explicit["id"], meal_time="19:10")
+        self.assertEqual(explicit_entry["meal_type"], "breakfast")
+        self.assertEqual(explicit_entry["source"], "coach")
+
+    def test_template_validation_preserves_state(self) -> None:
+        template = self.service.save_template({"name": "Snack", "description": "Synthetic snack", "kcal": 500})
+        for amount in [0, -1, 21, float("nan"), float("inf"), "invalid"]:
+            with self.subTest(amount=amount), self.assertRaises(AppError):
+                self.service.log_template(template["id"], amount)
+        with self.assertRaises(AppError):
+            self.service.save_template({"name": "snack", "description": "Other", "kcal": 100})
+        with self.assertRaises(AppError):
+            self.service.save_template({"id": "missing", "name": "Missing", "description": "Other", "kcal": 100})
+        self.assertEqual(len(self.service.list_templates()), 1)
+        self.assertEqual(self.service.get_today_summary()["entry_count"], 0)
 
     def test_log_and_get_meal(self) -> None:
         saved = self.service.log_meal({

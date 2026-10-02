@@ -13,6 +13,7 @@ from backend.planning.planned_units import (
     planned_unit_payload_hash,
     planned_workout_update_candidate,
     planned_workout_update_request,
+    prepare_planned_workout_date,
     remote_planned_unit_existing_state,
     remote_planned_unit_payload,
 )
@@ -170,6 +171,40 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
         self.assertTrue(restored["archived"] is False)
         self.assertFalse(restored["local_deleted"])
         self.assertEqual(restored["untouched"], current["untouched"])
+
+    def test_candidate_moves_existing_start_time_and_accepts_a_new_valid_time(self):
+        current = {
+            "date": "2026-09-22",
+            "start_date_local": "2026-09-22T07:30:00+02:00",
+        }
+        moved = planned_workout_update_candidate(
+            current, "update", {"date": "2026-09-23"}
+        )
+        self.assertTrue(prepare_planned_workout_date(moved, current))
+        retimed = planned_workout_update_candidate(
+            current,
+            "update",
+            {
+                "date": "2026-09-23",
+                "start_date_local": "2026-09-23T08:15:00+02:00",
+            },
+        )
+        self.assertTrue(prepare_planned_workout_date(retimed, current))
+
+        self.assertEqual(moved["start_date_local"], "2026-09-23T07:30:00+02:00")
+        self.assertEqual(
+            retimed["start_date_local"], "2026-09-23T08:15:00+02:00"
+        )
+        with self.assertRaises(AppError) as raised:
+            planned_workout_update_candidate(
+                current,
+                "update",
+                {
+                    "date": "2026-09-23",
+                    "start_date_local": "2026-09-22T08:15:00+02:00",
+                },
+            )
+        self.assertEqual(raised.exception.reason, "invalid_workout_start_date")
 
     def test_candidate_rejects_unknown_action(self):
         with self.assertRaises(AppError) as raised:

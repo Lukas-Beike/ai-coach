@@ -37,7 +37,7 @@ class CoachProposalValidationTests(unittest.TestCase):
     def test_valid_undo_local_and_duplicate_intervals(self):
         self.assertEqual(
             COACH_ACTION_TYPES,
-            {"undo_change", "delete_duplicate_intervals_activity", "remote_coach_write"},
+            {"undo_change", "delete_duplicate_intervals_activity", "remote_coach_write", "local_coach_write"},
         )
         for values in (self.undo, self.duplicate):
             before = copy.deepcopy(values)

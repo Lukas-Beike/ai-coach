@@ -45,13 +45,7 @@ class CoachStructuredToolPreparationService:
         name = metadata["name"]
         arguments = metadata["arguments"]
         action = metadata["action"]
-        if (
-            question
-            or cancelled
-            or (
-                paused and name not in {"clarify_coach_request", "cancel_coach_request"}
-            )
-        ) and name not in self._read_only_tools:
+        if self._request_is_paused(name, question, cancelled, paused):
             raise AppError(
                 409,
                 "Der Auftrag wartet auf deine Antwort oder wurde abgebrochen.",
@@ -64,9 +58,8 @@ class CoachStructuredToolPreparationService:
             action = self._dialogue_action.classify(
                 name, arguments, context, allow_mutations=allow_mutations
             )
-        if (action.get("request") or {}).get("remote_write") and any(
-            entry["tool"] != name and entry["tool"] not in self._read_only_tools
-            for entry in unresolved_coach_steps(command_receipts)
+        if self._has_unresolved_steps_before_remote_write(
+            name, action, command_receipts
         ):
             raise AppError(
                 409,
@@ -88,9 +81,41 @@ class CoachStructuredToolPreparationService:
             action["authorization_scope"] = [
                 "sync_job:" + str(arguments.get("job_id") or "")
             ]
+        if name in {"delete_nutrition_template", "log_nutrition_template"}:
+            action["authorization_scope"].append(
+                "nutrition_template:" + str(arguments.get("id") or "")
+            )
+            action["request"]["scope"].append(
+                "nutrition_template:" + str(arguments.get("id") or "")
+            )
         if name == "start_intervals_plan_sync":
             self._prepare_plan_sync(arguments, action, command_receipts)
         return action
+
+    def _request_is_paused(
+        self, name: str, question: str, cancelled: bool, paused: bool
+    ) -> bool:
+        pause_requested = (
+            question
+            or cancelled
+            or (
+                paused and name not in {"clarify_coach_request", "cancel_coach_request"}
+            )
+        )
+        return bool(pause_requested and name not in self._read_only_tools)
+
+    def _has_unresolved_steps_before_remote_write(
+        self,
+        name: str,
+        action: dict[str, Any],
+        command_receipts: list[dict[str, Any]],
+    ) -> bool:
+        if not (action.get("request") or {}).get("remote_write"):
+            return False
+        return any(
+            entry["tool"] != name and entry["tool"] not in self._read_only_tools
+            for entry in unresolved_coach_steps(command_receipts)
+        )
 
     def _prepare_plan_sync(
         self,

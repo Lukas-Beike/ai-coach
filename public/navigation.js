@@ -3,6 +3,9 @@ const NAV_ROUTES = Object.freeze({
   plan: "workoutsPanel",
   "plan/overview": "workoutsPanel",
   "plan/library": "workoutsPanel",
+  nutrition: "nutritionPanel",
+  "nutrition/diary": "nutritionPanel",
+  "nutrition/meals": "nutritionPanel",
   analysis: "dataPanel",
   "analysis/history": "dataPanel",
   "analysis/performance": "dataPanel",
@@ -17,6 +20,7 @@ const NAV_ROUTES = Object.freeze({
 const NAV_LINK_ROUTES = Object.freeze({
   coach: "coach",
   plan: "plan",
+  nutrition: "nutrition",
   analysis: "analysis",
   more: "more",
 });

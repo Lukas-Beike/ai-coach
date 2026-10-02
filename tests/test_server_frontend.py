@@ -129,7 +129,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("Array.isArray(result.model_options)", app)
         self.assertIn("renderModel(model)", app)
         self.assertIn('/api.js?v=221', index)
-        self.assertIn('/navigation.js?v=218', index)
+        self.assertIn('/navigation.js?v=219', index)
         self.assertIn('/appearance.js?v=218', index)
         self.assertNotIn('<script>', index)
         self.assertIn('/state.js?v=217', index)
@@ -137,10 +137,10 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('/forms.js?v=217', index)
         self.assertIn('/components.js?v=217', index)
         self.assertIn('/coach.js?v=4', index)
-        self.assertIn('/app.js?v=237', index)
-        self.assertIn('/styles.css?v=230', index)
-        self.assertIn('intervals-coach-v243', service_worker)
-        self.assertIn('"/navigation.js?v=218"', service_worker)
+        self.assertIn('/app.js?v=243', index)
+        self.assertIn('/styles.css?v=233', index)
+        self.assertIn('intervals-coach-v250', service_worker)
+        self.assertIn('"/navigation.js?v=219"', service_worker)
         self.assertIn('"/appearance.js?v=218"', service_worker)
         self.assertIn('"/state.js?v=217"', service_worker)
         self.assertIn('"/views.js?v=218"', service_worker)
@@ -187,7 +187,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn('function restoreDialogFocus(', app)
         self.assertLess(index.index('/forms.js?v=217'), index.index('/components.js?v=217'))
         self.assertLess(index.index('/components.js?v=217'), index.index('/coach.js?v=4'))
-        self.assertLess(index.index('/coach.js?v=4'), index.index('/app.js?v=237'))
+        self.assertLess(index.index('/coach.js?v=4'), index.index('/app.js?v=243'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn(
@@ -215,7 +215,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('class="desktop-nav"', index)
         self.assertIn('class="icon-sprite"', index)
         self.assertEqual(index.count('class="bottom-nav"'), 1)
-        self.assertEqual(index[index.index('<nav class="bottom-nav"'):].split('</nav>', 1)[0].count('class="nav-item'), 4)
+        self.assertEqual(index[index.index('<nav class="bottom-nav"'):].split('</nav>', 1)[0].count('class="nav-item'), 5)
         self.assertNotIn('function renderToday(data)', app)
 
     def test_task8_coach_first_views_have_shared_states_and_analysis_segments(self):
@@ -324,7 +324,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split('app.js?v=', 1)[1].split('"', 1)[0]
         self.assertIn(f'app.js?v={asset_version}', markup)
-        self.assertIn('intervals-coach-v243', service_worker)
+        self.assertIn('intervals-coach-v250', service_worker)
         self.assertIn(f'/app.js?v={asset_version}', service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -393,6 +393,12 @@ class ServerFrontendTests(ServerTestCase):
             static_assets.render("/C:/Windows/win.ini", "/C:/Windows/win.ini", None)
 
         self.assertEqual(error.exception.status, 403)
+
+    def test_nutrition_asset_is_served_as_immutable_javascript(self):
+        response = StaticAssetService(server.PUBLIC_DIR).render("/nutrition.js", "/nutrition.js?v=2", None)
+        self.assertEqual(response.status, 200)
+        self.assertIn("javascript", dict(response.headers)["Content-Type"])
+        self.assertEqual(dict(response.headers)["Cache-Control"], "public, max-age=31536000, immutable")
 
     def test_versioned_static_assets_are_immutable_and_support_etag_revalidation(self):
         response = StaticAssetService(server.PUBLIC_DIR).render("/appearance.js", "/appearance.js?v=218", None)
@@ -463,7 +469,7 @@ class ServerFrontendTests(ServerTestCase):
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
         self.assertIn('"/api.js?v=221"', source)
-        self.assertIn('"/navigation.js?v=218"', source)
+        self.assertIn('"/navigation.js?v=219"', source)
         self.assertIn('"/appearance.js?v=218"', source)
         self.assertIn('"/state.js?v=217"', source)
         self.assertIn('"/views.js?v=218"', source)
@@ -471,9 +477,9 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"/components.js?v=217"', source)
         self.assertIn('"/forms.js"', source)
         self.assertIn('"/coach.js?v=4"', source)
-        self.assertIn('"/app.js?v=237"', source)
+        self.assertIn('"/app.js?v=243"', source)
         self.assertIn('"/icon.svg?v=217"', source)
-        self.assertIn('"/styles.css?v=230"', source)
+        self.assertIn('"/styles.css?v=233"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)

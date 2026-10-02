@@ -117,25 +117,84 @@ class StructuredTrainingChangeValidatorTests(unittest.TestCase):
         )
         self.assertEqual(self.calendar.calls, [])
 
-    def test_duplicate_final_dates_are_rejected_before_calendar_checks(self) -> None:
+    def test_duplicate_final_dates_are_allowed_for_untimed_or_non_overlapping_workouts(
+        self,
+    ) -> None:
+        revision = self.validator.validate(
+            [
+                {"action": "create", "date": "2031-06-03"},
+                {"action": "create", "date": "2031-06-03"},
+            ],
+            {},
+            self.db,
+            False,
+        )
+        self.assertEqual(revision, 7)
+
+    def test_overlapping_final_dates_are_rejected(self) -> None:
         self._assert_app_error(
             lambda: self.validator.validate(
                 [
-                    {"action": "create", "date": "2031-06-03"},
-                    {"action": "create", "date": "2031-06-03"},
+                    {
+                        "action": "create",
+                        "date": "2031-06-03",
+                        "start_date_local": "2031-06-03T08:00:00",
+                        "duration_minutes": 60,
+                    },
+                    {
+                        "action": "create",
+                        "date": "2031-06-03",
+                        "start_date_local": "2031-06-03T08:30:00",
+                        "duration_minutes": 30,
+                    },
                 ],
                 {},
                 self.db,
                 False,
             ),
             status=409,
-            message=(
-                "Der Plan enthält mehrere Einheiten für den 2031-06-03; "
-                "pro Tag ist eine Einheit möglich."
-            ),
+            message="Der Plan enthält zeitlich überschneidende Einheiten für den 2031-06-03.",
             reason="plan_date_conflict",
         )
-        self.assertEqual(self.calendar.calls, [])
+
+    def test_date_only_moves_use_persisted_start_times_and_durations(self) -> None:
+        self._add_unit(
+            "morning",
+            date="2031-06-01",
+            raw_payload=json.dumps(
+                {
+                    "date": "2031-06-01",
+                    "start_date_local": "2031-06-01T08:00:00",
+                    "duration_minutes": 60,
+                }
+            ),
+        )
+        self._add_unit(
+            "second",
+            date="2031-06-02",
+            raw_payload=json.dumps(
+                {
+                    "date": "2031-06-02",
+                    "start_date_local": "2031-06-02T08:30:00",
+                    "duration_minutes": 30,
+                }
+            ),
+        )
+
+        self._assert_app_error(
+            lambda: self.validator.validate(
+                [
+                    {"action": "update", "local_id": "morning", "date": "2031-06-03"},
+                    {"action": "update", "local_id": "second", "date": "2031-06-03"},
+                ],
+                {},
+                self.db,
+                False,
+            ),
+            status=409,
+            message="Der Plan enthält zeitlich überschneidende Einheiten für den 2031-06-03.",
+            reason="plan_date_conflict",
+        )
 
     def test_moved_and_restored_dates_check_calendar_and_exclude_batch_ids(
         self,
