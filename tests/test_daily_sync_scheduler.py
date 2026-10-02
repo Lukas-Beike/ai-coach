@@ -5,6 +5,8 @@ from __future__ import annotations
 import threading
 import unittest
 from contextlib import contextmanager
+from datetime import date
+from unittest.mock import Mock
 
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
@@ -14,7 +16,6 @@ from backend.sync.scheduler import (
     DailySyncScheduler,
     DailySyncSchedulerConfig,
 )
-from unittest.mock import Mock
 
 
 class _Profile:
@@ -57,6 +58,12 @@ class _Garmin:
     def automatic_sync_days(self, minimum_days):
         return getattr(self, "refresh_days", minimum_days)
 
+    def automatic_sync_window(self, minimum_days):
+        return (
+            getattr(self, "refresh_days", minimum_days),
+            getattr(self, "refresh_end_date", None),
+        )
+
 
 class _Database:
     @contextmanager
@@ -88,6 +95,16 @@ class DailySyncSchedulerTests(unittest.TestCase):
         scheduler.schedule()
         job = next(job for job in self.queue.jobs if job[0] == "garmin")
         self.assertEqual(job[2]["days"], 8)
+
+    def test_due_refresh_queues_capped_contiguous_garmin_window(self):
+        garmin = _Garmin()
+        garmin.refresh_days = 90
+        garmin.refresh_end_date = date(2025, 5, 29)
+        scheduler = self.make_scheduler(garmin=garmin)
+        scheduler.schedule()
+        job = next(job for job in self.queue.jobs if job[0] == "garmin")
+        self.assertEqual(job[2]["days"], 90)
+        self.assertEqual(job[2]["end_date"], "2025-05-29")
 
     def make_scheduler(
         self,

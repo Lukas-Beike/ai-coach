@@ -139,26 +139,35 @@ class GarminPayloadService:
         return value if isinstance(value, dict) else {}
 
     def automatic_sync_days(self, minimum_days: int) -> int:
-        """Seed recent analysis history, then catch up each collection separately."""
+        return self.automatic_sync_window(minimum_days)[0]
+
+    def automatic_sync_window(self, minimum_days: int) -> tuple[int, date | None]:
+        """Return a bounded, contiguous refresh window for the oldest collection."""
         snapshot = self.snapshot()
         freshness = snapshot.get("source_freshness") or {}
         sources = {"activities", "sleep", "hrv"} | (
             set(freshness) & {"daily_stats", "resting_hr"}
         )
-        days = minimum_days
         today = self._local_today()
+        oldest_end: date | None = None
         for source in sources:
             coverage = freshness.get(source, {})
             try:
                 start = date.fromisoformat(coverage["synced_start"])
                 end = date.fromisoformat(coverage["synced_end"])
             except (KeyError, TypeError, ValueError):
-                days = max(days, GARMIN_INITIAL_SYNC_DAYS)
-                continue
+                return max(minimum_days, GARMIN_INITIAL_SYNC_DAYS), None
             if (end - start).days + 1 < GARMIN_INITIAL_SYNC_DAYS:
-                days = max(days, GARMIN_INITIAL_SYNC_DAYS)
-            days = max(days, (today - end).days + 1)
-        return min(days, GARMIN_CATCHUP_MAX_DAYS)
+                return max(minimum_days, GARMIN_INITIAL_SYNC_DAYS), None
+            oldest_end = end if oldest_end is None else min(oldest_end, end)
+        if oldest_end is None:
+            return minimum_days, None
+        span = (today - oldest_end).days + 1
+        if span <= GARMIN_CATCHUP_MAX_DAYS:
+            return max(minimum_days, span), None
+        return GARMIN_CATCHUP_MAX_DAYS, oldest_end + timedelta(
+            days=GARMIN_CATCHUP_MAX_DAYS - 1
+        )
 
     def prepare_fixture(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._prepare(payload, self.snapshot(), fixture=True)

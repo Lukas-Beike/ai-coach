@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import unittest
 import hashlib
 import json
+import unittest
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from inspect import signature
@@ -337,6 +337,14 @@ class SyncJobExecutorTests(unittest.TestCase):
 
         self.assertEqual(self.garmin.calls[-1][1]["end_date"], date(2026, 9, 18))
         self.assertEqual(self.morning.calls, [])
+
+    def test_garmin_refresh_forwards_explicit_catchup_end_date(self) -> None:
+        self.executor.execute(
+            self.job("garmin", payload={"days": 90, "end_date": "2025-05-29"})
+        )
+        self.assertEqual(self.garmin.calls[-1][1]["days"], 90)
+        self.assertEqual(self.garmin.calls[-1][1]["end_date"], date(2025, 5, 29))
+        self.assertNotIn("historical_next_end", self.garmin.result)
 
     def test_garmin_historical_fixture_omits_end_date_and_never_refreshes_morning(
         self,

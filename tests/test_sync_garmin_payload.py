@@ -2,16 +2,16 @@ import json
 import sqlite3
 import tempfile
 import unittest
-from types import SimpleNamespace
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
+from backend.providers.garmin import _gear_inventory
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.state import SyncStateRepository
-from backend.providers.garmin import _gear_inventory
 
 
 class GarminPayloadServiceTests(unittest.TestCase):
@@ -74,10 +74,31 @@ class GarminPayloadServiceTests(unittest.TestCase):
         seed = self.service.prepare_remote(self.collection_payload("2025-01-01", "2025-03-01"))
         self.store_garmin_snapshot(seed)
         self.assertEqual(self.service.automatic_sync_days(2), 90)
-        refreshed = self.service.prepare_remote(self.collection_payload("2026-06-23", "2026-09-20"))
-        self.store_garmin_snapshot(refreshed)
-        self.assertEqual(refreshed["source_freshness"]["sleep"]["synced_start"], "2026-06-23")
-        self.assertEqual(self.service.automatic_sync_days(2), 2)
+        self.assertEqual(
+            self.service.automatic_sync_window(2), (90, date(2025, 5, 29))
+        )
+
+    def test_long_outage_catches_up_in_contiguous_bounded_windows(self):
+        seed = self.service.prepare_remote(
+            self.collection_payload("2025-01-01", "2025-03-01")
+        )
+        self.store_garmin_snapshot(seed)
+        windows = []
+        while True:
+            days, end_date = self.service.automatic_sync_window(2)
+            window_end = end_date or date(2026, 9, 20)
+            window_start = window_end - timedelta(days=days - 1)
+            if windows:
+                self.assertLessEqual(window_start, windows[-1][1] + timedelta(days=1))
+            windows.append((window_start, window_end))
+            result = self.service.prepare_remote(
+                self.collection_payload(window_start.isoformat(), window_end.isoformat())
+            )
+            self.store_garmin_snapshot(result)
+            if end_date is None:
+                break
+        self.assertEqual(windows[-1][1], date(2026, 9, 20))
+        self.assertEqual(self.service.automatic_sync_window(2), (2, None))
 
     def test_gear_collection_uses_reported_stats_and_does_not_publish_partial_inventory(self):
         client = SimpleNamespace(

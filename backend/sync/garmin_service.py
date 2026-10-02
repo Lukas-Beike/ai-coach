@@ -420,6 +420,9 @@ class GarminSyncService:
     def automatic_sync_days(self, minimum_days: int) -> int:
         return self._payload_service.automatic_sync_days(minimum_days)
 
+    def automatic_sync_window(self, minimum_days: int) -> tuple[int, date | None]:
+        return self._payload_service.automatic_sync_window(minimum_days)
+
     def sync(
         self,
         days: int = 30,
