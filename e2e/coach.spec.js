@@ -241,7 +241,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
 
     await page.getByRole("link", { name: "Coach", exact: true }).click();
     const safetyHint = page.getByText("Trainingsempfehlungen dienen zur Orientierung", { exact: false });
-    await expect(safetyHint).toBeVisible();
+    await expect(safetyHint).toHaveCount(0);
     const chatIsEmpty = await page.locator("#messages").evaluate((node) => node.classList.contains("has-empty-state"));
     if (testInfo.project.name === "desktop" && chatIsEmpty) {
       const emptyLayout = await page.evaluate(() => {
@@ -253,19 +253,9 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
       expect(emptyLayout.composerTop).toBeLessThanOrEqual(emptyLayout.viewportHeight * 0.78);
     }
     await page.screenshot({ path: testInfo.outputPath("coach-core.png"), fullPage: true });
-    await safetyHint.scrollIntoViewIfNeeded();
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
-    await safetyHint.scrollIntoViewIfNeeded();
-    const safetyLayout = await page.evaluate(() => {
-      const hint = document.querySelector("#chatPanel .fine-print").getBoundingClientRect();
-      const composer = document.querySelector("#chatForm").getBoundingClientRect();
-      const navigationNode = document.querySelector(".bottom-nav");
-      const navigation = navigationNode && getComputedStyle(navigationNode).display !== "none"
-        ? navigationNode.getBoundingClientRect()
-        : null;
-      return { hintBottom: hint.bottom, composerTop: composer.top, navigationTop: navigation?.top ?? Number.POSITIVE_INFINITY };
-    });
-    expect(safetyLayout.hintBottom).toBeLessThanOrEqual(Math.min(safetyLayout.composerTop, safetyLayout.navigationTop));
+    await page.locator("#messageInput").scrollIntoViewIfNeeded();
+    await expect(page.locator("#messageInput")).toBeInViewport();
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.getByRole("link", { name: "Kalender", exact: true }).focus();
