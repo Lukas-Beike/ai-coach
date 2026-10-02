@@ -77,7 +77,11 @@ class MockNutritionSync:
 
     def sync_approved(self, manifest):
         self.calls.append(("approved", manifest))
-        return {"synced_dates": [item["date"] for item in manifest], "pending_dates": [], "failed_dates": {}}
+        return {
+            "synced_dates": [item["date"] for item in manifest],
+            "pending_dates": [],
+            "failed_dates": {},
+        }
 
 
 class RecordingObserver:
@@ -197,7 +201,12 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertLessEqual(len(parameters), 7)
         self.assertEqual(
             set(parameters),
-            {"provider_dispatcher", "historical_sync", "outcome_service", "all_sync_days"},
+            {
+                "provider_dispatcher",
+                "historical_sync",
+                "outcome_service",
+                "all_sync_days",
+            },
         )
 
     @staticmethod
@@ -220,7 +229,8 @@ class SyncJobExecutorTests(unittest.TestCase):
 
         competition = self.executor.execute(
             self.job(
-                "intervals", "competition_push",
+                "intervals",
+                "competition_push",
                 {"reason": "manual", "approval_manifest": []},
             )
         )
@@ -250,29 +260,51 @@ class SyncJobExecutorTests(unittest.TestCase):
         pending = self.executor.execute(
             self.job("intervals", "nutrition_sync", {"pending_limit": 7})
         )
-        self.assertEqual(daily, {"status": "completed", "date": "2026-09-24", "pending": False})
-        self.assertEqual(pending, {
-            "status": "completed", "synced_dates": ["2026-09-24"],
-            "pending_dates": [], "failed_dates": [],
-        })
+        self.assertEqual(
+            daily, {"status": "completed", "date": "2026-09-24", "pending": False}
+        )
+        self.assertEqual(
+            pending,
+            {
+                "status": "completed",
+                "synced_dates": ["2026-09-24"],
+                "pending_dates": [],
+                "failed_dates": [],
+            },
+        )
         self.assertEqual(self.nutrition.calls, [("day", "2026-09-24"), ("pending", 7)])
 
-        approved = [{
-            "date": "2026-09-24", "revision": 2, "total_kcal": 1200,
-            "total_carbs_g": 120.0, "total_protein_g": 60.0,
-            "total_fat_g": 40.0, "entry_count": 2,
-        }]
-        approved[0]["sha256"] = hashlib.sha256(json.dumps(
-            {key: value for key, value in approved[0].items() if key != "revision"},
-            sort_keys=True, ensure_ascii=False, separators=(",", ":"),
-        ).encode("utf-8")).hexdigest()
+        approved = [
+            {
+                "date": "2026-09-24",
+                "revision": 2,
+                "total_kcal": 1200,
+                "total_carbs_g": 120.0,
+                "total_protein_g": 60.0,
+                "total_fat_g": 40.0,
+                "entry_count": 2,
+            }
+        ]
+        approved[0]["sha256"] = hashlib.sha256(
+            json.dumps(
+                {key: value for key, value in approved[0].items() if key != "revision"},
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
         result = self.executor.execute(
             self.job("intervals", "nutrition_sync", {"approval_manifest": approved})
         )
-        self.assertEqual(result, {
-            "status": "completed", "synced_dates": ["2026-09-24"],
-            "pending_dates": [], "failed_dates": [],
-        })
+        self.assertEqual(
+            result,
+            {
+                "status": "completed",
+                "synced_dates": ["2026-09-24"],
+                "pending_dates": [],
+                "failed_dates": [],
+            },
+        )
         self.assertEqual(self.nutrition.calls[-1], ("approved", approved))
 
     def test_intervals_sync_observes_competitions_inside_provider_gate(self) -> None:
@@ -330,7 +362,9 @@ class SyncJobExecutorTests(unittest.TestCase):
             [((), {"reason": "manual", "force": False, "operation_id": "job-123"})],
         )
 
-    def test_garmin_historical_default_starts_after_two_day_refresh_window(self) -> None:
+    def test_garmin_historical_default_starts_after_two_day_refresh_window(
+        self,
+    ) -> None:
         self.garmin.result = {"status": "ok"}
 
         self.executor.execute(self.job("garmin", "historical_backfill", {"days": 30}))
@@ -344,6 +378,7 @@ class SyncJobExecutorTests(unittest.TestCase):
         )
         self.assertEqual(self.garmin.calls[-1][1]["days"], 90)
         self.assertEqual(self.garmin.calls[-1][1]["end_date"], date(2025, 5, 29))
+        self.assertTrue(self.garmin.calls[-1][1]["include_recovery"])
         self.assertNotIn("historical_next_end", self.garmin.result)
 
     def test_garmin_historical_fixture_omits_end_date_and_never_refreshes_morning(
@@ -370,6 +405,7 @@ class SyncJobExecutorTests(unittest.TestCase):
                         "days": 30,
                         "operation_id": "job-123",
                         "reason": "Persistenter Providerjob",
+                        "include_recovery": False,
                     },
                 )
             ],
