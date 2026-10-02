@@ -32,6 +32,7 @@ CALENDAR_ACTIVITY_FIELDS = (
     "icu_rpe",
     "feel",
     "source",
+    "workout_profile",
 )
 
 

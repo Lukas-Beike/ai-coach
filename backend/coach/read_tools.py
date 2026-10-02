@@ -104,7 +104,12 @@ class CoachReadToolService:
                     limit=arguments.get("limit"),
                 ),
             }
-        if name in {"list_recent_activities", "get_activity_details"}:
+        if name in {
+            "list_recent_activities",
+            "get_activity_details",
+            "get_training_report",
+            "read_training_records",
+        }:
             return self._activity_read_tool_service().execute(name, arguments)
         if name == "list_workout_library":
             limit = self._bounded_integer(
@@ -152,6 +157,11 @@ class CoachReadToolService:
         if not self._nutrition_service:
             return {"ok": False, "error": "NutritionService ist nicht verfügbar."}
         service = self._nutrition_service()
+        if arguments.get("planned_unit_id"):
+            return {
+                "ok": True,
+                "fueling": service.fueling().read(arguments["planned_unit_id"]),
+            }
         templates = service.list_templates()
         if arguments.get("date"):
             return {

@@ -23,7 +23,6 @@ test("older measurements retain their date and age after a successful fetch", as
     garmin: {},
     } });
   });
-  await page.route("**/api/performance/refresh", (route) => route.fulfill({ json: { status: "ok" } }));
   await page.goto("/#analysis/performance");
   await expect(page.locator("#appShell")).toBeVisible();
   await expect.poll(() => page.evaluate(() => state.loadedAreas.has("performance") && !state.loadPromise)).toBe(true);
@@ -34,7 +33,8 @@ test("older measurements retain their date and age after a successful fetch", as
   await expect(older.locator("small").first()).toHaveAttribute("title", /Abgerufen/);
   await expect(page.locator("#performanceSummary > section").filter({ hasText: "Radfahren" })).toContainText("Messdatum unbekannt");
 
-  await page.locator("#headerActionButton").click();
+  await expect(page.locator("#headerActionButton")).toHaveCount(0);
+  await page.reload();
   await expect.poll(() => performanceRequests).toBeGreaterThan(1);
   await page.getByRole("link", { name: "Kalender", exact: true }).click();
   await page.getByRole("link", { name: "Analyse", exact: true }).click();

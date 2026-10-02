@@ -33,12 +33,19 @@ class NutritionGetRoutes:
             "/api/nutrition/day",
             "/api/nutrition/range",
             "/api/nutrition/templates",
+            "/api/nutrition/fueling",
         }:
             return False
 
         self._session_auth_service().require_auth(handler)
         query = parse_qs(urlparse(handler.path).query)
         svc = self._nutrition_service()
+        if path == "/api/nutrition/fueling":
+            unit_id = query.get("planned_unit_id", [None])[0]
+            handler.send_json(
+                200, svc.fueling().read(unit_id) if unit_id else svc.fueling().choices()
+            )
+            return True
 
         if path == "/api/nutrition/templates":
             handler.send_json(200, {"ok": True, "templates": svc.list_templates()})

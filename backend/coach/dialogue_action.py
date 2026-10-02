@@ -42,6 +42,7 @@ BROAD_SCOPES = frozenset(
         "calendar_refresh",
         "weather_refresh",
         "local_nutrition",
+        "local_equipment",
     }
 )
 

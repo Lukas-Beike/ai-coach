@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from backend.http_api.analysis import AnalysisRoutes
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
 from backend.http_api.auth_post import AuthPostRoutes
@@ -52,6 +53,7 @@ from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.transcribe_post import TranscribePostRoutes
+from backend.performance.report_service import TrainingReportService
 
 
 @dataclass(frozen=True)
@@ -174,6 +176,8 @@ class HttpAthleteServices:
     clock: Any
     local_today: Callable[[], Any]
     state_event_buffer: Any
+    equipment: Callable[[], Any] | None = None
+    activity_feedback: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -383,6 +387,39 @@ class HttpApiAssembly:
         self.history_get_routes = HistoryGetRoutes(
             session_auth_service, change_history_service
         )
+        self.training_reports = lambda: TrainingReportService(
+            read_snapshot=lambda: sync_state_repository().latest_snapshot(),
+            read_plan=lambda: public_plan_state_service().read(local_only=True),
+            read_checkins=lambda: checkin_service().list(365),
+            read_feedback=lambda: (
+                athlete.activity_feedback().list(500)
+                if athlete.activity_feedback
+                else []
+            ),
+            database_manager=database_manager(),
+            today=local_today,
+            timezone=lambda: str(profile_service().get().get("timezone") or "UTC"),
+            read_competitions=lambda: competition_service().list(100),
+            read_equipment=lambda: (
+                athlete.equipment().read() if athlete.equipment else {}
+            ),
+            read_record=lambda kind, record_id: (
+                {
+                    "record_type": kind,
+                    "record": athlete.equipment().read(record_id)["items"][0],
+                }
+                if kind == "equipment" and athlete.equipment
+                else {}
+            ),
+            read_recovery=lambda: (
+                public_performance_state_service()
+                .performance_state()["performance"]
+                .get("personal_recovery", {})
+            ),
+        )
+        self.analysis_routes = AnalysisRoutes(
+            session_auth_service, self.training_reports
+        )
         self.history_undo_post_routes = HistoryUndoPostRoutes(
             history_undo_service,
             proposal_creation_service,
@@ -465,6 +502,7 @@ class HttpApiAssembly:
                 self.diagnostics_get_routes,
                 self.privacy_get_routes,
                 self.nutrition_get_routes,
+                self.analysis_routes,
             ),
             (
                 self.settings_put_routes,
@@ -487,6 +525,7 @@ class HttpApiAssembly:
             self.privacy_delete_post_routes,
             self.diagnostics_delete_post_routes,
             self.nutrition_post_routes,
+            self.analysis_routes,
         )
         self.post_dispatcher = HttpPostDispatcher(
             self.auth_post_routes,

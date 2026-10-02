@@ -31,6 +31,8 @@ class AthleteProfileTests(unittest.TestCase):
                 "coaching_style": "Supportive, direct, and evidence-aware",
                 "timezone": os.environ.get("TZ", DEFAULT_TIMEZONE),
                 "weather_location": "",
+                "sleep_target_hours": "",
+                "fueling_tolerance": "",
             },
         )
 

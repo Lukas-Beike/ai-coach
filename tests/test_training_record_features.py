@@ -1,0 +1,287 @@
+import sqlite3
+import json
+import unittest
+from datetime import date
+
+from backend.athlete.checkins import CheckinService
+from backend.athlete.equipment import EquipmentService
+from backend.db.repositories import CheckinRepository
+from backend.errors import AppError
+from backend.nutrition.fueling import FuelingService
+from backend.performance.tag_impact import tag_impact
+from backend.performance.comparisons import recurring_training_comparisons
+
+
+class MemoryManager:
+    def __init__(self):
+        self.connection = sqlite3.connect(":memory:")
+        self.connection.row_factory = sqlite3.Row
+        self.connection.execute(
+            "CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+        )
+
+    def unit_of_work(self):
+        manager = self
+
+        class Unit:
+            def __enter__(self):
+                return manager.connection
+
+            def __exit__(self, kind, value, trace):
+                if kind:
+                    manager.connection.rollback()
+                else:
+                    manager.connection.commit()
+                return False
+
+        return Unit()
+
+
+class TrainingRecordFeatureTests(unittest.TestCase):
+    def test_garmin_usage_is_authoritative_and_missing_stats_are_not_zero(self):
+        service = EquipmentService(self.manager, lambda: {"recent_activities": [{"id": "one", "distance": 10000}]}, lambda: date(2026, 10, 2), lambda: "2026-10-02T12:00:00Z")
+        snapshot = {"gear": [{"gearUUID": "gear-one", "gearName": "Bike", "maximumMeters": 10000,
+            "stats": {"totalDistance": 2500, "totalActivities": 3}}, {"gearUUID": "gear-two", "gearName": "Shoes", "stats": {}}]}
+        self.manager.connection.execute("INSERT INTO kv VALUES ('garmin_snapshot', ?, 'now')", (json.dumps(snapshot),))
+        items = service.read()["garmin_items"]
+        self.assertEqual(items[0]["distance_km"], 2.5)
+        self.assertEqual(items[0]["usage_percent"], 25)
+        self.assertEqual(items[0]["sessions"], 3)
+        self.assertIsNone(items[1]["distance_km"])
+        snapshot["gear"][0]["stats"]["totalDistance"] = 3000
+        self.manager.connection.execute("UPDATE kv SET value=? WHERE key='garmin_snapshot'", (json.dumps(snapshot),))
+        self.assertEqual(service.read()["garmin_items"][0]["distance_km"], 3)
+
+    def test_recurring_comparison_keeps_historical_targets_and_device_provenance_separate(self):
+        base = {"sport": "Ride", "device": "Wahoo", "target_snapshot": {"steps": [{"duration": 300, "target": "90%"}], "basis": {"icu_ftp": 250}},
+                "interval_quality": {"status": "ok"}, "date": "2026-08-01"}
+        rows = [base, {**base, "date": "2026-08-08"},
+                {**base, "device": "Garmin"},
+                {**base, "target_snapshot": {**base["target_snapshot"], "basis": {"icu_ftp": 280}}},
+                {**base, "interval_quality": {"status": "partial"}}]
+        result = recurring_training_comparisons(rows)
+        self.assertEqual(len(result["groups"]), 1)
+        self.assertEqual(len(result["groups"][0]["observations"]), 2)
+
+    def setUp(self):
+        self.manager = MemoryManager()
+
+    def tearDown(self):
+        self.manager.connection.close()
+
+    def test_fueling_plan_is_local_bound_to_current_unit_and_not_consumption(self):
+        unit = {
+            "id": "ride-1",
+            "type": "Ride",
+            "date": "2026-09-20",
+            "duration_minutes": 120,
+        }
+        service = FuelingService(
+            self.manager,
+            lambda: [unit],
+            lambda: [{"id": "meal-1", "name": "Oats", "carbs_g": 60}],
+            lambda: {},
+            lambda: "2026-09-01T00:00:00Z",
+        )
+        preview = service.read("ride-1")
+        saved = service.save(
+            {
+                "planned_unit_id": "ride-1",
+                "unit_sha256": preview["unit_sha256"],
+                "carbs_g_per_hour": 45,
+                "fluid_ml_per_hour": 600,
+                "template_id": "meal-1",
+            }
+        )
+        self.assertTrue(saved["stored_locally"])
+        self.assertFalse(saved["consumption_logged"])
+        self.assertEqual(saved["fueling_plan"]["suggested_portions_during"], 1.5)
+        unit["duration_minutes"] = 150
+        self.assertTrue(service.read("ride-1")["saved_stale"])
+        with self.assertRaises(AppError):
+            service.save(
+                {
+                    "planned_unit_id": "ride-1",
+                    "unit_sha256": preview["unit_sha256"],
+                    "carbs_g_per_hour": 45,
+                    "fluid_ml_per_hour": 600,
+                }
+            )
+
+    def test_checkin_tag_omission_preserves_and_empty_object_clears(self):
+        connection = self.manager.connection
+        connection.execute(
+            "CREATE TABLE athlete_checkins (checkin_date TEXT PRIMARY KEY, soreness INTEGER, stress INTEGER, motivation INTEGER, session_rpe INTEGER, day_form TEXT, illness TEXT, pain TEXT, available_minutes INTEGER, availability_notes TEXT, notes TEXT, created_at TEXT, updated_at TEXT)"
+        )
+        repository = CheckinRepository(lambda: "2026-09-01T00:00:00Z")
+        service = CheckinService(self.manager, repository, lambda: date(2026, 9, 1))
+        service.save({"checkin_date": "2026-08-31", "tag_answers": {"travel": True}})
+        service.save({"checkin_date": "2026-08-31", "notes": "edit"})
+        self.assertEqual(service.list()[0]["tag_answers"], {"travel": True})
+        service.save({"checkin_date": "2026-08-31", "tag_answers": {}})
+        self.assertEqual(service.list()[0].get("tag_answers"), {})
+
+    def test_checkin_rejects_non_boolean_and_unknown_tag_answers(self):
+        repository = CheckinRepository(lambda: "2026-09-01T00:00:00Z")
+        service = CheckinService(self.manager, repository, lambda: date(2026, 9, 1))
+        for answers in ({"travel": 1}, {"unknown": True}):
+            with self.assertRaises(AppError):
+                service.save({"tag_answers": answers})
+
+
+    def test_equipment_assignment_is_explicit_and_unassignable(self):
+        snapshot = {
+            "raw_provider_data": {
+                "activities": [
+                    {
+                        "id": "ride-1",
+                        "type": "Ride",
+                        "start_date_local": "2026-08-30",
+                        "distance": 20000,
+                        "moving_time": 3600,
+                    }
+                ]
+            }
+        }
+        service = EquipmentService(
+            self.manager,
+            lambda: snapshot,
+            lambda: date(2026, 9, 1),
+            lambda: "2026-09-01T00:00:00Z",
+        )
+        equipment = service.save(
+            {
+                "name": "Road bike",
+                "sport": "Ride",
+                "kind": "bike",
+                "start_date": "2026-08-01",
+                "initial_distance_km": 0,
+                "initial_hours": 0,
+            }
+        )["equipment"]
+        service.assign({"activity_id": "ride-1", "equipment_id": equipment["id"]})
+        read = service.read()
+        self.assertEqual(read["items"][0]["usage"]["distance_km"], 20)
+        service.assign({"activity_id": "ride-1", "equipment_id": None})
+        self.assertIsNone(service.read()["assignments"][0]["equipment_id"])
+        with self.assertRaises(AppError):
+            service.assign({"activity_id": "missing", "equipment_id": equipment["id"]})
+
+    def test_tag_impact_requires_ten_measured_days_in_each_explicit_group(self):
+        checkins = []
+        nights = {}
+        for day in range(1, 21):
+            date_text = f"2026-08-{day:02d}"
+            checkins.append(
+                {
+                    "checkin_date": date_text,
+                    "tag_answers": {"travel": day <= 10},
+                }
+            )
+            nights[f"2026-08-{day + 1:02d}"] = float(day)
+        result = tag_impact(
+            checkins,
+            {
+                "baselines": [
+                    {
+                        "metric": "sleep",
+                        "source": "Intervals.icu",
+                        "measurement": "sleepSecs",
+                        "unit": "hours",
+                        "history": [
+                            {"date": key, "value": value}
+                            for key, value in nights.items()
+                        ],
+                    }
+                ]
+            },
+            {"raw_provider_data": {"activities": []}},
+            date(2026, 9, 1),
+        )
+        report = next(row for row in result["reports"] if row["tag"] == "travel")
+        self.assertEqual(report["status"], "observed_association")
+        self.assertEqual(report["groups"]["with"]["days"], 10)
+        self.assertEqual(report["groups"]["without"]["days"], 10)
+        self.assertEqual(report["groups"]["with"]["median"], 5.5)
+
+
+    def test_equipment_requires_initial_values_and_prevents_component_cycles(self):
+        service = EquipmentService(
+            self.manager,
+            lambda: {},
+            lambda: date(2026, 9, 1),
+            lambda: "2026-09-01T00:00:00Z",
+        )
+        payload = {
+            "name": "Bike",
+            "sport": "Ride",
+            "kind": "bike",
+            "start_date": "2026-08-01",
+            "initial_distance_km": 0,
+            "initial_hours": 0,
+        }
+        with self.assertRaises(AppError):
+            service.save(
+                {key: value for key, value in payload.items() if key != "initial_hours"}
+            )
+        bike = service.save(payload)["equipment"]
+        component = service.save(
+            {**payload, "name": "Chain", "kind": "component", "parent_id": bike["id"]}
+        )["equipment"]
+        with self.assertRaises(AppError):
+            service.save(
+                {
+                    **payload,
+                    "kind": "component",
+                    "parent_id": bike["id"],
+                    "sport": "Run",
+                }
+            )
+        with self.assertRaises(AppError):
+            service.save(
+                {
+                    **payload,
+                    "id": bike["id"],
+                    "expected_revision": 1,
+                    "kind": "component",
+                    "parent_id": component["id"],
+                }
+            )
+        self.assertEqual(len(service.read()["items"]), 2)
+
+    def test_maintenance_does_not_claim_complete_usage_for_same_day_activity(self):
+        activity = {
+            "id": "ride-1",
+            "type": "Ride",
+            "start_date_local": "2026-08-30",
+            "distance": 20000,
+            "moving_time": 3600,
+        }
+        service = EquipmentService(
+            self.manager,
+            lambda: {"recent_activities": [activity]},
+            lambda: date(2026, 9, 1),
+            lambda: "2026-09-01T00:00:00Z",
+        )
+        bike = service.save(
+            {
+                "name": "Bike",
+                "sport": "Ride",
+                "kind": "bike",
+                "start_date": "2026-08-01",
+                "initial_distance_km": 0,
+                "initial_hours": 0,
+                "maintenance_km": 10,
+            }
+        )["equipment"]
+        service.assign({"activity_id": "ride-1", "equipment_id": bike["id"]})
+        self.assertTrue(service.read()["items"][0]["usage"]["maintenance_due"])
+        service.maintain({"equipment_id": bike["id"], "date": "2026-08-30"})
+        item = service.read()["items"][0]
+        self.assertEqual(item["usage"]["distance_km"], 20)
+        self.assertIsNone(item["usage"]["maintenance_due"])
+        self.assertEqual(item["usage"]["maintenance_same_day_sessions"], 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

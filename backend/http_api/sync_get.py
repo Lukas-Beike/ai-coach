@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable
 from datetime import date
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from backend.activities.read_service import ActivityReadService
 from backend.http_api.auth import SessionAuthService
@@ -14,6 +14,7 @@ from backend.sync.queue import SyncJobQueueService
 from backend.sync.status import SyncPublicStateService
 
 SYNC_JOB_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)$")
+ACTIVITY_DETAIL_RE = re.compile(r"^/api/activities/([^/]+)$")
 
 
 class SyncGetRoutes:
@@ -37,11 +38,25 @@ class SyncGetRoutes:
 
     def handle(self, handler: Any, path: str) -> bool:
         job_match = SYNC_JOB_RE.match(path)
-        if not job_match and path not in {"/api/sync/status", "/api/activities"}:
+        activity_match = ACTIVITY_DETAIL_RE.match(path)
+        if (
+            not job_match
+            and not activity_match
+            and path not in {"/api/sync/status", "/api/activities"}
+        ):
             return False
 
         self._session_auth_service().require_auth(handler)
-        if job_match:
+        if activity_match:
+            payload = self._activity_read_service().detail(
+                unquote(activity_match.group(1)),
+                garmin_snapshot={},
+                profile={},
+                today=self._local_today(),
+            )
+            # Performance validation belongs to the Coach's complete context.
+            payload.pop("activity_validation", None)
+        elif job_match:
             payload = self._sync_job_queue_service().state(job_match.group(1))
         elif path == "/api/sync/status":
             payload = self._sync_public_state_service().state()

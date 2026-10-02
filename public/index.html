@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=238">
+  <link rel="stylesheet" href="/styles.css?v=254">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -35,7 +35,6 @@
     </aside>
     <header class="topbar">
       <div class="topbar-actions">
-        <button id="headerActionButton" class="secondary-button top-action" type="button" hidden></button>
       </div>
     </header>
 
@@ -65,7 +64,6 @@
           <div id="coachActionReviewContent"></div>
         </section>
         <section id="coachReceipts" class="coach-receipts" aria-label="Aktionsstatus" aria-live="polite" hidden></section>
-        <p class="fine-print">Trainingsempfehlungen dienen zur Orientierung und ersetzen keinen medizinischen Rat. Jede Kalenderänderung gibst du selbst frei.</p>
         <form id="chatForm" class="composer">
           <div id="quickMessageTemplates" class="quick-message-templates" hidden aria-label="Schnelle Nachrichten">
             <span class="quick-message-label">Schnellstart</span>
@@ -78,7 +76,7 @@
           <input id="attachmentInput" type="file" accept=".gpx,.fit,.png,.jpg,.jpeg,.webp" multiple hidden aria-label="GPX- oder FIT-Dateien oder Bilder auswählen">
           <textarea id="messageInput" rows="1" maxlength="12000" placeholder="Frage deinen Coach…" aria-label="Nachricht an deinen Coach"></textarea>
           <div class="composer-actions">
-            <button type="button" id="attachmentButton" class="secondary-button attachment-button" aria-label="GPX- oder FIT-Dateien oder Bilder anhängen" title="Datei anhängen">+</button>
+            <button type="button" id="attachmentButton" class="secondary-button attachment-button" aria-label="GPX- oder FIT-Dateien oder Bilder anhängen" title="Datei anhängen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
             <button type="button" id="voiceButton" class="voice-button" aria-label="Spracheingabe starten" title="Spracheingabe starten"><svg class="nav-icon" aria-hidden="true"><use href="#icon-microphone"></use></svg></button>
             <button type="button" id="steerButton" class="secondary-button steer-button" hidden>Steuern</button>
             <button type="button" id="cancelChatButton" class="composer-stop-button" hidden aria-label="Antwort stoppen" title="Antwort stoppen"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg></button>
@@ -98,7 +96,9 @@
         <nav class="plan-segment-nav" aria-label="Kalenderbereiche">
           <a href="#plan/overview" data-plan-segment="overview" aria-current="page">Übersicht</a>
           <a href="#plan/library" data-plan-segment="library">Bibliothek</a>
+          <a href="#plan/season" data-plan-segment="season">Saison</a>
         </nav>
+        <section id="seasonPreparation" class="plan-segment" data-plan-segment-panel="season" aria-label="Saison und Szenarien" hidden></section>
         <section id="planOverviewSegment" class="plan-segment" data-plan-segment-panel="overview" aria-labelledby="planOverviewTitle">
           <div class="plan-segment-heading"><div><span class="eyebrow">KALENDER</span><h3 id="planOverviewTitle">Trainingskalender</h3><span id="plannedSummary" class="tab-sync-detail"></span></div></div>
           <div id="plannedCalendar" class="planned-calendar" aria-live="polite"></div>
@@ -127,6 +127,12 @@
               <label>Schmerz<textarea name="pain" rows="2" placeholder="Ort, Intensität und Bewegungen, die Beschwerden auslösen"></textarea></label>
               <label>Hinweise zur Verfügbarkeit<textarea name="availability_notes" rows="2" placeholder="Zum Beispiel Reise, wenig Schlaf oder nur Indoor möglich"></textarea></label>
               <label>Notizen<textarea name="notes" rows="3" placeholder="Alles, was der Coach heute wissen sollte"></textarea></label>
+              <label>Tagesstatus<select name="day_status"><option value="unknown">Unbekannt</option><option value="rest">Bestätigter Ruhetag</option><option value="pause">Bestätigte Trainingspause</option></select></label>
+              <fieldset><legend>Bestätigte Tages-Tags</legend><p class="fine-print">Ohne Antwort bleibt die Einordnung unbekannt. Für Vergleiche auch „Nein“ ausdrücklich angeben.</p>
+                <label>Reise<select name="tag_travel"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
+                <label>Spätes Essen<select name="tag_late_meal"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
+                <label>Hoher Stress<select name="tag_high_stress"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
+              </fieldset>
               <p id="checkinError" class="error" role="alert" aria-live="assertive"></p>
               <button type="submit">Tages-Check-in speichern</button>
             </form>
@@ -139,8 +145,16 @@
         <div class="section-heading">
           <div><span class="eyebrow">AUSWERTUNG</span><h2>Analyse</h2><span class="tab-sync-detail">Leistungsdaten und aktuelle Trainingsform</span></div>
         </div>
+        <nav class="plan-segment-nav" aria-label="Analysebereiche">
+          <a href="#analysis/performance" data-analysis-segment="performance">Leistung</a>
+          <a href="#analysis/recovery" data-analysis-segment="recovery">Erholung</a>
+          <a href="#analysis/review" data-analysis-segment="review">Aktuelle Woche</a>
+        </nav>
+        <section id="personalRecovery" class="analysis-history-charts" aria-label="Persönliche Erholung" hidden></section>
+        <section id="trainingReport" class="analysis-chart-card" aria-label="Trainingsbericht" hidden></section>
         <div id="analysisHistoryCharts" class="analysis-history-charts" aria-label="Fitness und Leistungsentwicklung"></div>
         <section id="analysisPerformanceSegment" class="analysis-segment" aria-labelledby="analysisPerformanceTitle">
+          <section id="sessionPerformance" class="analysis-chart-card" aria-label="Trainingsfokus"></section>
           <div class="analysis-segment-heading"><div><span class="eyebrow">LEISTUNG</span><h3 id="analysisPerformanceTitle">Leistungsdaten</h3></div></div>
           <div id="performanceSummary" class="performance-card" aria-live="polite"></div>
         </section>
@@ -156,23 +170,21 @@
         <section id="nutritionDiary" aria-label="Ernährungstagebuch">
           <div class="nutrition-toolbar"><button class="secondary-button" type="button" id="nutritionPrevious" aria-label="Vorheriger Tag">←</button><label>Tag <input type="date" id="nutritionDate"></label><button class="secondary-button" type="button" id="nutritionNext" aria-label="Nächster Tag">→</button><button class="secondary-button" type="button" id="nutritionToday">Heute</button></div>
           <div id="nutritionTotals" class="nutrition-totals"></div>
-          <button class="push-button" type="button" id="nutritionLog">Beim Coach erfassen</button>
           <div id="nutritionEntries" class="nutrition-list"></div>
         </section>
         <section id="nutritionMeals" aria-label="Gespeicherte Mahlzeiten" hidden>
-          <p>Vorlagen enthalten die Zutaten, Mengen und Nährwerte für eine Portion. Erst erfasster Verzehr zählt im Tagebuch.</p>
-          <button class="push-button" type="button" id="nutritionDefine">Mahlzeit mit dem Coach definieren</button>
           <div id="nutritionTemplates" class="nutrition-list"></div>
         </section>
       </section>
 
-      <section id="profilePanel" class="panel" aria-label="Athletenprofil">
+      <section id="profilePanel" class="panel" aria-label="Profil">
         <div class="section-heading">
-          <div><span class="eyebrow">MEHR · ATHLETENPROFIL</span><h2>Athletenprofil <span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2></div>
+          <div><span class="eyebrow">MEHR · PROFIL</span><h2>Profil <span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2></div>
         </div>
         <nav class="more-segment-nav" aria-label="Mehr-Bereiche">
           <a href="#more/appearance" data-more-segment="appearance">Darstellung</a>
-          <a href="#more/profile" data-more-segment="profile" aria-current="page">Athletenprofil</a>
+          <a href="#more/profile" data-more-segment="profile" aria-current="page">Profil</a>
+          <a href="#more/equipment" data-more-segment="equipment">Ausrüstung und Wartung</a>
           <a href="#more/connections" data-more-segment="connections">Anbindungen</a>
           <a href="#more/coach" data-more-segment="coach">Coach &amp; Modell</a>
           <a href="#more/privacy" data-more-segment="privacy">Daten &amp; Datenschutz</a>
@@ -194,6 +206,8 @@
             <label>Ausrüstung<textarea name="equipment" rows="2" placeholder="Rad, Smarttrainer, Gym, Powermeter…"></textarea></label>
             <label>Trainingspräferenzen<textarea name="training_preferences" rows="3" placeholder="Drinnen/draußen, bevorzugte Einheiten, Ruhetage…"></textarea></label>
             <label>Manuelle Leistungsnotizen<textarea name="performance_notes" rows="3" placeholder="Nur Fakten, die nicht in Intervals.icu stehen…"></textarea></label>
+            <label>Persönliches Schlafziel (Stunden)<input name="sleep_target_hours" type="number" min="4" max="12" step="0.25" placeholder="Optional, zum Beispiel 8"><small>Bestätigtes Ziel für die Auswertung bekannter Nächte; keine automatische Vorgabe.</small></label>
+            <label>Bestätigte Verpflegungsverträglichkeit<textarea name="fueling_tolerance" rows="2" placeholder="Erprobte Kohlenhydratmengen, verträgliche Produkte und Grenzen"></textarea></label>
             <div class="form-grid">
               <label>Coaching-Stil<input name="coaching_style" placeholder="Unterstützend, direkt und evidenzbasiert"></label>
               <label>Zeitzone<select name="timezone" autocomplete="off"><option value="Europe/Berlin">Europe/Berlin</option><option value="Europe/London">Europe/London</option><option value="Europe/Paris">Europe/Paris</option><option value="Europe/Zurich">Europe/Zurich</option><option value="America/New_York">America/New_York</option><option value="America/Chicago">America/Chicago</option><option value="America/Los_Angeles">America/Los_Angeles</option><option value="Asia/Tokyo">Asia/Tokyo</option><option value="Australia/Sydney">Australia/Sydney</option><option value="UTC">UTC</option></select><small>IANA-Zeitzone; die Auswahl steuert Tagesgrenzen und Zeitformatierung.</small></label>
@@ -221,12 +235,16 @@
         </div>
         <nav class="more-segment-nav" aria-label="Mehr-Bereiche">
           <a href="#more/appearance" data-more-segment="appearance">Darstellung</a>
-          <a href="#more/profile" data-more-segment="profile">Athletenprofil</a>
+          <a href="#more/profile" data-more-segment="profile">Profil</a>
+          <a href="#more/equipment" data-more-segment="equipment">Ausrüstung und Wartung</a>
           <a href="#more/connections" data-more-segment="connections" aria-current="page">Anbindungen</a>
           <a href="#more/coach" data-more-segment="coach">Coach &amp; Modell</a>
           <a href="#more/privacy" data-more-segment="privacy">Daten &amp; Datenschutz</a>
           <a href="#more/operations" data-more-segment="operations">Betrieb &amp; Diagnose</a>
         </nav>
+        <section class="settings-section" data-more-segment-panel="equipment" hidden>
+          <section id="equipmentItems" class="analysis-chart-card" aria-label="Ausrüstung und Wartung"></section>
+        </section>
         <section class="settings-section appearance-settings" data-more-segment-panel="appearance" aria-labelledby="appearanceTitle">
           <div><h3 id="appearanceTitle">Darstellung</h3><p>Wähle, wie Intervals Coach auf diesem Gerät angezeigt wird.</p></div>
           <label for="appearanceSelect">Farbschema
@@ -257,7 +275,7 @@
           <p class="fine-print settings-message">Wetterdaten: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a> · Lizenz: CC BY 4.0.</p>
           <p class="fine-print settings-message">Der gemeinsame Kalender wird über <code>CALENDAR_ICAL_URL</code> angebunden (private iCal-Adresse). Die URL bleibt serverseitig und der Zugriff ist ausschließlich lesend. Termine werden im Tab „Plan“ angezeigt.</p>
         </details>
-        <details class="settings-section collapsible-section" data-more-segment-panel="operations">
+        <details class="settings-section collapsible-section" data-more-segment-panel="appearance">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Kalenderansicht</span><span id="calendarDisplaySummary" class="collapsible-summary-meta">Einstellungen werden geladen...</span></summary>
           <form id="calendarDisplayForm" class="calendar-display-form">
             <div class="calendar-display-fields">
@@ -384,14 +402,15 @@
     </form>
   </dialog>
   <script src="/api.js?v=221" defer></script>
-  <script src="/navigation.js?v=220" defer></script>
+  <script src="/navigation.js?v=225" defer></script>
   <script src="/state.js?v=218" defer></script>
   <script src="/views.js?v=218" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
   <script src="/coach.js?v=5" defer></script>
-  <script src="/nutrition.js?v=2" defer></script>
-  <script src="/analysis.js?v=5" defer></script>
-  <script src="/app.js?v=245" defer></script>
+  <script src="/nutrition.js?v=6" defer></script>
+  <script src="/analysis.js?v=27" defer></script>
+  <script src="/activity-details.js?v=6" defer></script>
+  <script src="/app.js?v=259" defer></script>
 </body>
 </html>

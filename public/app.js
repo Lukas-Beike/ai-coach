@@ -98,7 +98,7 @@ function scheduleMobileViewportLayout() {
 }
 
 function renderMoreSegments(segment = moreSegmentFromRoute()) {
-  const selected = ["profile", "connections", "coach", "privacy", "operations", "appearance"].includes(segment) ? segment : "connections";
+  const selected = ["profile", "equipment", "connections", "coach", "privacy", "operations", "appearance"].includes(segment) ? segment : "connections";
   document.querySelectorAll("[data-more-segment-panel]").forEach((panel) => {
     panel.hidden = panel.dataset.moreSegmentPanel !== selected;
   });
@@ -111,8 +111,9 @@ function renderMoreSegments(segment = moreSegmentFromRoute()) {
 }
 
 function renderPlanSegments(segment = state.planSegment) {
-  const selected = ["overview", "library"].includes(segment) ? segment : "overview";
+  const selected = ["overview", "library", "season"].includes(segment) ? segment : "overview";
   state.planSegment = selected;
+  if (selected === "season" && state.data) void renderSeasonPreparation();
   document.querySelectorAll("[data-plan-segment-panel]").forEach((panel) => {
     panel.hidden = panel.dataset.planSegmentPanel !== selected;
   });
@@ -165,6 +166,7 @@ function updateNavigationHistory(panelRoute, historyMode) {
 }
 
 function renderActiveRoute(mainRoute, panelRoute) {
+  if (mainRoute === "analysis") renderAnalysisSegments(panelRoute);
   if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
   if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
   if (mainRoute === "nutrition") { renderNutritionSegments(panelRoute); if (state.data) void loadNutrition(); }
@@ -210,7 +212,6 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   renderActiveRoute(mainRoute, panelRoute);
   updateNavigationHistory(panelRoute, historyMode);
   if (state.data) renderStatus(state.data);
-  updateHeaderAction();
   restoreRouteScroll(mainRoute, returningToChat, shouldFocusPlannedToday);
   ensureRouteData(panelRoute);
   if (focus && !$("#appShell")?.hidden) {
@@ -299,6 +300,7 @@ function showLogin() {
   state.stateEventLastId = 0;
   state.stateEventBackoff = 1000;
   state.data = null;
+  globalThis.ActivityDetails?.close();
   resetNutritionView();
   state.busy = false;
   state.chatRequest = null;
@@ -567,9 +569,8 @@ function renderSyncStatus(status) {
     progress: progressPercentage(status.progress),
     last_error: status.last_error || null,
   };
-  renderPerformance(state.data.performance || {});
+  renderPerformance(state.data.performance || {}, { refreshCharts: false });
   renderSettings(state.data);
-  updateHeaderAction();
 }
 
 function renderMaintenanceStatus(maintenance) {
@@ -2187,55 +2188,6 @@ function plannedAppointmentLabel(event) {
   return time ? `${name} · ${time[1]}` : name;
 }
 
-function plannedInsightMetrics(checkin, recovery) {
-  const metrics = [];
-  const addMetric = (label, value, suffix, source) => {
-    const formatted = calendarMetricNumber(value, suffix);
-    if (formatted != null) metrics.push({ label, value: formatted, source });
-  };
-  for (const [key, label, suffix] of [
-    ["sleep_hours", "Schlaf", " h"], ["sleep_score", "Schlafscore", "/100"],
-    ["hrv", "HRV", " ms"], ["resting_hr", "Ruhepuls", " bpm"],
-    ["readiness", "Readiness", "/100"], ["body_battery", "Body Battery", "/100"],
-  ]) addMetric(label, recovery[key], suffix, recovery.sources?.[key]);
-  for (const [key, label, suffix] of [
-    ["soreness", "Muskelkater", "/10"], ["stress", "Stress", "/10"],
-    ["motivation", "Motivation", "/10"], ["available_minutes", "Zeit verfügbar", " Min."],
-  ]) addMetric(label, checkin[key], suffix, "Eigene Angabe");
-  return metrics;
-}
-
-function appendPlannedInsightMeasurements(content, metrics, checkin, dateKey, todayKey) {
-  if (metrics.length || Object.keys(checkin).length) {
-    if (checkin.day_form) {
-      const form = document.createElement("p");
-      form.className = "planned-day-form";
-      form.textContent = checkin.day_form;
-      content.append(form);
-    }
-    if (metrics.length) {
-      const grid = document.createElement("dl");
-      grid.className = "planned-day-metrics";
-      metrics.forEach(({ label, value, source }) => {
-        const item = document.createElement("div");
-        if (source) item.title = `${label}: ${source}`;
-        const term = document.createElement("dt");
-        term.textContent = label;
-        const measurement = document.createElement("dd");
-        measurement.textContent = value;
-        item.append(term, measurement);
-        grid.append(item);
-      });
-      content.append(grid);
-    }
-  } else if (dateKey <= todayKey) {
-    const empty = document.createElement("p");
-    empty.className = "planned-insights-empty";
-    empty.textContent = "Keine Check-in- oder Erholungswerte gespeichert";
-    content.append(empty);
-  }
-}
-
 function appendPlannedWeatherInsight(body, weather) {
   const weatherLabel = plannedWeatherLabel(weather);
   if (!weather || !weatherLabel) return;
@@ -2266,45 +2218,16 @@ function appendPlannedWeatherInsight(body, weather) {
   }
 }
 
-function appendPlannedCheckinObservations(body, checkin) {
-  for (const [field, label] of [["availability_notes", "Zeitplanung"], ["notes", "Notizen"]]) {
-    if (checkin[field]) {
-      const note = document.createElement("p");
-      note.textContent = `${label}: ${checkin[field]}`;
-      body.append(note);
-    }
-  }
-  const rpe = calendarRpeLabel(checkin.session_rpe);
-  if (rpe != null) {
-    const effort = document.createElement("p");
-    effort.textContent = `Belastung nach dem Training: RPE ${rpe}/10 · Eigene Angabe`;
-    body.append(effort);
-  }
-}
-
-function plannedDayInsights(context, weather, dateKey, todayKey) {
-  const checkin = context.checkin || {};
-  const recovery = dateKey <= todayKey ? context.recovery || {} : {};
-  const metrics = plannedInsightMetrics(checkin, recovery);
-  const section = document.createElement("div");
-  section.className = "planned-day-insights";
+function plannedDayInsights(weather) {
   const content = document.createElement("div");
   content.className = "planned-insights-content";
-  appendPlannedInsightMeasurements(content, metrics, checkin, dateKey, todayKey);
-  const details = document.createElement("div");
-  details.className = "planned-day-observations";
-  const body = document.createElement("div");
-  appendPlannedWeatherInsight(body, weather);
-  appendPlannedCheckinObservations(body, checkin);
-  if (body.childElementCount) {
-    details.append(body);
-    content.append(details);
-  }
+  appendPlannedWeatherInsight(content, weather);
   if (!content.childElementCount) return null;
+  const section = document.createElement("div");
+  section.className = "planned-day-insights";
   const title = document.createElement("p");
   title.className = "planned-insights-title";
-  title.textContent = metrics.length || Object.keys(checkin).length
-    ? "Check-in & Erholung" : "Tagesdetails";
+  title.textContent = "Wetter";
   section.append(title, content);
   return section;
 }
@@ -2520,6 +2443,44 @@ function appendPlannedExecution(cardSummary, entry, status) {
   }
 }
 
+let calendarProfileSequence = 0;
+
+function calendarWorkoutProfile(profile) {
+  const segments = profile?.segments;
+  if (!Array.isArray(segments) || !segments.length || segments.length > 1000) return null;
+  const total = segments.reduce((sum, item) => sum + (Number.isFinite(item.duration) && item.duration > 0 ? item.duration : 0), 0);
+  const values = segments.flatMap((item) => [item.value, item.end_value]).filter((value) => value != null && Number.isFinite(value) && value >= 0);
+  if (!total || !values.length) return null;
+  const top = Math.max(...values, 1) * 1.1;
+  const label = profile.source === "recorded" ? "Aufgezeichnetes Belastungsprofil" : "Geplantes Intervallprofil";
+  const svg = analysisSvg("svg", { viewBox: "0 0 300 56", role: "img", "aria-label": label, class: "calendar-workout-profile", preserveAspectRatio: "none" });
+  const gradientPrefix = `calendar-profile-${++calendarProfileSequence}`;
+  const defs = analysisSvg("defs");
+  for (const zone of [1, 2, 3, 4, 5, 6, 7, "unknown"]) {
+    const gradient = analysisSvg("linearGradient", { id: `${gradientPrefix}-${zone}`, x1: 0, y1: 0, x2: 0, y2: 1, "data-zone": zone });
+    gradient.append(analysisSvg("stop", { offset: "0%", "stop-color": "currentColor" }));
+    gradient.append(analysisSvg("stop", { offset: "100%", "stop-color": "currentColor", "stop-opacity": .35 }));
+    defs.append(gradient);
+  }
+  svg.append(defs);
+  svg.append(analysisSvg("title", {}, `${label} · Zeitachse · ${profile.unit || ""}`));
+  svg.append(analysisSvg("line", { x1: 0, x2: 300, y1: 54, y2: 54, class: "calendar-profile-baseline" }));
+  let offset = 0;
+  for (const item of segments) {
+    if (!Number.isFinite(item.duration) || item.duration <= 0) continue;
+    const x = offset / total * 300, width = item.duration / total * 300;
+    offset += item.duration;
+    if (item.value == null || item.end_value == null || !Number.isFinite(item.value) || !Number.isFinite(item.end_value)) continue;
+    const left = 54 - Math.max(0, item.value) / top * 50;
+    const right = 54 - Math.max(0, item.end_value) / top * 50;
+    const zone = Number.isInteger(item.zone) && item.zone >= 1 && item.zone <= 7 ? item.zone : "unknown";
+    const shape = analysisSvg("polygon", { points: `${x},54 ${x},${left} ${x + width},${right} ${x + width},54`, "data-zone": zone, fill: `url(#${gradientPrefix}-${zone})` });
+    shape.append(analysisSvg("title", {}, `${formatDuration(item.duration)} · ${item.label || ""}`));
+    svg.append(shape);
+  }
+  return svg;
+}
+
 function renderPlannedEntry(entry, dateKey, todayKey) {
   const actual = calendarActualActivity(entry);
   const status = calendarEntryStatus(entry, dateKey, todayKey);
@@ -2532,6 +2493,7 @@ function renderPlannedEntry(entry, dateKey, todayKey) {
   const meta = document.createElement("span");
   meta.className = "planned-meta";
   const displayed = actual || entry;
+  card.dataset.sport = activitySportLabel(displayed);
   meta.textContent = [
     activitySportLabel(displayed),
     calendarStartTime(displayed.start_date_local),
@@ -2546,6 +2508,8 @@ function renderPlannedEntry(entry, dateKey, todayKey) {
     cardSummary.append(statusText);
   }
   appendPlannedExecution(cardSummary, entry, status);
+  const profile = calendarWorkoutProfile(actual?.workout_profile || entry.workout_profile);
+  if (profile) cardSummary.append(profile);
   cardSummary.append(cardTitle);
   if (actual && !entry.is_completed_activity) {
     const target = document.createElement("span");
@@ -2558,6 +2522,17 @@ function renderPlannedEntry(entry, dateKey, todayKey) {
   const details = document.createElement("div");
   details.className = "planned-entry-details";
   appendActualCalendarDetails(details, actual);
+  if (actual && (actual.id || actual.activity_id)) {
+    const activityButton = document.createElement("button");
+    activityButton.type = "button";
+    activityButton.className = "secondary-button";
+    activityButton.textContent = "Aktivität analysieren";
+    activityButton.addEventListener("click", () => globalThis.ActivityDetails.open(actual, {
+      api,
+      showDialog: showAccessibleDialog,
+    }));
+    details.append(activityButton);
+  }
   appendPlannedCalendarComparison(details, entry, actual);
   if (entry.description) {
     const description = document.createElement("p");
@@ -2670,7 +2645,7 @@ function renderPlannedDay(view, dateKey) {
     content.append(empty);
   }
   dayEntries.forEach((entry) => content.append(renderPlannedEntry(entry, dateKey, todayKey)));
-  const insights = plannedDayInsights(dayContext, weather, dateKey, todayKey);
+  const insights = plannedDayInsights(weather);
   if (insights) day.append(insights);
   day.append(content);
   return day;
@@ -2730,6 +2705,8 @@ function renderPlannedWeek(view, weekIndex) {
   return week;
 }
 
+let plannedRenderSnapshot = null;
+
 function renderPlanned(trainingCalendar) {
   const root = $("#plannedCalendar");
   const summary = $("#plannedSummary");
@@ -2737,6 +2714,12 @@ function renderPlanned(trainingCalendar) {
   const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
   const currentWeekKey = planWeekStart(todayKey);
   const display = state.data?.calendar_display || {};
+  const snapshot = JSON.stringify([trainingCalendar, todayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance]);
+  if (snapshot === plannedRenderSnapshot && root.childElementCount) {
+    if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
+    return;
+  }
+  plannedRenderSnapshot = snapshot;
   const pastWeeks = calendarDisplayValue(display.past_weeks, 1);
   const futureWeeks = calendarDisplayValue(display.future_weeks, 4);
   const firstWeekKey = addDateKey(currentWeekKey, -7 * pastWeeks);
@@ -2878,6 +2861,8 @@ function populateCheckin(checkin, timeZone) {
     if (form.elements[field]) form.elements[field].value = values[field] ?? "";
   }
   state.checkinSelectedDate = values.checkin_date || null;
+  form.elements.day_status.value = values.day_status || "unknown";
+  for (const tag of ["travel", "late_meal", "high_stress"]) form.elements[`tag_${tag}`].value = values.tag_answers?.[tag] == null ? "" : String(values.tag_answers[tag]);
   state.checkinDirty = false;
 }
 
@@ -2889,6 +2874,7 @@ function selectedCheckin(rows, timeZone) {
 function checkinSummary(row) {
   return [
     row.day_form ? `Tagesform: ${row.day_form}` : null,
+    row.day_status === "rest" ? "Bestätigter Ruhetag" : row.day_status === "pause" ? "Bestätigte Trainingspause" : null,
     row.soreness != null ? `Schmerz/Muskelkater ${row.soreness}/10` : null,
     row.stress != null ? `Stress ${row.stress}/10` : null,
     row.motivation != null ? `Motivation ${row.motivation}/10` : null,
@@ -3100,20 +3086,6 @@ function renderCompetitions(competitions) {
     .forEach((competition, index) => root.append(competitionCard(competition, index)));
 }
 
-function askCoachAboutCompetitions() {
-  const input = $("#messageInput");
-  if (!input) return;
-  if (input.value.trim()) {
-    void applyNavigationRoute("coach", { historyMode: "push" });
-    requestAnimationFrame(() => input.focus());
-    return;
-  }
-  input.value = "Ich möchte meine Zielwettkämpfe hinzufügen oder überarbeiten.";
-  input.dispatchEvent(new Event("input"));
-  void applyNavigationRoute("coach", { historyMode: "push" });
-  requestAnimationFrame(() => input.focus());
-}
-
 function formatLocalCompetitionTime(value) {
   const raw = String(value || "");
   const match = /(?:T|\s)(\d{2}:\d{2})(?::\d{2})?/.exec(raw);
@@ -3305,15 +3277,20 @@ function performanceSection(root, title, items, detail = "") {
   root.append(section);
 }
 
-function renderPerformance(performance) {
-  renderAnalysisHistory(performance?.history);
+function renderPerformance(performance, { refreshCharts = true } = {}) {
+  if (refreshCharts) {
+    void renderTrainingRecords();
+    renderPersonalRecovery(performance?.personal_recovery);
+    renderAnalysisHistory(performance?.history);
+    renderTrainingFocus(performance?.training_focus);
+  }
   const root = $("#performanceSummary");
   if (root.querySelector(".metric-editable.editing")) return;
   root.replaceChildren();
   const syncNotices = [];
   if (state.data?.sync?.running || state.localSync.intervals) syncNotices.push(state.data?.sync?.status || "Intervals.icu wird synchronisiert…");
   if (state.data?.garmin_sync?.running || state.localSync.garmin) syncNotices.push(state.data?.garmin_sync?.status || "Garmin wird synchronisiert…");
-  if (state.data?.performance_refresh?.running || state.localSync.performance) syncNotices.push("Leistungsdaten werden aktualisiert…");
+  if (state.data?.performance_refresh?.running) syncNotices.push("Leistungsdaten werden aktualisiert…");
   if (!performance?.available) {
     const info = document.createElement("p");
     info.className = "fine-print";
@@ -3379,29 +3356,6 @@ function renderPerformance(performance) {
     ["Halbmarathon (geschätzt)", compared(values.run_half_marathon_seconds, "run_half_marathon_seconds_30d"), formatDuration],
     ["Marathon (geschätzt)", compared(values.run_marathon_seconds, "run_marathon_seconds_30d"), formatDuration],
   ]);
-}
-
-function updateHeaderAction() {
-  const button = $("#headerActionButton");
-  if (!button) return;
-  const panel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
-  if (panel === "dataPanel") {
-    button.hidden = false;
-    button.dataset.action = "performance";
-    button.title = "Aktuelle Leistungsdaten von Intervals.icu aktualisieren";
-    button.disabled = Boolean(state.data?.performance_refresh?.running || state.data?.sync?.running || state.data?.garmin_sync?.running || state.data?.provider_resync?.intervals?.running || state.data?.provider_resync?.garmin?.running || state.localSync.performance || state.localSync.intervals || state.localSync.garmin || state.localSync.intervalsFull || state.localSync.garminFull);
-    if (state.data?.sync?.running || state.data?.garmin_sync?.running || state.localSync.intervals || state.localSync.garmin) {
-      button.textContent = "Synchronisierung läuft…";
-    } else if (button.disabled) {
-      button.textContent = "Leistungsdaten werden aktualisiert…";
-    } else {
-      button.textContent = "Leistungsdaten aktualisieren";
-    }
-  } else {
-    button.hidden = true;
-    button.disabled = false;
-    button.dataset.action = "";
-  }
 }
 
 function renderAiProvider(provider) {
@@ -3878,7 +3832,6 @@ function render(data) {
   renderDiagnosticCapture(data.diagnostic_capture);
   renderSettings(data);
   updateVoiceButton();
-  updateHeaderAction();
 }
 
 function latestAssistantMessageKey(messages) {
@@ -4083,25 +4036,7 @@ async function syncNow(event) {
     invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
-  finally { state.localSync.intervals = false; button.disabled = false; button.classList.remove("busy"); button.textContent = defaultCaption; updateHeaderAction(); }
-}
-
-async function refreshPerformance() {
-  const button = $("#headerActionButton");
-  if (!button) return;
-  state.localSync.performance = true;
-  button.disabled = true;
-  button.textContent = "Aktualisierung läuft…";
-  try {
-    const result = await api("/api/performance/refresh", { method: "POST", body: "{}" });
-    toast(result.status === "ok" ? "Leistungsdaten aktualisiert" : "Aktualisierung läuft bereits");
-    invalidateContextPreview();
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    await load();
-  }
-  finally { state.localSync.performance = false; updateHeaderAction(); }
+  finally { state.localSync.intervals = false; button.disabled = false; button.classList.remove("busy"); button.textContent = defaultCaption; }
 }
 
 async function syncGarmin() {
@@ -4119,7 +4054,7 @@ async function syncGarmin() {
     invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
-  finally { state.localSync.garmin = false; button.disabled = false; button.textContent = "Garmin synchronisieren"; updateHeaderAction(); }
+  finally { state.localSync.garmin = false; button.disabled = false; button.textContent = "Garmin synchronisieren"; }
 }
 
 async function syncExternalCalendar() {
@@ -4183,7 +4118,6 @@ async function fullResync(source) {
   } finally {
     state.localSync[stateKey] = false;
     renderSettings(state.data || {});
-    updateHeaderAction();
   }
 }
 
@@ -4214,7 +4148,7 @@ async function saveProfile(event) {
     state.profileDirty = JSON.stringify([...new FormData(form)]) !== submittedForm;
     setDirtyIndicator("profileDirtyIndicator", state.profileDirty);
     invalidateContextPreview();
-    toast("Athletenprofil gespeichert und für den Coach aktiviert");
+    toast("Profil gespeichert und für den Coach aktiviert");
     // Do not keep the successful save action in its loading state while the
     // follow-up refresh loads the rest of the application state.
     if (button) {
@@ -4241,6 +4175,11 @@ async function saveCheckin(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const values = Object.fromEntries(new FormData(form));
+  values.tag_answers = {};
+  for (const tag of ["travel", "late_meal", "high_stress"]) {
+    if (values[`tag_${tag}`] !== "") values.tag_answers[tag] = values[`tag_${tag}`] === "true";
+    delete values[`tag_${tag}`];
+  }
   for (const field of ["soreness", "stress", "motivation", "session_rpe", "available_minutes"]) {
     values[field] = values[field] === "" ? null : Number(values[field]);
   }
@@ -4517,6 +4456,11 @@ document.querySelectorAll("[data-plan-segment]").forEach((link) => link.addEvent
   event.preventDefault();
   void applyNavigationRoute(`plan/${link.dataset.planSegment}`, { historyMode: "push" });
 }));
+document.querySelectorAll("[data-analysis-segment]").forEach((link) => link.addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  void applyNavigationRoute(`analysis/${link.dataset.analysisSegment}`, { historyMode: "push" });
+}));
 document.querySelectorAll("[data-more-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
@@ -4600,9 +4544,6 @@ $("#quickMessageTemplates").addEventListener("click", (event) => {
 $("#voiceButton").addEventListener("click", toggleVoiceInput);
 $("#chatJumpToComposer").addEventListener("click", () => {
   jumpToChatComposer();
-});
-$("#headerActionButton").addEventListener("click", (event) => {
-  if (event.currentTarget.dataset.action === "performance") void refreshPerformance();
 });
 $("#systemIntervalsSyncButton").addEventListener("click", syncNow);
 $("#systemIntervalsFullResyncButton").addEventListener("click", () => fullResync("intervals"));

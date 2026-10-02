@@ -467,29 +467,37 @@ class ActivityFeedbackRepository:
 
     def list(self, db: Any, limit: int = 100) -> list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT activity_id, activity_name, activity_date, notes, created_at, updated_at "
+            "SELECT activity_id, activity_name, activity_date, notes, session_rpe, deviation_reason, created_at, updated_at "
             "FROM activity_feedback ORDER BY updated_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def get(self, db: Any, activity_id: str) -> dict[str, Any] | None:
+        row = db.execute(
+            "SELECT * FROM activity_feedback WHERE activity_id=?", (activity_id,)
+        ).fetchone()
+        return dict(row) if row else None
 
     def delete(self, db: Any, activity_id: str) -> None:
         db.execute(
             "DELETE FROM activity_feedback WHERE activity_id = ?", (activity_id,)
         )
 
-    def upsert(self, db: Any, feedback: dict[str, str]) -> None:
+    def upsert(self, db: Any, feedback: dict[str, Any]) -> None:
         now = self._now()
         db.execute(
-            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
+            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, session_rpe, deviation_reason, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(activity_id) DO UPDATE SET activity_name=excluded.activity_name, "
-            "activity_date=excluded.activity_date, notes=excluded.notes, updated_at=excluded.updated_at",
+            "activity_date=excluded.activity_date, notes=excluded.notes, session_rpe=excluded.session_rpe, deviation_reason=excluded.deviation_reason, updated_at=excluded.updated_at",
             (
                 feedback["activity_id"],
                 feedback["activity_name"],
                 feedback["activity_date"],
                 feedback["notes"],
+                feedback.get("session_rpe"),
+                feedback.get("deviation_reason", ""),
                 now,
                 now,
             ),

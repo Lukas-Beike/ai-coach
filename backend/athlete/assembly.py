@@ -6,20 +6,23 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.read_service import ActivityReadService
 from backend.athlete.checkins import CheckinService
 from backend.athlete.context import AthleteContextService
+from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
 from backend.db import DatabaseManager
 from backend.db.repositories import (
     ActivityFeedbackRepository,
     CheckinRepository,
+    CompetitionRepository,
     ProfileRepository,
     SnapshotRepository,
-    CompetitionRepository,
 )
+from backend.sync.snapshots import latest_snapshot
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,7 @@ class AthleteRuntime:
     normalize_profile: Callable[[Any], Any]
     normalize_competition: Callable[[Any], Any]
     uuid_factory: Callable[[], Any]
+    read_planned_units: Callable[[], list[dict[str, Any]]] = list
 
 
 class AthleteDataAssembly:
@@ -54,7 +58,7 @@ class AthleteDataAssembly:
     def __init__(
         self,
         *,
-        dependencies: "AthleteDataAssembly.Inputs",
+        dependencies: AthleteDataAssembly.Inputs,
     ) -> None:
         repositories = dependencies.repositories
         runtime = dependencies.runtime
@@ -71,6 +75,19 @@ class AthleteDataAssembly:
         self._normalize_profile = runtime.normalize_profile
         self._normalize_competition = runtime.normalize_competition
         self._uuid_factory = runtime.uuid_factory
+        self._read_planned_units = runtime.read_planned_units
+
+    def training_snapshot(self) -> dict[str, Any]:
+        with self._database_manager().unit_of_work() as db:
+            return latest_snapshot(db, self._snapshot_repository) or {}
+
+    def equipment(self) -> EquipmentService:
+        return EquipmentService(
+            self._database_manager(),
+            self.training_snapshot,
+            self._local_date,
+            self._utc_now,
+        )
 
     def activity_feedback(self) -> ActivityFeedbackService:
         return ActivityFeedbackService(
@@ -84,6 +101,8 @@ class AthleteDataAssembly:
             self._database_manager(),
             self._snapshot_repository,
             self.activity_feedback(),
+            ActivityDetailStore(self._database_manager()),
+            read_equipment=lambda: self.equipment().read(),
         )
 
     def duplicate_activity(self) -> DuplicateActivityService:
@@ -112,7 +131,11 @@ class AthleteDataAssembly:
 
     def context(self) -> AthleteContextService:
         return AthleteContextService(
-            self._database_manager(), self.profile(), self._competition_repository,
-            self._normalize_profile, self._normalize_competition,
-            self._utc_now, self._uuid_factory,
+            self._database_manager(),
+            self.profile(),
+            self._competition_repository,
+            self._normalize_profile,
+            self._normalize_competition,
+            self._utc_now,
+            self._uuid_factory,
         )

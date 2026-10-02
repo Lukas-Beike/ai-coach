@@ -60,9 +60,7 @@ class SyncGetRoutesTests(unittest.TestCase):
                     Mock(),
                     Mock(),
                 )
-                route = SyncGetRoutes(
-                    *factories, lambda: date(2026, 9, 24), -1
-                )
+                route = SyncGetRoutes(*factories, lambda: date(2026, 9, 24), -1)
                 self.assertFalse(route.handle(handler, path))
                 for factory in factories:
                     factory.assert_not_called()
@@ -123,6 +121,25 @@ class SyncGetRoutesTests(unittest.TestCase):
         self.queue_factory.assert_not_called()
         self.sync_state_factory.assert_not_called()
         self.activity_factory.assert_not_called()
+
+    def test_activity_detail_is_authenticated_local_only_and_preserves_case(
+        self,
+    ) -> None:
+        self.activities.detail.return_value = {
+            "activity_id": "CaseSensitive-1",
+            "activity_validation": {},
+        }
+        self.assertTrue(
+            self.routes.handle(self.handler, "/api/activities/CaseSensitive-1")
+        )
+        self.auth.require_auth.assert_called_once_with(self.handler)
+        self.activities.detail.assert_called_once_with(
+            "CaseSensitive-1", garmin_snapshot={}, profile={}, today=date(2026, 9, 24)
+        )
+        self.queue_factory.assert_not_called()
+        self.assertEqual(
+            [(200, {"activity_id": "CaseSensitive-1"})], self.handler.responses
+        )
 
 
 if __name__ == "__main__":

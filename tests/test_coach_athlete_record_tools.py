@@ -61,9 +61,9 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
         self.assertEqual(self.service.execute("other", {}, {}), None)
         self.checkins.save_coach.assert_called_once_with({"notes": "Synthetic"})
         self.feedback.save_coach.assert_called_once_with(
-            "a1", {"notes": "Synthetic", "activity_name": None, "activity_date": None}
+            "a1", {"notes": "Synthetic"}
         )
-        self.feedback.save.assert_called_once_with("a1", {"notes": ""})
+        self.feedback.save.assert_called_once_with("a1", {"notes": "", "session_rpe": None, "deviation_reason": ""})
         self.competitions.save.assert_called_once_with({"name": "Synthetic"})
         self.competitions.delete.assert_called_once_with("a1")
         self.nutrition.log_meal.assert_called_once_with({"description": "Oatmeal", "kcal": 450})
