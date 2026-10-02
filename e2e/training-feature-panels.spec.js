@@ -14,6 +14,8 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(report.getByText("Hoch aerob", { exact: true })).toBeVisible();
   await expect(report.getByText("Anaerob", { exact: true })).toBeVisible();
   await expect(report.locator(".training-focus-share")).toBeVisible();
+  await expect(report.locator(".training-focus-coverage")).toContainText("3 erfasste Garmin-Einheiten");
+  await expect(report.locator(".training-focus-coverage")).toContainText("erfasste Daten");
   await expect(report.getByRole("heading", { name: "HF-Zonen" })).toBeHidden();
   await report.getByText("Zonen im Detail", { exact: true }).click();
   await expect(report.getByRole("heading", { name: "HF-Zonen" })).toBeVisible();

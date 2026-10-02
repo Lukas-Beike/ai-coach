@@ -672,8 +672,10 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await expect(ftp.locator("path[data-series]")).toHaveCount(5);
   await expect(ftp.locator(".analysis-chart-legend")).toContainText("1,1 %");
   await expect(ftp.locator(".analysis-chart-legend")).toContainText("-0,9 %");
+  await ftp.getByText("Datenabdeckung", { exact: true }).click();
+  await expect(ftp.locator(".analysis-coverage")).toContainText("55/56 datierte Werte");
   expect((await ftp.locator('path[data-series="0"]').getAttribute("d")).match(/M/g)).toHaveLength(2);
-  const details = ftp.locator("details");
+  const details = ftp.locator("details").filter({ has: page.getByText("Werte ansehen", { exact: true }) });
   await details.locator(":scope > summary").click();
   await expect(details).toHaveAttribute("open", "");
   await expect(ftp.getByRole("table")).toBeVisible();

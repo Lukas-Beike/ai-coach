@@ -371,6 +371,8 @@ Garmin Connect enforces Multi-Factor Authentication (MFA). Complete the initial 
 ### Background Scheduling Engine
 - **Startup Sync**: On container launch, the backend initializes the database, spins up background worker threads, and triggers an initial synchronization across all configured providers.
 - **Hourly Provider Cycle**: Checks for updated calendar events, refreshed weather forecasts, and new Intervals.icu completed activities.
+- **Garmin Recent History**: Automatic synchronization first loads 60 days of activities, sleep, HRV, daily statistics and resting heart rate where supported. Subsequent hourly refreshes normally read today and yesterday. Successfully read continuous date windows are retained per collection; failed collections do not advance their coverage. After an outage, refreshes catch up from the oldest collection endpoint with overlap, bounded to 90 days per request. Historical activity backfills do not advance recovery coverage.
+- **Analysis Coverage**: Charts expose the number of available dated values; recovery charts show measured days and prior nights in the 42-day personal baseline. Training focus shows locally known Garmin sessions and their observation dates. Missing measurements and recordings remain unknown, never confirmed zeros or rest days.
 - **Daily Synchronization Loop**: Runs daily at 03:00 UTC (or configured local time) to pull comprehensive activity files, update rolling fitness metrics, and schedule the day's training agenda.
 - **On-Demand Refreshes**: Triggered immediately whenever the athlete clicks **Synchronisieren** in the More tab or when requested by the Coach.
 

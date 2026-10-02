@@ -42,8 +42,35 @@ def training_focus(
         key: {"load": 0.0, "sessions": 0}
         for key in ("low_aerobic", "high_aerobic", "anaerobic")
     }
+    seen, unknown, observed_dates = _garmin_activity_coverage(
+        garmin, start, end, timezone, categories
+    )
+    return {
+        "start": start,
+        "end": end,
+        "zones": [row for row in zones if row["sensor"] in {"heart_rate", "power"}],
+        "categories": categories,
+        "unclassified_sessions": unknown,
+        "classified_sessions": len(seen) - unknown,
+        "category_source": "Garmin Connect",
+        "coverage": {
+            "known_sessions": len(seen),
+            "observed_start": min(observed_dates) if observed_dates else None,
+            "observed_end": max(observed_dates) if observed_dates else None,
+        },
+    }
+
+
+def _garmin_activity_coverage(
+    garmin: dict[str, Any],
+    start: str,
+    end: str,
+    timezone: str,
+    categories: dict[str, dict[str, float | int]],
+) -> tuple[set[str], int, list[str]]:
     seen: set[str] = set()
     unknown = 0
+    observed_dates = []
     rows = garmin.get("activities")
     for row in rows if isinstance(rows, list) else []:
         if not isinstance(row, dict):
@@ -59,20 +86,12 @@ def training_focus(
         if not identity or identity in seen or not start <= day <= end:
             continue
         seen.add(identity)
-        label = str(row.get("trainingEffectLabel") or "").upper()
-        category = _CATEGORIES.get(label)
+        observed_dates.append(day)
+        category = _CATEGORIES.get(str(row.get("trainingEffectLabel") or "").upper())
         load = number(row.get("activityTrainingLoad"))
         if category is None or load is None or load < 0:
             unknown += 1
-            continue
-        categories[category]["load"] += load
-        categories[category]["sessions"] += 1
-    return {
-        "start": start,
-        "end": end,
-        "zones": [row for row in zones if row["sensor"] in {"heart_rate", "power"}],
-        "categories": categories,
-        "unclassified_sessions": unknown,
-        "classified_sessions": len(seen) - unknown,
-        "category_source": "Garmin Connect",
-    }
+        else:
+            categories[category]["load"] += load
+            categories[category]["sessions"] += 1
+    return seen, unknown, observed_dates

@@ -27,6 +27,8 @@ from backend.sync.state import SyncStateRepository
 
 GARMIN_CAPABILITY_FAILURE_LIMIT = 3
 GARMIN_CAPABILITY_PAUSE_SECONDS = 24 * 60 * 60
+GARMIN_INITIAL_SYNC_DAYS = 60
+GARMIN_CATCHUP_MAX_DAYS = 90
 
 GARMIN_COLLECTION_SOURCES = (
     "sleep",
@@ -136,6 +138,37 @@ class GarminPayloadService:
             return {}
         return value if isinstance(value, dict) else {}
 
+    def automatic_sync_days(self, minimum_days: int) -> int:
+        return self.automatic_sync_window(minimum_days)[0]
+
+    def automatic_sync_window(self, minimum_days: int) -> tuple[int, date | None]:
+        """Return a bounded, contiguous refresh window for the oldest collection."""
+        snapshot = self.snapshot()
+        freshness = snapshot.get("source_freshness") or {}
+        sources = {"activities", "sleep", "hrv"} | (
+            set(freshness) & {"daily_stats", "resting_hr"}
+        )
+        today = self._local_today()
+        oldest_end: date | None = None
+        for source in sources:
+            coverage = freshness.get(source, {})
+            try:
+                start = date.fromisoformat(coverage["synced_start"])
+                end = date.fromisoformat(coverage["synced_end"])
+            except (KeyError, TypeError, ValueError):
+                return max(minimum_days, GARMIN_INITIAL_SYNC_DAYS), None
+            if (end - start).days + 1 < GARMIN_INITIAL_SYNC_DAYS:
+                return max(minimum_days, GARMIN_INITIAL_SYNC_DAYS), None
+            oldest_end = end if oldest_end is None else min(oldest_end, end)
+        if oldest_end is None:
+            return minimum_days, None
+        span = (today - oldest_end).days + 1
+        if span <= GARMIN_CATCHUP_MAX_DAYS:
+            return max(minimum_days, span), None
+        return GARMIN_CATCHUP_MAX_DAYS, oldest_end + timedelta(
+            days=GARMIN_CATCHUP_MAX_DAYS - 1
+        )
+
     def prepare_fixture(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._prepare(payload, self.snapshot(), fixture=True)
 
@@ -200,14 +233,45 @@ def _merge_garmin_source(
     source: str,
 ) -> None:
     incoming = payload.get(source)
+    previous_freshness = freshness.get(source, {})
     complete = source not in failed and pagination.get(source, {}).get("complete", True)
-    if source == "gear" and isinstance(incoming, list) and complete:
-        freshness[source] = {
-            "freshness": "current",
-            "fetched_at": payload["synced_at"],
-            "observed_at": payload["synced_at"],
-        }
+    if _merge_gear_freshness(source, incoming, complete, payload, freshness):
         return
+    _merge_source_freshness(
+        source, incoming, previous, previous_freshness, complete, payload, freshness
+    )
+    _merge_source_coverage(
+        source, previous_freshness, pagination, complete, payload, freshness
+    )
+    _merge_source_records(source, incoming, previous, payload)
+
+
+def _merge_gear_freshness(
+    source: str,
+    incoming: Any,
+    complete: bool,
+    payload: dict[str, Any],
+    freshness: dict[str, Any],
+) -> bool:
+    if source != "gear" or not isinstance(incoming, list) or not complete:
+        return False
+    freshness[source] = {
+        "freshness": "current",
+        "fetched_at": payload["synced_at"],
+        "observed_at": payload["synced_at"],
+    }
+    return True
+
+
+def _merge_source_freshness(
+    source: str,
+    incoming: Any,
+    previous: dict[str, Any],
+    previous_freshness: dict[str, Any],
+    complete: bool,
+    payload: dict[str, Any],
+    freshness: dict[str, Any],
+) -> None:
     if incoming:
         freshness[source] = {
             "freshness": "current" if complete else "partial",
@@ -215,13 +279,62 @@ def _merge_garmin_source(
             "observed_at": garmin_observations.garmin_source_observed_at(incoming),
         }
     elif source in previous:
-        freshness[source] = {**freshness.get(source, {}), "freshness": "stale"}
+        freshness[source] = {**previous_freshness, "freshness": "stale"}
+
+
+def _merge_source_coverage(
+    source: str,
+    previous_freshness: dict[str, Any],
+    pagination: dict[str, Any],
+    complete: bool,
+    payload: dict[str, Any],
+    freshness: dict[str, Any],
+) -> None:
+    if source in GARMIN_COLLECTION_SOURCES:
+        coverage: dict[str, Any] = {
+            key: previous_freshness[key]
+            for key in ("synced_start", "synced_end")
+            if key in previous_freshness
+        }
+        if source in pagination and complete:
+            coverage = _merge_collection_coverage(coverage, payload)
+        if source in freshness or source in pagination:
+            freshness[source] = {**freshness.get(source, {}), **coverage}
+
+
+def _merge_source_records(
+    source: str,
+    incoming: Any,
+    previous: dict[str, Any],
+    payload: dict[str, Any],
+) -> None:
     if source in GARMIN_COLLECTION_SOURCES and (
         source in previous or source in payload
     ):
         payload[source] = merge_garmin_records(incoming, previous.get(source))
     elif not incoming and source in previous:
         payload[source] = previous[source]
+
+
+def _merge_collection_coverage(
+    previous: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, str]:
+    """Keep the latest continuous successfully read window, including empty reads."""
+    try:
+        start = date.fromisoformat(payload["start"])
+        end = date.fromisoformat(payload["end"])
+    except (KeyError, TypeError, ValueError):
+        return previous
+    if previous:
+        prior_start = date.fromisoformat(previous["synced_start"])
+        prior_end = date.fromisoformat(previous["synced_end"])
+        if start <= prior_end + timedelta(days=1) and end >= prior_start - timedelta(
+            days=1
+        ):
+            start, end = min(start, prior_start), max(end, prior_end)
+        elif end < prior_end:
+            start, end = prior_start, prior_end
+    return {"synced_start": start.isoformat(), "synced_end": end.isoformat()}
 
 
 def collection_complete(payload: dict[str, Any]) -> bool:

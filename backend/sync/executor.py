@@ -54,12 +54,14 @@ class HistoricalSyncJobOwner:
         self, payload: dict[str, Any], job_type: str, provider: str
     ) -> tuple[int, date | None]:
         if job_type != "historical_backfill":
-            return int(
+            days = int(
                 payload.get("days")
                 or self._sync_state_repository.sync_period(
                     provider, self._sync_period_defaults, self._all_sync_days
                 )
-            ), None
+            )
+            end_date = payload.get("end_date")
+            return days, date.fromisoformat(str(end_date)[:10]) if end_date else None
         days = max(
             1,
             min(
@@ -178,7 +180,8 @@ class IntervalsSyncJobOwner:
         if historical_end is not None:
             sync_kwargs["end_date"] = historical_end
         result = self._intervals_sync_service.sync(**sync_kwargs)
-        self._historical_sync.add_next_end(result, historical_end, days)
+        if str(job.get("type") or "") == "historical_backfill":
+            self._historical_sync.add_next_end(result, historical_end, days)
         if result.get("status") == "already_running":
             return result
         try:
@@ -240,6 +243,10 @@ class GarminSyncJobOwner:
             "days": days,
             "operation_id": job["id"],
             "reason": reason,
+            "include_recovery": (
+                str(job.get("type") or "") != "historical_backfill"
+                and days != self._all_sync_days
+            ),
         }
         if historical_end is not None and self._garmin_fixture_loader.path() is None:
             sync_kwargs["end_date"] = historical_end
@@ -250,7 +257,8 @@ class GarminSyncJobOwner:
             and result.get("status") in {"ok", "partial"}
         ):
             self._morning_body_battery_service.refresh()
-        self._historical_sync.add_next_end(result, historical_end, days)
+        if str(job.get("type") or "") == "historical_backfill":
+            self._historical_sync.add_next_end(result, historical_end, days)
         return result
 
 
