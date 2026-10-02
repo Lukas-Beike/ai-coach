@@ -31,6 +31,31 @@ function analysisPointValue(item, point, unit) {
   return `${analysisValue(point.actual, item.unit)} (${analysisValue(point.value, "%")})`;
 }
 
+function appendAnalysisCoverage(section, series, compactInfo) {
+  const coverageSeries = series.filter((item) => item.coverage);
+  if (!coverageSeries.length && !compactInfo) return;
+  const coverage = document.createElement("details");
+  coverage.className = "analysis-coverage";
+  const summary = document.createElement("summary");
+  summary.textContent = "Datenabdeckung";
+  const note = document.createElement("p");
+  note.className = "muted";
+  note.textContent = "Fehlende Messungen bleiben unbekannt; sie sind keine Nullwerte oder bestätigten Ruhetage.";
+  const rows = document.createElement("ul");
+  coverageSeries.forEach((item) => {
+    const row = document.createElement("li");
+    row.textContent = `${item.label}: ${item.coverage}`;
+    rows.append(row);
+  });
+  if (!coverageSeries.length) {
+    const row = document.createElement("li");
+    row.textContent = "Keine Messhistorie vorhanden.";
+    rows.append(row);
+  }
+  coverage.append(summary, note, rows);
+  section.append(coverage);
+}
+
 let analysisInfoId = 0;
 
 function analysisChart(title, series, unit, start, end, note, compactInfo = false) {
@@ -45,6 +70,7 @@ function analysisChart(title, series, unit, start, end, note, compactInfo = fals
   description.className = "analysis-chart-note";
   description.textContent = note;
   if (!compactInfo) section.append(description);
+  appendAnalysisCoverage(section, series, compactInfo);
   if (!values.length) {
     const empty = document.createElement("p");
     empty.className = "empty";
@@ -269,7 +295,7 @@ function renderRecoveryCharts(report, root) {
   const weekStart = addDateKey(today, -((new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7));
   const currentDates = Array.from({ length: 7 }, (_, index) => addDateKey(weekStart, index));
   const weekDates = Array.from({ length: 8 }, (_, index) => addDateKey(weekStart, (index - 7) * 7));
-  const makeSeries = (dates, weekly) => recoveryChartSeries(metrics, baselines, dates, weekly);
+  const makeSeries = (dates, weekly) => recoveryChartSeries(metrics, baselines, dates, weekly, today);
   const note = "Gemeinsame Skala: relative Veränderung zum ersten vorhandenen Wert jeder Reihe (0 %). Originalwerte stehen in Legende und Tabelle. Ein höherer Ruhepuls bedeutet keine bessere Erholung. Pro Messwert wird eine Quelle verwendet, ohne Methoden zu mischen.";
   const currentChart = analysisChart("Erholung · Aktuelle Woche", makeSeries(currentDates, false), "%", currentDates[0], currentDates.at(-1), `${note} Fehlende Tagesmessungen bleiben als Lücken sichtbar.`, true);
   const weeklyChart = analysisChart("Erholung · Letzte 8 Wochen", makeSeries(weekDates, true), "%", weekDates[0], weekDates.at(-1), `${note} Jeder Datenpunkt ist der Durchschnitt der vorhandenen Tagesmessungen dieser Kalenderwoche. Die laufende Woche ist noch unvollständig; fehlende Messungen zählen nicht als null.`, true);
@@ -580,24 +606,23 @@ function seasonWeekSummary(week) {
   return `${dateLabel(week.start)} \u2013 ${dateLabel(week.end)}: ${week.sessions} erfasste Einheiten \u00b7 ${duration} (${week.duration_known_sessions}/${week.sessions} gemessen) \u00b7 ${distance} (${week.distance_known_sessions}/${week.sessions} gemessen)`;
 }
 
-function recoveryChartSeries(metrics, baselines, dates, weekly) {
+function recoveryChartSeries(metrics, baselines, dates, weekly, today) {
   const series = [];
   for (const [color, metric] of metrics.entries()) {
     for (const item of baselines.filter((candidate) => candidate.metric === metric[0])) {
-      series.push(recoverySeries(metric, item, dates, weekly, color));
+      series.push(recoverySeries(metric, item, dates, weekly, color, today));
     }
   }
   return series;
 }
 
-function recoverySeries([metric, title, unit], item, dates, weekly, color) {
+function recoverySeries([metric, title, unit], item, dates, weekly, color, today) {
   const values = new Map(item.history.map((point) => [point.date, point.value]));
   const points = dates.map((date) => recoveryPoint(date, values, weekly));
   const baseline = points.find((point) => point.actual != null && Number(point.actual) > 0);
   const method = metric === "hrv" ? " · " + item.measurement : "";
-  const today = new Date().toISOString().slice(0, 10);
   const chartEnd = dates.at(-1);
-  const coverageEnd = weekly || today > chartEnd ? today : chartEnd;
+  const coverageEnd = weekly || today < chartEnd ? today : chartEnd;
   const readings = item.history.filter((point) => point.date >= dates[0] && point.date <= coverageEnd);
   const expectedDays = Math.max(0, Math.round((Date.parse(coverageEnd) - Date.parse(dates[0])) / 86400000) + 1);
   const coverageLabel = `${readings.length}/${expectedDays} Tage mit Messung · 42-Tage-Normalbereich: ${item.nights} frühere Messnächte`;
