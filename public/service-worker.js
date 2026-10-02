@@ -1,6 +1,6 @@
-const CACHE = "intervals-coach-v250";
-const ASSETS = ["/", "/styles.css?v=233", "/api.js?v=221", "/navigation.js?v=219", "/appearance.js?v=218", "/state.js?v=217", "/views.js?v=218", "/forms.js?v=217", "/components.js?v=217", "/coach.js?v=4", "/app.js?v=243", "/nutrition.js?v=2", "/icon.svg?v=217", "/manifest.webmanifest"];
-const VERSIONED_ASSETS = new Set(["/nutrition.js", "/api.js", "/navigation.js", "/appearance.js", "/state.js", "/views.js", "/forms.js", "/components.js", "/coach.js", "/app.js", "/styles.css", "/logo.png", "/icon.svg"]);
+const CACHE = "intervals-coach-v257";
+const ASSETS = ["/", "/styles.css?v=238", "/api.js?v=221", "/navigation.js?v=220", "/appearance.js?v=218", "/state.js?v=218", "/views.js?v=218", "/forms.js?v=217", "/components.js?v=217", "/coach.js?v=5", "/app.js?v=245", "/nutrition.js?v=2", "/analysis.js?v=5", "/icon.svg?v=217", "/manifest.webmanifest"];
+const VERSIONED_ASSETS = new Set(["/analysis.js", "/nutrition.js", "/api.js", "/navigation.js", "/appearance.js", "/state.js", "/views.js", "/forms.js", "/components.js", "/coach.js", "/app.js", "/styles.css", "/logo.png", "/icon.svg"]);
 globalThis.addEventListener("install", (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS))));
 globalThis.addEventListener("activate", (event) => event.waitUntil((async () => {
   await globalThis.clients.claim();

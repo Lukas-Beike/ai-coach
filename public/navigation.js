@@ -7,7 +7,6 @@ const NAV_ROUTES = Object.freeze({
   "nutrition/diary": "nutritionPanel",
   "nutrition/meals": "nutritionPanel",
   analysis: "dataPanel",
-  "analysis/history": "dataPanel",
   "analysis/performance": "dataPanel",
   more: "settingsPanel",
   "more/connections": "settingsPanel",
@@ -34,11 +33,6 @@ function routeFromHash(hash = globalThis.location.hash) {
 function hashContainsKnownRoute(hash = globalThis.location.hash) {
   const rawRoute = String(hash || "").replace(/^#/, "").toLowerCase();
   return Object.hasOwn(NAV_ROUTES, rawRoute);
-}
-
-function analysisSegmentFromRoute(route = state.route) {
-  const segment = String(route || "").split("/")[1];
-  return ["history", "performance"].includes(segment) ? segment : "performance";
 }
 
 function planSegmentFromRoute(route = state.route) {

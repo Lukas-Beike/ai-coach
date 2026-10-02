@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=233">
+  <link rel="stylesheet" href="/styles.css?v=238">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -28,7 +28,7 @@
     </svg>
     <aside class="desktop-nav" aria-label="Hauptnavigation">
       <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
-      <a class="nav-item" href="#plan/overview" aria-controls="workoutsPanel" aria-label="Geplant" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Geplant</span></a>
+      <a class="nav-item" href="#plan/overview" aria-controls="workoutsPanel" aria-label="Kalender" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Kalender</span></a>
       <a class="nav-item" href="#analysis/performance" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
       <a class="nav-item" href="#nutrition/diary" aria-controls="nutritionPanel" aria-label="Ernährung" data-panel="nutritionPanel" data-route="nutrition"><svg class="nav-icon" aria-hidden="true"><use href="#icon-nutrition"></use></svg><span>Ernährung</span></a>
       <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
@@ -93,9 +93,9 @@
 
       <section id="workoutsPanel" class="panel" aria-label="Trainingskalender und Trainingsbibliothek">
         <div class="section-heading">
-          <div><span class="eyebrow">TRAININGSPLANUNG</span><h2>Geplant</h2><span class="tab-sync-detail">Nur lesen · Änderungen laufen über den Coach</span></div>
+          <div><span class="eyebrow">TRAININGSPLANUNG</span><h2>Kalender</h2><span class="tab-sync-detail">Nur lesen · Änderungen laufen über den Coach</span></div>
         </div>
-        <nav class="plan-segment-nav" aria-label="Geplante Bereiche">
+        <nav class="plan-segment-nav" aria-label="Kalenderbereiche">
           <a href="#plan/overview" data-plan-segment="overview" aria-current="page">Übersicht</a>
           <a href="#plan/library" data-plan-segment="library">Bibliothek</a>
         </nav>
@@ -137,26 +137,12 @@
 
       <section id="dataPanel" class="panel" aria-label="Analyse">
         <div class="section-heading">
-          <div><span class="eyebrow">AUSWERTUNG</span><h2>Analyse</h2><span class="tab-sync-detail">Verlauf und Leistungsdaten in einem Bereich</span></div>
+          <div><span class="eyebrow">AUSWERTUNG</span><h2>Analyse</h2><span class="tab-sync-detail">Leistungsdaten und aktuelle Trainingsform</span></div>
         </div>
-        <nav class="analysis-segment-nav" aria-label="Analysebereiche">
-          <a href="#analysis/performance" data-analysis-segment="performance" aria-current="page">Leistung</a>
-          <a href="#analysis/history" data-analysis-segment="history">Verlauf</a>
-        </nav>
-        <section id="analysisPerformanceSegment" class="analysis-segment" data-analysis-segment-panel="performance" aria-labelledby="analysisPerformanceTitle">
+        <div id="analysisHistoryCharts" class="analysis-history-charts" aria-label="Fitness und Leistungsentwicklung"></div>
+        <section id="analysisPerformanceSegment" class="analysis-segment" aria-labelledby="analysisPerformanceTitle">
           <div class="analysis-segment-heading"><div><span class="eyebrow">LEISTUNG</span><h3 id="analysisPerformanceTitle">Leistungsdaten</h3></div></div>
           <div id="performanceSummary" class="performance-card" aria-live="polite"></div>
-        </section>
-        <section id="analysisHistorySegment" class="analysis-segment" data-analysis-segment-panel="history" aria-labelledby="analysisHistoryTitle" hidden>
-          <div class="analysis-segment-heading"><div><span class="eyebrow">TRAININGSVERLAUF</span><h3 id="analysisHistoryTitle">Aktivitäten</h3></div><span id="activitySyncDetail" class="tab-sync-detail"></span></div>
-          <div class="activity-date-filter" aria-label="Aktivitäten nach Zeitraum filtern">
-            <label for="activityFromDate">Von<input id="activityFromDate" type="date"></label>
-            <label for="activityToDate">Bis<input id="activityToDate" type="date"></label>
-            <button type="button" id="activityFilterReset" class="activity-filter-button clear">Filter zurücksetzen</button>
-          </div>
-          <div id="activityStats" class="activity-stats-summary" aria-label="Aktivitätsstatistik"></div>
-          <div id="activityFilters" class="activity-filters" aria-label="Aktivitätstypen filtern"></div>
-          <div id="activities" class="activities"></div>
         </section>
       </section>
 
@@ -362,7 +348,7 @@
 
     <nav class="bottom-nav" aria-label="Hauptnavigation">
       <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
-      <a class="nav-item" href="#plan/overview" aria-controls="workoutsPanel" aria-label="Geplant" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Geplant</span></a>
+      <a class="nav-item" href="#plan/overview" aria-controls="workoutsPanel" aria-label="Kalender" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Kalender</span></a>
       <a class="nav-item" href="#analysis/performance" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
       <a class="nav-item" href="#nutrition/diary" aria-controls="nutritionPanel" aria-label="Ernährung" data-panel="nutritionPanel" data-route="nutrition"><svg class="nav-icon" aria-hidden="true"><use href="#icon-nutrition"></use></svg><span>Ernährung</span></a>
       <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
@@ -398,13 +384,14 @@
     </form>
   </dialog>
   <script src="/api.js?v=221" defer></script>
-  <script src="/navigation.js?v=219" defer></script>
-  <script src="/state.js?v=217" defer></script>
+  <script src="/navigation.js?v=220" defer></script>
+  <script src="/state.js?v=218" defer></script>
   <script src="/views.js?v=218" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/coach.js?v=4" defer></script>
+  <script src="/coach.js?v=5" defer></script>
   <script src="/nutrition.js?v=2" defer></script>
-  <script src="/app.js?v=243" defer></script>
+  <script src="/analysis.js?v=5" defer></script>
+  <script src="/app.js?v=245" defer></script>
 </body>
 </html>

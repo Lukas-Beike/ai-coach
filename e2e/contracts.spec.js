@@ -206,7 +206,7 @@ test("history barriers preserve optimistic and completed messages through naviga
   await expect(page.locator(".message.user")).toContainText("Fixture Run plan");
   await page.evaluate(() => { void load("/api/bootstrap?local=1", ["chat"]); });
   await expect.poll(() => page.evaluate(() => __contract.histories.length)).toBe(1);
-  await page.getByRole("link", { name: "Geplant", exact: true }).click();
+  await page.getByRole("link", { name: "Kalender", exact: true }).click();
   await page.evaluate(() => {
     __contract.push("completed", { message: { id: 102, content: "Run plan saved", client_turn_id: __contract.turn }, proposed_actions: [], command_receipts: [] });
     __contract.controller.close();
@@ -470,7 +470,7 @@ test("plan overview deep link focuses and reveals today after loading", { tag: "
 
 test("current plan payload displays each requested sport exactly", async ({ page }) => {
   await ready(page);
-  await page.getByRole("link", { name: "Geplant", exact: true }).click();
+  await page.getByRole("link", { name: "Kalender", exact: true }).click();
   await expect.poll(() => page.evaluate(() => state.loadPromise === null)).toBe(true);
   await page.evaluate(() => {
     const today = localDateKey(new Date());
@@ -488,7 +488,7 @@ test("current plan payload displays each requested sport exactly", async ({ page
 
 test("planned agenda prioritizes dates and sessions with compact weather and expandable details", { tag: "@responsive" }, async ({ page }, testInfo) => {
   await ready(page);
-  await page.getByRole("link", { name: "Geplant", exact: true }).click();
+  await page.getByRole("link", { name: "Kalender", exact: true }).click();
   await expect.poll(() => page.evaluate(() => state.loadPromise === null)).toBe(true);
   const today = await page.evaluate(() => {
     const date = timezoneDateKey(state.data?.profile?.timezone, new Date());
@@ -642,4 +642,52 @@ test("only current pending proposals expose an explicit confirmation action", as
       await expect(page.locator("#coachActionReview")).toContainText(status === "used" ? "Freigabe bereits verwendet" : "abgelaufen");
     }
   }
+});
+
+
+test("analysis charts preserve sources, gaps and dated values", { tag: "@responsive" }, async ({ page }) => {
+  const history = (() => {
+    const points = Array.from({ length: 90 }, (_, i) => ({
+      date: new Date(Date.UTC(2026, 6, 5 + i)).toISOString().slice(0, 10),
+      ctl: i === 40 || i === 89 ? null : 40 + i / 10,
+      atl: i === 40 || i === 89 ? null : 50 + Math.sin(i / 5) * 10,
+      tsb: i === 40 || i === 89 ? null : -10 + Math.cos(i / 5) * 10,
+    }));
+    const metrics = Object.fromEntries([
+      ["cycling_ftp_watts", 250], ["cycling_eftp_watts", 260], ["run_threshold_pace_seconds_per_km", 300],
+      ["cycling_vo2max_ml_kg_min", 52], ["running_vo2max_ml_kg_min", 54],
+    ].map(([key, value]) => [key, ["Intervals.icu", "Garmin Connect"].map((source, index) => ({
+      source, points: points.map((point, i) => ({ date: point.date, value: i === 40 ? null : value + index + i / 20 })),
+    }))]));
+    return { start: points[0].date, end: points.at(-1).date, load: { points }, metrics };
+  })();
+  const projection = fixture.get("/api/performance");
+  await page.route("**/api/performance", (route) => route.fulfill({ json: {
+    ...projection, performance: { ...projection.performance, history },
+  } }));
+  await ready(page);
+  await page.getByRole("link", { name: "Analyse", exact: true }).click();
+  const charts = page.locator("#analysisHistoryCharts");
+  await expect(charts.locator("svg")).toHaveCount(2);
+  await expect(charts.getByRole("heading", { name: "Belastung und Form" })).toBeVisible();
+  const ftp = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: "Leistungsentwicklung" }) });
+  await expect(ftp.locator(".analysis-chart-legend")).toContainText("Intervals.icu: 264,5 W");
+  await expect(ftp.locator(".analysis-chart-legend")).toContainText("Garmin Connect: 255,5 W");
+  await expect(ftp.locator("path[data-series]")).toHaveCount(5);
+  await expect(ftp.locator(".analysis-chart-legend")).toContainText("1,8 %");
+  await expect(ftp.locator(".analysis-chart-legend")).toContainText("-1,5 %");
+  expect((await ftp.locator('path[data-series="0"]').getAttribute("d")).match(/M/g)).toHaveLength(2);
+  const details = ftp.locator("details");
+  await details.locator(":scope > summary").click();
+  await expect(details).toHaveAttribute("open", "");
+  await expect(ftp.getByRole("table")).toBeVisible();
+  await expect(ftp.getByRole("columnheader", { name: /Rad.*FTP.*Garmin Connect/ })).toBeVisible();
+  const AxeBuilder = require("@axe-core/playwright").default;
+  expect((await new AxeBuilder({ page }).include("#analysisHistoryCharts").analyze()).violations).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  await page.evaluate(() => renderAnalysisHistory({
+    start: "2026-07-05", end: "2026-10-02", load: { points: [] }, metrics: {},
+  }));
+  await expect(charts.locator("svg")).toHaveCount(0);
+  await expect(charts.locator(".empty")).toHaveCount(2);
 });

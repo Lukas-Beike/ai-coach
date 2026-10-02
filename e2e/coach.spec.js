@@ -4,7 +4,7 @@ const { AxeBuilder } = require("@axe-core/playwright");
 
 const navigation = [
   ["Coach", "chatPanel", "coach"],
-  ["Geplant", "workoutsPanel", "plan/overview"],
+  ["Kalender", "workoutsPanel", "plan/overview"],
   ["Analyse", "dataPanel", "analysis/performance"],
   ["Ernährung", "nutritionPanel", "nutrition/diary"],
   ["Mehr", "settingsPanel", "more"],
@@ -176,8 +176,10 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
 
     await page.getByRole("link", { name: "Analyse", exact: true }).click();
     await expect(page).toHaveURL(/#analysis\/performance$/);
-    await page.getByRole("link", { name: "Verlauf", exact: true }).click();
-    await expect(page).toHaveURL(/#analysis\/history$/);
+    await expect(page.getByRole("link", { name: "Verlauf", exact: true })).toHaveCount(0);
+    await expect(page.locator("#activityFilters, #activityFromDate, #activityToDate")).toHaveCount(0);
+    await page.getByRole("link", { name: "Kalender", exact: true }).click();
+    await expect(page).toHaveURL(/#plan\/overview$/);
     await page.goBack();
     await expect(page.locator("#dataPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#analysis\/performance$/);
@@ -217,9 +219,9 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
     await expect(page.locator("#profileContextNotice")).toBeVisible();
 
-    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    await page.getByRole("link", { name: "Kalender", exact: true }).click();
     await expect(page).toHaveURL(/#plan\/overview$/);
-    await expect(page.getByRole("heading", { name: "Geplant", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Kalender", exact: true })).toBeVisible();
     await page.locator(".plan-segment-nav").getByRole("link", { name: "Bibliothek", exact: true }).click();
     await expect(page).toHaveURL(/#plan\/library$/);
     await expect(page.getByRole("heading", { name: "Bibliothek", exact: true })).toBeVisible();
@@ -266,7 +268,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     expect(safetyLayout.hintBottom).toBeLessThanOrEqual(Math.min(safetyLayout.composerTop, safetyLayout.navigationTop));
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.getByRole("link", { name: "Geplant", exact: true }).focus();
+    await page.getByRole("link", { name: "Kalender", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
     await expect(page.locator(".planned-day.is-today")).toBeInViewport();
@@ -362,7 +364,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
       return window.scrollY;
     });
     expect(savedScrollY).toBeGreaterThan(0);
-    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    await page.getByRole("link", { name: "Kalender", exact: true }).click();
     await expect(page).toHaveURL(/#plan\/overview$/);
     await page.getByRole("link", { name: "Coach", exact: true }).click();
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(savedScrollY);
@@ -404,7 +406,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await page.goto("/#coach");
     await expect(page.locator("#appShell")).toBeVisible();
     await expect.poll(() => Boolean(releaseHistory)).toBe(true);
-    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    await page.getByRole("link", { name: "Kalender", exact: true }).click();
     releaseHistory();
     const latest = page.locator(`[data-message-id="${messages.at(-1).id}"]`);
     await expect(latest).toBeAttached();
@@ -494,7 +496,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await expect(page.locator("#appShell")).toBeVisible();
     await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
     await page.evaluate(() => window.scrollTo({ top: 240, behavior: "auto" }));
-    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    await page.getByRole("link", { name: "Kalender", exact: true }).click();
     messages = [...messages, {
       id: 92_018,
       role: "assistant",
@@ -587,7 +589,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     }
     await expect(input).toBeVisible();
     await input.fill("Dieser Entwurf bleibt beim Tabwechsel erhalten.");
-    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    await page.getByRole("link", { name: "Kalender", exact: true }).click();
     await expect(page.locator("#confirmationDialog")).toBeHidden();
     await expect(input).toHaveValue("Dieser Entwurf bleibt beim Tabwechsel erhalten.");
     await page.getByRole("link", { name: "Coach", exact: true }).click();
@@ -623,7 +625,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
       "",
       ...Array.from({ length: 12 }, (_, index) => `## Abschnitt ${index + 1}\n\n${"Ausführliche, gut lesbare Trainingsbegründung. ".repeat(5)}`),
     ].join("\n");
-    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    await page.getByRole("link", { name: "Kalender", exact: true }).click();
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const inactiveScrollY = await page.evaluate(() => window.scrollY);
     await page.evaluate((content) => {
