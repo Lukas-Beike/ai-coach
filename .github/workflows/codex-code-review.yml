@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       pull_request_number:
-        description: Re-evaluate a trusted release promotion from protected develop
+        description: Re-evaluate the review policy for an open PR from protected develop
         required: true
         type: string
   # Re-evaluate the policy when the target branch advances. This never starts
@@ -229,13 +229,14 @@ jobs:
                 if (await hasCodexUsageLimit(pullRequest, Date.parse(latestReview.submitted_at))) return 'none';
                 return 'p1';
               }
+              if (latestReview.state === 'CHANGES_REQUESTED' && !cleanFollowUp) return 'unresolved';
               const unresolvedReviewIds = await getUnresolvedCodexReviewIds(pullRequest);
               return unresolvedReviewIds.size > 0 ? 'unresolved' : 'none';
             };
             if (context.eventName === 'workflow_dispatch') {
               const pullRequestNumber = Number(context.payload.inputs?.pull_request_number);
               if (context.ref !== 'refs/heads/develop' || !Number.isSafeInteger(pullRequestNumber) || pullRequestNumber < 1) {
-                core.setFailed('Promotion re-evaluation requires protected develop and a valid pull request number.');
+                core.setFailed('Review re-evaluation requires protected develop and a valid pull request number.');
                 return;
               }
               const { data: pullRequest } = await github.rest.pulls.get({
@@ -243,19 +244,23 @@ jobs:
                 repo: context.repo.repo,
                 pull_number: pullRequestNumber,
               });
-              if (pullRequest.state !== 'open' || pullRequest.draft === true || !isReleasePromotion(pullRequest)) {
-                core.setFailed('Only an open trusted release promotion can be re-evaluated.');
+              if (pullRequest.state !== 'open' || pullRequest.draft === true ||
+                  !['develop', 'main'].includes(pullRequest.base.ref)) {
+                core.setFailed('Only an open non-draft PR targeting develop or main can be re-evaluated.');
                 return;
               }
               const manualReviewRequestedAt = await getManualReviewRequest(pullRequest);
+              const promotion = isReleasePromotion(pullRequest);
+              const skipCodexReview = shouldSkipCodexReview(pullRequest) && !manualReviewRequestedAt;
               affectedPullRequests = [{
                 pullRequestNumber,
-                baseRef: 'main',
-                checkName: 'Codex code review (main)',
-                reviewRequestedAt: manualReviewRequestedAt,
-                skipCodexReview: !manualReviewRequestedAt,
-                runCodexReview: Boolean(manualReviewRequestedAt),
-                reviewRequired: Boolean(manualReviewRequestedAt),
+                baseRef: pullRequest.base.ref,
+                checkName: pullRequest.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
+                reviewRequestedAt: promotion ? manualReviewRequestedAt : '',
+                skipCodexReview,
+                runCodexReview: promotion && Boolean(manualReviewRequestedAt),
+                reviewRequired: promotion ? Boolean(manualReviewRequestedAt)
+                  : !skipCodexReview && (await getReviewRequirement(pullRequest)) !== 'none',
               }];
             } else if (context.eventName === 'push') {
               const base = context.ref.replace(/^refs\/heads\//, '');
