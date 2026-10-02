@@ -174,7 +174,7 @@ def aerobic_analysis(activity: dict[str, Any]) -> dict[str, Any]:
 
 
 def _pace_target(text: str) -> tuple[str, list[float], str] | None:
-    parts = re.findall(r"(?<!\d)(\d++):([0-5]\d)", text)
+    parts = re.findall(r"\b(\d{1,6}):([0-5]\d)", text)
     distances = {
         "/KM": 1000,
         "/MI": 1609.344,
@@ -250,37 +250,8 @@ def _interval_steps(
                 }
             )
             continue
-        sensor, low, high, unit = target
-        samples = _samples(activity, sensor, start, end)
-        measured = sum(weight for _, weight, _ in samples)
-        mean = (
-            sum(weight * value for _, weight, value in samples) / measured
-            if measured
-            else None
-        )
-        in_range = sum(weight for _, weight, value in samples if low <= value <= high)
-        adequate = measured / (end - start) >= 0.8
-        midpoint = (low + high) / 2
         results.append(
-            {
-                "step": index + 1,
-                "target": steps[index]["target"],
-                "unit": unit,
-                "start": start,
-                "end": end,
-                "target_low": low,
-                "target_high": high,
-                "status": "ok" if adequate else "insufficient_data",
-                "measured_seconds": round(measured, 1),
-                "coverage": round(measured / (end - start), 3),
-                "mean": round(mean, 2) if adequate and mean is not None else None,
-                "seconds_in_target": round(in_range, 1) if adequate else None,
-                "average_deviation_percent": round(
-                    100 * (mean - midpoint) / midpoint, 2
-                )
-                if adequate and mean is not None and midpoint > 0
-                else None,
-            }
+            _measured_step(activity, steps[index], index, start, end, target)
         )
 
     return results
@@ -365,3 +336,36 @@ def _aerobic_halves(
         )
 
     return halves
+
+
+def _measured_step(
+    activity: dict, step: dict, index: int, start: float, end: float, target: tuple
+) -> dict:
+    sensor, low, high, unit = target
+    samples = _samples(activity, sensor, start, end)
+    measured = sum(weight for _, weight, _ in samples)
+    mean = (
+        sum(weight * value for _, weight, value in samples) / measured
+        if measured
+        else None
+    )
+    in_range = sum(weight for _, weight, value in samples if low <= value <= high)
+    adequate = measured / (end - start) >= 0.8
+    midpoint = (low + high) / 2
+    return {
+        "step": index + 1,
+        "target": step["target"],
+        "unit": unit,
+        "start": start,
+        "end": end,
+        "target_low": low,
+        "target_high": high,
+        "status": "ok" if adequate else "insufficient_data",
+        "measured_seconds": round(measured, 1),
+        "coverage": round(measured / (end - start), 3),
+        "mean": round(mean, 2) if adequate and mean is not None else None,
+        "seconds_in_target": round(in_range, 1) if adequate else None,
+        "average_deviation_percent": round(100 * (mean - midpoint) / midpoint, 2)
+        if adequate and mean is not None and midpoint > 0
+        else None,
+    }

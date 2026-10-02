@@ -60,15 +60,13 @@ def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
         _recorded_segment(total, coverage, width, kind, ftp)
         for total, coverage in zip(totals, known, strict=True)
     ]
-    return (
-        {
-            "source": "recorded",
-            "unit": "W" if kind == "watts" else "bpm",
-            "segments": segments,
-        }
-        if any(item["value"] is not None for item in segments)
-        else None
-    )
+    if not any(item["value"] is not None for item in segments):
+        return None
+    return {
+        "source": "recorded",
+        "unit": "W" if kind == "watts" else "bpm",
+        "segments": segments,
+    }
 
 
 def _planned_segment(step: dict[str, Any]) -> tuple[dict[str, Any], str] | None:

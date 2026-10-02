@@ -357,7 +357,18 @@ function weeklyPointGroup(point, index, chart) {
       const markerY = value == null ? 152 : y(value);
       group.append(analysisSvg("circle", { cx: x(index), cy: markerY, r: 12, fill: "transparent" }));
       group.append(analysisSvg("circle", { cx: x(index), cy: markerY, r: 4, class: "weekly-load-point", ...(point.partial_period || partial || value == null ? { "stroke-dasharray": "2 2", fill: "var(--surface)" } : {}) }));
-      group.append(analysisSvg("text", { x: x(index), y: markerY - 12, "text-anchor": "middle" }, value == null ? "–" : `${Math.round(value)}${partial ? "?" : ""}`));
+      let valueText = String.fromCharCode(8211);
+      if (value != null) valueText = String(Math.round(value)) + (partial ? "?" : "");
+      group.append(analysisSvg("text", { x: x(index), y: markerY - 12, "text-anchor": "middle" }, valueText));
+      appendWeeklyPointTooltip(point, group, chart);
+    }
+    return group;
+
+}
+
+function appendWeeklyPointTooltip(point, group, chart) {
+  const {section, weekly} = chart;
+  const partial = point.metric.measured_sessions < point.metric.total_sessions;
       weeklyLoadTooltip(section, group, weekly ? `${dateLabel(point.start)} – ${dateLabel(point.end)}` : dateLabel(point.date), [
         `Wochenbelastung: ${reportMetric(point.metric, "")}`,
         ...(point.partial_period ? ["Diese Woche läuft noch."] : []),
@@ -366,9 +377,6 @@ function weeklyPointGroup(point, index, chart) {
         ...(point.activities || []).map((activity) => activitySportLabel({ type: activity.sport })),
         "Quelle: Intervals.icu · Aufsummierte Trainingsbelastung aufgezeichneter Einheiten. Ohne neue Einheiten bleibt die Summe konstant; keine Ermüdungskurve.",
       ]);
-    }
-    return group;
-
 }
 
 function appendWeeklyActivityMarkers(point, index, chart) {

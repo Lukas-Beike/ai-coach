@@ -41,22 +41,7 @@ def personal_recovery(
         # Unknown HRV measurement methods cannot support a homogeneous baseline.
         if row.get("hrv_method") in {"RMSSD", "SDNN"}:
             add((INTERVALS_SOURCE, "hrv", str(row["hrv_method"])), day, row.get("hrv"))
-    specifications = (
-        ("sleep", "sleep", "sleepTimeSeconds", 3600),
-        ("resting_hr", "resting_hr", "restingHeartRate", 1),
-        ("hrv", "hrv", "lastNightAvg", 1),
-    )
-    for section, metric, field, scale in specifications:
-        for day, record in sorted(
-            dated_garmin_recovery_records(garmin.get(section)), key=lambda item: item[0]
-        ):
-            if not history_start <= day <= current_day:
-                continue
-            value, observed = garmin_recovery_metric(
-                {section: [record]}, section, (field,)
-            )
-            if observed == day:
-                add(("Garmin Connect", metric, field), day, value, scale)
+    _add_garmin_records(garmin, history_start, current_day, add)
     baselines = [
         _baseline(key, records, cutoff, today)
         for key, records in sorted(groups.items())
@@ -175,3 +160,24 @@ def _sleep_deficits(groups: dict, target: float, today: date) -> list[dict[str, 
             )
 
     return deficits
+
+
+def _add_garmin_records(
+    garmin: dict, history_start: str, current_day: str, add: Any
+) -> None:
+    specifications = (
+        ("sleep", "sleep", "sleepTimeSeconds", 3600),
+        ("resting_hr", "resting_hr", "restingHeartRate", 1),
+        ("hrv", "hrv", "lastNightAvg", 1),
+    )
+    for section, metric, field, scale in specifications:
+        for day, record in sorted(
+            dated_garmin_recovery_records(garmin.get(section)), key=lambda item: item[0]
+        ):
+            if not history_start <= day <= current_day:
+                continue
+            value, observed = garmin_recovery_metric(
+                {section: [record]}, section, (field,)
+            )
+            if observed == day:
+                add(("Garmin Connect", metric, field), day, value, scale)
