@@ -223,10 +223,10 @@ jobs:
                 pullRequest,
                 await hasCompletedCleanReaction(pullRequest, Date.parse(latestReview.submitted_at)),
               );
-              const latestReviewHasP1 = /\[P1\]/i.test(latestReview.body || '') || comments.some((comment) => (
+              const latestReviewHasP1 = /(?:\[P1\]|P1 Badge)/i.test(latestReview.body || '') || comments.some((comment) => (
                 codexBotLogins.has(comment.user?.login) &&
                 comment.pull_request_review_id === latestReview.id &&
-                /\[P1\]/i.test(comment.body || '')
+                /(?:\[P1\]|P1 Badge)/i.test(comment.body || '')
               ));
               if (latestReviewHasP1 && !cleanFollowUp) {
                 if (await hasCodexUsageLimit(pullRequest, Date.parse(latestReview.submitted_at))) return 'none';
@@ -257,6 +257,8 @@ jobs:
               const skipCodexReview = shouldSkipCodexReview(pullRequest) && !manualReviewRequestedAt;
               affectedPullRequests = [{
                 pullRequestNumber,
+                evaluatedHead: pullRequest.head.sha,
+                evaluatedBase: pullRequest.base.sha,
                 baseRef: pullRequest.base.ref,
                 checkName: pullRequest.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
                 reviewRequestedAt: promotion ? manualReviewRequestedAt : '',
@@ -283,6 +285,8 @@ jobs:
                   const manualReviewRequested = Boolean(manualReviewRequestedAt);
                   return {
                     pullRequestNumber: pullRequest.number,
+                    evaluatedHead: pullRequest.head.sha,
+                    evaluatedBase: pullRequest.base.sha,
                     baseRef: base,
                     checkName: base === 'main' ? 'Codex code review (main)' : 'Codex code review',
                     reviewRequestedAt: manualReviewRequested ? pushReviewRequestedAt : '',
@@ -307,6 +311,8 @@ jobs:
                 const skipCodexReview = shouldSkipCodexReview(pullRequest) && !manualReviewRequestedAt;
                 affectedPullRequests = [{
                   pullRequestNumber: pullRequest.number,
+                  evaluatedHead: pullRequest.head.sha,
+                  evaluatedBase: pullRequest.base.sha,
                   baseRef: pullRequest.base.ref,
                   checkName: pullRequest.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
                   reviewRequestedAt: '',
@@ -361,6 +367,8 @@ jobs:
                 }
                 affectedPullRequests = [{
                   pullRequestNumber: response.data.number,
+                  evaluatedHead: response.data.head.sha,
+                  evaluatedBase: response.data.base.sha,
                   baseRef: response.data.base.ref,
                   checkName: response.data.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
                   reviewRequestedAt: context.payload.comment.created_at,
@@ -737,6 +745,8 @@ jobs:
           PR_NUMBER: ${{ matrix.pullRequestNumber }}
           CHECK_NAME: ${{ matrix.checkName }}
           REVIEW_REQUIRED: ${{ matrix.reviewRequired }}
+          EVALUATED_HEAD: ${{ matrix.evaluatedHead }}
+          EVALUATED_BASE: ${{ matrix.evaluatedBase }}
         with:
           github-token: ${{ github.token }}
           script: |
@@ -746,6 +756,11 @@ jobs:
               pull_number: Number(process.env.PR_NUMBER),
             });
             const headSha = pullRequest.data.head.sha;
+            if (headSha !== process.env.EVALUATED_HEAD ||
+                pullRequest.data.base.sha !== process.env.EVALUATED_BASE) {
+              core.setFailed('The PR revision changed after policy evaluation; re-evaluate its current head and base.');
+              return;
+            }
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -767,6 +782,15 @@ jobs:
               : (usageLimitReached
                 ? `Codex usage limit reached for code reviews; skipping the review check for PR #${pullRequest.data.number}.`
                 : 'The previous Codex review had no P1 finding. Fix the existing findings and close their comments; do not request another review.');
+            const { data: currentPullRequest } = await github.rest.pulls.get({
+              ...context.repo, pull_number: Number(process.env.PR_NUMBER),
+            });
+            if (currentPullRequest.state !== 'open' || currentPullRequest.draft === true ||
+                currentPullRequest.head.sha !== process.env.EVALUATED_HEAD ||
+                currentPullRequest.base.sha !== process.env.EVALUATED_BASE) {
+              core.setFailed('The PR revision changed during policy enforcement; re-evaluate its current head and base.');
+              return;
+            }
             await github.rest.checks.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
