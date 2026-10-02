@@ -88,6 +88,7 @@ class CoachCommandToolsAssemblyTests(unittest.TestCase):
             deps["activity_feedback_service"].return_value,
             deps["competition_service"].return_value,
             deps["nutrition_service"].return_value,
+            equipment=None,
         )
         constructors["CoachProfileUpdateService"].assert_called_once_with(
             deps["profile_service"].return_value, deps["database_manager"].return_value, deps["database_lock"]

@@ -54,12 +54,14 @@ class HistoricalSyncJobOwner:
         self, payload: dict[str, Any], job_type: str, provider: str
     ) -> tuple[int, date | None]:
         if job_type != "historical_backfill":
-            return int(
+            days = int(
                 payload.get("days")
                 or self._sync_state_repository.sync_period(
                     provider, self._sync_period_defaults, self._all_sync_days
                 )
-            ), None
+            )
+            end_date = payload.get("end_date")
+            return days, date.fromisoformat(str(end_date)[:10]) if end_date else None
         days = max(
             1,
             min(
@@ -125,6 +127,7 @@ class IntervalsSyncJobOwner:
         competition_sync_service: CompetitionSyncService,
         sync_operation_observer: SyncOperationObserver,
         intervals_resync_gate: ProviderResyncGate,
+        activity_detail_service: Any = None,
     ) -> None:
         self._historical_sync = historical_sync
         self._intervals_sync_service = intervals_sync_service
@@ -133,6 +136,7 @@ class IntervalsSyncJobOwner:
         self._competition_sync_service = competition_sync_service
         self._sync_operation_observer = sync_operation_observer
         self._intervals_resync_gate = intervals_resync_gate
+        self._activity_detail_service = activity_detail_service
 
     def execute_specific(
         self,
@@ -141,6 +145,11 @@ class IntervalsSyncJobOwner:
         reason: str,
         job_type: str,
     ) -> dict[str, Any] | None:
+        if job_type == "activity_details":
+            if self._activity_detail_service is None:
+                raise AppError(503, "Aktivitätsdetails sind nicht verfügbar.")
+            with self._intervals_resync_gate.operation():
+                return self._activity_detail_service.refresh(payload["activity_id"])
         if job_type == "performance_refresh":
             return self._performance_refresh_service.refresh()
         if job_type == "competition_push":
@@ -171,7 +180,8 @@ class IntervalsSyncJobOwner:
         if historical_end is not None:
             sync_kwargs["end_date"] = historical_end
         result = self._intervals_sync_service.sync(**sync_kwargs)
-        self._historical_sync.add_next_end(result, historical_end, days)
+        if str(job.get("type") or "") == "historical_backfill":
+            self._historical_sync.add_next_end(result, historical_end, days)
         if result.get("status") == "already_running":
             return result
         try:
@@ -233,6 +243,10 @@ class GarminSyncJobOwner:
             "days": days,
             "operation_id": job["id"],
             "reason": reason,
+            "include_recovery": (
+                str(job.get("type") or "") != "historical_backfill"
+                and days != self._all_sync_days
+            ),
         }
         if historical_end is not None and self._garmin_fixture_loader.path() is None:
             sync_kwargs["end_date"] = historical_end
@@ -243,7 +257,8 @@ class GarminSyncJobOwner:
             and result.get("status") in {"ok", "partial"}
         ):
             self._morning_body_battery_service.refresh()
-        self._historical_sync.add_next_end(result, historical_end, days)
+        if str(job.get("type") or "") == "historical_backfill":
+            self._historical_sync.add_next_end(result, historical_end, days)
         return result
 
 
@@ -289,9 +304,7 @@ class SyncJobProviderDispatcher:
         self._garmin_jobs = garmin_jobs
         self._calendar_weather_jobs = calendar_weather_jobs
 
-    def execute(
-        self, job: dict[str, Any], envelope: dict[str, Any]
-    ) -> dict[str, Any]:
+    def execute(self, job: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         payload = envelope["payload"]
         provider = envelope["provider"]
         job_type = envelope["type"]
@@ -315,9 +328,7 @@ class SyncJobProviderDispatcher:
         if provider == "garmin":
             return self._garmin_jobs.execute(job, payload, reason)
         if provider in {"calendar", "weather"}:
-            return self._calendar_weather_jobs.execute(
-                provider, job, payload, reason
-            )
+            return self._calendar_weather_jobs.execute(provider, job, payload, reason)
         raise AppError(400, "Unbekannter Providerjob.", reason="invalid_job_request")
 
     def _nutrition_sync(self, payload: dict[str, Any]) -> dict[str, Any]:

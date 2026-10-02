@@ -32,6 +32,7 @@ CALENDAR_ACTIVITY_FIELDS = (
     "icu_rpe",
     "feel",
     "source",
+    "workout_profile",
 )
 
 
@@ -278,7 +279,11 @@ def _weekly_compliance_row(
         1 for compliance in rows if compliance["status"] == "completed"
     )
     basis, planned_value, actual_value = _weekly_compliance_values(rows)
-    percentage = round(actual_value * 100 / planned_value) if planned_value else None
+    percentage = (
+        round(actual_value * 100 / planned_value)
+        if planned_value and actual_value is not None
+        else None
+    )
     return {
         "week_start": week_start,
         "week_end": (date.fromisoformat(week_start) + timedelta(days=6)).isoformat(),

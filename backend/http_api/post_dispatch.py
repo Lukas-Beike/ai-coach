@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.errors import NOT_FOUND_ERROR, AppError
+from backend.http_api.analysis import AnalysisRoutes
 from backend.http_api.auth_post import AuthPostRoutes
 from backend.http_api.chat_cancel_post import ChatCancelPostRoutes
 from backend.http_api.chat_post import ChatPostRoutes
@@ -37,6 +38,7 @@ class HttpAuthenticatedPostRoutes:
     privacy_delete: PrivacyDeletePostRoutes
     diagnostics_delete: DiagnosticsDeletePostRoutes
     nutrition: NutritionPostRoutes
+    analysis: AnalysisRoutes | None = None
 
 
 class HttpPostDispatcher:
@@ -63,6 +65,7 @@ class HttpPostDispatcher:
         self._privacy_delete = authenticated_routes.privacy_delete
         self._diagnostics_delete = authenticated_routes.diagnostics_delete
         self._nutrition = authenticated_routes.nutrition
+        self._analysis = authenticated_routes.analysis
 
     def handle_before_auth(self, handler: Any, path: str) -> bool:
         return self._auth_routes.handle(handler, path) or self._restore_route.handle(
@@ -77,6 +80,8 @@ class HttpPostDispatcher:
     def handle_authenticated(
         self, handler: Any, path: str, session: dict[str, Any]
     ) -> None:
+        if self._analysis and self._analysis.handle_post(handler, path):
+            return
         if self._coach_actions.handle(handler, path, session):
             return
         if self._chat.handle(handler, path, session):

@@ -75,6 +75,10 @@ class FailingListCheckinRepository(CheckinRepository):
 class AthleteCheckinTests(unittest.TestCase):
     def setUp(self):
         self.manager = FakeManager()
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+            )
         self.repository = CheckinRepository(lambda: "2026-08-31T12:00:00+00:00")
         self.service = CheckinService(self.manager, self.repository, lambda: TODAY)
 

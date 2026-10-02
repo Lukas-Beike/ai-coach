@@ -13,12 +13,15 @@ class PerformanceContextTests(unittest.TestCase):
             "as_of": None,
             "metrics": {},
         }
-        self.assertEqual(
-            current_performance_context(None, {}, {}, date(2026, 9, 20)), expected
-        )
-        self.assertEqual(
-            current_performance_context({}, {}, {}, date(2026, 9, 20)), expected
-        )
+        for snapshot in (None, {}):
+            result = current_performance_context(snapshot, {}, {}, date(2026, 9, 20))
+            recovery = result.pop("personal_recovery")
+            focus = result.pop("training_focus")
+            self.assertEqual(focus["zones"], [])
+            self.assertEqual(focus["classified_sessions"], 0)
+            self.assertEqual(result, expected)
+            self.assertEqual(recovery["baselines"], [])
+            self.assertEqual(recovery["sleep_deficits"], [])
 
     def test_composes_intervals_garmin_load_health_and_validation(self):
         today = date(2026, 9, 20)

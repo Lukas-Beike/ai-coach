@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import builtins
+import math
 from typing import Any
 
 from backend.errors import AppError
@@ -14,14 +16,14 @@ ACTIVITY_FEEDBACK_TEXT_LIMITS = {
 }
 
 
-def normalize_activity_feedback(activity_id: Any, value: Any) -> dict[str, str]:
+def normalize_activity_feedback(activity_id: Any, value: Any) -> dict[str, Any]:
     """Normalize an untrusted activity-feedback payload without mutating it."""
     normalized_id = str(activity_id or "").strip()
     if not normalized_id or len(normalized_id) > 200:
         raise AppError(400, "Die Aktivität konnte nicht eindeutig zugeordnet werden.")
     if not isinstance(value, dict):
         raise AppError(400, "Die Aktivitätsrückmeldung muss ein Objekt sein.")
-    return {
+    normalized: dict[str, Any] = {
         "activity_id": normalized_id,
         "activity_name": str(value.get("activity_name") or "").strip()[
             : ACTIVITY_FEEDBACK_TEXT_LIMITS["activity_name"]
@@ -33,6 +35,20 @@ def normalize_activity_feedback(activity_id: Any, value: Any) -> dict[str, str]:
             : ACTIVITY_FEEDBACK_TEXT_LIMITS["notes"]
         ],
     }
+    if "session_rpe" in value:
+        rpe = value["session_rpe"]
+        if rpe is not None and (
+            type(rpe) not in {int, float}
+            or not math.isfinite(rpe)
+            or not 0 <= rpe <= 10
+        ):
+            raise AppError(400, "Der Aktivitäts-RPE muss zwischen 0 und 10 liegen.")
+        normalized["session_rpe"] = rpe
+    if "deviation_reason" in value:
+        normalized["deviation_reason"] = str(
+            value.get("deviation_reason") or ""
+        ).strip()[:500]
+    return normalized
 
 
 def _activity_id(activity: Any) -> Any:
@@ -63,7 +79,21 @@ class ActivityFeedbackService:
     def save(self, activity_id: Any, value: Any) -> dict[str, Any]:
         feedback = normalize_activity_feedback(activity_id, value)
         with self._database_manager.unit_of_work() as db:
-            if not feedback["notes"]:
+            existing = self._feedback_repository.get(db, feedback["activity_id"]) or {}
+            for field in (
+                "notes",
+                "activity_name",
+                "activity_date",
+                "session_rpe",
+                "deviation_reason",
+            ):
+                if field not in value and field in existing:
+                    feedback[field] = existing[field]
+            if (
+                not feedback["notes"]
+                and feedback.get("session_rpe") is None
+                and not feedback.get("deviation_reason")
+            ):
                 self._feedback_repository.delete(db, feedback["activity_id"])
                 return {"status": "ok", "activity_feedback": None}
             self._feedback_repository.upsert(db, feedback)
@@ -80,7 +110,11 @@ class ActivityFeedbackService:
     def save_coach(self, activity_id: Any, value: Any) -> dict[str, Any]:
         """Save feedback only for an activity in the latest local snapshot."""
         normalized = normalize_activity_feedback(activity_id, value)
-        if not normalized["notes"]:
+        if (
+            not normalized["notes"]
+            and normalized.get("session_rpe") is None
+            and not normalized.get("deviation_reason")
+        ):
             raise AppError(400, "Die Rückmeldung darf nicht leer sein.")
         with self._database_manager.unit_of_work() as db:
             snapshot = latest_snapshot(db, self._snapshot_repository) or {}
@@ -102,15 +136,15 @@ class ActivityFeedbackService:
                     404,
                     "Die Aktivität ist im aktuellen lokalen Trainingssnapshot nicht vorhanden.",
                 )
-        return self.save(normalized["activity_id"], normalized)
+        return self.save(normalized["activity_id"], value)
 
     def context(self) -> dict[str, Any]:
         return {
             "recent": self.list(),
-            "scope": "Only athlete-entered notes about completed activities; this feedback is separate from daily check-ins and provider values.",
+            "scope": "Only athlete-entered notes, session RPE and deviation reasons about completed activities; this feedback is separate from daily check-ins and provider values.",
         }
 
-    def attach_to_activities(self, activities: Any) -> list[dict[str, Any]]:
+    def attach_to_activities(self, activities: Any) -> builtins.list[dict[str, Any]]:
         feedback_by_activity = {item["activity_id"]: item for item in self.list(500)}
         result = []
         for activity in activities if isinstance(activities, list) else []:

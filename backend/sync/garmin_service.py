@@ -15,8 +15,8 @@ from backend.athlete.profile import timezone_name
 from backend.config import Config
 from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.performance import morning_battery as performance_morning_battery
-from backend.providers import http as provider_http
 from backend.providers import garmin_morning
+from backend.providers import http as provider_http
 from backend.providers.garmin import (
     GarminClientFactory,
     GarminCollectionOptions,
@@ -81,6 +81,7 @@ class GarminRemoteReader:
         *,
         status: Callable[[str], None],
         cancel_event: threading.Event | None = None,
+        include_recovery: bool | None = None,
     ) -> tuple[dict[str, Any], list[tuple[date, date]]]:
         today = end_date or self._local_today()
         windows = split_date_windows(
@@ -151,7 +152,11 @@ class GarminRemoteReader:
             capability_failure=self._state_service.record_capability_failure,
             capability_success=self._state_service.record_capability_success,
             options=GarminCollectionOptions(
-                include_recovery=end_date is None and days != self._all_sync_days,
+                include_recovery=(
+                    end_date is None and days != self._all_sync_days
+                    if include_recovery is None
+                    else include_recovery
+                ),
                 include_current_metrics=(
                     end_date is None and days != self._all_sync_days
                 ),
@@ -197,8 +202,7 @@ class GarminMorningRemoteReader:
 
     def configured(self) -> bool:
         return self._client_factory.available() and bool(
-            self._config.garmin_email
-            or Path(self._config.garmin_tokenstore).exists()
+            self._config.garmin_email or Path(self._config.garmin_tokenstore).exists()
         )
 
     def fetch(self, checkin_date: date) -> tuple[Any, Any]:
@@ -206,9 +210,7 @@ class GarminMorningRemoteReader:
             self._config.garmin_email or None,
             self._config.garmin_password or None,
         )
-        profile_timezone = timezone_name(
-            self._profile_service.get().get("timezone")
-        )
+        profile_timezone = timezone_name(self._profile_service.get().get("timezone"))
         fallback_zone = self._athlete_clock.now().tzinfo or timezone.utc
         return garmin_morning.fetch_morning_body_battery(
             client,
@@ -256,10 +258,14 @@ class GarminSyncSource:
         self._local_today = local_today
 
     def available(self) -> bool:
-        return self._fixture_loader.path() is not None or self._remote_reader.available()
+        return (
+            self._fixture_loader.path() is not None or self._remote_reader.available()
+        )
 
     def configured(self) -> bool:
-        return self._fixture_loader.path() is not None or self._remote_reader.configured()
+        return (
+            self._fixture_loader.path() is not None or self._remote_reader.configured()
+        )
 
     def fixture_enabled(self) -> bool:
         return self._fixture_loader.path() is not None
@@ -271,12 +277,17 @@ class GarminSyncSource:
         *,
         status: Callable[[str], None],
         cancel_event: threading.Event | None,
+        include_recovery: bool | None = None,
     ) -> tuple[dict[str, Any], list[tuple[date, date]] | None, str | None, str]:
         if self.fixture_enabled():
             payload = self._fixture_loader.load(days)
             return payload, None, "fixture", self._earliest_date.isoformat()
         payload, windows = self._remote_reader.fetch(
-            days, end_date, status=status, cancel_event=cancel_event
+            days,
+            end_date,
+            status=status,
+            cancel_event=cancel_event,
+            include_recovery=include_recovery,
         )
         return payload, windows, None, windows[0][0].isoformat()
 
@@ -416,6 +427,12 @@ class GarminSyncService:
     def snapshot(self) -> dict[str, Any]:
         return self._payload_service.snapshot()
 
+    def automatic_sync_days(self, minimum_days: int) -> int:
+        return self._payload_service.automatic_sync_days(minimum_days)
+
+    def automatic_sync_window(self, minimum_days: int) -> tuple[int, date | None]:
+        return self._payload_service.automatic_sync_window(minimum_days)
+
     def sync(
         self,
         days: int = 30,
@@ -424,6 +441,7 @@ class GarminSyncService:
         end_date: date | None = None,
         wait_for_existing: bool = False,
         cancel_event: threading.Event | None = None,
+        include_recovery: bool | None = None,
     ) -> dict[str, Any]:
         with (
             self._observer.observe("garmin", "data", reason, operation_id) as scope,
@@ -436,6 +454,7 @@ class GarminSyncService:
                 end_date,
                 wait_for_existing,
                 cancel_event,
+                include_recovery,
             )
             scope.result = result
             return result
@@ -448,6 +467,7 @@ class GarminSyncService:
         end_date: date | None,
         wait_for_existing: bool,
         cancel_event: threading.Event | None,
+        include_recovery: bool | None,
     ) -> dict[str, Any]:
         fixture = self._source.fixture_enabled()
         if not self._source.available():
@@ -470,7 +490,9 @@ class GarminSyncService:
                 return {"status": "already_running"}
             return self._wait_for_existing(cancel_event)
         try:
-            return self._execute(days, operation_id, end_date, cancel_event)
+            return self._execute(
+                days, operation_id, end_date, cancel_event, include_recovery
+            )
         except Exception as error:
             self._record_failure(operation_id, reason, error)
             raise
@@ -484,6 +506,7 @@ class GarminSyncService:
         operation_id: str,
         end_date: date | None,
         cancel_event: threading.Event | None,
+        include_recovery: bool | None,
     ) -> dict[str, Any]:
         self._lifecycle_state.record_sync_started()
         self._set_status(operation_id, "fetching", 10, "Garmin-Daten werden gelesen…")
@@ -492,6 +515,7 @@ class GarminSyncService:
             end_date,
             status=self._lifecycle_state.set_sync_status,
             cancel_event=cancel_event,
+            include_recovery=include_recovery,
         )
         self._raise_if_cancelled(cancel_event)
         payload = (
@@ -536,9 +560,7 @@ class GarminSyncService:
         deadline = self._coordination.wait_deadline()
         while self._coordination.monotonic() < deadline:
             self._raise_if_cancelled(cancel_event)
-            remaining = max(
-                0.05, min(1.0, deadline - self._coordination.monotonic())
-            )
+            remaining = max(0.05, min(1.0, deadline - self._coordination.monotonic()))
             if not self._coordination.acquire(timeout=remaining):
                 continue
             try:

@@ -13,6 +13,26 @@ from backend.errors import AppError
 
 
 class CoachActivityReadToolServiceTests(unittest.TestCase):
+    def test_report_defaults_to_requested_period_without_unrelated_analysis_reads(self):
+        reports = Mock()
+        reports.read.return_value = {"start": "2026-09-01", "totals": {"sessions": 2}}
+        service = CoachActivityReadToolService(Mock(), Mock(), Mock(), date.today, reports)
+        result = service.execute("get_training_report", {"start": "2026-09-01", "days": 7})
+        self.assertEqual(result["report"]["totals"]["sessions"], 2)
+        reports.endurance.assert_not_called()
+        reports.impact.assert_not_called()
+        self.assertEqual(result["projection"]["requested_sections"], ["report"])
+
+    def test_report_can_select_comparisons_and_rejects_unknown_section(self):
+        reports = Mock()
+        reports.comparisons.return_value = {"status": "insufficient_data", "groups": []}
+        service = CoachActivityReadToolService(Mock(), Mock(), Mock(), date.today, reports)
+        result = service.execute("get_training_report", {"sections": ["comparisons"]})
+        self.assertEqual(result["comparisons"]["status"], "insufficient_data")
+        reports.read.assert_not_called()
+        with self.assertRaises(AppError):
+            service.execute("get_training_report", {"sections": ["unknown"]})
+
     def test_recent_activities_applies_defaults_bounds_and_today(self):
         activity_read = Mock()
         activity_read.recent.return_value = {"activities": []}

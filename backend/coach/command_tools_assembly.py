@@ -38,6 +38,7 @@ class CoachAthleteToolFactories:
     activity_feedback_service: Callable[[], Any]
     competition_service: Callable[[], Any]
     nutrition_service: Callable[[], Any]
+    equipment_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,9 @@ class CoachCommandToolsAssembly:
             self._athlete_tools.activity_feedback_service(),
             self._athlete_tools.competition_service(),
             self._athlete_tools.nutrition_service(),
+            equipment=self._athlete_tools.equipment_service()
+            if self._athlete_tools.equipment_service
+            else None,
         )
 
     def profile_update_service(self) -> CoachProfileUpdateService:

@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
 from backend.sync import executor as sync_executor
-from backend.sync.observation import SyncOperationObserver
 from backend.sync.gates import ProviderResyncGate
+from backend.sync.observation import SyncOperationObserver
 
 
 @dataclass(frozen=True)
@@ -38,6 +37,7 @@ class IntervalsJobDependencies:
     nutrition_sync_service: Callable[[], Any]
     operation_observer: Callable[[], SyncOperationObserver]
     resync_gate: ProviderResyncGate
+    activity_detail_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -64,7 +64,7 @@ class SyncJobExecutionAssembly:
         garmin: GarminJobDependencies
         calendar_weather: CalendarWeatherJobDependencies
 
-    def __init__(self, *, dependencies: "SyncJobExecutionAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: SyncJobExecutionAssembly.Inputs) -> None:
         historical = dependencies.historical
         state = dependencies.state
         intervals = dependencies.intervals
@@ -83,6 +83,7 @@ class SyncJobExecutionAssembly:
         self._competition_sync_service = intervals.competition_sync_service
         self._operation_observer = intervals.operation_observer
         self._intervals_resync_gate = intervals.resync_gate
+        self._activity_detail_service = intervals.activity_detail_service
         self._garmin_sync_service = garmin.sync_service
         self._morning_body_battery_service = garmin.morning_body_battery_service
         self._garmin_fixture_loader = garmin.fixture_loader
@@ -112,6 +113,9 @@ class SyncJobExecutionAssembly:
                 competition_sync_service=self._competition_sync_service(),
                 sync_operation_observer=self._operation_observer(),
                 intervals_resync_gate=self._intervals_resync_gate,
+                activity_detail_service=self._activity_detail_service()
+                if self._activity_detail_service
+                else None,
             ),
             garmin_jobs=sync_executor.GarminSyncJobOwner(
                 historical_sync=historical_sync,

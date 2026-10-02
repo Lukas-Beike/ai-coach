@@ -76,7 +76,7 @@ Each write tool carries _request describing THIS step's target and scope:
 local_plan (creation or a bounded planning period), planned_unit:<id>,
 training_plan:<id>, library_workout:<id>, local_template (template creation),
 competition:<id>, local_competitions (competition creation/sync), local_profile, local_checkin,
-activity_feedback, artifact:<id>, adaptive_replan:<id>, change:<id>,
+activity_feedback, local_nutrition, local_equipment, artifact:<id>, adaptive_replan:<id>, change:<id>,
 sync_job:<id>, intervals_refresh, garmin_refresh, calendar_refresh,
 weather_refresh, intervals_sync. Use exact existing object tokens for edits.
 An external write requires the athlete's corresponding synchronization request

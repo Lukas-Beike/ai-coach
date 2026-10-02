@@ -391,7 +391,7 @@ OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
 SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
-APP_VERSION = "1.12.13"
+APP_VERSION = "1.12.14"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -561,6 +561,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             normalize_profile=normalize_profile,
             normalize_competition=planning_competitions.normalize_competition,
             uuid_factory=uuid.uuid4,
+            read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
         ),
     )
 )
@@ -881,6 +882,7 @@ INTERVALS_SYNC = IntervalsSyncAssembly(dependencies=IntervalsSyncAssembly.Inputs
         remote_planned_unit_reconciler=lambda: PLANNED_UNIT_SYNC.remote_reconciler(),
         workout_library_refresh_service=lambda: WORKOUT_LIBRARY_SYNC.refresh_service(),
         workout_library_service=PLANNING_DATA.workout_library,
+        planned_unit_service=PLANNING_DATA.planned_unit,
     ),
     window=IntervalsWindowSettings(
         sync_period_defaults=SYNC_PERIOD_DEFAULTS,
@@ -936,6 +938,8 @@ NUTRITION_ASSEMBLY = NutritionAssembly(
             utc_now=runtime_clock.utc_now,
             local_now=ATHLETE_CLOCK.now,
             intervals_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
+            read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500, future_only=True),
+            read_profile=lambda: ATHLETE_DATA.profile().get(),
         ),
     )
 )
@@ -1152,6 +1156,7 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
             garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
             profile_service=ATHLETE_DATA.profile,
             today=lambda: ATHLETE_CLOCK.now().date(),
+            report_service=lambda: HTTP_API.training_reports(),
         ),
         planning=CoachPlanningReadSources(
             structured_training_state_service=PLANNING_WORKFLOWS.structured_training_state_service,
@@ -1235,6 +1240,7 @@ SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(dependencies=SyncJobExecutionAssem
     ),
     intervals=IntervalsJobDependencies(
         sync_service=INTERVALS_SYNC.sync_service,
+        activity_detail_service=INTERVALS_SYNC.activity_detail_service,
         performance_refresh_service=INTERVALS_SYNC.performance_service,
         selected_workout_sync_service=SELECTED_WORKOUT_SYNC.service,
         competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
@@ -1390,6 +1396,7 @@ COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
         activity_feedback_service=lambda: ATHLETE_DATA.activity_feedback(),
         competition_service=lambda: PLANNING_DATA.competition(),
         nutrition_service=NUTRITION_ASSEMBLY.service,
+        equipment_service=ATHLETE_DATA.equipment,
     ),
     profile_tools=CoachProfileToolDependencies(
         profile_service=lambda: ATHLETE_DATA.profile(),
@@ -1740,10 +1747,12 @@ HTTP_API = HttpApiAssembly(
                 feedback_state=PUBLIC_STATE.feedback_state_service,
                 sync_state=PUBLIC_STATE.sync_public_state_service,
             ),
-            athlete=HttpAthleteServices(
+        athlete=HttpAthleteServices(
                 profile=ATHLETE_DATA.profile,
                 competition=PLANNING_DATA.competition,
-                activity_read=ATHLETE_DATA.activity_read,
+            activity_read=ATHLETE_DATA.activity_read,
+            equipment=ATHLETE_DATA.equipment,
+            activity_feedback=ATHLETE_DATA.activity_feedback,
                 checkin=ATHLETE_DATA.checkin,
                 context_service=ATHLETE_DATA.context,
                 clock=ATHLETE_CLOCK,

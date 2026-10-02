@@ -1,6 +1,6 @@
 const { test, expect } = require("@playwright/test");
 
-test("@responsive nutrition diary and saved meals use the Coach and preserve consumption", async ({ page }) => {
+test("@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption", async ({ page }) => {
   const showNutrition = async (route) => {
     await page.evaluate(async (nextRoute) => {
       await applyNavigationRoute(nextRoute, { historyMode: "push" });
@@ -14,9 +14,9 @@ test("@responsive nutrition diary and saved meals use the Coach and preserve con
   await expect(page.locator("#nutritionEntries .nutrition-card")).toHaveCount(0);
   await expect(page.locator("#nutritionTotals")).toContainText("– kcal");
   await page.locator('[data-nutrition-segment="meals"]').click();
-  await page.locator("#nutritionDefine").click();
-  await expect(page.locator("#messageInput")).toHaveValue(/wiederverwendbare Mahlzeit/);
+  await expect(page.locator("#nutritionDefine, #nutritionLog, #trainingFueling")).toHaveCount(0);
   const send = async (text) => {
+    await page.locator('a[href="#coach"]:visible').first().click();
     await page.locator("#messageInput").fill(text);
     await page.locator("#messageInput").press("Enter");
     await expect.poll(() => page.evaluate(() => !state.busy && !state.chatServerOperationId && !state.chatRequest)).toBe(true);
@@ -31,20 +31,17 @@ test("@responsive nutrition diary and saved meals use the Coach and preserve con
   await expect(page.locator("#nutritionTemplates img")).toHaveCount(0);
   await page.locator('[data-nutrition-segment="diary"]').click();
   await expect(page.locator("#nutritionEntries .nutrition-card")).toHaveCount(0);
-  await page.locator("#nutritionLog").click();
   await send("E2E nutrition: half portion");
   await showNutrition("nutrition/diary");
   await expect(page.locator("#nutritionEntries .nutrition-card")).toHaveCount(1);
   await expect(page.locator("#nutritionTotals")).toContainText("200 kcal");
   await page.locator('[data-nutrition-segment="meals"]').click();
-  await page.locator("#nutritionTemplates").getByRole("button", { name: "Ändern beim Coach" }).click();
   await send("E2E nutrition: update meal");
   await expect(page.locator("#coachActionReview")).toBeVisible();
   await page.locator("#coachActionReview").getByRole("button", { name: "Mahlzeitvorlage speichern" }).click();
   await expect(page.locator("#coachActionReview")).toBeHidden();
   await showNutrition("nutrition/meals");
   await expect(page.locator("#nutritionTemplates")).toContainText("600 kcal");
-  await page.locator("#nutritionTemplates").getByRole("button", { name: "Löschen beim Coach" }).click();
   await send("E2E nutrition: delete meal");
   await showNutrition("nutrition/diary");
   await expect(page.locator("#nutritionTotals")).toContainText("200 kcal");
@@ -53,12 +50,10 @@ test("@responsive nutrition diary and saved meals use the Coach and preserve con
   await page.locator("#nutritionToday").click();
   await expect(page.locator("#nutritionEntries .nutrition-card")).toHaveCount(1);
   await page.evaluate(() => { document.querySelector("#messageInput").value = "Existing draft"; });
-  await page.locator("#nutritionLog").click();
   await expect(page.locator("#messageInput")).toHaveValue("Existing draft");
-  await page.locator("#messageInput").fill("");
+  await page.evaluate(() => { document.querySelector("#messageInput").value = ""; });
   await page.goto("/#nutrition/diary");
   await expect(page.locator("#nutritionTotals")).toContainText("200 kcal");
-  await page.locator("#nutritionLog").click();
   await send("E2E nutrition: database oats");
   await showNutrition("nutrition/diary");
   const databaseCard = page.locator("#nutritionEntries .nutrition-card").filter({ hasText: "50 g Haferflocken" });
@@ -70,7 +65,6 @@ test("@responsive nutrition diary and saved meals use the Coach and preserve con
   await expect(databaseCard).toContainText("174 kcal");
   await expect(databaseCard).toContainText("Datenbankberechnung");
   await page.locator('[data-nutrition-segment="meals"]').click();
-  await page.locator("#nutritionDefine").click();
   await send("E2E nutrition: confirm database meal");
   await expect(page.locator("#coachActionReview")).toContainText("174");
   await expect(page.locator("#coachActionReview")).toContainText("Max Rubner-Institut");

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 COACH_ACTIVITY_DETAIL_FIELDS = (
@@ -34,6 +35,7 @@ COACH_ACTIVITY_DETAIL_FIELDS = (
     "icu_training_load",
     "icu_intensity",
     "icu_rolling_ftp",
+    "icu_ftp",
     "icu_weighted_avg_speed",
     "icu_pace",
     "icu_rpe",
@@ -49,6 +51,7 @@ COACH_ACTIVITY_DETAIL_STREAM_FIELDS = (
     "grade_smooth",
     "speed",
     "velocity",
+    "velocity_smooth",
     "pace",
     "watts",
     "power",
@@ -61,6 +64,9 @@ COACH_ACTIVITY_DETAIL_STREAM_FIELDS = (
 COACH_ACTIVITY_DETAIL_LAP_FIELDS = (
     "name",
     "start_time",
+    "end_time",
+    "start_index",
+    "end_index",
     "elapsed_time",
     "moving_time",
     "distance",
@@ -83,6 +89,8 @@ COACH_ACTIVITY_DETAIL_MAX_LAPS = 200
 
 
 def _analysis_scalar(value: Any, *, limit: int = 200) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, str):

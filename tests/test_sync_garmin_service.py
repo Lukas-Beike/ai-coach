@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 
 from backend.config import Config
 from backend.errors import AppError
+from backend.sync.executor import GarminSyncJobOwner
 from backend.sync.garmin_service import (
     GarminMorningRemoteReader,
     GarminRemoteReader,
@@ -122,8 +123,10 @@ class _RemoteReader:
     def configured(self) -> bool:
         return self._configured
 
-    def fetch(self, days, end_date, *, status, cancel_event=None):
-        self.arguments = (days, end_date, cancel_event)
+    def fetch(
+        self, days, end_date, *, status, cancel_event=None, include_recovery=None
+    ):
+        self.arguments = (days, end_date, cancel_event, include_recovery)
         status("Garmin: Zeitraum 1/1 wird synchronisiert…")
         return (
             {"synced_at": "2026-09-20T10:00:00+00:00", "activities": []},
@@ -241,7 +244,7 @@ class GarminSyncServiceTests(unittest.TestCase):
         result = service.sync(days=20, end_date=end_date)
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(self.remote.arguments, (20, end_date, None))
+        self.assertEqual(self.remote.arguments, (20, end_date, None, None))
         self.assertEqual(self.payload.prepared[0], "remote")
         self.assertEqual(
             self.state.persisted[1:],
@@ -410,6 +413,34 @@ class GarminRemoteReaderTests(unittest.TestCase):
         self.assertFalse(options.include_recovery)
         self.assertFalse(options.include_current_metrics)
 
+    def test_capped_catchup_can_include_recovery_with_an_explicit_end_date(self):
+        client = Mock()
+        client.login.return_value = (False, None)
+        factory = Mock()
+        factory.available.return_value = True
+        factory.create.return_value = client
+        reader = self.make_reader(factory)
+
+        with (
+            patch(
+                "backend.sync.garmin_service.provider_http.external_call",
+                side_effect=lambda _service, _operation, call, _details, **_kwargs: (
+                    call()
+                ),
+            ),
+            patch("backend.sync.garmin_service.collect_garmin_data") as collect,
+        ):
+            reader.fetch(
+                90,
+                date(2026, 6, 30),
+                status=Mock(),
+                include_recovery=True,
+            )
+
+        options = collect.call_args.kwargs["options"]
+        self.assertTrue(options.include_recovery)
+        self.assertFalse(options.include_current_metrics)
+
     def test_reader_mfa_and_cancellation_keep_collection_from_running(self):
         client = Mock()
         client.login.return_value = (True, None)
@@ -443,6 +474,30 @@ class GarminRemoteReaderTests(unittest.TestCase):
         call.assert_not_called()
 
 
+class GarminSyncJobOwnerTests(unittest.TestCase):
+    def test_refresh_catchup_includes_recovery_but_historical_backfill_does_not(self):
+        historical_sync = Mock()
+        historical_sync.window.return_value = (90, date(2026, 6, 30))
+        garmin_service = Mock(sync=Mock(return_value={"status": "partial"}))
+        morning_service = Mock()
+        fixture_loader = Mock(path=Mock(return_value=None))
+        owner = GarminSyncJobOwner(
+            historical_sync=historical_sync,
+            garmin_sync_service=garmin_service,
+            morning_body_battery_service=morning_service,
+            garmin_fixture_loader=fixture_loader,
+            all_sync_days=3650,
+        )
+
+        owner.execute({"type": "refresh", "id": "refresh"}, {}, "scheduled")
+        self.assertTrue(garmin_service.sync.call_args.kwargs["include_recovery"])
+
+        owner.execute(
+            {"type": "historical_backfill", "id": "backfill"}, {}, "historical"
+        )
+        self.assertFalse(garmin_service.sync.call_args.kwargs["include_recovery"])
+
+
 class GarminMorningRemoteReaderTests(unittest.TestCase):
     def make_reader(self, config=None, factory=None):
         self.config = config or _config()
@@ -452,9 +507,7 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
         self.profile = Mock()
         self.profile.get.return_value = {"timezone": "Europe/Berlin"}
         self.clock = Mock()
-        self.clock.now.return_value = datetime(
-            2026, 9, 4, 6, 0, tzinfo=timezone.utc
-        )
+        self.clock.now.return_value = datetime(2026, 9, 4, 6, 0, tzinfo=timezone.utc)
         self.diagnostic_capture = object()
         self.logger = Mock()
         return GarminMorningRemoteReader(
@@ -518,9 +571,7 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
             self.assertEqual(
                 fetch.call_args.kwargs["profile_timezone"], "Europe/Berlin"
             )
-            self.assertEqual(
-                fetch.call_args.kwargs["fallback_zone"], timezone.utc
-            )
+            self.assertEqual(fetch.call_args.kwargs["fallback_zone"], timezone.utc)
             self.assertIs(fetch.call_args.kwargs["external_call"].__self__, reader)
             self.assertEqual(
                 fetch.call_args.kwargs["sleep_bounds"].__module__,
@@ -533,9 +584,7 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
                 "safe-result",
             )
 
-        self.factory.create.assert_called_once_with(
-            "athlete@example.invalid", "secret"
-        )
+        self.factory.create.assert_called_once_with("athlete@example.invalid", "secret")
         self.profile.get.assert_called_once_with()
         external_call.assert_called_once()
         self.assertIs(

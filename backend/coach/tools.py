@@ -175,6 +175,32 @@ def build_tool_contracts(
             },
         ),
         _canonical_coach_tool(
+            "get_training_report",
+            "Read selected deterministic local analyses shown in the Analysis UI. Default section report includes coverage, previous period, recorded sensor zones and local plan execution. Select endurance, power_profiles, tag_impact, season or comparisons only when relevant. Does not refresh providers, archive reports or change planning. Treat incomplete periods and missing loads as unknown; do not infer rest from absent records.",
+            {
+                "start": {"type": "string", "format": "date"},
+                "days": {"type": "integer", "enum": [7, 28]},
+                "sport": {"type": "string", "maxLength": 40},
+                "sections": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 6,
+                    "uniqueItems": True,
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "report",
+                            "endurance",
+                            "power_profiles",
+                            "tag_impact",
+                            "season",
+                            "comparisons",
+                        ],
+                    },
+                },
+            },
+        ),
+        _canonical_coach_tool(
             "list_planned_workouts",
             "Read future locally scheduled workouts.",
             {"limit": {"type": "integer"}},
@@ -445,6 +471,20 @@ def build_tool_contracts(
                     "additionalProperties": False,
                     "properties": {
                         "checkin_date": {"type": "string", "format": "date"},
+                        "day_status": {
+                            "type": "string",
+                            "enum": ["unknown", "rest", "pause"],
+                            "description": "Explicitly confirmed rest day or training pause only. Illness text or absence of activity is not confirmation. Omission preserves the saved status; unknown explicitly clears it.",
+                        },
+                        "tag_answers": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                tag: {"type": "boolean"}
+                                for tag in ("travel", "late_meal", "high_stress")
+                            },
+                            "description": "Only explicit yes/no answers. Missing tags are unknown, never false. A supplied object replaces the day tag answers; preserve other confirmed answers when correcting one.",
+                        },
                         **{
                             field: {"type": "string", "maxLength": limit}
                             for field, limit in CHECKIN_TEXT_LIMITS.items()
@@ -468,16 +508,13 @@ def build_tool_contracts(
         ),
         _canonical_coach_tool(
             "save_activity_feedback",
-            "Save the athlete's explicitly stated observations about an existing completed activity. Resolve its exact ID from the local snapshot or list_recent_activities first. Never invent an activity ID or observations. This tool cannot create completed activities.",
+            "Save explicitly stated feedback for one existing completed activity, including optional session RPE 0-10 and deviation reason. Resolve its exact ID first. Omitted fields preserve existing values; only clear a field on explicit request. Never infer session RPE from a daily check-in, provider RPE or another activity. This cannot create completed activities.",
             {
                 "payload": {
                     "type": "object",
                     "additionalProperties": False,
                     "required": [
                         "activity_id",
-                        "activity_name",
-                        "activity_date",
-                        "notes",
                     ],
                     "properties": {
                         "activity_id": {
@@ -489,13 +526,20 @@ def build_tool_contracts(
                         "activity_date": {"type": ["string", "null"]},
                         "notes": {
                             "type": "string",
-                            "minLength": 1,
                             "description": "Only observations explicitly stated by the athlete.",
+                        },
+                        "session_rpe": {
+                            "type": ["number", "null"],
+                            "minimum": 0,
+                            "maximum": 10,
+                        },
+                        "deviation_reason": {
+                            "type": ["string", "null"],
+                            "maxLength": 500,
                         },
                     },
                 }
             },
-            strict=True,
         ),
         _canonical_coach_tool(
             "delete_activity_feedback",
@@ -797,6 +841,10 @@ def build_tool_contracts(
                     "type": "string",
                     "description": "Optional specific date YYYY-MM-DD",
                 },
+                "planned_unit_id": {
+                    "type": "string",
+                    "description": "Optional local unit ID: read fueling suggestion, exact current fingerprint and confirmed plan instead of intake.",
+                },
                 "start": {
                     "type": "string",
                     "description": "Optional start date YYYY-MM-DD for range",
@@ -807,7 +855,128 @@ def build_tool_contracts(
                 },
             },
         ),
+        _canonical_coach_tool(
+            "save_fueling_plan",
+            "Save an explicitly confirmed local training fueling plan after reading its current fingerprint with read_nutrition. Never log consumption or synchronize a workout. Ask about quantities and tolerance; do not infer actual intake.",
+            {
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "planned_unit_id",
+                        "unit_sha256",
+                        "carbs_g_per_hour",
+                        "fluid_ml_per_hour",
+                    ],
+                    "properties": {
+                        "planned_unit_id": {"type": "string"},
+                        "unit_sha256": {"type": "string"},
+                        "carbs_g_per_hour": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 120,
+                        },
+                        "fluid_ml_per_hour": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1500,
+                        },
+                        "template_id": {"type": "string"},
+                        "notes": {"type": "string"},
+                    },
+                }
+            },
+        ),
     ]
+
+    revision_fields = {
+        "id": {"type": "string", "format": "uuid"},
+        "expected_revision": {"type": "integer", "minimum": 1},
+    }
+    record_schemas = [
+        (
+            "save_equipment",
+            "Save explicitly confirmed local equipment or component with known initial usage and personal maintenance intervals. Read all current fields and exact revision before an edit. Archiving preserves old activity references; no implied assignments.",
+            {
+                **revision_fields,
+                "name": {"type": "string", "maxLength": 200},
+                "sport": {
+                    "type": "string",
+                    "enum": ["Ride", "VirtualRide", "Run", "Swim", "WeightTraining"],
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["shoes", "bike", "component", "other"],
+                },
+                "status": {"type": "string", "enum": ["active", "archived"]},
+                "parent_id": {"type": ["string", "null"]},
+                "start_date": {"type": "string", "format": "date"},
+                "initial_distance_km": {"type": "number", "minimum": 0},
+                "initial_hours": {"type": "number", "minimum": 0},
+                "maintenance_km": {"type": ["number", "null"], "minimum": 0},
+                "maintenance_hours": {"type": ["number", "null"], "minimum": 0},
+            },
+            [
+                "name",
+                "sport",
+                "kind",
+                "start_date",
+                "initial_distance_km",
+                "initial_hours",
+            ],
+        ),
+        (
+            "assign_activity_equipment",
+            "Explicitly assign a canonical completed activity to matching active equipment. Reassignment recalculates both usage counters. equipment_id=null explicitly clears assignment. Never infer a favorite bike/shoe.",
+            {
+                "activity_id": {"type": "string"},
+                "equipment_id": {"type": ["string", "null"]},
+            },
+            ["activity_id", "equipment_id"],
+        ),
+        (
+            "log_equipment_maintenance",
+            "Record explicitly completed maintenance for one equipment item or component. Preserve lifetime usage and all maintenance records. Same-day activity ordering is unknown; no automatic replacement or material diagnosis.",
+            {
+                "equipment_id": {"type": "string"},
+                "date": {"type": "string", "format": "date"},
+                "notes": {"type": "string", "maxLength": 1000},
+            },
+            ["equipment_id", "date"],
+        ),
+    ]
+    COACH_STRUCTURED_TOOLS.append(
+        _canonical_coach_tool(
+            "read_training_records",
+            "Read current local equipment, revisions and usage counters before explicit corrections. Read-only bounded projection; do not invent missing IDs or data.",
+            {
+                "record_type": {
+                    "type": "string",
+                    "enum": ["equipment"],
+                },
+                "record_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Use together with record_type to read one exact current record, including records outside the latest 100.",
+                },
+            },
+        )
+    )
+    for name, description, properties, required in record_schemas:
+        COACH_STRUCTURED_TOOLS.append(
+            _canonical_coach_tool(
+                name,
+                description,
+                {
+                    "payload": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": properties,
+                        "required": required,
+                    }
+                },
+            )
+        )
 
     meal_properties = next(
         tool
@@ -873,6 +1042,8 @@ def build_tool_contracts(
         "read_training_state",
         "list_recent_activities",
         "get_activity_details",
+        "get_training_report",
+        "read_training_records",
         "list_workout_library",
         "list_planned_workouts",
         "list_change_history",

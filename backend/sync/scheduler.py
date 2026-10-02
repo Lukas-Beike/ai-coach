@@ -105,13 +105,16 @@ class DailySyncScheduler:
             or self._queue.active("garmin")
         ):
             return
+        days, end_date = self._garmin.automatic_sync_window(
+            self._config.garmin_automatic_sync_days
+        )
+        payload = {"days": days, "reason": self._config.auto_update_label}
+        if end_date is not None:
+            payload["end_date"] = end_date.isoformat()
         self._queue.enqueue(
             "garmin",
             "refresh",
-            {
-                "days": self._config.garmin_automatic_sync_days,
-                "reason": self._config.auto_update_label,
-            },
+            payload,
             requested_by="scheduler",
         )
 
@@ -260,13 +263,16 @@ class StartupSyncScheduler:
         if not self._garmin.configured():
             return
         if not self._queue.active("garmin", "refresh"):
+            days, end_date = self._garmin.automatic_sync_window(
+                self._config.garmin_automatic_sync_days
+            )
+            payload = {"days": days, "reason": "startup"}
+            if end_date is not None:
+                payload["end_date"] = end_date.isoformat()
             self._queue.enqueue(
                 "garmin",
                 "refresh",
-                {
-                    "days": self._config.garmin_automatic_sync_days,
-                    "reason": "startup",
-                },
+                payload,
                 requested_by="startup",
             )
         self._enqueue_historical_backfill("garmin")

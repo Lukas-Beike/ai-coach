@@ -3,11 +3,14 @@ const NAV_ROUTES = Object.freeze({
   plan: "workoutsPanel",
   "plan/overview": "workoutsPanel",
   "plan/library": "workoutsPanel",
+  "plan/season": "workoutsPanel",
   nutrition: "nutritionPanel",
   "nutrition/diary": "nutritionPanel",
   "nutrition/meals": "nutritionPanel",
   analysis: "dataPanel",
   "analysis/performance": "dataPanel",
+  "analysis/recovery": "dataPanel",
+  "analysis/review": "dataPanel",
   more: "settingsPanel",
   "more/connections": "settingsPanel",
   "more/coach": "settingsPanel",
@@ -15,6 +18,7 @@ const NAV_ROUTES = Object.freeze({
   "more/operations": "settingsPanel",
   "more/appearance": "settingsPanel",
   "more/profile": "profilePanel",
+  "more/equipment": "settingsPanel",
 });
 const NAV_LINK_ROUTES = Object.freeze({
   coach: "coach",
@@ -37,7 +41,7 @@ function hashContainsKnownRoute(hash = globalThis.location.hash) {
 
 function planSegmentFromRoute(route = state.route) {
   const segment = String(route || "").split("/")[1];
-  return ["overview", "library"].includes(segment) ? segment : "overview";
+  return ["overview", "library", "season"].includes(segment) ? segment : "overview";
 }
 
 function baseRoute(route = state.route) {
@@ -46,6 +50,6 @@ function baseRoute(route = state.route) {
 
 function moreSegmentFromRoute(route = state.route) {
   const segment = String(route || "").split("/")[1];
-  if (["profile", "connections", "coach", "privacy", "operations", "appearance"].includes(segment)) return segment;
+  if (["profile", "equipment", "connections", "coach", "privacy", "operations", "appearance"].includes(segment)) return segment;
   return "connections";
 }

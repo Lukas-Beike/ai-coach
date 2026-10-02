@@ -7,6 +7,7 @@ from typing import Any
 
 from backend.activities import calendar_projection, grouping
 from backend.calendar import canonical, local
+from backend.performance.workout_profile import planned_profile
 from backend.weather import history
 
 
@@ -31,6 +32,12 @@ def project_planning_calendar(
     weather_planned = history.add_to_planned(
         compliance_planned, weather, default_name=default_name
     )
+    weather_planned = [
+        {**row, "workout_profile": profile}
+        if (profile := planned_profile(row))
+        else row
+        for row in weather_planned
+    ]
     return {
         "planned": weather_planned,
         "training_calendar": calendar_projection.training_calendar_items(
