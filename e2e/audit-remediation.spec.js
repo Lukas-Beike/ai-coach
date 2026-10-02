@@ -188,12 +188,3 @@ test("history and library cursors expose and append another page once", async ({
   });
   await expect.poll(() => page.evaluate(() => state.data.library.map((item) => item.id))).toEqual(["older-template"]);
 });
-
-test("empty activity filter results still allow the next server page", async ({ page }) => {
-  expect(await page.evaluate(() => {
-    state.activityFromDate = "2099-01-01";
-    state.data.activities_next_cursor = "synthetic-older-page";
-    renderActivities([{ id: "old", name: "Synthetic", start_date_local: "2020-01-01", type: "Ride" }]);
-    return Boolean(document.querySelector(".activity-load-more"));
-  })).toBe(true);
-});

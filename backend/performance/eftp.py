@@ -24,9 +24,10 @@ def _sport_info_setting(wellness: dict[str, Any]) -> dict[str, Any]:
     for info in sport_info:
         if not isinstance(info, dict):
             continue
+        configured_types = info.get("types")
         raw_types = (
-            info.get("types")
-            if isinstance(info.get("types"), list)
+            configured_types
+            if isinstance(configured_types, list)
             else [info.get("type"), info.get("sport"), info.get("sport_type")]
         )
         if any(
@@ -47,8 +48,12 @@ def _wellness_eftp_value(
     if not cutoff <= row_date <= anchor:
         return None
     info = _sport_info_setting(row)
+    model = info.get("mmp_model")
+    model = model if isinstance(model, dict) else {}
     value = activity_validation.bounded_performance_metric(
-        "cycling_eftp_watts", _first_present(info, ("eftp", "eFTP"))
+        "cycling_eftp_watts",
+        _first_present(model, ("ftp", "eftp", "eFTP"))
+        or _first_present(info, ("eftp", "eFTP")),
     )
     return float(value) if value is not None else None
 
@@ -93,3 +98,24 @@ def eftp_30_day_average(
         if value is not None:
             values.append(value)
     return round(sum(values) / len(values), 1) if values else None
+
+
+def eftp_daily_values(
+    wellness_rows: list[dict[str, Any]],
+    activities: list[dict[str, Any]],
+    start: date,
+    end: date,
+) -> dict[str, float]:
+    """Prefer dated wellness eFTP, otherwise the day's latest cycling activity."""
+    observations: dict[str, float] = {}
+    for activity in sorted(
+        activities, key=lambda row: str(row.get("start_date_local") or "")
+    ):
+        value = _activity_eftp_value(activity, start, end)
+        if value is not None:
+            observations[str(activity["start_date_local"])[:10]] = value
+    for row in wellness_rows:
+        value = _wellness_eftp_value(row, start, end)
+        if value is not None:
+            observations[str(row.get("id") or row.get("date"))[:10]] = value
+    return observations

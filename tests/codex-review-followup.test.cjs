@@ -16,6 +16,10 @@ for (const line of script) {
 const discover = new (Object.getPrototypeOf(async function () {}).constructor)(
   'github', 'context', 'core', 'process', source.join('\n'));
 const bot = 'chatgpt-codex-connector[bot]';
+const enforcementLines = workflow.split('- name: Enforce explicit Codex review policy\n')[1]
+  .split('          script: |\n')[1].split('\n');
+const enforce = new (Object.getPrototypeOf(async function () {}).constructor)(
+  'github', 'context', 'core', 'process', enforcementLines.map(line => line.slice(12)).join('\n'));
 const head = 'a'.repeat(40);
 const pr = {
   number: 721, draft: false, state: 'open', title: 'refactor: test',
@@ -23,13 +27,45 @@ const pr = {
 };
 const p1Review = { id: 10, user: { login: bot }, submitted_at: '2026-09-23T15:19:04Z', body: '[P1] Fix fixture' };
 
-async function reviewRequired({ completedAt, reviewedHead = head, reaction = true, unresolved = false, sameDiff = true, differentContext = false, movedHunk = false } = {}) {
+test('policy enforcement cannot transfer a result to a changed head or base', async () => {
+  for (const changedField of ['head', 'base', null]) {
+    for (const changeOnRead of [1, 2]) {
+      const writes = [];
+      const failures = [];
+      let reads = 0;
+      const snapshot = { ...pr, base: { ...pr.base, sha: 'c'.repeat(40) } };
+      const github = {
+        rest: {
+          pulls: { get: async () => {
+            const data = structuredClone(snapshot);
+            if (++reads >= changeOnRead && changedField) data[changedField].sha = 'd'.repeat(40);
+            return { data };
+          } },
+          issues: { listComments: async () => [] },
+          checks: { create: async value => writes.push(value) },
+        },
+        paginate: async method => method(),
+      };
+      await enforce(github, { repo: { owner: 'example', repo: 'coach' } },
+        { setFailed: message => failures.push(message) }, { env: {
+          PR_NUMBER: '721', EVALUATED_HEAD: head, EVALUATED_BASE: snapshot.base.sha,
+          REVIEW_REQUIRED: 'false', CHECK_NAME: 'Codex code review',
+        } });
+      assert.equal(writes.length, changedField ? 0 : 1);
+      assert.equal(failures.length, changedField ? 1 : 0);
+      if (!changedField) assert.equal(writes[0].head_sha, head);
+    }
+  }
+});
+
+async function reviewRequired({ completedAt, reviewedHead = head, reaction = true, unresolved = false, sameDiff = true, differentContext = false, movedHunk = false, review = p1Review, eventName = 'push' } = {}) {
   const outputs = {};
   const github = {
     rest: {
       pulls: {
         list: async () => [pr],
-        listReviews: async () => [p1Review],
+        get: async () => ({ data: pr }),
+        listReviews: async () => review ? [review] : [],
         listReviewComments: async () => [],
       },
       checks: { listForRef: async () => [] },
@@ -61,10 +97,40 @@ async function reviewRequired({ completedAt, reviewedHead = head, reaction = tru
     } } } }),
   };
   await discover(github, {
-    repo: { owner: 'example', repo: 'coach' }, eventName: 'push', ref: 'refs/heads/develop', payload: {},
+    repo: { owner: 'example', repo: 'coach' }, eventName, ref: 'refs/heads/develop',
+    payload: { inputs: { pull_request_number: '721' } },
   }, { setOutput: (name, value) => { outputs[name] = value; } }, { env: {} });
   return JSON.parse(outputs.pull_requests).include[0].reviewRequired;
 }
+
+test('manual re-evaluation clears a resolved P2 after fixes without another review', async () => {
+  assert.equal(await reviewRequired({ eventName: 'workflow_dispatch',
+    review: { ...p1Review, body: '[P2] Fix fixture' }, sameDiff: false }), false);
+});
+
+test('manual re-evaluation keeps unresolved findings and P1 blocked', async () => {
+  assert.equal(await reviewRequired({ eventName: 'workflow_dispatch',
+    review: { ...p1Review, body: '[P2] Fix fixture' }, unresolved: true }), true);
+  assert.equal(await reviewRequired({ eventName: 'workflow_dispatch', reaction: false }), true);
+  assert.equal(await reviewRequired({ review: { ...p1Review,
+    body: '![P1 Badge](https://img.shields.io/badge/P1-orange)' }, reaction: false }), true);
+});
+
+test('manual re-evaluation cannot replace the initial review', async () => {
+  assert.equal(await reviewRequired({ eventName: 'workflow_dispatch', review: null, reaction: false }), true);
+});
+
+test('a summary-only clean initial review cannot approve a changed diff', async () => {
+  assert.equal(await reviewRequired({ review: null, completedAt: '2026-09-23T15:31:54Z',
+    reviewedHead: 'b'.repeat(40), sameDiff: false }), true);
+  assert.equal(await reviewRequired({ review: null, completedAt: '2026-09-23T15:31:54Z',
+    unresolved: true }), true);
+});
+
+test('manual re-evaluation preserves a changes-requested blocker', async () => {
+  assert.equal(await reviewRequired({ eventName: 'workflow_dispatch',
+    review: { ...p1Review, body: '', state: 'CHANGES_REQUESTED' }, reaction: false }), true);
+});
 
 test('a completed clean follow-up on the current head clears a previous P1', async () => {
   assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:31:54Z' }), false);

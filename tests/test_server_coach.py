@@ -382,21 +382,19 @@ class ServerCoachTests(ServerTestCase):
         })
         self.assertEqual(result["activity_feedback"]["activity_id"], "activity-2")
 
-    def test_activity_history_feedback_is_read_only_and_coach_managed(self):
+    def test_activity_feedback_remains_coach_managed_without_history_tab(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
         app = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
         backend = Path(server.__file__).read_text(encoding="utf-8")
         self.assertNotIn('id="feedbackForm"', markup)
         self.assertNotIn("Lokales Athleten-Feedback", markup)
-        self.assertIn('id="analysisHistorySegment"', markup)
-        self.assertIn('data-analysis-segment="history"', markup)
+        self.assertNotIn('id="analysisHistorySegment"', markup)
+        self.assertNotIn('data-analysis-segment="history"', markup)
         self.assertNotIn('id="activityDirtyIndicator"', markup)
         self.assertNotIn("function saveActivityFeedback", app)
         self.assertNotIn("Besonderheiten speichern", app)
         self.assertNotIn("activity-type-button", app)
-        self.assertIn("if (feedbackNotes) {", app)
-        self.assertIn("feedbackText.textContent = feedbackNotes;", app)
-        self.assertIn('activity_feedback: ["feedback", "activities"]', app)
+        self.assertIn('activity_feedback: ["feedback", "plan"]', app)
         self.assertNotIn('"^/api/activities/([^/]+)/feedback$"', backend)
 
     def test_structured_context_keeps_garmin_value_in_performance_only(self):

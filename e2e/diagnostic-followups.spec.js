@@ -36,8 +36,8 @@ test("older measurements retain their date and age after a successful fetch", as
 
   await page.locator("#headerActionButton").click();
   await expect.poll(() => performanceRequests).toBeGreaterThan(1);
-  await page.locator('[data-analysis-segment="history"]').click();
-  await page.locator('[data-analysis-segment="performance"]').click();
+  await page.getByRole("link", { name: "Kalender", exact: true }).click();
+  await page.getByRole("link", { name: "Analyse", exact: true }).click();
   await expect(older).toContainText("27 Tage alt");
   await expect(page.locator("#performanceSummary > section").filter({ hasText: "Radfahren" })).toContainText("Messdatum unbekannt");
 });

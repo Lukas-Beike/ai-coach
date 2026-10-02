@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       pull_request_number:
-        description: Re-evaluate a trusted release promotion from protected develop
+        description: Re-evaluate the review policy for an open PR from protected develop
         required: true
         type: string
   # Re-evaluate the policy when the target branch advances. This never starts
@@ -210,7 +210,10 @@ jobs:
               });
               if (codexReviews.length === 0) {
                 const cleanReview = await hasCompletedCleanReaction(pullRequest);
-                if (await unchangedReviewedDiff(pullRequest, cleanReview)) return 'none';
+                if (await unchangedReviewedDiff(pullRequest, cleanReview)) {
+                  const unresolvedReviewIds = await getUnresolvedCodexReviewIds(pullRequest);
+                  return unresolvedReviewIds.size > 0 ? 'unresolved' : 'none';
+                }
                 if (await hasCodexUsageLimit(pullRequest)) return 'none';
                 return 'initial';
               }
@@ -220,22 +223,23 @@ jobs:
                 pullRequest,
                 await hasCompletedCleanReaction(pullRequest, Date.parse(latestReview.submitted_at)),
               );
-              const latestReviewHasP1 = /\[P1\]/i.test(latestReview.body || '') || comments.some((comment) => (
+              const latestReviewHasP1 = /(?:\[P1\]|P1 Badge)/i.test(latestReview.body || '') || comments.some((comment) => (
                 codexBotLogins.has(comment.user?.login) &&
                 comment.pull_request_review_id === latestReview.id &&
-                /\[P1\]/i.test(comment.body || '')
+                /(?:\[P1\]|P1 Badge)/i.test(comment.body || '')
               ));
               if (latestReviewHasP1 && !cleanFollowUp) {
                 if (await hasCodexUsageLimit(pullRequest, Date.parse(latestReview.submitted_at))) return 'none';
                 return 'p1';
               }
+              if (latestReview.state === 'CHANGES_REQUESTED' && !cleanFollowUp) return 'unresolved';
               const unresolvedReviewIds = await getUnresolvedCodexReviewIds(pullRequest);
               return unresolvedReviewIds.size > 0 ? 'unresolved' : 'none';
             };
             if (context.eventName === 'workflow_dispatch') {
               const pullRequestNumber = Number(context.payload.inputs?.pull_request_number);
               if (context.ref !== 'refs/heads/develop' || !Number.isSafeInteger(pullRequestNumber) || pullRequestNumber < 1) {
-                core.setFailed('Promotion re-evaluation requires protected develop and a valid pull request number.');
+                core.setFailed('Review re-evaluation requires protected develop and a valid pull request number.');
                 return;
               }
               const { data: pullRequest } = await github.rest.pulls.get({
@@ -243,19 +247,25 @@ jobs:
                 repo: context.repo.repo,
                 pull_number: pullRequestNumber,
               });
-              if (pullRequest.state !== 'open' || pullRequest.draft === true || !isReleasePromotion(pullRequest)) {
-                core.setFailed('Only an open trusted release promotion can be re-evaluated.');
+              if (pullRequest.state !== 'open' || pullRequest.draft === true ||
+                  !['develop', 'main'].includes(pullRequest.base.ref)) {
+                core.setFailed('Only an open non-draft PR targeting develop or main can be re-evaluated.');
                 return;
               }
               const manualReviewRequestedAt = await getManualReviewRequest(pullRequest);
+              const promotion = isReleasePromotion(pullRequest);
+              const skipCodexReview = shouldSkipCodexReview(pullRequest) && !manualReviewRequestedAt;
               affectedPullRequests = [{
                 pullRequestNumber,
-                baseRef: 'main',
-                checkName: 'Codex code review (main)',
-                reviewRequestedAt: manualReviewRequestedAt,
-                skipCodexReview: !manualReviewRequestedAt,
-                runCodexReview: Boolean(manualReviewRequestedAt),
-                reviewRequired: Boolean(manualReviewRequestedAt),
+                evaluatedHead: pullRequest.head.sha,
+                evaluatedBase: pullRequest.base.sha,
+                baseRef: pullRequest.base.ref,
+                checkName: pullRequest.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
+                reviewRequestedAt: promotion ? manualReviewRequestedAt : '',
+                skipCodexReview,
+                runCodexReview: promotion && Boolean(manualReviewRequestedAt),
+                reviewRequired: promotion ? Boolean(manualReviewRequestedAt)
+                  : !skipCodexReview && (await getReviewRequirement(pullRequest)) !== 'none',
               }];
             } else if (context.eventName === 'push') {
               const base = context.ref.replace(/^refs\/heads\//, '');
@@ -275,6 +285,8 @@ jobs:
                   const manualReviewRequested = Boolean(manualReviewRequestedAt);
                   return {
                     pullRequestNumber: pullRequest.number,
+                    evaluatedHead: pullRequest.head.sha,
+                    evaluatedBase: pullRequest.base.sha,
                     baseRef: base,
                     checkName: base === 'main' ? 'Codex code review (main)' : 'Codex code review',
                     reviewRequestedAt: manualReviewRequested ? pushReviewRequestedAt : '',
@@ -299,6 +311,8 @@ jobs:
                 const skipCodexReview = shouldSkipCodexReview(pullRequest) && !manualReviewRequestedAt;
                 affectedPullRequests = [{
                   pullRequestNumber: pullRequest.number,
+                  evaluatedHead: pullRequest.head.sha,
+                  evaluatedBase: pullRequest.base.sha,
                   baseRef: pullRequest.base.ref,
                   checkName: pullRequest.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
                   reviewRequestedAt: '',
@@ -353,6 +367,8 @@ jobs:
                 }
                 affectedPullRequests = [{
                   pullRequestNumber: response.data.number,
+                  evaluatedHead: response.data.head.sha,
+                  evaluatedBase: response.data.base.sha,
                   baseRef: response.data.base.ref,
                   checkName: response.data.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
                   reviewRequestedAt: context.payload.comment.created_at,
@@ -729,6 +745,8 @@ jobs:
           PR_NUMBER: ${{ matrix.pullRequestNumber }}
           CHECK_NAME: ${{ matrix.checkName }}
           REVIEW_REQUIRED: ${{ matrix.reviewRequired }}
+          EVALUATED_HEAD: ${{ matrix.evaluatedHead }}
+          EVALUATED_BASE: ${{ matrix.evaluatedBase }}
         with:
           github-token: ${{ github.token }}
           script: |
@@ -738,6 +756,11 @@ jobs:
               pull_number: Number(process.env.PR_NUMBER),
             });
             const headSha = pullRequest.data.head.sha;
+            if (headSha !== process.env.EVALUATED_HEAD ||
+                pullRequest.data.base.sha !== process.env.EVALUATED_BASE) {
+              core.setFailed('The PR revision changed after policy evaluation; re-evaluate its current head and base.');
+              return;
+            }
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -759,6 +782,15 @@ jobs:
               : (usageLimitReached
                 ? `Codex usage limit reached for code reviews; skipping the review check for PR #${pullRequest.data.number}.`
                 : 'The previous Codex review had no P1 finding. Fix the existing findings and close their comments; do not request another review.');
+            const { data: currentPullRequest } = await github.rest.pulls.get({
+              ...context.repo, pull_number: Number(process.env.PR_NUMBER),
+            });
+            if (currentPullRequest.state !== 'open' || currentPullRequest.draft === true ||
+                currentPullRequest.head.sha !== process.env.EVALUATED_HEAD ||
+                currentPullRequest.base.sha !== process.env.EVALUATED_BASE) {
+              core.setFailed('The PR revision changed during policy enforcement; re-evaluate its current head and base.');
+              return;
+            }
             await github.rest.checks.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
