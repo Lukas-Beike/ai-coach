@@ -292,10 +292,21 @@ test('dispatch cannot run from a feature branch or main', async () => {
   }
 });
 
-test('dispatch refuses an ordinary main PR and malformed PR numbers', async () => {
+test('dispatch re-evaluates ordinary main PRs without granting a release exemption', async () => {
   const data = fixture();
   data.pr.user.login = 'someone';
-  for (const number of ['437', '0', '-1', 'not-a-number', '1.5']) {
+  const result = await run(discover, data, { eventName: 'workflow_dispatch', ref: 'refs/heads/develop',
+    payload: { inputs: { pull_request_number: '437' } } });
+  assert.deepEqual(result.failures, []);
+  assert.equal(matrix(result).skipCodexReview, false);
+  assert.equal(matrix(result).runCodexReview, false);
+  assert.equal(matrix(result).reviewRequired, true);
+});
+
+test('dispatch refuses malformed PR numbers', async () => {
+  const data = fixture();
+  data.pr.user.login = 'someone';
+  for (const number of ['0', '-1', 'not-a-number', '1.5']) {
     const result = await run(discover, data, { eventName: 'workflow_dispatch', ref: 'refs/heads/develop',
       payload: { inputs: { pull_request_number: number } } });
     assert.equal(result.failures.length, 1);
