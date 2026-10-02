@@ -226,13 +226,43 @@ def _merge_garmin_source(
     incoming = payload.get(source)
     previous_freshness = freshness.get(source, {})
     complete = source not in failed and pagination.get(source, {}).get("complete", True)
-    if source == "gear" and isinstance(incoming, list) and complete:
-        freshness[source] = {
-            "freshness": "current",
-            "fetched_at": payload["synced_at"],
-            "observed_at": payload["synced_at"],
-        }
+    if _merge_gear_freshness(source, incoming, complete, payload, freshness):
         return
+    _merge_source_freshness(
+        source, incoming, previous, previous_freshness, complete, payload, freshness
+    )
+    _merge_source_coverage(
+        source, previous_freshness, pagination, complete, payload, freshness
+    )
+    _merge_source_records(source, incoming, previous, payload)
+
+
+def _merge_gear_freshness(
+    source: str,
+    incoming: Any,
+    complete: bool,
+    payload: dict[str, Any],
+    freshness: dict[str, Any],
+) -> bool:
+    if source != "gear" or not isinstance(incoming, list) or not complete:
+        return False
+    freshness[source] = {
+        "freshness": "current",
+        "fetched_at": payload["synced_at"],
+        "observed_at": payload["synced_at"],
+    }
+    return True
+
+
+def _merge_source_freshness(
+    source: str,
+    incoming: Any,
+    previous: dict[str, Any],
+    previous_freshness: dict[str, Any],
+    complete: bool,
+    payload: dict[str, Any],
+    freshness: dict[str, Any],
+) -> None:
     if incoming:
         freshness[source] = {
             "freshness": "current" if complete else "partial",
@@ -240,9 +270,19 @@ def _merge_garmin_source(
             "observed_at": garmin_observations.garmin_source_observed_at(incoming),
         }
     elif source in previous:
-        freshness[source] = {**freshness.get(source, {}), "freshness": "stale"}
+        freshness[source] = {**previous_freshness, "freshness": "stale"}
+
+
+def _merge_source_coverage(
+    source: str,
+    previous_freshness: dict[str, Any],
+    pagination: dict[str, Any],
+    complete: bool,
+    payload: dict[str, Any],
+    freshness: dict[str, Any],
+) -> None:
     if source in GARMIN_COLLECTION_SOURCES:
-        coverage = {
+        coverage: dict[str, Any] = {
             key: previous_freshness[key]
             for key in ("synced_start", "synced_end")
             if key in previous_freshness
@@ -251,6 +291,14 @@ def _merge_garmin_source(
             coverage = _merge_collection_coverage(coverage, payload)
         if source in freshness or source in pagination:
             freshness[source] = {**freshness.get(source, {}), **coverage}
+
+
+def _merge_source_records(
+    source: str,
+    incoming: Any,
+    previous: dict[str, Any],
+    payload: dict[str, Any],
+) -> None:
     if source in GARMIN_COLLECTION_SOURCES and (
         source in previous or source in payload
     ):
