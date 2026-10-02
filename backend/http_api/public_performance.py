@@ -7,6 +7,7 @@ from datetime import date
 from typing import Any
 
 from backend.performance import context as performance_context
+from backend.performance.chart_history import analysis_history
 
 
 class PublicPerformanceStateService:
@@ -31,13 +32,17 @@ class PublicPerformanceStateService:
 
     def from_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         """Project a snapshot already read by a larger state request."""
+        garmin = self._garmin_payload_service.snapshot()
+        today = self._today()
+        performance = performance_context.current_performance_context(
+            snapshot, garmin, self._profile_service.get(), today
+        )
+        performance = {
+            **performance,
+            "history": analysis_history(snapshot, garmin, today),
+        }
         return {
-            "performance": performance_context.current_performance_context(
-                snapshot,
-                self._garmin_payload_service.snapshot(),
-                self._profile_service.get(),
-                self._today(),
-            ),
+            "performance": performance,
             "garmin": self._garmin_projection_service.public_state(),
         }
 
@@ -49,9 +54,13 @@ class PublicFeedbackStateService:
         self._checkin_service = checkin_service
         self._activity_feedback_service = activity_feedback_service
 
-    def feedback_state(self, checkins: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    def feedback_state(
+        self, checkins: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
         return {
-            "checkins": checkins if checkins is not None else self._checkin_service.list(30),
+            "checkins": checkins
+            if checkins is not None
+            else self._checkin_service.list(30),
             "local_feedback": self._checkin_service.context(),
             "activity_feedback": self._activity_feedback_service.context(),
         }

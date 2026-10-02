@@ -2,6 +2,8 @@ import unittest
 from datetime import date
 from unittest.mock import Mock, patch
 
+from backend.performance.chart_history import analysis_history
+
 from backend.http_api.public_performance import (
     PublicFeedbackStateService,
     PublicPerformanceStateService,
@@ -38,7 +40,16 @@ class PublicPerformanceStateTests(unittest.TestCase):
         ) as project_performance:
             result = service.performance_state()
 
-        self.assertEqual(result, {"performance": performance, "garmin": garmin_state})
+        self.assertEqual(
+            result,
+            {
+                "performance": {
+                    **performance,
+                    "history": analysis_history(snapshot, garmin, today),
+                },
+                "garmin": garmin_state,
+            },
+        )
         project_performance.assert_called_once_with(snapshot, garmin, profile, today)
         sync_state_repository.latest_snapshot.assert_called_once_with()
         garmin_payload_service.snapshot.assert_called_once_with()
@@ -54,9 +65,7 @@ class PublicPerformanceStateTests(unittest.TestCase):
         checkin_service.context.return_value = local_feedback
         activity_feedback_service = Mock()
         activity_feedback_service.context.return_value = activity_feedback
-        service = PublicFeedbackStateService(
-            checkin_service, activity_feedback_service
-        )
+        service = PublicFeedbackStateService(checkin_service, activity_feedback_service)
 
         result = service.feedback_state()
 

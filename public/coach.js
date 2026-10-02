@@ -180,8 +180,7 @@ async function loadInitialState() {
   state.initialStateLoaded = false;
   const route = routeFromHash();
   state.planSegment = planSegmentFromRoute(route);
-  state.analysisSegment = analysisSegmentFromRoute(route);
-  const areas = ["chat", "activities", "performance", "feedback", "profile"];
+  const areas = ["chat", "performance", "feedback", "profile"];
   areas.push("weather");
   if (baseRoute(route) === "plan") areas.push("plan", "library");
   await load("/api/bootstrap?local=1", areas);

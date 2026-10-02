@@ -110,20 +110,6 @@ function renderMoreSegments(segment = moreSegmentFromRoute()) {
   });
 }
 
-function renderAnalysisSegments(segment = state.analysisSegment) {
-  const selected = ["history", "performance"].includes(segment) ? segment : "performance";
-  state.analysisSegment = selected;
-  document.querySelectorAll("[data-analysis-segment-panel]").forEach((panel) => {
-    panel.hidden = panel.dataset.analysisSegmentPanel !== selected;
-  });
-  document.querySelectorAll("[data-analysis-segment]").forEach((link) => {
-    const active = link.dataset.analysisSegment === selected;
-    link.classList.toggle("active", active);
-    if (active) link.setAttribute("aria-current", "page");
-    else link.removeAttribute("aria-current");
-  });
-}
-
 function renderPlanSegments(segment = state.planSegment) {
   const selected = ["overview", "library"].includes(segment) ? segment : "overview";
   state.planSegment = selected;
@@ -139,7 +125,7 @@ function renderPlanSegments(segment = state.planSegment) {
 }
 
 function currentPlanLoadAreas() {
-  const areas = new Set(["chat", "activities", "performance", "feedback", "profile", "weather"]);
+  const areas = new Set(["chat", "performance", "feedback", "profile", "weather"]);
   const route = baseRoute();
   if (route === "plan") {
     areas.add("plan");
@@ -182,7 +168,6 @@ function renderActiveRoute(mainRoute, panelRoute) {
   if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
   if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
   if (mainRoute === "nutrition") { renderNutritionSegments(panelRoute); if (state.data) void loadNutrition(); }
-  if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
   if (state.data && mainRoute === "more") {
     void loadContextPreview();
     void loadLogs();
@@ -331,15 +316,11 @@ function showLogin() {
   cancelScheduledChatStreamRender();
   state.loadedAreas.clear();
   state.planSegment = "overview";
-  state.analysisSegment = "performance";
   state.profileDirty = false;
   state.checkinDirty = false;
   state.chatAttachments = [];
   renderChatAttachments();
   state.chatDraftDirty = false;
-  state.activityFromDate = "";
-  state.activityToDate = "";
-  state.activityVisibleCount = 250;
   $("#appShell").hidden = true;
   $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
@@ -482,10 +463,10 @@ function handleStateEvent(event) {
     planning: ["plan", "library"],
     provider: (() => {
       if (payload.status === "loading") return [];
-      return payload.area === "performance" ? ["performance"] : ["activities", "performance"];
+      return payload.area === "performance" ? ["performance"] : ["plan", "performance"];
     })(),
     job: [],
-    sync: ["activities", "performance", "plan", "library"],
+    sync: ["plan", "performance", "library"],
   }[event.type];
   if (event.type === "sync" && !["completed", "error"].includes(payload.status)) return;
   if (areas?.length) scheduleStateEventRefresh(areas);
@@ -557,13 +538,13 @@ function broadcastSyncMessage(message) {
 function changedSyncAreas(nextVersions) {
   const previous = state.data?.state_versions || {};
   const areaMap = {
-    activities: ["activities"],
+    activities: ["plan", "performance"],
     performance: ["performance", "plan"],
     garmin: ["performance", "plan"],
     chat: ["chat"],
     library: ["library", "plan"],
     checkins: ["feedback", "plan"],
-    activity_feedback: ["feedback", "activities"],
+    activity_feedback: ["feedback", "plan"],
     profile: ["profile"],
     plan: ["plan"],
   };
@@ -586,7 +567,6 @@ function renderSyncStatus(status) {
     progress: progressPercentage(status.progress),
     last_error: status.last_error || null,
   };
-  renderActivities(state.data.activities || []);
   renderPerformance(state.data.performance || {});
   renderSettings(state.data);
   updateHeaderAction();
@@ -1512,211 +1492,6 @@ function activitySportLabel(activity) {
   return "Andere";
 }
 
-function activityTypeKey(activity) {
-  return String(activity?.type || "Sportart unbekannt").trim() || "Sportart unbekannt";
-}
-
-function activityTypeCounts(activities) {
-  const counts = new Map();
-  (Array.isArray(activities) ? activities : []).forEach((activity) => {
-    const type = activityTypeKey(activity);
-    counts.set(type, (counts.get(type) || 0) + 1);
-  });
-  return counts;
-}
-
-function refreshActivityFilters() {
-  state.activityVisibleCount = 250;
-  renderActivities(state.data?.activities || []);
-}
-
-function activityFilterButton(type, count) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = `activity-filter-button${state.activityTypes.has(type) ? " active" : ""}`;
-  button.textContent = `${type} (${count})`;
-  button.setAttribute("aria-pressed", state.activityTypes.has(type) ? "true" : "false");
-  button.addEventListener("click", () => {
-    if (state.activityTypes.has(type)) state.activityTypes.delete(type);
-    else state.activityTypes.add(type);
-    refreshActivityFilters();
-  });
-  return button;
-}
-
-function renderActivityFilters(activities) {
-  const root = $("#activityFilters");
-  if (!root) return;
-  root.replaceChildren();
-  const counts = activityTypeCounts(activities);
-  if (!counts.size) {
-    root.hidden = true;
-    return;
-  }
-  root.hidden = false;
-  const label = document.createElement("span");
-  label.className = "activity-filters-label";
-  label.textContent = "Typ filtern:";
-  root.append(label);
-  [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).forEach(([type, count]) => root.append(activityFilterButton(type, count)));
-  if (state.activityTypes.size) {
-    const clear = document.createElement("button");
-    clear.type = "button";
-    clear.className = "activity-filter-button clear";
-    clear.textContent = "Zurücksetzen";
-    clear.addEventListener("click", () => {
-      state.activityTypes.clear();
-      refreshActivityFilters();
-    });
-    root.append(clear);
-  }
-}
-
-function renderActivityStats(activities, filtered = false) {
-  const root = $("#activityStats");
-  if (!root) return;
-  root.replaceChildren();
-  const list = Array.isArray(activities) ? activities : [];
-  const counts = new Map();
-  list.forEach((activity) => counts.set(activitySportLabel(activity), (counts.get(activitySportLabel(activity)) || 0) + 1));
-  const entries = [[filtered ? "Einheiten im Filter" : "Einheiten gesamt", list.length], ...[...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([sport, count]) => [`${sport}`, count])];
-  entries.forEach(([label, value]) => {
-    const card = document.createElement("div");
-    const number = document.createElement("strong");
-    number.textContent = String(value);
-    const caption = document.createElement("span");
-    caption.textContent = label;
-    card.append(number, caption);
-    root.append(card);
-  });
-}
-
-function renderActivitySyncDetail() {
-  const syncDetail = $("#activitySyncDetail");
-  if (!syncDetail) return;
-  const syncNotices = [];
-  if (state.data?.provider_resync?.intervals?.running || state.localSync.intervalsFull) syncNotices.push(state.data?.provider_resync?.intervals?.status || "Intervals.icu wird vollständig neu geladen…");
-  if (state.data?.provider_resync?.garmin?.running || state.localSync.garminFull) syncNotices.push(state.data?.provider_resync?.garmin?.status || "Garmin wird vollständig neu geladen…");
-  if (state.data?.sync?.running || state.localSync.intervals) syncNotices.push(state.data?.sync?.status || "Intervals.icu wird synchronisiert…");
-  const refreshedAt = state.data?.sync?.last_sync_at;
-  const refreshedText = refreshedAt ? `Letzte Aktualisierung: ${formatTime(refreshedAt)}` : "Noch nicht aktualisiert";
-  syncDetail.textContent = syncNotices.length ? syncNotices.join(" · ") : refreshedText;
-}
-
-function filteredActivities(list) {
-  const dateFiltered = list.filter((activity) => {
-    const activityDate = String(activity.start_date_local || activity.date || "").slice(0, 10);
-    if (state.activityFromDate && (!activityDate || activityDate < state.activityFromDate)) return false;
-    if (state.activityToDate && (!activityDate || activityDate > state.activityToDate)) return false;
-    return true;
-  });
-  return state.activityTypes.size
-    ? dateFiltered.filter((activity) => state.activityTypes.has(activityTypeKey(activity)))
-    : dateFiltered;
-}
-
-function renderActivitiesEmpty(root, list) {
-  const empty = document.createElement("div");
-  empty.className = "empty";
-  const title = document.createElement("strong");
-  title.textContent = list.length ? "Keine passenden Einheiten" : "Noch keine absolvierten Einheiten";
-  let emptyMessage;
-  if (!list.length) emptyMessage = "Aktualisiere die Trainingsdaten, um deine synchronisierten Aktivitäten hier zu sehen.";
-  else if (state.activityFromDate || state.activityToDate) emptyMessage = "Passe den Zeitraum an oder setze den Filter zurück.";
-  else emptyMessage = "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück.";
-  empty.append(title, document.createTextNode(emptyMessage));
-  root.append(empty);
-}
-
-function renderActivityCard(activity) {
-  const card = document.createElement("article");
-  card.className = "activity-card";
-  const top = document.createElement("div");
-  top.className = "activity-top";
-  const title = document.createElement("h3");
-  title.textContent = activity.name || activity.type || "Einheit";
-  const date = document.createElement("span");
-  date.className = "eyebrow";
-  date.textContent = dateLabel(activity.start_date_local);
-  top.append(title, date);
-  const stats = document.createElement("div");
-  stats.className = "activity-stats";
-  const addStat = (label, value) => {
-    if (value == null || value === "") return;
-    const item = document.createElement("span");
-    item.innerHTML = `${escapeHtml(label)} <strong>${escapeHtml(String(value))}</strong>`;
-    stats.append(item);
-  };
-  addStat("Dauer", formatDuration(activity.moving_time));
-  addStat("Distanz", distanceLabel(activity.distance));
-  addStat("Belastung", activity.icu_training_load);
-  addStat("Ø Puls", activity.average_heartrate ? `${Math.round(activity.average_heartrate)} bpm` : null);
-  addStat("Ø Leistung", activity.average_watts ? `${Math.round(activity.average_watts)} W` : null);
-  card.append(top, stats);
-  const feedbackNotes = String(activity.activity_feedback?.notes || "").trim();
-  if (feedbackNotes) {
-    const feedback = document.createElement("section");
-    feedback.className = "activity-feedback";
-    const feedbackTitle = document.createElement("h4");
-    feedbackTitle.className = "activity-feedback-title";
-    feedbackTitle.textContent = "Besonderheiten";
-    const feedbackText = document.createElement("p");
-    feedbackText.className = "activity-feedback-notes";
-    feedbackText.textContent = feedbackNotes;
-    feedback.append(feedbackTitle, feedbackText);
-    card.append(feedback);
-  }
-  return card;
-}
-
-function appendActivitiesLoadMore(root, displayedActivities) {
-  if (!(displayedActivities.length > state.activityVisibleCount || state.data?.activities_next_cursor)) return;
-  const loadMore = document.createElement("button");
-  loadMore.type = "button";
-  loadMore.className = "secondary-button activity-load-more";
-  loadMore.textContent = displayedActivities.length > state.activityVisibleCount
-    ? `Weitere Einheiten laden (${displayedActivities.length - state.activityVisibleCount} verbleibend)`
-    : "Weitere Einheiten laden";
-  loadMore.addEventListener("click", async () => {
-    if (displayedActivities.length > state.activityVisibleCount) {
-      state.activityVisibleCount += 250;
-      renderActivities(state.data?.activities || []);
-      return;
-    }
-    loadMore.disabled = true;
-    try {
-      const page = await api(`/api/activities?limit=250&cursor=${encodeURIComponent(state.data.activities_next_cursor)}`);
-      state.data.activities = [...(state.data.activities || []), ...(page.activities || [])];
-      state.data.activities_next_cursor = page.next_cursor;
-      state.activityVisibleCount += 250;
-      renderActivities(state.data.activities);
-    } catch (error) {
-      toast(error.message, true);
-      loadMore.disabled = false;
-    }
-  });
-  root.append(loadMore);
-}
-
-function renderActivities(activities) {
-  const list = Array.isArray(activities) ? activities : [];
-  renderActivitySyncDetail();
-  renderActivityFilters(list);
-  const displayedActivities = filteredActivities(list);
-  const isFiltered = Boolean(state.activityTypes.size || state.activityFromDate || state.activityToDate);
-  renderActivityStats(displayedActivities, isFiltered);
-  const stats = $("#activityStats");
-  if (stats) stats.setAttribute("aria-label", isFiltered ? "Gefilterte Aktivitätsstatistik" : "Aktivitätsstatistik");
-  const root = $("#activities");
-  const fromDate = $("#activityFromDate");
-  const toDate = $("#activityToDate");
-  if (fromDate && fromDate.value !== state.activityFromDate) fromDate.value = state.activityFromDate;
-  if (toDate && toDate.value !== state.activityToDate) toDate.value = state.activityToDate;
-  root.replaceChildren();
-  if (!displayedActivities.length) renderActivitiesEmpty(root, list);
-  displayedActivities.slice(0, state.activityVisibleCount).forEach((activity) => root.append(renderActivityCard(activity)));
-  appendActivitiesLoadMore(root, displayedActivities);
-}
 let chatStreamRenderFrame = null;
 let chatStreamStartScrollPending = false;
 function chatIsNearBottom() {
@@ -1931,7 +1706,7 @@ async function executeCoachActionProposal(proposal, button) {
     const receipt = coachActionReceipt(proposal, result);
     addCoachReceipt(receipt);
     toast(receipt.message);
-    await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["activities"] : ["plan", "library", "profile", "feedback"]);
+    await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["plan", "performance"] : ["plan", "library", "profile", "feedback"]);
     if (receipt.localWrite) void applyNavigationRoute("nutrition/meals", { historyMode: "push" });
     else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) void applyNavigationRoute("plan", { historyMode: "push" });
   } catch (error) {
@@ -3531,6 +3306,7 @@ function performanceSection(root, title, items, detail = "") {
 }
 
 function renderPerformance(performance) {
+  renderAnalysisHistory(performance?.history);
   const root = $("#performanceSummary");
   if (root.querySelector(".metric-editable.editing")) return;
   root.replaceChildren();
@@ -3611,22 +3387,15 @@ function updateHeaderAction() {
   const panel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
   if (panel === "dataPanel") {
     button.hidden = false;
-    if (state.analysisSegment === "performance") {
-      button.dataset.action = "performance";
-      button.title = "Aktuelle Leistungsdaten von Intervals.icu aktualisieren";
-      button.disabled = Boolean(state.data?.performance_refresh?.running || state.data?.sync?.running || state.data?.garmin_sync?.running || state.data?.provider_resync?.intervals?.running || state.data?.provider_resync?.garmin?.running || state.localSync.performance || state.localSync.intervals || state.localSync.garmin || state.localSync.intervalsFull || state.localSync.garminFull);
-      if (state.data?.sync?.running || state.data?.garmin_sync?.running || state.localSync.intervals || state.localSync.garmin) {
-        button.textContent = "Synchronisierung läuft…";
-      } else if (button.disabled) {
-        button.textContent = "Leistungsdaten werden aktualisiert…";
-      } else {
-        button.textContent = "Leistungsdaten aktualisieren";
-      }
+    button.dataset.action = "performance";
+    button.title = "Aktuelle Leistungsdaten von Intervals.icu aktualisieren";
+    button.disabled = Boolean(state.data?.performance_refresh?.running || state.data?.sync?.running || state.data?.garmin_sync?.running || state.data?.provider_resync?.intervals?.running || state.data?.provider_resync?.garmin?.running || state.localSync.performance || state.localSync.intervals || state.localSync.garmin || state.localSync.intervalsFull || state.localSync.garminFull);
+    if (state.data?.sync?.running || state.data?.garmin_sync?.running || state.localSync.intervals || state.localSync.garmin) {
+      button.textContent = "Synchronisierung läuft…";
+    } else if (button.disabled) {
+      button.textContent = "Leistungsdaten werden aktualisiert…";
     } else {
-      button.dataset.action = "activities";
-      button.title = "Aktivitäten der letzten 90 Tage von Intervals.icu laden";
-      button.disabled = Boolean(state.data?.sync?.running || state.data?.provider_resync?.intervals?.running || state.localSync.intervals || state.localSync.intervalsFull);
-      button.textContent = button.disabled ? "Synchronisierung läuft…" : "Aktivitäten aktualisieren";
+      button.textContent = "Leistungsdaten aktualisieren";
     }
   } else {
     button.hidden = true;
@@ -4095,7 +3864,6 @@ function render(data) {
   notifyState(data);
   renderStatus(data);
   renderMessages(data.messages, firstRender);
-  renderActivities(data.activities || []);
   renderPlanned(data.training_calendar || data.planned || []);
   renderLibrary(data.library || []);
   renderProfile(data.profile);
@@ -4157,7 +3925,6 @@ function applyChatResult(payload, result, chatContentVersion) {
 function loadStateRequests(areas, query) {
   const requests = [];
   if (areas.has("chat")) requests.push(["chat", api("/api/chat/history?limit=100")]);
-  if (areas.has("activities")) requests.push(["activities", api("/api/activities?limit=250")]);
   if (areas.has("plan")) requests.push(["plan", api(`/api/plan${query}`)]);
   if (areas.has("weather") && !areas.has("plan")) requests.push(["weather", api(`/api/weather${query}`)]);
   if (areas.has("library")) requests.push(["library", api("/api/library?limit=100")]);
@@ -4174,7 +3941,6 @@ function applyLoadedArea(payload, area, result, error, bootstrap, chatGeneration
   if (area === "chat" && chatGeneration !== state.chatGeneration) return { applied: false };
   if (error) return { applied: false, error: `${area}: ${error.message}` };
   if (area === "chat") applyChatResult(payload, result, chatContentVersion);
-  if (area === "activities") Object.assign(payload, { activities: result.activities || [], activities_next_cursor: result.next_cursor });
   if (area === "plan") Object.assign(payload, result);
   if (area === "weather") Object.assign(payload, { weather: result });
   if (area === "library") Object.assign(payload, { library: result.workouts || [], library_next_cursor: result.next_cursor });
@@ -4220,10 +3986,10 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     if (sessionGeneration !== state.sessionGeneration) return;
     const existing = state.data || {};
     const payload = { ...existing, ...bootstrap };
-    ["messages", "messages_next_cursor", "activities", "activities_next_cursor", "library", "library_next_cursor", "plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", "garmin", "checkins", "local_feedback", "activity_feedback"].forEach((key) => {
+    ["messages", "messages_next_cursor", "library", "library_next_cursor", "plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", "garmin", "checkins", "local_feedback", "activity_feedback"].forEach((key) => {
       if (existing[key] !== undefined) payload[key] = existing[key];
     });
-    const areas = new Set(requestedAreas || ["chat", "activities", "plan", "library", "performance", "feedback", "profile"]);
+    const areas = new Set(requestedAreas || ["chat", "plan", "library", "performance", "feedback", "profile"]);
     const domainData = loadStateRequests(areas, query);
     if (initialLoad && requestSequence === state.loadSequence) {
       render(payload);
@@ -4746,11 +4512,6 @@ document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("
   const linkedRoute = String(link.getAttribute("href") || "").replace(/^#/, "").trim();
   void applyNavigationRoute(linkedRoute || link.dataset.route, { historyMode: "push" });
 }));
-document.querySelectorAll("[data-analysis-segment]").forEach((link) => link.addEventListener("click", (event) => {
-  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  event.preventDefault();
-  void applyNavigationRoute(`analysis/${link.dataset.analysisSegment}`, { historyMode: "push" });
-}));
 document.querySelectorAll("[data-plan-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
@@ -4842,7 +4603,6 @@ $("#chatJumpToComposer").addEventListener("click", () => {
 });
 $("#headerActionButton").addEventListener("click", (event) => {
   if (event.currentTarget.dataset.action === "performance") void refreshPerformance();
-  else if (event.currentTarget.dataset.action === "activities") void syncNow(event);
 });
 $("#systemIntervalsSyncButton").addEventListener("click", syncNow);
 $("#systemIntervalsFullResyncButton").addEventListener("click", () => fullResync("intervals"));
@@ -4896,23 +4656,6 @@ $("#messageInput").addEventListener("keydown", (event) => {
     event.preventDefault();
     $("#chatForm").requestSubmit();
   }
-});
-$("#activityFromDate").addEventListener("input", (event) => {
-  state.activityFromDate = event.target.value;
-  state.activityVisibleCount = 250;
-  renderActivities(state.data?.activities || []);
-});
-$("#activityToDate").addEventListener("input", (event) => {
-  state.activityToDate = event.target.value;
-  state.activityVisibleCount = 250;
-  renderActivities(state.data?.activities || []);
-});
-$("#activityFilterReset").addEventListener("click", () => {
-  state.activityTypes.clear();
-  state.activityFromDate = "";
-  state.activityToDate = "";
-  state.activityVisibleCount = 250;
-  renderActivities(state.data?.activities || []);
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") savePwaActivity();
