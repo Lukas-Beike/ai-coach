@@ -210,7 +210,7 @@ jobs:
               });
               if (codexReviews.length === 0) {
                 const cleanReview = await hasCompletedCleanReaction(pullRequest);
-                if (cleanReview) {
+                if (await unchangedReviewedDiff(pullRequest, cleanReview)) {
                   const unresolvedReviewIds = await getUnresolvedCodexReviewIds(pullRequest);
                   return unresolvedReviewIds.size > 0 ? 'unresolved' : 'none';
                 }
