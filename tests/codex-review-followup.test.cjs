@@ -83,6 +83,13 @@ test('manual re-evaluation cannot replace the initial review', async () => {
   assert.equal(await reviewRequired({ eventName: 'workflow_dispatch', review: null, reaction: false }), true);
 });
 
+test('a completed clean initial review survives subsequent fixes without a native review record', async () => {
+  assert.equal(await reviewRequired({ review: null, completedAt: '2026-09-23T15:31:54Z',
+    reviewedHead: 'b'.repeat(40), sameDiff: false }), false);
+  assert.equal(await reviewRequired({ review: null, completedAt: '2026-09-23T15:31:54Z',
+    unresolved: true }), true);
+});
+
 test('manual re-evaluation preserves a changes-requested blocker', async () => {
   assert.equal(await reviewRequired({ eventName: 'workflow_dispatch',
     review: { ...p1Review, body: '', state: 'CHANGES_REQUESTED' }, reaction: false }), true);
