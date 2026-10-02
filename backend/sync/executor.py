@@ -243,6 +243,10 @@ class GarminSyncJobOwner:
             "days": days,
             "operation_id": job["id"],
             "reason": reason,
+            "include_recovery": (
+                str(job.get("type") or "") != "historical_backfill"
+                and days != self._all_sync_days
+            ),
         }
         if historical_end is not None and self._garmin_fixture_loader.path() is None:
             sync_kwargs["end_date"] = historical_end
