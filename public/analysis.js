@@ -32,7 +32,7 @@ function analysisPointValue(item, point, unit) {
 }
 
 function appendAnalysisCoverage(section, series, compactInfo) {
-  const coverageSeries = series.filter((item) => item.coverage);
+  const coverageSeries = series;
   if (!coverageSeries.length && !compactInfo) return;
   const coverage = document.createElement("details");
   coverage.className = "analysis-coverage";
@@ -44,7 +44,10 @@ function appendAnalysisCoverage(section, series, compactInfo) {
   const rows = document.createElement("ul");
   coverageSeries.forEach((item) => {
     const row = document.createElement("li");
-    row.textContent = `${item.label}: ${item.coverage}`;
+    const points = item.points.filter((point) => point?.value != null && Number.isFinite(Number(point.value)));
+    const range = points.length ? " · " + dateLabel(points[0].date) + " bis " + dateLabel(points.at(-1).date) : "";
+    const valueCoverage = item.coverage || points.length + "/" + item.points.length + " datierte Werte" + range;
+    row.textContent = `${item.label}: ${valueCoverage}`;
     rows.append(row);
   });
   if (!coverageSeries.length) {
