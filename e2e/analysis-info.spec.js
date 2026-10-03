@@ -120,6 +120,21 @@ test("@responsive sparse performance shows measurements and sources without inve
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test("sparse FTP stays unconnected alongside a dense eFTP series", async ({ page }) => {
+  await performanceFixture(page, { history: {
+    start: "2026-09-01", end: "2026-09-03", load: { points: [] }, metrics: {
+      cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-02", value: 210 }] }],
+      cycling_eftp_watts: [{ source: "Intervals.icu", points: [{ date: "2026-09-01", value: 205 }, { date: "2026-09-02", value: 208 }, { date: "2026-09-03", value: 212 }] }],
+    },
+  } });
+  const chart = page.locator("#analysisHistoryCharts svg");
+  await expect(chart).toHaveCount(1);
+  await expect(chart.locator('circle[data-series="0"]')).toHaveCount(2);
+  await expect(chart.locator('path[data-series="0"]')).toHaveCount(0);
+  await expect(chart.locator('path[data-series="1"]')).toHaveCount(1);
+  await expect(page.locator("#analysisHistoryCharts")).toContainText("Seit 01.09.2026: +10 W");
+});
+
 test("@responsive pace ticks stay distinct and faster pace is higher", async ({ page }) => {
   await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-03", load: { points: [] }, metrics: {
     run_threshold_pace_seconds_per_km: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 300 }, { date: "2026-09-02", value: 295 }, { date: "2026-09-03", value: 290 }] }],

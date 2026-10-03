@@ -116,7 +116,7 @@ function analysisChart(title, series, unit, start, end, note, {
     svg.append(analysisSvg("title", {}, `${title} · ${dateLabel(start)} bis ${dateLabel(end)}`));
     svg.append(analysisSvg("desc", {}, `Eigene Skala in ${unit || "Belastungspunkten"}. Fehlende Messungen bleiben unbekannt.`));
     appendAnalysisAxes(svg, unit, scales);
-    appendAnalysisSeries(svg, series, unit, scales, zeroCentered);
+    appendAnalysisSeries(svg, series, unit, scales, zeroCentered, sparse);
     appendAnalysisDateTicks(svg, start, end, scales);
     appendAnalysisPointInspectors(section, svg, series, unit, scales);
     section.append(svg);
@@ -214,8 +214,9 @@ function appendAnalysisAxes(svg, unit, { min, max, step, chartRight, y }) {
   svg.append(analysisSvg("text", { x: 60, y: 15, class: "analysis-axis-unit" }, unit === "s/km" ? "min/km · schneller oben" : unit || "Belastungspunkte"));
 }
 
-function appendAnalysisSeries(svg, series, unit, { chartRight, x, y }, zeroCentered) {
+function appendAnalysisSeries(svg, series, unit, { chartRight, x, y }, zeroCentered, sparse) {
   series.forEach((item, index) => {
+    const hasTrend = !sparse || item.points.filter(analysisValidPoint).length >= 3;
     const color = item.color ?? index;
     if (item.range) svg.append(analysisSvg("rect", { x: 60, y: Math.min(y(item.range.lower), y(item.range.upper)), width: chartRight - 60, height: Math.max(1, Math.abs(y(item.range.lower) - y(item.range.upper))), class: "analysis-baseline-band" }));
     if (item.target != null) svg.append(analysisSvg("line", { x1: 60, x2: chartRight, y1: y(item.target), y2: y(item.target), class: "analysis-target-line" }));
@@ -241,7 +242,7 @@ function appendAnalysisSeries(svg, series, unit, { chartRight, x, y }, zeroCente
       previous = point;
     });
     flushArea();
-    if (!item.bars) svg.append(analysisSvg("path", { d: path, fill: "none", "data-series": index, "data-color": color, "data-line": item.line || (index ? "dashed" : "solid") }));
+    if (!item.bars && hasTrend) svg.append(analysisSvg("path", { d: path, fill: "none", "data-series": index, "data-color": color, "data-line": item.line || (index ? "dashed" : "solid") }));
   });
 }
 
@@ -440,11 +441,11 @@ function selectedRecoveryBaselines(report) {
 function recoveryReferenceLabel(item, range, target, unit, position, weekly) {
   if (range) {
     const prefix = weekly ? "Letzte Tagesmessung: " : "";
-    const provisional = item.status === "provisional" ? " ? vorl?ufig" : "";
-    return `${prefix}${position || "Pers?nlicher Bereich"} ? Basis ${analysisValue(range.lower, unit)}?${analysisValue(range.upper, unit)}${provisional}`;
+    const provisional = item.status === "provisional" ? " · vorläufig" : "";
+    return `${prefix}${position || "Persönlicher Bereich"} · Basis ${analysisValue(range.lower, unit)}–${analysisValue(range.upper, unit)}${provisional}`;
   }
-  if (target != null) return `Pers?nliches Schlafziel: ${analysisValue(target, unit)}`;
-  return `Pers?nliche Basis: ${item.reason || "noch nicht verf?gbar"}`;
+  if (target != null) return `Persönliches Schlafziel: ${analysisValue(target, unit)}`;
+  return `Persönliche Basis: ${item.reason || "noch nicht verfügbar"}`;
 }
 
 function renderRecoveryCharts(report, root) {
@@ -465,7 +466,8 @@ function renderRecoveryCharts(report, root) {
     const range = metric !== "sleep" && ["ok", "provisional"].includes(item.status) && Number.isFinite(item.lower) && Number.isFinite(item.upper) ? { lower: item.lower, upper: item.upper, status: item.status } : null;
     const target = metric === "sleep" && Number.isFinite(report.sleep_target_hours) ? report.sleep_target_hours : null;
     const position = { below: "Unter deinem üblichen Bereich", within: "Innerhalb deines üblichen Bereichs", above: "Über deinem üblichen Bereich" }[item.position];
-    return { label: `${title} · ${item.source}${metric === "hrv" ? ` · ${item.measurement}` : ""}`, legendLabel: title, source: item.source, unit, color,
+    const measurement = metric === "hrv" ? " · " + item.measurement : "";
+    return { label: `${title} · ${item.source}${measurement}`, legendLabel: title, source: item.source, unit, color,
       bars: metric === "sleep" && !weekly, cadenceDays: weekly ? 7 : 1, range, target,
       referenceLabel: recoveryReferenceLabel(item, range, target, unit, position, weekly),
       coverageShort: `${readings.length}/${expectedDays} Tage mit Messung`,
