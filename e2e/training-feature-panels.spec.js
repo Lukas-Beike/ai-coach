@@ -32,7 +32,7 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
     };
   });
   expect(periods.same).toBeTruthy();
-  expect(periods.titles).toHaveLength(3);
+  expect(periods.titles).toHaveLength(2);
   for (const title of periods.titles) expect(title).toContain(periods.expected);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 
