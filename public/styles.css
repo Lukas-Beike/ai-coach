@@ -1255,6 +1255,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .recovery-sleep-line { stroke: var(--accent-bright); stroke-width: 1; opacity: .9; }
 .analysis-chart-card svg .recovery-axis-label { font-size: 9px; }
 .analysis-chart-card svg .recovery-sleep-axis { fill: var(--accent-bright); font-size: 10px; }
+.analysis-chart-card svg .analysis-secondary-axis { fill: var(--accent-bright); font-size: 10px; }
 .analysis-day-marker { cursor: pointer; }
 .analysis-day-marker:hover rect, .analysis-day-marker:focus rect { fill: var(--ink); fill-opacity: .06; }
 .analysis-day-marker:focus { outline: 2px solid var(--accent); }

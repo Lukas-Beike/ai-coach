@@ -23,7 +23,8 @@ test("@responsive recovery exposes partial measured history without counting fut
   await expect(charts.first().locator(".recovery-sleep-bar")).toHaveCount(2);
   await expect(charts.first().locator(".recovery-sleep-line")).toHaveCount(1);
   expect(await charts.first().locator(".recovery-sleep-line").evaluate((line) => Number.parseFloat(getComputedStyle(line).strokeWidth))).toBe(1);
-  await expect(charts.first().locator(".recovery-sleep-axis").last()).toContainText("12 h");
+  await expect(charts.first().locator(".recovery-sleep-axis").first()).toContainText("3 h");
+  await expect(charts.first().locator(".recovery-sleep-axis").last()).toContainText("10 h");
   await expect(charts.first().locator(".analysis-point-value")).toHaveCount(0);
   await expect(charts.first().locator(".analysis-chart-legend")).not.toContainText("%");
   await charts.first().locator(".analysis-day-marker").last().focus();
@@ -49,7 +50,13 @@ test("@responsive performance legend opens source information on demand", async 
     load: { points: [{ date: "2026-09-01", ctl: 30, atl: 35, tsb: -5 }] },
     metrics: { cycling_ftp_watts: [{ source: "Garmin Connect", points: [
       { date: "2026-09-01", value: 200 }, { date: "2026-09-02", value: 210 },
-    ] }] },
+    ] }],
+      run_threshold_pace_seconds_per_km: [{ source: "Garmin Connect", points: [
+        { date: "2026-09-01", value: 300 }, { date: "2026-09-02", value: 290 },
+      ] }],
+      cycling_vo2max_ml_kg_min: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 50 }, { date: "2026-09-02", value: 51 }] }],
+      running_vo2max_ml_kg_min: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 48 }, { date: "2026-09-02", value: 49 }] }],
+    },
   };
   await page.route("**/api/performance", async (route) => {
     const response = await route.fetch();
@@ -64,6 +71,15 @@ test("@responsive performance legend opens source information on demand", async 
     await applyNavigationRoute("analysis/performance", { historyMode: "replace" });
   });
   const charts = page.locator("#analysisHistoryCharts");
+  await expect(charts.locator(".analysis-chart-card")).toHaveCount(3);
+  const runningChart = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: "Leistungsentwicklung · Laufen", exact: true }) });
+  const cyclingChart = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: "Leistungsentwicklung · Rad", exact: true }) });
+  await expect(runningChart.getByRole("button", { name: /Schwellenpace: 4:50/ })).toBeVisible();
+  await expect(cyclingChart.getByRole("button", { name: /FTP: 210 W/ })).toBeVisible();
+  await expect(runningChart.locator(".analysis-chart-legend")).not.toContainText("%");
+  await expect(cyclingChart.locator(".analysis-chart-legend")).not.toContainText("%");
+  await expect(runningChart.locator(".analysis-secondary-axis")).toHaveCount(2);
+  await expect(cyclingChart.locator(".analysis-secondary-axis")).toHaveCount(3);
   await expect(charts.locator(".analysis-chart-note")).toHaveCount(0);
   const loadLegend = charts.locator(".analysis-chart-legend").first();
   await expect(loadLegend).not.toContainText(/CTL|ATL|TSB/);
@@ -80,7 +96,7 @@ test("@responsive performance legend opens source information on demand", async 
   const tooltip = charts.getByRole("tooltip").filter({ hasText: "Rad · FTP · Garmin Connect" });
   await expect(tooltip).toBeVisible();
   await expect(tooltip).toContainText("02.09.2026");
-  await expect(tooltip).toContainText("Basis 01.09.2026");
+  await expect(tooltip).not.toContainText("Basis");
   await expect(legend).toHaveAttribute("aria-expanded", "true");
   const bounds = await tooltip.boundingBox();
   expect(bounds.x).toBeGreaterThanOrEqual(0);

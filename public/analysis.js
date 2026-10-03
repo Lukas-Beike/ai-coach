@@ -61,7 +61,8 @@ function appendAnalysisCoverage(section, series, compactInfo) {
 
 let analysisInfoId = 0;
 
-function analysisChart(title, series, unit, start, end, note, compactInfo = false, { recovery = false } = {}) {
+function analysisChart(title, series, unit, start, end, note, compactInfo = false, { recovery = false, secondaryUnit = null } = {}) {
+  if (recovery) secondaryUnit = "h";
   const section = document.createElement("section");
   section.className = "analysis-chart-card";
   const heading = document.createElement("h3");
@@ -115,7 +116,7 @@ function analysisChart(title, series, unit, start, end, note, compactInfo = fals
     legend.append(entry);
   });
   section.append(legend);
-  const axisValues = recovery ? series.filter((item) => item.unit !== "h").flatMap((item) => item.points.filter(valid).map((point) => Number(point.value))) : values;
+  const axisValues = secondaryUnit ? series.filter((item) => item.unit !== secondaryUnit).flatMap((item) => item.points.filter(valid).map((point) => Number(point.value))) : values;
   const low = Math.min(...(axisValues.length ? axisValues : [0]));
   const high = Math.max(...(axisValues.length ? axisValues : [100]));
   const padding = Math.max((high - low) * .12, 1);
@@ -125,23 +126,26 @@ function analysisChart(title, series, unit, start, end, note, compactInfo = fals
   const min = Math.floor((low - padding) / step) * step;
   const max = Math.ceil((high + padding) / step) * step;
   const chartWidth = globalThis.innerWidth < 600 ? 360 : 680;
-  const chartRight = chartWidth - (recovery ? 54 : 30);
+  const chartRight = chartWidth - (secondaryUnit ? 54 : 30);
   const x = (date) => 66 + ((Date.parse(date) - Date.parse(start)) / Math.max(86400000, Date.parse(end) - Date.parse(start))) * (chartRight - 66);
   const y = (value) => 160 - (Number(value) - min) / (max - min) * 130;
-  const sleepMax = Math.max(12, Math.ceil(Math.max(0, ...series.filter((item) => item.unit === "h").flatMap((item) => item.points.filter(valid).map((point) => Number(point.value)))) / 3) * 3);
-  const pointY = (item, value) => recovery && item.unit === "h" ? 160 - Number(value) / sleepMax * 130 : y(value);
+  const secondaryValues = series.filter((item) => item.unit === secondaryUnit).flatMap((item) => item.points.filter(valid).map((point) => Number(point.value)));
+  const secondaryMin = recovery ? 3 : Math.floor((Math.min(...(secondaryValues.length ? secondaryValues : [40])) - 1) / 5) * 5;
+  const secondaryMax = recovery ? 10 : Math.ceil((Math.max(...(secondaryValues.length ? secondaryValues : [60])) + 1) / 5) * 5;
+  const secondaryY = (value) => 160 - (Math.max(secondaryMin, Math.min(secondaryMax, Number(value))) - secondaryMin) / (secondaryMax - secondaryMin) * 130;
+  const pointY = (item, value) => secondaryUnit && item.unit === secondaryUnit ? secondaryY(value) : y(value);
   const svg = analysisSvg("svg", { viewBox: `0 0 ${chartWidth} 200`, role: "img", "aria-label": `${title}: datierter Verlauf. Einzelwerte stehen unter Werte ansehen.` });
   svg.append(analysisSvg("title", {}, `${title} · ${dateLabel(start)} bis ${dateLabel(end)}`));
   Array.from({ length: Math.round((max - min) / step) + 1 }, (_, index) => min + index * step).forEach((value) => {
     svg.append(analysisSvg("line", { x1: 66, x2: chartRight, y1: y(value), y2: y(value), class: "analysis-grid-line" }));
     svg.append(analysisSvg("text", { x: 58, y: y(value) + 4, "text-anchor": "end" }, unit === "s/km" ? formatPace(value).split(" ")[0] : value.toLocaleString("de-DE", { maximumFractionDigits: 1 }) + (unit === "%" ? " %" : "")));
   });
-  if (recovery) {
-    svg.classList.add("recovery-combination-chart");
-    svg.append(analysisSvg("text", { x: 66, y: 14, class: "recovery-axis-label" }, "HRV (ms) / Ruhepuls (bpm)"));
-    svg.append(analysisSvg("text", { x: chartRight, y: 14, "text-anchor": "end", class: "recovery-axis-label" }, "Schlaf (h)"));
-    for (let value = 0; value <= sleepMax; value += 3) {
-      svg.append(analysisSvg("text", { x: chartRight + 9, y: 164 - value / sleepMax * 130, class: "recovery-sleep-axis" }, analysisValue(value, "h")));
+  if (secondaryUnit) {
+    if (recovery) svg.classList.add("recovery-combination-chart");
+    svg.append(analysisSvg("text", { x: 66, y: 14, class: "recovery-axis-label" }, recovery ? "HRV (ms) / Ruhepuls (bpm)" : unit === "W" ? "FTP / eFTP (W)" : "Schwellenpace (min/km)"));
+    svg.append(analysisSvg("text", { x: chartRight, y: 14, "text-anchor": "end", class: "recovery-axis-label" }, recovery ? "Schlaf (h)" : "VO₂max (ml/kg/min)"));
+    for (let value = secondaryMin; value <= secondaryMax; value += recovery ? 1 : 5) {
+      svg.append(analysisSvg("text", { x: chartRight + 9, y: secondaryY(value) + 4, class: recovery ? "recovery-sleep-axis" : "analysis-secondary-axis" }, recovery ? analysisValue(value, "h") : analysisValue(value, "")));
     }
   }
   series.forEach((item, index) => {
@@ -294,19 +298,17 @@ function renderAnalysisHistory(history) {
     ["running_vo2max_ml_kg_min", "Lauf · VO₂max", "ml/kg/min"],
   ].flatMap(([key, label, unit], color) => (history.metrics?.[key] || []).filter((item) => item.source === (key === "cycling_eftp_watts" ? "Intervals.icu" : "Garmin Connect")).map((item) => {
     const points = item.points.filter(withinPeriod);
-    const baseline = points.find((point) => point.value != null && Number(point.value) > 0);
     return {
       label: `${label} · ${item.source}`, legendLabel: label, unit, color,
       line: item.source === "Garmin Connect" ? "dashed" : "solid",
-      baselineDate: baseline?.date,
-      points: points.map((point) => ({
-        date: point.date, actual: point.value,
-        value: analysisRelativeValue(point.value, baseline, unit),
-      })),
+      points: points.map((point) => ({ date: point.date, value: point.value })),
     };
   }));
-  root.append(analysisChart("Leistungsentwicklung", performanceSeries, "%", start, end,
-    "Relative Veränderung ab dem ersten vorhandenen Wert je Reihe (0 %). Bei Schwellenpace bedeutet positives Wachstum eine kürzere Zeit pro Kilometer. Leistungswerte: Garmin; nur eFTP: Intervals.icu. VO₂max und eFTP sind Schätzungen. Datenlücken bleiben sichtbar.", true));
+  const runSeries = performanceSeries.filter((item) => item.legendLabel.startsWith("Lauf"));
+  const cyclingSeries = performanceSeries.filter((item) => item.legendLabel.startsWith("Rad"));
+  const note = "Absolute Messwerte je Sportart. Garmin; nur eFTP: Intervals.icu. VO₂max und eFTP sind Schätzungen. Datenlücken bleiben sichtbar.";
+  root.append(analysisChart("Leistungsentwicklung · Laufen", runSeries, "s/km", start, end, note, true, { secondaryUnit: "ml/kg/min" }));
+  root.append(analysisChart("Leistungsentwicklung · Rad", cyclingSeries, "W", start, end, note, true, { secondaryUnit: "ml/kg/min" }));
   root.querySelectorAll(".analysis-chart-card details").forEach((details, index) => {
     details.open = expandedDetails[index] ?? false;
   });
@@ -384,7 +386,7 @@ function renderRecoveryCharts(report, root) {
   const currentDates = Array.from({ length: 7 }, (_, index) => addDateKey(weekStart, index));
   const weekDates = Array.from({ length: 8 }, (_, index) => addDateKey(weekStart, (index - 7) * 7));
   const makeSeries = (dates, weekly) => recoveryChartSeries(metrics, baselines, dates, weekly, today).map((item) => ({ ...item, points: item.points.map(({ actual, ...point }) => ({ ...point, value: actual })) }));
-  const note = "Originalwerte: HRV in Millisekunden und Ruhepuls in Schl\u00e4gen pro Minute links; Schlafdauer als Balken in Stunden rechts. Die Gr\u00f6\u00dfen haben unterschiedliche Einheiten und d\u00fcrfen nicht als gleiche Messgr\u00f6\u00dfe verglichen werden. Ein h\u00f6herer Ruhepuls bedeutet keine bessere Erholung. Quellen bleiben getrennt.";
+  const note = "Originalwerte: HRV in Millisekunden und Ruhepuls in Schl\u00e4gen pro Minute links; Schlafdauer als Balken in Stunden rechts (3 bis 10 h). Werte au\u00dferhalb dieser Skala liegen am Rand; die Originalwerte bleiben abrufbar. Die Gr\u00f6\u00dfen haben unterschiedliche Einheiten und d\u00fcrfen nicht als gleiche Messgr\u00f6\u00dfe verglichen werden. Ein h\u00f6herer Ruhepuls bedeutet keine bessere Erholung. Quellen bleiben getrennt.";
   const currentChart = analysisChart("Erholung \u00b7 Aktuelle Woche", makeSeries(currentDates, false), "", currentDates[0], currentDates.at(-1), `${note} Fehlende Tagesmessungen bleiben als L\u00fccken sichtbar.`, true, { recovery: true });
   const weeklyChart = analysisChart("Erholung \u00b7 Letzte 8 Wochen", makeSeries(weekDates, true), "", weekDates[0], weekDates.at(-1), `${note} Jeder Datenpunkt ist der Durchschnitt der vorhandenen Tagesmessungen dieser Kalenderwoche. Die laufende Woche ist noch unvollst\u00e4ndig; fehlende Messungen z\u00e4hlen nicht als null.`, true, { recovery: true });
   root.replaceChildren(currentChart, weeklyChart);
