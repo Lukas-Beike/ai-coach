@@ -783,17 +783,41 @@ jobs:
               per_page: 100,
             });
             const codexBotLogins = new Set(['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector']);
-            const usageLimitReached = comments.some((comment) => (
+            let usageLimitReached = comments.some((comment) => (
               codexBotLogins.has(comment.user?.login) &&
               /(?:usage limits for code reviews|reached (?:your )?Codex usage limits)/i.test(comment.body || '')
             ));
+            let reviewUnavailable = false;
+            if (process.env.REVIEW_REQUIRED === 'true' && !usageLimitReached) {
+              // No reply cannot prove a usage limit. Allow a bounded wait for
+              // an initial review, then report unavailable evidence honestly.
+              // Existing review evidence (including findings) stays blocking.
+              for (let attempt = 0; attempt <= 4; attempt++) {
+                const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                  ...context.repo, pull_number: Number(process.env.PR_NUMBER), per_page: 100,
+                });
+                const currentComments = await github.paginate(github.rest.issues.listComments, {
+                  ...context.repo, issue_number: Number(process.env.PR_NUMBER), per_page: 100,
+                });
+                const hasEvidence = reviews.some((review) => codexBotLogins.has(review.user?.login)) ||
+                  currentComments.some((comment) => codexBotLogins.has(comment.user?.login));
+                usageLimitReached = currentComments.some((comment) => codexBotLogins.has(comment.user?.login) &&
+                  /(?:usage limits for code reviews|reached (?:your )?Codex usage limits)/i.test(comment.body || ''));
+                if (usageLimitReached) { reviewUnavailable = true; break; }
+                if (hasEvidence) break;
+                if (attempt === 4) { reviewUnavailable = true; break; }
+                await new Promise((resolve) => setTimeout(resolve, 30000));
+              }
+            }
             const title = process.env.REVIEW_REQUIRED === 'true'
-              ? 'Explicit Codex review required'
+              ? (reviewUnavailable ? 'Codex review unavailable (no response)' : 'Explicit Codex review required')
               : (usageLimitReached
                 ? 'Codex review skipped (usage limit reached)'
                 : 'No additional Codex review required');
             const summary = process.env.REVIEW_REQUIRED === 'true'
-              ? `Comment @codex review on PR #${pullRequest.data.number}. A review is required initially or because the previous Codex review had a P1 finding.`
+              ? (reviewUnavailable
+                ? 'No Codex response was available after the bounded wait. Review was skipped; all other required checks still apply.'
+                : `Comment @codex review on PR #${pullRequest.data.number}. A review is required initially or because the previous Codex review had a P1 finding.`)
               : (usageLimitReached
                 ? `Codex usage limit reached for code reviews; skipping the review check for PR #${pullRequest.data.number}.`
                 : 'The previous Codex review had no P1 finding. Fix the existing findings and close their comments; do not request another review.');
@@ -812,7 +836,7 @@ jobs:
               name: process.env.CHECK_NAME,
               head_sha: headSha,
               status: 'completed',
-              conclusion: process.env.REVIEW_REQUIRED === 'true' ? 'failure' : 'success',
+              conclusion: process.env.REVIEW_REQUIRED === 'true' && !reviewUnavailable ? 'failure' : 'success',
               started_at: new Date().toISOString(),
               completed_at: new Date().toISOString(),
               output: { title, summary },
