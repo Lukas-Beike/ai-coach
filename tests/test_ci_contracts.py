@@ -142,6 +142,7 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("context.payload.changes.base", workflow.replace("changes?.base", "changes.base"))
         self.assertIn("context.payload.changes.title", workflow.replace("changes?.title", "changes.title"))
         self.assertIn("Explicit Codex review required", workflow)
+        self.assertIn("A subscription usage limit is an explicit", workflow)
         self.assertIn("matrix.runCodexReview == true", workflow)
         self.assertIn("getUnresolvedCodexReviewIds", workflow)
         self.assertIn("hasCompletedCleanReaction", workflow)

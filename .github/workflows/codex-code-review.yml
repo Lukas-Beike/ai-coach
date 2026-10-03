@@ -210,6 +210,10 @@ jobs:
               }
             };
             const getReviewRequirement = async (pullRequest) => {
+              // A subscription usage limit is an explicit, provider-reported
+              // exemption. It must supersede stale initial/P1 requirements so
+              // the required check cannot block the current head.
+              if (await hasCodexUsageLimit(pullRequest)) return 'none';
               const reviews = await github.paginate(github.rest.pulls.listReviews, {
                 owner: context.repo.owner, repo: context.repo.repo,
                 pull_number: pullRequest.number, per_page: 100,
