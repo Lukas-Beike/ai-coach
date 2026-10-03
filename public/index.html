@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=260">
+  <link rel="stylesheet" href="/styles.css?v=261">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -146,12 +146,14 @@
           <div><span class="eyebrow">AUSWERTUNG</span><h2>Analyse</h2><span class="tab-sync-detail">Leistungsdaten und aktuelle Trainingsform</span></div>
         </div>
         <nav class="plan-segment-nav" aria-label="Analysebereiche">
+          <a href="#analysis/load" data-analysis-segment="load">Belastung</a>
           <a href="#analysis/performance" data-analysis-segment="performance">Leistung</a>
           <a href="#analysis/recovery" data-analysis-segment="recovery">Erholung</a>
-          <a href="#analysis/review" data-analysis-segment="review">Aktuelle Woche</a>
+          <a href="#analysis/review" data-analysis-segment="review">Woche</a>
         </nav>
         <section id="personalRecovery" class="analysis-history-charts" aria-label="Persönliche Erholung" hidden></section>
         <section id="trainingReport" class="analysis-chart-card" aria-label="Trainingsbericht" hidden></section>
+        <div id="analysisLoadCharts" class="analysis-history-charts" aria-label="Belastung und Form" hidden></div>
         <div id="analysisHistoryCharts" class="analysis-history-charts" aria-label="Fitness und Leistungsentwicklung"></div>
         <section id="analysisPerformanceSegment" class="analysis-segment" aria-labelledby="analysisPerformanceTitle">
           <section id="sessionPerformance" class="analysis-chart-card" aria-label="Trainingsfokus"></section>
@@ -402,14 +404,14 @@
     </form>
   </dialog>
   <script src="/api.js?v=221" defer></script>
-  <script src="/navigation.js?v=225" defer></script>
+  <script src="/navigation.js?v=226" defer></script>
   <script src="/state.js?v=218" defer></script>
   <script src="/views.js?v=218" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
   <script src="/coach.js?v=5" defer></script>
   <script src="/nutrition.js?v=6" defer></script>
-  <script src="/analysis.js?v=44" defer></script>
+  <script src="/analysis.js?v=45" defer></script>
   <script src="/activity-details.js?v=7" defer></script>
   <script src="/app.js?v=260" defer></script>
 </body>

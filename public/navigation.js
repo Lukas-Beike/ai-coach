@@ -9,6 +9,7 @@ const NAV_ROUTES = Object.freeze({
   "nutrition/meals": "nutritionPanel",
   analysis: "dataPanel",
   "analysis/performance": "dataPanel",
+  "analysis/load": "dataPanel",
   "analysis/recovery": "dataPanel",
   "analysis/review": "dataPanel",
   more: "settingsPanel",
