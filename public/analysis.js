@@ -118,7 +118,7 @@ function analysisChart(title, series, unit, start, end, note, { compactInfo = fa
   section.append(legend);
   const scales = analysisPlotScales(series, start, end, { recovery, secondaryUnit });
   const { min, max, chartWidth, chartRight, x, y, pointY } = scales;
-  const svg = analysisSvg("svg", { viewBox: `0 0 ${chartWidth} 200`, role: "img", "aria-label": `${title}: datierter Verlauf. Einzelwerte stehen unter Werte ansehen.` });
+  const svg = analysisSvg("svg", { viewBox: `0 0 ${chartWidth} 200`, role: "group", "aria-label": `${title}: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen.` });
   svg.append(analysisSvg("title", {}, `${title} · ${dateLabel(start)} bis ${dateLabel(end)}`));
   appendAnalysisAxes(svg, unit, scales, recovery);
   appendAnalysisSeries(svg, series, unit, scales, recovery);

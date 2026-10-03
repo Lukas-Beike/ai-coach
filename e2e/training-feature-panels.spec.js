@@ -40,7 +40,7 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.getByRole("heading", { name: "Aktuelle Erholung", exact: true })).toHaveCount(0);
   const recovery = page.locator("#personalRecovery");
   await expect(recovery.locator("svg")).toHaveCount(2);
-  await expect(recovery.getByRole("img", { name: "Erholung · Aktuelle Woche: datierter Verlauf. Einzelwerte stehen unter Werte ansehen." })).toBeVisible();
+  await expect(recovery.getByRole("group", { name: "Erholung · Aktuelle Woche: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen." })).toBeVisible();
   for (const metric of ["Schlafdauer", "HRV", "Ruhepuls"]) await expect(recovery.getByRole("button", { name: new RegExp(`^${metric}:`) })).toHaveCount(2);
   await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Aktuelle Woche");
   await expect(recovery.locator("svg path[data-color='1']").first()).toHaveAttribute("d", /M.*M/);
