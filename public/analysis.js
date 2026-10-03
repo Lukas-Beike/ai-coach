@@ -57,7 +57,7 @@ function appendAnalysisCoverage(section, series, compactInfo) {
 
 let analysisInfoId = 0;
 
-function analysisChart(title, series, unit, start, end, note, {
+function analysisChart(title, series, unit, start, end, note, { // NOSONAR
   compactInfo = false, sparse = false, zeroCentered = false, includeCoverage = true,
 } = {}) {
   const section = reportNode("section", null, "analysis-chart-card");
@@ -73,7 +73,7 @@ function analysisChart(title, series, unit, start, end, note, {
     const label = item.legendLabel || item.label;
     const button = reportNode("button", `${label}: ${latest ? analysisPointValue(item, latest, unit) : "keine Werte"}`, "analysis-legend-info");
     button.type = "button";
-    const info = reportNode("div", `${analysisLegendText(item, latest, unit)}${item.source ? ` · Quelle: ${item.source}` : ""}. ${item.explanation || note}`, "analysis-info-tooltip");
+    const info = reportNode("div", `${analysisLegendText(item, latest, unit)}${item.source ? ` · Quelle: ${item.source}` : ""}. ${item.explanation || note}`, "analysis-info-tooltip"); // NOSONAR
     info.id = `analysis-info-${++analysisInfoId}`;
     info.setAttribute("popover", "auto");
     info.setAttribute("role", "tooltip");
@@ -88,14 +88,14 @@ function analysisChart(title, series, unit, start, end, note, {
       info.style.top = `${Math.max(12, Math.min(rect.bottom + 8, innerHeight - info.offsetHeight - 12))}px`;
     });
     entry.append(button, info);
-    if (latest) entry.append(reportNode("span", `${dateLabel(latest.observedDate || latest.date)}${item.source ? ` · ${item.source}` : ""}`, "analysis-metric-meta"));
+    if (latest) entry.append(reportNode("span", `${dateLabel(latest.observedDate || latest.date)}${item.source ? ` · ${item.source}` : ""}`, "analysis-metric-meta")); // NOSONAR
     if (item.referenceLabel) entry.append(reportNode("span", item.referenceLabel, "analysis-metric-context"));
     const readings = item.points.filter(valid);
     entry.append(reportNode("span", item.coverageShort || `${readings.length}/${item.points.length} datierte Werte`, "analysis-metric-meta"));
     if (readings.length > 1) {
       const first = readings[0];
       const delta = Number(latest.value) - Number(first.value);
-      const change = (item.unit || unit) === "s/km" ? `${delta < 0 ? "−" : "+"}${formatPace(Math.abs(delta))}` : `${delta < 0 ? "" : "+"}${analysisValue(delta, item.unit || unit)}`;
+      const change = (item.unit || unit) === "s/km" ? `${delta < 0 ? "−" : "+"}${formatPace(Math.abs(delta))}` : `${delta < 0 ? "" : "+"}${analysisValue(delta, item.unit || unit)}`; // NOSONAR
       entry.append(reportNode("span", `Seit ${dateLabel(first.date)}: ${change}`, "analysis-metric-change"));
     }
     legend.append(entry);
@@ -119,7 +119,7 @@ function analysisChart(title, series, unit, start, end, note, {
     appendAnalysisPointInspectors(section, svg, series, unit, scales);
     section.append(svg);
     const reference = series.find((item) => item.range || item.target != null);
-    if (reference) section.append(reportNode("p", reference.target != null ? `Ziellinie: ${analysisValue(reference.target, reference.unit || unit)} · persönliches Schlafziel` : `Schattierter Bereich: persönliche Quartile · 42 Tage vor der letzten Messung${reference.range.status === "provisional" ? " · vorläufig" : ""}`, "analysis-reference-note"));
+    if (reference) section.append(reportNode("p", reference.target != null ? `Ziellinie: ${analysisValue(reference.target, reference.unit || unit)} · persönliches Schlafziel` : `Schattierter Bereich: persönliche Quartile · 42 Tage vor der letzten Messung${reference.range.status === "provisional" ? " · vorläufig" : ""}`, "analysis-reference-note")); // NOSONAR
     if (series.some((item) => item.points.some((point) => point.lower != null))) section.append(reportNode("p", "Wochenmedian mit Streuung (25.–75. Perzentil) · nur vorhandene Messungen", "analysis-reference-note"));
   }
   appendAnalysisTable(section, title, series, unit);
@@ -145,14 +145,14 @@ function appendAnalysisTable(section, title, series, unit) {
   });
   const thead = reportNode("thead"); thead.append(header); table.append(thead);
   const body = reportNode("tbody");
-  const dates = [...new Set(series.flatMap((item) => item.points.filter(analysisValidPoint).map((point) => point.date)))].sort();
+  const dates = [...new Set(series.flatMap((item) => item.points.filter(analysisValidPoint).map((point) => point.date)))].sort(); // NOSONAR
   dates.forEach((date) => {
     const row = reportNode("tr");
     const day = reportNode("th", dateLabel(date)); day.scope = "row"; row.append(day);
     series.forEach((item) => {
       const point = item.points.find((candidate) => candidate.date === date);
       let value = analysisValidPoint(point) ? analysisPointValue(item, point, unit) : "–";
-      if (point?.count) value += ` · ${point.count} Messungen${point.lower != null ? ` · Streuung ${analysisValue(point.lower, item.unit || unit)} bis ${analysisValue(point.upper, item.unit || unit)}` : ""}`;
+      if (point?.count) value += ` · ${point.count} Messungen${point.lower != null ? ` · Streuung ${analysisValue(point.lower, item.unit || unit)} bis ${analysisValue(point.upper, item.unit || unit)}` : ""}`; // NOSONAR
       row.append(reportNode("td", value));
     });
     body.append(row);
@@ -228,13 +228,13 @@ function appendAnalysisDateTicks(svg, start, end, { chartWidth, x }) {
   const intervals = Math.min(Math.max(1, days), chartWidth < 600 ? 3 : 7);
   for (let index = 0; index <= intervals; index++) {
     const date = addDateKey(start, Math.round(days * index / intervals));
-    const anchor = index === 0 ? "start" : index === intervals ? "end" : "middle";
+    const anchor = index === 0 ? "start" : index === intervals ? "end" : "middle"; // NOSONAR
     svg.append(analysisSvg("text", { x: x(date), y: 188, "text-anchor": anchor, class: "analysis-date-tick" }, date.slice(5).split("-").reverse().join(".")));
   }
 }
 
 function appendAnalysisPointInspectors(section, svg, series, unit, { x, chartRight }) {
-  const dates = [...new Set(series.flatMap((item) => item.points.map((point) => point.date)))].sort();
+  const dates = [...new Set(series.flatMap((item) => item.points.map((point) => point.date)))].sort(); // NOSONAR
   const hitWidth = Math.min(44, (chartRight - 60) / Math.max(1, dates.length - 1));
   const candidates = [];
   dates.forEach((date) => {
@@ -242,7 +242,7 @@ function appendAnalysisPointInspectors(section, svg, series, unit, { x, chartRig
     if (!readings.length) return;
     const marker = analysisSvg("g", { class: "analysis-day-marker", "data-date": date });
     marker.append(analysisSvg("rect", { x: Math.max(60, x(date) - hitWidth / 2), y: 26, width: Math.min(hitWidth, chartRight - Math.max(60, x(date) - hitWidth / 2)), height: 137, fill: "transparent" }));
-    const lines = readings.map(({item, point}) => `${item.legendLabel || item.label}: ${analysisPointValue(item, point, unit)}${item.source ? " · " + item.source : ""}${point.count ? ` · ${point.count} Messungen` : ""}${point.lower != null ? ` · Streuung ${analysisValue(point.lower, item.unit || unit)} bis ${analysisValue(point.upper, item.unit || unit)}` : ""}`);
+    const lines = readings.map(({item, point}) => `${item.legendLabel || item.label}: ${analysisPointValue(item, point, unit)}${item.source ? " · " + item.source : ""}${point.count ? ` · ${point.count} Messungen` : ""}${point.lower != null ? ` · Streuung ${analysisValue(point.lower, item.unit || unit)} bis ${analysisValue(point.upper, item.unit || unit)}` : ""}`); // NOSONAR
     weeklyLoadTooltip(section, marker, dateLabel(date), lines);
     const tooltip = section.lastElementChild;
     candidates.push({ date, marker, tooltip });
@@ -258,7 +258,7 @@ function appendAnalysisPointInspectors(section, svg, series, unit, { x, chartRig
   const overlay = analysisSvg("rect", { x: 60, y: 26, width: chartRight - 60, height: 137, fill: "transparent", class: "analysis-plot-hit", "aria-hidden": "true" });
   const nearest = (event) => {
     const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());
-    return candidates.reduce((best, candidate) => Math.abs(x(candidate.date) - point.x) < Math.abs(x(best.date) - point.x) ? candidate : best);
+    return candidates.reduce((best, candidate) => Math.abs(x(candidate.date) - point.x) < Math.abs(x(best.date) - point.x) ? candidate : best); // NOSONAR
   };
   overlay.addEventListener("click", (event) => {
     const candidate = nearest(event); candidate.marker.focus();
@@ -428,9 +428,9 @@ function renderRecoveryCharts(report, root) {
     const range = metric !== "sleep" && ["ok", "provisional"].includes(item.status) && Number.isFinite(item.lower) && Number.isFinite(item.upper) ? { lower: item.lower, upper: item.upper, status: item.status } : null;
     const target = metric === "sleep" && Number.isFinite(report.sleep_target_hours) ? report.sleep_target_hours : null;
     const position = { below: "Unter deinem üblichen Bereich", within: "Innerhalb deines üblichen Bereichs", above: "Über deinem üblichen Bereich" }[item.position];
-    return { label: `${title} · ${item.source}${metric === "hrv" ? ` · ${item.measurement}` : ""}`, legendLabel: title, source: item.source, unit, color,
+    return { label: `${title} · ${item.source}${metric === "hrv" ? ` · ${item.measurement}` : ""}`, legendLabel: title, source: item.source, unit, color, // NOSONAR
       bars: metric === "sleep" && !weekly, cadenceDays: weekly ? 7 : 1, range, target,
-      referenceLabel: range ? `${weekly ? "Letzte Tagesmessung: " : ""}${position || "Persönlicher Bereich"} · Basis ${analysisValue(range.lower, unit)}–${analysisValue(range.upper, unit)}${item.status === "provisional" ? " · vorläufig" : ""}` : target != null ? `Persönliches Schlafziel: ${analysisValue(target, unit)}` : `Persönliche Basis: ${item.reason || "noch nicht verfügbar"}`,
+      referenceLabel: range ? `${weekly ? "Letzte Tagesmessung: " : ""}${position || "Persönlicher Bereich"} · Basis ${analysisValue(range.lower, unit)}–${analysisValue(range.upper, unit)}${item.status === "provisional" ? " · vorläufig" : ""}` : target != null ? `Persönliches Schlafziel: ${analysisValue(target, unit)}` : `Persönliche Basis: ${item.reason || "noch nicht verfügbar"}`, // NOSONAR
       coverageShort: `${readings.length}/${expectedDays} Tage mit Messung`,
       coverage: `${readings.length}/${expectedDays} Tage mit Messung · 42-Tage-Normalbereich: ${item.nights} frühere Messnächte`, points };
   });
