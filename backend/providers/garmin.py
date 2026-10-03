@@ -352,11 +352,11 @@ def _collect_current_metrics(
 
 def _gear_inventory(client: Any, external_call: ExternalCall) -> list[dict[str, Any]]:
     profile = external_call("garmin", "gear_profile", client.get_user_profile, None)
-    data = profile.get("userData") if isinstance(profile, dict) else None
-    if not isinstance(data, dict) or not data.get("userProfilePk"):
+    profile_number = profile.get("id") if isinstance(profile, dict) else None
+    if not profile_number:
         raise ValueError("Garmin gear profile is unavailable")
     inventory = external_call(
-        "garmin", "gear_inventory", lambda: client.get_gear(data["userProfilePk"]), None
+        "garmin", "gear_inventory", lambda: client.get_gear(profile_number), None
     )
     if isinstance(inventory, dict):
         inventory = inventory.get("gear")
