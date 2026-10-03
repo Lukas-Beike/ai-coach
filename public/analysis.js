@@ -61,7 +61,7 @@ function appendAnalysisCoverage(section, series, compactInfo) {
 
 let analysisInfoId = 0;
 
-function analysisChart(title, series, unit, start, end, note, compactInfo = false, { recovery = false, secondaryUnit = null } = {}) {
+function analysisChart(title, series, unit, start, end, note, { compactInfo = false, recovery = false, secondaryUnit = null } = {}) {
   if (recovery) secondaryUnit = "h";
   const section = document.createElement("section");
   section.className = "analysis-chart-card";
@@ -116,70 +116,16 @@ function analysisChart(title, series, unit, start, end, note, compactInfo = fals
     legend.append(entry);
   });
   section.append(legend);
-  const axisValues = secondaryUnit ? series.filter((item) => item.unit !== secondaryUnit).flatMap((item) => item.points.filter(valid).map((point) => Number(point.value))) : values;
-  const low = Math.min(...(axisValues.length ? axisValues : [0]));
-  const high = Math.max(...(axisValues.length ? axisValues : [100]));
-  const padding = Math.max((high - low) * .12, 1);
-  const rawStep = (high - low + padding * 2) / 4;
-  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
-  const step = [1, 2, 5, 10].find((factor) => factor * magnitude >= rawStep) * magnitude;
-  const min = Math.floor((low - padding) / step) * step;
-  const max = Math.ceil((high + padding) / step) * step;
-  const chartWidth = globalThis.innerWidth < 600 ? 360 : 680;
-  const chartRight = chartWidth - (secondaryUnit ? 54 : 30);
-  const x = (date) => 66 + ((Date.parse(date) - Date.parse(start)) / Math.max(86400000, Date.parse(end) - Date.parse(start))) * (chartRight - 66);
-  const y = (value) => 160 - (Number(value) - min) / (max - min) * 130;
-  const secondaryValues = series.filter((item) => item.unit === secondaryUnit).flatMap((item) => item.points.filter(valid).map((point) => Number(point.value)));
-  const secondaryMin = recovery ? 3 : Math.floor((Math.min(...(secondaryValues.length ? secondaryValues : [40])) - 1) / 5) * 5;
-  const secondaryMax = recovery ? 10 : Math.ceil((Math.max(...(secondaryValues.length ? secondaryValues : [60])) + 1) / 5) * 5;
-  const secondaryY = (value) => 160 - (Math.max(secondaryMin, Math.min(secondaryMax, Number(value))) - secondaryMin) / (secondaryMax - secondaryMin) * 130;
-  const pointY = (item, value) => secondaryUnit && item.unit === secondaryUnit ? secondaryY(value) : y(value);
+  const scales = analysisPlotScales(series, start, end, { recovery, secondaryUnit });
+  const { min, max, chartWidth, chartRight, x, y, pointY } = scales;
   const svg = analysisSvg("svg", { viewBox: `0 0 ${chartWidth} 200`, role: "img", "aria-label": `${title}: datierter Verlauf. Einzelwerte stehen unter Werte ansehen.` });
   svg.append(analysisSvg("title", {}, `${title} · ${dateLabel(start)} bis ${dateLabel(end)}`));
-  Array.from({ length: Math.round((max - min) / step) + 1 }, (_, index) => min + index * step).forEach((value) => {
-    svg.append(analysisSvg("line", { x1: 66, x2: chartRight, y1: y(value), y2: y(value), class: "analysis-grid-line" }));
-    svg.append(analysisSvg("text", { x: 58, y: y(value) + 4, "text-anchor": "end" }, unit === "s/km" ? formatPace(value).split(" ")[0] : value.toLocaleString("de-DE", { maximumFractionDigits: 1 }) + (unit === "%" ? " %" : "")));
-  });
-  if (secondaryUnit) {
-    if (recovery) svg.classList.add("recovery-combination-chart");
-    svg.append(analysisSvg("text", { x: 66, y: 14, class: "recovery-axis-label" }, recovery ? "HRV (ms) / Ruhepuls (bpm)" : unit === "W" ? "FTP / eFTP (W)" : "Schwellenpace (min/km)"));
-    svg.append(analysisSvg("text", { x: chartRight, y: 14, "text-anchor": "end", class: "recovery-axis-label" }, recovery ? "Schlaf (h)" : "VO₂max (ml/kg/min)"));
-    for (let value = secondaryMin; value <= secondaryMax; value += recovery ? 1 : 5) {
-      svg.append(analysisSvg("text", { x: chartRight + 9, y: secondaryY(value) + 4, class: recovery ? "recovery-sleep-axis" : "analysis-secondary-axis" }, recovery ? analysisValue(value, "h") : analysisValue(value, "")));
-    }
-  }
-  series.forEach((item, index) => {
-    let path = "";
-    let continuing = false;
-    item.points.forEach((point, pointIndex) => {
-      if (!valid(point)) { continuing = false; return; }
-      path += `${continuing ? "L" : "M"}${x(point.date).toFixed(2)},${pointY(item, point.value).toFixed(2)} `;
-      continuing = true;
-      const endpoint = !valid(item.points[pointIndex - 1]) || !valid(item.points[pointIndex + 1]);
-      if (endpoint || item.points.length <= 8) {
-        const dot = analysisSvg("circle", { cx: x(point.date), cy: pointY(item, point.value), r: 2.5, "data-series": index, "data-color": item.color ?? index });
-        dot.append(analysisSvg("title", {}, `${item.label} · ${dateLabel(point.date)}: ${analysisPointValue(item, point, unit)}`));
-        svg.append(dot);
-      }
-    });
-    if (recovery && item.unit === "h") {
-      const barWidth = Math.min(30, (chartRight - 66) / Math.max(1, item.points.length) * .55);
-      item.points.filter(valid).forEach((point) => svg.prepend(analysisSvg("rect", {
-        x: x(point.date) - barWidth / 2, y: pointY(item, point.value), width: barWidth,
-        height: 160 - pointY(item, point.value), rx: 3, class: "recovery-sleep-bar",
-      })));
-      svg.append(analysisSvg("path", { d: path, fill: "none", class: "recovery-sleep-line" }));
-    } else svg.append(analysisSvg("path", { d: path, fill: "none", "data-series": index, "data-color": item.color ?? index, ...(item.line ? { "data-line": item.line } : {}) }));
-  });
+  appendAnalysisAxes(svg, unit, scales, recovery);
+  appendAnalysisSeries(svg, series, unit, scales, recovery);
   appendAnalysisExtrema(svg, series, unit, x, pointY, chartRight);
   appendAnalysisPointInspectors(section, svg, series, unit, x, chartRight);
   if (min < 0 && max > 0) svg.append(analysisSvg("line", { x1: 66, x2: chartRight, y1: y(0), y2: y(0), class: "analysis-zero-line" }));
-  const days = Math.round((Date.parse(end) - Date.parse(start)) / 86400000);
-  const intervals = days <= 6 ? Math.max(1, days) : (chartWidth < 600 ? 3 : 7);
-  for (let index = 0; index <= intervals; index++) {
-    const date = addDateKey(start, Math.round(days * index / intervals));
-    svg.append(analysisSvg("text", { x: x(date), y: 188, "text-anchor": index === 0 ? "start" : index === intervals ? "end" : "middle", class: "analysis-date-tick" }, date.slice(5).split("-").reverse().join(".")));
-  }
+  appendAnalysisDateTicks(svg, start, end, scales);
   section.append(svg);
   if (compactInfo || series.some((item) => item.unit)) section.append(legend);
   const details = document.createElement("details");
@@ -213,6 +159,94 @@ function analysisChart(title, series, unit, start, end, note, compactInfo = fals
   });
   table.append(body); scroll.append(table); details.append(summary, scroll); section.append(details);
   return section;
+}
+
+function analysisPlotScales(series, start, end, { recovery, secondaryUnit }) {
+  const valid = (point) => point?.value != null && Number.isFinite(Number(point.value));
+  const axisValues = secondaryUnit ? series.filter((item) => item.unit !== secondaryUnit).flatMap((item) => item.points.filter(valid).map((point) => Number(point.value))) : series.flatMap((item) => item.points.filter(valid).map((point) => Number(point.value)));
+  const low = Math.min(...(axisValues.length ? axisValues : [0]));
+  const high = Math.max(...(axisValues.length ? axisValues : [100]));
+  const padding = Math.max((high - low) * .12, 1);
+  const rawStep = (high - low + padding * 2) / 4;
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const step = [1, 2, 5, 10].find((factor) => factor * magnitude >= rawStep) * magnitude;
+  const min = Math.floor((low - padding) / step) * step;
+  const max = Math.ceil((high + padding) / step) * step;
+  const chartWidth = globalThis.innerWidth < 600 ? 360 : 680;
+  const chartRight = chartWidth - (secondaryUnit ? 54 : 30);
+  const x = (date) => 66 + ((Date.parse(date) - Date.parse(start)) / Math.max(86400000, Date.parse(end) - Date.parse(start))) * (chartRight - 66);
+  const y = (value) => 160 - (Number(value) - min) / (max - min) * 130;
+  const secondaryValues = series.filter((item) => item.unit === secondaryUnit).flatMap((item) => item.points.filter(valid).map((point) => Number(point.value)));
+  const secondaryLow = Math.min(...(secondaryValues.length ? secondaryValues : [40]));
+  const secondaryMin = recovery ? 3 : Math.floor((secondaryLow - 1) / 5) * 5;
+  const secondaryHigh = Math.max(...(secondaryValues.length ? secondaryValues : [60]));
+  const secondaryMax = recovery ? 10 : Math.ceil((secondaryHigh + 1) / 5) * 5;
+  const secondaryY = (value) => 160 - (Math.max(secondaryMin, Math.min(secondaryMax, Number(value))) - secondaryMin) / (secondaryMax - secondaryMin) * 130;
+  const pointY = (item, value) => secondaryUnit && item.unit === secondaryUnit ? secondaryY(value) : y(value);
+  return { min, max, step, chartWidth, chartRight, x, y, pointY, secondaryMin, secondaryMax, secondaryY, secondaryUnit };
+}
+
+function appendAnalysisAxes(svg, unit, scales, recovery) {
+  const { min, max, step, chartRight, y, secondaryUnit, secondaryMin, secondaryMax, secondaryY } = scales;
+  Array.from({ length: Math.round((max - min) / step) + 1 }, (_, index) => min + index * step).forEach((value) => {
+    svg.append(analysisSvg("line", { x1: 66, x2: chartRight, y1: y(value), y2: y(value), class: "analysis-grid-line" }));
+    let label = value.toLocaleString("de-DE", { maximumFractionDigits: 1 });
+    if (unit === "s/km") label = formatPace(value).split(" ")[0];
+    else if (unit === "%") label += " %";
+    svg.append(analysisSvg("text", { x: 58, y: y(value) + 4, "text-anchor": "end" }, label));
+  });
+  if (secondaryUnit) {
+    if (recovery) svg.classList.add("recovery-combination-chart");
+    let primaryLabel = "Schwellenpace (min/km)";
+    if (unit === "W") primaryLabel = "FTP / eFTP (W)";
+    if (recovery) primaryLabel = "HRV (ms) / Ruhepuls (bpm)";
+    svg.append(analysisSvg("text", { x: 66, y: 14, class: "recovery-axis-label" }, primaryLabel));
+    svg.append(analysisSvg("text", { x: chartRight, y: 14, "text-anchor": "end", class: "recovery-axis-label" }, recovery ? "Schlaf (h)" : "VO₂max (ml/kg/min)"));
+    for (let value = secondaryMin; value <= secondaryMax; value += recovery ? 1 : 5) {
+      svg.append(analysisSvg("text", { x: chartRight + 9, y: secondaryY(value) + 4, class: recovery ? "recovery-sleep-axis" : "analysis-secondary-axis" }, recovery ? analysisValue(value, "h") : analysisValue(value, "")));
+    }
+  }
+}
+
+function appendAnalysisSeries(svg, series, unit, scales, recovery) {
+  const { chartRight, x, pointY } = scales;
+  const valid = (point) => point?.value != null && Number.isFinite(Number(point.value));
+  series.forEach((item, index) => {
+    let path = "";
+    let continuing = false;
+    item.points.forEach((point, pointIndex) => {
+      if (!valid(point)) { continuing = false; return; }
+      path += `${continuing ? "L" : "M"}${x(point.date).toFixed(2)},${pointY(item, point.value).toFixed(2)} `;
+      continuing = true;
+      const endpoint = !valid(item.points[pointIndex - 1]) || !valid(item.points[pointIndex + 1]);
+      if (endpoint || item.points.length <= 8) {
+        const dot = analysisSvg("circle", { cx: x(point.date), cy: pointY(item, point.value), r: 2.5, "data-series": index, "data-color": item.color ?? index });
+        dot.append(analysisSvg("title", {}, `${item.label} · ${dateLabel(point.date)}: ${analysisPointValue(item, point, unit)}`));
+        svg.append(dot);
+      }
+    });
+    if (recovery && item.unit === "h") {
+      const barWidth = Math.min(30, (chartRight - 66) / Math.max(1, item.points.length) * .55);
+      item.points.filter(valid).forEach((point) => svg.prepend(analysisSvg("rect", {
+        x: x(point.date) - barWidth / 2, y: pointY(item, point.value), width: barWidth,
+        height: 160 - pointY(item, point.value), rx: 3, class: "recovery-sleep-bar",
+      })));
+      svg.append(analysisSvg("path", { d: path, fill: "none", class: "recovery-sleep-line" }));
+    } else svg.append(analysisSvg("path", { d: path, fill: "none", "data-series": index, "data-color": item.color ?? index, ...(item.line ? { "data-line": item.line } : {}) }));
+  });
+}
+
+function appendAnalysisDateTicks(svg, start, end, { chartWidth, x }) {
+  const days = Math.round((Date.parse(end) - Date.parse(start)) / 86400000);
+  let intervals = chartWidth < 600 ? 3 : 7;
+  if (days <= 6) intervals = Math.max(1, days);
+  for (let index = 0; index <= intervals; index++) {
+    const date = addDateKey(start, Math.round(days * index / intervals));
+    let anchor = "middle";
+    if (index === 0) anchor = "start";
+    else if (index === intervals) anchor = "end";
+    svg.append(analysisSvg("text", { x: x(date), y: 188, "text-anchor": anchor, class: "analysis-date-tick" }, date.slice(5).split("-").reverse().join(".")));
+  }
 }
 
 function appendAnalysisExtrema(svg, series, unit, x, pointY, chartRight) {
@@ -249,7 +283,7 @@ function appendAnalysisExtrema(svg, series, unit, x, pointY, chartRight) {
 }
 
 function appendAnalysisPointInspectors(section, svg, series, unit, x, chartRight) {
-  const dates = [...new Set(series.flatMap((item) => item.points.map((point) => point.date)))].sort();
+  const dates = [...new Set(series.flatMap((item) => item.points.map((point) => point.date)))].sort((a, b) => a.localeCompare(b));
   const hitWidth = Math.min(32, (chartRight - 66) / Math.max(1, dates.length - 1));
   dates.forEach((date) => {
     const readings = series.map((item) => ({ item, point: item.points.find((point) => point.date === date) }))
@@ -289,7 +323,7 @@ function renderAnalysisHistory(history) {
     label, source: "Intervals.icu", points: load.points.filter(withinPeriod).map((point) => ({ date: point.date, value: point[key] })),
   }));
   root.append(analysisChart("Belastung und Form", loadSeries, "", start, end,
-    "Fitness: langfristige Belastung (üblich 42 Tage), Ermüdung: kurzfristige Belastung (7 Tage). Die Providerkonfiguration gilt. Form = Fitness − Ermüdung am selben Tag. Historische Werte bis gestern; Fitness ist kein Leistungstest.", true));
+    "Fitness: langfristige Belastung (üblich 42 Tage), Ermüdung: kurzfristige Belastung (7 Tage). Die Providerkonfiguration gilt. Form = Fitness − Ermüdung am selben Tag. Historische Werte bis gestern; Fitness ist kein Leistungstest.", { compactInfo: true }));
   const performanceSeries = [
     ["cycling_ftp_watts", "Rad · FTP", "W"],
     ["cycling_eftp_watts", "Rad · eFTP", "W"],
@@ -307,8 +341,8 @@ function renderAnalysisHistory(history) {
   const runSeries = performanceSeries.filter((item) => item.legendLabel.startsWith("Lauf"));
   const cyclingSeries = performanceSeries.filter((item) => item.legendLabel.startsWith("Rad"));
   const note = "Absolute Messwerte je Sportart. Garmin; nur eFTP: Intervals.icu. VO₂max und eFTP sind Schätzungen. Datenlücken bleiben sichtbar.";
-  root.append(analysisChart("Leistungsentwicklung · Laufen", runSeries, "s/km", start, end, note, true, { secondaryUnit: "ml/kg/min" }));
-  root.append(analysisChart("Leistungsentwicklung · Rad", cyclingSeries, "W", start, end, note, true, { secondaryUnit: "ml/kg/min" }));
+  root.append(analysisChart("Leistungsentwicklung · Laufen", runSeries, "s/km", start, end, note, { compactInfo: true, secondaryUnit: "ml/kg/min" }));
+  root.append(analysisChart("Leistungsentwicklung · Rad", cyclingSeries, "W", start, end, note, { compactInfo: true, secondaryUnit: "ml/kg/min" }));
   root.querySelectorAll(".analysis-chart-card details").forEach((details, index) => {
     details.open = expandedDetails[index] ?? false;
   });
@@ -387,8 +421,8 @@ function renderRecoveryCharts(report, root) {
   const weekDates = Array.from({ length: 8 }, (_, index) => addDateKey(weekStart, (index - 7) * 7));
   const makeSeries = (dates, weekly) => recoveryChartSeries(metrics, baselines, dates, weekly, today).map((item) => ({ ...item, points: item.points.map(({ actual, ...point }) => ({ ...point, value: actual })) }));
   const note = "Originalwerte: HRV in Millisekunden und Ruhepuls in Schl\u00e4gen pro Minute links; Schlafdauer als Balken in Stunden rechts (3 bis 10 h). Werte au\u00dferhalb dieser Skala liegen am Rand; die Originalwerte bleiben abrufbar. Die Gr\u00f6\u00dfen haben unterschiedliche Einheiten und d\u00fcrfen nicht als gleiche Messgr\u00f6\u00dfe verglichen werden. Ein h\u00f6herer Ruhepuls bedeutet keine bessere Erholung. Quellen bleiben getrennt.";
-  const currentChart = analysisChart("Erholung \u00b7 Aktuelle Woche", makeSeries(currentDates, false), "", currentDates[0], currentDates.at(-1), `${note} Fehlende Tagesmessungen bleiben als L\u00fccken sichtbar.`, true, { recovery: true });
-  const weeklyChart = analysisChart("Erholung \u00b7 Letzte 8 Wochen", makeSeries(weekDates, true), "", weekDates[0], weekDates.at(-1), `${note} Jeder Datenpunkt ist der Durchschnitt der vorhandenen Tagesmessungen dieser Kalenderwoche. Die laufende Woche ist noch unvollst\u00e4ndig; fehlende Messungen z\u00e4hlen nicht als null.`, true, { recovery: true });
+  const currentChart = analysisChart("Erholung \u00b7 Aktuelle Woche", makeSeries(currentDates, false), "", currentDates[0], currentDates.at(-1), `${note} Fehlende Tagesmessungen bleiben als L\u00fccken sichtbar.`, { compactInfo: true, recovery: true });
+  const weeklyChart = analysisChart("Erholung \u00b7 Letzte 8 Wochen", makeSeries(weekDates, true), "", weekDates[0], weekDates.at(-1), `${note} Jeder Datenpunkt ist der Durchschnitt der vorhandenen Tagesmessungen dieser Kalenderwoche. Die laufende Woche ist noch unvollst\u00e4ndig; fehlende Messungen z\u00e4hlen nicht als null.`, { compactInfo: true, recovery: true });
   root.replaceChildren(currentChart, weeklyChart);
 
 }
@@ -568,7 +602,7 @@ function renderTrainingReportBody(report, root) {
     card.append(reportNode("strong", value), reportNode("span", label));
     facts.append(card);
   }
-  root.append(facts, weeklyTrainingChart(report), weeklyTrainingChart(report, true));
+  root.append(facts, weeklyTrainingChart(report), weeklyTrainingChart(report, { compactInfo: true }));
 
 
 }

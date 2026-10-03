@@ -120,7 +120,7 @@ test("@responsive chart dates, values and focus labels follow their data", async
   await page.waitForFunction(() => state.loadedAreas.has("performance") && !state.loadPromise);
   await page.evaluate(() => {
     const points = Array.from({ length: 8 }, (_, index) => ({ date: addDateKey("2026-09-01", index * 7), value: 30 + index }));
-    document.querySelector("#analysisHistoryCharts").replaceChildren(analysisChart("Test", [{ label: "Fitness", points }], "", "2026-09-01", "2026-10-20", "", true));
+    document.querySelector("#analysisHistoryCharts").replaceChildren(analysisChart("Test", [{ label: "Fitness", points }], "", "2026-09-01", "2026-10-20", "", { compactInfo: true }));
     renderTrainingFocus({ start: "2026-09-01", end: "2026-10-20", classified_sessions: 3, categories: { low_aerobic: { load: 60 }, high_aerobic: { load: 30 }, anaerobic: { load: 10 } } });
   });
   const chart = page.locator("#analysisHistoryCharts svg");
@@ -155,7 +155,7 @@ test("@responsive coinciding extrema stay readable and day details retain origin
     const series = Array.from({length: 5}, (_, index) => ({ label: `Reihe ${index}`, color: index, unit: "W", points: [
       {date: "2026-09-01", value: 0, actual: 200}, {date: "2026-09-02", value: 5, actual: 210},
     ] }));
-    document.querySelector("#analysisHistoryCharts").replaceChildren(analysisChart("Vergleich", series, "%", "2026-09-01", "2026-09-02", "", true));
+    document.querySelector("#analysisHistoryCharts").replaceChildren(analysisChart("Vergleich", series, "%", "2026-09-01", "2026-09-02", "", { compactInfo: true }));
   });
   const chart = page.locator("#analysisHistoryCharts svg");
   const boxes = await chart.locator(".analysis-extremum-background").evaluateAll((items) => items.map((item) => {

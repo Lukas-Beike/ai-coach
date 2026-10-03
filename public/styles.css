@@ -545,8 +545,8 @@ h2 {
 .training-focus-share [data-color="1"] { background: #ff9b40; }
 .training-focus-share [data-color="2"] { background: #e83b76; }
 .training-focus-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 0; margin: 12px 0 18px; list-style: none; }
-.training-focus-legend li { display: grid; gap: 4px; text-align: center; font-size: .75rem; }
-.training-focus-legend strong { font-size: 1.15rem; }
+.training-focus-legend li { display: grid; gap: 4px; text-align: center; font-size: .75rem; min-width: 0; justify-items: center; }
+.training-focus-legend strong { font-size: 1.15rem; white-space: nowrap; }
 .training-focus-legend [data-color="0"] strong { color: #37b43c; }
 .training-focus-legend [data-color="1"] strong { color: #ff9b40; }
 .training-focus-legend [data-color="2"] strong { color: #e83b76; }
@@ -1246,8 +1246,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .report-controls > * { min-width: 0; max-width: 100%; flex: 1 1 120px; }
 
 .analysis-chart-card svg .analysis-point-value { font-size: 9px; fill: var(--ink); }
-.training-focus-legend li { min-width: 0; justify-items: center; }
-.training-focus-legend strong { white-space: nowrap; }
 .training-focus-legend li > span { width: max-content; max-width: 72px; }
 @media (max-width: 599px) { .training-focus-legend li > span { font-size: .65rem; } }
 
