@@ -53,6 +53,99 @@ test('accepts the native clean Codex review comment format', () => {
   });
 });
 
+test('rejects ambiguous native clean evidence', () => {
+  const body = "Codex Review: Didn't find any major issues. :rocket:\n\n**Reviewed commit:** `9494ff2`";
+  const at = '2026-10-03T16:31:39Z';
+  for (const candidate of [
+    body.replace('9494ff2', 'no-sha'),
+    body + '\n**Reviewed commit:** `abcdef0`',
+    body + '\n[P1] Unresolved finding',
+    body.replace('Codex Review:', '> Codex Review:'),
+    body.replace(':rocket:', 'But there are problems.'),
+  ]) assert.equal(parseCodeReviewSummary(candidate, at), undefined);
+  assert.equal(parseCodeReviewSummary(body), undefined);
+});
+
+async function runNativeReviewGate({ wrongCommit = false, unresolved = false,
+  author = 'chatgpt-codex-connector', review, stale = false, changedRevision } = {}) {
+  const action = fs.readFileSync(
+    path.join(__dirname, '../.github/actions/codex-review-gate/action.yml'), 'utf8',
+  ).replace(/\r\n/g, '\n');
+  const script = action.split('        script: |\n')[1]
+    .split('\n').map(line => line.slice(10)).join('\n');
+  const head = 'a'.repeat(40);
+  const base = 'c'.repeat(40);
+  const checks = [];
+  const failures = [];
+  let reads = 0;
+  let ticks = 0;
+  const github = {
+    rest: {
+      pulls: {
+        get: async () => {
+          const data = { state: 'open', head: { sha: head }, base: { sha: base } };
+          if (++reads >= 3 && changedRevision) data[changedRevision].sha = 'd'.repeat(40);
+          return { data };
+        },
+        listReviews: async () => review ? [review] : [],
+        listReviewComments: async () => [],
+      },
+      issues: { listComments: async () => [{
+        id: 1, user: { login: author },
+        created_at: stale ? '2026-10-03T16:00:00Z' : '2026-10-03T16:31:39Z',
+        updated_at: '2026-10-03T16:31:39Z',
+        body: `Codex Review: Didn't find any major issues. :rocket:\n\n**Reviewed commit:** \`${head.slice(0, 10)}\``,
+      }] },
+      reactions: { listForIssue: async () => [] },
+      repos: { getCommit: async () => ({ data: { sha: wrongCommit ? 'b'.repeat(40) : head } }) },
+      checks: {
+        listForRef: async () => [],
+        create: async () => ({ data: { id: 100 } }),
+        update: async value => checks.push(value),
+      },
+    },
+    paginate: async (method, args) => method(args),
+    graphql: async () => ({ repository: { pullRequest: { reviewThreads: {
+      nodes: unresolved ? [{ isResolved: false, comments: { nodes: [{
+        author: { login: 'chatgpt-codex-connector' }, pullRequestReview: { databaseId: 10 },
+      }] } }] : [], pageInfo: { hasNextPage: false },
+    } } } }),
+  };
+  const FakeDate = class extends Date {
+    static now() { return ticks++ < 2 ? 0 : 2000; }
+  };
+  const execute = new (Object.getPrototypeOf(async function () {}).constructor)(
+    'github', 'context', 'core', 'process', 'require', 'Date', 'setTimeout', script,
+  );
+  await execute(github, { repo: { owner: 'example', repo: 'coach' }, eventName: 'workflow_dispatch' },
+    { info() {}, debug() {}, warning() {}, setFailed: message => failures.push(message) },
+    { env: { ACTION_PATH: path.join(__dirname, '../.github/actions/codex-review-gate'),
+      PR_NUMBER: '928', CHECK_NAME: 'Codex code review', CODEX_BOT_LOGINS: 'chatgpt-codex-connector',
+      TIMEOUT_SECONDS: '1', POLL_SECONDS: '1', REVIEW_REQUESTED_AT: '2026-10-03T16:29:13Z',
+    } }, require, FakeDate, callback => callback());
+  return { checks, failures };
+}
+
+test('native clean review completes the actual gate without a reaction', async () => {
+  const { checks, failures } = await runNativeReviewGate();
+  assert.equal(checks.at(-1).conclusion, 'success');
+  assert.deepEqual(failures, []);
+});
+
+test('actual gate rejects wrong, stale, untrusted and unresolved native evidence', async () => {
+  for (const options of [
+    { wrongCommit: true }, { stale: true }, { author: 'athlete' }, { unresolved: true },
+    { changedRevision: 'head' }, { changedRevision: 'base' },
+    { review: { user: { login: 'chatgpt-codex-connector' }, state: 'PENDING' } },
+    { review: { id: 10, user: { login: 'chatgpt-codex-connector' },
+      submitted_at: '2026-10-03T16:31:00Z', state: 'CHANGES_REQUESTED', body: '[P1] Fix this' } },
+  ]) {
+    const { checks, failures } = await runNativeReviewGate(options);
+    assert.equal(checks.at(-1).conclusion, 'failure', JSON.stringify(options));
+    assert.equal(failures.length, 1);
+  }
+});
+
 test('rejects missing and ambiguous commit references', () => {
   assert.equal(parseCodeReviewSummary('no review table'), undefined);
   assert.equal(parseCodeReviewSummary('| **Code Review** | **Completed** | no sha | automatic |'), undefined);

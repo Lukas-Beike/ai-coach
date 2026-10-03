@@ -113,7 +113,7 @@ runs:
 
             const candidates = reviews.filter((review) => (
               botLogins.has(review.user?.login) &&
-              (minimumSubmittedAt === 0 || (
+              (review.state === 'PENDING' || minimumSubmittedAt === 0 || (
                 review.submitted_at &&
                 Date.parse(review.submitted_at) >= minimumSubmittedAt
               ))
