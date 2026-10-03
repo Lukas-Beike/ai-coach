@@ -8,11 +8,18 @@ test("@responsive current week report is shown automatically without controls", 
   expect((await request.get("/api/fixture/activity")).ok()).toBeTruthy();
   await page.goto("/#analysis/review");
   await expect(page.locator("#appShell")).toBeVisible();
-  await page.evaluate(async () => { await applyNavigationRoute("analysis/review", { historyMode: "replace" }); });
   const report = page.locator("#trainingReport");
   await expect(report.getByRole("img", { name: "Trainingsbelastung · aktuelle Woche" })).toBeVisible();
   await expect(report.getByRole("img", { name: "Trainingsbelastung · letzte 8 Wochen" })).toBeVisible();
   await expect(report.locator(".weekly-chart svg")).toHaveCount(2);
+  expect((await report.locator(".weekly-chart svg").first().boundingBox()).height).toBeLessThan(350);
+  const preserved = await page.evaluate(() => {
+    const chart = document.querySelector("#trainingReport svg");
+    renderAnalysisHistory(state.data.performance?.history);
+    renderPersonalRecovery(state.data.performance?.personal_recovery);
+    return chart === document.querySelector("#trainingReport svg");
+  });
+  expect(preserved).toBe(true);
   await expect(report.locator("svg [data-day]")).toHaveCount(7);
   await expect(report.locator("svg [data-week]")).toHaveCount(8);
   await expect(report.locator("svg rect")).toHaveCount(0);
