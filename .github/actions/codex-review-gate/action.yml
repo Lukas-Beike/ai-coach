@@ -355,7 +355,7 @@ runs:
               const summary = await getCodexSummary(minimumArtifactTime, headSha);
               const summaryStatus = String(summary.current?.codeReview?.status || '').toLowerCase();
               const reviews = await getCodexReviews(minimumArtifactTime);
-              observedReviewEvidence ||= Boolean(summary.current) || reviews.length > 0;
+              observedReviewEvidence ||= Boolean(summary.latest) || reviews.length > 0;
               const pendingReviews = reviews.filter((review) => (
                 review.state === 'PENDING' || !review.submitted_at
               ));
