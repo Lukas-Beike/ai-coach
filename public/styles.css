@@ -267,7 +267,7 @@ h2 {
 .analysis-chart-legend [data-color="2"]::before { background: #a78bfa; }
 .analysis-chart-legend [data-color="3"]::before { background: #38bdf8; }
 .analysis-chart-legend [data-color="4"]::before { background: #fb7185; }
-.analysis-chart-card svg { display: block; width: 100%; height: auto; overflow: visible; }
+.analysis-chart-card svg { display: block; width: 100%; height: auto; max-width: 680px; margin-inline: auto; overflow: visible; }
 .analysis-chart-card svg text { fill: var(--muted); font-size: 12px; }
 .analysis-chart-card svg [data-series] { stroke: var(--accent-bright); stroke-width: 2; }
 .analysis-chart-card svg circle { fill: var(--surface); }
@@ -544,7 +544,7 @@ h2 {
 .training-focus-share [data-color="0"] { background: #37b43c; }
 .training-focus-share [data-color="1"] { background: #ff9b40; }
 .training-focus-share [data-color="2"] { background: #e83b76; }
-.training-focus-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 0; margin: 12px 0 18px; list-style: none; }
+.training-focus-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 0; margin: 12px 0 18px; list-style: none; }
 .training-focus-legend li { display: grid; gap: 4px; text-align: center; font-size: .75rem; }
 .training-focus-legend strong { font-size: 1.15rem; }
 .training-focus-legend [data-color="0"] strong { color: #37b43c; }
@@ -1228,7 +1228,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .weekly-metrics > div { display: grid; gap: 4px; min-width: 0; padding: 12px 8px; border-radius: 12px; background: var(--surface-raised, var(--surface)); border: 1px solid var(--line); }
 .weekly-metrics strong { font-size: clamp(.9rem, 4vw, 1.3rem); overflow-wrap: anywhere; }
 .weekly-metrics span { color: var(--muted); font-size: .75rem; }
-.weekly-chart svg { width: 100%; height: auto; }
+.weekly-chart svg { width: 100%; height: auto; max-width: 480px; margin-inline: auto; }
 .weekly-chart { padding-top: 8px; }
 .weekly-chart h4 { margin-bottom: 12px; }
 .weekly-chart svg text { fill: var(--muted); font-size: 10px; }
@@ -1244,3 +1244,27 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .weekly-sport-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 0; list-style: none; font-size: .8rem; }
 .weekly-sport-legend li::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 3px; background: var(--sport-color); }
 .report-controls > * { min-width: 0; max-width: 100%; flex: 1 1 120px; }
+
+.analysis-chart-card svg .analysis-point-value { font-size: 9px; fill: var(--ink); }
+.training-focus-legend li { min-width: 0; justify-items: center; }
+.training-focus-legend strong { white-space: nowrap; }
+.training-focus-legend li > span { width: max-content; max-width: 72px; }
+@media (max-width: 599px) { .training-focus-legend li > span { font-size: .65rem; } }
+
+.recovery-sleep-bar { fill: var(--accent-bright); opacity: .22; }
+.recovery-sleep-line { stroke: var(--accent-bright); stroke-width: 1; opacity: .9; }
+.analysis-chart-card svg .recovery-axis-label { font-size: 9px; }
+.analysis-chart-card svg .recovery-sleep-axis { fill: var(--accent-bright); font-size: 10px; }
+.analysis-day-marker { cursor: pointer; }
+.analysis-day-marker:hover rect, .analysis-day-marker:focus rect { fill: var(--ink); fill-opacity: .06; }
+.analysis-day-marker:focus { outline: 2px solid var(--accent); }
+.analysis-chart-hint { font-size: .75rem; margin: 8px 0; }
+
+.analysis-extremum { --point-color: var(--accent-bright); }
+.analysis-extremum[data-color="1"] { --point-color: #cc7c00; }
+.analysis-extremum[data-color="2"] { --point-color: #a78bfa; }
+.analysis-extremum[data-color="3"] { --point-color: #38bdf8; }
+.analysis-extremum[data-color="4"] { --point-color: #fb7185; }
+.analysis-extremum-link { stroke: var(--point-color); stroke-width: .7; opacity: .65; }
+.analysis-extremum-background { fill: var(--surface); fill-opacity: .94; }
+.analysis-chart-card svg .analysis-extremum-label { fill: var(--point-color); font-size: 9px; }
