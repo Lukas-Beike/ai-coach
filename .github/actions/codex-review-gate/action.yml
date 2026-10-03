@@ -355,7 +355,14 @@ runs:
               const summary = await getCodexSummary(minimumArtifactTime, headSha);
               const summaryStatus = String(summary.current?.codeReview?.status || '').toLowerCase();
               const reviews = await getCodexReviews(minimumArtifactTime);
-              observedReviewEvidence ||= Boolean(summary.latest) || reviews.length > 0;
+              const allReviews = await github.paginate(github.rest.pulls.listReviews, {
+                owner, repo, pull_number: prNumber, per_page: 100,
+              });
+              const allComments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: prNumber, per_page: 100,
+              });
+              observedReviewEvidence ||= Boolean(summary.latest) || reviews.length > 0 ||
+                allReviews.length > 0 || allComments.length > 0;
               const pendingReviews = reviews.filter((review) => (
                 review.state === 'PENDING' || !review.submitted_at
               ));
