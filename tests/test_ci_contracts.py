@@ -167,7 +167,7 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("parseCodeReviewSummary", action)
         self.assertIn("isCodexUsageLimitComment", action)
         self.assertIn("Codex review skipped (usage limit reached)", action)
-        self.assertNotIn("commitMatchesHead", action)
+        self.assertIn("commitMatchesHead", action)
         self.assertNotIn("repos.compareCommits", action)
         self.assertNotIn("commitBelongsToHead", action)
         self.assertIn("reviewThreads(first: 100", action)

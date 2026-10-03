@@ -39,6 +39,20 @@ test('keeps an unfinished code review pending', () => {
   assert.equal(Number.isNaN(result.completedAt), true);
 });
 
+test('accepts the native clean Codex review comment format', () => {
+  const result = parseCodeReviewSummary(
+    "Codex Review: Didn't find any major issues. :rocket:\n\n**Reviewed commit:** `9494ff2`",
+    '2026-10-03T16:31:39Z',
+  );
+
+  assert.deepEqual(result, {
+    commit: '9494ff2',
+    status: 'completed',
+    completedAt: Date.parse('2026-10-03T16:31:39Z'),
+    clean: true,
+  });
+});
+
 test('rejects missing and ambiguous commit references', () => {
   assert.equal(parseCodeReviewSummary('no review table'), undefined);
   assert.equal(parseCodeReviewSummary('| **Code Review** | **Completed** | no sha | automatic |'), undefined);
