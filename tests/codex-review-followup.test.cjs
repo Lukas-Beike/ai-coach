@@ -138,10 +138,22 @@ test('a completed clean follow-up on the current head clears a previous P1', asy
   assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:31:54Z' }), false);
 });
 
-test('the native clean Codex comment clears a previous P1', async () => {
+test('a native clean comment completes initial review without a reaction', async () => {
   assert.equal(await reviewRequired({
-    completedAt: '2026-09-23T15:31:54Z', native: true, review: null,
+    completedAt: '2026-09-23T15:31:54Z', native: true, review: null, reaction: false,
   }), false);
+});
+
+test('native clean follow-up retains timestamp, diff, author and finding safeguards', async () => {
+  const native = { native: true, completedAt: '2026-09-23T15:31:54Z', reaction: false };
+  assert.equal(await reviewRequired(native), false);
+  for (const changed of [
+    { completedAt: '2026-09-23T15:18:00Z' }, { author: 'athlete' },
+    { unresolved: true }, { reviewedHead: 'b'.repeat(40), sameDiff: false },
+    { completedAt: undefined },
+  ]) assert.equal(await reviewRequired({ ...native, ...changed }), true);
+  assert.equal(await reviewRequired({ ...native, review: null,
+    reviewedHead: 'b'.repeat(40), sameDiff: false }), true);
 });
 
 test('an old or missing clean reaction cannot clear a P1', async () => {
