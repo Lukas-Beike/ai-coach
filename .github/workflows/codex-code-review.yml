@@ -122,18 +122,25 @@ jobs:
               });
               const summaries = comments
                 .filter((comment) => codexBotLogins.has(comment.user?.login) &&
-                  (comment.body || '').includes('<!-- codex-pull-request-review-summary -->'))
+                  ((comment.body || '').includes('<!-- codex-pull-request-review-summary -->') ||
+                    /Codex Review:\s*Didn't find any major issues\b/i.test(comment.body || '')))
                 .sort((left, right) => Date.parse(right.updated_at || right.created_at) -
                   Date.parse(left.updated_at || left.created_at));
               const latestSummary = summaries[0];
+              const nativeClean = /^Codex Review: Didn't find any major issues\.(?:[ \t]*(?::rocket:|🚀))?[ \t]*(?:\r?\n|$)/i
+                .test(latestSummary?.body || '');
+              if (nativeClean) {
+                const body = latestSummary.body || '';
+                const commits = [...body.matchAll(/^\*\*Reviewed commit:\*\*[ \t]*`([0-9a-f]{7,40})`[ \t]*$/gim)];
+                const completedAt = Date.parse(latestSummary.created_at || '');
+                if (commits.length !== 1 || !Number.isFinite(completedAt) ||
+                    !(completedAt > after) || /(?:\[P[0-3]\]|P[0-3] Badge)/i.test(body)) return false;
+                return commits[0][1].toLowerCase();
+              }
               if (!latestSummary || !/\*\*Code Review\*\*/i.test(latestSummary.body || '') ||
                 !/\*\*Completed\*\*/i.test(latestSummary.body || '')) {
                 return false;
               }
-              const reactions = await github.paginate(github.rest.reactions.listForIssue, {
-                owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: pullRequest.number, per_page: 100,
-              });
               const completedCodeReview = (latestSummary.body || '').split('\n').find((line) =>
                 line.includes('**Code Review**') && line.includes('**Completed**'));
               const reviewCompletedAt = Date.parse(completedCodeReview?.match(/datetime="([^"]+)"/)?.[1] || '');
@@ -141,6 +148,10 @@ jobs:
               // still has to match before the clean result carries forward.
               if (!(reviewCompletedAt > after)) return false;
               const summaryUpdatedAt = Date.parse(latestSummary.updated_at || latestSummary.created_at);
+              const reactions = await github.paginate(github.rest.reactions.listForIssue, {
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: pullRequest.number, per_page: 100,
+              });
               return reactions.some((reaction) => codexBotLogins.has(reaction.user?.login) &&
                 reaction.content === '+1' && Date.parse(reaction.created_at) >= summaryUpdatedAt)
                 ? completedCodeReview.match(/`([0-9a-f]{7,40})`/)?.[1] || null : null;
@@ -715,7 +726,7 @@ jobs:
         # develop. Invoke the action directly from that protected ref so no
         # pull-request repository is checked out in this privileged workflow.
         if: matrix.skipCodexReview != true && matrix.runCodexReview == true && (matrix.baseRef == 'develop' || github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment')
-        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@f924cb31f8d0f0898441e320687979020d46048c
+        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@adfb539562df8456fccf676c7d4626e3c5178acf
         with:
           github-token: ${{ github.token }}
           pull-request-number: ${{ matrix.pullRequestNumber }}
@@ -728,7 +739,7 @@ jobs:
       - name: Run trusted main Codex gate
         # Explicit @codex requests use the protected main action revision.
         if: matrix.skipCodexReview != true && matrix.runCodexReview == true && matrix.baseRef == 'main' && github.event_name != 'workflow_dispatch' && github.event_name != 'issue_comment'
-        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@f924cb31f8d0f0898441e320687979020d46048c
+        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@adfb539562df8456fccf676c7d4626e3c5178acf
         with:
           github-token: ${{ github.token }}
           pull-request-number: ${{ matrix.pullRequestNumber }}

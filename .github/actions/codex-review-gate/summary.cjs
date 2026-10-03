@@ -9,32 +9,48 @@ function isCodexUsageLimitComment(body) {
 
 const RELATIVE_TIME_PATTERN = /<relative-time\b[^>]*\bdatetime=["']([^"']+)["']/i;
 
-function parseCodeReviewSummary(body) {
-  const row = String(body || '')
+function parseCodeReviewSummary(body, createdAt) {
+  const text = String(body || '');
+  const row = text
     .split(/\r?\n/)
     .find((line) => /\*\*Code Review\*\*/i.test(line));
-  if (!row) {
+  if (row) {
+    const cells = row.split('|').map((cell) => cell.trim());
+    const reviewCell = cells.findIndex((cell) => /\*\*Code Review\*\*/i.test(cell));
+    if (reviewCell < 0 || cells.length <= reviewCell + 2) {
+      return undefined;
+    }
+
+    const statusCell = cells[reviewCell + 1];
+    const commitCell = cells[reviewCell + 2];
+    const commit = COMMIT_PATTERN.exec(commitCell)?.[1]?.toLowerCase();
+    if (!commit) {
+      return undefined;
+    }
+
+    const completedAtText = RELATIVE_TIME_PATTERN.exec(statusCell)?.[1];
+    return {
+      commit,
+      status: /\*\*Completed\*\*/i.test(statusCell) ? 'completed' : 'pending',
+      completedAt: completedAtText ? Date.parse(completedAtText) : Number.NaN,
+    };
+  }
+
+  if (!/^Codex Review: Didn't find any major issues\.(?:[ \t]*(?::rocket:|🚀))?[ \t]*(?:\r?\n|$)/i.test(text) ||
+      /(?:\[P[0-3]\]|P[0-3] Badge)/i.test(text)) {
     return undefined;
   }
 
-  const cells = row.split('|').map((cell) => cell.trim());
-  const reviewCell = cells.findIndex((cell) => /\*\*Code Review\*\*/i.test(cell));
-  if (reviewCell < 0 || cells.length <= reviewCell + 2) {
+  const commits = [...text.matchAll(/^\*\*Reviewed commit:\*\*[ \t]*`([0-9a-f]{7,40})`[ \t]*$/gim)];
+  const completedAt = Date.parse(createdAt || '');
+  if (commits.length !== 1 || !Number.isFinite(completedAt)) {
     return undefined;
   }
-
-  const statusCell = cells[reviewCell + 1];
-  const commitCell = cells[reviewCell + 2];
-  const commit = COMMIT_PATTERN.exec(commitCell)?.[1]?.toLowerCase();
-  if (!commit) {
-    return undefined;
-  }
-
-  const completedAtText = RELATIVE_TIME_PATTERN.exec(statusCell)?.[1];
   return {
-    commit,
-    status: /\*\*Completed\*\*/i.test(statusCell) ? 'completed' : 'pending',
-    completedAt: completedAtText ? Date.parse(completedAtText) : Number.NaN,
+    commit: commits[0][1].toLowerCase(),
+    status: 'completed',
+    completedAt,
+    clean: true,
   };
 }
 

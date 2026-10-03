@@ -58,7 +58,7 @@ test('policy enforcement cannot transfer a result to a changed head or base', as
   }
 });
 
-async function reviewRequired({ completedAt, reviewedHead = head, reaction = true, unresolved = false, sameDiff = true, differentContext = false, movedHunk = false, review = p1Review, eventName = 'push' } = {}) {
+async function reviewRequired({ completedAt, reviewedHead = head, reaction = true, unresolved = false, sameDiff = true, differentContext = false, movedHunk = false, review = p1Review, eventName = 'push', native = false, author = bot } = {}) {
   const outputs = {};
   const github = {
     rest: {
@@ -70,8 +70,10 @@ async function reviewRequired({ completedAt, reviewedHead = head, reaction = tru
       },
       checks: { listForRef: async () => [] },
       issues: { listComments: async () => [{
-        user: { login: bot }, updated_at: '2026-09-23T15:32:00Z',
-        body: `<!-- codex-pull-request-review-summary -->\n| 📝 **Code Review** | ✅ **Completed** <relative-time datetime="${completedAt}">now</relative-time> | \`${reviewedHead.slice(0, 7)}\` | Manual request |`,
+        user: { login: author }, updated_at: '2026-09-23T15:32:00Z', created_at: completedAt,
+        body: native
+          ? `Codex Review: Didn't find any major issues. :rocket:\n\n**Reviewed commit:** \`${reviewedHead.slice(0, 10)}\``
+          : `<!-- codex-pull-request-review-summary -->\n| 📝 **Code Review** | ✅ **Completed** <relative-time datetime="${completedAt}">now</relative-time> | \`${reviewedHead.slice(0, 7)}\` | Manual request |`,
       }] },
       reactions: { listForIssue: async () => reaction ? [{
         user: { login: bot }, content: '+1', created_at: '2026-09-23T15:32:01Z',
@@ -134,6 +136,24 @@ test('manual re-evaluation preserves a changes-requested blocker', async () => {
 
 test('a completed clean follow-up on the current head clears a previous P1', async () => {
   assert.equal(await reviewRequired({ completedAt: '2026-09-23T15:31:54Z' }), false);
+});
+
+test('a native clean comment completes initial review without a reaction', async () => {
+  assert.equal(await reviewRequired({
+    completedAt: '2026-09-23T15:31:54Z', native: true, review: null, reaction: false,
+  }), false);
+});
+
+test('native clean follow-up retains timestamp, diff, author and finding safeguards', async () => {
+  const native = { native: true, completedAt: '2026-09-23T15:31:54Z', reaction: false };
+  assert.equal(await reviewRequired(native), false);
+  for (const changed of [
+    { completedAt: '2026-09-23T15:18:00Z' }, { author: 'athlete' },
+    { unresolved: true }, { reviewedHead: 'b'.repeat(40), sameDiff: false },
+    { completedAt: undefined },
+  ]) assert.equal(await reviewRequired({ ...native, ...changed }), true);
+  assert.equal(await reviewRequired({ ...native, review: null,
+    reviewedHead: 'b'.repeat(40), sameDiff: false }), true);
 });
 
 test('an old or missing clean reaction cannot clear a P1', async () => {
