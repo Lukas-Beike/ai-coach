@@ -33,6 +33,20 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn('release_source.py --verify "$TESTED_SHA"', workflow)
         self.assertIn("github.ref == 'refs/heads/main' && inputs.publish_container == true", workflow)
 
+    def test_browser_results_are_aggregated_before_publishing(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/publish-container.yml").read_text(encoding="utf-8")
+        browser = workflow.split("  browser:\n", 1)[1].split("  build-and-push:\n", 1)[0]
+        self.assertIn("needs: e2e", browser)
+        self.assertIn('E2E_RESULT: ${{ needs.e2e.result }}', browser)
+        self.assertIn("needs: [source, test, e2e, browser, quality]", workflow)
+
+    def test_published_tags_are_verified_against_the_signed_digest(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/publish-container.yml").read_text(encoding="utf-8")
+        self.assertIn("verify published tag digest parity", workflow)
+        self.assertIn("docker buildx imagetools inspect", workflow)
+        self.assertIn("Verify image signature", workflow)
+        self.assertIn("cosign verify", workflow)
+
     def test_release_pr_dispatch_selects_its_own_branch_without_source_override(self):
         workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml").read_text(encoding="utf-8")
         dispatch = workflow.split("trigger_release_test() {", 1)[1].split("ensure_release_test() {", 1)[0]
@@ -128,6 +142,7 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("context.payload.changes.base", workflow.replace("changes?.base", "changes.base"))
         self.assertIn("context.payload.changes.title", workflow.replace("changes?.title", "changes.title"))
         self.assertIn("Explicit Codex review required", workflow)
+        self.assertIn("A subscription usage limit is an explicit", workflow)
         self.assertIn("matrix.runCodexReview == true", workflow)
         self.assertIn("getUnresolvedCodexReviewIds", workflow)
         self.assertIn("hasCompletedCleanReaction", workflow)
@@ -287,6 +302,21 @@ class ReleaseSourceTests(unittest.TestCase):
     def test_read_only_release_pr_can_resolve_before_its_tag_exists(self):
         self.commit("1.7.3")
         self.assertEqual(release_source.resolve(self.root, "develop"), self.git("rev-parse", "HEAD"))
+
+    def test_read_only_release_pr_version_must_match_application(self):
+        self.commit("1.7.3")
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve().parents[1] / ".github/scripts/release_source.py"),
+             "--source", "develop", "--expected-version", "1.7.3"],
+            cwd=self.root, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        mismatch = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve().parents[1] / ".github/scripts/release_source.py"),
+             "--source", "develop", "--expected-version", "1.7.4"],
+            cwd=self.root, capture_output=True, text=True, check=False,
+        )
+        self.assertNotEqual(mismatch.returncode, 0)
 
     def test_release_rejects_commit_outside_main(self):
         self.commit("1.7.3")

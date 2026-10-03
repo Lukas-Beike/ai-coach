@@ -567,7 +567,7 @@ Configured viewports in `playwright.config.cjs`:
 ### Continuous Integration & Codex Review Gate
 - **Conventional Commits**: All commit messages and pull request titles must follow the Conventional Commits specification (e.g., `feat(coach): add Gemini 3.8 Flash support` or `fix(sync): resolve Garmin sleep retry backoff`).
 - **Codex PR Review Gate**: Pull requests targeting `develop` or `main` require a subscription-backed Codex review gate. Request review by commenting `@codex review` on the pull request. All review findings must be resolved before merging.
-- **Automated Daily Releases**: At 03:00 UTC, an automated workflow inspects `develop`. If new commits exist, it creates a version-bump PR, integrates it, synchronizes with `main`, and publishes a cryptographically signed GitHub release and container image.
+- **Automated Daily Releases**: At 03:00 UTC, an automated workflow inspects `develop`. If new commits exist, it creates a version-bump PR and a promotion PR to protected `main`. Both branches require native, SQLCipher container, quality and browser checks without bypass actors. After successful main tests, the workflow creates an immutable GitHub release and publishes the container. The container digest is signed and verified before promoting `latest`; the version tag and `latest` must resolve to that same digest. A read-only release preflight also verifies `APP_VERSION` before its tag exists. Actions use read-only default permissions, with explicit job-level write permissions where needed.
 
 ---
 

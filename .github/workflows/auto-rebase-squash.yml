@@ -6,8 +6,7 @@ on:
       - develop
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: auto-rebase-develop
@@ -17,9 +16,18 @@ jobs:
   rebase:
     runs-on: ubuntu-latest
     steps:
+      - name: Create branch update GitHub App token
+        id: branch-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.0.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - name: Rebase eligible pull requests
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # App-authored updates emit synchronize events and start fresh CI.
+          GH_TOKEN: ${{ steps.branch-app-token.outputs.token }}
           REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
