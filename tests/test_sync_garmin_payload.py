@@ -5,6 +5,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
@@ -102,7 +103,7 @@ class GarminPayloadServiceTests(unittest.TestCase):
 
     def test_gear_collection_uses_reported_stats_and_does_not_publish_partial_inventory(self):
         client = SimpleNamespace(
-            get_user_profile=lambda: {"userData": {"userProfilePk": 123}},
+            get_user_profile=lambda: {"id": 123, "userData": {}},
             get_gear=lambda profile: [{"gearUUID": "one", "gearName": "Bike"}, {"gearUUID": "two", "gearName": "Shoes"}],
             get_gear_stats=lambda identity: {"totalDistance": 2000 if identity == "one" else 3000},
         )
@@ -114,6 +115,20 @@ class GarminPayloadServiceTests(unittest.TestCase):
         client.get_gear_stats = fail_stats
         with self.assertRaises(RuntimeError):
             _gear_inventory(client, call)
+
+    def test_gear_collection_uses_top_level_profile_id(self):
+        client = SimpleNamespace(
+            get_user_profile=lambda: {"id": 123, "userData": {"displayName": "Athlete"}},
+            get_gear=Mock(return_value=[{"gearUUID": "one", "gearName": "Bike"}]),
+            get_gear_stats=lambda identity: {"totalDistance": 2000},
+        )
+        call = lambda service, operation, fetch, details: fetch()
+        self.assertEqual(_gear_inventory(client, call)[0]["gearUUID"], "one")
+        client.get_gear.assert_called_once_with(123)
+        client.get_user_profile = lambda: {"userData": {}}
+        with self.assertRaisesRegex(ValueError, "gear profile is unavailable"):
+            _gear_inventory(client, call)
+        client.get_gear.assert_called_once_with(123)
 
     def test_garmin_gear_empty_inventory_replaces_old_and_failed_read_preserves_it(self):
         self.store_garmin_snapshot({"gear": [{"gearUUID": "one", "stats": {"totalDistance": 2000}}]})

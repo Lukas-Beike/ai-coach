@@ -57,7 +57,7 @@ test("@responsive current week report is shown automatically without controls", 
   expect(weekStart.getUTCDay()).toBe(1);
   const formatDate = (value) => value.split("-").reverse().join(".");
   await expect(report.getByRole("heading", { name: `Aktuelle Woche: ${formatDate(current.start)} – ${formatDate(current.end)}` })).toBeVisible();
-  await expect(page.locator("[data-analysis-segment=review]")).toHaveText("Aktuelle Woche");
+  await expect(page.locator("[data-analysis-segment=review]")).toHaveText("Woche");
   await expect(page.locator("#analysisPerformanceSegment")).toBeHidden();
   await expect(page.locator("[data-analysis-segment=review]")).toHaveAttribute("aria-current", "page");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();

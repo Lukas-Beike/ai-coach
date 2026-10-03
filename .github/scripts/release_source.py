@@ -90,12 +90,19 @@ def main() -> None:
     parser.add_argument("--source", default=os.environ.get("SOURCE_REF", ""))
     parser.add_argument("--release-tag", default=os.environ.get("RELEASE_TAG", ""))
     parser.add_argument("--verify", default="")
+    parser.add_argument("--expected-version", default=os.environ.get("EXPECTED_VERSION", ""))
     args = parser.parse_args()
     repository = Path.cwd()
     if args.verify:
         verify(repository, args.verify, args.release_tag)
         return
     source = resolve(repository, args.source, args.release_tag)
+    if args.expected_version:
+        if not VERSION_PATTERN.fullmatch(args.expected_version):
+            raise ValueError("Expected version must be an application version")
+        version = APP_VERSION_PATTERN.search(git(repository, "show", f"{source}:server.py"))
+        if not version or version.group(1) != args.expected_version:
+            raise ValueError("Expected release version does not match APP_VERSION at the resolved source")
     print(f"Resolved source: {source}")
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:

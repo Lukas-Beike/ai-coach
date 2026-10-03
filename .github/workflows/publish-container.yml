@@ -47,6 +47,7 @@ jobs:
           SOURCE_REF: ${{ github.sha }}
           # Release PRs are tested before their tag exists, with read-only permissions.
           RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || (github.event_name == 'workflow_dispatch' && inputs.publish_container == true) && inputs.release_tag || '' }}
+          EXPECTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || '' }}
         run: python .github/scripts/release_source.py
 
   test_shards:
@@ -325,10 +326,31 @@ jobs:
         if: always()
         run: docker rm --force ai-coach-e2e >/dev/null 2>&1 || true
 
+  browser:
+    if: always()
+    needs: e2e
+    name: Browser checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate browser results
+        env:
+          E2E_RESULT: ${{ needs.e2e.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$E2E_RESULT" != "success" ]]; then
+            echo "Browser checks: $E2E_RESULT"
+            exit 1
+          fi
+          echo "All browser projects passed."
+
   build-and-push:
     if: (github.event_name == 'release' && github.event.action == 'published') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_container == true)
-    needs: [source, test, e2e, quality]
+    needs: [source, test, e2e, browser, quality]
     runs-on: ubuntu-latest
+    concurrency:
+      group: container-publish
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -356,7 +378,6 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
             type=raw,value=${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.release_tag || github.ref_name }}
             type=sha,format=long
       - name: Set up Docker Buildx
@@ -381,3 +402,36 @@ jobs:
         run: |
           image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           cosign sign "${image,,}@${{ steps.image.outputs.digest }}"
+      - name: Verify image signature
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          EXPECTED_DIGEST: ${{ steps.image.outputs.digest }}
+          SIGNING_IDENTITY: https://github.com/${{ github.workflow_ref }}
+        run: >-
+          cosign verify "${IMAGE,,}@${EXPECTED_DIGEST}"
+          --certificate-identity "$SIGNING_IDENTITY"
+          --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+      - name: Promote signed image and verify published tag digest parity
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
+          EXPECTED_DIGEST: ${{ steps.image.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${IMAGE,,}"
+          latest_release="$(gh api "repos/$REPOSITORY/releases/latest" --jq .tag_name)"
+          if [[ "$RELEASE_TAG" != "$latest_release" ]]; then
+            echo "Refusing to replace latest with $RELEASE_TAG; current release is $latest_release."
+            exit 1
+          fi
+          docker buildx imagetools create --prefer-index=false --tag "$image:latest" "$image@$EXPECTED_DIGEST"
+          for tag in "$RELEASE_TAG" latest; do
+            actual_digest="$(docker buildx imagetools inspect "$image:$tag" | awk '/Digest:/ { print $2; exit }')"
+            if [[ -z "$actual_digest" || "$actual_digest" != "$EXPECTED_DIGEST" ]]; then
+              echo "Digest mismatch for $image:$tag: expected $EXPECTED_DIGEST, got ${actual_digest:-<missing>}"
+              exit 1
+            fi
+          done

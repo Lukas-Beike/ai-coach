@@ -32,18 +32,19 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
     };
   });
   expect(periods.same).toBeTruthy();
-  expect(periods.titles).toHaveLength(2);
+  expect(periods.titles).toHaveLength(0);
+  await expect(page.locator("#analysisHistoryCharts .analysis-sparse-note")).toHaveCount(1);
   for (const title of periods.titles) expect(title).toContain(periods.expected);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 
   await page.evaluate(async () => { await applyNavigationRoute("analysis/recovery", { historyMode: "replace" }); });
   await expect(page.getByRole("heading", { name: "Aktuelle Erholung", exact: true })).toHaveCount(0);
   const recovery = page.locator("#personalRecovery");
-  await expect(recovery.locator("svg")).toHaveCount(2);
-  await expect(recovery.getByRole("group", { name: "Erholung · Aktuelle Woche: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen." })).toBeVisible();
-  for (const metric of ["Schlafdauer", "HRV", "Ruhepuls"]) await expect(recovery.getByRole("button", { name: new RegExp(`^${metric}:`) })).toHaveCount(2);
+  await expect(recovery.locator("svg")).toHaveCount(3);
+  await expect(recovery.getByRole("group", { name: "Schlafdauer: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen." })).toBeVisible();
+  for (const metric of ["Schlafdauer", "HRV", "Ruhepuls"]) await expect(recovery.getByRole("button", { name: new RegExp(`^${metric}:`) })).toHaveCount(1);
   await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Aktuelle Woche");
-  await expect(recovery.locator("svg path[data-color='1']").first()).toHaveAttribute("d", /M.*M/);
+  await expect(recovery.locator("svg path[data-color='2']").first()).toHaveAttribute("d", /M.*M/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.locator("#personalRecovery").getByText("Was beeinflusst deine Erholung?", { exact: true }).click();
   await expect(page.locator("#personalRecovery").getByText(/Mindestens zehn gemessene Tage je Gruppe/).first()).toBeVisible();
@@ -59,9 +60,10 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
       ...baselines.map((item) => ({ ...item, source: "Garmin Connect", history: item.history.map((point) => ({ ...point, value: 99 })) })),
     ] });
   });
-  const weeklyRecovery = recovery.locator(".analysis-chart-card").nth(1);
-  await expect(weeklyRecovery.getByRole("button", { name: /^Schlafdauer: 8 h/ })).toBeVisible();
-  await expect(weeklyRecovery.locator("tbody tr")).toHaveCount(2);
+  await recovery.getByRole("button", { name: "8 Wochen", exact: true }).click();
+  const weeklyRecovery = recovery.locator(".analysis-chart-card").first();
+  await expect(weeklyRecovery.getByRole("button", { name: /^Schlafdauer: 8:00 h/ })).toBeVisible();
+  await expect(weeklyRecovery.locator(".analysis-subchart").first().locator("tbody tr")).toHaveCount(2);
   await expect(weeklyRecovery.locator(".analysis-chart-legend li")).toHaveCount(3);
   await expect(weeklyRecovery).not.toContainText("99 h");
 

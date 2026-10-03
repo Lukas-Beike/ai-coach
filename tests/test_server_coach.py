@@ -661,10 +661,11 @@ class ServerCoachTests(ServerTestCase):
         context = server.COACH_CONTEXT.training_context_service().build()
 
         self.assertIn('"Leistungsfähigkeit und Entwicklung"', context)
-        self.assertIn("VO2max", context)
-        self.assertIn("Zone 2 pace", context)
-        self.assertIn("keep FTP and Intervals.icu eFTP clearly separate", context)
-        self.assertIn("do not claim a reliable trend", context)
+        self.assertIn("identify meaningful new evidence", context)
+        self.assertIn("Mention VO2max, FTP, eFTP", context)
+        self.assertIn("If there is no new indication for a metric, omit it entirely", context)
+        self.assertIn("Keep provider values clearly separated by source", context)
+        self.assertIn("Do not claim a reliable trend", context)
 
     def test_coach_projection_does_not_change_provider_snapshots(self):
         today = server.ATHLETE_CLOCK.now().date()
