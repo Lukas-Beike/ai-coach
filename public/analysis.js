@@ -187,7 +187,7 @@ function analysisPlotScales(series, start, end, { recovery, secondaryUnit }) {
 }
 
 function appendAnalysisAxes(svg, unit, scales, recovery) {
-  const { min, max, step, chartRight, y, secondaryUnit, secondaryMin, secondaryMax, secondaryY } = scales;
+  const { min, max, step, chartRight, y, secondaryUnit } = scales;
   Array.from({ length: Math.round((max - min) / step) + 1 }, (_, index) => min + index * step).forEach((value) => {
     svg.append(analysisSvg("line", { x1: 66, x2: chartRight, y1: y(value), y2: y(value), class: "analysis-grid-line" }));
     let label = value.toLocaleString("de-DE", { maximumFractionDigits: 1 });
@@ -195,7 +195,11 @@ function appendAnalysisAxes(svg, unit, scales, recovery) {
     else if (unit === "%") label += " %";
     svg.append(analysisSvg("text", { x: 58, y: y(value) + 4, "text-anchor": "end" }, label));
   });
-  if (secondaryUnit) {
+  if (secondaryUnit) appendAnalysisSecondaryAxis(svg, unit, scales, recovery);
+}
+
+function appendAnalysisSecondaryAxis(svg, unit, scales, recovery) {
+  const { chartRight, secondaryMin, secondaryMax, secondaryY } = scales;
     if (recovery) svg.classList.add("recovery-combination-chart");
     let primaryLabel = "Schwellenpace (min/km)";
     if (unit === "W") primaryLabel = "FTP / eFTP (W)";
@@ -205,7 +209,6 @@ function appendAnalysisAxes(svg, unit, scales, recovery) {
     for (let value = secondaryMin; value <= secondaryMax; value += recovery ? 1 : 5) {
       svg.append(analysisSvg("text", { x: chartRight + 9, y: secondaryY(value) + 4, class: recovery ? "recovery-sleep-axis" : "analysis-secondary-axis" }, recovery ? analysisValue(value, "h") : analysisValue(value, "")));
     }
-  }
 }
 
 function appendAnalysisSeries(svg, series, unit, scales, recovery) {
@@ -419,7 +422,11 @@ function renderRecoveryCharts(report, root) {
   const weekStart = addDateKey(today, -((new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7));
   const currentDates = Array.from({ length: 7 }, (_, index) => addDateKey(weekStart, index));
   const weekDates = Array.from({ length: 8 }, (_, index) => addDateKey(weekStart, (index - 7) * 7));
-  const makeSeries = (dates, weekly) => recoveryChartSeries(metrics, baselines, dates, weekly, today).map((item) => ({ ...item, points: item.points.map(({ actual, ...point }) => ({ ...point, value: actual })) }));
+  const makeSeries = (dates, weekly) => recoveryChartSeries(metrics, baselines, dates, weekly, today).map((item) => {
+    const absoluteItem = { ...item };
+    delete absoluteItem.baselineDate;
+    return { ...absoluteItem, points: item.points.map(({ actual, ...point }) => ({ ...point, value: actual })) };
+  });
   const note = "Originalwerte: HRV in Millisekunden und Ruhepuls in Schl\u00e4gen pro Minute links; Schlafdauer als Balken in Stunden rechts (3 bis 10 h). Werte au\u00dferhalb dieser Skala liegen am Rand; die Originalwerte bleiben abrufbar. Die Gr\u00f6\u00dfen haben unterschiedliche Einheiten und d\u00fcrfen nicht als gleiche Messgr\u00f6\u00dfe verglichen werden. Ein h\u00f6herer Ruhepuls bedeutet keine bessere Erholung. Quellen bleiben getrennt.";
   const currentChart = analysisChart("Erholung \u00b7 Aktuelle Woche", makeSeries(currentDates, false), "", currentDates[0], currentDates.at(-1), `${note} Fehlende Tagesmessungen bleiben als L\u00fccken sichtbar.`, { compactInfo: true, recovery: true });
   const weeklyChart = analysisChart("Erholung \u00b7 Letzte 8 Wochen", makeSeries(weekDates, true), "", weekDates[0], weekDates.at(-1), `${note} Jeder Datenpunkt ist der Durchschnitt der vorhandenen Tagesmessungen dieser Kalenderwoche. Die laufende Woche ist noch unvollst\u00e4ndig; fehlende Messungen z\u00e4hlen nicht als null.`, { compactInfo: true, recovery: true });

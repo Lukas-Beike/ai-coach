@@ -27,6 +27,7 @@ test("@responsive recovery exposes partial measured history without counting fut
   await expect(charts.first().locator(".recovery-sleep-axis").last()).toContainText("10 h");
   await expect(charts.first().locator(".analysis-point-value")).toHaveCount(0);
   await expect(charts.first().locator(".analysis-chart-legend")).not.toContainText("%");
+  await expect(charts.first().locator(".analysis-chart-legend")).not.toContainText("Basis");
   await charts.first().locator(".analysis-day-marker").last().focus();
   await page.keyboard.press("Enter");
   await expect(page.locator(".analysis-info-tooltip:popover-open")).toContainText("Schlafdauer: 8 h");
