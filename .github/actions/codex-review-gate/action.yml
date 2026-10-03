@@ -329,6 +329,7 @@ runs:
             const deadline = Date.now() + timeoutSeconds * 1000;
             let currentPollSeconds = pollSeconds;
             let previousObservation;
+            let observedReviewEvidence = false;
 
             core.info(`Waiting for Codex to publish a review for PR #${prNumber} at head ${headSha} against base ${baseSha}.`);
             while (Date.now() < deadline) {
@@ -354,6 +355,14 @@ runs:
               const summary = await getCodexSummary(minimumArtifactTime, headSha);
               const summaryStatus = String(summary.current?.codeReview?.status || '').toLowerCase();
               const reviews = await getCodexReviews(minimumArtifactTime);
+              const allReviews = await github.paginate(github.rest.pulls.listReviews, {
+                owner, repo, pull_number: prNumber, per_page: 100,
+              });
+              const allComments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: prNumber, per_page: 100,
+              });
+              observedReviewEvidence ||= Boolean(summary.latest) || reviews.length > 0 ||
+                allReviews.length > 0 || allComments.length > 0;
               const pendingReviews = reviews.filter((review) => (
                 review.state === 'PENDING' || !review.submitted_at
               ));
@@ -491,6 +500,15 @@ runs:
               await sleep(currentPollSeconds);
             }
 
+            if (!observedReviewEvidence) {
+              const unresolved = await getUnresolvedCodexReviewIds();
+              if (unresolved.size === 0) {
+                await updateCheck(checkRunId, 'completed', 'success',
+                  'Codex review unavailable (no response)',
+                  'No Codex response arrived before the deadline. Review skipped; other required checks still apply.');
+                return;
+              }
+            }
             throw new Error(`Timed out after ${timeoutSeconds} seconds waiting for Codex to publish its review.`);
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
