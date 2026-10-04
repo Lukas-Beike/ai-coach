@@ -47,6 +47,7 @@ function analysisChart(title, series, unit, start, end, note, {
     button.type = "button";
     const sourceInfo = item.source ? " · Quelle: " + item.source : "";
     const info = reportNode("div", `${analysisLegendText(item, latest, unit)}${sourceInfo}. ${item.explanation || note}`, "analysis-info-tooltip");
+    info.dataset.series = String(index);
     info.id = `analysis-info-${++analysisInfoId}`;
     info.setAttribute("popover", "auto");
     info.setAttribute("role", "tooltip");
@@ -104,14 +105,15 @@ function analysisChange(delta, unit) {
 }
 
 function appendAnalysisReferenceNotes(section, series, unit) {
-  const reference = series.find((item) => item.range || item.target != null);
-  if (reference) {
+  series.forEach((item, index) => {
+    const info = section.querySelector(`.analysis-legend-info + .analysis-info-tooltip[data-series="${index}"]`);
+    if (item.points.some((point) => point.lower != null)) info?.append(reportNode("p", "Wochenmedian mit Streuung (25.–75. Perzentil) · nur vorhandene Messungen", "analysis-reference-note"));
+    if (!item.range && item.target == null) return;
     let label = "Grüner Bereich: persönliche Quartile · 42 Tage vor der letzten Messung";
-    if (reference.target != null) label = `Ziellinie: ${analysisValue(reference.target, reference.unit || unit)} · persönliches Schlafziel`;
-    else if (reference.range.status === "provisional") label += " · vorläufig";
-    section.querySelectorAll(".analysis-legend-info + .analysis-info-tooltip").forEach((info) => info.append(reportNode("p", label, "analysis-reference-note")));
-  }
-  if (series.some((item) => item.points.some((point) => point.lower != null))) section.querySelectorAll(".analysis-legend-info + .analysis-info-tooltip").forEach((info) => info.append(reportNode("p", "Wochenmedian mit Streuung (25.–75. Perzentil) · nur vorhandene Messungen", "analysis-reference-note")));
+    if (item.target != null) label = `Ziellinie: ${analysisValue(item.target, item.unit || unit)} · persönliches Schlafziel`;
+    else if (item.range.status === "provisional") label += " · vorläufig";
+    info?.append(reportNode("p", label, "analysis-reference-note"));
+  });
 }
 
 function analysisReadingDetails(point, unit) {

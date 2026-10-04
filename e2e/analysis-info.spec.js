@@ -168,3 +168,24 @@ test("personal load bands use earlier known values and keep values and context i
   await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("29 frühere Tage");
   await expect(root.locator(".analysis-baseline-band")).toHaveCount(3);
 });
+
+test("reference notes stay with their own series and baseline status", async ({ page }) => {
+  const points = Array.from({ length: 30 }, (_, index) => ({ date: `2026-09-${String(index + 1).padStart(2, "0")}`, ctl: index < 14 ? null : 40 + index, atl: 50 + index, tsb: null }));
+  await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-30", load: { points }, metrics: {} } }, "load");
+  const root = page.locator("#analysisLoadCharts");
+  const ctl = root.getByRole("button", { name: "CTL · Fitness", exact: true });
+  const atl = root.getByRole("button", { name: "ATL · Ermüdung", exact: true });
+  await ctl.click();
+  await expect(root.locator(".analysis-info-tooltip:popover-open .analysis-reference-note")).toContainText("vorläufig");
+  await page.keyboard.press("Escape");
+  await atl.click();
+  await expect(root.locator(".analysis-info-tooltip:popover-open .analysis-reference-note")).not.toContainText("vorläufig");
+  await page.keyboard.press("Escape");
+  points.forEach((point, index) => { if (index < 20) point.ctl = null; });
+  await page.unroute("**/api/performance");
+  await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-30", load: { points }, metrics: {} } }, "load");
+  await page.reload();
+  await page.waitForFunction(() => state.loadedAreas.has("performance") && !state.loadPromise);
+  await ctl.click();
+  await expect(root.locator(".analysis-info-tooltip:popover-open .analysis-reference-note")).toHaveCount(0);
+});
