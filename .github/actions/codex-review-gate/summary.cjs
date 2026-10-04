@@ -36,7 +36,7 @@ function parseCodeReviewSummary(body, createdAt) {
     };
   }
 
-  if (!/^Codex Review: Didn't find any major issues\.(?:[ \t]*(?::rocket:|🚀))?[ \t]*(?:\r?\n|$)/i.test(text) ||
+  if (!/^Codex Review: Didn't find any major issues\.(?:[ \t]*(?::rocket:|🚀|Hooray!|Swish!|Keep it up!))?[ \t]*(?:\r?\n|$)/i.test(text) ||
       /(?:\[P[0-3]\]|P[0-3] Badge)/i.test(text)) {
     return undefined;
   }
