@@ -879,7 +879,7 @@ function analysisWeeklyLastPoints(points, start, end) {
   for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
     let weekEnd = addDateKey(weekStart, 6);
     if (weekEnd > end) weekEnd = end;
-    const last = points.filter((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point)).at(-1);
+    const last = points.findLast((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point));
     weeks.push(last ? { ...last, date: weekEnd, observedDate: last.date } : { date: weekEnd, value: null });
   }
   return weeks;
