@@ -127,7 +127,7 @@ jobs:
                 .sort((left, right) => Date.parse(right.updated_at || right.created_at) -
                   Date.parse(left.updated_at || left.created_at));
               const latestSummary = summaries[0];
-              const nativeClean = /^Codex Review: Didn't find any major issues\.(?:[ \t]*(?::rocket:|🚀))?[ \t]*(?:\r?\n|$)/i
+              const nativeClean = /^Codex Review: Didn't find any major issues\.(?:[ \t]*(?::rocket:|🚀|Hooray!|Swish!|Keep it up!))?[ \t]*(?:\r?\n|$)/i
                 .test(latestSummary?.body || '');
               if (nativeClean) {
                 const body = latestSummary.body || '';
