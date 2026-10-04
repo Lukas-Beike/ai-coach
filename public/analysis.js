@@ -27,54 +27,27 @@ function analysisPointValue(item, point, unit) {
   return `${analysisValue(point.actual, item.unit)} (${analysisValue(point.value, "%")})`;
 }
 
-function appendAnalysisCoverage(section, series, compactInfo) {
-  const coverageSeries = series;
-  if (!coverageSeries.length && !compactInfo) return;
-  const coverage = document.createElement("details");
-  coverage.className = "analysis-coverage";
-  const summary = document.createElement("summary");
-  summary.textContent = "Datenabdeckung";
-  const note = document.createElement("p");
-  note.className = "muted";
-  note.textContent = "Fehlende Messungen bleiben unbekannt; sie sind keine Nullwerte oder bestätigten Ruhetage.";
-  const rows = document.createElement("ul");
-  coverageSeries.forEach((item) => {
-    const row = document.createElement("li");
-    const points = item.points.filter((point) => point?.value != null && Number.isFinite(Number(point.value)));
-    const range = points.length ? " · " + dateLabel(points[0].date) + " bis " + dateLabel(points.at(-1).date) : "";
-    const valueCoverage = item.coverage || points.length + "/" + item.points.length + " datierte Werte" + range;
-    row.textContent = `${item.label}: ${valueCoverage}`;
-    rows.append(row);
-  });
-  if (!coverageSeries.length) {
-    const row = document.createElement("li");
-    row.textContent = "Keine Messhistorie vorhanden.";
-    rows.append(row);
-  }
-  coverage.append(summary, note, rows);
-  section.append(coverage);
-}
-
 let analysisInfoId = 0;
 
 function analysisChart(title, series, unit, start, end, note, {
-  compactInfo = false, sparse = false, zeroCentered = false, includeCoverage = true,
+  sparse = false, zeroCentered = false,
 } = {}) {
   const section = reportNode("section", null, "analysis-chart-card");
   section.append(reportNode("h3", title));
   const valid = analysisValidPoint;
   const values = series.flatMap((item) => item.points.filter(valid));
-  if (note) section.append(reportNode("p", note, "analysis-chart-note"));
+
   const legend = reportNode("ul", null, "analysis-chart-legend");
   series.forEach((item, index) => {
     const latest = item.points.findLast(valid);
     const entry = reportNode("li");
     entry.dataset.color = String(item.color ?? index);
     const label = item.legendLabel || item.label;
-    const button = reportNode("button", `${label}: ${latest ? analysisPointValue(item, latest, unit) : "keine Werte"}`, "analysis-legend-info");
+    const button = reportNode("button", label, "analysis-legend-info");
     button.type = "button";
     const sourceInfo = item.source ? " · Quelle: " + item.source : "";
     const info = reportNode("div", `${analysisLegendText(item, latest, unit)}${sourceInfo}. ${item.explanation || note}`, "analysis-info-tooltip");
+    info.dataset.series = String(index);
     info.id = `analysis-info-${++analysisInfoId}`;
     info.setAttribute("popover", "auto");
     info.setAttribute("role", "tooltip");
@@ -90,26 +63,26 @@ function analysisChart(title, series, unit, start, end, note, {
     });
     entry.append(button, info);
     const sourceSuffix = item.source ? " · " + item.source : "";
-    if (latest) entry.append(reportNode("span", `${dateLabel(latest.observedDate || latest.date)}${sourceSuffix}`, "analysis-metric-meta"));
-    if (item.referenceLabel) entry.append(reportNode("span", item.referenceLabel, "analysis-metric-context"));
+    if (latest) info.append(reportNode("span", `${dateLabel(latest.observedDate || latest.date)}${sourceSuffix}`, "analysis-metric-meta"));
+    if (item.referenceLabel) info.append(reportNode("span", item.referenceLabel, "analysis-metric-context"));
     const readings = item.points.filter(valid);
-    entry.append(reportNode("span", item.coverageShort || `${readings.length}/${item.points.length} datierte Werte`, "analysis-metric-meta"));
+    info.append(reportNode("span", item.coverageShort || `${readings.length}/${item.points.length} datierte Werte`, "analysis-metric-meta"));
     if (readings.length > 1) {
       const first = readings[0];
       const delta = Number(latest.value) - Number(first.value);
       const change = analysisChange(delta, item.unit || unit);
-      entry.append(reportNode("span", `Seit ${dateLabel(first.date)}: ${change}`, "analysis-metric-change"));
+      info.append(reportNode("span", `Seit ${dateLabel(first.date)}: ${change}`, "analysis-metric-change"));
     }
     legend.append(entry);
   });
   section.append(legend);
-  if (includeCoverage) appendAnalysisCoverage(section, series, compactInfo);
+
   if (!values.length) {
     section.append(reportNode("p", "Noch keine datierten Werte im Zeitraum vorhanden.", "empty"));
     return section;
   }
   const fewReadings = sparse && series.every((item) => item.points.filter(valid).length < 3);
-  if (fewReadings) section.append(reportNode("p", "Wenige Messungen · kein belastbarer Trend. Letzte Messung und Veränderung bleiben sichtbar.", "analysis-sparse-note"));
+  if (fewReadings) legend.querySelectorAll(".analysis-info-tooltip").forEach((info) => info.append(reportNode("p", "Wenige Messungen · kein belastbarer Trend.", "analysis-sparse-note")));
   else {
     const scales = analysisPlotScales(series, start, end, { unit, zeroCentered });
     const svg = analysisSvg("svg", { viewBox: `0 0 ${scales.chartWidth} 200`, role: "group", "aria-label": `${title}: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen.` });
@@ -132,14 +105,15 @@ function analysisChange(delta, unit) {
 }
 
 function appendAnalysisReferenceNotes(section, series, unit) {
-  const reference = series.find((item) => item.range || item.target != null);
-  if (reference) {
-    let label = "Schattierter Bereich: persönliche Quartile · 42 Tage vor der letzten Messung";
-    if (reference.target != null) label = `Ziellinie: ${analysisValue(reference.target, reference.unit || unit)} · persönliches Schlafziel`;
-    else if (reference.range.status === "provisional") label += " · vorläufig";
-    section.append(reportNode("p", label, "analysis-reference-note"));
-  }
-  if (series.some((item) => item.points.some((point) => point.lower != null))) section.append(reportNode("p", "Wochenmedian mit Streuung (25.–75. Perzentil) · nur vorhandene Messungen", "analysis-reference-note"));
+  series.forEach((item, index) => {
+    const info = section.querySelector(`.analysis-legend-info + .analysis-info-tooltip[data-series="${index}"]`);
+    if (item.points.some((point) => point.lower != null)) info?.append(reportNode("p", "Wochenmedian mit Streuung (25.–75. Perzentil) · nur vorhandene Messungen", "analysis-reference-note"));
+    if (!item.range && item.target == null) return;
+    let label = "Grüner Bereich: persönliche Quartile · 42 Tage vor der letzten Messung";
+    if (item.target != null) label = `Ziellinie: ${analysisValue(item.target, item.unit || unit)} · persönliches Schlafziel`;
+    else if (item.range.status === "provisional") label += " · vorläufig";
+    info?.append(reportNode("p", label, "analysis-reference-note"));
+  });
 }
 
 function analysisReadingDetails(point, unit) {
@@ -238,6 +212,7 @@ function appendAnalysisSeries(svg, series, unit, { chartRight, x, y }, zeroCente
       } else {
         const dot = analysisSvg("circle", { cx: x(point.date), cy: y(point.value), r: 2.5, "data-series": index, "data-color": color });
         dot.append(analysisSvg("title", {}, `${item.label} · ${dateLabel(point.date)}: ${analysisPointValue(item, point, unit)}`)); svg.append(dot);
+
       }
       previous = point;
     });
@@ -305,8 +280,7 @@ function appendAnalysisPointInspectors(section, svg, series, unit, { x, chartRig
 function analysisChartGroup(title, charts, series, note) {
   const group = reportNode("section", null, "analysis-chart-card analysis-chart-stack");
   group.append(reportNode("h3", title));
-  if (note) group.append(reportNode("p", note, "analysis-chart-note"));
-  appendAnalysisCoverage(group, series, true);
+  if (note) charts.forEach((chart) => chart.querySelectorAll(".analysis-legend-info + .analysis-info-tooltip").forEach((info) => info.append(reportNode("p", note))));
   charts.forEach((chart) => {
     chart.classList.remove("analysis-chart-card"); chart.classList.add("analysis-subchart");
     const heading = chart.querySelector("h3");
@@ -334,6 +308,17 @@ globalThis.matchMedia("(max-width: 599px)").addEventListener("change", () => {
   if (state.data) { renderAnalysisHistory(state.data.performance?.history); renderPersonalRecovery(state.data.performance?.personal_recovery); }
 });
 
+function appendAnalysisLoadReferences(loadSeries, points) {
+  for (const [index, key] of ["ctl", "atl", "tsb"].entries()) {
+    const latest = points.findLast((point) => point[key] != null && Number.isFinite(Number(point[key])));
+    if (!latest) continue;
+    const prior = points.filter((point) => point.date >= addDateKey(latest.date, -42) && point.date < latest.date && point[key] != null && Number.isFinite(Number(point[key]))).map((point) => point[key]);
+    if (prior.length < 14) continue;
+    loadSeries[index].range = { lower: analysisQuantile(prior, .25), upper: analysisQuantile(prior, .75), status: prior.length < 28 ? "provisional" : "ok" };
+    loadSeries[index].referenceLabel = `Persönlicher üblicher Bereich: ${analysisValue(loadSeries[index].range.lower, "")}–${analysisValue(loadSeries[index].range.upper, "")} · ${prior.length} frühere Tage${prior.length < 28 ? " · vorläufig" : ""}`;
+  }
+}
+
 function renderAnalysisHistory(history) {
   const root = document.querySelector("#analysisHistoryCharts");
   const loadRoot = document.querySelector("#analysisLoadCharts");
@@ -349,6 +334,7 @@ function renderAnalysisHistory(history) {
   const loadSeries = [["ctl", "CTL · Fitness"], ["atl", "ATL · Ermüdung"], ["tsb", "TSB · Form"]].map(([key, label], color) => ({
     label, color, source: "Intervals.icu", points: load.points.filter(withinPeriod).map((point) => ({ date: point.date, value: point[key] })),
   }));
+  appendAnalysisLoadReferences(loadSeries, load.points);
   const loadNote = "CTL: langfristige Belastung (üblich 42 Tage). ATL: kurzfristige Belastung (7 Tage). Die Providerkonfiguration gilt. TSB = CTL − ATL am selben Tag; positiv bedeutet weniger kurzfristige als langfristige Last. Historische Werte bis gestern; kein Leistungstest oder alleinige Trainingsfreigabe.";
   loadRoot.append(analysisChartGroup("Belastung und Form", [
     analysisChart("Trainingsbelastung", loadSeries.slice(0, 2), "", start, end, "", { compactInfo: true, includeCoverage: false }),

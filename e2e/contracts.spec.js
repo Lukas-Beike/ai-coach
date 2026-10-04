@@ -676,8 +676,10 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await expect(cycling.locator("path[data-series]")).toHaveCount(3);
   await expect(running).not.toContainText("%");
   await expect(cycling).not.toContainText("%");
-  await cycling.getByText("Datenabdeckung", { exact: true }).click();
-  await expect(cycling.locator(".analysis-coverage")).toContainText("55/56 datierte Werte");
+  await expect(cycling.locator(".analysis-coverage")).toHaveCount(0);
+  await cycling.getByRole("button", { name: "Rad · FTP", exact: true }).click();
+  await expect(cycling.locator(".analysis-info-tooltip:popover-open")).toContainText("55/56 datierte Werte");
+  await page.keyboard.press("Escape");
   expect((await cycling.locator('path[data-series="0"]').first().getAttribute("d")).match(/M/g)).toHaveLength(2);
   const details = cycling.locator("details").filter({ has: page.getByText("Werte ansehen", { exact: true }) }).first();
   await details.locator(":scope > summary").click();
