@@ -107,7 +107,7 @@ class EquipmentService:
             local_rows = [
                 json.loads(row["value"])
                 for row in db.execute(
-                    "SELECT value FROM kv WHERE key LIKE ?", (EQUIPMENT_PREFIX + ":%",)
+                    "SELECT value FROM kv WHERE key LIKE ?", (EQUIPMENT_PREFIX + "%",)
                 ).fetchall()
                 if row["value"] and isinstance(json.loads(row["value"]), dict)
             ]
