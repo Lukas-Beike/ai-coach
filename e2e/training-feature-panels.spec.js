@@ -35,7 +35,7 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   expect(periods.titles.length).toBeGreaterThan(0);
   await expect(page.locator("#analysisHistoryCharts .analysis-sparse-note:visible")).toHaveCount(0);
   await page.locator("#analysisHistoryCharts").getByRole("button", { name: "Rad · FTP", exact: true }).click();
-  await expect(page.locator("#analysisHistoryCharts .analysis-info-tooltip:popover-open")).toContainText("kein belastbarer Trend");
+  await expect(page.locator("#analysisHistoryCharts .analysis-info-tooltip:popover-open")).toContainText(/Seit .+: \+\d+(?:,\d+)? W/);
   await page.keyboard.press("Escape");
   for (const title of periods.titles) expect(title).toContain(periods.expected);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();

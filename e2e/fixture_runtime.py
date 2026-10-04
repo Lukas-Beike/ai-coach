@@ -192,6 +192,22 @@ def initialise_fixture():
 FIXTURE_ACTIVITY_TIME = "T08:00:00"
 
 
+def demo_performance_history(today):
+    """Weekly synthetic performance observations across the 90-day chart window."""
+    ages = [*range(89, 0, -7), 0]
+    history = []
+    for index, age in enumerate(ages):
+        progress = index / (len(ages) - 1)
+        variation = (index % 3 - 1) * 0.4
+        history.append({"date": (today - timedelta(days=age)).isoformat(), "metrics": {
+            "cycling_ftp_watts": round(262 + 22 * progress + variation),
+            "cycling_vo2max_ml_kg_min": round(49.5 + 2.6 * progress + variation / 4, 1),
+            "running_vo2max_ml_kg_min": round(47.2 + 2.2 * progress + variation / 4, 1),
+            "run_threshold_pace_seconds_per_km": round(298 - 24 * progress - variation),
+        }})
+    return history
+
+
 def seed_training_features():
     from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
     from backend.performance.power_profile import power_profile
@@ -212,8 +228,9 @@ def seed_training_features():
         ]
     wellness = [{"id": (now.date() - timedelta(days=offset)).isoformat(), "sleepSecs": (7 + offset % 3 / 4) * 3600,
                  "restingHR": 50 + offset % 3, "hrv": None if offset == 3 else 45 + offset % 4,
-                 "hrv_method": "RMSSD", "ctl": 25 + (34 - offset) * .15, "atl": 30 + offset % 7,
-                 "eftp": 260 + (34 - offset) / 3} for offset in range(56)]
+                 "hrv_method": "RMSSD", "ctl": 27 + (89 - offset) * .18 + [0, 1, 2, 1, -1, -2, -1][offset % 7],
+                 "atl": 26 + (89 - offset) * .08 + [0, 2, 4, 1, -1, -2, 1][offset % 7],
+                 "eftp": 260 + (89 - offset) * .25} for offset in range(90)]
     week_start = now.date() - timedelta(days=now.date().weekday())
     for weeks_ago in range(2, 8):
         rows.append({"id": f"feature-history-{weeks_ago}", "name": "Fixture historical ride", "type": "Ride",
@@ -230,10 +247,7 @@ def seed_training_features():
     with server.database_manager().unit_of_work() as db:
         server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
         server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps({"synced_at": snapshot["synced_at"],
-            "performance_history": [
-                {"date": (now.date() - timedelta(days=55)).isoformat(), "metrics": {"cycling_ftp_watts": 200}},
-                {"date": now.date().isoformat(), "metrics": {"cycling_ftp_watts": 210}},
-            ],
+            "performance_history": demo_performance_history(now.date()),
             "activities": [{"activityId": f"demo-{index}", "startTimeLocal": now.date().isoformat() + FIXTURE_ACTIVITY_TIME,
                 "trainingEffectLabel": label, "activityTrainingLoad": load}
                 for index, (label, load) in enumerate([("AEROBIC_BASE", 40), ("TEMPO", 80), ("ANAEROBIC_CAPACITY", 30)])],
@@ -303,12 +317,7 @@ def seed_preview_demo():
                     (3, "Radintervalle", "Ride", 60, "- 15m 50%\n- 5m 100%\n- 5m 50%\n- 5m 100%\n- 5m 50%\n- 5m 100%\n- 5m 50%\n- 15m 50%"),
                     (5, "Grundlagenausfahrt", "Ride", 90, "- 90m 65%")]]
     server.PLANNING_WORKFLOWS.local_plan_creation_service().save(workouts)
-    history = [{"date": (today - timedelta(days=offset)).isoformat(), "metrics": {
-        "cycling_ftp_watts": 270 + (42 - offset) / 3,
-        "cycling_vo2max_ml_kg_min": 51 + (42 - offset) / 20,
-        "running_vo2max_ml_kg_min": 49 + (42 - offset) / 25,
-        "run_threshold_pace_seconds_per_km": 270 - (42 - offset) / 2}}
-        for offset in range(42, -1, -1)]
+    history = demo_performance_history(today)
     garmin = {"synced_at": server.runtime_clock.utc_now(), "performance_history": history,
         "activities": [{"activityId": f"demo-{index}", "startTimeLocal": today.isoformat() + FIXTURE_ACTIVITY_TIME,
             "trainingEffectLabel": label, "activityTrainingLoad": load}
@@ -317,9 +326,9 @@ def seed_preview_demo():
                  {"gearUUID": "22222222-2222-4222-8222-222222222222", "gearName": "Demo-Laufschuhe", "gearTypeName": "Laufschuhe", "gearStatusName": "Aktiv", "maximumMeters": 600000, "stats": {"totalDistance": 410000, "totalActivities": 62}}],
         "max_metrics": [{"calendarDate": today.isoformat(), "running": {"vo2MaxPreciseValue": 50.7}, "cycling": {"vo2MaxPreciseValue": 53.1}}],
         "cycling_ftp": {"power": 284, "calendarDate": today.isoformat()},
-        "sleep": [{"calendarDate": (today - timedelta(days=offset)).isoformat(), "sleepTimeSeconds": (7.2 + offset % 3 / 4) * 3600} for offset in range(56)],
-        "resting_hr": [{"calendarDate": (today - timedelta(days=offset)).isoformat(), "restingHeartRate": 49 + offset % 3} for offset in range(56)],
-        "hrv": [{"calendarDate": (today - timedelta(days=offset)).isoformat(), "lastNightAvg": 46 + offset % 5} for offset in range(56)]}
+        "sleep": [{"calendarDate": (today - timedelta(days=offset)).isoformat(), "sleepTimeSeconds": (7.2 + offset % 3 / 4) * 3600} for offset in range(90)],
+        "resting_hr": [{"calendarDate": (today - timedelta(days=offset)).isoformat(), "restingHeartRate": 49 + offset % 3} for offset in range(90)],
+        "hrv": [{"calendarDate": (today - timedelta(days=offset)).isoformat(), "lastNightAvg": 46 + offset % 5} for offset in range(90)]}
     with server.database_manager().unit_of_work() as db:
         server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps(garmin))
         for role, content in [("user", "Wie sieht meine Trainingswoche aus?"),

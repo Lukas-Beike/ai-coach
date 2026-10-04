@@ -1267,11 +1267,12 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .weekly-sport-legend li::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 3px; background: var(--sport-color); }
 .report-controls > * { min-width: 0; max-width: 100%; flex: 1 1 120px; }
 
-.analysis-chart-card svg .analysis-point-value { font-size: 12px; fill: var(--ink); stroke: var(--surface); stroke-width: 3px; paint-order: stroke; pointer-events: none; }
+.analysis-chart-card svg .analysis-point-value { font-size: 12px; fill: var(--ink); pointer-events: none; }
 .training-focus-legend li > span { width: max-content; max-width: 72px; }
 @media (max-width: 599px) { .training-focus-legend li > span { font-size: .65rem; } }
 
 .recovery-sleep-bar { fill: var(--accent-bright); opacity: .65; }
+.analysis-average-line { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
 .analysis-day-marker { cursor: pointer; }
 .analysis-plot-hit { cursor: crosshair; }
 .analysis-day-marker:hover rect, .analysis-day-marker:focus rect { fill: var(--ink); fill-opacity: .06; }
