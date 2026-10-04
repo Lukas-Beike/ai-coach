@@ -49,6 +49,8 @@ class EquipmentService:
             except (TypeError, json.JSONDecodeError):
                 garmin = {}
             garmin = garmin if isinstance(garmin, dict) else {}
+            if garmin.get("source") == "fixture":
+                garmin = {key: value for key, value in garmin.items() if key != "gear"}
             gear_initialized = (
                 db.execute(SELECT_VALUE, ("garmin_equipment_initialized",)).fetchone()
                 is not None
