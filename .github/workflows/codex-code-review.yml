@@ -730,7 +730,7 @@ jobs:
         # develop. Invoke the action directly from that protected ref so no
         # pull-request repository is checked out in this privileged workflow.
         if: matrix.skipCodexReview != true && matrix.runCodexReview == true && (matrix.baseRef == 'develop' || github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment')
-        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@adfb539562df8456fccf676c7d4626e3c5178acf
+        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@8f815400e8b30a2d55059326857ed34a7e5196ce
         with:
           github-token: ${{ github.token }}
           pull-request-number: ${{ matrix.pullRequestNumber }}
@@ -743,7 +743,7 @@ jobs:
       - name: Run trusted main Codex gate
         # Explicit @codex requests use the protected main action revision.
         if: matrix.skipCodexReview != true && matrix.runCodexReview == true && matrix.baseRef == 'main' && github.event_name != 'workflow_dispatch' && github.event_name != 'issue_comment'
-        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@adfb539562df8456fccf676c7d4626e3c5178acf
+        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@8f815400e8b30a2d55059326857ed34a7e5196ce
         with:
           github-token: ${{ github.token }}
           pull-request-number: ${{ matrix.pullRequestNumber }}
