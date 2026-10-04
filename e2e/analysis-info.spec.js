@@ -31,12 +31,13 @@ test("@responsive recovery uses independent scales, honest coverage and weekly d
   await expect(root.locator("svg")).toHaveCount(3);
   await expect(root.locator(".analysis-secondary-axis, .analysis-extremum")).toHaveCount(0);
   const sleep = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Schlafdauer", exact: true }) });
-  await expect(sleep.getByRole("button", { name: /^Schlafdauer: 11:00 h/ })).toBeVisible();
+  await expect(sleep.getByRole("button", { name: "Schlafdauer", exact: true })).toBeVisible();
   await expect(sleep.locator(".recovery-sleep-bar")).toHaveCount(2);
   await expect(sleep.locator(".analysis-target-line")).toHaveCount(1);
   await expect(sleep).toContainText("2/5 Tage mit Messung");
   const hrv = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "HRV", exact: true }) });
   await expect(hrv.locator(".analysis-baseline-band")).toHaveCount(1);
+  await expect(hrv.locator(".analysis-point-value")).toHaveCount(0);
   await expect(hrv).toContainText("Innerhalb deines üblichen Bereichs");
   await expect(root).toContainText("Mindestens 14 frühere passende Nächte erforderlich");
   await expect(root.locator(".analysis-value-tick").first()).toHaveText("0");
@@ -46,7 +47,7 @@ test("@responsive recovery uses independent scales, honest coverage and weekly d
   await page.keyboard.press("Escape");
   await root.getByRole("button", { name: "8 Wochen", exact: true }).click();
   await expect(root.getByRole("heading", { name: "Erholung · Letzte 8 Wochen", exact: true })).toBeVisible();
-  await expect(root.getByRole("button", { name: /^Schlafdauer: 9:00 h/ })).toBeVisible();
+  await expect(root.getByRole("button", { name: "Schlafdauer", exact: true })).toBeVisible();
   await expect(root).toContainText("2/54 Tage mit Messung");
   await expect(root.locator(".analysis-range-whisker")).toHaveCount(2);
   const weeklySleep = root.locator(".analysis-subchart").first();
@@ -65,8 +66,8 @@ test("@responsive load separates CTL and ATL from zero-centred TSB and preserves
   await expect(root).toBeVisible();
   await expect(page.locator("#analysisHistoryCharts")).toBeHidden();
   await expect(root.locator("svg")).toHaveCount(2);
-  await expect(root.getByRole("button", { name: /^CTL · Fitness: 47/ })).toBeVisible();
-  await expect(root.getByRole("button", { name: /^ATL · Ermüdung: 48/ })).toBeVisible();
+  await expect(root.getByRole("button", { name: "CTL · Fitness", exact: true })).toBeVisible();
+  await expect(root.getByRole("button", { name: "ATL · Ermüdung", exact: true })).toBeVisible();
   const form = root.locator(".analysis-subchart").last();
   await expect(form.locator(".analysis-zero-line")).toHaveCount(1);
   await expect(form.locator(".analysis-form-area")).toHaveCount(2);
@@ -102,11 +103,11 @@ test("@responsive sparse performance shows measurements and sources without inve
   const root = page.locator("#analysisHistoryCharts");
   await expect(root.locator(".analysis-chart-card")).toHaveCount(2);
   await expect(root.locator("svg")).toHaveCount(0);
-  await expect(root.getByRole("button", { name: /^Lauf · Schwellenpace: 4:50/ })).toBeVisible();
+  await expect(root.getByRole("button", { name: "Lauf · Schwellenpace", exact: true })).toBeVisible();
   await expect(root).toContainText("kein belastbarer Trend");
   await expect(root).toContainText("Seit 01.09.2026: −0:10 min/km");
   await expect(root).toContainText("02.09.2026 · Garmin Connect");
-  const button = root.getByRole("button", { name: /^Rad · FTP: 210 W/ });
+  const button = root.getByRole("button", { name: "Rad · FTP", exact: true });
   await button.click();
   const info = root.getByRole("tooltip").filter({ hasText: "Rad · FTP · Garmin Connect" });
   await expect(info).toBeVisible();
@@ -150,4 +151,20 @@ test("@responsive pace ticks stay distinct and faster pace is higher", async ({ 
   expect(new Set(dates).size).toBe(dates.length);
   const labelSizes = await chart.locator("text").evaluateAll((labels) => labels.map((label) => label.getBoundingClientRect().height));
   expect(Math.min(...labelSizes)).toBeGreaterThanOrEqual(11);
+});
+
+test("personal load bands use earlier known values and keep values and context in tooltips", async ({ page }) => {
+  const points = Array.from({ length: 30 }, (_, index) => ({ date: `2026-09-${String(index + 1).padStart(2, "0")}`, ctl: 40 + index, atl: 50 + index, tsb: -10 }));
+  points.at(-1).ctl = 500;
+  await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-30", load: { points }, metrics: {} } }, "load");
+  const root = page.locator("#analysisLoadCharts");
+  await expect(root.locator(".analysis-baseline-band")).toHaveCount(3);
+  await expect(root).toContainText("Persönlicher üblicher Bereich: 47–61 · 29 frühere Tage");
+  await root.getByRole("button", { name: "Aktuelle Woche", exact: true }).click();
+  await expect(root.locator(".analysis-point-value")).toHaveCount(0);
+  await expect(root.locator(".analysis-metric-meta").first()).toBeHidden();
+  await root.getByRole("button", { name: "CTL · Fitness", exact: true }).click();
+  await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("500");
+  await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("29 frühere Tage");
+  await expect(root.locator(".analysis-baseline-band")).toHaveCount(3);
 });
