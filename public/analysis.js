@@ -363,6 +363,7 @@ let trainingReportGeneration = 0;
 let trainingReportPendingSession = null;
 let seasonGeneration = 0;
 let trainingRecordsGeneration = 0;
+let equipmentTab = "bike";
 
 async function renderTrainingRecords() {
   const generation = ++trainingRecordsGeneration;
@@ -373,11 +374,42 @@ async function renderTrainingRecords() {
     const gear = document.getElementById("equipmentItems"); gear.replaceChildren(reportNode("h3", "Ausrüstung und Wartung"));
     const equipment = result.equipment || {};
     const items = equipment.garmin_items || [];
-    if (!items.length) gear.append(reportNode("p", "Noch keine Ausr\u00fcstung aus Garmin synchronisiert.", "muted"));
-    for (const item of items) {
-      gear.append(garminEquipmentCard(item));
+    const tabs = reportNode("div", null, "segmented-control equipment-tabs");
+    tabs.setAttribute("role", "tablist"); tabs.setAttribute("aria-label", "Ausrüstung nach Sportart");
+    const localItems = equipment.items || [];
+    const groups = {
+      bike: { label: "Fahrrad", items: localItems.filter((item) => ["Ride", "VirtualRide"].includes(item.sport) || item.kind === "bike" || item.kind === "component") },
+      run: { label: "Laufschuhe", items: localItems.filter((item) => item.sport === "Run" || item.kind === "shoes") },
+    };
+    const garminGroups = {
+      bike: items.filter((item) => /bike|cycl|component|rad/i.test(`${item.kind} ${item.name}`)),
+      run: items.filter((item) => /shoe|run|lauf/i.test(`${item.kind} ${item.name}`)),
+    };
+    for (const key of ["bike", "run"]) {
+      const tab = reportNode("button", groups[key].label); tab.type = "button";
+      tab.id = `equipmentTab-${key}`; tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-controls", `equipmentPanel-${key}`); tabs.append(tab);
+      const panel = reportNode("div", null, "equipment-tab-panel");
+      panel.id = `equipmentPanel-${key}`; panel.setAttribute("role", "tabpanel");
+      panel.setAttribute("aria-labelledby", tab.id); panel.tabIndex = 0;
+      panel.hidden = equipmentTab !== key;
+      for (const item of groups[key].items) panel.append(localEquipmentCard(item));
+      for (const item of garminGroups[key]) panel.append(garminEquipmentCard(item));
+      if (!groups[key].items.length && !garminGroups[key].length) {
+        panel.append(reportNode("p", key === "bike" ? "Noch keine Fahrräder oder Komponenten erfasst." : "Noch keine Laufschuhe erfasst.", "muted"));
+      }
+      gear.append(panel);
+      tab.setAttribute("aria-selected", String(equipmentTab === key));
+      tab.tabIndex = equipmentTab === key ? 0 : -1;
+      tab.classList.toggle("active", equipmentTab === key);
+      tab.addEventListener("click", () => { equipmentTab = key; renderTrainingRecords(); });
+      tab.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault(); equipmentTab = equipmentTab === "bike" ? "run" : "bike";
+        renderTrainingRecords().then(() => document.getElementById(`equipmentTab-${equipmentTab}`)?.focus());
+      });
     }
-    appendLocalEquipment(equipment.items || [], gear);
+    gear.prepend(tabs);
     if (equipment.garmin_synced_at) gear.append(reportNode("p", `Garmin \u00b7 Stand ${new Date(equipment.garmin_synced_at).toLocaleString("de-DE")}${equipment.garmin_freshness === "stale" ? " \u00b7 letzter erfolgreicher Abruf" : ""}`, "muted"));
   } catch (error) {
     if (generation === trainingRecordsGeneration && session === state.sessionGeneration) {
@@ -698,7 +730,7 @@ function localEquipmentCard(item) {
   const card = reportNode("section", null, "garmin-equipment-card");
   const usage = item.usage || {};
   card.append(reportNode("h4", item.name));
-  card.append(reportNode("p", `${item.kind} \u00b7 Revision ${item.revision}`));
+  card.append(reportNode("p", `${item.kind} · ${item.sport_pending ? "Sportart offen" : item.sport} · ${item.parent_pending ? "Fahrrad offen" : ""} · ${item.status === "archived" ? "ausgemustert" : "aktiv"} · Revision ${item.revision}`));
   card.append(reportNode("p", `${analysisValue(usage.distance_km, "km")} \u00b7 ${analysisValue(usage.hours, "h")} \u00b7 ${usage.assigned_sessions || 0} zugeordnete Einheiten`));
   card.append(reportNode("p", `Seit letzter Wartung: ${analysisValue(usage.maintenance_distance_km, "km")} \u00b7 ${analysisValue(usage.maintenance_hours, "h")}`));
   const status = new Map([[true, "Wartung f\u00e4llig"], [false, "Wartung nicht f\u00e4llig"]]);

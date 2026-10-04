@@ -19,40 +19,60 @@ class GarminPayloadServiceTests(unittest.TestCase):
     def collection_payload(self, start, end, *, failed=None):
         sources = ("activities", "sleep", "hrv", "daily_stats", "resting_hr")
         return {
-            "start": start, "end": end, "synced_at": f"{end}T12:00:00",
+            "start": start,
+            "end": end,
+            "synced_at": f"{end}T12:00:00",
             "errors": [{"source": failed}] if failed else [],
-            "provider_sync": {"pagination": {
-                source: {"complete": source != failed} for source in sources
-            }},
+            "provider_sync": {
+                "pagination": {
+                    source: {"complete": source != failed} for source in sources
+                }
+            },
             **{source: [] for source in sources},
         }
 
     def test_initial_recent_import_then_regular_two_day_refresh(self):
         self.assertEqual(self.service.automatic_sync_days(2), 60)
-        seed = self.service.prepare_remote(self.collection_payload("2026-07-23", "2026-09-20"))
+        seed = self.service.prepare_remote(
+            self.collection_payload("2026-07-23", "2026-09-20")
+        )
         self.store_garmin_snapshot(seed)
         self.assertEqual(self.service.automatic_sync_days(2), 2)
-        self.assertEqual(seed["source_freshness"]["sleep"]["synced_start"], "2026-07-23")
+        self.assertEqual(
+            seed["source_freshness"]["sleep"]["synced_start"], "2026-07-23"
+        )
 
     def test_partial_success_does_not_advance_failed_collection(self):
-        seed = self.service.prepare_remote(self.collection_payload("2026-07-13", "2026-09-10"))
+        seed = self.service.prepare_remote(
+            self.collection_payload("2026-07-13", "2026-09-10")
+        )
         self.store_garmin_snapshot(seed)
         self.assertEqual(self.service.automatic_sync_days(2), 11)
-        partial = self.service.prepare_remote(self.collection_payload("2026-09-09", "2026-09-20", failed="sleep"))
+        partial = self.service.prepare_remote(
+            self.collection_payload("2026-09-09", "2026-09-20", failed="sleep")
+        )
         self.store_garmin_snapshot(partial)
         self.assertEqual(partial["source_freshness"]["hrv"]["synced_end"], "2026-09-20")
-        self.assertEqual(partial["source_freshness"]["sleep"]["synced_end"], "2026-09-10")
+        self.assertEqual(
+            partial["source_freshness"]["sleep"]["synced_end"], "2026-09-10"
+        )
         self.assertEqual(self.service.automatic_sync_days(2), 11)
-        completed = self.service.prepare_remote(self.collection_payload("2026-09-09", "2026-09-20"))
+        completed = self.service.prepare_remote(
+            self.collection_payload("2026-09-09", "2026-09-20")
+        )
         self.store_garmin_snapshot(completed)
         self.assertEqual(self.service.automatic_sync_days(2), 2)
 
     def test_next_calendar_day_still_needs_only_two_days(self):
-        seed = self.service.prepare_remote(self.collection_payload("2026-07-22", "2026-09-19"))
+        seed = self.service.prepare_remote(
+            self.collection_payload("2026-07-22", "2026-09-19")
+        )
         self.store_garmin_snapshot(seed)
         self.assertEqual(self.service.automatic_sync_days(2), 2)
 
-    def test_unavailable_optional_collection_does_not_force_repeated_initial_import(self):
+    def test_unavailable_optional_collection_does_not_force_repeated_initial_import(
+        self,
+    ):
         payload = self.collection_payload("2026-07-23", "2026-09-20")
         for source in ("daily_stats", "resting_hr"):
             del payload[source]
@@ -61,23 +81,34 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.assertEqual(self.service.automatic_sync_days(2), 2)
 
     def test_failed_initial_recovery_is_retried_despite_activity_backfill(self):
-        seed = self.service.prepare_remote(self.collection_payload("2026-07-23", "2026-09-20", failed="hrv"))
+        seed = self.service.prepare_remote(
+            self.collection_payload("2026-07-23", "2026-09-20", failed="hrv")
+        )
         self.store_garmin_snapshot(seed)
-        historical = self.service.prepare_remote({
-            "start": "2026-01-01", "end": "2026-03-31", "synced_at": "2026-09-20T13:00:00",
-            "activities": [], "provider_sync": {"pagination": {"activities": {"complete": True}}},
-        })
+        historical = self.service.prepare_remote(
+            {
+                "start": "2026-01-01",
+                "end": "2026-03-31",
+                "synced_at": "2026-09-20T13:00:00",
+                "activities": [],
+                "provider_sync": {"pagination": {"activities": {"complete": True}}},
+            }
+        )
         self.store_garmin_snapshot(historical)
         self.assertEqual(self.service.automatic_sync_days(2), 60)
-        self.assertEqual(historical["source_freshness"]["activities"]["synced_end"], "2026-09-20")
+        self.assertEqual(
+            historical["source_freshness"]["activities"]["synced_end"], "2026-09-20"
+        )
 
-    def test_long_outage_is_bounded_and_disjoint_windows_are_not_called_continuous(self):
-        seed = self.service.prepare_remote(self.collection_payload("2025-01-01", "2025-03-01"))
+    def test_long_outage_is_bounded_and_disjoint_windows_are_not_called_continuous(
+        self,
+    ):
+        seed = self.service.prepare_remote(
+            self.collection_payload("2025-01-01", "2025-03-01")
+        )
         self.store_garmin_snapshot(seed)
         self.assertEqual(self.service.automatic_sync_days(2), 90)
-        self.assertEqual(
-            self.service.automatic_sync_window(2), (90, date(2025, 5, 29))
-        )
+        self.assertEqual(self.service.automatic_sync_window(2), (90, date(2025, 5, 29)))
 
     def test_long_outage_catches_up_in_contiguous_bounded_windows(self):
         seed = self.service.prepare_remote(
@@ -93,7 +124,9 @@ class GarminPayloadServiceTests(unittest.TestCase):
                 self.assertLessEqual(window_start, windows[-1][1] + timedelta(days=1))
             windows.append((window_start, window_end))
             result = self.service.prepare_remote(
-                self.collection_payload(window_start.isoformat(), window_end.isoformat())
+                self.collection_payload(
+                    window_start.isoformat(), window_end.isoformat()
+                )
             )
             self.store_garmin_snapshot(result)
             if end_date is None:
@@ -101,24 +134,52 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.assertEqual(windows[-1][1], date(2026, 9, 20))
         self.assertEqual(self.service.automatic_sync_window(2), (2, None))
 
-    def test_gear_collection_uses_reported_stats_and_does_not_publish_partial_inventory(self):
+    def test_gear_collection_uses_reported_stats_and_does_not_publish_partial_inventory(
+        self,
+    ):
         client = SimpleNamespace(
             get_user_profile=lambda: {"id": 123, "userData": {}},
-            get_gear=lambda profile: [{"gearUUID": "one", "gearName": "Bike"}, {"gearUUID": "two", "gearName": "Shoes"}],
-            get_gear_stats=lambda identity: {"totalDistance": 2000 if identity == "one" else 3000},
+            get_gear=lambda profile: [
+                {"gearUUID": "one", "gearName": "Bike"},
+                {"gearUUID": "two", "gearName": "Shoes"},
+            ],
+            get_gear_stats=lambda identity: {
+                "totalDistance": 2000 if identity == "one" else 3000
+            },
         )
         call = lambda service, operation, fetch, details: fetch()
         result = _gear_inventory(client, call)
-        self.assertEqual([row["stats"]["totalDistance"] for row in result], [2000, 3000])
+        self.assertEqual(
+            [row["stats"]["totalDistance"] for row in result], [2000, 3000]
+        )
+
         def fail_stats(identity):
             raise RuntimeError("Synthetic unavailable")
+
         client.get_gear_stats = fail_stats
-        with self.assertRaises(RuntimeError):
-            _gear_inventory(client, call)
+        self.assertEqual(_gear_inventory(client, call), [])
+
+    def test_gear_collection_skips_malformed_inventory_rows(self):
+        client = SimpleNamespace(
+            get_user_profile=lambda: {"id": 123},
+            get_gear=lambda profile: [
+                {"gearUUID": "one", "gearName": "Bike"},
+                {"gearName": "Garmin placeholder"},
+                None,
+                {"gearUUID": "two", "gearName": "Shoes"},
+            ],
+            get_gear_stats=lambda identity: {"totalDistance": 2000},
+        )
+        call = lambda service, operation, fetch, details: fetch()
+        result = _gear_inventory(client, call)
+        self.assertEqual([row["gearUUID"] for row in result], ["one", "two"])
 
     def test_gear_collection_uses_top_level_profile_id(self):
         client = SimpleNamespace(
-            get_user_profile=lambda: {"id": 123, "userData": {"displayName": "Athlete"}},
+            get_user_profile=lambda: {
+                "id": 123,
+                "userData": {"displayName": "Athlete"},
+            },
             get_gear=Mock(return_value=[{"gearUUID": "one", "gearName": "Bike"}]),
             get_gear_stats=lambda identity: {"totalDistance": 2000},
         )
@@ -130,12 +191,23 @@ class GarminPayloadServiceTests(unittest.TestCase):
             _gear_inventory(client, call)
         client.get_gear.assert_called_once_with(123)
 
-    def test_garmin_gear_empty_inventory_replaces_old_and_failed_read_preserves_it(self):
-        self.store_garmin_snapshot({"gear": [{"gearUUID": "one", "stats": {"totalDistance": 2000}}]})
-        failed = self.service.prepare_remote({"synced_at": "2026-09-20T10:00:00", "errors": [{"source": "gear", "message": "Synthetic failure"}]})
+    def test_garmin_gear_empty_inventory_replaces_old_and_failed_read_preserves_it(
+        self,
+    ):
+        self.store_garmin_snapshot(
+            {"gear": [{"gearUUID": "one", "stats": {"totalDistance": 2000}}]}
+        )
+        failed = self.service.prepare_remote(
+            {
+                "synced_at": "2026-09-20T10:00:00",
+                "errors": [{"source": "gear", "message": "Synthetic failure"}],
+            }
+        )
         self.assertEqual(failed["gear"][0]["gearUUID"], "one")
         self.assertEqual(failed["source_freshness"]["gear"]["freshness"], "stale")
-        empty = self.service.prepare_remote({"synced_at": "2026-09-20T11:00:00", "gear": [], "errors": []})
+        empty = self.service.prepare_remote(
+            {"synced_at": "2026-09-20T11:00:00", "gear": [], "errors": []}
+        )
         self.assertEqual(empty["gear"], [])
         self.assertEqual(empty["source_freshness"]["gear"]["freshness"], "current")
 

@@ -49,6 +49,15 @@ class EquipmentService:
             except (TypeError, json.JSONDecodeError):
                 garmin = {}
             garmin = garmin if isinstance(garmin, dict) else {}
+            gear_initialized = (
+                db.execute(SELECT_VALUE, ("garmin_equipment_initialized",)).fetchone()
+                is not None
+            )
+            garmin_usage = {
+                str(row.get("gearUUID")): _garmin_distance_km(row)
+                for row in garmin.get("gear") or []
+                if isinstance(row, dict) and row.get("gearUUID")
+            }
             items = self._records(db, "equipment", 100)
             if item_id:
                 selected = db.execute(
@@ -63,10 +72,18 @@ class EquipmentService:
             }
             maintenance = self._records(db, "equipment_maintenance", 1000)
         for item in items:
-            _update_usage(item, rows, assignments, maintenance, self._today())
+            _update_usage(
+                item, rows, assignments, maintenance, self._today(), garmin_usage
+            )
         return {
             "items": items,
-            "garmin_items": self._garmin_items(garmin),
+            "garmin_items": []
+            if gear_initialized
+            else [
+                item
+                for item in self._garmin_items(garmin)
+                if item["id"] not in {str(local.get("garmin_uuid")) for local in items}
+            ],
             "garmin_synced_at": garmin.get("synced_at"),
             "garmin_freshness": (garmin.get("source_freshness") or {})
             .get("gear", {})
@@ -75,6 +92,85 @@ class EquipmentService:
             "excluded_duplicates": duplicates,
             "scope": "Known canonical snapshot activities with explicit assignments only, plus confirmed initial usage. Missing provider history or measurements makes counters incomplete; no inferred favorite gear. Maintenance includes only later calendar days, same-day order is unknown. Limits: 100 items, 2000 assignments, 1000 maintenance events.",
         }
+
+    def sync_garmin_snapshot(self, snapshot: dict[str, Any]) -> None:
+        """Import Garmin gear once, then refresh only Garmin-owned mileage."""
+        if not isinstance(snapshot, dict):
+            return
+        if (snapshot.get("source_freshness") or {}).get("gear", {}).get(
+            "freshness"
+        ) != "current":
+            return
+        rows = [row for row in snapshot.get("gear") or [] if isinstance(row, dict)]
+        with self._manager.unit_of_work() as db:
+            initialized = db.execute(
+                SELECT_VALUE, ("garmin_equipment_initialized",)
+            ).fetchone()
+            local_rows = [
+                json.loads(row["value"])
+                for row in db.execute(
+                    "SELECT value FROM kv WHERE key LIKE ?", (EQUIPMENT_PREFIX + ":%",)
+                ).fetchall()
+                if row["value"] and isinstance(json.loads(row["value"]), dict)
+            ]
+            by_garmin: dict[str, dict[str, Any]] = {
+                str(item.get("garmin_uuid")): item
+                for item in local_rows
+                if item.get("garmin_uuid")
+            }
+            now = self._utc_now()
+            if not initialized:
+                for row in rows:
+                    gear_id = str(row.get("gearUUID") or "")
+                    if not gear_id or gear_id in by_garmin:
+                        continue
+                    distance = _garmin_distance_km(row)
+                    distance_known = distance is not None
+                    distance = distance if distance_known else 0
+                    item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "garmin:" + gear_id))
+                    item = {
+                        "id": item_id,
+                        "name": str(row.get("gearName") or "Ausrüstung")[:200],
+                        "sport": _garmin_sport(row),
+                        "sport_pending": _garmin_sport(row) == "Other",
+                        "kind": _garmin_kind(row),
+                        "parent_pending": _garmin_kind(row) == "component",
+                        "status": _garmin_status(row),
+                        "parent_id": None,
+                        "start_date": self._today().isoformat(),
+                        "initial_distance_km": distance,
+                        "initial_hours": 0,
+                        "maintenance_km": None,
+                        "maintenance_hours": None,
+                        "garmin_uuid": gear_id,
+                        "initial_distance_known": distance_known,
+                        "revision": 1,
+                        "updated_at": now,
+                        "source": "garmin-initial-sync",
+                    }
+                    db.execute(
+                        "INSERT OR IGNORE INTO kv(key,value,updated_at) VALUES(?,?,?)",
+                        (EQUIPMENT_PREFIX + item_id, json.dumps(item), now),
+                    )
+            for row in rows:
+                linked_item = by_garmin.get(str(row.get("gearUUID") or ""))
+                distance = _garmin_distance_km(row)
+                if linked_item and distance is not None:
+                    linked_item["garmin_distance_km"] = distance
+                    linked_item["updated_at"] = now
+                    db.execute(
+                        "UPDATE kv SET value=?, updated_at=? WHERE key=?",
+                        (
+                            json.dumps(linked_item),
+                            now,
+                            EQUIPMENT_PREFIX + str(linked_item["id"]),
+                        ),
+                    )
+            if not initialized:
+                db.execute(
+                    "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?)",
+                    ("garmin_equipment_initialized", "1", now),
+                )
 
     @staticmethod
     def _garmin_items(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -139,7 +235,13 @@ class EquipmentService:
                 "revision": previous["revision"] + 1 if previous else 1,
                 "updated_at": self._utc_now(),
                 "source": "athlete-entered equipment",
+                "sport_pending": payload["sport"] == "Other",
+                "parent_pending": payload["kind"] == "component" and not parent_id,
             }
+            if previous and previous.get("garmin_uuid"):
+                saved["garmin_uuid"] = previous["garmin_uuid"]
+                if previous.get("garmin_distance_km") is not None:
+                    saved["garmin_distance_km"] = previous["garmin_distance_km"]
             db.execute(
                 "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
                 (
@@ -220,6 +322,7 @@ class EquipmentService:
             "equipment_id": item["id"],
             "date": day.isoformat(),
             "notes": str(payload.get("notes") or "")[:1000],
+            "distance_km": item.get("usage", {}).get("distance_km"),
             "observed_at": self._utc_now(),
         }
         with self._manager.unit_of_work() as db:
@@ -232,6 +335,82 @@ class EquipmentService:
                 ),
             )
         return {"ok": True, "stored_locally": True, "maintenance": saved}
+
+
+def _garmin_distance_km(row: dict) -> float | None:
+    stats = row.get("stats") or {}
+    distance = number(stats.get("totalDistance")) if isinstance(stats, dict) else None
+    return round(distance / 1000, 2) if distance is not None else None
+
+
+def _garmin_sport(row: dict) -> str:
+    value = _garmin_gear_text(row)
+    if _garmin_kind(row) == "shoes" or any(
+        token in value for token in ("running", "laufen", "run")
+    ):
+        return "Run"
+    if _garmin_kind(row) in {"bike", "component"} or any(
+        token in value for token in ("cycling", "ride", "radfahren")
+    ):
+        return "Ride"
+    if "swim" in value:
+        return "Swim"
+    return "Other"
+
+
+def _garmin_kind(row: dict) -> str:
+    value = _garmin_gear_text(row)
+    if any(
+        token in value for token in ("shoe", "footwear", "laufschuh", "running shoe")
+    ):
+        return "shoes"
+    if any(
+        token in value
+        for token in (
+            "component",
+            "part",
+            "kette",
+            "chain",
+            "cassette",
+            "crank",
+            "derailleur",
+            "schaltwerk",
+            "rotor",
+            "brake",
+            "bremse",
+            "reifen",
+            "tire",
+            "tyre",
+            "wheel",
+            "laufrad",
+            "pedal",
+            "chainring",
+            "kettenblatt",
+            "handlebar",
+            "lenker",
+            "groupset",
+        )
+    ):
+        return "component"
+    if any(token in value for token in ("bike", "bicycle", "biking", "rad")):
+        return "bike"
+    return "other"
+
+
+def _garmin_gear_text(row: dict) -> str:
+    return " ".join(
+        str(row.get(key) or "").lower()
+        for key in ("gearTypeName", "gearName", "activityTypeName")
+    )
+
+
+def _garmin_status(row: dict) -> str:
+    value = str(row.get("gearStatusName") or "").lower()
+    return (
+        "archived"
+        if any(token in value for token in ("retir", "archiv", "inactive"))
+        else "active"
+    )
 
 
 def _garmin_item(row: dict) -> dict[str, Any]:
@@ -261,7 +440,7 @@ def _equipment_identity(payload: dict, today: date) -> tuple[str, date, str]:
         not name
         or len(name) > 200
         or payload.get("sport")
-        not in {"Ride", "VirtualRide", "Run", "Swim", "WeightTraining"}
+        not in {"Ride", "VirtualRide", "Run", "Swim", "WeightTraining", "Other"}
         or payload.get("kind") not in {"shoes", "bike", "component", "other"}
         or payload.get("status", "active") not in {"active", "archived"}
     ):
@@ -333,6 +512,7 @@ def _update_usage(
     assignments: dict,
     maintenance: list[dict],
     today: date,
+    garmin_usage: dict[str, float | None],
 ) -> None:
     eligible = [
         row
@@ -348,9 +528,21 @@ def _update_usage(
         key=lambda row: (row["date"], row["observed_at"]),
     )
     distance = sum(number(row.get("distance")) or 0 for row in eligible) / 1000
+    garmin_distance = item.get("garmin_distance_km")
+    if garmin_distance is None:
+        garmin_distance = garmin_usage.get(str(item.get("garmin_uuid")))
     hours = sum(number(row.get("moving_time")) or 0 for row in eligible) / 3600
     item["usage"] = {
-        "distance_km": round(item["initial_distance_km"] + distance, 2),
+        "distance_km": (
+            None
+            if item.get("garmin_uuid") and garmin_distance is None
+            else round(
+                garmin_distance
+                if garmin_distance is not None
+                else item["initial_distance_km"] + distance,
+                2,
+            )
+        ),
         "hours": round(item["initial_hours"] + hours, 2),
         "assigned_sessions": len(eligible),
         "distance_known_sessions": sum(
@@ -359,13 +551,16 @@ def _update_usage(
         "time_known_sessions": sum(
             number(row.get("moving_time")) is not None for row in eligible
         ),
-        **_maintenance_usage(item, eligible, events),
+        **_maintenance_usage(item, eligible, events, garmin_distance),
     }
     item["maintenance"] = events
 
 
 def _maintenance_usage(
-    item: dict, eligible: list[dict], events: list[dict]
+    item: dict,
+    eligible: list[dict],
+    events: list[dict],
+    garmin_distance: float | None = None,
 ) -> dict[str, Any]:
     latest = events[-1] if events else None
     ambiguous = [
@@ -381,6 +576,15 @@ def _maintenance_usage(
     distance = sum(number(row.get("distance")) or 0 for row in since) / 1000 + (
         item["initial_distance_km"] if not latest else 0
     )
+    if garmin_distance is not None:
+        distance = (
+            garmin_distance
+            if not latest
+            else max(
+                0,
+                garmin_distance - (number(latest.get("distance_km")) or 0),
+            )
+        )
     hours = sum(number(row.get("moving_time")) or 0 for row in since) / 3600 + (
         item["initial_hours"] if not latest else 0
     )
