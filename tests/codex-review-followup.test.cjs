@@ -146,7 +146,7 @@ test('a native clean comment completes initial review without a reaction', async
 
 test('workflow policy accepts every supported native clean suffix', async () => {
   for (const nativeSuffix of [':rocket:', 'Hooray!', 'Swish!', 'Keep it up!',
-    'Already looking forward to the next diff.', 'Bravo.']) {
+    'Already looking forward to the next diff.', 'Bravo.', ':+1:']) {
     assert.equal(await reviewRequired({
       completedAt: '2026-09-23T15:31:54Z', native: true, nativeSuffix, review: null, reaction: false,
     }), false);
