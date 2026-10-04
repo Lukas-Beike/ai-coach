@@ -55,6 +55,10 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             _garmin_sport({"gearTypeName": "Shoes", "gearName": "Running shoes"}),
             "Run",
         )
+        self.assertEqual(
+            _garmin_sport({"gearTypeName": "Shoes", "gearName": "Cycling Shoes"}),
+            "Ride",
+        )
 
     def test_garmin_usage_is_authoritative_and_missing_stats_are_not_zero(self):
         service = EquipmentService(
@@ -110,6 +114,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         service.sync_garmin_snapshot(first)
         imported = service.read()["items"][0]
         self.assertEqual(imported["initial_distance_km"], 120)
+        self.assertEqual(imported["garmin_distance_km"], 120)
         self.assertEqual(imported["status"], "active")
         service.save(
             {
@@ -289,6 +294,18 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self.assertIsNone(service.read()["assignments"][0]["equipment_id"])
         with self.assertRaises(AppError):
             service.assign({"activity_id": "missing", "equipment_id": equipment["id"]})
+        stored = json.loads(
+            self.manager.connection.execute(
+                "SELECT value FROM kv WHERE key=?", ("equipment:" + equipment["id"],)
+            ).fetchone()[0]
+        )
+        stored["sport_pending"] = True
+        self.manager.connection.execute(
+            "UPDATE kv SET value=? WHERE key=?",
+            (json.dumps(stored), "equipment:" + equipment["id"]),
+        )
+        with self.assertRaises(AppError):
+            service.assign({"activity_id": "ride-1", "equipment_id": equipment["id"]})
 
     def test_tag_impact_requires_ten_measured_days_in_each_explicit_group(self):
         checkins = []
@@ -370,6 +387,44 @@ class TrainingRecordFeatureTests(unittest.TestCase):
                 }
             )
         self.assertEqual(len(service.read()["items"]), 2)
+
+    def test_backdated_garmin_maintenance_keeps_distance_baseline_unknown(self):
+        service = EquipmentService(
+            self.manager, dict, lambda: date(2026, 10, 2), lambda: "now"
+        )
+        service.sync_garmin_snapshot(
+            {
+                "source_freshness": {"gear": {"freshness": "current"}},
+                "gear": [
+                    {
+                        "gearUUID": "gear-backdated",
+                        "gearName": "Road bike",
+                        "gearTypeName": "bike",
+                        "stats": {"totalDistance": 100000},
+                    }
+                ],
+            }
+        )
+        item = service.read()["items"][0]
+        saved = service.save(
+            {
+                "id": item["id"],
+                "expected_revision": item["revision"],
+                "name": item["name"],
+                "sport": item["sport"],
+                "kind": item["kind"],
+                "status": "active",
+                "parent_id": None,
+                "start_date": "2026-09-01",
+                "initial_distance_km": item["initial_distance_km"],
+                "initial_hours": 0,
+                "maintenance_km": 50,
+            }
+        )["equipment"]
+        service.maintain({"equipment_id": saved["id"], "date": "2026-10-01"})
+        latest = service.read()["items"][0]["usage"]
+        self.assertIsNone(latest["maintenance_distance_km"])
+        self.assertIsNone(latest["maintenance_due"])
 
     def test_maintenance_does_not_claim_complete_usage_for_same_day_activity(self):
         activity = {

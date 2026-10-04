@@ -220,6 +220,7 @@ class EquipmentService:
                 or equipment["status"] != "active"
                 or equipment.get("parent_id")
                 or equipment.get("parent_pending")
+                or equipment.get("sport_pending")
                 or equipment["sport"] != row.get("type")
             ):
                 raise AppError(400, "Aktive passende Hauptausrüstung erforderlich.")
@@ -267,7 +268,11 @@ class EquipmentService:
             "equipment_id": item["id"],
             "date": day.isoformat(),
             "notes": str(payload.get("notes") or "")[:1000],
-            "distance_km": item.get("usage", {}).get("distance_km"),
+            "distance_km": (
+                None
+                if item.get("garmin_uuid") and day < self._today()
+                else item.get("usage", {}).get("distance_km")
+            ),
             "observed_at": self._utc_now(),
         }
         with self._manager.unit_of_work() as db:
@@ -313,6 +318,7 @@ def _insert_initial_garmin_item(
         "maintenance_hours": None,
         "garmin_uuid": gear_id,
         "initial_distance_known": distance is not None,
+        "garmin_distance_km": distance,
         "revision": 1,
         "updated_at": now,
         "source": "garmin-initial-sync",
@@ -366,14 +372,14 @@ def _garmin_distance_km(row: dict) -> float | None:
 
 def _garmin_sport(row: dict) -> str:
     value = _garmin_gear_text(row)
+    if any(token in value for token in ("cycling", "cycle", "ride", "radfahren")):
+        return "Ride"
+    if _garmin_kind(row) in {"bike", "component"}:
+        return "Ride"
     if _garmin_kind(row) == "shoes" or any(
         token in value for token in ("running", "laufen", "run")
     ):
         return "Run"
-    if _garmin_kind(row) in {"bike", "component"} or any(
-        token in value for token in ("cycling", "ride", "radfahren")
-    ):
-        return "Ride"
     if "swim" in value:
         return "Swim"
     return "Other"

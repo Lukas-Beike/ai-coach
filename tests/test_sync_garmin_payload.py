@@ -10,7 +10,7 @@ from unittest.mock import Mock
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
-from backend.providers.garmin import _gear_inventory
+from backend.providers.garmin import _collect_optional_metric, _gear_inventory
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.state import SyncStateRepository
 
@@ -160,6 +160,24 @@ class GarminPayloadServiceTests(unittest.TestCase):
         result = _gear_inventory(client, call)
         self.assertEqual([row["gearUUID"] for row in result], ["one", "two"])
         self.assertEqual([row["stats"] for row in result], [{}, {}])
+
+    def test_top_level_gear_profile_failure_is_reported(self):
+        payload = {"errors": []}
+
+        def fail(*args):
+            raise RuntimeError("Synthetic profile unavailable")
+
+        _collect_optional_metric(
+            payload,
+            "gear",
+            fail,
+            None,
+            lambda service, operation, fetch, details: fetch(),
+            str,
+            None,
+        )
+        self.assertEqual(payload["errors"][0]["source"], "gear")
+        self.assertIn("Synthetic profile unavailable", payload["errors"][0]["message"])
 
     def test_gear_collection_skips_malformed_inventory_rows(self):
         client = SimpleNamespace(

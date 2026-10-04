@@ -401,8 +401,6 @@ def _collect_optional_metric(
     try:
         payload[key] = external_call("garmin", key, fetch, details)
     except Exception as exc:  # noqa: BLE001 - SDK errors vary; retain other sources and redact.
-        if key == "gear":
-            return
         _add_error(payload, key, exc, redact, warn)
 
 
