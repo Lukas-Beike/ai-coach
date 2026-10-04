@@ -117,11 +117,13 @@ function appendAnalysisReferenceNotes(section, series, unit) {
     if (item.points.some((point) => point.lower != null)) info?.append(reportNode("p", "Wochenmedian mit Streuung (25.–75. Perzentil) · nur vorhandene Messungen", "analysis-reference-note"));
     if (item.range) info?.append(reportNode("p", "Grüner Bereich: persönliche Quartile · 42 Tage vor der letzten Messung" + (item.range.status === "provisional" ? " · vorläufig" : ""), "analysis-reference-note"));
     if (item.target != null) info?.append(reportNode("p", `Ziellinie: ${analysisValue(item.target, item.unit || unit)} · persönliches Schlafziel`, "analysis-reference-note"));
+    if (item.average) info?.append(reportNode("p", "Gestrichelte Linie: Durchschnitt der angezeigten Schlafwerte.", "analysis-reference-note"));
   });
 }
 
 function analysisReadingDetails(point, unit) {
   let details = point.count ? ` · ${point.count} Messungen` : "";
+  if (point.observedDate && point.observedDate !== point.date) details += ` · letzter Messwert ${dateLabel(point.observedDate)}`;
   if (point.lower != null) details += ` · Streuung ${analysisValue(point.lower, unit)} bis ${analysisValue(point.upper, unit)}`;
   return details;
 }
@@ -200,6 +202,15 @@ function appendAnalysisSeries(svg, series, unit, { chartRight, x, y }, zeroCente
     const color = item.color ?? index;
     if (item.range) svg.append(analysisSvg("rect", { x: 60, y: Math.min(y(item.range.lower), y(item.range.upper)), width: chartRight - 60, height: Math.max(1, Math.abs(y(item.range.lower) - y(item.range.upper))), class: "analysis-baseline-band" }));
     if (item.target != null) svg.append(analysisSvg("line", { x1: 60, x2: chartRight, y1: y(item.target), y2: y(item.target), class: "analysis-target-line" }));
+    if (item.average) {
+      const readings = item.points.filter(analysisValidPoint).map((point) => Number(point.value));
+      if (readings.length) {
+        const average = readings.reduce((sum, value) => sum + value, 0) / readings.length;
+        const line = analysisSvg("line", { x1: 60, x2: chartRight, y1: y(average), y2: y(average), class: "analysis-average-line" });
+        line.append(analysisSvg("title", {}, `${item.label}: Durchschnitt ${analysisValue(average, item.unit || unit)}`));
+        svg.append(line);
+      }
+    }
     if (currentLine) {
       const latest = analysisLatestPoint(item);
       const line = analysisSvg("line", { x1: 60, x2: chartRight, y1: y(latest.value), y2: y(latest.value), class: "analysis-current-line", "data-series": index, "data-color": color });
@@ -221,7 +232,8 @@ function appendAnalysisSeries(svg, series, unit, { chartRight, x, y }, zeroCente
       if (point.lower != null) svg.append(analysisSvg("line", { x1: x(point.date), x2: x(point.date), y1: y(point.lower), y2: y(point.upper), class: "analysis-range-whisker", "data-color": color }));
       if (item.bars) {
         const width = Math.min(24, (chartRight - 60) / Math.max(1, item.points.length) * .55);
-        svg.append(analysisSvg("rect", { x: Math.max(60, x(point.date) - width / 2), y: y(point.value), width: Math.min(width, chartRight - Math.max(60, x(point.date) - width / 2)), height: Math.max(0, y(0) - y(point.value)), rx: 3, class: "recovery-sleep-bar" }));
+        const left = Math.max(60, Math.min(chartRight - width, x(point.date) - width / 2));
+        svg.append(analysisSvg("rect", { x: left, y: y(point.value), width, height: Math.max(0, y(0) - y(point.value)), rx: 3, class: "recovery-sleep-bar" }));
       } else {
         const dot = analysisSvg("circle", { cx: x(point.date), cy: y(point.value), r: 2.5, "data-series": index, "data-color": color });
         dot.append(analysisSvg("title", {}, `${item.label} · ${dateLabel(point.date)}: ${analysisPointValue(item, point, unit)}`)); svg.append(dot);
@@ -332,23 +344,6 @@ globalThis.matchMedia("(max-width: 599px)").addEventListener("change", () => {
   if (state.data) { renderAnalysisHistory(state.data.performance?.history); renderPersonalRecovery(state.data.performance?.personal_recovery); }
 });
 
-function analysisPersonalRange(points) {
-  const latest = points.findLast(analysisValidPoint);
-  if (!latest) return null;
-  const prior = points.filter((point) => analysisValidPoint(point) && point.date >= addDateKey(latest.date, -42) && point.date < latest.date).map((point) => Number(point.value));
-  if (prior.length < 14) return null;
-  return { lower: analysisQuantile(prior, .25), upper: analysisQuantile(prior, .75), status: prior.length < 28 ? "provisional" : "ok", count: prior.length };
-}
-
-function appendAnalysisLoadReferences(loadSeries, points) {
-  for (const [index, key] of ["ctl", "atl", "tsb"].entries()) {
-    const range = analysisPersonalRange(points.map((point) => ({ date: point.date, value: point[key] })));
-    if (!range) continue;
-    loadSeries[index].range = range;
-    loadSeries[index].referenceLabel = `Persönlicher üblicher Bereich: ${analysisValue(range.lower, "")}–${analysisValue(range.upper, "")} · ${range.count} frühere Tage${range.status === "provisional" ? " · vorläufig" : ""}`;
-  }
-}
-
 function renderAnalysisHistory(history) { // NOSONAR
   const root = document.querySelector("#analysisHistoryCharts");
   const loadRoot = document.querySelector("#analysisLoadCharts");
@@ -357,19 +352,22 @@ function renderAnalysisHistory(history) { // NOSONAR
   if (!history?.start || !history?.end) return;
   const end = history.end;
   const weekStart = addDateKey(end, -((new Date(`${end}T12:00:00Z`).getUTCDay() + 6) % 7));
-  const start = analysisHistoryPeriod === "week" ? weekStart : addDateKey(end, -55);
+  const start = analysisHistoryPeriod === "week" ? weekStart : addDateKey(weekStart, -49);
   for (const target of [loadRoot, root]) target.append(analysisPeriodControls("Zeitraum für Belastung und Leistung", analysisHistoryPeriod, (period) => { analysisHistoryPeriod = period; renderAnalysisHistory(history); }));
   const withinPeriod = (point) => point.date >= start && point.date <= end;
   const load = history.load || { points: [] };
-  const loadSeries = [["ctl", "CTL · Fitness"], ["atl", "ATL · Ermüdung"], ["tsb", "TSB · Form"]].map(([key, label], color) => ({
-    label, color, source: "Intervals.icu", points: load.points.filter(withinPeriod).map((point) => ({ date: point.date, value: point[key] })),
-    currentPoint: load.points.filter((point) => point.date <= end).map((point) => ({ date: point.date, value: point[key] })).findLast(analysisValidPoint),
-  }));
-  appendAnalysisLoadReferences(loadSeries, load.points);
-  const loadNote = "CTL: langfristige Belastung (üblich 42 Tage). ATL: kurzfristige Belastung (7 Tage). Die Providerkonfiguration gilt. TSB = CTL − ATL am selben Tag; positiv bedeutet weniger kurzfristige als langfristige Last. Historische Werte bis gestern; kein Leistungstest oder alleinige Trainingsfreigabe.";
+  const loadSeries = [["ctl", "Fitness"], ["atl", "Ermüdung"], ["tsb", "Form"]].map(([key, label], color) => {
+    const dailyPoints = load.points.filter(withinPeriod).map((point) => ({ date: point.date, value: point[key] }));
+    return {
+      label, color, source: "Intervals.icu", cadenceDays: analysisHistoryPeriod === "eightWeeks" ? 7 : 1,
+      points: analysisHistoryPeriod === "eightWeeks" ? analysisWeeklyLastPoints(dailyPoints, start, end) : dailyPoints,
+      currentPoint: load.points.filter((point) => point.date <= end).map((point) => ({ date: point.date, value: point[key] })).findLast(analysisValidPoint),
+    };
+  });
+  const loadNote = "Fitness zeigt die langfristige, Ermüdung die kurzfristige Belastung. Form ist die Differenz beider Werte am selben Tag; positiv bedeutet weniger kurzfristige als langfristige Last. Im 8-Wochen-Verlauf zeigt jeder Punkt den letzten verfügbaren Tageswert der Woche. Historische Werte bis gestern; kein Leistungstest oder alleinige Trainingsfreigabe.";
   loadRoot.append(analysisChartGroup("Belastung und Form", [
     analysisChart("Trainingsbelastung", loadSeries.slice(0, 2), "", start, end, "", { compactInfo: true, includeCoverage: false }),
-    analysisChart("Lastbalance · TSB", loadSeries.slice(2), "", start, end, "", { compactInfo: true, zeroCentered: true, includeCoverage: false }),
+    analysisChart("Form", loadSeries.slice(2), "", start, end, "", { compactInfo: true, zeroCentered: true, includeCoverage: false }),
   ], loadSeries, loadNote));
   const performanceSeries = [
     ["cycling_ftp_watts", "Rad · FTP", "W", 0],
@@ -380,8 +378,8 @@ function renderAnalysisHistory(history) { // NOSONAR
   ].flatMap(([key, label, unit, color]) => (history.metrics?.[key] || []).filter((item) => item.source === (key === "cycling_eftp_watts" ? "Intervals.icu" : "Garmin Connect")).map((item) => ({
     label: `${label} · ${item.source}`, legendLabel: label, source: item.source, unit, color,
     line: key === "cycling_eftp_watts" || key.includes("vo2max") ? "dashed" : "solid",
+    cadenceDays: key === "cycling_eftp_watts" ? 1 : 8,
     currentPoint: item.points.filter((point) => point.date <= end).findLast(analysisValidPoint),
-    range: analysisPersonalRange(item.points.filter((point) => point.date <= end)),
     points: item.points.filter(withinPeriod).map((point) => ({ date: point.date, value: point.value })),
   })));
   for (const [sport, title, primaryUnit] of [["Lauf", "Laufen", "s/km"], ["Rad", "Rad", "W"]]) {
@@ -532,19 +530,19 @@ function renderRecoveryCharts(report, root) {
     const points = dates.map((date) => recoveryPoint(date, values, weekly));
     const readings = item.history.filter((point) => point.date >= start && point.date <= today);
     const expectedDays = Math.max(0, Math.round((Date.parse(today) - Date.parse(start)) / 86400000) + 1);
-    const range = ["ok", "provisional"].includes(item.status) && Number.isFinite(item.lower) && Number.isFinite(item.upper) ? { lower: item.lower, upper: item.upper, status: item.status } : null;
-    const target = metric === "sleep" && Number.isFinite(report.sleep_target_hours) ? report.sleep_target_hours : null;
+    const range = metric !== "sleep" && ["ok", "provisional"].includes(item.status) && Number.isFinite(item.lower) && Number.isFinite(item.upper) ? { lower: item.lower, upper: item.upper, status: item.status } : null;
+    const target = null;
     const position = { below: "Unter deinem üblichen Bereich", within: "Innerhalb deines üblichen Bereichs", above: "Über deinem üblichen Bereich" }[item.position];
     const measurement = metric === "hrv" ? " · " + item.measurement : "";
     return { label: `${title} · ${item.source}${measurement}`, legendLabel: title, source: item.source, unit, color,
-      bars: metric === "sleep" && !weekly, cadenceDays: weekly ? 7 : 1, range, target,
+      bars: metric === "sleep" && !weekly, average: metric === "sleep", cadenceDays: weekly ? 7 : 1, range, target,
       currentPoint: points.some(analysisValidPoint) ? null : item.history.filter((point) => point.date <= today).findLast(analysisValidPoint),
-      referenceLabel: recoveryReferenceLabel(item, range, target, unit, position, weekly),
+      referenceLabel: metric === "sleep" ? "Durchschnitt der angezeigten Werte" : recoveryReferenceLabel(item, range, target, unit, position, weekly),
       coverageShort: `${readings.length}/${expectedDays} Tage mit Messung`,
-      coverage: `${readings.length}/${expectedDays} Tage mit Messung · 42-Tage-Normalbereich: ${item.nights} frühere Messnächte`, points };
+      coverage: `${readings.length}/${expectedDays} Tage mit Messung${range ? ` - persoenlicher Bereich aus ${item.nights} frueheren Naechten` : ""}`, points };
   });
   root.replaceChildren(analysisPeriodControls("Zeitraum für Erholung", analysisRecoveryPeriod, (period) => { analysisRecoveryPeriod = period; renderPersonalRecovery(report); }));
-  const note = weekly ? "Wochenmedian und Streuung aus vorhandenen Tagesmessungen. Die laufende Woche ist unvollständig; fehlende Werte zählen nicht als null." : "Drei Messgrößen mit eigenen Skalen und gemeinsamer Zeitachse. Persönliche Bereiche beschreiben Abweichungen, keine medizinische Trainingsfreigabe.";
+  const note = weekly ? "Wochenmedian und Streuung aus vorhandenen Tagesmessungen. Die laufende Woche ist unvollstaendig; fehlende Werte zaehlen nicht als null." : "Schlaf zeigt den Durchschnitt der angezeigten Messungen. Persoenliche Normalbereiche werden nur fuer HRV und Ruhepuls angezeigt.";
   root.append(analysisChartGroup(weekly ? "Erholung · Letzte 8 Wochen" : "Erholung · Aktuelle Woche", series.map((item) => analysisChart(item.legendLabel, [item], item.unit, start, end, "", { compactInfo: true, includeCoverage: false })), series, note));
 }
 
@@ -873,6 +871,16 @@ function recoveryPoint(date, values, weekly) {
   const point = { date, value: analysisQuantile(readings, .5), count: readings.length, observedDate };
   if (readings.length > 1) { point.lower = analysisQuantile(readings, .25); point.upper = analysisQuantile(readings, .75); }
   return point;
+}
+
+function analysisWeeklyLastPoints(points, start, end) {
+  const weeks = [];
+  for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
+    const weekEnd = [addDateKey(weekStart, 6), end].sort()[0];
+    const last = points.filter((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point)).at(-1);
+    weeks.push(last ? { ...last, date: weekEnd, observedDate: last.date } : { date: weekEnd, value: null });
+  }
+  return weeks;
 }
 
 function trainingFocusDistribution(title, readings, unit, info) {
