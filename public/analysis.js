@@ -534,12 +534,13 @@ function renderRecoveryCharts(report, root) {
     const target = null;
     const position = { below: "Unter deinem üblichen Bereich", within: "Innerhalb deines üblichen Bereichs", above: "Über deinem üblichen Bereich" }[item.position];
     const measurement = metric === "hrv" ? " · " + item.measurement : "";
+    const rangeDescription = range ? " - persönlicher Bereich aus " + item.nights + " früheren Nächten" : "";
     return { label: `${title} · ${item.source}${measurement}`, legendLabel: title, source: item.source, unit, color,
       bars: metric === "sleep" && !weekly, average: metric === "sleep", cadenceDays: weekly ? 7 : 1, range, target,
-      currentPoint: points.some(analysisValidPoint) ? null : item.history.filter((point) => point.date <= today).findLast(analysisValidPoint),
+      currentPoint: points.some(analysisValidPoint) ? null : item.history.findLast((point) => point.date <= today && analysisValidPoint(point)),
       referenceLabel: metric === "sleep" ? "Durchschnitt der angezeigten Werte" : recoveryReferenceLabel(item, range, target, unit, position, weekly),
       coverageShort: `${readings.length}/${expectedDays} Tage mit Messung`,
-      coverage: `${readings.length}/${expectedDays} Tage mit Messung${range ? ` - persoenlicher Bereich aus ${item.nights} frueheren Naechten` : ""}`, points };
+      coverage: `${readings.length}/${expectedDays} Tage mit Messung${rangeDescription}`, points };
   });
   root.replaceChildren(analysisPeriodControls("Zeitraum für Erholung", analysisRecoveryPeriod, (period) => { analysisRecoveryPeriod = period; renderPersonalRecovery(report); }));
   const note = weekly ? "Wochenmedian und Streuung aus vorhandenen Tagesmessungen. Die laufende Woche ist unvollstaendig; fehlende Werte zaehlen nicht als null." : "Schlaf zeigt den Durchschnitt der angezeigten Messungen. Persoenliche Normalbereiche werden nur fuer HRV und Ruhepuls angezeigt.";
@@ -876,7 +877,8 @@ function recoveryPoint(date, values, weekly) {
 function analysisWeeklyLastPoints(points, start, end) {
   const weeks = [];
   for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
-    const weekEnd = addDateKey(weekStart, 6) < end ? addDateKey(weekStart, 6) : end;
+    let weekEnd = addDateKey(weekStart, 6);
+    if (weekEnd > end) weekEnd = end;
     const last = points.filter((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point)).at(-1);
     weeks.push(last ? { ...last, date: weekEnd, observedDate: last.date } : { date: weekEnd, value: null });
   }
