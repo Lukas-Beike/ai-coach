@@ -578,6 +578,33 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
       await expect(input).toBeFocused();
     }
     await expect(input).toBeVisible();
+    await page.evaluate(() => {
+      const messages = state.data.messages;
+      delete state.data.messages;
+      updateChatControls();
+      window.__chatTest.draftStayedEnabled = !document.querySelector("#messageInput").disabled;
+      state.data.messages = messages;
+      updateChatControls();
+    });
+    expect(await page.evaluate(() => window.__chatTest.draftStayedEnabled)).toBe(true);
+    await expect(input).toBeEnabled();
+    await input.click();
+    await input.pressSequentially("Bitte kürzer antworten.");
+    await expect(page.locator("#steerButton")).toBeEnabled();
+    const stopGeometry = await page.locator("#cancelChatButton").evaluate((button) => {
+      const bounds = button.getBoundingClientRect();
+      const icon = button.querySelector("svg").getBoundingClientRect();
+      const style = getComputedStyle(button);
+      return { width: bounds.width, height: bounds.height, radius: style.borderRadius, padding: style.padding,
+        offsetX: Math.abs(icon.left + icon.width / 2 - bounds.left - bounds.width / 2),
+        offsetY: Math.abs(icon.top + icon.height / 2 - bounds.top - bounds.height / 2) };
+    });
+    expect(stopGeometry).toMatchObject({ width: 44, height: 44, radius: "50%", padding: "0px" });
+    expect(stopGeometry.offsetX).toBeLessThanOrEqual(1);
+    expect(stopGeometry.offsetY).toBeLessThanOrEqual(1);
+    await page.locator("#steerButton").click();
+    expect(await page.evaluate(() => state.chatQueue[0])).toMatchObject({ message: "Bitte kürzer antworten.", mode: "steer" });
+    await page.evaluate(() => { state.chatQueue = []; updateChatControls(); });
     await input.fill("Dieser Entwurf bleibt beim Tabwechsel erhalten.");
     await page.getByRole("link", { name: "Kalender", exact: true }).click();
     await expect(page.locator("#confirmationDialog")).toBeHidden();

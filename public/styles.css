@@ -504,7 +504,7 @@ h2 {
 .composer #sendButton { color: var(--primary-control-ink); background: var(--primary-control-bg); box-shadow: none; }
 .composer #sendButton svg, .composer-stop-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
 .composer #sendButton:disabled { color: var(--subtle); background: var(--surface-raised); }
-.composer .composer-stop-button { border: 0; color: #fff; background: #c83232; box-shadow: none; }
+.composer .composer-stop-button { border: 0; border-radius: 50%; padding: 0; color: #fff; background: #c83232; box-shadow: none; }
 .composer .composer-stop-button:hover { background: #a92323; }
 .composer .composer-stop-button[hidden] { display: none; }
 @keyframes voice-recording { 50% { box-shadow: 0 0 0 5px rgba(255, 69, 58, .15); } }
