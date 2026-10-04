@@ -876,7 +876,7 @@ function recoveryPoint(date, values, weekly) {
 function analysisWeeklyLastPoints(points, start, end) {
   const weeks = [];
   for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
-    const weekEnd = [addDateKey(weekStart, 6), end].sort()[0];
+    const weekEnd = addDateKey(weekStart, 6) < end ? addDateKey(weekStart, 6) : end;
     const last = points.filter((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point)).at(-1);
     weeks.push(last ? { ...last, date: weekEnd, observedDate: last.date } : { date: weekEnd, value: null });
   }
