@@ -32,7 +32,7 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
     };
   });
   expect(periods.same).toBeTruthy();
-  expect(periods.titles).toHaveLength(0);
+  expect(periods.titles.length).toBeGreaterThan(0);
   await expect(page.locator("#analysisHistoryCharts .analysis-sparse-note:visible")).toHaveCount(0);
   await page.locator("#analysisHistoryCharts").getByRole("button", { name: "Rad · FTP", exact: true }).click();
   await expect(page.locator("#analysisHistoryCharts .analysis-info-tooltip:popover-open")).toContainText("kein belastbarer Trend");

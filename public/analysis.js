@@ -27,6 +27,14 @@ function analysisPointValue(item, point, unit) {
   return `${analysisValue(point.actual, item.unit)} (${analysisValue(point.value, "%")})`;
 }
 
+function analysisLatestPoint(item) {
+  return item.currentPoint || item.points.findLast(analysisValidPoint);
+}
+
+function analysisUsesCurrentLine(item) {
+  return Boolean(analysisLatestPoint(item)) && new Set(item.points.filter(analysisValidPoint).map((point) => Number(point.value))).size < 3;
+}
+
 let analysisInfoId = 0;
 
 function analysisChart(title, series, unit, start, end, note, {
@@ -35,11 +43,11 @@ function analysisChart(title, series, unit, start, end, note, {
   const section = reportNode("section", null, "analysis-chart-card");
   section.append(reportNode("h3", title));
   const valid = analysisValidPoint;
-  const values = series.flatMap((item) => item.points.filter(valid));
+  const values = series.flatMap((item) => [...item.points.filter(valid), ...[item.currentPoint].filter(valid)]);
 
   const legend = reportNode("ul", null, "analysis-chart-legend");
   series.forEach((item, index) => {
-    const latest = item.points.findLast(valid);
+    const latest = analysisLatestPoint(item);
     const entry = reportNode("li");
     entry.dataset.color = String(item.color ?? index);
     const label = item.legendLabel || item.label;
@@ -73,6 +81,7 @@ function analysisChart(title, series, unit, start, end, note, {
       const change = analysisChange(delta, item.unit || unit);
       info.append(reportNode("span", `Seit ${dateLabel(first.date)}: ${change}`, "analysis-metric-change"));
     }
+    if (analysisUsesCurrentLine(item)) info.append(reportNode("p", "Durchgehende Linie: letzter bekannter Wert, kein gemessener Verlauf über den gesamten Zeitraum.", "analysis-reference-note"));
     legend.append(entry);
   });
   section.append(legend);
@@ -83,18 +92,16 @@ function analysisChart(title, series, unit, start, end, note, {
   }
   const fewReadings = sparse && series.every((item) => item.points.filter(valid).length < 3);
   if (fewReadings) legend.querySelectorAll(".analysis-info-tooltip").forEach((info) => info.append(reportNode("p", "Wenige Messungen · kein belastbarer Trend.", "analysis-sparse-note")));
-  else {
-    const scales = analysisPlotScales(series, start, end, { unit, zeroCentered });
-    const svg = analysisSvg("svg", { viewBox: `0 0 ${scales.chartWidth} 200`, role: "group", "aria-label": `${title}: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen.` });
-    svg.append(analysisSvg("title", {}, `${title} · ${dateLabel(start)} bis ${dateLabel(end)}`));
-    svg.append(analysisSvg("desc", {}, `Eigene Skala in ${unit || "Belastungspunkten"}. Fehlende Messungen bleiben unbekannt.`));
-    appendAnalysisAxes(svg, unit, scales);
-    appendAnalysisSeries(svg, series, unit, scales, zeroCentered, sparse);
-    appendAnalysisDateTicks(svg, start, end, scales);
-    appendAnalysisPointInspectors(section, svg, series, unit, scales);
-    section.append(svg);
-    appendAnalysisReferenceNotes(section, series, unit);
-  }
+  const scales = analysisPlotScales(series, start, end, { unit, zeroCentered });
+  const svg = analysisSvg("svg", { viewBox: `0 0 ${scales.chartWidth} 200`, role: "group", "aria-label": `${title}: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen.` });
+  svg.append(analysisSvg("title", {}, `${title} · ${dateLabel(start)} bis ${dateLabel(end)}`));
+  svg.append(analysisSvg("desc", {}, `Eigene Skala in ${unit || "Belastungspunkten"}. Fehlende Messungen bleiben unbekannt.`));
+  appendAnalysisAxes(svg, unit, scales);
+  appendAnalysisSeries(svg, series, unit, scales, zeroCentered, sparse);
+  appendAnalysisDateTicks(svg, start, end, scales);
+  appendAnalysisPointInspectors(section, svg, series, unit, scales);
+  section.append(svg);
+  appendAnalysisReferenceNotes(section, series, unit);
   appendAnalysisTable(section, title, series, unit);
   return section;
 }
@@ -108,11 +115,8 @@ function appendAnalysisReferenceNotes(section, series, unit) {
   series.forEach((item, index) => {
     const info = section.querySelector(`.analysis-legend-info + .analysis-info-tooltip[data-series="${index}"]`);
     if (item.points.some((point) => point.lower != null)) info?.append(reportNode("p", "Wochenmedian mit Streuung (25.–75. Perzentil) · nur vorhandene Messungen", "analysis-reference-note"));
-    if (!item.range && item.target == null) return;
-    let label = "Grüner Bereich: persönliche Quartile · 42 Tage vor der letzten Messung";
-    if (item.target != null) label = `Ziellinie: ${analysisValue(item.target, item.unit || unit)} · persönliches Schlafziel`;
-    else if (item.range.status === "provisional") label += " · vorläufig";
-    info?.append(reportNode("p", label, "analysis-reference-note"));
+    if (item.range) info?.append(reportNode("p", "Grüner Bereich: persönliche Quartile · 42 Tage vor der letzten Messung" + (item.range.status === "provisional" ? " · vorläufig" : ""), "analysis-reference-note"));
+    if (item.target != null) info?.append(reportNode("p", `Ziellinie: ${analysisValue(item.target, item.unit || unit)} · persönliches Schlafziel`, "analysis-reference-note"));
   });
 }
 
@@ -161,6 +165,7 @@ function analysisPlotScales(series, start, end, { unit = "", zeroCentered = fals
     ...item.points.filter(analysisValidPoint).flatMap((point) => [Number(point.value), point.lower, point.upper].filter((v) => v != null && Number.isFinite(Number(v))).map(Number)),
     ...(item.range ? [item.range.lower, item.range.upper] : []),
     ...(item.target != null ? [item.target] : []),
+    ...(analysisValidPoint(item.currentPoint) ? [Number(item.currentPoint.value)] : []),
   ]);
   let low = Math.min(...values), high = Math.max(...values);
   if (zeroCentered) { const extent = Math.max(Math.abs(low), Math.abs(high), 1); low = -extent; high = extent; }
@@ -190,11 +195,19 @@ function appendAnalysisAxes(svg, unit, { min, max, step, chartRight, y }) {
 
 function appendAnalysisSeries(svg, series, unit, { chartRight, x, y }, zeroCentered, sparse) {
   series.forEach((item, index) => {
-    const hasTrend = !sparse || item.points.filter(analysisValidPoint).length >= 3;
+    const currentLine = analysisUsesCurrentLine(item);
+    const hasTrend = !currentLine && (!sparse || item.points.filter(analysisValidPoint).length >= 3);
     const color = item.color ?? index;
     if (item.range) svg.append(analysisSvg("rect", { x: 60, y: Math.min(y(item.range.lower), y(item.range.upper)), width: chartRight - 60, height: Math.max(1, Math.abs(y(item.range.lower) - y(item.range.upper))), class: "analysis-baseline-band" }));
     if (item.target != null) svg.append(analysisSvg("line", { x1: 60, x2: chartRight, y1: y(item.target), y2: y(item.target), class: "analysis-target-line" }));
+    if (currentLine) {
+      const latest = analysisLatestPoint(item);
+      const line = analysisSvg("line", { x1: 60, x2: chartRight, y1: y(latest.value), y2: y(latest.value), class: "analysis-current-line", "data-series": index, "data-color": color });
+      line.append(analysisSvg("title", {}, `${item.label}: ${analysisPointValue(item, latest, unit)} · letzte Messung ${dateLabel(latest.date)}`));
+      svg.append(line);
+    }
     let path = "", previous = null, segment = [];
+    const labelledValues = new Set();
     const flushArea = () => {
       if (zeroCentered && segment.length > 1) svg.append(analysisSvg("path", { d: `M${x(segment[0].date)},${y(0)} ` + segment.map((p) => `L${x(p.date)},${y(p.value)}`).join(" ") + ` L${x(segment.at(-1).date)},${y(0)} Z`, class: "analysis-form-area", "data-color": color }));
       segment = [];
@@ -212,11 +225,22 @@ function appendAnalysisSeries(svg, series, unit, { chartRight, x, y }, zeroCente
       } else {
         const dot = analysisSvg("circle", { cx: x(point.date), cy: y(point.value), r: 2.5, "data-series": index, "data-color": color });
         dot.append(analysisSvg("title", {}, `${item.label} · ${dateLabel(point.date)}: ${analysisPointValue(item, point, unit)}`)); svg.append(dot);
-
+      }
+      const label = analysisValue(point.value, item.unit || unit).split(" ")[0];
+      if (!labelledValues.has(label)) {
+        labelledValues.add(label);
+        let anchor = "middle";
+        if (x(point.date) <= 70) anchor = "start";
+        else if (x(point.date) >= chartRight - 10) anchor = "end";
+        svg.append(analysisSvg("text", { x: x(point.date), y: y(point.value) - 8 - index * 12, "text-anchor": anchor, class: "analysis-point-value", "data-value-series": index }, label));
       }
       previous = point;
     });
     flushArea();
+    if (currentLine && !labelledValues.size) {
+      const latest = analysisLatestPoint(item);
+      svg.append(analysisSvg("text", { x: chartRight, y: y(latest.value) - 8 - index * 12, "text-anchor": "end", class: "analysis-point-value", "data-value-series": index }, analysisValue(latest.value, item.unit || unit).split(" ")[0]));
+    }
     if (!item.bars && hasTrend) svg.append(analysisSvg("path", { d: path, fill: "none", "data-series": index, "data-color": color, "data-line": item.line || (index ? "dashed" : "solid") }));
   });
 }
@@ -308,14 +332,20 @@ globalThis.matchMedia("(max-width: 599px)").addEventListener("change", () => {
   if (state.data) { renderAnalysisHistory(state.data.performance?.history); renderPersonalRecovery(state.data.performance?.personal_recovery); }
 });
 
+function analysisPersonalRange(points) {
+  const latest = points.findLast(analysisValidPoint);
+  if (!latest) return null;
+  const prior = points.filter((point) => analysisValidPoint(point) && point.date >= addDateKey(latest.date, -42) && point.date < latest.date).map((point) => Number(point.value));
+  if (prior.length < 14) return null;
+  return { lower: analysisQuantile(prior, .25), upper: analysisQuantile(prior, .75), status: prior.length < 28 ? "provisional" : "ok", count: prior.length };
+}
+
 function appendAnalysisLoadReferences(loadSeries, points) {
   for (const [index, key] of ["ctl", "atl", "tsb"].entries()) {
-    const latest = points.findLast((point) => point[key] != null && Number.isFinite(Number(point[key])));
-    if (!latest) continue;
-    const prior = points.filter((point) => point.date >= addDateKey(latest.date, -42) && point.date < latest.date && point[key] != null && Number.isFinite(Number(point[key]))).map((point) => point[key]);
-    if (prior.length < 14) continue;
-    loadSeries[index].range = { lower: analysisQuantile(prior, .25), upper: analysisQuantile(prior, .75), status: prior.length < 28 ? "provisional" : "ok" };
-    loadSeries[index].referenceLabel = `Persönlicher üblicher Bereich: ${analysisValue(loadSeries[index].range.lower, "")}–${analysisValue(loadSeries[index].range.upper, "")} · ${prior.length} frühere Tage${prior.length < 28 ? " · vorläufig" : ""}`;
+    const range = analysisPersonalRange(points.map((point) => ({ date: point.date, value: point[key] })));
+    if (!range) continue;
+    loadSeries[index].range = range;
+    loadSeries[index].referenceLabel = `Persönlicher üblicher Bereich: ${analysisValue(range.lower, "")}–${analysisValue(range.upper, "")} · ${range.count} frühere Tage${range.status === "provisional" ? " · vorläufig" : ""}`;
   }
 }
 
@@ -333,6 +363,7 @@ function renderAnalysisHistory(history) { // NOSONAR
   const load = history.load || { points: [] };
   const loadSeries = [["ctl", "CTL · Fitness"], ["atl", "ATL · Ermüdung"], ["tsb", "TSB · Form"]].map(([key, label], color) => ({
     label, color, source: "Intervals.icu", points: load.points.filter(withinPeriod).map((point) => ({ date: point.date, value: point[key] })),
+    currentPoint: load.points.filter((point) => point.date <= end).map((point) => ({ date: point.date, value: point[key] })).findLast(analysisValidPoint),
   }));
   appendAnalysisLoadReferences(loadSeries, load.points);
   const loadNote = "CTL: langfristige Belastung (üblich 42 Tage). ATL: kurzfristige Belastung (7 Tage). Die Providerkonfiguration gilt. TSB = CTL − ATL am selben Tag; positiv bedeutet weniger kurzfristige als langfristige Last. Historische Werte bis gestern; kein Leistungstest oder alleinige Trainingsfreigabe.";
@@ -349,6 +380,8 @@ function renderAnalysisHistory(history) { // NOSONAR
   ].flatMap(([key, label, unit, color]) => (history.metrics?.[key] || []).filter((item) => item.source === (key === "cycling_eftp_watts" ? "Intervals.icu" : "Garmin Connect")).map((item) => ({
     label: `${label} · ${item.source}`, legendLabel: label, source: item.source, unit, color,
     line: key === "cycling_eftp_watts" || key.includes("vo2max") ? "dashed" : "solid",
+    currentPoint: item.points.filter((point) => point.date <= end).findLast(analysisValidPoint),
+    range: analysisPersonalRange(item.points.filter((point) => point.date <= end)),
     points: item.points.filter(withinPeriod).map((point) => ({ date: point.date, value: point.value })),
   })));
   for (const [sport, title, primaryUnit] of [["Lauf", "Laufen", "s/km"], ["Rad", "Rad", "W"]]) {
@@ -499,12 +532,13 @@ function renderRecoveryCharts(report, root) {
     const points = dates.map((date) => recoveryPoint(date, values, weekly));
     const readings = item.history.filter((point) => point.date >= start && point.date <= today);
     const expectedDays = Math.max(0, Math.round((Date.parse(today) - Date.parse(start)) / 86400000) + 1);
-    const range = metric !== "sleep" && ["ok", "provisional"].includes(item.status) && Number.isFinite(item.lower) && Number.isFinite(item.upper) ? { lower: item.lower, upper: item.upper, status: item.status } : null;
+    const range = ["ok", "provisional"].includes(item.status) && Number.isFinite(item.lower) && Number.isFinite(item.upper) ? { lower: item.lower, upper: item.upper, status: item.status } : null;
     const target = metric === "sleep" && Number.isFinite(report.sleep_target_hours) ? report.sleep_target_hours : null;
     const position = { below: "Unter deinem üblichen Bereich", within: "Innerhalb deines üblichen Bereichs", above: "Über deinem üblichen Bereich" }[item.position];
     const measurement = metric === "hrv" ? " · " + item.measurement : "";
     return { label: `${title} · ${item.source}${measurement}`, legendLabel: title, source: item.source, unit, color,
       bars: metric === "sleep" && !weekly, cadenceDays: weekly ? 7 : 1, range, target,
+      currentPoint: points.some(analysisValidPoint) ? null : item.history.filter((point) => point.date <= today).findLast(analysisValidPoint),
       referenceLabel: recoveryReferenceLabel(item, range, target, unit, position, weekly),
       coverageShort: `${readings.length}/${expectedDays} Tage mit Messung`,
       coverage: `${readings.length}/${expectedDays} Tage mit Messung · 42-Tage-Normalbereich: ${item.nights} frühere Messnächte`, points };
