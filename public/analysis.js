@@ -229,7 +229,9 @@ function appendAnalysisSeries(svg, series, unit, { chartRight, x, y }, zeroCente
       const label = analysisValue(point.value, item.unit || unit).split(" ")[0];
       if (!labelledValues.has(label)) {
         labelledValues.add(label);
-        const anchor = x(point.date) <= 70 ? "start" : x(point.date) >= chartRight - 10 ? "end" : "middle";
+        let anchor = "middle";
+        if (x(point.date) <= 70) anchor = "start";
+        else if (x(point.date) >= chartRight - 10) anchor = "end";
         svg.append(analysisSvg("text", { x: x(point.date), y: y(point.value) - 8 - index * 12, "text-anchor": anchor, class: "analysis-point-value", "data-value-series": index }, label));
       }
       previous = point;
