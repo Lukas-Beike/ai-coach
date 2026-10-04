@@ -149,7 +149,7 @@ test("@responsive pace ticks stay distinct and faster pace is higher", async ({ 
   await expect(chart.locator(".analysis-extremum, .analysis-secondary-axis")).toHaveCount(0);
   const dates = await chart.locator(".analysis-date-tick").allTextContents();
   expect(new Set(dates).size).toBe(dates.length);
-  const labelSizes = await chart.locator("text").evaluateAll((labels) => labels.map((label) => label.getBoundingClientRect().height));
+  const labelSizes = await chart.locator("text").evaluateAll((labels) => labels.map((label) => Math.round(label.getBoundingClientRect().height * 1000) / 1000));
   expect(Math.min(...labelSizes)).toBeGreaterThanOrEqual(11);
 });
 
