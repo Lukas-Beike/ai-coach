@@ -53,6 +53,14 @@ test('accepts the native clean Codex review comment format', () => {
   });
 });
 
+test('accepts observed native clean suffixes without accepting contradictory text', () => {
+  for (const suffix of ['Hooray!', 'Swish!', 'Keep it up!', 'Already looking forward to the next diff.', 'Bravo.', ':+1:']) {
+    const body = `Codex Review: Didn't find any major issues. ${suffix}\n\n**Reviewed commit:** \`9494ff2\``;
+    assert.equal(parseCodeReviewSummary(body, '2026-10-04T13:55:13Z').clean, true);
+    assert.equal(parseCodeReviewSummary(body + '\n[P1] Fix this', '2026-10-04T13:55:13Z'), undefined);
+  }
+});
+
 test('rejects ambiguous native clean evidence', () => {
   const body = "Codex Review: Didn't find any major issues. :rocket:\n\n**Reviewed commit:** `9494ff2`";
   const at = '2026-10-03T16:31:39Z';

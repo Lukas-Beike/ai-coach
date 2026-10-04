@@ -58,7 +58,7 @@ test('policy enforcement cannot transfer a result to a changed head or base', as
   }
 });
 
-async function reviewRequired({ completedAt, reviewedHead = head, reaction = true, unresolved = false, sameDiff = true, differentContext = false, movedHunk = false, review = p1Review, eventName = 'push', native = false, author = bot } = {}) {
+async function reviewRequired({ completedAt, reviewedHead = head, reaction = true, unresolved = false, sameDiff = true, differentContext = false, movedHunk = false, review = p1Review, eventName = 'push', native = false, nativeSuffix = ':rocket:', author = bot } = {}) {
   const outputs = {};
   const github = {
     rest: {
@@ -72,7 +72,7 @@ async function reviewRequired({ completedAt, reviewedHead = head, reaction = tru
       issues: { listComments: async () => [{
         user: { login: author }, updated_at: '2026-09-23T15:32:00Z', created_at: completedAt,
         body: native
-          ? `Codex Review: Didn't find any major issues. :rocket:\n\n**Reviewed commit:** \`${reviewedHead.slice(0, 10)}\``
+          ? `Codex Review: Didn't find any major issues. ${nativeSuffix}\n\n**Reviewed commit:** \`${reviewedHead.slice(0, 10)}\``
           : `<!-- codex-pull-request-review-summary -->\n| 📝 **Code Review** | ✅ **Completed** <relative-time datetime="${completedAt}">now</relative-time> | \`${reviewedHead.slice(0, 7)}\` | Manual request |`,
       }] },
       reactions: { listForIssue: async () => reaction ? [{
@@ -142,6 +142,15 @@ test('a native clean comment completes initial review without a reaction', async
   assert.equal(await reviewRequired({
     completedAt: '2026-09-23T15:31:54Z', native: true, review: null, reaction: false,
   }), false);
+});
+
+test('workflow policy accepts every supported native clean suffix', async () => {
+  for (const nativeSuffix of [':rocket:', 'Hooray!', 'Swish!', 'Keep it up!',
+    'Already looking forward to the next diff.', 'Bravo.', ':+1:']) {
+    assert.equal(await reviewRequired({
+      completedAt: '2026-09-23T15:31:54Z', native: true, nativeSuffix, review: null, reaction: false,
+    }), false);
+  }
 });
 
 test('native clean follow-up retains timestamp, diff, author and finding safeguards', async () => {
