@@ -157,7 +157,9 @@ class GarminPayloadServiceTests(unittest.TestCase):
             raise RuntimeError("Synthetic unavailable")
 
         client.get_gear_stats = fail_stats
-        self.assertEqual(_gear_inventory(client, call), [])
+        result = _gear_inventory(client, call)
+        self.assertEqual([row["gearUUID"] for row in result], ["one", "two"])
+        self.assertEqual([row["stats"] for row in result], [{}, {}])
 
     def test_gear_collection_skips_malformed_inventory_rows(self):
         client = SimpleNamespace(
