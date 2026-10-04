@@ -793,6 +793,7 @@ GARMIN_ASSEMBLY = GarminAssembly(dependencies=GarminAssembly.Inputs(
         key_values=KEY_VALUE_REPOSITORY,
         sync_state_repository=SYNC_PERSISTENCE.state_repository,
         daily_sync_marker_service=SYNC_PERSISTENCE.daily_markers,
+        sync_equipment=lambda payload: ATHLETE_DATA.equipment().sync_garmin_snapshot(payload),
     ),
     telemetry=GarminSyncTelemetry(
         redactor=REDACTOR,
