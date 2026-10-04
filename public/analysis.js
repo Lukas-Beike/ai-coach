@@ -377,13 +377,18 @@ async function renderTrainingRecords() { // NOSONAR
     const tabs = reportNode("div", null, "segmented-control equipment-tabs");
     tabs.setAttribute("role", "tablist"); tabs.setAttribute("aria-label", "Ausrüstung nach Sportart");
     const localItems = equipment.items || [];
+    const bikeItems = localItems.filter((item) => ["Ride", "VirtualRide"].includes(item.sport) || item.kind === "bike" || item.kind === "component");
+    const runItems = localItems.filter((item) => item.sport === "Run" || item.kind === "shoes");
+    const uncategorizedItems = localItems.filter((item) => !bikeItems.includes(item) && !runItems.includes(item));
     const groups = {
-      bike: { label: "Fahrrad", items: localItems.filter((item) => ["Ride", "VirtualRide"].includes(item.sport) || item.kind === "bike" || item.kind === "component") },
-      run: { label: "Laufschuhe", items: localItems.filter((item) => item.sport === "Run" || item.kind === "shoes") },
+      bike: { label: "Fahrrad", items: [...bikeItems, ...uncategorizedItems] },
+      run: { label: "Laufschuhe", items: runItems },
     };
+    const garminBikeItems = items.filter((item) => /bike|cycl|component|rad/i.test(`${item.kind} ${item.name}`));
+    const garminRunItems = items.filter((item) => /shoe|run|lauf/i.test(`${item.kind} ${item.name}`));
     const garminGroups = {
-      bike: items.filter((item) => /bike|cycl|component|rad/i.test(`${item.kind} ${item.name}`)),
-      run: items.filter((item) => /shoe|run|lauf/i.test(`${item.kind} ${item.name}`)),
+      bike: [...garminBikeItems, ...items.filter((item) => !garminBikeItems.includes(item) && !garminRunItems.includes(item))],
+      run: garminRunItems,
     };
     for (const key of ["bike", "run"]) {
       const tab = reportNode("button", groups[key].label); tab.type = "button";

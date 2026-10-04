@@ -217,6 +217,7 @@ class EquipmentService:
                 not equipment
                 or equipment["status"] != "active"
                 or equipment.get("parent_id")
+                or equipment.get("parent_pending")
                 or equipment["sport"] != row.get("type")
             ):
                 raise AppError(400, "Aktive passende Hauptausrüstung erforderlich.")
@@ -296,7 +297,7 @@ def _insert_initial_garmin_item(
     item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "garmin:" + gear_id))
     item = {
         "id": item_id,
-        "name": str(row.get("gearName") or "Ausr?stung")[:200],
+        "name": str(row.get("gearName") or "Ausr\u00fcstung")[:200],
         "sport": sport,
         "sport_pending": sport == "Other",
         "kind": kind,

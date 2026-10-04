@@ -370,9 +370,7 @@ def _gear_inventory(client: Any, external_call: ExternalCall) -> list[dict[str, 
             # retain valid gear instead of failing the entire optional source.
             continue
         stats = _gear_usage_stats(client, item["gearUUID"], external_call)
-        if not isinstance(stats, dict):
-            continue
-        result.append({**item, "stats": stats})
+        result.append({**item, "stats": stats or {}})
     return result
 
 
