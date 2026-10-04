@@ -583,10 +583,14 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
       delete state.data.messages;
       updateChatControls();
       window.__chatTest.draftStayedEnabled = !document.querySelector("#messageInput").disabled;
-      state.data.messages = messages;
-      updateChatControls();
+      window.__chatTest.restoreMessages = () => { state.data.messages = messages; updateChatControls(); };
     });
     expect(await page.evaluate(() => window.__chatTest.draftStayedEnabled)).toBe(true);
+    await input.fill("Entwurf beim Laden behalten.");
+    await input.press("Enter");
+    await expect(input).toHaveValue("Entwurf beim Laden behalten.");
+    await page.evaluate(() => window.__chatTest.restoreMessages());
+    await input.fill("");
     await expect(input).toBeEnabled();
     await input.click();
     await input.pressSequentially("Bitte kürzer antworten.");
