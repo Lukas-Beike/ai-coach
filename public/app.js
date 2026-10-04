@@ -847,7 +847,9 @@ function updateChatControls() {
     form.classList.toggle("is-reconciling", controls.reconciling);
   }
   if (input) {
-    input.disabled = !controls.chatReady;
+    // Drafting stays available while the Coach loads or works; readiness only
+    // gates the actions that submit the draft.
+    input.disabled = false;
     if (!controls.aiConfigured) {
       input.placeholder = "OpenAI- oder Gemini-API-Schlüssel in Einstellungen konfigurieren…";
     } else if (controls.chatReady) {
