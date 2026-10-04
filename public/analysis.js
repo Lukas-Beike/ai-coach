@@ -399,7 +399,12 @@ async function renderTrainingRecords() { // NOSONAR
       panel.id = `equipmentPanel-${key}`; panel.setAttribute("role", "tabpanel");
       panel.setAttribute("aria-labelledby", tab.id); panel.tabIndex = 0;
       panel.hidden = equipmentTab !== key;
-      for (const item of groups[key].items) panel.append(localEquipmentCard(item));
+      if (groups[key].items.length) {
+        const local = reportNode("details", null, "training-focus-details");
+        local.append(reportNode("summary", "Lokale Ausrüstung und Wartung"));
+        for (const item of groups[key].items) local.append(localEquipmentCard(item));
+        panel.append(local);
+      }
       for (const item of garminGroups[key]) panel.append(garminEquipmentCard(item));
       if (!groups[key].items.length && !garminGroups[key].length) {
         panel.append(reportNode("p", key === "bike" ? "Noch keine Fahrräder oder Komponenten erfasst." : "Noch keine Laufschuhe erfasst.", "muted"));
