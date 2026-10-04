@@ -270,7 +270,7 @@ h2 {
 .analysis-metric-meta, .analysis-metric-context, .analysis-metric-change { display: block; margin-top: 4px; color: var(--muted); font-size: .72rem; line-height: 1.45; }
 .analysis-metric-context { color: var(--ink); }
 .analysis-sparse-note, .analysis-reference-note { margin: 8px 0; color: var(--muted); font-size: .75rem; line-height: 1.5; }
-.analysis-baseline-band { fill: var(--muted); opacity: .1; }
+.analysis-baseline-band { fill: #22c55e; opacity: .17; }
 .analysis-target-line { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
 .analysis-form-area { fill: #a78bfa; opacity: .15; stroke: none !important; }
 .analysis-range-whisker { stroke-width: 8px !important; stroke-linecap: round; opacity: .25; }
@@ -307,6 +307,7 @@ h2 {
 :root[data-theme="light"] .analysis-chart-legend [data-color="2"]::before { background: #7c3aed; }
 :root[data-theme="light"] .analysis-chart-legend [data-color="3"]::before { background: #0369a1; }
 :root[data-theme="light"] .analysis-chart-card svg [data-color="4"] { stroke: #be123c; }
+:root[data-theme="light"] .analysis-baseline-band { fill: #16a34a; opacity: .14; }
 :root[data-theme="light"] .analysis-chart-legend [data-color="4"]::before { background: #be123c; }
 .analysis-grid-line { stroke: var(--line); }
 .analysis-zero-line { stroke: var(--muted); stroke-dasharray: 3 3; }
@@ -504,7 +505,7 @@ h2 {
 .composer #sendButton { color: var(--primary-control-ink); background: var(--primary-control-bg); box-shadow: none; }
 .composer #sendButton svg, .composer-stop-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
 .composer #sendButton:disabled { color: var(--subtle); background: var(--surface-raised); }
-.composer .composer-stop-button { border: 0; color: #fff; background: #c83232; box-shadow: none; }
+.composer .composer-stop-button { border: 0; border-radius: 50%; padding: 0; color: #fff; background: #c83232; box-shadow: none; }
 .composer .composer-stop-button:hover { background: #a92323; }
 .composer .composer-stop-button[hidden] { display: none; }
 @keyframes voice-recording { 50% { box-shadow: 0 0 0 5px rgba(255, 69, 58, .15); } }
@@ -1266,7 +1267,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .weekly-sport-legend li::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 3px; background: var(--sport-color); }
 .report-controls > * { min-width: 0; max-width: 100%; flex: 1 1 120px; }
 
-.analysis-chart-card svg .analysis-point-value { font-size: 9px; fill: var(--ink); }
+.analysis-chart-card svg .analysis-point-value { font-size: 12px; fill: var(--ink); stroke: var(--surface); stroke-width: 3px; paint-order: stroke; pointer-events: none; }
 .training-focus-legend li > span { width: max-content; max-width: 72px; }
 @media (max-width: 599px) { .training-focus-legend li > span { font-size: .65rem; } }
 

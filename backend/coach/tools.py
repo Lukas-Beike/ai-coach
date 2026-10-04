@@ -896,13 +896,20 @@ def build_tool_contracts(
     record_schemas = [
         (
             "save_equipment",
-            "Save explicitly confirmed local equipment or component with known initial usage and personal maintenance intervals. Read all current fields and exact revision before an edit. Archiving preserves old activity references; no implied assignments.",
+            "Save explicitly confirmed local equipment or component with known initial usage and personal maintenance intervals. If read_training_records marks sport_pending or parent_pending, ask the athlete for the missing sport or parent bicycle before saving or assigning it. Read all current fields and exact revision before an edit. Archiving preserves old activity references; no implied assignments.",
             {
                 **revision_fields,
                 "name": {"type": "string", "maxLength": 200},
                 "sport": {
                     "type": "string",
-                    "enum": ["Ride", "VirtualRide", "Run", "Swim", "WeightTraining"],
+                    "enum": [
+                        "Ride",
+                        "VirtualRide",
+                        "Run",
+                        "Swim",
+                        "WeightTraining",
+                        "Other",
+                    ],
                 },
                 "kind": {
                     "type": "string",
@@ -927,7 +934,7 @@ def build_tool_contracts(
         ),
         (
             "assign_activity_equipment",
-            "Explicitly assign a canonical completed activity to matching active equipment. Reassignment recalculates both usage counters. equipment_id=null explicitly clears assignment. Never infer a favorite bike/shoe.",
+            "Explicitly assign a canonical completed activity to matching active equipment. If sport_pending or parent_pending is true, ask the athlete for the missing equipment detail before assignment. Reassignment recalculates both usage counters. equipment_id=null explicitly clears assignment. Never infer a favorite bike/shoe.",
             {
                 "activity_id": {"type": "string"},
                 "equipment_id": {"type": ["string", "null"]},
@@ -948,7 +955,7 @@ def build_tool_contracts(
     COACH_STRUCTURED_TOOLS.append(
         _canonical_coach_tool(
             "read_training_records",
-            "Read current local equipment, revisions and usage counters before explicit corrections. Read-only bounded projection; do not invent missing IDs or data.",
+            "Read current local equipment, revisions and usage counters before explicit corrections. If an item has sport_pending or parent_pending, ask the athlete for that missing detail before changing or assigning it. Read-only bounded projection; do not invent missing IDs or data.",
             {
                 "record_type": {
                     "type": "string",

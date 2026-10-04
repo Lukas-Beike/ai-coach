@@ -365,17 +365,28 @@ def _gear_inventory(client: Any, external_call: ExternalCall) -> list[dict[str, 
     result = []
     for item in inventory:
         if not isinstance(item, dict) or not item.get("gearUUID"):
-            raise ValueError("Invalid Garmin gear record")
-        stats = external_call(
+            # Garmin sometimes includes placeholder or malformed inventory rows.
+            # They cannot be looked up for usage, so omit only those rows and
+            # retain valid gear instead of failing the entire optional source.
+            continue
+        stats = _gear_usage_stats(client, item["gearUUID"], external_call)
+        result.append({**item, "stats": stats or {}})
+    return result
+
+
+def _gear_usage_stats(
+    client: Any, gear_uuid: str, external_call: ExternalCall
+) -> dict[str, Any] | None:
+    try:
+        result = external_call(
             "garmin",
             "gear_usage",
-            partial(client.get_gear_stats, item["gearUUID"]),
+            partial(client.get_gear_stats, gear_uuid),
             None,
         )
-        if not isinstance(stats, dict):
-            raise TypeError("Invalid Garmin gear usage")
-        result.append({**item, "stats": stats})
-    return result
+    except Exception:  # noqa: BLE001 - omit only this unavailable optional row.
+        return None
+    return result if isinstance(result, dict) else None
 
 
 def _collect_optional_metric(

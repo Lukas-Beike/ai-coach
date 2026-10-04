@@ -358,6 +358,7 @@ class GarminSyncStateService:
         redactor: Redactor,
         utc_now: Callable[[], str],
         current_time: Callable[[], datetime],
+        sync_equipment: Callable[[dict[str, Any]], Any] | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
@@ -366,6 +367,7 @@ class GarminSyncStateService:
         self._redactor = redactor
         self._utc_now = utc_now
         self._current_time = current_time
+        self._sync_equipment = sync_equipment
 
     def _get(self, key: str) -> str | None:
         with self._database_manager.unit_of_work() as db:
@@ -464,6 +466,8 @@ class GarminSyncStateService:
     ) -> dict[str, Any]:
         synced_at = payload["synced_at"]
         complete = collection_complete(payload)
+        if self._sync_equipment is not None and source != "fixture":
+            self._sync_equipment(payload)
         self._set(
             "garmin_snapshot",
             json.dumps(payload, ensure_ascii=False, separators=(",", ":")),

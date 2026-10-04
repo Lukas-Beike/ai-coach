@@ -507,6 +507,7 @@ async function sendMessage(event) {
     return;
   }
   const input = $("#messageInput");
+  if (!chatControlState(input).chatReady) return;
   const attachments = state.chatAttachments || [];
   const message = input.value.trim() || (attachments.length ? "Bitte analysiere die angehängten Dateien." : "");
   const requestKind = input.dataset.requestKind || null;
