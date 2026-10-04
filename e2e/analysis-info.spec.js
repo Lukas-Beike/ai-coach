@@ -37,7 +37,7 @@ test("@responsive recovery uses independent scales, honest coverage and weekly d
   await expect(sleep).toContainText("2/5 Tage mit Messung");
   const hrv = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "HRV", exact: true }) });
   await expect(hrv.locator(".analysis-baseline-band")).toHaveCount(1);
-  await expect(hrv.locator(".analysis-point-value")).toHaveCount(0);
+  await expect(hrv.locator(".analysis-point-value")).toHaveText(["52", "58"]);
   await expect(hrv).toContainText("Innerhalb deines üblichen Bereichs");
   await expect(root).toContainText("Mindestens 14 frühere passende Nächte erforderlich");
   await expect(root.locator(".analysis-value-tick").first()).toHaveText("0");
@@ -91,7 +91,7 @@ test("@responsive load separates CTL and ATL from zero-centred TSB and preserves
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
-test("@responsive sparse performance shows measurements and sources without invented trends", async ({ page }) => {
+test("@responsive sparse performance shows measurements and the current value line", async ({ page }) => {
   await performanceFixture(page, { history: {
     start: "2026-09-01", end: "2026-09-02", load: { points: [] },
     metrics: {
@@ -102,7 +102,9 @@ test("@responsive sparse performance shows measurements and sources without inve
   } });
   const root = page.locator("#analysisHistoryCharts");
   await expect(root.locator(".analysis-chart-card")).toHaveCount(2);
-  await expect(root.locator("svg")).toHaveCount(0);
+  await expect(root.locator("svg")).toHaveCount(3);
+  await expect(root.locator(".analysis-current-line")).toHaveCount(3);
+  await expect(root.locator(".analysis-point-value")).toHaveText(["5:00", "4:50", "49", "200", "210"]);
   await expect(root.getByRole("button", { name: "Lauf · Schwellenpace", exact: true })).toBeVisible();
   await expect(root).toContainText("kein belastbarer Trend");
   await expect(root).toContainText("Seit 01.09.2026: −0:10 min/km");
@@ -121,7 +123,7 @@ test("@responsive sparse performance shows measurements and sources without inve
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
-test("sparse FTP stays unconnected alongside a dense eFTP series", async ({ page }) => {
+test("sparse FTP uses a current value line alongside a dense eFTP series", async ({ page }) => {
   await performanceFixture(page, { history: {
     start: "2026-09-01", end: "2026-09-03", load: { points: [] }, metrics: {
       cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-02", value: 210 }] }],
@@ -132,6 +134,7 @@ test("sparse FTP stays unconnected alongside a dense eFTP series", async ({ page
   await expect(chart).toHaveCount(1);
   await expect(chart.locator('circle[data-series="0"]')).toHaveCount(2);
   await expect(chart.locator('path[data-series="0"]')).toHaveCount(0);
+  await expect(chart.locator('.analysis-current-line[data-series="0"]')).toHaveCount(1);
   await expect(chart.locator('path[data-series="1"]')).toHaveCount(1);
   await expect(page.locator("#analysisHistoryCharts")).toContainText("Seit 01.09.2026: +10 W");
 });
@@ -161,7 +164,7 @@ test("personal load bands use earlier known values and keep values and context i
   await expect(root.locator(".analysis-baseline-band")).toHaveCount(3);
   await expect(root).toContainText("Persönlicher üblicher Bereich: 47–61 · 29 frühere Tage");
   await root.getByRole("button", { name: "Aktuelle Woche", exact: true }).click();
-  await expect(root.locator(".analysis-point-value")).toHaveCount(0);
+  await expect(root.locator(".analysis-point-value").first()).toHaveText("67");
   await expect(root.locator(".analysis-metric-meta").first()).toBeHidden();
   await root.getByRole("button", { name: "CTL · Fitness", exact: true }).click();
   await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("500");
@@ -188,4 +191,59 @@ test("reference notes stay with their own series and baseline status", async ({ 
   await page.waitForFunction(() => state.loadedAreas.has("performance") && !state.loadPromise);
   await ctl.click();
   await expect(root.locator(".analysis-info-tooltip:popover-open .analysis-reference-note")).toHaveCount(0);
+});
+
+test("@responsive repeated performance values are labelled once and retain their personal range in both periods", async ({ page }) => {
+  const points = Array.from({ length: 30 }, (_, index) => ({ date: `2026-09-${String(index + 1).padStart(2, "0")}`, value: index % 2 ? 210 : 200 }));
+  await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-30", load: { points: [] }, metrics: {
+    cycling_ftp_watts: [{ source: "Garmin Connect", points }],
+  } } });
+  const root = page.locator("#analysisHistoryCharts");
+  for (const period of ["8 Wochen", "Aktuelle Woche"]) {
+    await root.getByRole("button", { name: period, exact: true }).click();
+    await expect(root.locator(".analysis-point-value")).toHaveText(period === "8 Wochen" ? ["200", "210"] : ["210", "200"]);
+    await expect(root.locator(".analysis-current-line")).toHaveCount(1);
+    await expect(root.locator(".analysis-baseline-band")).toHaveCount(1);
+    const line = root.locator(".analysis-current-line");
+    expect(await line.getAttribute("y1")).toEqual(await line.getAttribute("y2"));
+    const latestY = await root.locator("circle").last().getAttribute("cy");
+    expect(await line.getAttribute("y1")).toEqual(latestY);
+    await root.getByRole("button", { name: "Rad · FTP", exact: true }).click();
+    await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("Grüner Bereich");
+    await page.keyboard.press("Escape");
+  }
+});
+
+test("@responsive latest measurement stays visible without inventing a measurement in the selected week", async ({ page }) => {
+  await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-30", load: { points: [] }, metrics: {
+    running_vo2max_ml_kg_min: [{ source: "Garmin Connect", points: [{ date: "2026-09-20", value: 49 }] }],
+  } } });
+  const root = page.locator("#analysisHistoryCharts");
+  await root.getByRole("button", { name: "Aktuelle Woche", exact: true }).click();
+  await expect(root.locator("svg")).toHaveCount(1);
+  await expect(root.locator(".analysis-current-line")).toHaveCount(1);
+  await expect(root.locator(".analysis-point-value")).toHaveText(["49"]);
+  await expect(root.locator("circle, .analysis-day-marker, .analysis-baseline-band")).toHaveCount(0);
+  await root.getByRole("button", { name: "Lauf · VO₂max", exact: true }).click();
+  await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("20.09.2026");
+  await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("0/0 datierte Werte");
+  await page.keyboard.press("Escape");
+  await root.getByText("Werte ansehen", { exact: true }).click();
+  await expect(root.locator("tbody tr")).toHaveCount(0);
+});
+
+test("sleep personal band is retained together with the target", async ({ page }) => {
+  const history = Array.from({ length: 30 }, (_, index) => ({ date: `2026-09-${String(index + 1).padStart(2, "0")}`, value: index % 2 ? 8 : 7 }));
+  await performanceFixture(page, { personal_recovery: { as_of: "2026-09-30", sleep_target_hours: 8,
+    baselines: [{ metric: "sleep", source: "Garmin Connect", measurement: "sleepTimeSeconds", observed_at: "2026-09-30", nights: 29,
+      status: "ok", lower: 7, upper: 8, history }],
+  } }, "recovery");
+  const root = page.locator("#personalRecovery");
+  await expect(root.locator(".analysis-baseline-band")).toHaveCount(1);
+  await expect(root.locator(".analysis-target-line")).toHaveCount(1);
+  await expect(root.locator(".analysis-point-value")).toHaveText(["8:00", "7:00"]);
+  await root.getByRole("button", { name: "Schlafdauer", exact: true }).click();
+  const info = root.locator(".analysis-info-tooltip:popover-open");
+  await expect(info).toContainText("Grüner Bereich");
+  await expect(info).toContainText("persönliches Schlafziel");
 });
