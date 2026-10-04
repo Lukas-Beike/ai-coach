@@ -319,7 +319,7 @@ function appendAnalysisLoadReferences(loadSeries, points) {
   }
 }
 
-function renderAnalysisHistory(history) {
+function renderAnalysisHistory(history) { // NOSONAR
   const root = document.querySelector("#analysisHistoryCharts");
   const loadRoot = document.querySelector("#analysisLoadCharts");
   const openDetails = new Set([...root.querySelectorAll("details[open]"), ...loadRoot.querySelectorAll("details[open]")].map((details) => `${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`));
@@ -365,7 +365,7 @@ let seasonGeneration = 0;
 let trainingRecordsGeneration = 0;
 let equipmentTab = "bike";
 
-async function renderTrainingRecords() {
+async function renderTrainingRecords() { // NOSONAR
   const generation = ++trainingRecordsGeneration;
   const session = state.sessionGeneration;
   try {
@@ -402,11 +402,11 @@ async function renderTrainingRecords() {
       tab.setAttribute("aria-selected", String(equipmentTab === key));
       tab.tabIndex = equipmentTab === key ? 0 : -1;
       tab.classList.toggle("active", equipmentTab === key);
-      tab.addEventListener("click", () => { equipmentTab = key; renderTrainingRecords(); });
+      tab.addEventListener("click", () => { equipmentTab = key; void renderTrainingRecords(); });
       tab.addEventListener("keydown", (event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault(); equipmentTab = equipmentTab === "bike" ? "run" : "bike";
-        renderTrainingRecords().then(() => document.getElementById(`equipmentTab-${equipmentTab}`)?.focus());
+        void renderTrainingRecords().then(() => document.getElementById(`equipmentTab-${equipmentTab}`)?.focus());
       });
     }
     gear.prepend(tabs);

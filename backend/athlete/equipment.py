@@ -95,11 +95,7 @@ class EquipmentService:
 
     def sync_garmin_snapshot(self, snapshot: dict[str, Any]) -> None:
         """Import Garmin gear once, then refresh only Garmin-owned mileage."""
-        if not isinstance(snapshot, dict):
-            return
-        if (snapshot.get("source_freshness") or {}).get("gear", {}).get(
-            "freshness"
-        ) != "current":
+        if not _current_garmin_gear(snapshot):
             return
         rows = [row for row in snapshot.get("gear") or [] if isinstance(row, dict)]
         with self._manager.unit_of_work() as db:
@@ -113,8 +109,8 @@ class EquipmentService:
                 ).fetchall()
                 if row["value"] and isinstance(json.loads(row["value"]), dict)
             ]
-            by_garmin: dict[str, dict[str, Any]] = {
-                str(item.get("garmin_uuid")): item
+            by_garmin = {
+                str(item["garmin_uuid"]): item
                 for item in local_rows
                 if item.get("garmin_uuid")
             }
@@ -122,50 +118,11 @@ class EquipmentService:
             if not initialized:
                 for row in rows:
                     gear_id = str(row.get("gearUUID") or "")
-                    if not gear_id or gear_id in by_garmin:
-                        continue
-                    distance = _garmin_distance_km(row)
-                    distance_known = distance is not None
-                    distance = distance if distance_known else 0
-                    item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "garmin:" + gear_id))
-                    item = {
-                        "id": item_id,
-                        "name": str(row.get("gearName") or "Ausrüstung")[:200],
-                        "sport": _garmin_sport(row),
-                        "sport_pending": _garmin_sport(row) == "Other",
-                        "kind": _garmin_kind(row),
-                        "parent_pending": _garmin_kind(row) == "component",
-                        "status": _garmin_status(row),
-                        "parent_id": None,
-                        "start_date": self._today().isoformat(),
-                        "initial_distance_km": distance,
-                        "initial_hours": 0,
-                        "maintenance_km": None,
-                        "maintenance_hours": None,
-                        "garmin_uuid": gear_id,
-                        "initial_distance_known": distance_known,
-                        "revision": 1,
-                        "updated_at": now,
-                        "source": "garmin-initial-sync",
-                    }
-                    db.execute(
-                        "INSERT OR IGNORE INTO kv(key,value,updated_at) VALUES(?,?,?)",
-                        (EQUIPMENT_PREFIX + item_id, json.dumps(item), now),
-                    )
-            for row in rows:
-                linked_item = by_garmin.get(str(row.get("gearUUID") or ""))
-                distance = _garmin_distance_km(row)
-                if linked_item and distance is not None:
-                    linked_item["garmin_distance_km"] = distance
-                    linked_item["updated_at"] = now
-                    db.execute(
-                        "UPDATE kv SET value=?, updated_at=? WHERE key=?",
-                        (
-                            json.dumps(linked_item),
-                            now,
-                            EQUIPMENT_PREFIX + str(linked_item["id"]),
-                        ),
-                    )
+                    if gear_id and gear_id not in by_garmin:
+                        _insert_initial_garmin_item(
+                            db, row, gear_id, self._today(), now
+                        )
+            _refresh_garmin_distances(db, rows, by_garmin, now)
             if not initialized:
                 db.execute(
                     "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?)",
@@ -207,22 +164,7 @@ class EquipmentService:
             if previous and payload.get("expected_revision") != previous["revision"]:
                 raise AppError(409, "Ausrüstung geändert; neu lesen.")
             parent_id = _equipment_parent(db, payload, item_id)
-            children = [
-                json.loads(row["value"])
-                for row in db.execute(
-                    "SELECT value FROM kv WHERE key LIKE 'equipment:%' AND json_extract(value, '$.parent_id')=?",
-                    (item_id,),
-                ).fetchall()
-            ]
-            if children and (
-                parent_id
-                or payload["kind"] == "component"
-                or any(item["sport"] != payload["sport"] for item in children)
-            ):
-                raise AppError(
-                    409,
-                    "Vorhandene Komponenten benötigen diesen Hauptgegenstand und dessen Sportart.",
-                )
+            _validate_equipment_children(db, item_id, parent_id, payload)
             saved = {
                 "id": item_id,
                 "name": name,
@@ -335,6 +277,82 @@ class EquipmentService:
                 ),
             )
         return {"ok": True, "stored_locally": True, "maintenance": saved}
+
+
+def _current_garmin_gear(snapshot: Any) -> bool:
+    return bool(
+        isinstance(snapshot, dict)
+        and (snapshot.get("source_freshness") or {}).get("gear", {}).get("freshness")
+        == "current"
+    )
+
+
+def _insert_initial_garmin_item(
+    db: Any, row: dict[str, Any], gear_id: str, today: date, now: str
+) -> None:
+    distance = _garmin_distance_km(row)
+    kind = _garmin_kind(row)
+    sport = _garmin_sport(row)
+    item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "garmin:" + gear_id))
+    item = {
+        "id": item_id,
+        "name": str(row.get("gearName") or "Ausr?stung")[:200],
+        "sport": sport,
+        "sport_pending": sport == "Other",
+        "kind": kind,
+        "parent_pending": kind == "component",
+        "status": _garmin_status(row),
+        "parent_id": None,
+        "start_date": today.isoformat(),
+        "initial_distance_km": distance or 0,
+        "initial_hours": 0,
+        "maintenance_km": None,
+        "maintenance_hours": None,
+        "garmin_uuid": gear_id,
+        "initial_distance_known": distance is not None,
+        "revision": 1,
+        "updated_at": now,
+        "source": "garmin-initial-sync",
+    }
+    db.execute(
+        "INSERT OR IGNORE INTO kv(key,value,updated_at) VALUES(?,?,?)",
+        (EQUIPMENT_PREFIX + item_id, json.dumps(item), now),
+    )
+
+
+def _refresh_garmin_distances(
+    db: Any, rows: list[dict[str, Any]], by_garmin: dict[str, dict[str, Any]], now: str
+) -> None:
+    for row in rows:
+        linked = by_garmin.get(str(row.get("gearUUID") or ""))
+        distance = _garmin_distance_km(row)
+        if linked is None or distance is None:
+            continue
+        linked["garmin_distance_km"] = distance
+        linked["updated_at"] = now
+        db.execute(
+            "UPDATE kv SET value=?, updated_at=? WHERE key=?",
+            (json.dumps(linked), now, EQUIPMENT_PREFIX + str(linked["id"])),
+        )
+
+
+def _validate_equipment_children(
+    db: Any, item_id: str, parent_id: str | None, payload: dict[str, Any]
+) -> None:
+    children = [
+        json.loads(row["value"])
+        for row in db.execute(
+            "SELECT value FROM kv WHERE key LIKE 'equipment:%' AND json_extract(value, '$.parent_id')=?",
+            (item_id,),
+        ).fetchall()
+    ]
+    invalid_parent = parent_id or payload["kind"] == "component"
+    mismatched_sport = any(item["sport"] != payload["sport"] for item in children)
+    if children and (invalid_parent or mismatched_sport):
+        raise AppError(
+            409,
+            "Vorhandene Komponenten ben?tigen diesen Hauptgegenstand und dessen Sportart.",
+        )
 
 
 def _garmin_distance_km(row: dict) -> float | None:
@@ -588,12 +606,13 @@ def _maintenance_usage(
     hours = sum(number(row.get("moving_time")) or 0 for row in since) / 3600 + (
         item["initial_hours"] if not latest else 0
     )
-    reached = bool(
-        item.get("maintenance_km")
-        and distance >= item["maintenance_km"]
-        or item.get("maintenance_hours")
-        and hours >= item["maintenance_hours"]
+    reaches_distance = bool(
+        item.get("maintenance_km") and distance >= item["maintenance_km"]
     )
+    reaches_hours = bool(
+        item.get("maintenance_hours") and hours >= item["maintenance_hours"]
+    )
+    reached = reaches_distance or reaches_hours
     uncertain = _maintenance_uncertain(item, since, ambiguous)
     due = None if uncertain else False
     if reached:
