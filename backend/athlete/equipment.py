@@ -639,7 +639,7 @@ def _maintenance_hours(item: dict, since: list[dict], latest: dict | None) -> fl
     return hours + (item["initial_hours"] if not latest else 0)
 
 
-def _maintenance_reached(item: dict, distance: float, hours: float) -> bool:
+def _maintenance_reached(item: dict, distance: float | None, hours: float) -> bool:
     distance_due = bool(
         item.get("maintenance_km")
         and distance is not None
