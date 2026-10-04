@@ -466,7 +466,7 @@ class GarminSyncStateService:
     ) -> dict[str, Any]:
         synced_at = payload["synced_at"]
         complete = collection_complete(payload)
-        if self._sync_equipment is not None:
+        if self._sync_equipment is not None and source != "fixture":
             self._sync_equipment(payload)
         self._set(
             "garmin_snapshot",

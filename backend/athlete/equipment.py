@@ -587,7 +587,12 @@ def _maintenance_usage(
     hours = _maintenance_hours(item, since, latest)
     reached = _maintenance_reached(item, distance, hours)
     uncertain = _maintenance_uncertain(item, since, ambiguous)
-    due = True if reached else None if uncertain else False
+    if reached:
+        due = True
+    elif uncertain:
+        due = None
+    else:
+        due = False
     return {
         "maintenance_distance_km": round(distance, 2),
         "maintenance_hours": round(hours, 2),
