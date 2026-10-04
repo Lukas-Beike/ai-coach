@@ -586,7 +586,9 @@ def _maintenance_usage(
     distance = _maintenance_distance(item, since, latest, garmin_distance)
     hours = _maintenance_hours(item, since, latest)
     reached = _maintenance_reached(item, distance, hours)
-    uncertain = _maintenance_uncertain(item, since, ambiguous)
+    uncertain = _maintenance_uncertain(item, since, ambiguous) or (
+        bool(item.get("maintenance_km")) and distance is None
+    )
     if reached:
         due = True
     elif uncertain:
@@ -594,7 +596,7 @@ def _maintenance_usage(
     else:
         due = False
     return {
-        "maintenance_distance_km": round(distance, 2),
+        "maintenance_distance_km": round(distance, 2) if distance is not None else None,
         "maintenance_hours": round(hours, 2),
         "maintenance_due": due,
         "maintenance_same_day_sessions": len(ambiguous),
@@ -620,10 +622,14 @@ def _maintenance_sessions(
 
 def _maintenance_distance(
     item: dict, since: list[dict], latest: dict | None, garmin_distance: float | None
-) -> float:
-    if garmin_distance is not None:
-        baseline = number(latest.get("distance_km")) or 0 if latest else 0
-        return max(0, garmin_distance - baseline)
+) -> float | None:
+    if item.get("garmin_uuid"):
+        if garmin_distance is None:
+            return None
+        if latest and latest.get("distance_km") is None:
+            return None
+        baseline = number(latest.get("distance_km")) if latest else 0
+        return max(0, garmin_distance - (baseline or 0))
     local_distance = sum(number(row.get("distance")) or 0 for row in since) / 1000
     return local_distance + (item["initial_distance_km"] if not latest else 0)
 
@@ -635,7 +641,9 @@ def _maintenance_hours(item: dict, since: list[dict], latest: dict | None) -> fl
 
 def _maintenance_reached(item: dict, distance: float, hours: float) -> bool:
     distance_due = bool(
-        item.get("maintenance_km") and distance >= item["maintenance_km"]
+        item.get("maintenance_km")
+        and distance is not None
+        and distance >= item["maintenance_km"]
     )
     hours_due = bool(
         item.get("maintenance_hours") and hours >= item["maintenance_hours"]

@@ -381,13 +381,14 @@ async function renderTrainingRecords() { // NOSONAR
     const runItems = localItems.filter((item) => item.sport === "Run" || item.kind === "shoes");
     const uncategorizedItems = localItems.filter((item) => !bikeItems.includes(item) && !runItems.includes(item));
     const groups = {
-      bike: { label: "Fahrrad", items: [...bikeItems, ...uncategorizedItems] },
+      bike: { label: "Fahrrad", items: bikeItems },
       run: { label: "Laufschuhe", items: runItems },
     };
     const garminBikeItems = items.filter((item) => /bike|cycl|component|rad/i.test(`${item.kind} ${item.name}`));
     const garminRunItems = items.filter((item) => /shoe|run|lauf/i.test(`${item.kind} ${item.name}`));
+    const uncategorizedGarminItems = items.filter((item) => !garminBikeItems.includes(item) && !garminRunItems.includes(item));
     const garminGroups = {
-      bike: [...garminBikeItems, ...items.filter((item) => !garminBikeItems.includes(item) && !garminRunItems.includes(item))],
+      bike: garminBikeItems,
       run: garminRunItems,
     };
     for (const key of ["bike", "run"]) {
@@ -413,6 +414,13 @@ async function renderTrainingRecords() { // NOSONAR
         event.preventDefault(); equipmentTab = equipmentTab === "bike" ? "run" : "bike";
         void renderTrainingRecords().then(() => document.getElementById(`equipmentTab-${equipmentTab}`)?.focus());
       });
+    }
+    if (uncategorizedItems.length || uncategorizedGarminItems.length) {
+      const other = reportNode("section", null, "equipment-uncategorized");
+      other.append(reportNode("h4", "Weitere Ausrüstung"));
+      for (const item of uncategorizedItems) other.append(localEquipmentCard(item));
+      for (const item of uncategorizedGarminItems) other.append(garminEquipmentCard(item));
+      gear.append(other);
     }
     gear.prepend(tabs);
     if (equipment.garmin_synced_at) gear.append(reportNode("p", `Garmin \u00b7 Stand ${new Date(equipment.garmin_synced_at).toLocaleString("de-DE")}${equipment.garmin_freshness === "stale" ? " \u00b7 letzter erfolgreicher Abruf" : ""}`, "muted"));
