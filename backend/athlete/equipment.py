@@ -550,17 +550,17 @@ def _update_usage(
     if garmin_distance is None:
         garmin_distance = garmin_usage.get(str(item.get("garmin_uuid")))
     hours = sum(number(row.get("moving_time")) or 0 for row in eligible) / 3600
+    if item.get("garmin_uuid") and garmin_distance is None:
+        distance_km = None
+    else:
+        total_distance = (
+            garmin_distance
+            if garmin_distance is not None
+            else item["initial_distance_km"] + distance
+        )
+        distance_km = round(total_distance, 2)
     item["usage"] = {
-        "distance_km": (
-            None
-            if item.get("garmin_uuid") and garmin_distance is None
-            else round(
-                garmin_distance
-                if garmin_distance is not None
-                else item["initial_distance_km"] + distance,
-                2,
-            )
-        ),
+        "distance_km": distance_km,
         "hours": round(item["initial_hours"] + hours, 2),
         "assigned_sessions": len(eligible),
         "distance_known_sessions": sum(
@@ -581,6 +581,24 @@ def _maintenance_usage(
     garmin_distance: float | None = None,
 ) -> dict[str, Any]:
     latest = events[-1] if events else None
+    ambiguous, since = _maintenance_sessions(eligible, latest)
+    distance = _maintenance_distance(item, since, latest, garmin_distance)
+    hours = _maintenance_hours(item, since, latest)
+    reached = _maintenance_reached(item, distance, hours)
+    uncertain = _maintenance_uncertain(item, since, ambiguous)
+    due = True if reached else None if uncertain else False
+    return {
+        "maintenance_distance_km": round(distance, 2),
+        "maintenance_hours": round(hours, 2),
+        "maintenance_due": due,
+        "maintenance_same_day_sessions": len(ambiguous),
+        "maintenance_coverage": "partial" if uncertain else "known_assignments",
+    }
+
+
+def _maintenance_sessions(
+    eligible: list[dict], latest: dict | None
+) -> tuple[list[dict], list[dict]]:
     ambiguous = [
         row
         for row in eligible
@@ -591,39 +609,32 @@ def _maintenance_usage(
         for row in eligible
         if not latest or str(row.get("start_date_local") or "")[:10] > latest["date"]
     ]
-    distance = sum(number(row.get("distance")) or 0 for row in since) / 1000 + (
-        item["initial_distance_km"] if not latest else 0
-    )
+    return ambiguous, since
+
+
+def _maintenance_distance(
+    item: dict, since: list[dict], latest: dict | None, garmin_distance: float | None
+) -> float:
     if garmin_distance is not None:
-        distance = (
-            garmin_distance
-            if not latest
-            else max(
-                0,
-                garmin_distance - (number(latest.get("distance_km")) or 0),
-            )
-        )
-    hours = sum(number(row.get("moving_time")) or 0 for row in since) / 3600 + (
-        item["initial_hours"] if not latest else 0
-    )
-    reaches_distance = bool(
+        baseline = number(latest.get("distance_km")) or 0 if latest else 0
+        return max(0, garmin_distance - baseline)
+    local_distance = sum(number(row.get("distance")) or 0 for row in since) / 1000
+    return local_distance + (item["initial_distance_km"] if not latest else 0)
+
+
+def _maintenance_hours(item: dict, since: list[dict], latest: dict | None) -> float:
+    hours = sum(number(row.get("moving_time")) or 0 for row in since) / 3600
+    return hours + (item["initial_hours"] if not latest else 0)
+
+
+def _maintenance_reached(item: dict, distance: float, hours: float) -> bool:
+    distance_due = bool(
         item.get("maintenance_km") and distance >= item["maintenance_km"]
     )
-    reaches_hours = bool(
+    hours_due = bool(
         item.get("maintenance_hours") and hours >= item["maintenance_hours"]
     )
-    reached = reaches_distance or reaches_hours
-    uncertain = _maintenance_uncertain(item, since, ambiguous)
-    due = None if uncertain else False
-    if reached:
-        due = True
-    return {
-        "maintenance_distance_km": round(distance, 2),
-        "maintenance_hours": round(hours, 2),
-        "maintenance_due": due,
-        "maintenance_same_day_sessions": len(ambiguous),
-        "maintenance_coverage": "partial" if uncertain else "known_assignments",
-    }
+    return distance_due or hours_due
 
 
 def _maintenance_uncertain(
