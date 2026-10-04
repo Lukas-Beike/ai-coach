@@ -306,6 +306,17 @@ globalThis.matchMedia("(max-width: 599px)").addEventListener("change", () => {
   if (state.data) { renderAnalysisHistory(state.data.performance?.history); renderPersonalRecovery(state.data.performance?.personal_recovery); }
 });
 
+function appendAnalysisLoadReferences(loadSeries, points) {
+  for (const [index, key] of ["ctl", "atl", "tsb"].entries()) {
+    const latest = points.findLast((point) => point[key] != null && Number.isFinite(Number(point[key])));
+    if (!latest) continue;
+    const prior = points.filter((point) => point.date >= addDateKey(latest.date, -42) && point.date < latest.date && point[key] != null && Number.isFinite(Number(point[key]))).map((point) => point[key]);
+    if (prior.length < 14) continue;
+    loadSeries[index].range = { lower: analysisQuantile(prior, .25), upper: analysisQuantile(prior, .75), status: prior.length < 28 ? "provisional" : "ok" };
+    loadSeries[index].referenceLabel = `Persönlicher üblicher Bereich: ${analysisValue(loadSeries[index].range.lower, "")}–${analysisValue(loadSeries[index].range.upper, "")} · ${prior.length} frühere Tage${prior.length < 28 ? " · vorläufig" : ""}`;
+  }
+}
+
 function renderAnalysisHistory(history) {
   const root = document.querySelector("#analysisHistoryCharts");
   const loadRoot = document.querySelector("#analysisLoadCharts");
@@ -321,14 +332,7 @@ function renderAnalysisHistory(history) {
   const loadSeries = [["ctl", "CTL · Fitness"], ["atl", "ATL · Ermüdung"], ["tsb", "TSB · Form"]].map(([key, label], color) => ({
     label, color, source: "Intervals.icu", points: load.points.filter(withinPeriod).map((point) => ({ date: point.date, value: point[key] })),
   }));
-  for (const [index, key] of ["ctl", "atl", "tsb"].entries()) {
-    const latest = load.points.findLast((point) => point[key] != null && Number.isFinite(Number(point[key])));
-    if (!latest) continue;
-    const prior = load.points.filter((point) => point.date >= addDateKey(latest.date, -42) && point.date < latest.date && point[key] != null && Number.isFinite(Number(point[key]))).map((point) => point[key]);
-    if (prior.length < 14) continue;
-    loadSeries[index].range = { lower: analysisQuantile(prior, .25), upper: analysisQuantile(prior, .75), status: prior.length < 28 ? "provisional" : "ok" };
-    loadSeries[index].referenceLabel = `Persönlicher üblicher Bereich: ${analysisValue(loadSeries[index].range.lower, "")}–${analysisValue(loadSeries[index].range.upper, "")} · ${prior.length} frühere Tage${prior.length < 28 ? " · vorläufig" : ""}`;
-  }
+  appendAnalysisLoadReferences(loadSeries, load.points);
   const loadNote = "CTL: langfristige Belastung (üblich 42 Tage). ATL: kurzfristige Belastung (7 Tage). Die Providerkonfiguration gilt. TSB = CTL − ATL am selben Tag; positiv bedeutet weniger kurzfristige als langfristige Last. Historische Werte bis gestern; kein Leistungstest oder alleinige Trainingsfreigabe.";
   loadRoot.append(analysisChartGroup("Belastung und Form", [
     analysisChart("Trainingsbelastung", loadSeries.slice(0, 2), "", start, end, "", { compactInfo: true, includeCoverage: false }),
