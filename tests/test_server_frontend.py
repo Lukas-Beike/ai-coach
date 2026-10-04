@@ -401,13 +401,13 @@ class ServerFrontendTests(ServerTestCase):
         self.assertEqual(dict(response.headers)["Cache-Control"], "public, max-age=31536000, immutable")
 
     def test_analysis_asset_is_served_and_precached_as_javascript(self):
-        response = StaticAssetService(server.PUBLIC_DIR).render("/analysis.js", "/analysis.js?v=50", None)
+        response = StaticAssetService(server.PUBLIC_DIR).render("/analysis.js", "/analysis.js?v=51", None)
         self.assertEqual(response.status, 200)
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
         self.assertEqual(dict(response.headers)["Cache-Control"], "public, max-age=31536000, immutable")
         self.assertIn(b"function renderAnalysisHistory", response.body)
         worker = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/analysis.js?v=50"', worker)
+        self.assertIn('"/analysis.js?v=51"', worker)
 
     def test_versioned_static_assets_are_immutable_and_support_etag_revalidation(self):
         response = StaticAssetService(server.PUBLIC_DIR).render("/appearance.js", "/appearance.js?v=218", None)
