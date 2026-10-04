@@ -247,3 +247,16 @@ test("sleep personal band is retained together with the target", async ({ page }
   await expect(info).toContainText("Grüner Bereich");
   await expect(info).toContainText("persönliches Schlafziel");
 });
+
+test("stale recovery history cannot bypass a rejected backend baseline", async ({ page }) => {
+  const history = Array.from({ length: 30 }, (_, index) => ({ date: `2026-09-${String(index + 1).padStart(2, "0")}`, value: 50 + index % 3 }));
+  await performanceFixture(page, { personal_recovery: { as_of: "2026-10-02",
+    baselines: [{ metric: "hrv", source: "Garmin Connect", measurement: "lastNightAvg", observed_at: "2026-09-30", nights: 29,
+      status: "insufficient_data", reason: "Messung veraltet.", history }],
+  } }, "recovery");
+  const root = page.locator("#personalRecovery");
+  await expect(root.locator(".analysis-baseline-band")).toHaveCount(0);
+  await root.getByRole("button", { name: "HRV", exact: true }).click();
+  await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("Messung veraltet.");
+  await expect(root.locator(".analysis-info-tooltip:popover-open")).not.toContainText("Grüner Bereich");
+});
