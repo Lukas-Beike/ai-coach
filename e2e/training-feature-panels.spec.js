@@ -69,14 +69,10 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
       ...baselines.map((item) => ({ ...item, source: "Garmin Connect", history: item.history.map((point) => ({ ...point, value: 99 })) })),
     ] });
   });
-  await expect(recovery.locator(".analysis-period-controls")).toHaveCount(0);
-  const weeklyRecovery = recovery.locator(".analysis-chart-card").first();
-  await weeklyRecovery.getByRole("button", { name: "Schlafdauer", exact: true }).click();
-  await expect(weeklyRecovery.locator(".analysis-info-tooltip:popover-open")).toContainText("9:00 h");
-  await page.keyboard.press("Escape");
-  await expect(weeklyRecovery.locator(".analysis-subchart").first().locator("tbody tr")).toHaveCount(2);
-  await expect(weeklyRecovery.locator(".analysis-chart-legend li")).toHaveCount(3);
-  await expect(weeklyRecovery).not.toContainText("99 h");
+  await expect(recovery.locator(".analysis-period-controls")).toHaveCount(1);
+  await recovery.getByRole("button", { name: "12 Wochen", exact: true }).click();
+  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Letzte 12 Wochen");
+  await expect(recovery.locator(".analysis-subchart")).toHaveCount(3);
 
   await page.evaluate(async () => { await applyNavigationRoute("plan/season", { historyMode: "replace" }); });
   await expect(page.locator("#seasonPreparation").getByRole("heading", { name: /Fixture cycling target/ }).first()).toBeVisible();
