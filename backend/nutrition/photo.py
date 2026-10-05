@@ -193,6 +193,20 @@ class NutritionPhotoExtractionService:
             "sugar_g, fiber_g, salt_g und confidence. Unlesbare Werte sowie unbekannte basis_amount/basis_unit sind null; nicht raten. basis_unit ist g, ml oder portion. Der Produktname darf fehlen, wenn nur eine Nährwerttabelle sichtbar ist."
         )
         encoded = base64.b64encode(image).decode("ascii")
+        text = self._request_text(provider, model, mime, encoded, instruction)
+        try:
+            candidate = json.loads(text)
+        except (TypeError, ValueError) as exc:
+            raise AppError(
+                502,
+                "Die Nährwerttabelle konnte nicht gelesen werden.",
+                reason="invalid_provider_response",
+            ) from exc
+        return validate_packaging_extraction(candidate, require_name=False)
+
+    def _request_text(
+        self, provider: str, model: str, mime: str, encoded: str, instruction: str
+    ) -> str:
         if provider == "gemini":
             if self._gemini_generate is None:
                 raise AppError(
@@ -243,15 +257,7 @@ class NutritionPhotoExtractionService:
                 },
             )
             text = _openai_text(response)
-        try:
-            candidate = json.loads(text)
-        except (TypeError, ValueError) as exc:
-            raise AppError(
-                502,
-                "Die Nährwerttabelle konnte nicht gelesen werden.",
-                reason="invalid_provider_response",
-            ) from exc
-        return validate_packaging_extraction(candidate, require_name=False)
+        return text
 
 
 def _openai_text(response: Any) -> str:
