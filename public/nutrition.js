@@ -1,12 +1,69 @@
 // Read-only nutrition views; every write remains an explicit Coach request.
 let nutritionLoadSequence = 0;
 
+const MAX_NUTRITION_IMAGE_EDGE = 1600;
+const MAX_NUTRITION_IMAGE_BYTES = 1_200_000;
+
+async function prepareNutritionImage(file, { maxEdge = MAX_NUTRITION_IMAGE_EDGE, maxBytes = MAX_NUTRITION_IMAGE_BYTES } = {}) {
+  if (!file || !/^image\/(png|jpe?g|webp)$/i.test(file.type)) throw new Error("Bitte ein JPEG-, PNG- oder WebP-Bild auswählen.");
+  if (!file.size || file.size > 15_000_000) throw new Error("Das Foto darf höchstens 15 MB groß sein.");
+  // Tiny already bounded images (such as browser fixture icons) can be passed
+  // through. Camera photos always go through the dimension cap below, even if
+  // their compressed source happens to be small.
+  if (file.size <= 128_000) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+    return { dataUrl: `data:${file.type};base64,${btoa(binary)}`, blob: file, width: 0, height: 0, mime: file.type };
+  }
+  let bitmap;
+  let objectUrl;
+  try {
+    if (typeof createImageBitmap === "function") bitmap = await createImageBitmap(file, { imageOrientation: "from-image", resizeWidth: maxEdge, resizeQuality: "high" });
+    else {
+      objectUrl = URL.createObjectURL(file);
+      bitmap = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("Das Foto konnte nicht dekodiert werden."));
+        image.src = objectUrl;
+      });
+    }
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) throw new Error("Die Bildverarbeitung ist auf diesem Gerät nicht verfügbar.");
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    let blob;
+    for (const quality of [0.84, 0.72, 0.6, 0.48]) {
+      blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+      if (blob && blob.size <= maxBytes) break;
+    }
+    if (!blob || blob.size > maxBytes) throw new Error("Das Foto ließ sich nicht ausreichend verkleinern. Bitte ein kleineres Bild wählen.");
+    const buffer = await blob.arrayBuffer();
+    let binary = "";
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
+    }
+    return { dataUrl: `data:image/jpeg;base64,${btoa(binary)}`, blob, width: canvas.width, height: canvas.height, mime: "image/jpeg" };
+  } finally {
+    bitmap?.close?.();
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function renderNutritionSegments(route) {
   const meals = route === "nutrition/meals";
+  const products = route === "nutrition/products";
   document.querySelector("#nutritionDiary").hidden = meals;
   document.querySelector("#nutritionMeals").hidden = !meals;
+  document.querySelector("#nutritionProductsPanel").hidden = !products;
   document.querySelectorAll("[data-nutrition-segment]").forEach((link) => {
-    const active = link.dataset.nutritionSegment === (meals ? "meals" : "diary");
+    const active = link.dataset.nutritionSegment === (products ? "products" : (meals ? "meals" : "diary"));
     link.classList.toggle("active", active);
     if (active) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
@@ -24,7 +81,7 @@ function nutritionCard(item, template) {
   const description = document.createElement("p");
   description.textContent = item.description;
   const values = document.createElement("p");
-  values.textContent = `${item.kcal} kcal · KH ${item.carbs_g ?? "–"} g · Protein ${item.protein_g ?? "–"} g · Fett ${item.fat_g ?? "–"} g${template ? " / Portion" : ""}`;
+  values.textContent = `${item.kcal == null ? "–" : item.kcal} kcal · KH ${item.carbs_g ?? "–"} g · Protein ${item.protein_g ?? "–"} g · Fett ${item.fat_g ?? "–"} g${template ? " / Portion" : ""}`;
   const source = document.createElement("small");
   const sourceLabels = { coach: "Coach-Schätzung", photo: "Foto-Schätzung", voice: "Sprach-Schätzung", manual: "Manuelle Angabe" };
   const sourceLabel = sourceLabels[item.source] || "Erfasst";
@@ -32,6 +89,10 @@ function nutritionCard(item, template) {
   const basis = item.nutrition_basis;
   let basisLabel = sourceLabel;
   if (basis?.kind === "database") basisLabel = "Datenbankberechnung · " + basis.ingredients.map((food) => `${food.source}: ${food.name}, ${food.amount} ${food.unit} (Basis 100 ${food.basis_unit})`).join("; ");
+  else if (basis?.kind === "product" || basis?.kind === "local_product") {
+    const product = basis.product || basis;
+    basisLabel = `Lokales Produkt · ${product.product_name || product.name || "Produkt"}${product.source ? ` (${product.source})` : ""}${basis.amount != null ? ` · ${basis.amount} ${basis.unit || "g"}` : ""}`;
+  }
   else if (basis?.kind === "manual_correction") basisLabel = "Manuell korrigierte Nährwerte";
   else if (basis?.kind === "packaging_label") basisLabel = "Verpackungsangabe";
   source.textContent = basisLabel + (template ? "" : syncLabel);
@@ -97,3 +158,220 @@ function resetNutritionView() {
   document.querySelector("#nutritionDate").value = "";
   for (const id of ["nutritionEntries", "nutritionTemplates", "nutritionTotals", "nutritionStatus"]) document.getElementById(id).replaceChildren();
 }
+
+let nutritionBarcodeStream = null;
+let nutritionBarcodeFrame = null;
+let nutritionBarcodeDetector = null;
+let nutritionProductForUse = null;
+
+function nutritionProductValue(value) {
+  return value == null || value === "" ? "" : String(value);
+}
+
+function normalizeNutritionProduct(product = {}) {
+  const per100 = product.per_100 || {};
+  const source = product.source === "Open Food Facts" || product.source === "open_food_facts" ? "open_food_facts" : (product.source || "packaging_label");
+  const normalized = {
+    ...product,
+    brand: product.brand || product.brands || "",
+    kcal: product.kcal ?? per100.kcal ?? null,
+    carbs_g: product.carbs_g ?? per100.carbs_g ?? null,
+    protein_g: product.protein_g ?? per100.protein_g ?? null,
+    fat_g: product.fat_g ?? per100.fat_g ?? null,
+    source_url: product.source_url || "",
+    source,
+  };
+  if (source === "open_food_facts" && String(product.id || "").startsWith("off:")) {
+    normalized.external_id = normalized.external_id || product.id;
+    delete normalized.id;
+  }
+  return normalized;
+}
+
+function nutritionProductForm(product = {}) {
+  const form = document.createElement("form");
+  form.className = "nutrition-product-form";
+  form.innerHTML = `<input name="id" type="hidden"><input name="source" type="hidden"><input name="source_url" type="hidden"><input name="external_id" type="hidden"><input name="provenance" type="hidden"><input name="warnings" type="hidden"><label>Marke<input name="brand" maxlength="120"></label><label>EAN/GTIN<input name="barcode" inputmode="numeric" pattern="[0-9]{8,14}" maxlength="14"></label><div class="nutrition-product-grid"><label>Name<input name="name" required maxlength="160"></label><label>kcal<input name="kcal" type="number" min="0" step="0.1"></label><label>Kohlenhydrate (g)<input name="carbs_g" type="number" min="0" step="0.1"></label><label>Protein (g)<input name="protein_g" type="number" min="0" step="0.1"></label><label>Fett (g)<input name="fat_g" type="number" min="0" step="0.1"></label><label>Bezugsmenge<input name="basis_amount" type="number" min="0.1" step="0.1" value="100"></label><label>Einheit<select name="basis_unit"><option value="g">pro 100 g</option><option value="ml">pro 100 ml</option><option value="portion">pro Portion</option></select></label></div><p class="fine-print" data-extraction-confidence></p><p class="fine-print">Leere Nährwerte bleiben unbekannt. Bitte prüfe jede erkannte Zahl vor dem Speichern.</p><div class="nutrition-actions"><button type="submit" class="push-button">Produkt lokal speichern</button><button type="button" class="secondary-button" data-product-cancel>Abbrechen</button></div>`;
+  for (const [key, value] of Object.entries(product)) {
+    const field = form.elements.namedItem(key);
+    if (field) field.value = nutritionProductValue(value);
+  }
+  form.elements.source.value = product.source || "packaging_label";
+  for (const key of ["source_url", "external_id"]) form.elements[key].value = nutritionProductValue(product[key]);
+  const provenance = product.provenance && typeof product.provenance === "object" ? product.provenance : { kind: product.source || product.provenance || "packaging_label", requires_confirmation: true };
+  form.elements.provenance.value = JSON.stringify(provenance);
+  form.elements.warnings.value = JSON.stringify(product.warnings || []);
+  const confidence = Number(product.confidence);
+  const warning = Number.isFinite(confidence) && confidence < 0.65 ? "Geringe Erkennungssicherheit. Werte besonders sorgfältig prüfen." : "Erkannte Werte bitte mit dem Etikett abgleichen.";
+  const confidenceLine = form.querySelector("[data-extraction-confidence]");
+  confidenceLine.textContent = Number.isFinite(confidence) ? `Erkennungssicherheit: ${Math.round(confidence * 100)} %. ${warning}` : `${warning}${product.warnings?.length ? ` Hinweise: ${product.warnings.join("; ")}` : ""}`;
+  for (const [field, score] of Object.entries(product.field_confidence || {})) {
+    const input = form.elements.namedItem(field);
+    if (input && Number(score) < 0.65) { input.classList.add("nutrition-low-confidence"); input.title = "Unsichere Fotoerkennung; bitte am Etikett prüfen."; }
+  }
+  if (!form.elements.basis_amount.value) form.elements.basis_amount.value = "100";
+  return form;
+}
+
+function nutritionProductPayload(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  const source = data.source || "packaging_label";
+  let provenance;
+  try { provenance = JSON.parse(data.provenance || "{}"); } catch { provenance = {}; }
+  const payload = { ...data, source, provenance: { ...(provenance && typeof provenance === "object" ? provenance : {}), kind: source, confirmed: true } };
+  try { payload.warnings = JSON.parse(data.warnings || "[]"); } catch { payload.warnings = []; }
+  for (const key of ["kcal", "carbs_g", "protein_g", "fat_g", "basis_amount"]) payload[key] = data[key] === "" ? null : Number(data[key]);
+  return payload;
+}
+
+function renderNutritionProducts(products, { local = true } = {}) {
+  const target = document.querySelector("#nutritionProducts");
+  if (!target) return;
+  target.replaceChildren();
+  if (!products?.length) { target.textContent = "Keine lokalen Produkte gefunden."; return; }
+  for (const rawProduct of products) {
+    const product = normalizeNutritionProduct(rawProduct);
+  const card = document.createElement("article");
+    card.className = "nutrition-card nutrition-product-card";
+    const title = document.createElement("h3"); title.textContent = [product.brand, product.name].filter(Boolean).join(" · ") || "Unbenanntes Produkt";
+    const detail = document.createElement("p"); detail.textContent = `${product.kcal == null ? "kcal unbekannt" : `${product.kcal} kcal`} · KH ${product.carbs_g ?? "–"} g · Protein ${product.protein_g ?? "–"} g · Fett ${product.fat_g ?? "–"} g`;
+    const source = document.createElement("small"); source.textContent = `${product.source === "packaging_label" ? "Verpackungsangabe" : (product.source || "Lokales Produkt")}${product.barcode ? ` · EAN ${product.barcode}` : ""}`;
+    const basis = document.createElement("small"); basis.textContent = product.basis_amount ? `Basis: ${product.basis_amount} ${product.basis_unit || "g"}` : "Bezugsmenge unbekannt";
+    card.append(title, detail, source, basis);
+    if (!local || product.local === false) {
+      const button = document.createElement("button"); button.type = "button"; button.className = "secondary-button"; button.textContent = "Lokal speichern";
+      button.addEventListener("click", () => saveNutritionProduct(product)); card.append(button);
+    } else if (product.id) {
+      const actions = document.createElement("div"); actions.className = "nutrition-actions";
+      const use = document.createElement("button"); use.type = "button"; use.className = "push-button"; use.textContent = "In Mahlzeit erfassen";
+      use.addEventListener("click", () => useNutritionProduct(product));
+      const edit = document.createElement("button"); edit.type = "button"; edit.className = "secondary-button"; edit.textContent = "Bearbeiten"; edit.addEventListener("click", () => saveNutritionProduct(product));
+      const archive = document.createElement("button"); archive.type = "button"; archive.className = "secondary-button"; archive.textContent = "Archivieren";
+      archive.addEventListener("click", async () => {
+        if (!await requestConfirmation(`Produkt „${product.name}“ archivieren?`)) return;
+        try { await api("/api/nutrition/products/archive", { method: "POST", body: JSON.stringify({ id: product.id, confirmed: true }) }); await loadNutritionProducts(document.querySelector("#nutritionProductQuery").value.trim()); }
+        catch (error) { document.querySelector("#nutritionProductStatus").textContent = `Produkt konnte nicht archiviert werden: ${error.message}`; }
+      });
+      actions.append(use, edit, archive); card.append(actions);
+    }
+    target.append(card);
+  }
+}
+
+function useNutritionProduct(product) {
+  const unit = product.basis_unit === "ml" ? "ml" : product.basis_unit === "portion" ? "Portion" : "g";
+  nutritionProductForUse = product;
+  const dialog = document.querySelector("#nutritionProductUseDialog");
+  document.querySelector("#nutritionProductUseName").textContent = product.name || "Lokales Produkt";
+  document.querySelector("#nutritionProductUseUnit").textContent = `(in ${unit})`;
+  const amount = document.querySelector("#nutritionProductUseAmount"); amount.value = product.basis_amount || 100;
+  dialog.showModal();
+}
+
+function createNutritionProductDraft() {
+  const product = nutritionProductForUse;
+  if (!product) return;
+  const unit = product.basis_unit === "ml" ? "ml" : product.basis_unit === "portion" ? "Portion" : "g";
+  const amount = document.querySelector("#nutritionProductUseAmount").value;
+  const input = document.querySelector("#messageInput");
+  if (!input) return;
+  input.value = `Erfasse ${amount} ${unit} ${product.name || "dieses Produkts"} als Mahlzeit (Produkt-ID: ${product.id}).`;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  state.chatDraftDirty = true;
+  document.querySelector("#nutritionProductUseDialog")?.close();
+  nutritionProductForUse = null;
+  void applyNavigationRoute("coach", { historyMode: "push" });
+  jumpToChatComposer();
+}
+
+async function loadNutritionProducts(query = "") {
+  const status = document.querySelector("#nutritionProductStatus");
+  try {
+    status.textContent = "Produkte werden gesucht …";
+    const params = query ? `?q=${encodeURIComponent(query)}` : "";
+    const result = await api(`/api/nutrition/products${params}`);
+    renderNutritionProducts(result.products || []);
+    status.textContent = result.products?.length ? "" : "Keine lokalen Produkte gefunden.";
+  } catch (error) { status.textContent = `Produktsuche fehlgeschlagen: ${error.message}`; }
+}
+
+async function saveNutritionProduct(product) {
+  const editor = document.querySelector("#nutritionExtraction");
+  const form = product instanceof HTMLFormElement ? product : nutritionProductForm(normalizeNutritionProduct(product));
+  if (product instanceof HTMLFormElement) {
+    try {
+      const payload = nutritionProductPayload(form);
+      const saved = await api("/api/nutrition/products", { method: payload.id ? "PUT" : "POST", body: JSON.stringify({ ...payload, confirmed: true }) });
+      editor.hidden = true; editor.replaceChildren(); document.querySelector("#nutritionProductStatus").textContent = `Produkt „${saved.product?.name || "Produkt"}“ lokal gespeichert.`; await loadNutritionProducts();
+    } catch (error) { document.querySelector("#nutritionProductStatus").textContent = `Produkt konnte nicht gespeichert werden: ${error.message}`; }
+    return;
+  }
+  editor.replaceChildren(); editor.append(form); editor.hidden = false;
+  form.addEventListener("submit", (event) => { event.preventDefault(); void saveNutritionProduct(form); });
+  form.querySelector("[data-product-cancel]").addEventListener("click", () => { editor.hidden = true; editor.replaceChildren(); });
+}
+
+async function extractNutritionProduct(file) {
+  const status = document.querySelector("#nutritionProductStatus");
+  try {
+    status.textContent = "Nährwerttabelle wird gelesen …";
+    const prepared = await prepareNutritionImage(file);
+    const result = await api("/api/nutrition/products/extract", { method: "POST", body: JSON.stringify({ image_data_url: prepared.dataUrl }) });
+    const extraction = { ...(result.candidate || result.extraction || {}), provenance: result.provenance || "packaging_label", source: "packaging_label" };
+    saveNutritionProduct(extraction);
+    status.textContent = "Bitte erkannte Werte prüfen und ausdrücklich speichern.";
+  } catch (error) { status.textContent = `Foto konnte nicht verarbeitet werden: ${error.message}`; }
+}
+
+async function lookupNutritionProduct(barcode) {
+  const clean = String(barcode || "").replace(/\D/g, "");
+  if (!/^\d{8,14}$/.test(clean)) { document.querySelector("#nutritionBarcodeStatus").textContent = "Bitte eine gültige EAN mit 8 bis 14 Ziffern eingeben."; return; }
+  try {
+    document.querySelector("#nutritionBarcodeStatus").textContent = "Produkt wird gesucht …";
+    const result = await api("/api/nutrition/products/lookup", { method: "POST", body: JSON.stringify({ barcode: clean }) });
+    document.querySelector("#nutritionBarcodeDialog")?.close();
+    const product = result.product || result.foods?.[0] || result.products?.[0] || null;
+    const isLocal = result.local !== false && result.source !== "open_food_facts";
+    renderNutritionProducts(product ? [{ ...product, local: isLocal }] : [], { local: isLocal });
+    document.querySelector("#nutritionProductStatus").textContent = isLocal ? "Lokales Produkt gefunden." : "Online-Treffer gefunden. Prüfe ihn und speichere ihn lokal.";
+    if (product && !isLocal) saveNutritionProduct(normalizeNutritionProduct({ ...product, source: result.source || product.source || "open_food_facts" }));
+  } catch (error) { document.querySelector("#nutritionBarcodeStatus").textContent = `Produktsuche fehlgeschlagen: ${error.message}`; }
+}
+
+function stopNutritionBarcode() {
+  if (nutritionBarcodeFrame) cancelAnimationFrame(nutritionBarcodeFrame);
+  nutritionBarcodeFrame = null;
+  nutritionBarcodeStream?.getTracks().forEach((track) => track.stop());
+  nutritionBarcodeStream = null;
+  const video = document.querySelector("#nutritionBarcodeVideo"); if (video) video.srcObject = null;
+}
+
+async function scanNutritionBarcode() {
+  const dialog = document.querySelector("#nutritionBarcodeDialog");
+  const video = document.querySelector("#nutritionBarcodeVideo");
+  const status = document.querySelector("#nutritionBarcodeStatus");
+  dialog.showModal();
+  if (!("BarcodeDetector" in globalThis) || !navigator.mediaDevices?.getUserMedia) { status.textContent = "Automatisches Scannen wird hier nicht unterstützt. Gib die EAN manuell ein."; return; }
+  try {
+    nutritionBarcodeDetector = new BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
+    nutritionBarcodeStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+    video.srcObject = nutritionBarcodeStream; await video.play(); status.textContent = "Barcode vor die Kamera halten …";
+    const scan = async () => {
+      if (!dialog.open) return;
+      try { const codes = await nutritionBarcodeDetector.detect(video); if (codes[0]?.rawValue) { document.querySelector("#nutritionBarcodeManual").value = codes[0].rawValue; await lookupNutritionProduct(codes[0].rawValue); return; } } catch (_) { /* continue until cancelled */ }
+      nutritionBarcodeFrame = requestAnimationFrame(scan);
+    };
+    nutritionBarcodeFrame = requestAnimationFrame(scan);
+  } catch (error) { status.textContent = `Kamera nicht verfügbar. Gib die EAN manuell ein. (${error.message})`; stopNutritionBarcode(); }
+}
+
+document.querySelector("#nutritionProductSearch")?.addEventListener("submit", (event) => { event.preventDefault(); void loadNutritionProducts(document.querySelector("#nutritionProductQuery").value.trim()); });
+document.querySelector("#nutritionLabelButton")?.addEventListener("click", () => document.querySelector("#nutritionLabelInput").click());
+document.querySelector("#nutritionProductManual")?.addEventListener("click", () => saveNutritionProduct({ source: "manual", basis_amount: 100, basis_unit: "g" }));
+document.querySelector("#nutritionLabelInput")?.addEventListener("change", (event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void extractNutritionProduct(file); });
+document.querySelector("#nutritionBarcodeButton")?.addEventListener("click", () => void scanNutritionBarcode());
+document.querySelector("#nutritionBarcodeCancel")?.addEventListener("click", () => document.querySelector("#nutritionBarcodeDialog")?.close());
+document.querySelector("#nutritionBarcodeDialog")?.addEventListener("close", stopNutritionBarcode);
+document.querySelector("#nutritionBarcodeForm")?.addEventListener("submit", (event) => { event.preventDefault(); void lookupNutritionProduct(document.querySelector("#nutritionBarcodeManual").value); });
+document.querySelector("#nutritionProductUseCancel")?.addEventListener("click", () => document.querySelector("#nutritionProductUseDialog")?.close());
+document.querySelector("#nutritionProductUseForm")?.addEventListener("submit", (event) => { event.preventDefault(); createNutritionProductDraft(); });

@@ -169,7 +169,7 @@ function renderActiveRoute(mainRoute, panelRoute) {
   if (mainRoute === "analysis") renderAnalysisSegments(panelRoute);
   if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
   if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
-  if (mainRoute === "nutrition") { renderNutritionSegments(panelRoute); if (state.data) void loadNutrition(); }
+  if (mainRoute === "nutrition") { renderNutritionSegments(panelRoute); if (state.data) { if (panelRoute === "nutrition/products") void loadNutritionProducts(); else void loadNutrition(); } }
   if (state.data && mainRoute === "more") {
     void loadContextPreview();
     void loadLogs();
@@ -3811,7 +3811,7 @@ async function deleteServerLogs() {
 }
 
 function render(data) {
-  if (baseRoute() === "nutrition") void loadNutrition();
+  if (baseRoute() === "nutrition") { if (state.route === "nutrition/products") void loadNutritionProducts(); else void loadNutrition(); }
   const firstRender = !state.data;
   state.data = data;
   renderAppVersion(data.app);
@@ -4503,21 +4503,22 @@ $("#attachmentInput").addEventListener("change", async (event) => {
   state.chatAttachmentsLoading = true;
   updateChatControls();
   try {
-    if ((state.chatAttachments || []).length + files.length > 4 || files.some(file => !file.size || file.size > 5000000 || !/\.(gpx|fit|png|jpe?g|webp)$/i.test(file.name))) {
-      throw new Error("Bis zu 4 GPX-, FIT-, PNG-, JPEG- oder WebP-Dateien mit je höchstens 5 MB auswählen.");
+    if ((state.chatAttachments || []).length + files.length > 4 || files.some(file => !file.size || file.size > 15000000 || !/\.(gpx|fit|png|jpe?g|webp)$/i.test(file.name))) {
+      throw new Error("Bis zu 4 GPX-, FIT-, PNG-, JPEG- oder WebP-Dateien mit je höchstens 15 MB auswählen.");
     }
-    const attachments = await Promise.all(files.map(file => new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result !== "string") {
-          reject(new Error("Die Datei konnte nicht als Data-URL gelesen werden."));
-          return;
-        }
-        resolve({ name: file.name, data: reader.result.split(",")[1] });
-      };
-      reader.onerror = () => reject(new Error("Die Datei konnte nicht gelesen werden."));
-      reader.readAsDataURL(file);
-    })));
+    const attachments = [];
+    for (const file of files) {
+      if (/\.(png|jpe?g|webp)$/i.test(file.name)) {
+        const prepared = await prepareNutritionImage(file);
+        const name = prepared.mime === file.type ? file.name : file.name.replace(/\.[^.]+$/, ".jpg");
+        attachments.push({ name, data: prepared.dataUrl.split(",")[1], type: prepared.mime });
+      } else {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let binary = "";
+        for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+        attachments.push({ name: file.name, data: btoa(binary) });
+      }
+    }
     if (generation !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
     state.chatAttachments = [...(state.chatAttachments || []), ...attachments];
     state.chatDraftDirty = true;
