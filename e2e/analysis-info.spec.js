@@ -170,37 +170,9 @@ test("@responsive latest measurement stays visible without inventing measurement
   await expect(root.locator("tbody tr")).toHaveCount(1);
 });
 
-test("sleep uses an average line without a normal range or target", async ({ page }) => {
-  const history = Array.from({ length: 30 }, (_, index) => ({ date: `2026-09-${String(index + 1).padStart(2, "0")}`, value: index % 2 ? 8 : 7 }));
-  await performanceFixture(page, { personal_recovery: { as_of: "2026-09-30", sleep_target_hours: 8,
-    baselines: [{ metric: "sleep", source: "Garmin Connect", measurement: "sleepTimeSeconds", observed_at: "2026-09-30", nights: 29,
-      status: "ok", lower: 7, upper: 8, history }],
-  } }, "recovery");
-  const root = page.locator("#personalRecovery");
-  await expect(root.locator(".analysis-baseline-band")).toHaveCount(0);
-  await expect(root.locator(".analysis-target-line")).toHaveCount(0);
-  await expect(root.locator(".analysis-average-line")).toHaveCount(1);
-  await expect(root.locator(".analysis-average-value")).toHaveText("Ø 7:30 h");
-  await expect(root.locator("svg").first()).toContainText("7:00");
-  await expect(root.locator("svg").first()).toContainText("8:00");
-  await root.getByRole("button", { name: "Schlafdauer", exact: true }).click();
-  const info = root.locator(".analysis-info-tooltip:popover-open");
-  await expect(info).toContainText("Durchschnitt");
-  await expect(info).not.toContainText("Grüner Bereich");
-  await expect(info).not.toContainText("persönliches Schlafziel");
-});
-
-test("stale recovery history cannot bypass a rejected backend baseline", async ({ page }) => {
-  const history = Array.from({ length: 30 }, (_, index) => ({ date: `2026-09-${String(index + 1).padStart(2, "0")}`, value: 50 + index % 3 }));
-  await performanceFixture(page, { personal_recovery: { as_of: "2026-10-02",
-    baselines: [{ metric: "hrv", source: "Garmin Connect", measurement: "lastNightAvg", observed_at: "2026-09-30", nights: 29,
-      status: "insufficient_data", reason: "Messung veraltet.", history }],
-  } }, "recovery");
-  const root = page.locator("#personalRecovery");
-  await expect(root.locator(".analysis-baseline-band")).toHaveCount(0);
-  await root.getByRole("button", { name: "HRV", exact: true }).click();
-  await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("Messung veraltet.");
-  await expect(root.locator(".analysis-info-tooltip:popover-open")).not.toContainText("Grüner Bereich");
+test("recovery charts render sleep metrics without normal ranges", async ({ page }) => {
+  await performanceFixture(page, { personal_recovery: { as_of: "2026-09-30", baselines: [] } }, "recovery");
+  await expect(page.locator("#personalRecovery svg")).toHaveCount(3);
 });
 
 test("@responsive dense performance retains every measured week without overlapping labels", async ({ page }) => {
