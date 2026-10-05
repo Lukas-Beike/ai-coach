@@ -320,6 +320,11 @@ function useNutritionProduct(product) {
   dialog.showModal();
 }
 
+function nutritionProductUnit(product = {}) {
+  const unit = String(product.basis_unit || "g").toLowerCase();
+  return ["g", "ml", "portion"].includes(unit) ? unit : "g";
+}
+
 async function createNutritionProductDraft() {
   const product = nutritionProductForUse;
   if (!product) return;
