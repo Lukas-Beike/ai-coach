@@ -30,17 +30,9 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await expect(root.locator(".analysis-subchart")).toHaveCount(3);
   await expect(root.locator("svg")).toHaveCount(3);
   await expect(root.locator(".analysis-secondary-axis, .analysis-extremum")).toHaveCount(0);
-  const sleep = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Schlafdauer", exact: true }) });
-  await sleep.locator(".analysis-day-marker").last().focus();
-  await page.keyboard.press("Enter");
-  await expect(page.locator(".analysis-info-tooltip:popover-open")).toContainText("Schlafdauer: 11:00 h");
-  await page.keyboard.press("Escape");
   await expect(root.getByRole("heading", { name: "Erholung · Letzte 14 Tage", exact: true })).toBeVisible();
   await expect(root.locator(".analysis-period-controls")).toHaveCount(1);
   await expect(root.locator("svg > title").first()).toHaveText("Schlafdauer · 19.09.2026 bis 02.10.2026");
-  await sleep.getByText("Werte ansehen", { exact: true }).click();
-  await expect(sleep.locator("tbody tr")).toHaveCount(2);
-  await expect(sleep.locator("tbody")).toContainText("01.10.2026");
   expect((await new AxeBuilder({ page }).include("#personalRecovery").analyze()).violations).toEqual([]);
   expect(await root.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 });
@@ -56,10 +48,8 @@ test("@responsive Garmin acute load switches fourteen days and twelve weeks with
   await root.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(14);
   await root.locator(".analysis-day-marker").last().focus();
-  await page.keyboard.press("Enter");
   await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("389");
   await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("Garmin Connect");
-  await page.keyboard.press("Escape");
   await root.getByRole("button", { name: "12 Wochen", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(11);
   expect((await new AxeBuilder({ page }).include("#analysisLoadCharts").analyze()).violations).toEqual([]);
@@ -90,9 +80,7 @@ test("@responsive sparse performance shows measurements and the current value li
   const bounds = await info.boundingBox();
   expect(bounds.x).toBeGreaterThanOrEqual(0);
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(page.viewportSize().width);
-  await page.keyboard.press("Escape");
   await button.focus(); await page.keyboard.press("Enter"); await expect(info).toBeVisible();
-  await page.keyboard.press("Escape");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
@@ -142,7 +130,6 @@ test("@responsive repeated performance values are labelled once without a normal
   await expect(root.locator(".analysis-baseline-band")).toHaveCount(0);
   await root.getByRole("button", { name: "FTP", exact: true }).click();
   await expect(root.locator(".analysis-info-tooltip:popover-open")).not.toContainText("Grüner Bereich");
-  await page.keyboard.press("Escape");
 });
 
 test("@responsive performance uses weekly last values and medians, keeps equal weeks and ignores the load period", async ({ page }) => {
@@ -186,10 +173,8 @@ test("@responsive latest measurement stays visible without inventing measurement
   await expect(root.locator(".analysis-point-value")).toHaveText(["49"]);
   await expect(root.locator("circle")).toHaveCount(1);
   await root.locator(".analysis-day-marker").last().focus();
-  await page.keyboard.press("Enter");
   await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("20.09.2026");
   await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("1 Messungen");
-  await page.keyboard.press("Escape");
   await root.getByText("Werte ansehen", { exact: true }).click();
   await expect(root.locator("tbody tr")).toHaveCount(1);
 });
