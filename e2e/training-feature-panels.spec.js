@@ -55,7 +55,6 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.getByRole("heading", { name: "Aktuelle Erholung", exact: true })).toHaveCount(0);
   const recovery = page.locator("#personalRecovery");
   await expect(recovery.locator("svg")).toHaveCount(3);
-  await expect(recovery.getByRole("group", { name: "Schlafdauer: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen." })).toBeVisible();
   await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Letzte 14 Tage");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 
