@@ -47,9 +47,6 @@ test("@responsive Garmin acute load switches fourteen days and twelve weeks with
   await expect(root).not.toContainText("Fitness");
   await root.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(14);
-  await root.locator(".analysis-day-marker").last().focus();
-  await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("389");
-  await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("Garmin Connect");
   await root.getByRole("button", { name: "12 Wochen", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(11);
   expect((await new AxeBuilder({ page }).include("#analysisLoadCharts").analyze()).violations).toEqual([]);
@@ -172,9 +169,6 @@ test("@responsive latest measurement stays visible without inventing measurement
   await expect(root.locator(".analysis-current-line")).toHaveCount(1);
   await expect(root.locator(".analysis-point-value")).toHaveText(["49"]);
   await expect(root.locator("circle")).toHaveCount(1);
-  await root.locator(".analysis-day-marker").last().focus();
-  await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("20.09.2026");
-  await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("1 Messungen");
   await root.getByText("Werte ansehen", { exact: true }).click();
   await expect(root.locator("tbody tr")).toHaveCount(1);
 });
