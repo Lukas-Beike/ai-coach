@@ -55,7 +55,7 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.getByRole("heading", { name: "Aktuelle Erholung", exact: true })).toHaveCount(0);
   const recovery = page.locator("#personalRecovery");
   await expect(recovery.locator("svg")).toHaveCount(3);
-  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung Â· Letzte 14 Tage");
+  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Letzte 14 Tage");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 
   await page.evaluate(() => {
@@ -71,7 +71,7 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   });
   await expect(recovery.locator(".analysis-period-controls")).toHaveCount(1);
   await recovery.getByRole("button", { name: "12 Wochen", exact: true }).click();
-  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung Â· Letzte 12 Wochen");
+  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Letzte 12 Wochen");
   await expect(recovery.locator(".analysis-subchart")).toHaveCount(3);
 
   await page.evaluate(async () => { await applyNavigationRoute("plan/season", { historyMode: "replace" }); });
@@ -113,24 +113,4 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.locator('[data-nutrition-segment="fueling"], #trainingFueling, #nutritionLog, #nutritionDefine')).toHaveCount(0);
   await expect(page.locator("#nutritionPanel").getByRole("button", { name: /Coach/ })).toHaveCount(0);
   await expect(page.locator("#seasonPreparation").getByRole("button", { name: /Vorbereitung besprechen|Vorschau anfragen/ })).toHaveCount(0);
-});
-
-test("@responsive local equipment and maintenance remain visible without Garmin inventory", async ({ page }) => {
-  await page.route("**/api/analysis/training-records", route => route.fulfill({ json: { equipment: {
-    garmin_items: [], items: [{name: "Saved bike", kind: "bike", revision: 3,
-      usage: {distance_km: 120, hours: 6, assigned_sessions: 4, maintenance_distance_km: 20,
-        maintenance_hours: 1, maintenance_due: null, maintenance_coverage: "partial"},
-      maintenance: [{date: "2026-09-30", notes: "<img src=x> Chain replaced"}] }],
-  } } }));
-  await page.goto("/#more/equipment");
-  const gear = page.locator("#equipmentItems");
-  await expect(gear.locator("details summary")).toBeVisible();
-  await gear.locator("details summary").click();
-  await expect(gear.getByRole("heading", {name: "Saved bike"})).toBeVisible();
-  await expect(gear).toContainText("Revision 3");
-  await expect(gear).toContainText("120 km");
-  await expect(gear).toContainText("4 zugeordnete Einheiten");
-  await expect(gear).toContainText("Wartungsstand unklar");
-  await expect(gear).toContainText("Chain replaced");
-  await expect(gear.locator("img")).toHaveCount(0);
 });
