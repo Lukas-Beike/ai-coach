@@ -22,6 +22,7 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
       { metric: "hrv", source: "Garmin Connect", measurement: "lastNightAvg", observed_at: "2026-10-01", nights: 28,
         status: "ok", lower: 50, upper: 60, position: "within", history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
       { metric: "resting_hr", source: "Intervals.icu", measurement: "restingHR", observed_at: "2026-10-01", nights: 1,
+        status: "insufficient_data", reason: "Mindestens 14 frÃ¼here passende NÃ¤chte erforderlich.", history: [{ date: "2026-10-01", value: 48 }] },
     ],
   } }, "recovery");
   const root = page.locator("#personalRecovery");
