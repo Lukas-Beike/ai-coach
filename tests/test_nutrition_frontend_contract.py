@@ -25,11 +25,14 @@ class NutritionFrontendContractTests(unittest.TestCase):
 
         # The generic attachment handler must finish image preparation before
         # replacing state.chatAttachments, otherwise a Chromium decode failure
-        # can discard the draft or leave a half-attached image.
+        # can discard the draft or leave a half-attached image. Image files go
+        # through the shared helper, which owns the nutrition image processing.
+        helper = app[app.index("async function prepareChatAttachment(file)") : app.index('$("#attachmentInput").addEventListener')]
         handler = app[app.index('$("#attachmentInput").addEventListener') :]
-        self.assertIn("prepareNutritionImage(file)", handler)
+        self.assertIn("prepareNutritionImage(file)", helper)
+        self.assertIn("prepareChatAttachment", handler)
         self.assertIn("state.chatAttachments =", handler)
-        self.assertLess(handler.index("await prepareNutritionImage(file)"), handler.index("state.chatAttachments ="))
+        self.assertLess(handler.index("await Promise.all(files.map(prepareChatAttachment))"), handler.index("state.chatAttachments ="))
         self.assertIn("state.chatAttachmentsLoading = false", handler)
         self.assertIn("catch (error) { toast(error.message, true); }", handler)
 
