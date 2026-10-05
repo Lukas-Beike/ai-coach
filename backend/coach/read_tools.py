@@ -145,21 +145,29 @@ class CoachReadToolService:
         if name == "read_nutrition":
             return self._read_nutrition(arguments)
         if name in {"lookup_food", "calculate_food_nutrition"}:
-            if self._nutrition_service is None:
-                raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
-            foods = self._nutrition_service().food_database
-            if name == "lookup_food":
-                if arguments.get("barcode") or arguments.get("query"):
-                    return self._nutrition_service().lookup_product(arguments)
-                return foods.lookup(arguments)
-            if arguments.get("product_id"):
-                return self._nutrition_service().calculate_product(
-                    str(arguments.get("product_id")),
-                    arguments.get("amount"),
-                    str(arguments.get("unit") or ""),
-                )
-            return {"ok": True, **foods.calculate(arguments.get("ingredients"))}
+            return self._food_database_read(name, arguments)
         return None
+
+    def _food_database_read(
+        self, name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        if self._nutrition_service is None:
+            raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
+        nutrition = self._nutrition_service()
+        if name == "lookup_food":
+            if arguments.get("barcode") or arguments.get("query"):
+                return nutrition.lookup_product(arguments)
+            return nutrition.food_database.lookup(arguments)
+        if arguments.get("product_id"):
+            return nutrition.calculate_product(
+                str(arguments.get("product_id")),
+                arguments.get("amount"),
+                str(arguments.get("unit") or ""),
+            )
+        return {
+            "ok": True,
+            **nutrition.food_database.calculate(arguments.get("ingredients")),
+        }
 
     def _read_nutrition(self, arguments: dict[str, Any]) -> dict[str, Any]:
         if not self._nutrition_service:
