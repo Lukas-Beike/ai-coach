@@ -17,6 +17,7 @@ from backend.providers import openai as openai_provider
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 _DATA_URL = re.compile(r"^data:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$")
+INVALID_BASIS_AMOUNT = "Ungültige Bezugsmenge."
 
 
 def validate_packaging_extraction(
@@ -36,18 +37,18 @@ def validate_packaging_extraction(
         )
     basis_unit = str(payload.get("basis_unit") or "").strip().lower()
     if basis_unit and basis_unit not in {"g", "ml", "portion"}:
-        raise AppError(400, "Ungültige Bezugsmenge.", reason="invalid_food_extraction")
+        raise AppError(400, INVALID_BASIS_AMOUNT, reason="invalid_food_extraction")
     basis_amount = None
     if payload.get("basis_amount") not in (None, ""):
         if isinstance(payload.get("basis_amount"), bool):
             raise AppError(
-                400, "Ungültige Bezugsmenge.", reason="invalid_food_extraction"
+                400, INVALID_BASIS_AMOUNT, reason="invalid_food_extraction"
             )
         try:
             basis_amount = float(payload.get("basis_amount"))  # type: ignore[arg-type]
         except (TypeError, ValueError) as exc:
             raise AppError(
-                400, "Ungültige Bezugsmenge.", reason="invalid_food_extraction"
+                400, INVALID_BASIS_AMOUNT, reason="invalid_food_extraction"
             ) from exc
         if not math.isfinite(basis_amount) or not 0 < basis_amount <= 10000:
             raise AppError(

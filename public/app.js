@@ -4509,13 +4509,21 @@ $("#attachmentInput").addEventListener("change", async (event) => {
     const attachments = [];
     for (const file of files) {
       if (/\.(png|jpe?g|webp)$/i.test(file.name)) {
-        const prepared = await prepareNutritionImage(file);
-        const name = prepared.mime === file.type ? file.name : file.name.replace(/\.[^.]+$/, ".jpg");
-        attachments.push({ name, data: prepared.dataUrl.split(",")[1], type: prepared.mime });
+        try {
+          const prepared = await prepareNutritionImage(file);
+          const name = prepared.mime === file.type ? file.name : file.name.replace(/\.[^.]+$/, ".jpg");
+          attachments.push({ name, data: prepared.dataUrl.split(",")[1], type: prepared.mime });
+        } catch (error) {
+          if (file.size > 5_000_000) throw error;
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          let binary = "";
+          for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCodePoint(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+          attachments.push({ name: file.name, data: btoa(binary), type: file.type });
+        }
       } else {
         const bytes = new Uint8Array(await file.arrayBuffer());
         let binary = "";
-        for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+        for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCodePoint(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
         attachments.push({ name: file.name, data: btoa(binary) });
       }
     }

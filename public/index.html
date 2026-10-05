@@ -178,7 +178,7 @@
             <button type="button" class="push-button" id="nutritionBarcodeButton">Barcode scannen</button>
             <button type="button" class="secondary-button" id="nutritionLabelButton">Nährwerttabelle fotografieren</button>
             <button type="button" class="secondary-button" id="nutritionProductManual">Produkt manuell erfassen</button>
-            <input id="nutritionLabelInput" type="file" accept="image/*" capture="environment" hidden>
+            <label for="nutritionLabelInput" class="visually-hidden">Nährwerttabelle auswählen</label><input id="nutritionLabelInput" type="file" accept="image/*" capture="environment" hidden>
           </div>
           <form id="nutritionProductSearch" class="nutrition-search">
             <label for="nutritionProductQuery">Lokale Produkte suchen</label>
@@ -450,6 +450,6 @@
   <script src="/nutrition.js?v=12" defer></script>
   <script src="/analysis.js?v=54" defer></script>
   <script src="/activity-details.js?v=7" defer></script>
-  <script src="/app.js?v=264" defer></script>
+  <script src="/app.js?v=265" defer></script>
 </body>
 </html>

@@ -12,6 +12,7 @@ from backend.http_api.auth import SessionAuthService
 from backend.nutrition.service import NutritionService
 
 NUTRITION_ENTRY_PATH = "/api/nutrition/entry"
+NUTRITION_PRODUCTS_PATH = "/api/nutrition/products"
 INVALID_BODY = "Ungültiger Anfrageinhalt."
 
 
@@ -34,14 +35,14 @@ class NutritionGetRoutes:
             "/api/nutrition/range",
             "/api/nutrition/templates",
             "/api/nutrition/fueling",
-            "/api/nutrition/products",
+            NUTRITION_PRODUCTS_PATH,
         }:
             return False
 
         self._session_auth_service().require_auth(handler)
         query = parse_qs(urlparse(handler.path).query)
         svc = self._nutrition_service()
-        if path == "/api/nutrition/products":
+        if path == NUTRITION_PRODUCTS_PATH:
             barcode = query.get("barcode", [None])[0]
             term = query.get("q", [None])[0]
             if barcode:
@@ -96,10 +97,10 @@ class NutritionPostRoutes:
             NUTRITION_ENTRY_PATH: self._create,
             f"{NUTRITION_ENTRY_PATH}/delete": self._delete,
             "/api/nutrition/sync": self._sync,
-            "/api/nutrition/products": self._save_product,
-            "/api/nutrition/products/lookup": self._lookup_product,
-            "/api/nutrition/products/extract": self._extract_product,
-            "/api/nutrition/products/archive": self._archive_product,
+            NUTRITION_PRODUCTS_PATH: self._save_product,
+            f"{NUTRITION_PRODUCTS_PATH}/lookup": self._lookup_product,
+            f"{NUTRITION_PRODUCTS_PATH}/extract": self._extract_product,
+            f"{NUTRITION_PRODUCTS_PATH}/archive": self._archive_product,
         }
         route = routes.get(path)
         if route is None:
