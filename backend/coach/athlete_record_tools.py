@@ -162,16 +162,7 @@ class CoachAthleteRecordToolService:
         if name == "save_nutrition_template":
             return self._save_nutrition_template(arguments)
         if name == "save_nutrition_product":
-            payload = structured_action_payload(arguments)
-            product_id = str(payload.get("id") or "").strip()
-            if product_id:
-                require_coach_scope(intent, f"nutrition_product:{product_id}")
-            product = (
-                self._nutrition.update_product(product_id, payload)
-                if product_id
-                else self._nutrition.save_product(payload)
-            )
-            return {"ok": True, "product": product}
+            return self._save_nutrition_product(arguments, intent)
         if name == "delete_nutrition_template":
             return {
                 "ok": True,
@@ -187,18 +178,39 @@ class CoachAthleteRecordToolService:
                     meal_time=arguments.get("meal_time"),
                 ),
             }
-        if name == "save_nutrition_entry":
-            payload = structured_action_payload(arguments)
-            return {"ok": True, "entry": self._nutrition.log_meal(payload)}
-        if name == "update_nutrition_entry":
-            return {
-                "ok": True,
-                "entry": self._nutrition.correct_meal(
-                    str(arguments.get("id") or ""), arguments.get("changes")
-                ),
-            }
+        if name in {"save_nutrition_entry", "update_nutrition_entry"}:
+            return self._save_or_update_nutrition_entry(name, arguments)
         entry_id = str(arguments.get("id") or arguments.get("entry_id") or "").strip()
         return {"ok": True, **self._nutrition.delete_meal(entry_id)}
+
+    def _save_nutrition_product(
+        self, arguments: dict[str, Any], intent: dict[str, Any]
+    ) -> dict[str, Any]:
+        payload = structured_action_payload(arguments)
+        product_id = str(payload.get("id") or "").strip()
+        if product_id:
+            require_coach_scope(intent, f"nutrition_product:{product_id}")
+        product = (
+            self._nutrition.update_product(product_id, payload)
+            if product_id
+            else self._nutrition.save_product(payload)
+        )
+        return {"ok": True, "product": product}
+
+    def _save_or_update_nutrition_entry(
+        self, name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        if name == "save_nutrition_entry":
+            return {
+                "ok": True,
+                "entry": self._nutrition.log_meal(structured_action_payload(arguments)),
+            }
+        return {
+            "ok": True,
+            "entry": self._nutrition.correct_meal(
+                str(arguments.get("id") or ""), arguments.get("changes")
+            ),
+        }
 
     @staticmethod
     def _authorize(intent: dict[str, Any], operation: str, message: str) -> None:
