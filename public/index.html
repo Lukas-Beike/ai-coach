@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=264">
+  <link rel="stylesheet" href="/styles.css?v=266">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -167,8 +167,28 @@
         <nav class="plan-segment-nav" aria-label="Ernährungsbereiche">
           <a href="#nutrition/diary" data-nutrition-segment="diary">Tagebuch</a>
           <a href="#nutrition/meals" data-nutrition-segment="meals">Meine Mahlzeiten</a>
+          <a href="#nutrition/products" data-nutrition-segment="products">Produkte</a>
         </nav>
         <output id="nutritionStatus" class="tab-sync-detail"></output>
+        <section id="nutritionProductsPanel" aria-label="Produktbibliothek" hidden>
+        <div class="nutrition-tools" aria-label="Produkte erfassen">
+          <h3>Produkte</h3>
+          <p class="fine-print">Scanne den Barcode oder fotografiere die Nährwerttabelle. Prüfe die Werte und speichere das Produkt anschließend lokal.</p>
+          <div class="nutrition-actions">
+            <button type="button" class="push-button" id="nutritionBarcodeButton">Barcode scannen</button>
+            <button type="button" class="secondary-button" id="nutritionLabelButton">Nährwerttabelle fotografieren</button>
+            <button type="button" class="secondary-button" id="nutritionProductManual">Produkt manuell erfassen</button>
+            <label for="nutritionLabelInput" class="visually-hidden">Nährwerttabelle auswählen</label><input id="nutritionLabelInput" type="file" accept="image/*" capture="environment" hidden>
+          </div>
+          <form id="nutritionProductSearch" class="nutrition-search">
+            <label for="nutritionProductQuery">Lokale Produkte suchen</label>
+            <div class="nutrition-search-row"><input id="nutritionProductQuery" type="search" autocomplete="off" placeholder="Name, Marke oder EAN"><button type="submit" class="secondary-button">Suchen</button></div>
+          </form>
+          <output id="nutritionProductStatus" class="tab-sync-detail" aria-live="polite"></output>
+          <div id="nutritionProducts" class="nutrition-list"></div>
+          <div id="nutritionExtraction" class="nutrition-product-editor" hidden></div>
+        </div>
+        </section>
         <section id="nutritionDiary" aria-label="Ernährungstagebuch">
           <div class="nutrition-toolbar"><button class="secondary-button" type="button" id="nutritionPrevious" aria-label="Vorheriger Tag">←</button><label>Tag <input type="date" id="nutritionDate"></label><button class="secondary-button" type="button" id="nutritionNext" aria-label="Nächster Tag">→</button><button class="secondary-button" type="button" id="nutritionToday">Heute</button></div>
           <div id="nutritionTotals" class="nutrition-totals"></div>
@@ -389,6 +409,23 @@
       </button>
     </form>
   </dialog>
+  <dialog id="nutritionBarcodeDialog" aria-labelledby="nutritionBarcodeTitle">
+    <form method="dialog" class="confirmation-dialog" id="nutritionBarcodeForm">
+      <span class="eyebrow">PRODUKT</span><h2 id="nutritionBarcodeTitle">Barcode scannen</h2>
+      <video id="nutritionBarcodeVideo" playsinline muted aria-label="Kamerabild für Barcode-Scan"></video>
+      <p id="nutritionBarcodeStatus" class="tab-sync-detail" aria-live="polite">Kamera wird vorbereitet …</p>
+      <label for="nutritionBarcodeManual">EAN manuell eingeben<input id="nutritionBarcodeManual" inputmode="numeric" pattern="[0-9]{8,14}" maxlength="14" autocomplete="off"></label>
+      <div class="dialog-actions"><button type="button" id="nutritionBarcodeCancel" class="secondary-button">Abbrechen</button><button type="submit" id="nutritionBarcodeLookup" class="adaptive-planning-button">Produkt suchen</button></div>
+    </form>
+  </dialog>
+  <dialog id="nutritionProductUseDialog" aria-labelledby="nutritionProductUseTitle">
+    <form id="nutritionProductUseForm" class="confirmation-dialog">
+      <span class="eyebrow">MAHLZEIT</span><h2 id="nutritionProductUseTitle">Produkt erfassen</h2>
+      <p id="nutritionProductUseName"></p>
+      <label for="nutritionProductUseAmount">Verzehrte Menge <span id="nutritionProductUseUnit"></span><input id="nutritionProductUseAmount" type="number" min="0.1" step="0.1" required></label>
+      <div class="dialog-actions"><button type="button" id="nutritionProductUseCancel" class="secondary-button">Abbrechen</button><button type="submit" class="adaptive-planning-button">Coach-Entwurf erstellen</button></div>
+    </form>
+  </dialog>
   <dialog id="confirmationDialog" aria-labelledby="confirmationDialogTitle" aria-describedby="confirmationDialogMessage">
     <form id="confirmationDialogForm" method="dialog" class="confirmation-dialog">
       <span class="eyebrow">BESTÄTIGUNG</span>
@@ -404,15 +441,15 @@
     </form>
   </dialog>
   <script src="/api.js?v=221" defer></script>
-  <script src="/navigation.js?v=226" defer></script>
+  <script src="/navigation.js?v=227" defer></script>
   <script src="/state.js?v=218" defer></script>
   <script src="/views.js?v=218" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
   <script src="/coach.js?v=6" defer></script>
-  <script src="/nutrition.js?v=6" defer></script>
+  <script src="/nutrition.js?v=13" defer></script>
   <script src="/analysis.js?v=54" defer></script>
   <script src="/activity-details.js?v=7" defer></script>
-  <script src="/app.js?v=261" defer></script>
+  <script src="/app.js?v=267" defer></script>
 </body>
 </html>

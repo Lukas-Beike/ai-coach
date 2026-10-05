@@ -80,7 +80,7 @@ class CoachStructuredToolExecutionService:
                 return {"ok": True, "status": "cancelled"}
             if name == "apply_training_patch":
                 return self._training_patch.apply(arguments, action)
-            if name == "save_nutrition_template":
+            if name in {"save_nutrition_template", "save_nutrition_product"}:
                 proposal = self._proposal_creation.create_local_write(
                     name,
                     arguments,

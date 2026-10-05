@@ -54,6 +54,7 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["local_data_deleted"])
         self.assertIn("DELETE FROM nutrition_templates", [call.args[0] for call in db.execute.call_args_list])
+        self.assertIn("DELETE FROM nutrition_products", [call.args[0] for call in db.execute.call_args_list])
         dependencies.maintenance_gate.restore.assert_called_once_with()
         self.assertEqual(dependencies.database_manager.unit_of_work.call_count, 2)
         dependencies.planning_revision_service.mark_reset_pending.assert_called_once_with()

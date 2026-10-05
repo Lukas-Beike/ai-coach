@@ -32,6 +32,7 @@ OWNER_TOOLS = {
         "save_competition",
         "delete_competition",
         "save_nutrition_template",
+        "save_nutrition_product",
         "delete_nutrition_template",
         "log_nutrition_template",
         "save_nutrition_entry",

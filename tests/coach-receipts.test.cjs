@@ -100,6 +100,47 @@ test("a completed remote write receipt uses completion wording", () => {
   assert.equal(receipt.title, "Remote-Änderung ausgeführt");
 });
 
+test("an approved nutrition product write has product receipt and destination", () => {
+  const start = source.indexOf("function coachActionReceipt(");
+  const end = source.indexOf("\nasync function executeCoachActionProposal", start);
+  const context = vm.createContext({});
+  vm.runInContext(source.slice(start, end), context);
+  const receipt = context.coachActionReceipt(
+    { action_type: "local_coach_write", object_ids: { operation: "save_nutrition_product" } },
+    { status: "applied" },
+  );
+  assert.equal(receipt.title, "Produkt gespeichert");
+  assert.equal(receipt.message, "Das Produkt wurde lokal gespeichert.");
+  assert.equal(receipt.nutritionProductWrite, true);
+  assert.equal(receipt.localWrite, true);
+});
+
+test("approved nutrition product write refreshes and opens the product catalog", async () => {
+  const start = source.indexOf("function coachActionReceipt(");
+  const end = source.indexOf("\nfunction createPendingMessage", start);
+  const routes = [];
+  const loads = [];
+  let request = 0;
+  const context = vm.createContext({
+    state: { coachActionProposals: [{ id: "proposal-1" }] },
+    api: async () => (++request === 1
+      ? { action_token: "token", proposed_action: { payload_hash: "hash" } }
+      : { ok: true, status: "applied" }),
+    renderCoachActionReview() {},
+    addCoachReceipt() {},
+    toast() {},
+    load: async (...args) => { loads.push(args); },
+    applyNavigationRoute: async (...args) => { routes.push(args); },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  await context.executeCoachActionProposal(
+    { id: "proposal-1", action_type: "local_coach_write", object_ids: { operation: "save_nutrition_product" }, status: "ready" },
+    { disabled: false },
+  );
+  assert.equal(JSON.stringify(loads), JSON.stringify([["/api/bootstrap?local=1", ["plan", "library", "profile", "feedback"]]]));
+  assert.equal(JSON.stringify(routes), JSON.stringify([["nutrition/products", { historyMode: "push" }]]));
+});
+
 test("approval preview renders every bound remote-write value as text", () => {
   const start = source.indexOf("function coachActionDiff(");
   const end = source.indexOf("\nfunction coachActionButtons", start);

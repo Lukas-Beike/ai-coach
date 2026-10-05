@@ -1236,6 +1236,17 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 #nutritionPanel .push-button { padding: 12px 16px; }
 #nutritionPanel .panel-heading { margin-bottom: 18px; }
 .nutrition-total span, .nutrition-card small { color: var(--muted); }
+.nutrition-tools { display: grid; gap: 12px; margin: 20px 0; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.nutrition-tools h3, .nutrition-tools p { margin: 0; }
+.nutrition-search { display: grid; gap: 6px; }
+.nutrition-search-row { display: flex; gap: 8px; align-items: center; }
+.nutrition-search-row input { min-width: 0; flex: 1; }
+.nutrition-product-editor { padding: 14px; border: 1px dashed var(--line-strong); border-radius: 12px; }
+.nutrition-product-form { display: grid; gap: 10px; }
+.nutrition-product-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.nutrition-product-card { display: grid; gap: 7px; }
+.nutrition-low-confidence { border-color: #dca448 !important; box-shadow: 0 0 0 1px #dca448; }
+#nutritionBarcodeVideo { display: block; width: 100%; max-height: 40vh; object-fit: cover; border-radius: 12px; background: #000; }
 :root .activity-detail-dialog {
   width: min(760px, calc(100vw - 24px));
   max-height: calc(100dvh - 24px);

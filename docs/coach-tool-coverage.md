@@ -1,6 +1,6 @@
 # Coach tool execution coverage
 
-This matrix covers the 40 tools currently offered to the conversational Coach.
+This matrix covers the 41 tools currently offered to the conversational Coach.
 It builds on the profile/sync fix in `ebbe311`. It measures execution through
 `chat_with_coach`, not the accuracy of a language model's interpretation.
 
@@ -61,6 +61,7 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `save_checkin` | `success` | `test_daily_feedback_and_activity_feedback_are_separate_from_profile` |
 | `save_competition` | `create`, `update` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |
 | `save_nutrition_entry` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
+| `save_nutrition_product` | `success` | `test_confirmed_product_is_saved_locally_through_authorized_coach_receipt` |
 | `save_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
 | `log_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
 | `delete_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |

@@ -106,6 +106,12 @@ class PrivacyDataExportService:
             public_calendar = public_event_calendar.state(db)
             kv_rows = db.execute("SELECT key, value FROM kv ORDER BY key").fetchall()
             nutrition_templates = NutritionTemplateRepository().list(db)
+            nutrition_products = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT * FROM nutrition_products ORDER BY name COLLATE NOCASE"
+                ).fetchall()
+            ]
 
         application_state: dict[str, Any] = {}
         excluded_state = {"profile", "garmin_snapshot", weather_cache.CACHE_KEY}
@@ -127,6 +133,7 @@ class PrivacyDataExportService:
             "profile": dependencies.profile_service.get(),
             "application_state": application_state,
             "nutrition_templates": nutrition_templates,
+            "nutrition_products": nutrition_products,
             "competitions": competitions,
             "competition_sync_tombstones": tombstones,
             "messages": messages,
@@ -179,7 +186,12 @@ PRIVACY_DELETE_SCOPE = (
     (
         "nutrition",
         "Ernährungsprotokolle und Kalorientracking",
-        ("nutrition_logs", "nutrition_sync_dates", "nutrition_templates"),
+        (
+            "nutrition_logs",
+            "nutrition_sync_dates",
+            "nutrition_templates",
+            "nutrition_products",
+        ),
     ),
     ("adaptive", "Adaptive Plananpassungen", ("plan_adjustments",)),
     (

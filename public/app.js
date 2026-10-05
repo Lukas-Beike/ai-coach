@@ -169,7 +169,7 @@ function renderActiveRoute(mainRoute, panelRoute) {
   if (mainRoute === "analysis") renderAnalysisSegments(panelRoute);
   if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
   if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
-  if (mainRoute === "nutrition") { renderNutritionSegments(panelRoute); if (state.data) void loadNutrition(); }
+  if (mainRoute === "nutrition") { renderNutritionSegments(panelRoute); if (state.data) { if (panelRoute === "nutrition/products") void loadNutritionProducts(); else void loadNutrition(); } }
   if (state.data && mainRoute === "more") {
     void loadContextPreview();
     void loadLogs();
@@ -1553,7 +1553,11 @@ function createCoachWorkingIndicator() {
 
 function coachActionDescription(proposal) {
   if (proposal.action_type === "undo_change") return "Diese lokale Änderung zurücknehmen? Der aktuelle Stand wird vor der Ausführung erneut geprüft.";
-  if (proposal.action_type === "local_coach_write") return "Diese Mahlzeitvorlage wird lokal gespeichert. Sie wird erst nach deiner Bestätigung angelegt.";
+  if (proposal.action_type === "local_coach_write") {
+    return proposal.object_ids?.operation === "save_nutrition_product"
+      ? "Dieses Produkt wird lokal gespeichert. Es wird erst nach deiner Bestätigung angelegt."
+      : "Diese Mahlzeitvorlage wird lokal gespeichert. Sie wird erst nach deiner Bestätigung angelegt.";
+  }
   if (proposal.action_type === "remote_coach_write") {
     return "Diese Änderung wird an Intervals.icu gesendet. Sie wird erst ausgeführt, wenn du sie hier freigibst.";
   }
@@ -1617,7 +1621,9 @@ function coachActionButtons(proposal) {
   if (remoteWrite) {
     confirm.textContent = "Remote-Änderung freigeben";
   } else if (localWrite) {
-    confirm.textContent = "Mahlzeitvorlage speichern";
+    confirm.textContent = proposal.object_ids?.operation === "save_nutrition_product"
+      ? "Produkt speichern"
+      : "Mahlzeitvorlage speichern";
   } else if (undo) {
     confirm.textContent = "Änderung zurücknehmen";
   } else {
@@ -1657,38 +1663,37 @@ function renderCoachActionReview() {
 }
 
 function coachActionReceipt(proposal, result) {
-    const undo = proposal.action_type === "undo_change";
-    const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
-    const remoteWrite = proposal.action_type === "remote_coach_write";
-    const localWrite = proposal.action_type === "local_coach_write";
-  let message = "Planung lokal gespeichert.";
-  let title = "Planung gespeichert";
-  let details = ["Keine implizite Remote-Änderung"];
-  if (localWrite) {
-    message = "Die Mahlzeitvorlage wurde lokal gespeichert.";
-    title = "Mahlzeitvorlage gespeichert";
-    details = ["Nur lokal gespeichert; keine Synchronisierung an Intervals.icu"];
-  } else if (undo) {
-    message = "Die lokale Änderung wurde zurückgenommen.";
-    title = "Änderung zurückgenommen";
-  } else if (duplicateDelete) {
-    message = "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten.";
-    title = "Duplikat gelöscht";
-    details = ["Garmin-Duplikat in Intervals.icu gelöscht; Wahoo bleibt kanonisch"];
-  } else if (remoteWrite) {
-    const queued = ["queued", "running"].includes(result.status)
-      || Boolean(result.sync_job_id || result.sync_job_ids?.length);
-    message = queued
-      ? "Die freigegebene Änderung ist eingereiht; das Ergebnis steht noch aus."
-      : "Die freigegebene Remote-Änderung wurde ausgeführt.";
-    title = queued ? "Remote-Änderung eingereiht" : "Remote-Änderung ausgeführt";
-  } else if (result.local_planned) {
-    message = `${result.local_planned} Einheit(en) lokal geplant.`;
+  function content() {
+    if (localWrite) {
+      return nutritionProductWrite
+        ? { message: "Das Produkt wurde lokal gespeichert.", title: "Produkt gespeichert", details: ["Nur lokal gespeichert; keine Synchronisierung an Intervals.icu"] }
+        : { message: "Die Mahlzeitvorlage wurde lokal gespeichert.", title: "Mahlzeitvorlage gespeichert", details: ["Nur lokal gespeichert; keine Synchronisierung an Intervals.icu"] };
+    }
+    if (undo) return { message: "Die lokale Änderung wurde zurückgenommen.", title: "Änderung zurückgenommen" };
+    if (duplicateDelete) return {
+      message: "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten.",
+      title: "Duplikat gelöscht",
+      details: ["Garmin-Duplikat in Intervals.icu gelöscht; Wahoo bleibt kanonisch"],
+    };
+    if (remoteWrite) {
+      const queued = ["queued", "running"].includes(result.status)
+        || Boolean(result.sync_job_id || result.sync_job_ids?.length);
+      return queued
+        ? { message: "Die freigegebene Änderung ist eingereiht; das Ergebnis steht noch aus.", title: "Remote-Änderung eingereiht" }
+        : { message: "Die freigegebene Remote-Änderung wurde ausgeführt.", title: "Remote-Änderung ausgeführt" };
+    }
+    return { message: `${result.local_planned} Einheit(en) lokal geplant.` };
   }
+  const undo = proposal.action_type === "undo_change";
+  const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
+  const remoteWrite = proposal.action_type === "remote_coach_write";
+  const localWrite = proposal.action_type === "local_coach_write";
+  const nutritionProductWrite = localWrite && proposal.object_ids?.operation === "save_nutrition_product";
+  let { message, title, details = ["Keine implizite Remote-Änderung"] } = content();
   if (!duplicateDelete && result.sync_job_ids?.length) details = result.sync_job_ids.map((id) => `Syncjob ${id} eingereiht`);
   else if (!duplicateDelete && result.sync_job_id) details = [`Syncjob ${result.sync_job_id} eingereiht`];
   else if (remoteWrite) details = ["Freigegebene Remote-Änderung direkt ausgeführt"];
-  return { title, message, details, duplicateDelete, undo, remoteWrite, localWrite };
+  return { title, message, details, duplicateDelete, undo, remoteWrite, localWrite, nutritionProductWrite };
 }
 
 async function executeCoachActionProposal(proposal, button) {
@@ -1710,7 +1715,8 @@ async function executeCoachActionProposal(proposal, button) {
     addCoachReceipt(receipt);
     toast(receipt.message);
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["plan", "performance"] : ["plan", "library", "profile", "feedback"]);
-    if (receipt.localWrite) void applyNavigationRoute("nutrition/meals", { historyMode: "push" });
+    if (receipt.nutritionProductWrite) void applyNavigationRoute("nutrition/products", { historyMode: "push" });
+    else if (receipt.localWrite) void applyNavigationRoute("nutrition/meals", { historyMode: "push" });
     else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) void applyNavigationRoute("plan", { historyMode: "push" });
   } catch (error) {
     addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
@@ -3811,7 +3817,7 @@ async function deleteServerLogs() {
 }
 
 function render(data) {
-  if (baseRoute() === "nutrition") void loadNutrition();
+  if (baseRoute() === "nutrition") { if (state.route === "nutrition/products") void loadNutritionProducts(); else void loadNutrition(); }
   const firstRender = !state.data;
   state.data = data;
   renderAppVersion(data.app);
@@ -4494,35 +4500,36 @@ function renderChatAttachments() {
 }
 
 $("#attachmentButton").addEventListener("click", () => $("#attachmentInput").click());
-$("#attachmentInput").addEventListener("change", async (event) => {
-  const files = [...event.target.files];
-  event.target.value = "";
-  if (!files.length || state.chatAttachmentsLoading) return;
-  const generation = state.sessionGeneration;
-  const chatGeneration = state.chatGeneration;
-  state.chatAttachmentsLoading = true;
-  updateChatControls();
+function validateChatAttachmentFiles(files) {
+  const valid = file => file.size && /\.(gpx|fit|png|jpe?g|webp)$/i.test(file.name) && (/\.(gpx|fit)$/i.test(file.name) ? file.size <= 5000000 : file.size <= 15000000);
+  if ((state.chatAttachments || []).length + files.length > 4 || files.some(file => !valid(file))) throw new Error("Bis zu 4 Dateien auswählen. GPX/FIT dürfen höchstens 5 MB, Bilder höchstens 15 MB groß sein.");
+}
+async function fileBase64(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer()); let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCodePoint(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+  return btoa(binary);
+}
+async function prepareChatAttachment(file) {
+  if (!/\.(png|jpe?g|webp)$/i.test(file.name)) return { name: file.name, data: await fileBase64(file) };
   try {
-    if ((state.chatAttachments || []).length + files.length > 4 || files.some(file => !file.size || file.size > 5000000 || !/\.(gpx|fit|png|jpe?g|webp)$/i.test(file.name))) {
-      throw new Error("Bis zu 4 GPX-, FIT-, PNG-, JPEG- oder WebP-Dateien mit je höchstens 5 MB auswählen.");
-    }
-    const attachments = await Promise.all(files.map(file => new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result !== "string") {
-          reject(new Error("Die Datei konnte nicht als Data-URL gelesen werden."));
-          return;
-        }
-        resolve({ name: file.name, data: reader.result.split(",")[1] });
-      };
-      reader.onerror = () => reject(new Error("Die Datei konnte nicht gelesen werden."));
-      reader.readAsDataURL(file);
-    })));
+    const prepared = await prepareNutritionImage(file); const name = prepared.mime === file.type ? file.name : file.name.replace(/\.[^.]+$/, ".jpg");
+    return { name, data: prepared.dataUrl.split(",")[1], type: prepared.mime };
+  } catch (error) {
+    if (file.size > 5_000_000) throw error;
+    return { name: file.name, data: await fileBase64(file), type: file.type };
+  }
+}
+$("#attachmentInput").addEventListener("change", async (event) => {
+  const files = [...event.target.files]; event.target.value = "";
+  if (!files.length || state.chatAttachmentsLoading) return;
+  const generation = state.sessionGeneration; const chatGeneration = state.chatGeneration;
+  state.chatAttachmentsLoading = true; updateChatControls();
+  try {
+    validateChatAttachmentFiles(files);
+    const attachments = await Promise.all(files.map(prepareChatAttachment));
     if (generation !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
-    state.chatAttachments = [...(state.chatAttachments || []), ...attachments];
-    state.chatDraftDirty = true;
-    renderChatAttachments();
-    jumpToChatComposer();
+    state.chatAttachments = [...(state.chatAttachments || []), ...attachments]; state.chatDraftDirty = true;
+    renderChatAttachments(); jumpToChatComposer();
   } catch (error) { toast(error.message, true); }
   finally { state.chatAttachmentsLoading = false; updateChatControls(); }
 });

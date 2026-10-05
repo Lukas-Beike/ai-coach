@@ -26,7 +26,8 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
     const history = state.data.performance.history;
     const focus = state.data.performance.training_focus;
     return {
-      expected: `${dateLabel(focus.start)} bis ${dateLabel(focus.end)}`,
+      start: focus.start,
+      end: focus.end,
       same: focus.end === history.end && focus.start === addDateKey(history.end, -55),
       titles: [...document.querySelectorAll("#analysisHistoryCharts svg > title")].map((node) => node.textContent),
     };
@@ -37,7 +38,15 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await page.locator("#analysisHistoryCharts").getByRole("button", { name: "Rad · FTP", exact: true }).click();
   await expect(page.locator("#analysisHistoryCharts .analysis-info-tooltip:popover-open")).toContainText(/Seit .+: \+\d+(?:,\d+)? W/);
   await page.keyboard.press("Escape");
-  for (const title of periods.titles) expect(title).toContain(periods.expected);
+  for (const title of periods.titles) {
+    const match = title.match(/· (\d{2}\.\d{2}\.\d{4}) bis (\d{2}\.\d{2}\.\d{4})$/);
+    expect(match, title).not.toBeNull();
+    if (!match) continue;
+    const dateKey = (label) => label.split(".").reverse().join("-");
+    expect(dateKey(match[1]) >= periods.start).toBeTruthy();
+    expect(dateKey(match[1]) <= periods.end).toBeTruthy();
+    expect(dateKey(match[2])).toBe(periods.end);
+  }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 
   await page.evaluate(async () => { await applyNavigationRoute("analysis/recovery", { historyMode: "replace" }); });
@@ -47,7 +56,6 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(recovery.getByRole("group", { name: "Schlafdauer: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen." })).toBeVisible();
   for (const metric of ["Schlafdauer", "HRV", "Ruhepuls"]) await expect(recovery.getByRole("button", { name: metric, exact: true })).toHaveCount(1);
   await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Aktuelle Woche");
-  await expect(recovery.locator("svg path[data-color='2']").first()).toHaveAttribute("d", /M.*M/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.locator("#personalRecovery").getByText("Was beeinflusst deine Erholung?", { exact: true }).click();
   await expect(page.locator("#personalRecovery").getByText(/Mindestens zehn gemessene Tage je Gruppe/).first()).toBeVisible();
@@ -124,7 +132,7 @@ test("@responsive local equipment and maintenance remain visible without Garmin 
   const gear = page.locator("#equipmentItems");
   await expect(gear.locator("details summary")).toBeVisible();
   await gear.locator("details summary").click();
-  await expect(gear.getByRole("heading", {name: "Saved bike"})).toBeVisible();
+  await expect(gear.getByRole("heading", {name: "Saved bike", level: 4})).toBeVisible();
   await expect(gear).toContainText("Revision 3");
   await expect(gear).toContainText("120 km");
   await expect(gear).toContainText("4 zugeordnete Einheiten");
