@@ -154,7 +154,18 @@ class CoachAthleteRecordToolService:
             else "Die strukturierte Coach-Autorisierung erlaubt das Löschen dieses Eintrags nicht."
         )
         self._authorize(intent, operation, message)
-        require_coach_scope(intent, "local_nutrition", "local_nutrition_product")
+        if name == "save_nutrition_product":
+            product_id = str(
+                structured_action_payload(arguments).get("id") or ""
+            ).strip()
+            require_coach_scope(
+                intent,
+                f"nutrition_product:{product_id}"
+                if product_id
+                else "local_nutrition_product",
+            )
+        else:
+            require_coach_scope(intent, "local_nutrition")
         if not self._nutrition:
             raise AppError(500, "NutritionService ist nicht verfügbar.")
         if name == "save_fueling_plan":

@@ -9,6 +9,7 @@ from unittest.mock import Mock
 from backend.activities.feedback import ActivityFeedbackService
 from backend.athlete.checkins import CheckinService
 from backend.coach.athlete_record_tools import CoachAthleteRecordToolService
+from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.errors import AppError
 from backend.planning.competition_service import CompetitionService
 
@@ -129,6 +130,60 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
         self.nutrition.save_template.assert_not_called()
         self.nutrition.log_template.assert_not_called()
         self.nutrition.delete_template.assert_not_called()
+
+    def test_product_scope_only_authorizes_product_save(self):
+        self.nutrition.save_product.return_value = {"id": "product-1"}
+        result = self.service.execute(
+            "save_nutrition_product",
+            {"payload": {"name": "Synthetic product"}},
+            {
+                "operation": "save_nutrition_product",
+                "authorization_scope": ["local_nutrition_product"],
+            },
+        )
+        self.assertEqual(result, {"ok": True, "product": {"id": "product-1"}})
+        self.nutrition.save_product.assert_called_once_with(
+            {"name": "Synthetic product"}
+        )
+
+        for name, arguments in (
+            ("save_nutrition_entry", {"payload": {"description": "Lunch"}}),
+            ("update_nutrition_entry", {"id": "entry-1", "changes": {}}),
+            ("delete_nutrition_entry", {"id": "entry-1"}),
+            ("save_nutrition_template", {"payload": {"name": "Meal"}}),
+            ("log_nutrition_template", {"id": "template-1"}),
+            ("delete_nutrition_template", {"id": "template-1"}),
+            ("save_fueling_plan", {"payload": {}}),
+        ):
+            with self.subTest(name=name), self.assertRaises(AppError) as raised:
+                self.service.execute(
+                    name,
+                    arguments,
+                    {
+                        "operation": name,
+                        "authorization_scope": ["local_nutrition_product"],
+                    },
+                )
+            self.assertEqual(raised.exception.reason, "intent_scope_denied")
+
+    def test_dialogue_action_keeps_product_scope_operation_specific(self):
+        action = {"authorization_scope": ["local_nutrition_product"]}
+        CoachDialogueActionService._apply_nutrition_object_scope(
+            "save_nutrition_product", {"payload": {}}, action
+        )
+        for name in (
+            "save_nutrition_template",
+            "delete_nutrition_template",
+            "log_nutrition_template",
+            "save_nutrition_entry",
+            "update_nutrition_entry",
+            "delete_nutrition_entry",
+        ):
+            with self.subTest(name=name), self.assertRaises(AppError) as raised:
+                CoachDialogueActionService._apply_nutrition_object_scope(
+                    name, {}, action
+                )
+            self.assertEqual(raised.exception.reason, "intent_scope_denied")
 
     def test_invalid_payloads_keep_shared_and_domain_validation(self):
         invalid_saves = (

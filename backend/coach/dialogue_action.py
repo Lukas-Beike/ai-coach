@@ -388,8 +388,6 @@ class CoachDialogueActionService:
             "update_nutrition_entry",
             "delete_nutrition_entry",
         }:
-            if not CoachDialogueActionService._has_nutrition_write_scope(action):
-                require_coach_scope(action, "local_nutrition")
             if name == "save_nutrition_product":
                 product_id = str((arguments.get("payload") or {}).get("id") or "")
                 require_coach_scope(
@@ -398,11 +396,8 @@ class CoachDialogueActionService:
                     if product_id
                     else "local_nutrition_product",
                 )
+            else:
+                require_coach_scope(action, "local_nutrition")
             if name in {"delete_nutrition_template", "log_nutrition_template"}:
                 template_id = str(arguments.get("id") or "")
                 require_coach_scope(action, f"nutrition_template:{template_id}")
-
-    @staticmethod
-    def _has_nutrition_write_scope(action: dict[str, Any]) -> bool:
-        scopes = set(action.get("authorization_scope") or [])
-        return bool({"local_nutrition", "local_nutrition_product"} & scopes)
