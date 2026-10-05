@@ -188,9 +188,7 @@ class CoachAthleteRecordToolService:
         entry_id = str(arguments.get("id") or arguments.get("entry_id") or "").strip()
         return {"ok": True, **self._nutrition.delete_meal(entry_id)}
 
-    def _authorize_nutrition_operation(
-        self, name: str, intent: dict[str, Any]
-    ) -> None:
+    def _authorize_nutrition_operation(self, name: str, intent: dict[str, Any]) -> None:
         message = (
             "Die strukturierte Coach-Autorisierung erlaubt diesen Ern\u00e4hrungseintrag nicht."
             if name in {"save_nutrition_entry", "update_nutrition_entry"}
