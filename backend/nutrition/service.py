@@ -230,6 +230,12 @@ class NutritionService:
         self, product_id: str, amount: Any, unit: str
     ) -> dict[str, Any]:
         product = self.get_product(product_id)
+        if product.get("status") != "active":
+            raise AppError(
+                409,
+                "Archivierte Produkte können nicht erfasst werden.",
+                reason="nutrition_product_archived",
+            )
         try:
             quantity = float(amount)
         except (TypeError, ValueError) as exc:
