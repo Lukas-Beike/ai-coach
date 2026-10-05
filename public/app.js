@@ -4503,8 +4503,8 @@ $("#attachmentInput").addEventListener("change", async (event) => {
   state.chatAttachmentsLoading = true;
   updateChatControls();
   try {
-    if ((state.chatAttachments || []).length + files.length > 4 || files.some(file => !file.size || file.size > 15000000 || !/\.(gpx|fit|png|jpe?g|webp)$/i.test(file.name))) {
-      throw new Error("Bis zu 4 GPX-, FIT-, PNG-, JPEG- oder WebP-Dateien mit je höchstens 15 MB auswählen.");
+    if ((state.chatAttachments || []).length + files.length > 4 || files.some(file => !file.size || !/\.(gpx|fit|png|jpe?g|webp)$/i.test(file.name) || (/\.(gpx|fit)$/i.test(file.name) ? file.size > 5000000 : file.size > 15000000))) {
+      throw new Error("Bis zu 4 Dateien auswählen. GPX/FIT dürfen höchstens 5 MB, Bilder höchstens 15 MB groß sein.");
     }
     const attachments = [];
     for (const file of files) {

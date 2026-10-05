@@ -34,12 +34,22 @@ class NutritionGetRoutes:
             "/api/nutrition/range",
             "/api/nutrition/templates",
             "/api/nutrition/fueling",
+            "/api/nutrition/products",
         }:
             return False
 
         self._session_auth_service().require_auth(handler)
         query = parse_qs(urlparse(handler.path).query)
         svc = self._nutrition_service()
+        if path == "/api/nutrition/products":
+            barcode = query.get("barcode", [None])[0]
+            term = query.get("q", [None])[0]
+            if barcode:
+                handler.send_json(200, svc.lookup_product({"barcode": barcode}))
+            else:
+                products = svc.list_products(query=term)
+                handler.send_json(200, {"ok": True, "products": products})
+            return True
         if path == "/api/nutrition/fueling":
             unit_id = query.get("planned_unit_id", [None])[0]
             handler.send_json(
@@ -86,6 +96,10 @@ class NutritionPostRoutes:
             NUTRITION_ENTRY_PATH: self._create,
             f"{NUTRITION_ENTRY_PATH}/delete": self._delete,
             "/api/nutrition/sync": self._sync,
+            "/api/nutrition/products": self._save_product,
+            "/api/nutrition/products/lookup": self._lookup_product,
+            "/api/nutrition/products/extract": self._extract_product,
+            "/api/nutrition/products/archive": self._archive_product,
         }
         route = routes.get(path)
         if route is None:
@@ -125,6 +139,49 @@ class NutritionPostRoutes:
             },
         )
 
+    def _save_product(self, handler: Any) -> None:
+        payload = _read_object(handler)
+        confirmed = payload.pop("confirmed", None)
+        product = payload.pop("product", payload)
+        if confirmed is not True:
+            raise AppError(
+                400,
+                "Das Produkt muss ausdrücklich bestätigt werden.",
+                reason="confirmation_required",
+            )
+        handler.send_json(
+            200,
+            {"ok": True, "product": self._nutrition_service().save_product(product)},
+        )
+
+    def _lookup_product(self, handler: Any) -> None:
+        payload = _read_object(handler)
+        handler.send_json(200, self._nutrition_service().lookup_product(payload))
+
+    def _extract_product(self, handler: Any) -> None:
+        payload = _read_object(handler)
+        handler.send_json(
+            200, self._nutrition_service().extract_packaging_photo(payload)
+        )
+
+    def _archive_product(self, handler: Any) -> None:
+        payload = _read_object(handler)
+        if payload.get("confirmed") is not True:
+            raise AppError(
+                400,
+                "Das Archivieren muss ausdrücklich bestätigt werden.",
+                reason="confirmation_required",
+            )
+        handler.send_json(
+            200,
+            {
+                "ok": True,
+                "product": self._nutrition_service().archive_product(
+                    str(payload.get("id") or "")
+                ),
+            },
+        )
+
 
 class NutritionPutRoutes:
     """Handle authenticated nutrition updates."""
@@ -136,6 +193,27 @@ class NutritionPutRoutes:
         self._nutrition_service = nutrition_service
 
     def handle(self, handler: Any, path: str) -> bool:
+        if path == "/api/nutrition/products":
+            payload = _read_object(handler)
+            if payload.pop("confirmed", None) is not True:
+                raise AppError(
+                    400,
+                    "Das Produkt muss ausdrücklich bestätigt werden.",
+                    reason="confirmation_required",
+                )
+            product_id = str(payload.get("id") or "").strip()
+            if not product_id:
+                raise AppError(400, "id ist erforderlich zum Aktualisieren.")
+            handler.send_json(
+                200,
+                {
+                    "ok": True,
+                    "product": self._nutrition_service().update_product(
+                        product_id, payload
+                    ),
+                },
+            )
+            return True
         if path != NUTRITION_ENTRY_PATH:
             return False
 

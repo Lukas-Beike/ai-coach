@@ -365,13 +365,27 @@ class CoachDialogueActionService:
             )
         if name in {
             "save_nutrition_template",
+            "save_nutrition_product",
             "delete_nutrition_template",
             "log_nutrition_template",
             "save_nutrition_entry",
             "update_nutrition_entry",
             "delete_nutrition_entry",
         }:
-            require_coach_scope(action, "local_nutrition")
+            if not (
+                "local_nutrition" in set(action.get("authorization_scope") or [])
+                or "local_nutrition_product"
+                in set(action.get("authorization_scope") or [])
+            ):
+                require_coach_scope(action, "local_nutrition")
+            if name == "save_nutrition_product":
+                product_id = str((arguments.get("payload") or {}).get("id") or "")
+                require_coach_scope(
+                    action,
+                    f"nutrition_product:{product_id}"
+                    if product_id
+                    else "local_nutrition_product",
+                )
             if name in {"delete_nutrition_template", "log_nutrition_template"}:
                 template_id = str(arguments.get("id") or "")
                 require_coach_scope(action, f"nutrition_template:{template_id}")

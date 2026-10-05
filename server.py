@@ -215,6 +215,7 @@ from backend.nutrition.assembly import (
     NutritionPersistence,
     NutritionRuntime,
 )
+from backend.nutrition.photo import NutritionPhotoExtractionService
 from backend.sync.command_assembly import (
     IllnessPauseDependencies,
     SyncCommandAssembly,
@@ -941,6 +942,15 @@ NUTRITION_ASSEMBLY = NutritionAssembly(
             intervals_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
             read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500, future_only=True),
             read_profile=lambda: ATHLETE_DATA.profile().get(),
+            photo_extractor=lambda: NutritionPhotoExtractionService(
+                selected_provider=SETTINGS.selected_ai_provider,
+                selected_model=SETTINGS.selected_model,
+                openai_request=lambda path, payload: MODEL_TRANSPORT.openai_responses_client().request(path, payload),
+                openai_path=OPENAI_RESPONSES_PATH,
+                gemini_generate=lambda model, payload: MODEL_TRANSPORT.gemini_json_client().generate(
+                    model, payload, operation="nutrition_packaging_extraction"
+                ),
+            ),
         ),
     )
 )

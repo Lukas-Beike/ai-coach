@@ -10,6 +10,7 @@ from backend.config import Config
 from backend.db.repositories import NutritionRepository
 from backend.nutrition.food_database import FoodDatabaseService
 from backend.nutrition.fueling import FuelingService
+from backend.nutrition.photo import NutritionPhotoExtractionService
 from backend.nutrition.service import NutritionService
 from backend.nutrition.sync import IntervalsNutritionSyncService
 from backend.providers.intervals import IntervalsApiClient
@@ -29,6 +30,7 @@ class NutritionRuntime:
     intervals_request: Callable[[], Callable[..., Any]]
     read_planned_units: Callable[[], list[dict[str, Any]]] = list
     read_profile: Callable[[], dict[str, Any]] = dict
+    photo_extractor: Callable[[], NutritionPhotoExtractionService] | None = None
 
 
 class NutritionAssembly:
@@ -53,6 +55,7 @@ class NutritionAssembly:
         self._food_database = FoodDatabaseService()
         self._read_planned_units = dependencies.runtime.read_planned_units
         self._read_profile = dependencies.runtime.read_profile
+        self._runtime_photo_extractor = dependencies.runtime.photo_extractor
 
     def fueling(self) -> FuelingService:
         return FuelingService(
@@ -67,15 +70,24 @@ class NutritionAssembly:
         return self._food_database
 
     def service(self) -> NutritionService:
-        return NutritionService(
-            database_manager=self._database_manager(),
-            db_lock=self._database_lock,
-            nutrition_repository=NutritionRepository(self._utc_now),
-            utc_now=self._utc_now,
-            local_now=self._local_now,
-            food_database=self._food_database,
-            fueling_service=self.fueling,
-        )
+        kwargs = {
+            "database_manager": self._database_manager(),
+            "db_lock": self._database_lock,
+            "nutrition_repository": NutritionRepository(self._utc_now),
+            "utc_now": self._utc_now,
+            "local_now": self._local_now,
+            "food_database": self._food_database,
+            "fueling_service": self.fueling,
+        }
+        photo_extractor = self._photo_extractor()
+        if photo_extractor is not None:
+            return NutritionService(**kwargs, photo_extractor=photo_extractor)
+        return NutritionService(**kwargs)
+
+    def _photo_extractor(self) -> NutritionPhotoExtractionService | None:
+        if self._runtime_photo_extractor is None:
+            return None
+        return self._runtime_photo_extractor()
 
     def intervals_sync_service(self) -> IntervalsNutritionSyncService:
         config = self._config()

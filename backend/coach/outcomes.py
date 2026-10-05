@@ -4,6 +4,7 @@ from typing import Any
 
 COACH_OPERATION_LABELS = {
     "save_nutrition_template": "Mahlzeitvorlage gespeichert",
+    "save_nutrition_product": "Produkt lokal gespeichert",
     "delete_nutrition_template": "Mahlzeitvorlage entfernt",
     "log_nutrition_template": "Verzehr gespeichert",
     "update_profile": "Profil aktualisiert",
@@ -41,6 +42,7 @@ COACH_OPERATION_LABELS = {
 
 COACH_ACTION_LABELS = {
     "save_nutrition_template": "Mahlzeitvorlage speichern",
+    "save_nutrition_product": "Produkt lokal speichern",
     "delete_nutrition_template": "Mahlzeitvorlage entfernen",
     "log_nutrition_template": "Verzehr erfassen",
     "update_profile": "Profil aktualisieren",

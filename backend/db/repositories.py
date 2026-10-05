@@ -46,6 +46,111 @@ class NutritionTemplateRepository:
         )
 
 
+class NutritionProductRepository:
+    """Persist athlete-confirmed food products independently from meal logs."""
+
+    _SELECT = (
+        "SELECT id, barcode, name, brand, basis_amount, basis_unit, kcal, carbs_g, "
+        "protein_g, fat_g, sugar_g, fiber_g, salt_g, source, source_url, external_id, "
+        "provenance, extraction_confidence, status, created_at, updated_at FROM nutrition_products"
+    )
+
+    @staticmethod
+    def _row(row: Any) -> dict[str, Any]:
+        product = dict(row)
+        try:
+            product["provenance"] = json.loads(product["provenance"])
+        except (KeyError, TypeError, ValueError):
+            product["provenance"] = {"kind": product.get("source", "manual")}
+        return product
+
+    def list(
+        self,
+        db: Any,
+        *,
+        query: str | None = None,
+        barcode: str | None = None,
+        include_archived: bool = False,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if not include_archived:
+            clauses.append("status = 'active'")
+        if barcode:
+            clauses.append("barcode = ?")
+            params.append(barcode)
+        if query:
+            clauses.append(
+                "(name LIKE ? COLLATE NOCASE OR brand LIKE ? COLLATE NOCASE)"
+            )
+            pattern = f"%{query}%"
+            params.extend((pattern, pattern))
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        rows = db.execute(
+            self._SELECT
+            + where
+            + " ORDER BY updated_at DESC, name COLLATE NOCASE LIMIT ?",
+            (*params, max(1, min(int(limit), 100))),
+        ).fetchall()
+        return [self._row(row) for row in rows]
+
+    def get(self, db: Any, product_id: str) -> dict[str, Any] | None:
+        row = db.execute(self._SELECT + " WHERE id = ?", (product_id,)).fetchone()
+        return self._row(row) if row else None
+
+    def save(self, db: Any, product: dict[str, Any]) -> dict[str, Any]:
+        columns = (
+            "id",
+            "barcode",
+            "name",
+            "brand",
+            "basis_amount",
+            "basis_unit",
+            "kcal",
+            "carbs_g",
+            "protein_g",
+            "fat_g",
+            "sugar_g",
+            "fiber_g",
+            "salt_g",
+            "source",
+            "source_url",
+            "external_id",
+            "provenance",
+            "extraction_confidence",
+            "status",
+            "created_at",
+            "updated_at",
+        )
+        db.execute(
+            "INSERT INTO nutrition_products("
+            + ",".join(columns)
+            + ") VALUES ("
+            + ",".join("?" for _ in columns)
+            + ") ON CONFLICT(id) DO UPDATE SET "
+            + ",".join(
+                f"{column}=excluded.{column}" for column in columns if column != "id"
+            ),
+            tuple(
+                json.dumps(product.get(column), ensure_ascii=False)
+                if column == "provenance"
+                else product.get(column)
+                for column in columns
+            ),
+        )
+        return self.get(db, str(product["id"])) or product
+
+    def archive(self, db: Any, product_id: str, updated_at: str) -> bool:
+        return (
+            db.execute(
+                "UPDATE nutrition_products SET status='archived', updated_at=? WHERE id=? AND status='active'",
+                (updated_at, product_id),
+            ).rowcount
+            > 0
+        )
+
+
 class KeyValueRepository:
     """Read and write the application's durable key/value settings."""
 

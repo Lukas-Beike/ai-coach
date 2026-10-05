@@ -82,7 +82,12 @@ def build_tool_contracts(
         _canonical_coach_tool(
             "calculate_food_nutrition",
             "Calculate a meal from looked-up food IDs and known quantities without saving it. Returns totals and source/basis information. Missing macros stay unknown. Use these ingredients again when saving so the server calculates and preserves provenance.",
-            {"ingredients": food_ingredients},
+            {
+                "ingredients": food_ingredients,
+                "product_id": {"type": "string"},
+                "amount": {"type": "number", "exclusiveMinimum": 0, "maximum": 10000},
+                "unit": {"type": "string", "enum": ["g", "ml", "portion"]},
+            },
         ),
         _canonical_coach_tool(
             "read_coach_context",
@@ -991,6 +996,16 @@ def build_tool_contracts(
         if tool["name"] == "save_nutrition_entry"
     )["parameters"]["properties"]["payload"]["properties"]
     meal_properties["food_ingredients"] = food_ingredients
+    meal_properties["product_id"] = {
+        "type": "string",
+        "description": "Exact local nutrition product ID read from read_nutrition",
+    }
+    meal_properties["amount"] = {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 10000,
+    }
+    meal_properties["unit"] = {"type": "string", "enum": ["g", "ml", "portion"]}
     next(
         tool
         for tool in COACH_STRUCTURED_TOOLS
@@ -1040,6 +1055,48 @@ def build_tool_contracts(
                 },
             ),
         ]
+    )
+
+    product_properties = {
+        "id": {"type": "string"},
+        "barcode": {"type": ["string", "null"]},
+        "name": {"type": "string", "maxLength": 200},
+        "brand": {"type": "string", "maxLength": 120},
+        "basis_amount": {"type": "number", "exclusiveMinimum": 0, "maximum": 10000},
+        "basis_unit": {"type": "string", "enum": ["g", "ml", "portion"]},
+        "kcal": {"type": ["number", "null"], "minimum": 0, "maximum": 10000},
+        "carbs_g": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+        "protein_g": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+        "fat_g": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+        "sugar_g": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+        "fiber_g": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+        "salt_g": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+        "source": {
+            "type": "string",
+            "enum": [
+                "packaging_label",
+                "manual",
+                "open_food_facts",
+                "bls",
+                "fddb_export",
+            ],
+        },
+        "source_url": {"type": "string", "maxLength": 500},
+        "external_id": {"type": "string", "maxLength": 200},
+    }
+    COACH_STRUCTURED_TOOLS.append(
+        _canonical_coach_tool(
+            "save_nutrition_product",
+            "Save or update one reusable local food product after the athlete has reviewed and confirmed its displayed name, source, basis and nutrients. This does not record consumption. Preserve source provenance; use id only for the exact product read first.",
+            {
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": product_properties,
+                    "required": ["name", "basis_amount", "basis_unit", "source"],
+                }
+            },
+        )
     )
 
     COACH_CANONICAL_TOOL_NAMES = tuple(tool["name"] for tool in COACH_STRUCTURED_TOOLS)

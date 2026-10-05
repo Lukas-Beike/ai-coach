@@ -266,6 +266,29 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     },
     "nutrition_sync_dates": {"meal_date", "revision", "sync_state", "updated_at"},
     "nutrition_templates": {"id", "name", "payload", "updated_at"},
+    "nutrition_products": {
+        "id",
+        "barcode",
+        "name",
+        "brand",
+        "basis_amount",
+        "basis_unit",
+        "kcal",
+        "carbs_g",
+        "protein_g",
+        "fat_g",
+        "sugar_g",
+        "fiber_g",
+        "salt_g",
+        "source",
+        "source_url",
+        "external_id",
+        "status",
+        "provenance",
+        "extraction_confidence",
+        "created_at",
+        "updated_at",
+    },
     "sessions": {"token_hash", "csrf_hash", "expires_at", "created_at", "last_seen"},
 }
 
@@ -274,6 +297,8 @@ CURRENT_DATABASE_INDEXES = {
     "idx_change_history_entity",
     "idx_coach_plan_artifacts_conversation",
     "idx_nutrition_logs_date",
+    "idx_nutrition_products_name",
+    "idx_nutrition_products_status",
     "idx_planned_units_date",
     "idx_planned_units_external_id",
     "idx_planned_units_local_id",
@@ -592,6 +617,31 @@ def initialize_schema(db: Any) -> None:
         updated_at TEXT NOT NULL
     );
     CREATE INDEX idx_nutrition_logs_date ON nutrition_logs(meal_date, logged_at DESC);
+    CREATE TABLE nutrition_products (
+        id TEXT PRIMARY KEY,
+        barcode TEXT UNIQUE,
+        name TEXT NOT NULL,
+        brand TEXT NOT NULL DEFAULT '',
+        basis_amount REAL NOT NULL CHECK (basis_amount > 0),
+        basis_unit TEXT NOT NULL CHECK (basis_unit IN ('g', 'ml', 'portion')),
+        kcal REAL,
+        carbs_g REAL,
+        protein_g REAL,
+        fat_g REAL,
+        sugar_g REAL,
+        fiber_g REAL,
+        salt_g REAL,
+        source TEXT NOT NULL CHECK (source IN ('packaging_label', 'manual', 'open_food_facts', 'bls', 'fddb_export')),
+        source_url TEXT NOT NULL DEFAULT '',
+        external_id TEXT NOT NULL DEFAULT '',
+        provenance TEXT NOT NULL DEFAULT 'manual',
+        extraction_confidence REAL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_nutrition_products_name ON nutrition_products(name COLLATE NOCASE);
+    CREATE INDEX idx_nutrition_products_status ON nutrition_products(status, updated_at DESC);
     CREATE TABLE nutrition_sync_dates (
         meal_date TEXT PRIMARY KEY,
         revision INTEGER NOT NULL DEFAULT 1,

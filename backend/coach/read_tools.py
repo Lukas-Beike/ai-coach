@@ -149,7 +149,15 @@ class CoachReadToolService:
                 raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
             foods = self._nutrition_service().food_database
             if name == "lookup_food":
+                if arguments.get("barcode") or arguments.get("query"):
+                    return self._nutrition_service().lookup_product(arguments)
                 return foods.lookup(arguments)
+            if arguments.get("product_id"):
+                return self._nutrition_service().calculate_product(
+                    str(arguments.get("product_id")),
+                    arguments.get("amount"),
+                    str(arguments.get("unit") or ""),
+                )
             return {"ok": True, **foods.calculate(arguments.get("ingredients"))}
         return None
 
@@ -163,10 +171,15 @@ class CoachReadToolService:
                 "fueling": service.fueling().read(arguments["planned_unit_id"]),
             }
         templates = service.list_templates()
+        products = service.list_products()
+        product_projection = (
+            {"products": products} if isinstance(products, list) else {}
+        )
         if arguments.get("date"):
             return {
                 "ok": True,
                 "templates": templates,
+                **product_projection,
                 **service.get_day_summary(str(arguments["date"])),
             }
         if arguments.get("start") and arguments.get("end"):
@@ -181,9 +194,15 @@ class CoachReadToolService:
             return {
                 "ok": True,
                 "templates": templates,
+                **product_projection,
                 "summaries": service.get_range_summary(start, end),
             }
-        return {"ok": True, "templates": templates, **service.get_today_summary()}
+        return {
+            "ok": True,
+            "templates": templates,
+            **product_projection,
+            **service.get_today_summary(),
+        }
 
     @staticmethod
     def _bounded_integer(

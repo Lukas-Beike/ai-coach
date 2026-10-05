@@ -41,7 +41,9 @@ REMOTE_COACH_WRITE_TOOLS = frozenset(
         "apply_adaptive_replan",
     }
 )
-LOCAL_COACH_WRITE_TOOLS = frozenset({"save_nutrition_template"})
+LOCAL_COACH_WRITE_TOOLS = frozenset(
+    {"save_nutrition_template", "save_nutrition_product"}
+)
 COACH_ACTION_TTL_SECONDS = 600
 LOGGER = logging.getLogger("intervals_coach")
 _MAX_REMOTE_APPROVAL_DETAILS = 5000
@@ -147,6 +149,16 @@ def _validate_local_coach_write(payload: dict[str, Any]) -> None:
         request.get("source_message_ids") if isinstance(request, dict) else None
     )
     values = arguments.get("payload") if isinstance(arguments, dict) else None
+    product_write = tool == "save_nutrition_product"
+    valid_payload = (
+        isinstance(values, dict)
+        and isinstance(values.get("name"), str)
+        and (
+            values.get("basis_unit") in {"g", "ml", "portion"}
+            if product_write
+            else isinstance(values.get("description"), str)
+        )
+    )
     source_ids_ok = (
         isinstance(source_ids, list)
         and 1 <= len(source_ids) <= 24
@@ -161,10 +173,13 @@ def _validate_local_coach_write(payload: dict[str, Any]) -> None:
         or not isinstance(request, dict)
         or not source_ids_ok
         or not isinstance(scope, list)
-        or "local_nutrition" not in scope
-        or not isinstance(values, dict)
-        or not isinstance(values.get("name"), str)
-        or not isinstance(values.get("description"), str)
+        or not ({"local_nutrition", "local_nutrition_product"} & set(scope))
+        or (
+            product_write
+            and values.get("id")
+            and f"nutrition_product:{values.get('id')}" not in scope
+        )
+        or not valid_payload
     ):
         raise AppError(400, "Die lokale Coach-Aktion ist ungÃ¼ltig.")
 
@@ -489,6 +504,15 @@ class CoachProposalCreationService:
             )
             if existing:
                 preview_values = {**existing, **preview_values}
+            elif payload.get("tool") == "save_nutrition_product":
+                try:
+                    existing_product = self._nutrition_service().get_product(
+                        template_id
+                    )
+                except AppError:
+                    existing_product = None
+                if existing_product:
+                    preview_values = {**existing_product, **preview_values}
         if "food_ingredients" in values:
             if self._nutrition_service is None:
                 raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
@@ -518,6 +542,12 @@ class CoachProposalCreationService:
             diff["source"] = "; ".join(
                 f"{item['source']}: {item['name']}, {item['amount']:g} {item['unit']} (Basis 100 {item['basis_unit']})"
                 for item in preview_values["nutrition_basis"]["ingredients"]
+            )
+        if preview_values.get("basis_amount") and preview_values.get("source"):
+            diff["source"] = str(preview_values["source"])
+        if preview_values.get("basis_amount") and preview_values.get("basis_unit"):
+            diff["basis"] = (
+                f"pro {preview_values['basis_amount']:g} {preview_values['basis_unit']}"
             )
         return diff
 

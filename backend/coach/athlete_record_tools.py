@@ -56,6 +56,7 @@ class CoachAthleteRecordToolService:
             return method(structured_action_payload(arguments))
         if name in {
             "save_nutrition_template",
+            "save_nutrition_product",
             "delete_nutrition_template",
             "log_nutrition_template",
             "save_nutrition_entry",
@@ -153,13 +154,24 @@ class CoachAthleteRecordToolService:
             else "Die strukturierte Coach-Autorisierung erlaubt das Löschen dieses Eintrags nicht."
         )
         self._authorize(intent, operation, message)
-        require_coach_scope(intent, "local_nutrition")
+        require_coach_scope(intent, "local_nutrition", "local_nutrition_product")
         if not self._nutrition:
             raise AppError(500, "NutritionService ist nicht verfügbar.")
         if name == "save_fueling_plan":
             return self._nutrition.fueling().save(structured_action_payload(arguments))
         if name == "save_nutrition_template":
             return self._save_nutrition_template(arguments)
+        if name == "save_nutrition_product":
+            payload = structured_action_payload(arguments)
+            product_id = str(payload.get("id") or "").strip()
+            if product_id:
+                require_coach_scope(intent, f"nutrition_product:{product_id}")
+            product = (
+                self._nutrition.update_product(product_id, payload)
+                if product_id
+                else self._nutrition.save_product(payload)
+            )
+            return {"ok": True, "product": product}
         if name == "delete_nutrition_template":
             return {
                 "ok": True,
