@@ -28,7 +28,7 @@ def personal_recovery(
     today: date,
 ) -> dict[str, Any]:
     cutoff = (today - timedelta(days=42)).isoformat()
-    history_start = (today - timedelta(days=today.weekday(), weeks=7)).isoformat()
+    history_start = (today - timedelta(days=83)).isoformat()
     current_day = today.isoformat()
     groups: dict[tuple[str, str, str], dict[str, float]] = {}
 

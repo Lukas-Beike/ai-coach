@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.performance import activity_validation, eftp
+from backend.performance.garmin_load import acute_load_value
 
 INTERVALS_SOURCE = "Intervals.icu"
 
@@ -42,24 +43,13 @@ def _wellness_history(
     }
 
 
-def _load_values(row: dict[str, Any]) -> dict[str, float | None]:
-    values: dict[str, float | None] = {}
-    for key, aliases in (("ctl", ("ctl", "ctLoad")), ("atl", ("atl", "atlLoad"))):
-        value = next((row[name] for name in aliases if row.get(name) is not None), None)
-        values[key] = activity_validation.bounded_activity_metric(value, 0, 10000)
-    ctl, atl = values["ctl"], values["atl"]
-    values["tsb"] = round(ctl - atl, 2) if ctl is not None and atl is not None else None
-    return values
-
-
-def _load_history(
-    dates: list[str], wellness: dict[date, dict[str, Any]]
-) -> list[dict[str, Any]]:
-    load = []
-    for date_key in dates:
-        row = wellness.get(date.fromisoformat(date_key), {})
-        load.append({"date": date_key, **_load_values(row)})
-    return load
+def _load_history(dates: list[str], garmin: dict[str, Any]) -> list[dict[str, Any]]:
+    observations = {
+        day.isoformat(): acute_load_value(row)
+        for row in _rows(garmin.get("training_status"))
+        if (day := _day(row.get("calendarDate") or row.get("date"))) is not None
+    }
+    return [{"date": day, "value": observations.get(day)} for day in dates]
 
 
 def _garmin_values(
@@ -113,14 +103,14 @@ def analysis_history(
     snapshot = snapshot or {}
     start = today - timedelta(days=89)
     dates = [(start + timedelta(days=i)).isoformat() for i in range(90)]
-    load_end = today - timedelta(days=1)
+    load_end = today
     load_start = load_end - timedelta(days=89)
     load_dates = [(load_start + timedelta(days=i)).isoformat() for i in range(90)]
     raw = snapshot.get("raw_provider_data")
     raw = raw if isinstance(raw, dict) else {}
     # Raw provider rows retain the history that the compact Coach projection trims.
     wellness = _wellness_history(raw, snapshot, load_start, today)
-    load = _load_history(load_dates, wellness)
+    load = _load_history(load_dates, garmin)
     series = {
         key: _metric_series(key, raw, snapshot, garmin, wellness, dates, start, today)
         for key in METRIC_KEYS
@@ -130,7 +120,7 @@ def analysis_history(
         "end": dates[-1],
         "days": 90,
         "load": {
-            "source": INTERVALS_SOURCE,
+            "source": "Garmin Connect",
             "start": load_dates[0],
             "end": load_dates[-1],
             "points": load,

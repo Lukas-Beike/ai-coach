@@ -87,8 +87,8 @@ class PersonalRecoveryTests(unittest.TestCase):
                 row["restingHR"] = 100
         result = personal_recovery(rows, {}, {}, self.today)
         pulse = next(row for row in result["baselines"] if row["metric"] == "resting_hr")
-        self.assertEqual("2026-08-10", pulse["history"][0]["date"])
-        self.assertEqual(54, len(pulse["history"]))
+        self.assertEqual("2026-08-03", pulse["history"][0]["date"])
+        self.assertEqual(61, len(pulse["history"]))
         self.assertEqual(42, pulse["nights"])
         self.assertEqual(50, pulse["median"])
 

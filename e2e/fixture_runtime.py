@@ -248,6 +248,7 @@ def seed_training_features():
         server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
         server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps({"synced_at": snapshot["synced_at"],
             "performance_history": demo_performance_history(now.date()),
+            "training_status": [{"calendarDate": (now.date() - timedelta(days=offset)).isoformat(), "acuteTrainingLoadDTO": {"acuteTrainingLoad": 420 + offset % 12 * 15}} for offset in range(90)],
             "activities": [{"activityId": f"demo-{index}", "startTimeLocal": now.date().isoformat() + FIXTURE_ACTIVITY_TIME,
                 "trainingEffectLabel": label, "activityTrainingLoad": load}
                 for index, (label, load) in enumerate([("AEROBIC_BASE", 40), ("TEMPO", 80), ("ANAEROBIC_CAPACITY", 30)])],
@@ -319,6 +320,7 @@ def seed_preview_demo():
     server.PLANNING_WORKFLOWS.local_plan_creation_service().save(workouts)
     history = demo_performance_history(today)
     garmin = {"synced_at": server.runtime_clock.utc_now(), "performance_history": history,
+        "training_status": [{"calendarDate": (today - timedelta(days=offset)).isoformat(), "acuteTrainingLoadDTO": {"acuteTrainingLoad": 420 + offset % 12 * 15}} for offset in range(90)],
         "activities": [{"activityId": f"demo-{index}", "startTimeLocal": today.isoformat() + FIXTURE_ACTIVITY_TIME,
             "trainingEffectLabel": label, "activityTrainingLoad": load}
             for index, (label, load) in enumerate([("AEROBIC_BASE", 40), ("TEMPO", 80), ("ANAEROBIC_CAPACITY", 30)])],

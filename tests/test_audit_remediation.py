@@ -173,7 +173,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             rows = db.execute("SELECT provider, payload FROM sync_jobs").fetchall()
         self.assertEqual([row["provider"] for row in rows], ["garmin"])
-        self.assertEqual(json.loads(rows[0]["payload"])["days"], 60)
+        self.assertEqual(json.loads(rows[0]["payload"])["days"], 84)
 
     def test_ongoing_calendar_event_and_nested_alarm(self):
         feed = b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:synthetic\r\nDTSTART;VALUE=DATE:20260906\r\nDTEND;VALUE=DATE:20260909\r\nSUMMARY:Trip\r\nDESCRIPTION:[SHORT_ONLY]\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
