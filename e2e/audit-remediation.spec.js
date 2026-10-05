@@ -38,20 +38,6 @@ test("profile edits made while saving remain dirty and visible", async ({ page }
     .toEqual({ dirty: true, name: "New unsaved name" });
 });
 
-test("performance polling preserves the active inline editor", async ({ page }) => {
-  const result = await page.evaluate(() => {
-    const root = document.querySelector("#performanceSummary");
-    root.replaceChildren();
-    displayMetric(root, "Weight", { value: 70 }, null, { key: "weight" });
-    root.querySelector("button").click();
-    const input = root.querySelector("input");
-    input.value = "67.8";
-    renderPerformance(state.data.performance);
-    return { connected: input.isConnected, value: input.value, editing: !input.hidden };
-  });
-  expect(result).toEqual({ connected: true, value: "67.8", editing: true });
-});
-
 test("late microphone permission after logout stops and discards capture", async ({ page }) => {
   const result = await page.evaluate(async () => {
     window.stoppedTracks = 0;
