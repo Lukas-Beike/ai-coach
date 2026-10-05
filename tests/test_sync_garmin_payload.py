@@ -32,19 +32,19 @@ class GarminPayloadServiceTests(unittest.TestCase):
         }
 
     def test_initial_recent_import_then_regular_two_day_refresh(self):
-        self.assertEqual(self.service.automatic_sync_days(2), 60)
+        self.assertEqual(self.service.automatic_sync_days(2), 84)
         seed = self.service.prepare_remote(
-            self.collection_payload("2026-07-23", "2026-09-20")
+            self.collection_payload("2026-06-29", "2026-09-20")
         )
         self.store_garmin_snapshot(seed)
         self.assertEqual(self.service.automatic_sync_days(2), 2)
         self.assertEqual(
-            seed["source_freshness"]["sleep"]["synced_start"], "2026-07-23"
+            seed["source_freshness"]["sleep"]["synced_start"], "2026-06-29"
         )
 
     def test_partial_success_does_not_advance_failed_collection(self):
         seed = self.service.prepare_remote(
-            self.collection_payload("2026-07-13", "2026-09-10")
+            self.collection_payload("2026-06-19", "2026-09-10")
         )
         self.store_garmin_snapshot(seed)
         self.assertEqual(self.service.automatic_sync_days(2), 11)
@@ -65,7 +65,7 @@ class GarminPayloadServiceTests(unittest.TestCase):
 
     def test_next_calendar_day_still_needs_only_two_days(self):
         seed = self.service.prepare_remote(
-            self.collection_payload("2026-07-22", "2026-09-19")
+            self.collection_payload("2026-06-28", "2026-09-19")
         )
         self.store_garmin_snapshot(seed)
         self.assertEqual(self.service.automatic_sync_days(2), 2)
@@ -73,7 +73,7 @@ class GarminPayloadServiceTests(unittest.TestCase):
     def test_unavailable_optional_collection_does_not_force_repeated_initial_import(
         self,
     ):
-        payload = self.collection_payload("2026-07-23", "2026-09-20")
+        payload = self.collection_payload("2026-06-29", "2026-09-20")
         for source in ("daily_stats", "resting_hr"):
             del payload[source]
             del payload["provider_sync"]["pagination"][source]
@@ -82,7 +82,7 @@ class GarminPayloadServiceTests(unittest.TestCase):
 
     def test_failed_initial_recovery_is_retried_despite_activity_backfill(self):
         seed = self.service.prepare_remote(
-            self.collection_payload("2026-07-23", "2026-09-20", failed="hrv")
+            self.collection_payload("2026-06-29", "2026-09-20", failed="hrv")
         )
         self.store_garmin_snapshot(seed)
         historical = self.service.prepare_remote(
@@ -95,7 +95,7 @@ class GarminPayloadServiceTests(unittest.TestCase):
             }
         )
         self.store_garmin_snapshot(historical)
-        self.assertEqual(self.service.automatic_sync_days(2), 60)
+        self.assertEqual(self.service.automatic_sync_days(2), 84)
         self.assertEqual(
             historical["source_freshness"]["activities"]["synced_end"], "2026-09-20"
         )
@@ -104,7 +104,7 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self,
     ):
         seed = self.service.prepare_remote(
-            self.collection_payload("2025-01-01", "2025-03-01")
+            self.collection_payload("2024-12-08", "2025-03-01")
         )
         self.store_garmin_snapshot(seed)
         self.assertEqual(self.service.automatic_sync_days(2), 90)
@@ -112,7 +112,7 @@ class GarminPayloadServiceTests(unittest.TestCase):
 
     def test_long_outage_catches_up_in_contiguous_bounded_windows(self):
         seed = self.service.prepare_remote(
-            self.collection_payload("2025-01-01", "2025-03-01")
+            self.collection_payload("2024-12-08", "2025-03-01")
         )
         self.store_garmin_snapshot(seed)
         windows = []

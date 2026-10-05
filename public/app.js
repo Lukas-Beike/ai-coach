@@ -3293,78 +3293,32 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
     renderAnalysisHistory(performance?.history);
     renderTrainingFocus(performance?.training_focus);
   }
-  const root = $("#performanceSummary");
-  if (root.querySelector(".metric-editable.editing")) return;
+  const root = $("#performancePredictions");
   root.replaceChildren();
-  const syncNotices = [];
-  if (state.data?.sync?.running || state.localSync.intervals) syncNotices.push(state.data?.sync?.status || "Intervals.icu wird synchronisiert…");
-  if (state.data?.garmin_sync?.running || state.localSync.garmin) syncNotices.push(state.data?.garmin_sync?.status || "Garmin wird synchronisiert…");
-  if (state.data?.performance_refresh?.running) syncNotices.push("Leistungsdaten werden aktualisiert…");
-  if (!performance?.available) {
-    const info = document.createElement("p");
-    info.className = "fine-print";
-    info.textContent = !state.loadedAreas.has("performance") && state.loadPromise
-      ? "Leistungsdaten werden geladen…"
-      : "Nach dem ersten Trainingsdaten-Update werden hier Leistungswerte angezeigt.";
-    root.append(info);
-    if (syncNotices.length) {
-      const status = document.createElement("p");
-      status.className = "tab-sync-detail";
-      status.textContent = syncNotices.join(" · ");
-      root.append(status);
+  const values = performance?.metrics || {};
+  const predictions = [["5 km (geschätzt)", values.run_5k_seconds, formatDuration],
+    ["10 km (geschätzt)", values.run_10k_seconds, formatDuration],
+    ["Halbmarathon (geschätzt)", values.run_half_marathon_seconds, formatDuration],
+    ["Marathon (geschätzt)", values.run_marathon_seconds, formatDuration]].filter(([, metric]) => metric?.value != null);
+  root.hidden = !predictions.length;
+  if (predictions.length) {
+    root.append(reportNode("h3", "Laufprognosen"));
+    const table = reportNode("table");
+    const head = reportNode("thead");
+    const header = reportNode("tr");
+    for (const label of ["Distanz", "Gesch\u00e4tzte Zeit", "Quelle"]) {
+      const cell = reportNode("th", label); cell.scope = "col"; header.append(cell);
     }
-    return;
+    head.append(header); table.append(head);
+    const body = reportNode("tbody");
+    for (const [label, metric, formatter] of predictions) {
+      const row = reportNode("tr");
+      row.append(reportNode("td", label), reportNode("td", formatter(metric.value)), reportNode("td", metric.source || "Unbekannt"));
+      body.append(row);
+    }
+    table.append(body); root.append(table);
   }
-
-  const values = performance.metrics || {};
-  const load = performance.current_load || {};
-  const actualLoad = performance.actual_load || {};
-  const recovery = performance.recovery || {};
-  const comparisons = performance.comparisons || {};
-  const week = performance.rolling_training?.last_7_days || {};
-  const refreshedAt = performance.as_of || state.data?.performance_refresh?.last_refresh_at || state.data?.sync?.last_sync_at;
-  let performanceDetail = "";
-  if (syncNotices.length) performanceDetail = syncNotices.join(" · ");
-  else if (refreshedAt) performanceDetail = `Letzte Aktualisierung: ${formatTime(refreshedAt)}`;
-  const compared = (value, key) => value && typeof value === "object" ? { ...value, comparison: comparisons[key] } : { value, comparison: comparisons[key] };
-  performanceSection(root, "Gesundheitsdaten", [
-    ["Gewicht", compared(values.weight_kg, "weight_kg_30d"), null, { key: "weight_kg", step: "0.1" }],
-    ["Körperfett", values.body_fat_pct, null, { key: "body_fat_pct", step: "0.1" }],
-    ["Größe", values.height_cm, null, { key: "height_cm", step: "0.1" }],
-    ["Schlaf", compared({ ...recovery.source_freshness?.sleep_hours, value: recovery.sleep_hours, unit: "h", source: recovery.sleep_source || "Intervals.icu Wellness" }, "sleep_hours")],
-    ["Readiness", compared({ ...recovery.source_freshness?.readiness, value: recovery.readiness, unit: "", source: recovery.readiness_source || "Intervals.icu Wellness" }, "readiness_30d")],
-    ["Ruhepuls", compared({ ...recovery.source_freshness?.restingHR, value: recovery.restingHR, unit: "bpm", source: recovery.restingHR_source || "Intervals.icu Wellness" }, "restingHR")],
-    ["HRV", compared({ ...recovery.source_freshness?.hrv, value: recovery.hrv, unit: "ms", source: recovery.hrv_source || "Intervals.icu Wellness" }, "hrv")],
-    ["Schritte (Ø letzte 7 Tage)", values.steps_7d],
-    ["Stockwerke (Ø letzte 7 Tage)", values.floors_7d],
-    ["Kalorien (Ø letzte 7 Tage)", values.calories_7d],
-  ], performanceDetail);
-  performanceSection(root, "Allgemeine Leistungsdaten", [
-    ["Fitness / CTL", compared({ value: load.ctl, unit: "", source: "Intervals.icu" }, "fitness_ctl"), formatWhole],
-    ["Form / TSB", compared({ value: load.tsb, unit: "", source: "Intervals.icu" }, "form_tsb"), formatWhole],
-    ["Ermüdung / ATL (inkl. Planung)", compared({ value: load.atl, unit: "", source: "Intervals.icu" }, "fatigue_atl"), formatWhole],
-    ["Ermüdung / ATL (nur absolviert)", compared({ value: actualLoad.atl, unit: "", source: actualLoad.source || "Berechnet" }, "fatigue_atl_actual"), formatWhole],
-    ["Belastung letzte 7 Tage", compared({ value: week.training_load, unit: "", source: "Aus Aktivitäten" }, "training_load_7d")],
-    ["Trainingsumfang letzte 7 Tage", compared({ value: week.duration_hours, unit: "h", source: "Aus Aktivitäten" }, "training_volume_7d")],
-  ]);
-  performanceSection(root, "Radfahren", [
-    ["FTP", compared(values.cycling_ftp_watts, "cycling_ftp_watts_30d")],
-    ["eFTP", compared(values.cycling_eftp_watts, "cycling_eftp_30d")],
-    ["Schwellenpuls", compared(values.bike_threshold_hr_bpm, "bike_threshold_hr_bpm_30d")],
-    ["Max HF", values.cycling_max_hr_bpm],
-    ["VO₂max", compared(values.cycling_vo2max_ml_kg_min, "cycling_vo2max_ml_kg_min_30d")],
-  ]);
-  performanceSection(root, "Laufen", [
-    ["Schwellenleistung", compared(values.run_threshold_watts, "run_threshold_watts_30d")],
-    ["Schwellenpace", compared(values.run_threshold_pace_seconds_per_km, "run_threshold_pace_seconds_per_km_30d"), formatPace],
-    ["Schwellenpuls", compared(values.run_threshold_hr_bpm, "run_threshold_hr_bpm_30d")],
-    ["Max HF", values.running_max_hr_bpm],
-    ["VO₂max", compared(values.running_vo2max_ml_kg_min, "running_vo2max_ml_kg_min_30d")],
-    ["5 km (geschätzt)", compared(values.run_5k_seconds, "run_5k_seconds_30d"), formatDuration],
-    ["10 km (geschätzt)", compared(values.run_10k_seconds, "run_10k_seconds_30d"), formatDuration],
-    ["Halbmarathon (geschätzt)", compared(values.run_half_marathon_seconds, "run_half_marathon_seconds_30d"), formatDuration],
-    ["Marathon (geschätzt)", compared(values.run_marathon_seconds, "run_marathon_seconds_30d"), formatDuration],
-  ]);
+  renderAnalysisSegments(state.route);
 }
 
 function renderAiProvider(provider) {
@@ -3560,8 +3514,8 @@ function updateUnfocusedInput(selector, value) {
 }
 
 function renderSettingsSyncDayInputs(data) {
-  updateUnfocusedInput("#intervalsSyncDays", data.sync_settings?.intervals_days || 90);
-  updateUnfocusedInput("#garminSyncDays", data.sync_settings?.garmin_days || 30);
+  updateUnfocusedInput("#intervalsSyncDays", data.sync_settings?.intervals_days || 84);
+  updateUnfocusedInput("#garminSyncDays", data.sync_settings?.garmin_days || 84);
 }
 
 function calendarHorizonText(data) {
@@ -4033,7 +3987,7 @@ async function syncNow(event) {
   const button = event?.currentTarget || $("#activitiesSyncButton");
   const compactButton = button.id === "systemIntervalsSyncButton";
   const defaultCaption = compactButton ? "Synchronisieren" : "Aktivitäten aktualisieren";
-  const configuredDays = $("#intervalsSyncDays")?.value || state.data?.sync_settings?.intervals_days || 90;
+  const configuredDays = $("#intervalsSyncDays")?.value || state.data?.sync_settings?.intervals_days || 84;
   state.localSync.intervals = true;
   button.disabled = true; button.classList.add("busy"); button.textContent = compactButton ? "Synchronisierung läuft…" : "Aktivitäten werden aktualisiert…";
   try {
@@ -4055,7 +4009,7 @@ async function syncGarmin() {
   button.disabled = true;
   button.textContent = "Garmin wird synchronisiert…";
   try {
-    const configuredDays = $("#garminSyncDays")?.value || state.data?.sync_settings?.garmin_days || 30;
+    const configuredDays = $("#garminSyncDays")?.value || state.data?.sync_settings?.garmin_days || 84;
     const result = await api("/api/garmin/sync", { method: "POST", body: JSON.stringify({ days: configuredDays }) });
     const completed = await waitForSyncJob(result.id);
     if (completed.status === "failed") throw new Error(completed.error_class || "Garmin-Synchronisierung fehlgeschlagen.");

@@ -752,7 +752,7 @@ def key_value_service() -> KeyValueService:
     return KeyValueService(database_manager(), KEY_VALUE_REPOSITORY, DB_LOCK)
 
 
-SYNC_PERIOD_DEFAULTS = {"intervals": 90, "garmin": 30}
+SYNC_PERIOD_DEFAULTS = {"intervals": 84, "garmin": 84}
 ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
 SYNC_EARLIEST_DATE = date(2000, 1, 1)

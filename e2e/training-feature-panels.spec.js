@@ -7,28 +7,35 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.locator("#appShell")).toBeVisible();
   await expect(page.locator("#strengthProgress, #strengthTemplates")).toHaveCount(0);
   await page.evaluate(async () => { await applyNavigationRoute("analysis/performance", { historyMode: "replace" }); });
+  await expect(page.locator("#analysisHistoryCharts")).toBeVisible();
+  await expect(page.locator("#sessionPerformance")).toBeHidden();
+  await expect(page.locator("#trainingReport")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Woche", exact: true })).toHaveCount(0);
+  await page.evaluate(async () => { await applyNavigationRoute("analysis/load", { historyMode: "replace" }); });
   const report = page.locator("#sessionPerformance");
-  await expect(page.locator("#trainingReport")).toBeHidden();
   await expect(report.getByRole("heading", { name: /^Trainingsfokus/ })).toBeVisible();
+  expect((await report.boundingBox()).y).toBeGreaterThan((await page.locator("#analysisLoadCharts").boundingBox()).y);
+  await expect(page.locator("#analysisHistoryCharts .analysis-period-controls")).toHaveCount(0);
   await expect(report.getByText("Leicht aerob", { exact: true })).toBeVisible();
   await expect(report.getByText("Hoch aerob", { exact: true })).toBeVisible();
   await expect(report.getByText("Anaerob", { exact: true })).toBeVisible();
   await expect(report.locator(".training-focus-share")).toBeVisible();
   await expect(report.locator(".training-focus-coverage")).toContainText("3 erfasste Garmin-Einheiten");
   await expect(report.locator(".training-focus-coverage")).toContainText("erfasste Daten");
-  await expect(report.getByRole("heading", { name: "HF-Zonen" })).toBeHidden();
-  await report.getByText("Zonen im Detail", { exact: true }).click();
-  await expect(report.getByRole("heading", { name: "HF-Zonen" })).toBeVisible();
-  await expect(report.getByRole("heading", { name: "Power-Zonen" })).toBeVisible();
+  const zones = page.locator("#trainingZoneCharts");
+  await expect(zones.getByRole("heading", { name: "HF-Zonen" })).toBeVisible();
+  await expect(zones.getByRole("heading", { name: "Power-Zonen" })).toBeVisible();
+  await expect(zones.locator("details")).toHaveCount(0);
+  expect((await zones.boundingBox()).y).toBeGreaterThan((await report.boundingBox()).y);
   await page.evaluate(() => renderSyncStatus({ running: false, message: null }));
-  await expect(report.locator("progress")).toHaveCount(12);
+  await expect(zones.locator("progress")).toHaveCount(12);
+  await page.evaluate(async () => { await applyNavigationRoute("analysis/performance", { historyMode: "replace" }); });
   const periods = await page.evaluate(() => {
     const history = state.data.performance.history;
     const focus = state.data.performance.training_focus;
     return {
-      start: focus.start,
-      end: focus.end,
-      same: focus.end === history.end && focus.start === addDateKey(history.end, -55),
+      expected: `${dateLabel(addDateKey(history.end, -((new Date(`${history.end}T12:00:00Z`).getUTCDay() + 6) % 7) - 77))} bis ${dateLabel(history.end)}`,
+      same: focus.end === history.end && focus.start === addDateKey(history.end, -27),
       titles: [...document.querySelectorAll("#analysisHistoryCharts svg > title")].map((node) => node.textContent),
     };
   });
@@ -38,15 +45,7 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await page.locator("#analysisHistoryCharts").getByRole("button", { name: "Rad · FTP", exact: true }).click();
   await expect(page.locator("#analysisHistoryCharts .analysis-info-tooltip:popover-open")).toContainText(/Seit .+: \+\d+(?:,\d+)? W/);
   await page.keyboard.press("Escape");
-  for (const title of periods.titles) {
-    const match = title.match(/· (\d{2}\.\d{2}\.\d{4}) bis (\d{2}\.\d{2}\.\d{4})$/);
-    expect(match, title).not.toBeNull();
-    if (!match) continue;
-    const dateKey = (label) => label.split(".").reverse().join("-");
-    expect(dateKey(match[1]) >= periods.start).toBeTruthy();
-    expect(dateKey(match[1]) <= periods.end).toBeTruthy();
-    expect(dateKey(match[2])).toBe(periods.end);
-  }
+  for (const title of periods.titles) expect(title).toContain(periods.expected);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 
   await page.evaluate(async () => { await applyNavigationRoute("analysis/recovery", { historyMode: "replace" }); });
@@ -55,7 +54,8 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(recovery.locator("svg")).toHaveCount(3);
   await expect(recovery.getByRole("group", { name: "Schlafdauer: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen." })).toBeVisible();
   for (const metric of ["Schlafdauer", "HRV", "Ruhepuls"]) await expect(recovery.getByRole("button", { name: metric, exact: true })).toHaveCount(1);
-  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Aktuelle Woche");
+  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Letzte 14 Tage");
+  await expect(recovery.locator("svg path[data-color='2']").first()).toHaveAttribute("d", /M.*M/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.locator("#personalRecovery").getByText("Was beeinflusst deine Erholung?", { exact: true }).click();
   await expect(page.locator("#personalRecovery").getByText(/Mindestens zehn gemessene Tage je Gruppe/).first()).toBeVisible();
@@ -71,10 +71,10 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
       ...baselines.map((item) => ({ ...item, source: "Garmin Connect", history: item.history.map((point) => ({ ...point, value: 99 })) })),
     ] });
   });
-  await recovery.getByRole("button", { name: "8 Wochen", exact: true }).click();
+  await expect(recovery.locator(".analysis-period-controls")).toHaveCount(0);
   const weeklyRecovery = recovery.locator(".analysis-chart-card").first();
   await weeklyRecovery.getByRole("button", { name: "Schlafdauer", exact: true }).click();
-  await expect(weeklyRecovery.locator(".analysis-info-tooltip:popover-open")).toContainText("8:00 h");
+  await expect(weeklyRecovery.locator(".analysis-info-tooltip:popover-open")).toContainText("9:00 h");
   await page.keyboard.press("Escape");
   await expect(weeklyRecovery.locator(".analysis-subchart").first().locator("tbody tr")).toHaveCount(2);
   await expect(weeklyRecovery.locator(".analysis-chart-legend li")).toHaveCount(3);
@@ -132,7 +132,7 @@ test("@responsive local equipment and maintenance remain visible without Garmin 
   const gear = page.locator("#equipmentItems");
   await expect(gear.locator("details summary")).toBeVisible();
   await gear.locator("details summary").click();
-  await expect(gear.getByRole("heading", {name: "Saved bike", level: 4})).toBeVisible();
+  await expect(gear.getByRole("heading", {name: "Saved bike"})).toBeVisible();
   await expect(gear).toContainText("Revision 3");
   await expect(gear).toContainText("120 km");
   await expect(gear).toContainText("4 zugeordnete Einheiten");

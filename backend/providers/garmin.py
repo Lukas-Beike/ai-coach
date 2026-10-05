@@ -189,21 +189,22 @@ def _collect_daily_stats_day(
     external_call: ExternalCall,
     redact: Redact,
     warn: WarningLogger | None,
+    source: str = "daily_stats",
 ) -> None:
     try:
         value = external_call(
             "garmin",
-            "daily_stats",
+            source,
             lambda: fetch(current.isoformat()),
             {"date": current.isoformat()},
         )
         records = _daily_stats_records(value, current)
-        payload.setdefault("daily_stats", []).extend(records)
+        payload.setdefault(source, []).extend(records)
         stats["records"] = int(stats["records"]) + len(records)
     except Exception as exc:  # noqa: BLE001 - SDK errors vary; retain other sources and redact.
         stats["complete"] = False
         stats["error"] = redact(str(exc))[:500]
-        _add_error(payload, "daily_stats", exc, redact, warn)
+        _add_error(payload, source, exc, redact, warn)
 
 
 def _collect_daily_stats(
@@ -214,18 +215,20 @@ def _collect_daily_stats(
     external_call: ExternalCall,
     redact: Redact,
     warn: WarningLogger | None,
+    source: str = "daily_stats",
+    method: str = "get_user_summary",
 ) -> None:
-    fetch = getattr(client, "get_user_summary", None)
+    fetch = getattr(client, method, None)
     if not callable(fetch):
         return
     stats = pagination.setdefault(
-        "daily_stats", {"windows": len(windows), "records": 0, "complete": True}
+        source, {"windows": len(windows), "records": 0, "complete": True}
     )
     for window_start, window_end in windows:
         current = window_start
         while current <= window_end:
             _collect_daily_stats_day(
-                fetch, current, payload, stats, external_call, redact, warn
+                fetch, current, payload, stats, external_call, redact, warn, source
             )
             current += timedelta(days=1)
 
@@ -471,6 +474,17 @@ def collect_garmin_data(
         )
         _collect_resting_hr(
             client, windows, payload, pagination, external_call, redact, warn
+        )
+        _collect_daily_stats(
+            client,
+            windows,
+            payload,
+            pagination,
+            external_call,
+            redact,
+            warn,
+            source="training_status",
+            method="get_training_status",
         )
     if collection_options.include_current_metrics:
         _collect_current_metrics(client, today, payload, external_call, redact, warn)

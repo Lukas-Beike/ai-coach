@@ -34,3 +34,15 @@ class TrainingFocusTests(unittest.TestCase):
         self.assertEqual({"Z1": 600, "Z2": 1800, "Z3": 1200}, zones["heart_rate"]["seconds"])
         self.assertEqual({"Z1": 1000, "Z2": 2600}, zones["power"]["seconds"])
         self.assertEqual(0, result["classified_sessions"])
+
+    def test_focus_uses_exactly_four_weeks_including_today(self):
+        rows = [
+            {"activityId": index, "startTimeLocal": day + "T08:00:00",
+             "trainingEffectLabel": "TEMPO", "activityTrainingLoad": 40}
+            for index, day in enumerate(("2026-09-04", "2026-09-05", "2026-10-02", "2026-10-03"), 1)
+        ]
+        result = training_focus({}, {"activities": rows}, date(2026, 10, 2))
+        self.assertEqual(result["start"], "2026-09-05")
+        self.assertEqual(result["end"], "2026-10-02")
+        self.assertEqual(result["classified_sessions"], 2)
+        self.assertEqual(result["categories"]["high_aerobic"]["load"], 80)

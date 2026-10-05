@@ -653,7 +653,7 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
       ["cycling_ftp_watts", 250], ["cycling_eftp_watts", 260], ["run_threshold_pace_seconds_per_km", 300],
       ["cycling_vo2max_ml_kg_min", 52], ["running_vo2max_ml_kg_min", 54],
     ].map(([key, value]) => [key, ["Intervals.icu", "Garmin Connect"].map((source, index) => ({
-      source, points: points.map((point, i) => ({ date: point.date, value: i === 40 ? null : value + index + i / 20 })),
+      source, points: points.map((point, i) => ({ date: point.date, value: i >= 36 && i <= 42 ? null : value + index + i / 20 })),
     }))]));
     return { start: points[0].date, end: points.at(-1).date, load: { points }, metrics };
   })();
@@ -668,10 +668,10 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   const running = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: "Leistungsentwicklung · Laufen", exact: true }) });
   const cycling = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: "Leistungsentwicklung · Rad", exact: true }) });
   await expect(running).toContainText("Schwellenpace: 5:05 min/km");
-  await expect(running).toContainText("Lauf · VO₂max: 59,5 ml/kg/min");
+  await expect(running).toContainText("Lauf · VO₂max: 59,4 ml/kg/min");
   await expect(cycling).toContainText("FTP: 255,5 W");
-  await expect(cycling).toContainText("eFTP: 264,5 W");
-  await expect(cycling).toContainText("Rad · VO₂max: 57,5 ml/kg/min");
+  await expect(cycling).toContainText("eFTP: 264,4 W");
+  await expect(cycling).toContainText("Rad · VO₂max: 57,4 ml/kg/min");
   await expect(running.locator("path[data-series]")).toHaveCount(2);
   await expect(cycling.locator("path[data-series]")).toHaveCount(3);
   await expect(running).not.toContainText("%");

@@ -31,7 +31,7 @@ test("older measurements retain their date and age after a successful fetch", as
   await expect(older).toContainText("Messung");
   await expect(older).toContainText("27 Tage alt");
   await expect(older.locator("small").first()).toHaveAttribute("title", /Abgerufen/);
-  await expect(page.locator("#performanceSummary > section").filter({ hasText: "Radfahren" })).toContainText("Messdatum unbekannt");
+  await expect(page.locator("#performanceSummary > section").filter({ hasText: "Radfahren" })).toHaveCount(0);
 
   await expect(page.locator("#headerActionButton")).toHaveCount(0);
   await page.reload();
@@ -39,7 +39,7 @@ test("older measurements retain their date and age after a successful fetch", as
   await page.getByRole("link", { name: "Kalender", exact: true }).click();
   await page.getByRole("link", { name: "Analyse", exact: true }).click();
   await expect(older).toContainText("27 Tage alt");
-  await expect(page.locator("#performanceSummary > section").filter({ hasText: "Radfahren" })).toContainText("Messdatum unbekannt");
+  await expect(page.locator("#performanceSummary > section").filter({ hasText: "Radfahren" })).toHaveCount(0);
 });
 
 test("retained Body Battery is dated instead of being presented as current", async ({ page }) => {

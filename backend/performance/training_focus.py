@@ -32,7 +32,7 @@ def training_focus(
     today: date,
     timezone: str = "UTC",
 ) -> dict[str, Any]:
-    start = (today - timedelta(days=55)).isoformat()
+    start = (today - timedelta(days=27)).isoformat()
     end = today.isoformat()
     activities, _ = canonical_rows(snapshot or {})
     zones = zone_distribution(
