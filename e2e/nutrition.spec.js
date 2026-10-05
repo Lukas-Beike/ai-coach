@@ -78,6 +78,7 @@ test("@responsive nutrition diary and saved meals remain read-only and preserve 
 
 test("@responsive nutrition product library supports review, local save, and preserving an existing Coach draft", async ({ page }) => {
   const productName = `Fixture Whey ${Date.now()}`;
+  const barcode = String(Date.now()).slice(-13);
   await page.goto("/#nutrition/products");
   await expect(page.locator("#appShell")).toBeVisible();
   await page.locator("#nutritionProductManual").click();
@@ -85,7 +86,7 @@ test("@responsive nutrition product library supports review, local save, and pre
   await expect(editor).toBeVisible();
   await editor.locator('[name="name"]').fill(productName);
   await editor.locator('[name="brand"]').fill("Fixture");
-  await editor.locator('[name="barcode"]').fill("4006381333931");
+  await editor.locator('[name="barcode"]').fill(barcode);
   await editor.locator('[name="kcal"]').fill("380");
   await editor.locator('[name="protein_g"]').fill("72");
   await editor.locator('[name="basis_amount"]').fill("100");
@@ -213,15 +214,14 @@ test("@responsive Open Food Facts lookup can be explicitly saved into the local 
   expect(lookupCount).toBe(2);
 });
 
-test("@responsive a rejected packaging image does not prevent attaching a valid image afterwards", async ({ page }) => {
+test("@responsive a small undecodable image falls back to attachment and allows a valid image afterwards", async ({ page }) => {
   const validPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
   await page.evaluate(() => jumpToChatComposer());
   await page.locator("#attachmentInput").setInputFiles({ name: "broken.png", mimeType: "image/png", buffer: Buffer.from("not an image") });
-  await expect(page.locator("#toast")).toContainText(/decoded|Foto|Bild/i);
-  await expect(page.locator("#chatAttachments")).toBeHidden();
-  await expect(page.locator("#sendButton")).toBeDisabled();
+  await expect(page.locator("#chatAttachments")).toContainText("broken.png");
+  await expect(page.locator("#sendButton")).toBeEnabled();
   await page.locator("#attachmentInput").setInputFiles({ name: "label.png", mimeType: "image/png", buffer: validPng });
   await expect(page.locator("#chatAttachments")).toContainText("label.png");
   await expect(page.locator("#sendButton")).toBeEnabled();

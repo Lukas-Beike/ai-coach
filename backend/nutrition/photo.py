@@ -41,9 +41,7 @@ def validate_packaging_extraction(
     basis_amount = None
     if payload.get("basis_amount") not in (None, ""):
         if isinstance(payload.get("basis_amount"), bool):
-            raise AppError(
-                400, INVALID_BASIS_AMOUNT, reason="invalid_food_extraction"
-            )
+            raise AppError(400, INVALID_BASIS_AMOUNT, reason="invalid_food_extraction")
         try:
             basis_amount = float(payload.get("basis_amount"))  # type: ignore[arg-type]
         except (TypeError, ValueError) as exc:

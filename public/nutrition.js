@@ -378,7 +378,11 @@ async function extractNutritionProduct(file) {
     if (generation !== state.sessionGeneration) return;
     const result = await api("/api/nutrition/products/extract", { method: "POST", body: JSON.stringify({ image_data_url: prepared.dataUrl }) });
     if (generation !== state.sessionGeneration) return;
-    const extraction = { ...(result.candidate || result.extraction || {}), provenance: result.provenance || "packaging_label", source: "packaging_label" };
+    const extraction = {};
+    const candidate = result.candidate || result.extraction;
+    if (candidate && typeof candidate === "object") Object.assign(extraction, candidate);
+    extraction.provenance = result.provenance || "packaging_label";
+    extraction.source = "packaging_label";
     await saveNutritionProduct(extraction);
     status.textContent = "Bitte erkannte Werte prüfen und ausdrücklich speichern.";
   } catch (error) { if (generation === state.sessionGeneration) status.textContent = `Foto konnte nicht verarbeitet werden: ${error.message}`; }

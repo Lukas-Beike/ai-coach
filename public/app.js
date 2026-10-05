@@ -4494,44 +4494,36 @@ function renderChatAttachments() {
 }
 
 $("#attachmentButton").addEventListener("click", () => $("#attachmentInput").click());
-$("#attachmentInput").addEventListener("change", async (event) => {
-  const files = [...event.target.files];
-  event.target.value = "";
-  if (!files.length || state.chatAttachmentsLoading) return;
-  const generation = state.sessionGeneration;
-  const chatGeneration = state.chatGeneration;
-  state.chatAttachmentsLoading = true;
-  updateChatControls();
+function validateChatAttachmentFiles(files) {
+  const valid = file => file.size && /\.(gpx|fit|png|jpe?g|webp)$/i.test(file.name) && (/\.(gpx|fit)$/i.test(file.name) ? file.size <= 5000000 : file.size <= 15000000);
+  if ((state.chatAttachments || []).length + files.length > 4 || files.some(file => !valid(file))) throw new Error("Bis zu 4 Dateien auswählen. GPX/FIT dürfen höchstens 5 MB, Bilder höchstens 15 MB groß sein.");
+}
+async function fileBase64(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer()); let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCodePoint(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+  return btoa(binary);
+}
+async function prepareChatAttachment(file) {
+  if (!/\.(png|jpe?g|webp)$/i.test(file.name)) return { name: file.name, data: await fileBase64(file) };
   try {
-    if ((state.chatAttachments || []).length + files.length > 4 || files.some(file => !file.size || !/\.(gpx|fit|png|jpe?g|webp)$/i.test(file.name) || (/\.(gpx|fit)$/i.test(file.name) ? file.size > 5000000 : file.size > 15000000))) {
-      throw new Error("Bis zu 4 Dateien auswählen. GPX/FIT dürfen höchstens 5 MB, Bilder höchstens 15 MB groß sein.");
-    }
-    const attachments = [];
-    for (const file of files) {
-      if (/\.(png|jpe?g|webp)$/i.test(file.name)) {
-        try {
-          const prepared = await prepareNutritionImage(file);
-          const name = prepared.mime === file.type ? file.name : file.name.replace(/\.[^.]+$/, ".jpg");
-          attachments.push({ name, data: prepared.dataUrl.split(",")[1], type: prepared.mime });
-        } catch (error) {
-          if (file.size > 5_000_000) throw error;
-          const bytes = new Uint8Array(await file.arrayBuffer());
-          let binary = "";
-          for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCodePoint(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
-          attachments.push({ name: file.name, data: btoa(binary), type: file.type });
-        }
-      } else {
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        let binary = "";
-        for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCodePoint(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
-        attachments.push({ name: file.name, data: btoa(binary) });
-      }
-    }
+    const prepared = await prepareNutritionImage(file); const name = prepared.mime === file.type ? file.name : file.name.replace(/\.[^.]+$/, ".jpg");
+    return { name, data: prepared.dataUrl.split(",")[1], type: prepared.mime };
+  } catch (error) {
+    if (file.size > 5_000_000) throw error;
+    return { name: file.name, data: await fileBase64(file), type: file.type };
+  }
+}
+$("#attachmentInput").addEventListener("change", async (event) => {
+  const files = [...event.target.files]; event.target.value = "";
+  if (!files.length || state.chatAttachmentsLoading) return;
+  const generation = state.sessionGeneration; const chatGeneration = state.chatGeneration;
+  state.chatAttachmentsLoading = true; updateChatControls();
+  try {
+    validateChatAttachmentFiles(files);
+    const attachments = await Promise.all(files.map(prepareChatAttachment));
     if (generation !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
-    state.chatAttachments = [...(state.chatAttachments || []), ...attachments];
-    state.chatDraftDirty = true;
-    renderChatAttachments();
-    jumpToChatComposer();
+    state.chatAttachments = [...(state.chatAttachments || []), ...attachments]; state.chatDraftDirty = true;
+    renderChatAttachments(); jumpToChatComposer();
   } catch (error) { toast(error.message, true); }
   finally { state.chatAttachmentsLoading = false; updateChatControls(); }
 });
