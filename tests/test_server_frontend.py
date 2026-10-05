@@ -137,9 +137,9 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('/forms.js?v=217', index)
         self.assertIn('/components.js?v=217', index)
         self.assertIn('/coach.js?v=6', index)
-        self.assertIn('/app.js?v=265', index)
+        self.assertIn('/app.js?v=266', index)
         self.assertIn('/styles.css?v=266', index)
-        self.assertIn('intervals-coach-v324', service_worker)
+        self.assertIn('intervals-coach-v325', service_worker)
         self.assertIn('"/navigation.js?v=227"', service_worker)
         self.assertIn('"/appearance.js?v=218"', service_worker)
         self.assertIn('"/state.js?v=218"', service_worker)
@@ -187,7 +187,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn('function restoreDialogFocus(', app)
         self.assertLess(index.index('/forms.js?v=217'), index.index('/components.js?v=217'))
         self.assertLess(index.index('/components.js?v=217'), index.index('/coach.js?v=6'))
-        self.assertLess(index.index('/coach.js?v=6'), index.index('/app.js?v=265'))
+        self.assertLess(index.index('/coach.js?v=6'), index.index('/app.js?v=266'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn(
@@ -324,7 +324,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split('app.js?v=', 1)[1].split('"', 1)[0]
         self.assertIn(f'app.js?v={asset_version}', markup)
-        self.assertIn('intervals-coach-v324', service_worker)
+        self.assertIn('intervals-coach-v325', service_worker)
         self.assertIn(f'/app.js?v={asset_version}', service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -486,7 +486,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"/components.js?v=217"', source)
         self.assertIn('"/forms.js"', source)
         self.assertIn('"/coach.js?v=6"', source)
-        self.assertIn('"/app.js?v=265"', source)
+        self.assertIn('"/app.js?v=266"', source)
         self.assertIn('"/nutrition.js?v=13"', source)
         self.assertIn('"/icon.svg?v=217"', source)
         self.assertIn('"/styles.css?v=266"', source)
