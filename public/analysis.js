@@ -197,104 +197,139 @@ function appendAnalysisAxes(svg, unit, { min, max, step, chartRight, y }) {
   svg.append(analysisSvg("text", { x: 60, y: 15, class: "analysis-axis-unit" }, unit === "s/km" ? "min/km · schneller oben" : unit || "Belastungspunkte"));
 }
 
-function appendAnalysisSeries(svg, series, unit, { chartRight, x, y }, zeroCentered, sparse) { // NOSONAR
-  const labels = [];
-  series.forEach((item, index) => {
-    const currentLine = analysisUsesCurrentLine(item);
-    const hasTrend = !currentLine && (!sparse || item.points.filter(analysisValidPoint).length >= 3);
-    const color = item.color ?? index;
-    if (item.range) svg.append(analysisSvg("rect", { x: 60, y: Math.min(y(item.range.lower), y(item.range.upper)), width: chartRight - 60, height: Math.max(1, Math.abs(y(item.range.lower) - y(item.range.upper))), class: "analysis-baseline-band" }));
-    if (item.target != null) svg.append(analysisSvg("line", { x1: 60, x2: chartRight, y1: y(item.target), y2: y(item.target), class: "analysis-target-line" }));
-    if (item.average) {
-      const readings = item.points.filter(analysisValidPoint).map((point) => Number(point.value));
-      if (readings.length) {
-        const average = readings.reduce((sum, value) => sum + value, 0) / readings.length;
-        const line = analysisSvg("line", { x1: 60, x2: chartRight, y1: y(average), y2: y(average), class: "analysis-average-line" });
-        line.append(analysisSvg("title", {}, `${item.label}: Durchschnitt ${analysisValue(average, item.unit || unit)}`));
-        svg.append(line);
-        if (!item.averageInHeading) svg.append(analysisSvg("text", { x: chartRight, y: y(average) - 8, "text-anchor": "end", class: "analysis-point-value analysis-average-value", stroke: "var(--surface)", "stroke-width": 4, "paint-order": "stroke", "stroke-linejoin": "round" }, `Ø ${analysisValue(average, item.unit || unit)}`));
-      }
-    }
-    if (currentLine) {
-      const latest = analysisLatestPoint(item);
-      const line = analysisSvg("line", { x1: 60, x2: chartRight, y1: y(latest.value), y2: y(latest.value), class: "analysis-current-line", "data-series": index, "data-color": color });
-      line.append(analysisSvg("title", {}, `${item.label}: ${analysisPointValue(item, latest, unit)} · letzte Messung ${dateLabel(latest.date)}`));
+function appendAnalysisReferenceLines(svg, item, index, unit, scales, currentLine) {
+  const { chartRight, y } = scales;
+  const color = item.color ?? index;
+  if (item.range) svg.append(analysisSvg("rect", { x: 60, y: Math.min(y(item.range.lower), y(item.range.upper)), width: chartRight - 60, height: Math.max(1, Math.abs(y(item.range.lower) - y(item.range.upper))), class: "analysis-baseline-band" }));
+  if (item.target != null) svg.append(analysisSvg("line", { x1: 60, x2: chartRight, y1: y(item.target), y2: y(item.target), class: "analysis-target-line" }));
+  if (item.average) {
+    const readings = item.points.filter(analysisValidPoint).map((point) => Number(point.value));
+    if (readings.length) {
+      const average = readings.reduce((sum, value) => sum + value, 0) / readings.length;
+      const line = analysisSvg("line", { x1: 60, x2: chartRight, y1: y(average), y2: y(average), class: "analysis-average-line" });
+      line.append(analysisSvg("title", {}, `${item.label}: Durchschnitt ${analysisValue(average, item.unit || unit)}`));
       svg.append(line);
+      if (!item.averageInHeading) svg.append(analysisSvg("text", { x: chartRight, y: y(average) - 8, "text-anchor": "end", class: "analysis-point-value analysis-average-value", stroke: "var(--surface)", "stroke-width": 4, "paint-order": "stroke", "stroke-linejoin": "round" }, `\u00d8 ${analysisValue(average, item.unit || unit)}`));
     }
-    let path = "", previous = null, segment = [];
-    const labelledValues = new Set();
-    const latest = item.points.findLast(analysisValidPoint);
-    const latestLabel = latest ? analysisValue(latest.value, item.unit || unit).split(" ")[0] : null;
-    const flushArea = () => {
-      if (zeroCentered && segment.length > 1) svg.append(analysisSvg("path", { d: `M${x(segment[0].date)},${y(0)} ` + segment.map((p) => `L${x(p.date)},${y(p.value)}`).join(" ") + ` L${x(segment.at(-1).date)},${y(0)} Z`, class: "analysis-form-area", "data-color": color }));
+  }
+  if (!currentLine) return;
+  const latest = analysisLatestPoint(item);
+  const line = analysisSvg("line", { x1: 60, x2: chartRight, y1: y(latest.value), y2: y(latest.value), class: "analysis-current-line", "data-series": index, "data-color": color });
+  line.append(analysisSvg("title", {}, `${item.label}: ${analysisPointValue(item, latest, unit)} \u00b7 letzte Messung ${dateLabel(latest.date)}`));
+  svg.append(line);
+}
+
+function flushAnalysisArea(svg, segment, zeroCentered, color, x, y) {
+  if (zeroCentered && segment.length > 1) svg.append(analysisSvg("path", { d: `M${x(segment[0].date)},${y(0)} ` + segment.map((point) => `L${x(point.date)},${y(point.value)}`).join(" ") + ` L${x(segment.at(-1).date)},${y(0)} Z`, class: "analysis-form-area", "data-color": color }));
+}
+
+function appendAnalysisPointMark(svg, item, point, index, unit, scales) {
+  const { chartRight, x, y } = scales;
+  if (point.lower != null) svg.append(analysisSvg("line", { x1: x(point.date), x2: x(point.date), y1: y(point.lower), y2: y(point.upper), class: "analysis-range-whisker", "data-color": item.color ?? index }));
+  if (!item.bars) {
+    const dot = analysisSvg("circle", { cx: x(point.date), cy: y(point.value), r: 2.5, "data-series": index, "data-color": item.color ?? index });
+    dot.append(analysisSvg("title", {}, `${item.label} \u00b7 ${dateLabel(point.date)}: ${analysisPointValue(item, point, unit)}`));
+    svg.append(dot);
+    return;
+  }
+  const width = Math.min(24, (chartRight - 60) / Math.max(1, item.points.length) * .55);
+  const left = Math.max(60, Math.min(chartRight - width, x(point.date) - width / 2));
+  svg.append(analysisSvg("rect", { x: left, y: y(point.value), width, height: Math.max(0, y(0) - y(point.value)), rx: 3, class: "recovery-sleep-bar" }));
+}
+
+function analysisPointValueLabel(item, point, pointIndex, index, unit, scales, latest, latestIndex, labelledValues) {
+  if (item.bars) return null;
+  const label = analysisValue(point.value, item.unit || unit).split(" ")[0];
+  if (labelledValues.has(label) || (label === latest && pointIndex !== latestIndex)) return null;
+  labelledValues.add(label);
+  const { chartRight, x, y } = scales;
+  const pointX = x(point.date);
+  const anchor = pointX <= 70 ? "start" : pointX >= chartRight - 10 ? "end" : "middle";
+  const width = label.length * 8 + 8;
+  const pointY = y(point.value);
+  const nearby = item.points.filter((other) => analysisValidPoint(other) && other !== point && Math.abs(x(other.date) - pointX) < width + 12);
+  const aboveClear = pointY >= 30 && !nearby.some((other) => Math.abs(y(other.value) - pointY) < 22);
+  return { label, x: pointX, y: aboveClear ? pointY - 10 : Math.min(174, pointY + 16), anchor, width, index, latest: pointIndex === latestIndex };
+}
+
+function appendAnalysisBarExtremaLabels(item, unit, index, scales, labels) {
+  if (!item.bars) return;
+  const values = item.points.filter(analysisValidPoint).map((point) => Number(point.value));
+  if (!values.length) return;
+  const { x, y } = scales;
+  const extrema = [...new Set([Math.min(...values), Math.max(...values)])];
+  for (const [extremeIndex, value] of extrema.entries()) {
+    const point = item.points.find((candidate) => analysisValidPoint(candidate) && Number(candidate.value) === value);
+    if (point) labels.push({ label: analysisValue(value, item.unit || unit).split(" ")[0], x: x(point.date), y: y(value) - (extremeIndex ? 24 : 10), anchor: "middle", width: 50, index, latest: false, extrema: true });
+  }
+}
+
+function appendAnalysisSeriesPoints(svg, item, index, unit, scales, zeroCentered, currentLine, labels) {
+  const { x, y } = scales;
+  const color = item.color ?? index;
+  let path = "", previous = null, segment = [];
+  const labelledValues = new Set();
+  const latest = item.points.findLast(analysisValidPoint);
+  const latestLabel = latest ? analysisValue(latest.value, item.unit || unit).split(" ")[0] : null;
+  const latestIndex = item.points.findLastIndex(analysisValidPoint);
+  item.points.forEach((point, pointIndex) => {
+    if (!analysisValidPoint(point)) {
+      previous = null;
+      flushAnalysisArea(svg, segment, zeroCentered, color, x, y);
       segment = [];
-    };
-    item.points.forEach((point, pointIndex) => {
-      if (!analysisValidPoint(point)) { previous = null; flushArea(); return; }
-      const continuous = previous && Date.parse(point.date) - Date.parse(previous.date) <= (item.cadenceDays || 1) * 86400000;
-      if (!continuous) flushArea();
-      segment.push(point);
-      path += `${continuous ? "L" : "M"}${x(point.date).toFixed(2)},${y(point.value).toFixed(2)} `;
-      if (point.lower != null) svg.append(analysisSvg("line", { x1: x(point.date), x2: x(point.date), y1: y(point.lower), y2: y(point.upper), class: "analysis-range-whisker", "data-color": color }));
-      if (item.bars) {
-        const width = Math.min(24, (chartRight - 60) / Math.max(1, item.points.length) * .55);
-        const left = Math.max(60, Math.min(chartRight - width, x(point.date) - width / 2));
-        svg.append(analysisSvg("rect", { x: left, y: y(point.value), width, height: Math.max(0, y(0) - y(point.value)), rx: 3, class: "recovery-sleep-bar" }));
-      } else {
-        const dot = analysisSvg("circle", { cx: x(point.date), cy: y(point.value), r: 2.5, "data-series": index, "data-color": color });
-        dot.append(analysisSvg("title", {}, `${item.label} · ${dateLabel(point.date)}: ${analysisPointValue(item, point, unit)}`)); svg.append(dot);
-      }
-      const label = analysisValue(point.value, item.unit || unit).split(" ")[0];
-      if (!item.bars && !labelledValues.has(label) && (label !== latestLabel || point === latest)) {
-        labelledValues.add(label);
-        let anchor = "middle";
-        if (x(point.date) <= 70) anchor = "start";
-        else if (x(point.date) >= chartRight - 10) anchor = "end";
-        const width = label.length * 8 + 8;
-        const pointY = y(point.value);
-        const nearby = item.points.filter((other) => analysisValidPoint(other) && other !== point && Math.abs(x(other.date) - x(point.date)) < width + 12);
-        const aboveClear = pointY >= 30 && !nearby.some((other) => Math.abs(y(other.value) - pointY) < 22);
-        const labelY = aboveClear ? pointY - 10 : Math.min(174, pointY + 16);
-        labels.push({ label, x: x(point.date), y: labelY, anchor, width, index, latest: pointIndex === item.points.findLastIndex(analysisValidPoint) });
-      }
-      previous = point;
-    });
-    if (item.bars) {
-      const values = item.points.filter(analysisValidPoint).map((point) => Number(point.value));
-      const extrema = [...new Set([Math.min(...values), Math.max(...values)])];
-      for (const [extremeIndex, value] of extrema.entries()) {
-        const point = item.points.find((candidate) => analysisValidPoint(candidate) && Number(candidate.value) === value);
-        if (point) labels.push({ label: analysisValue(value, item.unit || unit).split(" ")[0], x: x(point.date), y: y(value) - (extremeIndex ? 24 : 10), anchor: "middle", width: 50, index, latest: false, extrema: true });
-      }
+      return;
     }
-    flushArea();
-    if (currentLine && !labelledValues.size) {
-      const latest = analysisLatestPoint(item);
-      svg.append(analysisSvg("text", { x: chartRight, y: y(latest.value) - 8 - index * 12, "text-anchor": "end", class: "analysis-point-value", "data-value-series": index }, analysisValue(latest.value, item.unit || unit).split(" ")[0]));
+    const continuous = previous && Date.parse(point.date) - Date.parse(previous.date) <= (item.cadenceDays || 1) * 86400000;
+    if (!continuous) {
+      flushAnalysisArea(svg, segment, zeroCentered, color, x, y);
+      segment = [];
     }
-    if (!item.bars && hasTrend) svg.append(analysisSvg("path", { d: path, fill: "none", "data-series": index, "data-color": color, "data-line": item.line || (index ? "dashed" : "solid") }));
+    segment.push(point);
+    path += `${continuous ? "L" : "M"}${x(point.date).toFixed(2)},${y(point.value).toFixed(2)} `;
+    appendAnalysisPointMark(svg, item, point, index, unit, scales);
+    const label = analysisPointValueLabel(item, point, pointIndex, index, unit, scales, latestLabel, latestIndex, labelledValues);
+    if (label) labels.push(label);
+    previous = point;
   });
+  flushAnalysisArea(svg, segment, zeroCentered, color, x, y);
+  appendAnalysisBarExtremaLabels(item, unit, index, scales, labels);
+  if (currentLine && !labelledValues.size) {
+    const current = analysisLatestPoint(item);
+    svg.append(analysisSvg("text", { x: scales.chartRight, y: y(current.value) - 8 - index * 12, "text-anchor": "end", class: "analysis-point-value", "data-value-series": index }, analysisValue(current.value, item.unit || unit).split(" ")[0]));
+  }
+  return path;
+}
+
+function appendAnalysisPointLabels(svg, labels) {
   const occupied = [];
   const accepted = [];
   labels.sort((a, b) => Number(b.extrema) - Number(a.extrema) || Number(b.latest) - Number(a.latest));
   labels.forEach((label) => {
-    let left = label.x - label.width / 2;
-    if (label.anchor === "start") left = label.x;
-    else if (label.anchor === "end") left = label.x - label.width;
+    const left = label.anchor === "start" ? label.x : label.anchor === "end" ? label.x - label.width : label.x - label.width / 2;
     const box = { left, right: left + label.width, top: label.y - 12, bottom: label.y + 3 };
     if (occupied.some((other) => box.left < other.right + 6 && box.right > other.left - 6 && box.top < other.bottom + 4 && box.bottom > other.top - 4)) {
-      if (label.extrema) {
-        label.y = Math.max(18, label.y - 18);
-        box.top = label.y - 12; box.bottom = label.y + 3;
-      } else return;
+      if (!label.extrema) return;
+      label.y = Math.max(18, label.y - 18);
+      box.top = label.y - 12; box.bottom = label.y + 3;
     }
     occupied.push(box);
     accepted.push(label);
   });
   accepted.sort((a, b) => a.index - b.index || a.x - b.x);
-  accepted.forEach((label) => {
-    svg.append(analysisSvg("text", { x: label.x, y: label.y, "text-anchor": label.anchor, class: "analysis-point-value", "data-value-series": label.index }, label.label));
+  accepted.forEach((label) => svg.append(analysisSvg("text", { x: label.x, y: label.y, "text-anchor": label.anchor, class: "analysis-point-value", "data-value-series": label.index }, label.label)));
+}
+
+function appendAnalysisSeries(svg, series, unit, scales, zeroCentered, sparse) {
+  const labels = [];
+  series.forEach((item, index) => {
+    const currentLine = analysisUsesCurrentLine(item);
+    const hasTrend = !currentLine && (!sparse || item.points.filter(analysisValidPoint).length >= 3);
+    const color = item.color ?? index;
+    appendAnalysisReferenceLines(svg, item, index, unit, scales, currentLine);
+    const path = appendAnalysisSeriesPoints(svg, item, index, unit, scales, zeroCentered, currentLine, labels);
+    if (!item.bars && hasTrend) svg.append(analysisSvg("path", { d: path, fill: "none", "data-series": index, "data-color": color, "data-line": item.line || (index ? "dashed" : "solid") }));
   });
+  appendAnalysisPointLabels(svg, labels);
 }
 
 function appendAnalysisDateTicks(svg, start, end, { chartWidth, x }) {
@@ -744,7 +779,7 @@ function seasonWeekSummary(week) {
 function analysisWeeklyPerformancePoints(points, start, end, median = false) {
   const weeks = [];
   for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
-    const weekEnd = addDateKey(weekStart, 6) > end ? end : addDateKey(weekStart, 6);
+    const weekEnd = Math.min(addDateKey(weekStart, 6), end);
     const readings = points.filter((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point)).sort((a, b) => a.date.localeCompare(b.date));
     if (!readings.length) { weeks.push({ date: weekEnd, value: null }); continue; }
     const latest = readings.at(-1);
