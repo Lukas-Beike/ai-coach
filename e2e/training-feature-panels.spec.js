@@ -20,8 +20,11 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(report.getByText("Hoch aerob", { exact: true })).toBeVisible();
   await expect(report.getByText("Anaerob", { exact: true })).toBeVisible();
   await expect(report.locator(".training-focus-share")).toBeVisible();
-  await expect(report.locator(".training-focus-coverage")).toContainText("3 erfasste Garmin-Einheiten");
-  await expect(report.locator(".training-focus-coverage")).toContainText("erfasste Daten");
+  const focusInfo = report.locator(".analysis-legend-info").first();
+  await focusInfo.click();
+  await expect(report.locator(".analysis-info-tooltip:popover-open")).toContainText("3 erfasste Garmin-Einheiten");
+  await expect(report.locator(".analysis-info-tooltip:popover-open")).toContainText("erfasste Daten");
+  await page.keyboard.press("Escape");
   const zones = page.locator("#trainingZoneCharts");
   await expect(zones.getByRole("heading", { name: "HF-Zonen" })).toBeVisible();
   await expect(zones.getByRole("heading", { name: "Power-Zonen" })).toBeVisible();
