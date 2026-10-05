@@ -217,6 +217,11 @@
               <label>Sportarten<select name="sports" multiple size="4" aria-describedby="sportsHelp"><option value="Cycling">Radfahren</option><option value="Running">Laufen</option><option value="Swimming">Schwimmen</option><option value="Strength">Krafttraining</option><option value="Triathlon">Triathlon</option><option value="Other">Andere</option></select><small id="sportsHelp">Mit Strg/Ctrl oder Cmd mehrere Sportarten auswählen.</small></label>
             </div>
             <label>Trainingserfahrung<textarea name="training_background" rows="3" placeholder="Erfahrung, Trainingshistorie, Stärken und Schwächen…"></textarea></label>
+            <div class="form-grid">
+              <label>Größe (cm)<input name="height_cm" type="number" min="50" max="250" step="0.1"></label>
+              <label>Gewicht (kg)<input name="weight_kg" type="number" min="20" max="300" step="0.1"></label>
+              <label>Körperfettanteil (%)<input name="body_fat_pct" type="number" min="1" max="70" step="0.1"></label>
+            </div>
             <label>Typischer Wochenumfang<input name="typical_weekly_volume" placeholder="Zum Beispiel: 8–10 Stunden, 5 Trainingstage"></label>
             <label>Langfristige Ziele<textarea name="goals" rows="4" placeholder="Saisonziele und Wettkampfziele…"></textarea></label>
             <label>Verfügbarkeit pro Woche<textarea name="availability" rows="3" placeholder="Tage, Zeiten, bevorzugter Ruhetag…"></textarea></label>
