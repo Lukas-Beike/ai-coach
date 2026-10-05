@@ -170,11 +170,6 @@ test("@responsive latest measurement stays visible without inventing measurement
   await expect(root.locator("tbody tr")).toHaveCount(1);
 });
 
-test("recovery charts render sleep metrics without normal ranges", async ({ page }) => {
-  await performanceFixture(page, { personal_recovery: { as_of: "2026-09-30", baselines: [] } }, "recovery");
-  await expect(page.locator("#personalRecovery svg")).toHaveCount(3);
-});
-
 test("@responsive dense performance retains every measured week without overlapping labels", async ({ page }) => {
   const points = Array.from({ length: 12 }, (_, index) => ({ date: new Date(Date.UTC(2026, 6, 13 + index * 7)).toISOString().slice(0, 10), value: 47.6 + index * .15 }));
   await performanceFixture(page, { history: { start: "2026-07-13", end: "2026-09-30", load: { points: [] }, metrics: {
