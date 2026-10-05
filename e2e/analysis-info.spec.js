@@ -31,7 +31,6 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await expect(root.locator("svg")).toHaveCount(3);
   await expect(root.locator(".analysis-secondary-axis, .analysis-extremum")).toHaveCount(0);
   const sleep = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Schlafdauer", exact: true }) });
-  const hrv = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "HRV", exact: true }) });
   await expect(hrv).toContainText("Innerhalb deines üblichen Bereichs");
   await expect(root).toContainText("Mindestens 14 frühere passende Nächte erforderlich");
   await sleep.locator(".analysis-day-marker").last().focus();
