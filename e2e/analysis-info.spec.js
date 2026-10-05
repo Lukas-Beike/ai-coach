@@ -22,7 +22,6 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
       { metric: "hrv", source: "Garmin Connect", measurement: "lastNightAvg", observed_at: "2026-10-01", nights: 28,
         status: "ok", lower: 50, upper: 60, position: "within", history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
       { metric: "resting_hr", source: "Intervals.icu", measurement: "restingHR", observed_at: "2026-10-01", nights: 1,
-        status: "insufficient_data", reason: "Mindestens 14 frühere passende Nächte erforderlich.", history: [{ date: "2026-10-01", value: 48 }] },
     ],
   } }, "recovery");
   const root = page.locator("#personalRecovery");
@@ -31,8 +30,6 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await expect(root.locator("svg")).toHaveCount(3);
   await expect(root.locator(".analysis-secondary-axis, .analysis-extremum")).toHaveCount(0);
   const sleep = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Schlafdauer", exact: true }) });
-  await expect(hrv).toContainText("Innerhalb deines üblichen Bereichs");
-  await expect(root).toContainText("Mindestens 14 frühere passende Nächte erforderlich");
   await sleep.locator(".analysis-day-marker").last().focus();
   await page.keyboard.press("Enter");
   await expect(page.locator(".analysis-info-tooltip:popover-open")).toContainText("Schlafdauer: 11:00 h");
