@@ -355,6 +355,15 @@ class CoachDialogueActionService:
     def _apply_object_scope(
         name: str, arguments: dict[str, Any], action: dict[str, Any]
     ) -> None:
+        CoachDialogueActionService._apply_training_object_scope(name, arguments, action)
+        CoachDialogueActionService._apply_nutrition_object_scope(
+            name, arguments, action
+        )
+
+    @staticmethod
+    def _apply_training_object_scope(
+        name: str, arguments: dict[str, Any], action: dict[str, Any]
+    ) -> None:
         if name == "update_training_plan":
             require_coach_scope(
                 action,
@@ -365,6 +374,11 @@ class CoachDialogueActionService:
             require_coach_scope(
                 action, "adaptive_replan:" + str(arguments.get("adjustment_id") or "")
             )
+
+    @staticmethod
+    def _apply_nutrition_object_scope(
+        name: str, arguments: dict[str, Any], action: dict[str, Any]
+    ) -> None:
         if name in {
             "save_nutrition_template",
             "save_nutrition_product",

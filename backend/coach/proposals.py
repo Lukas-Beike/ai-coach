@@ -493,6 +493,18 @@ class CoachProposalCreationService:
         self, values: dict[str, Any], payload: dict[str, Any]
     ) -> dict[str, Any]:
         preview_values = dict(values)
+        preview_values = self._merge_existing_local_write(
+            preview_values, values, payload
+        )
+        self._calculate_local_write_preview(preview_values, values, payload)
+        return preview_values
+
+    def _merge_existing_local_write(
+        self,
+        preview_values: dict[str, Any],
+        values: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
         template_id = str(values.get("id") or "").strip()
         if template_id and self._nutrition_service:
             existing = next(
@@ -514,6 +526,14 @@ class CoachProposalCreationService:
                     existing_product = None
                 if existing_product:
                     preview_values = {**existing_product, **preview_values}
+        return preview_values
+
+    def _calculate_local_write_preview(
+        self,
+        preview_values: dict[str, Any],
+        values: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> None:
         if "food_ingredients" in values:
             if self._nutrition_service is None:
                 raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
@@ -527,7 +547,6 @@ class CoachProposalCreationService:
                 preview_values.update(
                     self._nutrition_service()._prepare_values(preview_values)
                 )
-        return preview_values
 
     @staticmethod
     def _local_write_preview_diff(preview_values: dict[str, Any]) -> dict[str, str]:
