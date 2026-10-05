@@ -55,7 +55,7 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.getByRole("heading", { name: "Aktuelle Erholung", exact: true })).toHaveCount(0);
   const recovery = page.locator("#personalRecovery");
   await expect(recovery.locator("svg")).toHaveCount(3);
-  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Letzte 14 Tage");
+  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung Â· Letzte 14 Tage");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 
   await page.evaluate(() => {
@@ -71,7 +71,7 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   });
   await expect(recovery.locator(".analysis-period-controls")).toHaveCount(1);
   await recovery.getByRole("button", { name: "12 Wochen", exact: true }).click();
-  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Letzte 12 Wochen");
+  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung Â· Letzte 12 Wochen");
   await expect(recovery.locator(".analysis-subchart")).toHaveCount(3);
 
   await page.evaluate(async () => { await applyNavigationRoute("plan/season", { historyMode: "replace" }); });
