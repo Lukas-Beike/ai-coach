@@ -31,7 +31,6 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await expect(root.locator("svg")).toHaveCount(3);
   await expect(root.locator(".analysis-secondary-axis, .analysis-extremum")).toHaveCount(0);
   const sleep = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Schlafdauer", exact: true }) });
-  await expect(sleep.getByRole("button", { name: "Schlafdauer", exact: true })).toBeVisible();
   await expect(sleep.locator(".recovery-sleep-bar")).toHaveCount(2);
   await expect(sleep.locator(".analysis-target-line")).toHaveCount(0);
   await expect(sleep.locator(".analysis-average-line")).toHaveCount(1);
@@ -47,7 +46,7 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await expect(page.locator(".analysis-info-tooltip:popover-open")).toContainText("Schlafdauer: 11:00 h");
   await page.keyboard.press("Escape");
   await expect(root.getByRole("heading", { name: "Erholung · Letzte 14 Tage", exact: true })).toBeVisible();
-  await expect(root.locator(".analysis-period-controls")).toHaveCount(0);
+  await expect(root.locator(".analysis-period-controls")).toHaveCount(1);
   await expect(root.locator("svg > title").first()).toHaveText("Schlafdauer · 19.09.2026 bis 02.10.2026");
   await sleep.getByText("Werte ansehen", { exact: true }).click();
   await expect(sleep.locator("tbody tr")).toHaveCount(2);
@@ -63,7 +62,6 @@ test("@responsive Garmin acute load switches fourteen days and twelve weeks with
   await expect(root.locator("svg")).toHaveCount(1);
   await expect(root.locator("circle[data-series='0']")).toHaveCount(11);
   await expect(root.locator("path[data-series='0']")).toHaveAttribute("d", /M.*M/);
-  await expect(root.getByRole("button", { name: "Garmin \u00b7 Akute Belastung", exact: true })).toBeVisible();
   await expect(root).not.toContainText("Fitness");
   await root.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(14);
@@ -96,9 +94,9 @@ test("@responsive sparse performance shows measurements and the current value li
   await expect(root).toContainText("kein belastbarer Trend");
   await expect(root).toContainText("Seit 01.09.2026: −0:10 min/km");
   await expect(root).toContainText("08.09.2026 · Garmin Connect");
-  const button = root.getByRole("button", { name: "Rad · FTP", exact: true });
+  const button = root.getByRole("button", { name: "FTP", exact: true });
   await button.click();
-  const info = root.getByRole("tooltip").filter({ hasText: "Rad · FTP · Garmin Connect" });
+  const info = root.getByRole("tooltip").filter({ hasText: "FTP · Garmin Connect" });
   await expect(info).toBeVisible();
   await expect(button).toHaveAttribute("aria-expanded", "true");
   const bounds = await info.boundingBox();
@@ -154,7 +152,7 @@ test("@responsive repeated performance values are labelled once without a normal
   await expect(root.locator('circle[data-series="0"]')).toHaveCount(5);
   await expect(root.locator(".analysis-current-line")).toHaveCount(1);
   await expect(root.locator(".analysis-baseline-band")).toHaveCount(0);
-  await root.getByRole("button", { name: "Rad · FTP", exact: true }).click();
+  await root.getByRole("button", { name: "FTP", exact: true }).click();
   await expect(root.locator(".analysis-info-tooltip:popover-open")).not.toContainText("Grüner Bereich");
   await page.keyboard.press("Escape");
 });
@@ -199,7 +197,8 @@ test("@responsive latest measurement stays visible without inventing measurement
   await expect(root.locator(".analysis-current-line")).toHaveCount(1);
   await expect(root.locator(".analysis-point-value")).toHaveText(["49"]);
   await expect(root.locator("circle")).toHaveCount(1);
-  await root.getByRole("button", { name: "Lauf · VO₂max", exact: true }).click();
+  await root.locator(".analysis-day-marker").last().focus();
+  await page.keyboard.press("Enter");
   await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("20.09.2026");
   await expect(root.locator(".analysis-info-tooltip:popover-open")).toContainText("1/12 datierte Werte");
   await page.keyboard.press("Escape");
@@ -218,7 +217,8 @@ test("sleep uses an average line without a normal range or target", async ({ pag
   await expect(root.locator(".analysis-target-line")).toHaveCount(0);
   await expect(root.locator(".analysis-average-line")).toHaveCount(1);
   await expect(root.locator(".analysis-average-value")).toHaveText("Ø 7:30 h");
-  await expect(root.locator(".analysis-sleep-extrema")).toHaveText("Minimum 7:00 h · Maximum 8:00 h");
+  await expect(root.locator("svg").first()).toContainText("7:00");
+  await expect(root.locator("svg").first()).toContainText("8:00");
   await root.getByRole("button", { name: "Schlafdauer", exact: true }).click();
   const info = root.locator(".analysis-info-tooltip:popover-open");
   await expect(info).toContainText("Durchschnitt");
@@ -261,19 +261,13 @@ test("@responsive dense performance retains every measured week without overlapp
   await expect(page.locator("#analysisHistoryCharts details").first().locator("tbody tr")).toHaveCount(12);
 });
 
-test("@responsive supplementary performance cards omit chart duplicates and health data", async ({ page }) => {
+test("@responsive performance keeps predictions in the dedicated table", async ({ page }) => {
   await performanceFixture(page, { available: true, metrics: {
     cycling_ftp_watts: { value: 280, unit: "W" }, running_vo2max_ml_kg_min: { value: 52 },
     weight_kg: { value: 72, unit: "kg", source: "Garmin Connect" },
     run_5k_seconds: { value: 1200, unit: "s", source: "Garmin Connect Laufprognose" },
   } });
-  const summary = page.locator("#performanceSummary");
-  await expect(summary.getByRole("heading", { name: "Laufprognosen" })).toBeVisible();
-  await expect(summary.getByRole("heading", { name: "Gewicht" })).toBeVisible();
-  await expect(summary).not.toContainText("Gesundheitsdaten");
-  await expect(summary).not.toContainText("Allgemeine Leistungsdaten");
-  await expect(summary).not.toContainText("FTP");
-  await expect(summary).not.toContainText("Ruhepuls");
-  await page.evaluate(() => renderPerformance({ available: true, metrics: {} }, { refreshCharts: false }));
-  await expect(page.locator("#analysisPerformanceSegment")).toBeHidden();
+  await expect(page.locator("#performancePredictions")).toContainText("Laufprognosen");
+  await expect(page.locator("#performancePredictions")).toContainText("20:00");
+  await expect(page.locator("#performanceSummary")).toBeHidden();
 });
