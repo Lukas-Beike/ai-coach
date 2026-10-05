@@ -783,7 +783,8 @@ function seasonWeekSummary(week) {
 function analysisWeeklyPerformancePoints(points, start, end, median = false) {
   const weeks = [];
   for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
-    const weekEnd = Math.min(addDateKey(weekStart, 6), end);
+    let weekEnd = addDateKey(weekStart, 6);
+    if (weekEnd > end) weekEnd = end;
     const readings = points.filter((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point)).sort((a, b) => a.date.localeCompare(b.date));
     if (!readings.length) { weeks.push({ date: weekEnd, value: null }); continue; }
     const latest = readings.at(-1);
