@@ -237,14 +237,16 @@ function appendAnalysisPointMark(svg, item, point, index, unit, scales) {
   svg.append(analysisSvg("rect", { x: left, y: y(point.value), width, height: Math.max(0, y(0) - y(point.value)), rx: 3, class: "recovery-sleep-bar" }));
 }
 
-function analysisPointValueLabel(item, point, pointIndex, index, unit, scales, latest, latestIndex, labelledValues) {
+function analysisPointValueLabel(item, point, { pointIndex, index, unit, scales, latest, latestIndex, labelledValues }) {
   if (item.bars) return null;
   const label = analysisValue(point.value, item.unit || unit).split(" ")[0];
   if (labelledValues.has(label) || (label === latest && pointIndex !== latestIndex)) return null;
   labelledValues.add(label);
   const { chartRight, x, y } = scales;
   const pointX = x(point.date);
-  const anchor = pointX <= 70 ? "start" : pointX >= chartRight - 10 ? "end" : "middle";
+  let anchor = "middle";
+  if (pointX <= 70) anchor = "start";
+  else if (pointX >= chartRight - 10) anchor = "end";
   const width = label.length * 8 + 8;
   const pointY = y(point.value);
   const nearby = item.points.filter((other) => analysisValidPoint(other) && other !== point && Math.abs(x(other.date) - pointX) < width + 12);
@@ -264,7 +266,7 @@ function appendAnalysisBarExtremaLabels(item, unit, index, scales, labels) {
   }
 }
 
-function appendAnalysisSeriesPoints(svg, item, index, unit, scales, zeroCentered, currentLine, labels) {
+function appendAnalysisSeriesPoints(svg, item, { index, unit, scales, zeroCentered, currentLine, labels }) {
   const { x, y } = scales;
   const color = item.color ?? index;
   let path = "", previous = null, segment = [];
@@ -287,7 +289,7 @@ function appendAnalysisSeriesPoints(svg, item, index, unit, scales, zeroCentered
     segment.push(point);
     path += `${continuous ? "L" : "M"}${x(point.date).toFixed(2)},${y(point.value).toFixed(2)} `;
     appendAnalysisPointMark(svg, item, point, index, unit, scales);
-    const label = analysisPointValueLabel(item, point, pointIndex, index, unit, scales, latestLabel, latestIndex, labelledValues);
+    const label = analysisPointValueLabel(item, point, { pointIndex, index, unit, scales, latest: latestLabel, latestIndex, labelledValues });
     if (label) labels.push(label);
     previous = point;
   });
@@ -305,7 +307,9 @@ function appendAnalysisPointLabels(svg, labels) {
   const accepted = [];
   labels.sort((a, b) => Number(b.extrema) - Number(a.extrema) || Number(b.latest) - Number(a.latest));
   labels.forEach((label) => {
-    const left = label.anchor === "start" ? label.x : label.anchor === "end" ? label.x - label.width : label.x - label.width / 2;
+    let left = label.x - label.width / 2;
+    if (label.anchor === "start") left = label.x;
+    else if (label.anchor === "end") left = label.x - label.width;
     const box = { left, right: left + label.width, top: label.y - 12, bottom: label.y + 3 };
     if (occupied.some((other) => box.left < other.right + 6 && box.right > other.left - 6 && box.top < other.bottom + 4 && box.bottom > other.top - 4)) {
       if (!label.extrema) return;
@@ -326,7 +330,7 @@ function appendAnalysisSeries(svg, series, unit, scales, zeroCentered, sparse) {
     const hasTrend = !currentLine && (!sparse || item.points.filter(analysisValidPoint).length >= 3);
     const color = item.color ?? index;
     appendAnalysisReferenceLines(svg, item, index, unit, scales, currentLine);
-    const path = appendAnalysisSeriesPoints(svg, item, index, unit, scales, zeroCentered, currentLine, labels);
+    const path = appendAnalysisSeriesPoints(svg, item, { index, unit, scales, zeroCentered, currentLine, labels });
     if (!item.bars && hasTrend) svg.append(analysisSvg("path", { d: path, fill: "none", "data-series": index, "data-color": color, "data-line": item.line || (index ? "dashed" : "solid") }));
   });
   appendAnalysisPointLabels(svg, labels);
