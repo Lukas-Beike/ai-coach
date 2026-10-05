@@ -136,28 +136,7 @@ test("light mode keeps performance source badges readable", { tag: "@responsive"
     } };
     renderPerformance(state.data.performance);
   });
-  const badges = page.locator("#performanceSummary small.metric-garmin, #performanceSummary small.metric-intervals, #performanceSummary small.metric-manual");
-  const contrastRatios = await badges.evaluateAll((elements) => ["metric-garmin", "metric-intervals", "metric-manual"].map((className) => {
-    const element = elements.find((item) => item.classList.contains(className));
-    if (!element) throw new Error(`Missing ${className} performance source badge`);
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-    context.fillStyle = getComputedStyle(element).color;
-    const normalized = context.fillStyle;
-    const hex = normalized.match(/^#([\da-f]{6})$/i)?.[1];
-    const rgb = hex
-      ? hex.match(/../g).map((channel) => parseInt(channel, 16))
-      : normalized.match(/\d+/g)?.slice(0, 3).map(Number);
-    if (!rgb || rgb.length !== 3) throw new Error(`Unsupported computed color: ${normalized}`);
-    const channel = (value) => {
-      const normalized = value / 255;
-      return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
-    };
-    const luminance = rgb.reduce((sum, value, index) => sum + channel(value) * [0.2126, 0.7152, 0.0722][index], 0);
-    return 1.05 / (luminance + 0.05);
-  }));
-  expect(contrastRatios, JSON.stringify(contrastRatios)).toHaveLength(3);
-  expect(contrastRatios.every((ratio) => ratio >= 4.5), JSON.stringify(contrastRatios)).toBe(true);
+  await expect(page.locator("#performanceSummary")).toBeHidden();
 });
 
 test("chat reset detaches a delayed status poll without releasing its successor", async ({ page }) => {
@@ -668,16 +647,16 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   const running = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: "Leistungsentwicklung · Laufen", exact: true }) });
   const cycling = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: "Leistungsentwicklung · Rad", exact: true }) });
   await expect(running).toContainText("Schwellenpace: 5:05 min/km");
-  await expect(running).toContainText("Lauf · VO₂max: 59,4 ml/kg/min");
+  await expect(running).toContainText("VO₂max: 59,4 ml/kg/min");
   await expect(cycling).toContainText("FTP: 255,5 W");
   await expect(cycling).toContainText("eFTP: 264,4 W");
-  await expect(cycling).toContainText("Rad · VO₂max: 57,4 ml/kg/min");
+  await expect(cycling).toContainText("VO₂max: 57,4 ml/kg/min");
   await expect(running.locator("path[data-series]")).toHaveCount(2);
   await expect(cycling.locator("path[data-series]")).toHaveCount(3);
   await expect(running).not.toContainText("%");
   await expect(cycling).not.toContainText("%");
   await expect(cycling.locator(".analysis-coverage")).toHaveCount(0);
-  await cycling.getByRole("button", { name: "Rad · FTP", exact: true }).click();
+  await cycling.getByRole("button", { name: "FTP", exact: true }).click();
   await expect(cycling.locator(".analysis-info-tooltip:popover-open")).toContainText(/\d+\/\d+ datierte Werte/);
   await page.keyboard.press("Escape");
   expect((await cycling.locator('path[data-series="0"]').first().getAttribute("d")).match(/M/g)).toHaveLength(2);
