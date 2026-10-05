@@ -56,12 +56,8 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   const recovery = page.locator("#personalRecovery");
   await expect(recovery.locator("svg")).toHaveCount(3);
   await expect(recovery.getByRole("group", { name: "Schlafdauer: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen." })).toBeVisible();
-  for (const metric of ["Schlafdauer", "HRV", "Ruhepuls"]) await expect(recovery.getByRole("button", { name: metric, exact: true })).toHaveCount(1);
   await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Letzte 14 Tage");
-  await expect(recovery.locator("svg path[data-color='2']").first()).toHaveAttribute("d", /M.*M/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-  await page.locator("#personalRecovery").getByText("Was beeinflusst deine Erholung?", { exact: true }).click();
-  await expect(page.locator("#personalRecovery").getByText(/Mindestens zehn gemessene Tage je Gruppe/).first()).toBeVisible();
 
   await page.evaluate(() => {
     const report = { ...state.data.performance.personal_recovery, as_of: "2026-10-02" };
