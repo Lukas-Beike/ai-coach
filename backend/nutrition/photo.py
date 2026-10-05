@@ -96,7 +96,16 @@ def validate_packaging_extraction(
         "salt_g",
     ):
         result[key] = _validated_number(payload.get(key), field=key)
-    confidence = payload.get("confidence")
+    _add_confidence(result, payload.get("confidence"))
+    return {
+        "ok": True,
+        "candidate": result,
+        "provenance": "packaging_label",
+        "requires_confirmation": True,
+    }
+
+
+def _add_confidence(result: dict[str, Any], confidence: Any) -> None:
     if confidence is not None:
         try:
             confidence_value = float(confidence)
@@ -107,12 +116,6 @@ def validate_packaging_extraction(
             )
         except (TypeError, ValueError):
             result["confidence"] = None
-    return {
-        "ok": True,
-        "candidate": result,
-        "provenance": "packaging_label",
-        "requires_confirmation": True,
-    }
 
 
 def _barcode(value: Any) -> str | None:

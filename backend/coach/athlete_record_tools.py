@@ -186,31 +186,38 @@ class CoachAthleteRecordToolService:
     def _save_nutrition_product(
         self, arguments: dict[str, Any], intent: dict[str, Any]
     ) -> dict[str, Any]:
+        nutrition = self._nutrition_service()
         payload = structured_action_payload(arguments)
         product_id = str(payload.get("id") or "").strip()
         if product_id:
             require_coach_scope(intent, f"nutrition_product:{product_id}")
         product = (
-            self._nutrition.update_product(product_id, payload)
+            nutrition.update_product(product_id, payload)
             if product_id
-            else self._nutrition.save_product(payload)
+            else nutrition.save_product(payload)
         )
         return {"ok": True, "product": product}
 
     def _save_or_update_nutrition_entry(
         self, name: str, arguments: dict[str, Any]
     ) -> dict[str, Any]:
+        nutrition = self._nutrition_service()
         if name == "save_nutrition_entry":
             return {
                 "ok": True,
-                "entry": self._nutrition.log_meal(structured_action_payload(arguments)),
+                "entry": nutrition.log_meal(structured_action_payload(arguments)),
             }
         return {
             "ok": True,
-            "entry": self._nutrition.correct_meal(
+            "entry": nutrition.correct_meal(
                 str(arguments.get("id") or ""), arguments.get("changes")
             ),
         }
+
+    def _nutrition_service(self) -> NutritionService:
+        if self._nutrition is None:
+            raise AppError(500, "NutritionService ist nicht verfÃ¼gbar.")
+        return self._nutrition
 
     @staticmethod
     def _authorize(intent: dict[str, Any], operation: str, message: str) -> None:
