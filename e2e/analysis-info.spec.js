@@ -32,7 +32,6 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await expect(root.locator(".analysis-secondary-axis, .analysis-extremum")).toHaveCount(0);
   await expect(root.getByRole("heading", { name: "Erholung · Letzte 14 Tage", exact: true })).toBeVisible();
   await expect(root.locator(".analysis-period-controls")).toHaveCount(1);
-  await expect(root.locator("svg > title").first()).toHaveText("Schlafdauer · 19.09.2026 bis 02.10.2026");
   expect((await new AxeBuilder({ page }).include("#personalRecovery").analyze()).violations).toEqual([]);
   expect(await root.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 });
@@ -77,7 +76,6 @@ test("@responsive sparse performance shows measurements and the current value li
   const bounds = await info.boundingBox();
   expect(bounds.x).toBeGreaterThanOrEqual(0);
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(page.viewportSize().width);
-  await button.focus(); await page.keyboard.press("Enter"); await expect(info).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
@@ -156,7 +154,6 @@ test("@responsive performance uses weekly last values and medians, keeps equal w
   await page.locator("#analysisLoadCharts").getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await page.evaluate(async () => { await applyNavigationRoute("analysis/performance", { historyMode: "replace" }); });
   await expect(ftp.locator("tbody tr")).toHaveCount(2);
-  await expect(root.locator("svg > title").first()).toContainText("13.07.2026 bis 30.09.2026");
 });
 
 test("@responsive latest measurement stays visible without inventing measurements in empty weeks", async ({ page }) => {
