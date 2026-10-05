@@ -127,19 +127,24 @@ test("@responsive nutrition product library supports review, local save, and pre
 test("@responsive packaging extraction requires editable basis values before explicit local save", async ({ page }) => {
   const onePixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
   let savedPayload;
+  let extractionPayload;
   await page.route("**/api/nutrition/products**", async (route) => {
     const request = route.request();
     if (request.method() === "GET") return route.fulfill({ json: { ok: true, products: [] } });
     savedPayload = request.postDataJSON();
     return route.fulfill({ json: { ok: true, product: { ...savedPayload, id: "product-photo-1", local: true } } });
   });
-  await page.route("**/api/nutrition/products/extract", async (route) => route.fulfill({ json: {
-    ok: true,
-    candidate: { name: "Foto Protein", kcal: 180, protein_g: 30, carbs_g: null, fat_g: null },
-    provenance: { kind: "packaging_label", requires_confirmation: true },
-  } }));
+  await page.route("**/api/nutrition/products/extract", async (route) => {
+    extractionPayload = route.request().postDataJSON();
+    return route.fulfill({ json: {
+      ok: true,
+      candidate: { name: "Foto Protein", kcal: 180, protein_g: 30, carbs_g: null, fat_g: null },
+      provenance: { kind: "packaging_label", requires_confirmation: true },
+    } });
+  });
   await page.goto("/#nutrition/products");
-  await page.locator("#nutritionLabelInput").setInputFiles({ name: "label.png", mimeType: "image/png", buffer: onePixel });
+  await page.locator("#nutritionLabelInput").setInputFiles({ name: "label.jpg", mimeType: "image/jpg", buffer: onePixel });
+  await expect.poll(() => extractionPayload?.image_data_url).toMatch(/^data:image\/jpeg;base64,/);
   const editor = page.locator("#nutritionExtraction");
   await expect(editor).toBeVisible();
   await expect(editor.locator('[name="basis_amount"]')).toHaveValue("");

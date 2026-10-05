@@ -16,6 +16,8 @@ class NutritionFrontendContractTests(unittest.TestCase):
         self.assertIn("MAX_NUTRITION_IMAGE_EDGE = 1600", nutrition)
         self.assertIn("MAX_NUTRITION_IMAGE_BYTES = 1_200_000", nutrition)
         self.assertIn("createImageBitmap", nutrition)
+        self.assertIn('normalizedMime = String(file.type || "").toLowerCase() === "image/jpg" ? "image/jpeg"', nutrition)
+        self.assertIn("nutritionImageDataUrl(file, normalizedMime)", nutrition)
         self.assertIn("#nutritionLabelInput", nutrition)
         self.assertIn("#nutritionExtraction", nutrition)
         self.assertIn("#nutritionBarcodeDialog", nutrition)
@@ -35,6 +37,10 @@ class NutritionFrontendContractTests(unittest.TestCase):
         self.assertLess(handler.index("await Promise.all(files.map(prepareChatAttachment))"), handler.index("state.chatAttachments ="))
         self.assertIn("state.chatAttachmentsLoading = false", handler)
         self.assertIn("catch (error) { toast(error.message, true); }", handler)
+
+        draft = nutrition[nutrition.index("async function createNutritionProductDraft()") : nutrition.index("async function loadNutritionProducts(")]
+        self.assertIn("Produkt-ID: ${product.id}", draft)
+        self.assertNotIn("product.name ||", draft)
 
     def test_nutrition_product_and_label_controls_are_exposed(self):
         index = (ROOT / "public" / "index.html").read_text(encoding="utf-8")

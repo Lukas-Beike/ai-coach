@@ -33,6 +33,7 @@ async function resizeNutritionImage(bitmap, maxEdge, maxBytes) {
 async function prepareNutritionImage(file, { maxEdge = MAX_NUTRITION_IMAGE_EDGE, maxBytes = MAX_NUTRITION_IMAGE_BYTES } = {}) {
   if (!file || !/^image\/(png|jpe?g|webp)$/i.test(file.type)) throw new Error("Bitte ein JPEG-, PNG- oder WebP-Bild auswählen.");
   if (!file.size || file.size > 15_000_000) throw new Error("Das Foto darf höchstens 15 MB groß sein.");
+  const normalizedMime = String(file.type || "").toLowerCase() === "image/jpg" ? "image/jpeg" : String(file.type || "").toLowerCase();
   let bitmap;
   let objectUrl;
   try {
@@ -47,7 +48,7 @@ async function prepareNutritionImage(file, { maxEdge = MAX_NUTRITION_IMAGE_EDGE,
       });
     }
     if (bitmap.width <= maxEdge && bitmap.height <= maxEdge && file.size <= maxBytes) {
-      return { dataUrl: await nutritionImageDataUrl(file, file.type), blob: file, width: bitmap.width, height: bitmap.height, mime: file.type };
+      return { dataUrl: await nutritionImageDataUrl(file, normalizedMime), blob: file, width: bitmap.width, height: bitmap.height, mime: normalizedMime };
     }
     return await resizeNutritionImage(bitmap, maxEdge, maxBytes);
   } finally {
@@ -333,7 +334,7 @@ async function createNutritionProductDraft() {
   const input = document.querySelector("#messageInput");
   if (!input) return;
   if (input.value.trim() && !await requestConfirmation("Dein aktueller Coach-Entwurf wird durch den Produktverzehr ersetzt. Fortfahren?", { title: "Entwurf ersetzen?" })) return;
-  input.value = `Erfasse ${amount} ${unit} ${product.name || "dieses Produkts"} als Mahlzeit (Produkt-ID: ${product.id}).`;
+  input.value = `Erfasse ${amount} ${unit} als Mahlzeit (Produkt-ID: ${product.id}).`;
   input.dispatchEvent(new Event("input", { bubbles: true }));
   state.chatDraftDirty = true;
   document.querySelector("#nutritionProductUseDialog")?.close();
