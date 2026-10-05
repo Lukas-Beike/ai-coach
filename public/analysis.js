@@ -421,7 +421,20 @@ function appendAnalysisPointInspectors(section, svg, series, unit, { x, chartRig
 
 function analysisChartGroup(title, charts, series, note) {
   const group = reportNode("section", null, "analysis-chart-card analysis-chart-stack");
-  group.append(reportNode("h3", title));
+  const heading = reportNode("h3", title);
+  if (series?.length) {
+    const help = reportNode("button", "i", "analysis-legend-info");
+    help.type = "button"; help.setAttribute("aria-label", `${title}: Informationen`);
+    const info = reportNode("div", null, "analysis-info-tooltip");
+    info.id = `group-info-${++analysisInfoId}`; info.setAttribute("popover", "auto"); info.setAttribute("role", "tooltip");
+    series.forEach((item) => {
+      const details = [item.source, item.coverage, item.referenceLabel].filter(Boolean).join(" · ");
+      if (details) info.append(reportNode("p", `${item.legendLabel || item.label}: ${details}`));
+    });
+    if (note) info.append(reportNode("p", note));
+    help.setAttribute("popovertarget", info.id); heading.append(help); group.append(info);
+  }
+  group.append(heading);
   if (note) charts.forEach((chart) => chart.querySelectorAll(".analysis-legend-info + .analysis-info-tooltip").forEach((info) => info.append(reportNode("p", note))));
   charts.forEach((chart) => {
     chart.classList.remove("analysis-chart-card"); chart.classList.add("analysis-subchart");
