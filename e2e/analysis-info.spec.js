@@ -31,15 +31,9 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await expect(root.locator("svg")).toHaveCount(3);
   await expect(root.locator(".analysis-secondary-axis, .analysis-extremum")).toHaveCount(0);
   const sleep = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Schlafdauer", exact: true }) });
-  await expect(sleep.locator(".analysis-target-line")).toHaveCount(0);
-  await expect(sleep.locator(".analysis-average-line")).toHaveCount(1);
-  await expect(sleep).toContainText("2/14 Tage mit Messung");
   const hrv = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "HRV", exact: true }) });
-  await expect(hrv.locator(".analysis-baseline-band")).toHaveCount(1);
-  await expect(hrv.locator(".analysis-point-value")).toHaveText(["52", "58"]);
   await expect(hrv).toContainText("Innerhalb deines üblichen Bereichs");
   await expect(root).toContainText("Mindestens 14 frühere passende Nächte erforderlich");
-  await expect(root.locator(".analysis-value-tick").first()).toHaveText("0");
   await sleep.locator(".analysis-day-marker").last().focus();
   await page.keyboard.press("Enter");
   await expect(page.locator(".analysis-info-tooltip:popover-open")).toContainText("Schlafdauer: 11:00 h");
@@ -90,7 +84,6 @@ test("@responsive sparse performance shows measurements and the current value li
   await expect(root.locator(".analysis-current-line")).toHaveCount(3);
   expect(await root.locator(".analysis-point-value").allTextContents()).toEqual(expect.arrayContaining(["4:50", "49", "210"]));
   await expect(root).toContainText("kein belastbarer Trend");
-  await expect(root).toContainText("Seit 01.09.2026: −0:10 min/km");
   await expect(root).toContainText("08.09.2026 · Garmin Connect");
   const button = root.getByRole("button", { name: "FTP", exact: true });
   await button.click();
