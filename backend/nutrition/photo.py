@@ -20,6 +20,46 @@ _DATA_URL = re.compile(r"^data:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+
 INVALID_BASIS_AMOUNT = "Ungültige Bezugsmenge."
 
 
+def _validated_number(value: Any, *, field: str) -> float | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        raise AppError(
+            400, f"Ungültiger Wert für {field}.", reason="invalid_food_extraction"
+        )
+    try:
+        number = float(str(value).replace(",", "."))
+    except (TypeError, ValueError) as exc:
+        raise AppError(
+            400, f"Ungültiger Wert für {field}.", reason="invalid_food_extraction"
+        ) from exc
+    if not math.isfinite(number) or number < 0 or number > 10000:
+        raise AppError(
+            400, f"Ungültiger Wert für {field}.", reason="invalid_food_extraction"
+        )
+    return round(number, 1)
+
+
+def _basis_amount(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        raise AppError(400, INVALID_BASIS_AMOUNT, reason="invalid_food_extraction")
+    try:
+        amount = float(value)
+    except (TypeError, ValueError) as exc:
+        raise AppError(
+            400, INVALID_BASIS_AMOUNT, reason="invalid_food_extraction"
+        ) from exc
+    if not math.isfinite(amount) or not 0 < amount <= 10000:
+        raise AppError(
+            400,
+            "Bezugsmenge muss zwischen 0 und 10000 liegen.",
+            reason="invalid_food_extraction",
+        )
+    return amount
+
+
 def validate_packaging_extraction(
     payload: Any, *, require_name: bool = True
 ) -> dict[str, Any]:
@@ -38,27 +78,11 @@ def validate_packaging_extraction(
     basis_unit = str(payload.get("basis_unit") or "").strip().lower()
     if basis_unit and basis_unit not in {"g", "ml", "portion"}:
         raise AppError(400, INVALID_BASIS_AMOUNT, reason="invalid_food_extraction")
-    basis_amount = None
-    if payload.get("basis_amount") not in (None, ""):
-        if isinstance(payload.get("basis_amount"), bool):
-            raise AppError(400, INVALID_BASIS_AMOUNT, reason="invalid_food_extraction")
-        try:
-            basis_amount = float(payload.get("basis_amount"))  # type: ignore[arg-type]
-        except (TypeError, ValueError) as exc:
-            raise AppError(
-                400, INVALID_BASIS_AMOUNT, reason="invalid_food_extraction"
-            ) from exc
-        if not math.isfinite(basis_amount) or not 0 < basis_amount <= 10000:
-            raise AppError(
-                400,
-                "Bezugsmenge muss zwischen 0 und 10000 liegen.",
-                reason="invalid_food_extraction",
-            )
     result: dict[str, Any] = {
         "name": name,
         "brand": str(payload.get("brand") or "").strip()[:120],
         "barcode": _barcode(payload.get("barcode")),
-        "basis_amount": basis_amount,
+        "basis_amount": _basis_amount(payload.get("basis_amount")),
         "basis_unit": basis_unit or None,
         "source": "packaging_label",
     }
@@ -71,25 +95,7 @@ def validate_packaging_extraction(
         "fiber_g",
         "salt_g",
     ):
-        value = payload.get(key)
-        if value in (None, ""):
-            result[key] = None
-            continue
-        if isinstance(value, bool):
-            raise AppError(
-                400, f"Ungültiger Wert für {key}.", reason="invalid_food_extraction"
-            )
-        try:
-            number = float(str(value).replace(",", "."))
-        except (TypeError, ValueError) as exc:
-            raise AppError(
-                400, f"Ungültiger Wert für {key}.", reason="invalid_food_extraction"
-            ) from exc
-        if not math.isfinite(number) or number < 0 or number > 10000:
-            raise AppError(
-                400, f"Ungültiger Wert für {key}.", reason="invalid_food_extraction"
-            )
-        result[key] = round(number, 1)
+        result[key] = _validated_number(payload.get(key), field=key)
     confidence = payload.get("confidence")
     if confidence is not None:
         try:
