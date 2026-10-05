@@ -190,6 +190,8 @@ function normalizeNutritionProduct(product = {}) {
   };
   if (source === "open_food_facts" && String(product.id || "").startsWith("off:")) {
     normalized.external_id = normalized.external_id || product.id;
+    const barcode = /^off:(\d{8,14})$/.exec(String(product.id));
+    if (barcode && !normalized.barcode) normalized.barcode = barcode[1];
     delete normalized.id;
   }
   return normalized;

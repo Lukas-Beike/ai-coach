@@ -545,6 +545,57 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.run_tool("delete_nutrition_template", {"id": template["id"]}, ["local_nutrition"], message="Lösche diese Mahlzeitvorlage.")
         self.assertEqual(server.NUTRITION_ASSEMBLY.service().get_meal(entry["id"])["kcal"], 200)
 
+    @covers("save_nutrition_product:success")
+    def test_confirmed_product_is_saved_locally_through_authorized_coach_receipt(self):
+        saved = self.run_tool(
+            "save_nutrition_product",
+            {"payload": {
+                "name": "Synthetic cocoa whey",
+                "brand": "Synthetic brand",
+                "barcode": "4006381333931",
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 382,
+                "carbs_g": 8.2,
+                "protein_g": 76,
+                "fat_g": 5.1,
+                "source": "packaging_label",
+            }},
+            ["local_nutrition_product"],
+            message="Die angezeigten Angaben stimmen; speichere das Produkt lokal.",
+        )["product"]
+
+        self.assertEqual(saved["name"], "Synthetic cocoa whey")
+        self.assertEqual(saved["barcode"], "4006381333931")
+        self.assertEqual(saved["source"], "packaging_label")
+        updated = self.run_tool(
+            "save_nutrition_product",
+            {"payload": {
+                "id": saved["id"],
+                "name": "Synthetic cocoa whey, corrected",
+                "brand": "Synthetic brand",
+                "barcode": "4006381333931",
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 380,
+                "carbs_g": 8.2,
+                "protein_g": 76,
+                "fat_g": 5.1,
+                "source": "packaging_label",
+            }},
+            ["local_nutrition_product", f"nutrition_product:{saved['id']}"],
+            message="Der korrigierte Produktname und die Kalorien stimmen; aktualisiere das lokale Produkt.",
+        )["product"]
+        self.assertEqual(updated["id"], saved["id"])
+        self.assertEqual(updated["name"], "Synthetic cocoa whey, corrected")
+        self.assertEqual(updated["kcal"], 380)
+        self.assertEqual(
+            server.NUTRITION_ASSEMBLY.service().get_product(saved["id"]), updated
+        )
+        self.assertEqual(
+            server.NUTRITION_ASSEMBLY.service().get_today_summary()["entry_count"], 0
+        )
+
     @covers("save_nutrition_entry:success", "read_nutrition:success", "delete_nutrition_entry:success")
     def test_nutrition_entries_can_be_saved_read_and_deleted(self):
         saved = self.run_tool(

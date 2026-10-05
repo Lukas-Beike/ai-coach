@@ -621,7 +621,7 @@ Equipment and maintenance has its own More section, separate from Profile. The G
 
 Calendar cards include a compact interval profile when explicit timed workout steps or current locally cached original samples are available. Width represents time, height represents intensity, and known zones supply colors. Recorded sample gaps remain empty; stale detail profiles are excluded. Absolute targets without known historical zones use neutral colors. No provider requests are triggered by rendering the calendar.
 
-Nutrition navigation contains the diary and saved meals only. Cross-section Coach shortcut buttons have been removed from nutrition, activity details and season analysis; these views do not prepare or submit chat drafts. Coach requests remain available through the main Coach navigation. Existing confirmed fueling records and Coach capabilities remain local data; there is no training-fueling tab or calendar shortcut.
+Die Ernährungsnavigation enthält das Tagebuch, gespeicherte Mahlzeiten und die Produktbibliothek. Das Erfassen eines lokalen Produkts erstellt einen bearbeitbaren Coach-Entwurf; es wird nichts automatisch gesendet oder gespeichert. Coach-Anfragen bleiben über die Hauptnavigation verfügbar. Bestätigte Fueling-Datensätze und Coach-Funktionen bleiben lokal; es gibt keinen Fueling-Tab und keine Kalenderverknüpfung.
 
 #### Lokale Produkte und Verpackungsfotos
 
@@ -630,7 +630,11 @@ Mahlzeitvorlagen und Tagebucheinträgen. Ein Barcode sucht zuerst in dieser
 lokalen Produktbibliothek und verwendet Open Food Facts nur als Fallback. Ein
 Treffer aus einer Onlinequelle wird erst nach Prüfung und ausdrücklicher
 Bestätigung lokal gespeichert; BLS, Open Food Facts, Verpackungsangabe und
-FDDB-Export bleiben als Quellen sichtbar. Nährwerte werden immer mit
+Das Modell kennt die Quellenkennzeichnung `fddb_export`, aber es gibt keinen
+FDDB-Importworkflow. Eine Live-FDDB-Anbindung und der Wrapper
+[itobey/fddb-exporter](https://github.com/itobey/fddb-exporter) sind derzeit
+nicht integriert: Der Wrapper exportiert ein bestehendes FDDB-Tagebuch in
+MongoDB/InfluxDB und ist keine produktbezogene Lookup-API. Die Nährwerte werden immer mit
 Bezugsmenge und Einheit gespeichert. Gramm und Milliliter werden ohne bekannte
 Dichte nicht ineinander umgerechnet.
 
@@ -639,6 +643,8 @@ ausgewählten KI-Provider übertragen. OpenAI Responses und Gemini liefern einen
 strukturierten, editierbaren Vorschlag; Bilddaten, Providerantworten und
 unbestätigte Werte werden nicht in der Produktbibliothek abgelegt. Name,
 Bezugsmenge und erkannte Nährwerte müssen vor dem Speichern geprüft werden.
+Die Übergabe eines Kamerafotos durch Android/Chromium ist auf einem realen
+Android-Gerät noch nicht verifiziert.
 Beim Erfassen eines Verzehrs berechnet der Server die Werte aus dem lokalen
 Produkt und speichert einen unveränderlichen Nährwert-Snapshot im Tagebuch;
 spätere Produktänderungen ändern keine früheren Einträge.

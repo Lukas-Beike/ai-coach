@@ -26,6 +26,7 @@ OBJECT_SCOPE_TABLES = {
     "change": ("change_history", "id"),
     "sync_job": ("sync_jobs", "id"),
     "nutrition_template": ("nutrition_templates", "id"),
+    "nutrition_product": ("nutrition_products", "id"),
 }
 BROAD_SCOPES = frozenset(
     {
@@ -42,6 +43,7 @@ BROAD_SCOPES = frozenset(
         "calendar_refresh",
         "weather_refresh",
         "local_nutrition",
+        "local_nutrition_product",
         "local_equipment",
     }
 )

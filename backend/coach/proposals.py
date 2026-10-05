@@ -176,6 +176,7 @@ def _validate_local_coach_write(payload: dict[str, Any]) -> None:
         or not ({"local_nutrition", "local_nutrition_product"} & set(scope))
         or (
             product_write
+            and isinstance(values, dict)
             and values.get("id")
             and f"nutrition_product:{values.get('id')}" not in scope
         )
