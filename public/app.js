@@ -1663,37 +1663,33 @@ function renderCoachActionReview() {
 }
 
 function coachActionReceipt(proposal, result) {
-    const undo = proposal.action_type === "undo_change";
-    const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
-    const remoteWrite = proposal.action_type === "remote_coach_write";
-    const localWrite = proposal.action_type === "local_coach_write";
-  const nutritionProductWrite = localWrite && proposal.object_ids?.operation === "save_nutrition_product";
-  let message = "Planung lokal gespeichert.";
-  let title = "Planung gespeichert";
-  let details = ["Keine implizite Remote-Änderung"];
-  if (localWrite) {
-    message = nutritionProductWrite
-      ? "Das Produkt wurde lokal gespeichert."
-      : "Die Mahlzeitvorlage wurde lokal gespeichert.";
-    title = nutritionProductWrite ? "Produkt gespeichert" : "Mahlzeitvorlage gespeichert";
-    details = ["Nur lokal gespeichert; keine Synchronisierung an Intervals.icu"];
-  } else if (undo) {
-    message = "Die lokale Änderung wurde zurückgenommen.";
-    title = "Änderung zurückgenommen";
-  } else if (duplicateDelete) {
-    message = "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten.";
-    title = "Duplikat gelöscht";
-    details = ["Garmin-Duplikat in Intervals.icu gelöscht; Wahoo bleibt kanonisch"];
-  } else if (remoteWrite) {
-    const queued = ["queued", "running"].includes(result.status)
-      || Boolean(result.sync_job_id || result.sync_job_ids?.length);
-    message = queued
-      ? "Die freigegebene Änderung ist eingereiht; das Ergebnis steht noch aus."
-      : "Die freigegebene Remote-Änderung wurde ausgeführt.";
-    title = queued ? "Remote-Änderung eingereiht" : "Remote-Änderung ausgeführt";
-  } else if (result.local_planned) {
-    message = `${result.local_planned} Einheit(en) lokal geplant.`;
+  function content() {
+    if (localWrite) {
+      return nutritionProductWrite
+        ? { message: "Das Produkt wurde lokal gespeichert.", title: "Produkt gespeichert", details: ["Nur lokal gespeichert; keine Synchronisierung an Intervals.icu"] }
+        : { message: "Die Mahlzeitvorlage wurde lokal gespeichert.", title: "Mahlzeitvorlage gespeichert", details: ["Nur lokal gespeichert; keine Synchronisierung an Intervals.icu"] };
+    }
+    if (undo) return { message: "Die lokale Änderung wurde zurückgenommen.", title: "Änderung zurückgenommen" };
+    if (duplicateDelete) return {
+      message: "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten.",
+      title: "Duplikat gelöscht",
+      details: ["Garmin-Duplikat in Intervals.icu gelöscht; Wahoo bleibt kanonisch"],
+    };
+    if (remoteWrite) {
+      const queued = ["queued", "running"].includes(result.status)
+        || Boolean(result.sync_job_id || result.sync_job_ids?.length);
+      return queued
+        ? { message: "Die freigegebene Änderung ist eingereiht; das Ergebnis steht noch aus.", title: "Remote-Änderung eingereiht" }
+        : { message: "Die freigegebene Remote-Änderung wurde ausgeführt.", title: "Remote-Änderung ausgeführt" };
+    }
+    return { message: `${result.local_planned} Einheit(en) lokal geplant.` };
   }
+  const undo = proposal.action_type === "undo_change";
+  const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
+  const remoteWrite = proposal.action_type === "remote_coach_write";
+  const localWrite = proposal.action_type === "local_coach_write";
+  const nutritionProductWrite = localWrite && proposal.object_ids?.operation === "save_nutrition_product";
+  let { message, title, details = ["Keine implizite Remote-Änderung"] } = content();
   if (!duplicateDelete && result.sync_job_ids?.length) details = result.sync_job_ids.map((id) => `Syncjob ${id} eingereiht`);
   else if (!duplicateDelete && result.sync_job_id) details = [`Syncjob ${result.sync_job_id} eingereiht`];
   else if (remoteWrite) details = ["Freigegebene Remote-Änderung direkt ausgeführt"];
