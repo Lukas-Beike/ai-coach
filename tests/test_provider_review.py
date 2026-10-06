@@ -215,8 +215,12 @@ class ProviderReviewTests(unittest.TestCase):
 
     def test_garmin_partial_metrics_and_backfill_keep_last_good_sources_and_cursors(self):
         sources = ("sleep", "hrv", "body_battery", "activities", "daily_stats", "resting_hr",
+                   "training_load_activities", "training_load_balance", "daily_training_status",
                    "heart_rate_zones", "readiness", "race_predictions", "max_metrics", "cycling_ftp", "running_threshold", "weight")
-        previous = {source: [{"calendarDate": "2026-09-01", "synthetic_metric": 51}] for source in sources}
+        previous = {source: ({"calendarDate": "2026-09-01", "synthetic_metric": 51}
+                             if source in ("training_load_balance", "daily_training_status")
+                             else [{"calendarDate": "2026-09-01", "synthetic_metric": 51}])
+                    for source in sources}
         previous["source_freshness"] = {source: {"fetched_at": "2026-09-01T00:00:00+00:00", "observed_at": "2026-09-01", "freshness": "current"} for source in sources}
         client = Mock()
         client.login.return_value = (False, None)
@@ -409,6 +413,68 @@ class GarminRangeContractTests(unittest.TestCase):
                 self.assertFalse(garmin_sync.collection_complete(result))
         self.assertEqual(normalize_range_records("hrv", {"hrvSummaries": []}), [])
         self.assertEqual(normalize_range_records("hrv", []), [])
+
+    def test_training_load_sources_preserve_sdk_shapes_and_current_date_only(self):
+        client = Mock(spec=["get_activities_by_date", "get_training_load_activities",
+                            "get_daily_training_status", "get_training_four_week_load_balance",
+                            "get_training_readiness", "get_race_predictions", "get_max_metrics_range"])
+        client.get_activities_by_date.return_value = []
+        client.get_training_load_activities.return_value = [
+            {"activityId": 42, "activityTrainingLoad": 123, "trainingEffectLabel": "BASE"}
+        ]
+        client.get_daily_training_status.return_value = {"trainingStatus": "PRODUCTIVE", "acuteTrainingLoad": 55}
+        client.get_training_four_week_load_balance.return_value = {"load": 321}
+        client.get_training_readiness.return_value = {"score": 80}
+        client.get_race_predictions.return_value = []
+        client.get_max_metrics_range.return_value = []
+        windows = [(date(2026, 9, 1), date(2026, 9, 3))]
+        calls = []
+
+        def external_call(provider, source, fn, details):
+            calls.append((source, details))
+            return fn()
+
+        result = collect_garmin_data(
+            client, windows, start=windows[0][0], today=windows[0][1], synced_at="synthetic",
+            external_call=external_call, redact=lambda value: value,
+            options=GarminCollectionOptions(include_recovery=False),
+        )
+
+        self.assertEqual(result["training_load_activities"][0]["activityTrainingLoad"], 123)
+        self.assertEqual(result["daily_training_status"], {"trainingStatus": "PRODUCTIVE", "acuteTrainingLoad": 55})
+        self.assertNotIn("calendarDate", result["daily_training_status"])
+        self.assertEqual(result["training_load_balance"], {"load": 321})
+        self.assertEqual(client.get_daily_training_status.call_count, 1)
+        self.assertEqual([details for source, details in calls if source == "daily_training_status"],
+                         [{"date": "2026-09-03"}])
+
+    def test_training_load_failure_is_optional_and_reported(self):
+        client = Mock(spec=["get_activities_by_date", "get_training_load_activities",
+                            "get_sleep_daily", "get_hrv_data_range"])
+        client.get_activities_by_date.return_value = []
+        client.get_sleep_daily.return_value = []
+        client.get_hrv_data_range.return_value = []
+        client.get_training_load_activities.side_effect = RuntimeError("synthetic outage")
+        result = collect_garmin_data(
+            client, [(date(2026, 9, 1), date(2026, 9, 1))],
+            start=date(2026, 9, 1), today=date(2026, 9, 1), synced_at="synthetic",
+            external_call=lambda _provider, _source, fn, _details: fn(), redact=lambda value: value,
+            options=GarminCollectionOptions(include_recovery=True, include_current_metrics=False),
+        )
+        self.assertEqual(result["errors"][0]["source"], "training_load_activities")
+        self.assertFalse(result["provider_sync"]["pagination"]["training_load_activities"]["complete"])
+
+    def test_activity_load_is_skipped_for_activity_only_collection(self):
+        client = Mock(spec=["get_activities_by_date", "get_training_load_activities"])
+        client.get_activities_by_date.return_value = []
+        result = collect_garmin_data(
+            client, [(date(2026, 9, 1), date(2026, 9, 1))],
+            start=date(2026, 9, 1), today=date(2026, 9, 1), synced_at="synthetic",
+            external_call=lambda _provider, _source, fn, _details: fn(), redact=lambda value: value,
+            options=GarminCollectionOptions(include_recovery=False, include_current_metrics=False),
+        )
+        client.get_training_load_activities.assert_not_called()
+        self.assertEqual(set(result["provider_sync"]["pagination"]), {"activities"})
 
 
 if __name__ == "__main__":

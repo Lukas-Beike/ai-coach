@@ -46,3 +46,35 @@ class TrainingFocusTests(unittest.TestCase):
         self.assertEqual(result["end"], "2026-10-02")
         self.assertEqual(result["classified_sessions"], 2)
         self.assertEqual(result["categories"]["high_aerobic"]["load"], 80)
+
+    def test_dedicated_activity_loads_join_base_activities_and_keep_unknowns(self):
+        base = [
+            {"activityId": "matched", "startTimeLocal": "2026-10-02T08:00:00",
+             "trainingEffectLabel": "TEMPO", "activityTrainingLoad": 40},
+            {"activityId": "unmatched", "startTimeLocal": "2026-10-02T09:00:00"},
+        ]
+        result = training_focus(
+            {},
+            {
+                "activities": base,
+                "training_load_activities": [
+                    {"activityId": "matched", "trainingEffectLabel": "VO2_MAX",
+                     "activityTrainingLoad": 80},
+                    {"activityId": "without-base", "trainingEffectLabel": "TEMPO",
+                     "activityTrainingLoad": 900},
+                ],
+                "source_freshness": {
+                    "activities": {"freshness": "current"},
+                    "training_load_activities": {"freshness": "partial"},
+                },
+            },
+            date(2026, 10, 2),
+        )
+        self.assertEqual(result["coverage"]["known_sessions"], 2)
+        self.assertEqual(result["classified_sessions"], 1)
+        self.assertEqual(result["unclassified_sessions"], 1)
+        self.assertEqual(result["categories"]["high_aerobic"]["load"], 80)
+        self.assertEqual(
+            result["category_freshness"]["training_load_activities"]["freshness"],
+            "partial",
+        )

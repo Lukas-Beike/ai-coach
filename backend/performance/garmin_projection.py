@@ -1,6 +1,10 @@
 """Compact projections for Garmin context and recovery payloads."""
 
+from datetime import date
 from typing import Any
+
+from backend.performance import freshness as performance_freshness
+from backend.performance.activity_validation import bounded_activity_metric
 
 GARMIN_CONTEXT_FIELDS = {
     "date",
@@ -40,6 +44,8 @@ GARMIN_CONTEXT_FIELDS = {
     "maxHeartRate",
     "calories",
     "trainingEffect",
+    "trainingEffectLabel",
+    "activityTrainingLoad",
     "vO2MaxValue",
     "trainingReadiness",
     "recoveryTime",
@@ -77,6 +83,181 @@ def compact_garmin_context(value: Any, depth: int = 0) -> Any:
     if isinstance(value, (int, float, bool)) or value is None:
         return value
     return str(value)[:200]
+
+
+def garmin_training_load_projection(
+    snapshot: dict[str, Any], current_date: date
+) -> dict[str, Any]:
+    """Project new Garmin load endpoints with source and freshness attached."""
+    freshness = performance_freshness.garmin_source_freshness(snapshot, current_date)
+    result: dict[str, Any] = {}
+    balance = _primary_device_record(
+        snapshot.get("training_load_balance"),
+        "mostRecentTrainingLoadBalance",
+        "metricsTrainingLoadBalanceDTOMap",
+        (
+            "calendarDate",
+            "monthlyLoadAerobicLow",
+            "monthlyLoadAerobicLowTargetMin",
+            "monthlyLoadAerobicLowTargetMax",
+            "monthlyLoadAerobicHigh",
+            "monthlyLoadAerobicHighTargetMin",
+            "monthlyLoadAerobicHighTargetMax",
+            "monthlyLoadAnaerobic",
+            "monthlyLoadAnaerobicTargetMin",
+            "monthlyLoadAnaerobicTargetMax",
+        ),
+    )
+    if balance is not None:
+        fields = (
+            "monthlyLoadAerobicLow",
+            "monthlyLoadAerobicLowTargetMin",
+            "monthlyLoadAerobicLowTargetMax",
+            "monthlyLoadAerobicHigh",
+            "monthlyLoadAerobicHighTargetMin",
+            "monthlyLoadAerobicHighTargetMax",
+            "monthlyLoadAnaerobic",
+            "monthlyLoadAnaerobicTargetMin",
+            "monthlyLoadAnaerobicTargetMax",
+        )
+        result["four_week_balance"] = {
+            "source": "Garmin Connect",
+            **freshness.get("training_load_balance", {"freshness": "unknown"}),
+            "date": _date(balance.get("calendarDate")),
+            **{
+                key: metric
+                for key in fields
+                if _fresh_source(
+                    freshness.get("training_load_balance"),
+                    balance.get("calendarDate"),
+                    current_date,
+                )
+                if (metric := bounded_activity_metric(balance.get(key), 0, 100_000))
+                is not None
+            },
+        }
+    daily = _primary_device_record(
+        snapshot.get("daily_training_status"),
+        "mostRecentTrainingStatus",
+        "latestTrainingStatusData",
+        (
+            "calendarDate",
+            "acuteTrainingLoadDTO.dailyTrainingLoadAcute",
+            "acuteTrainingLoadDTO.dailyTrainingLoadChronic",
+            "acuteTrainingLoadDTO.dailyAcuteChronicWorkloadRatio",
+        ),
+    )
+    acute = daily.get("acuteTrainingLoadDTO") if daily else None
+    acute = acute if isinstance(acute, dict) else {}
+    if daily is not None:
+        result["daily_status"] = {
+            "source": "Garmin Connect",
+            **freshness.get("daily_training_status", {"freshness": "unknown"}),
+            "date": _date(daily.get("calendarDate")),
+            "acute_load": bounded_activity_metric(
+                acute.get("dailyTrainingLoadAcute"), 0, 100_000
+            )
+            if daily
+            and _fresh_source(
+                freshness.get("daily_training_status"),
+                daily.get("calendarDate"),
+                current_date,
+            )
+            else None,
+            "chronic_load": bounded_activity_metric(
+                acute.get("dailyTrainingLoadChronic"), 0, 100_000
+            )
+            if daily
+            and _fresh_source(
+                freshness.get("daily_training_status"),
+                daily.get("calendarDate"),
+                current_date,
+            )
+            else None,
+            "acute_chronic_ratio": bounded_activity_metric(
+                acute.get("dailyAcuteChronicWorkloadRatio"), 0, 100
+            )
+            if daily
+            and _fresh_source(
+                freshness.get("daily_training_status"),
+                daily.get("calendarDate"),
+                current_date,
+            )
+            else None,
+        }
+    return result
+
+
+def _fresh_source(value: Any, observed_at: Any, current_date: date) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("freshness")
+        in {
+            "current",
+            "partial",
+        }
+        and _date(observed_at) == current_date.isoformat()
+    )
+
+
+def _date(value: Any) -> str | None:
+    candidate = str(value or "")[:10]
+    try:
+        return date.fromisoformat(candidate).isoformat()
+    except ValueError:
+        return None
+
+
+def _primary_device_record(
+    value: Any,
+    section_key: str,
+    devices_key: str,
+    comparable_fields: tuple[str, ...],
+) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    section = value.get(section_key)
+    devices = value.get(devices_key)
+    if not isinstance(devices, dict) and isinstance(section, dict):
+        devices = section.get(devices_key)
+    if not isinstance(devices, dict) or not devices:
+        return None
+    candidates = [
+        dict(item) for item in list(devices.values())[:100] if isinstance(item, dict)
+    ]
+    primary = [item for item in candidates if item.get("primaryTrainingDevice") is True]
+    if len(primary) == 1:
+        return primary[0] if _date(primary[0].get("calendarDate")) else None
+    if primary:
+        return None
+    dated: list[tuple[str, dict[str, Any]]] = []
+    for item in candidates:
+        day = _date(item.get("calendarDate"))
+        if day is not None:
+            dated.append((day, item))
+    latest = max((day for day, _ in dated), default="")
+    matches = [item for day, item in dated if day == latest and latest]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        return None
+
+    def comparable(item: dict[str, Any]) -> tuple[Any, ...]:
+        return tuple(
+            _nested_value(item, field.split(".")) for field in comparable_fields
+        )
+
+    first = comparable(matches[0])
+    return (
+        matches[0] if all(comparable(item) == first for item in matches[1:]) else None
+    )
+
+
+def _nested_value(value: dict[str, Any], keys: list[str]) -> Any:
+    current: Any = value
+    for key in keys:
+        current = current.get(key) if isinstance(current, dict) else None
+    return current
 
 
 GARMIN_RECOVERY_FIELDS = (
