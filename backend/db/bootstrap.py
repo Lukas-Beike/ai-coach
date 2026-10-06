@@ -10,7 +10,7 @@ from backend.db.migrations import migrate_schema
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import (
     database_schema_is_current,
-    database_table_names,
+    database_schema_signature,
     initialize_schema,
 )
 
@@ -27,11 +27,12 @@ def initialize_application_database(
     all_sync_days: int,
 ) -> None:
     """Create and validate the application schema, then apply startup state."""
-    existing_tables = database_table_names(db)
-    if existing_tables:
-        migrate_schema(db)
-    else:
+    if db.execute("PRAGMA user_version").fetchone()[
+        "user_version"
+    ] == 0 and not database_schema_signature(db):
         initialize_schema(db)
+    else:
+        migrate_schema(db)
 
     db.execute(
         "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",

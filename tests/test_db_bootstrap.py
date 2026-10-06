@@ -90,6 +90,26 @@ class DatabaseBootstrapTests(unittest.TestCase):
         )
         self.assertEqual(db.execute("SELECT id FROM unexpected_records").fetchone()[0], "synthetic")
 
+    def test_tableless_nonfresh_database_is_rejected_without_mutation(self):
+        for setup_sql in (
+            "PRAGMA user_version = 99",
+            "PRAGMA user_version = 1",
+            "CREATE VIEW unexpected_view AS SELECT 1 AS id",
+            "CREATE VIEW sqlitecustom AS SELECT 1 AS id",
+        ):
+            with self.subTest(setup_sql=setup_sql):
+                db = self.make_connection()
+                self.addCleanup(db.close)
+                db.execute(setup_sql)
+                db.commit()
+                before = list(db.iterdump())
+                version = db.execute("PRAGMA user_version").fetchone()[0]
+                with self.assertRaises(RuntimeError):
+                    self.bootstrap(db)
+                db.rollback()
+                self.assertEqual(list(db.iterdump()), before)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], version)
+
     def test_1_12_19_schema_is_migrated_without_losing_existing_rows(self):
         db = self.make_connection()
         self.addCleanup(db.close)
