@@ -1,8 +1,10 @@
 # Umsetzungsplan für Trainingsanalysen und neue Funktionen
 
-Stand: 2. Oktober 2026. Grundlage ist Commit `2adf195189d98a270b63d3e5a307c804fcb88c08` auf `t3code/training-platform-feature-research`. Status: geplant.
+Stand: 6. Oktober 2026. Grundlage ist der aktuelle Planungsstand auf Commit `33e244011039d051d1af6f4a3dd047b82aead2d9`. Status: erste Lieferung lokal umgesetzt; abschließende Integrationsprüfung läuft.
 
-Der Plan ergänzt Intervals Coach um nachvollziehbare Trainingsanalysen, persönliche Erholung, Wettkampfvorbereitung und praktische Trainingsfunktionen. Die erste Lieferung verbindet Kalenderdetails, einen Wochenrückblick, Intervallqualität und Ausdauerentwicklung. Weitere Lieferungen ergänzen Erholung, Leistungsprofile, Planungsszenarien, Verpflegung, Einflussanalysen und Ausrüstung.
+Der Plan ergänzt Intervals Coach um nachvollziehbare Trainingsanalysen, persönliche Erholung, Wettkampfvorbereitung und praktische Trainingsfunktionen. Neu aufgenommen sind der Analyse-Tab **Body**, die verlässliche Auswertung beider Kalender-Flags **`[NO_TRAINING]` und `[NO_INTENSITY]`** sowie der Garmin-Tagesverbrauch im Ernährungstagebuch. Die nächste Lieferung behebt zuerst die Kalenderregeln und ergänzt danach Body und Tagesenergie. Bestehende Pakete für Kalenderdetails, Wochenrückblick, Intervallqualität, Ausdauerentwicklung, Erholung, Leistungsprofile, Planungsszenarien, Verpflegung, Einflussanalysen und Ausrüstung werden gezielt erweitert.
+
+Die ursprünglichen Paketnummern bleiben als Referenzen erhalten. Einige ihrer Abläufe sind inzwischen vorhanden; vor jeder Umsetzung ist die konkrete Lücke zum aktuellen Code zu bestimmen. Neu geplante Erweiterungen werden ausdrücklich beschrieben und bauen auf vorhandenen Modulen auf.
 
 Jedes Arbeitspaket liefert einen nutzbaren Ablauf mit Backend, HTTP/API, Coach-Anbindung, Oberfläche und passenden Tests. Die Funktionen entstehen in getrennten PRs; größere Pakete werden entlang ihrer beschriebenen Teilschritte aufgeteilt. Dieser Plan beauftragt keine Veröffentlichung oder Umstellung einer bestehenden Installation.
 
@@ -10,14 +12,17 @@ Jedes Arbeitspaket liefert einen nutzbaren Ablauf mit Backend, HTTP/API, Coach-A
 
 | Bereich | Bereits vorhanden | Konsequenz für die Umsetzung |
 | --- | --- | --- |
-| Analyse | Zwei SVG-Diagramme für Belastung/Form und relative Leistungsentwicklung über 90 Tage; Quellen und Datenlücken bleiben getrennt | `public/analysis.js` und `backend/performance/chart_history.py` erweitern; bestehende Diagramme weiterverwenden |
+| Analyse | SVG-Diagramme für Belastung/Form, Leistungsentwicklung und Erholung; datierte Backend-Historie, 14-Tage-/12-Wochen-Darstellung und Wochenbericht | `public/analysis.js` und `backend/performance/chart_history.py` erweitern; bestehende Diagramme und Zeitraumwahl für Body weiterverwenden |
 | Kalender | Geplante und absolvierte Einheiten, konservative Paarung und Soll-Ist-Vergleich nach Belastung oder Dauer | Aktivitätsdetails aus dem Kalender öffnen; der entfernte Verlauf-Tab bleibt entfernt |
-| Detaildaten | `ActivityReadService.detail` liest genau eine Aktivität aus `raw_provider_data`; Coach-Projektion unterstützt vorhandene Streams und Runden | Verfügbarkeit vollständiger Streams zuerst absichern; die Projektion lädt sie nicht selbst |
+| Detaildaten | `backend/sync/activity_details.py` lädt bereits Aktivitätsdetails, Streams und Intervalle; `ActivityReadService.detail` liefert lokale Details und Cache-Verfügbarkeit | Vorhandenen gezielten Detail-Sync um Bestleistungen, Intervallstatistik und Kontext ergänzen |
 | Intervals-Sync | `IntervalsSnapshotReader.fetch_snapshot` lädt Aktivitäten, Wellness, Events und Athletenwerte | Gezielte Detailabfragen über den bestehenden Sync ergänzen; Listenabrufe garantieren keine vollständigen Zeitreihen |
-| Gesundheitsdaten | Garmin-/Intervals-Werte, datierte Verläufe und Durchschnittsvergleiche | Persönliche Normalbereiche und Schlafauswertungen als zusätzliche Berechnungen implementieren |
+| Intervals-Wellness | Das `Wellness`-Schema liefert unter anderem `weight`, `bodyFat`, `kcalConsumed`, `soreness`, `fatigue`, `stress`, `injury`, `spO2`, `hydration`, `respiration`, `steps`, `carbohydrates`, `protein` und `fatTotal` | Optionale, quellengenaue Zeitreihen für Body, Energie und Erholung normalisieren; fehlende Messungen bleiben Lücken |
+| Garmin | `garminconnect==0.3.17` liefert bereits Aktivitäten, Schlaf, HRV, Tagesstatus, Readiness, Ruhepuls, Rennprognosen, Max-Metriken, FTP, Laktatschwelle, Gewicht und Ausrüstung | Body Composition, Tageskalorien und historische FTP-Werte über capability-geprüfte, getrennte Abrufe ergänzen |
+| Gesundheitsdaten | Garmin-/Intervals-Werte, datierte Verläufe und Durchschnittsvergleiche | Persönliche Normalbereiche, Schlafauswertungen und Quellenwechsel getrennt berechnen |
+| Kalender-Constraints | `[NO_TRAINING]`, `[NO_INTENSITY]` und `[SHORT_ONLY]` werden aus iCal-Beschreibungen erkannt; relevante Termine können derzeit herausgefiltert werden | Marker aus Titel und Beschreibung zentral normalisieren und vor jeder Planänderung auswerten; ein Sperrtermin bleibt im Kontext sichtbar |
 | Rückmeldungen | Aktivitätsfeedback speichert Freitext; Tages-Check-ins enthalten unter anderem Session-RPE | RPE je Aktivität strukturiert ergänzen; Tages-RPE nicht mehreren Einheiten zuordnen |
 | Saison | Wettkämpfe und eine datumsbasierte Phasenzuordnung in `backend/planning/season.py` | Wettkampfeignung aus absolviertem Training getrennt von der kalendarischen Phase bewerten |
-| Ernährung | Tagebuch, Mahlzeitenvorlagen, Lebensmittelberechnung und explizite Erfassung über den Coach | Trainingsverpflegung auf vorhandene Lebensmittel und Vorlagen aufbauen |
+| Ernährung | Tagebuch, Mahlzeitenvorlagen, Lebensmittelberechnung und explizite Erfassung über den Coach; Garmin-Tagesstatistiken enthalten Kalorien, die Gesundheitsprojektion mittelt sie derzeit über ein Fenster | Datierten Verbrauch aus vorhandenen Tagesstatistiken verfügbar machen; optional aktive/Ruhekalorien ergänzen; keinen Durchschnitt als Tageswert darstellen |
 | Dauerhafte Daten | Aktuelles SQLCipher-Schema, Backup und explizite Exportlisten | Neue Felder und Tabellen zusammen mit Schema-Prüfung, Export und Restore-Verträgen ergänzen |
 
 ## Oberfläche und Einstiegspunkte
@@ -27,6 +32,7 @@ Die Hauptnavigation bleibt `Coach`, `Geplant`, `Analyse`, `Ernährung`, `Mehr`. 
 | Ort | Geplante Inhalte |
 | --- | --- |
 | Analyse → Leistung | Vorhandene Diagramme, Ausdauerentwicklung, Leistungsprofil und wiederkehrende Trainings |
+| Analyse → Body | Drei Diagramme für Gewicht, KFA und W/kg; Zeiträume 14 Tage und 12 Wochen; Messzeit, Quelle und Datenlücken sichtbar |
 | Analyse → Aktuelle Woche | Automatischer Bericht der aktuellen Woche, ohne Zeitraumwahl, Filter oder Buttons |
 | Analyse → Erholung | Heutige Einordnung, persönliche Normalbereiche, Schlafverläufe und später persönliche Einflussanalyse |
 | Geplant → Übersicht → absolvierte Einheit | Detailansicht mit Zusammenfassung, Diagrammen, Trainingsqualität, Vergleich und Feedback; Rückkehr zum gleichen Kalendertag |
@@ -35,6 +41,7 @@ Die Hauptnavigation bleibt `Coach`, `Geplant`, `Analyse`, `Ernährung`, `Mehr`. 
 | Geplant → Saison | Wettkämpfe, Trainingsphasen, Vorbereitungsstand und Szenarienvergleich |
 | Geplant → Bibliothek | Bestehende Vorlagen |
 | Ernährung → Trainingsverpflegung | Auswahl einer Einheit und zeitliche Abfolge für vorher, währenddessen und danach |
+| Ernährung → Tagebuch | Tageskarte mit Garmin-geschätztem Verbrauch; Gesamtwert, Aktualität sowie aktive und Ruhekalorien optional aufklappbar |
 | Mehr → Athletenprofil | Ausrüstung, Verträglichkeit, Schlafziel und persönliche Vorgaben |
 | Coach | Passende Schnellstarts und Verweise auf konkrete Berichte, Aktivitäten oder Wettkämpfe |
 
@@ -52,31 +59,49 @@ UI-Diagramme dürfen Daten zur Darstellung verdichten. Intervallbewertung und Be
 
 Leseansichten und normale Coach-Nachrichten verwenden gespeicherte Daten. Ein fehlender Detaildatensatz wird über eine ausdrückliche Ladeaktion und einen bestehenden Sync-Job beschafft. Neue Berechnungen lösen keine dauernden Providerabrufe aus. Der Wochenrückblick lässt sich ohne AI-Aufruf anzeigen; eine Coach-Erklärung startet auf Nutzerwunsch.
 
+Provider-Erweiterungen sind optional und fehlertolerant: Capability-Erkennung erfolgt vor dem Abruf, jeder Datenbereich hat eigenen Fehler- und Freshness-Status, und ein nicht unterstützter oder fehlgeschlagener Endpunkt verwirft keine anderen Sync-Daten. Rohdaten bleiben untrusted; Coach-Kontext erhält nur bereinigte Werte mit Quelle und Messdatum. Neue Abrufe laufen ausschließlich in den bestehenden Sync-Pfaden oder über eine ausdrückliche Aktualisierung.
+
 Neue dauerhafte Daten werden mit dem aktuellen SQLCipher-Schema initialisiert. Schema-Erweiterungen erhalten versionierte, transaktionale Migrationen mit Upgrade-Regressionstests; unterstützte vorherige Releases können direkt aktualisiert werden. Unbekannte oder neuere Schemata werden ohne Datenänderung abgewiesen. Same-build-Restart und Restore eines Backups mit dem aktuellen Schema bleiben überprüfbare Verträge.
 
-## Reihenfolge der Arbeitspakete
+## Arbeitspakete und Abhängigkeiten
 
 | Paket | Ergebnis | Benötigt | Größe |
 | --- | --- | --- | --- |
+| 0 | Verlässliche Kalender-Constraints für Planung und Coach | Aktueller Kalender-Sync | Mittel |
 | 1 | Verlässliche Detaildaten und Aktivitätsansicht aus dem Kalender | Aktueller Stand | Groß |
 | 2 | Wochenrückblick, Blockvergleich und Trainingsreiz | Paket 1; Teilbericht funktioniert auch ohne Streams | Mittel |
 | 3 | Intervallqualität und strukturierter RPE je Aktivität | Paket 1 | Groß |
 | 4 | Ausdauer-Effizienz, Herzfrequenzdrift und Stabilität langer Einheiten | Paket 1 | Groß |
 | 5 | Erholungsbereich, Schlafdefizit und Schlafregelmäßigkeit | Vorhandene Gesundheitshistorie | Mittel |
+| 5a | Gemeinsame Körperdatenbasis und Body-Tab mit Gewicht, KFA und W/kg | Intervals-Wellness, Garmin-Körperdaten, datiertes FTP | Mittel |
+| 5b | Garmin-Tagesverbrauch im Ernährungstagebuch | Vorhandene Tagesstatistiken, optional Calories Daily; bestehende Ernährung | Klein |
 | 6 | Leistungsprofil und Vergleich wiederkehrender Trainings | Pakete 1, 3, 4 | Groß |
 | 7 | Saisonansicht und wettkampfspezifische Vorbereitung | Pakete 2, 3, 4 | Mittel |
 | 8 | Plan-Simulation und Szenarienvergleich | Paket 7 und vorhandene Planvorschau | Groß |
 | 9 | Trainingsverpflegung | Pakete 1, 7; bestehende Ernährung | Mittel |
 | 10 | Persönliche Einflussanalyse | Paket 5 und ausreichend getaggte Tage | Mittel |
-| 12 | Ausrüstung und Wartung | Paket 1 und strukturierte Zuordnung | Mittel |
+| 11 | Bewertete Intervals-/Garmin-Erweiterungen für Leistung, Aktivität und Erholung | Pakete 1, 5, 6; ausreichende Capability-Abdeckung | Groß |
+| 12 | Ausrüstung, Lebensdauer und ausgemusterte Komponenten | Paket 1 und strukturierte Zuordnung | Mittel |
 
-Größe bezeichnet den relativen Umfang einschließlich Tests und UI. Die belastbare Zeitabschätzung folgt nach Paket 1, weil Verfügbarkeit und Qualität der Provider-Detaildaten den Aufwand der folgenden Analysen bestimmen.
+Die nächste Umsetzung beginnt mit **0 → 5a → 5b**, gefolgt von den gezielten Erweiterungen der bestehenden Analysepakete. Die Nummern erhalten die Referenzen des Bestandsplans. Größe bezeichnet den relativen Umfang der beschriebenen Verantwortung einschließlich Tests und UI; für bereits vorhandene Abläufe wird nur der verbleibende Erweiterungsaufwand geschätzt. Die konkrete Zeitabschätzung folgt auf die Eingrenzung je PR und auf die verfügbare Datenqualität.
+
+## Paket 0 Kalender-Constraints (`[NO_TRAINING]` und `[NO_INTENSITY]`)
+
+**Problem:** Beide Marker müssen verbindliche Trainingsregeln sein. `[NO_TRAINING]` wird heute beim Erkennen als `training_relevant=false` markiert und kann dadurch aus dem Planungskontext verschwinden. `[NO_INTENSITY]` wird nur in einem Teilpfad der adaptiven Vorschau berücksichtigt. Zusätzlich werden die Marker derzeit nur aus der Beschreibung gelesen. Damit kann ein Termin im Titel oder eine wiederkehrende Ausnahme übersehen werden.
+
+**Umsetzung:** Titel und Beschreibung jedes iCal-Termins in einer zentralen, case-insensitiven Normalisierung auswerten. Die Normalisierung liefert Marker, Quelle, Terminreferenz, lokale Gültigkeit, Wiederholungsinstanz und Synchronisationszeit. Ein `[NO_TRAINING]`-Termin bleibt in Kalender-, Coach- und Planungsdaten sichtbar und sperrt Training an jedem betroffenen lokalen Tag. Ein `[NO_INTENSITY]`-Termin erlaubt ausschließlich als locker eingestufte Einheiten; unbekannte Intensität benötigt Klärung. Bei beiden Markern gilt die Trainingssperre. `[SHORT_ONLY]` bleibt eine optionale Dauergrenze mit einer ausdrücklich festgelegten Maximaldauer.
+
+**Architektur:** `backend/providers/calendar.py` interpretiert die untrusted iCal-Eingabe. Eine fokussierte gemeinsame Prüfung unter `backend/calendar/` liefert dieselbe Entscheidung für Kalenderprojektion, Planerstellung, Bearbeitung, Verschieben, Ersetzen, adaptive Vorschau, deren Anwendung und expliziten Bibliotheks-Sync. `training_relevant` darf Sperrtermine nicht ausschließen. Verstöße gegen beide Flags blockieren die betroffene Änderung unabhängig von der Coach-Antwort. Das Anwenden prüft Kalender- und Planrevision erneut; veraltete Vorschauen müssen neu erstellt werden. Bereits vorhandene Einheiten werden als Konflikt angezeigt und erst nach ausdrücklich genehmigter Planänderung angepasst. Ein Sync-Fehler darf bekannte Sperren nicht entfernen.
+
+**Vereinfachung:** Im Kalender sichtbare Hinweise „Training gesperrt“ und „Nur locker“ mit Quelle und letzter Synchronisation anzeigen. Eine kurze Anleitung und kopierbare Marker erklären die Nutzung im Google-Termintitel oder in der Beschreibung. Lokale Bedienfelder und Coach-Aufträge können dieselben Regeln ausdrücklich setzen; sie schreiben nicht automatisch in Google-Termine. Freitext wie „Reise“ erzeugt keine heimliche Sperre.
+
+**Abnahme:** Marker in Titel, Beschreibung, gemischter Groß-/Kleinschreibung, wiederkehrenden und mehrtägigen Terminen werden gleich behandelt. Ein Termin mit beiden Markern bleibt blockierend. Zeitzonen und Sommer-/Winterzeit verwenden die Athletenzeitzone. Eine Vorschau, ein gespeicherter Plan und eine spätere Anwendung verwenden dieselbe Entscheidung. Tests prüfen insbesondere, dass `[NO_TRAINING]` und `[NO_INTENSITY]` weder aus dem Coach-Kontext herausfallen noch durch `training_relevant_only` verloren gehen.
 
 ## Paket 1 Detaildaten und Aktivitätsansicht
 
-**Umsetzung:** Zuerst die öffentlich dokumentierten Intervals-Endpunkte für Detaildaten, Streams und Runden prüfen und mit synthetischen Provider-Fixtures abbilden. Danach einen gezielten, abbrechbaren Detail-Sync ergänzen. Er kennt Aktivitäts-ID, Providerrevision beziehungsweise Inhaltsfingerprint, Messkanäle, Abdeckung und Ladezustand. Bereits aktuelle Details werden wiederverwendet; geänderte Providerdaten invalidieren betroffene Ableitungen.
+**Umsetzung:** Den bereits vorhandenen gezielten Detail-Sync und die Kalenderdetailansicht verwenden. Die öffentlich dokumentierten Ergänzungen für Best Efforts, Intervallstatistiken, Wetter, Karte und Histogramme einzeln mit synthetischen Provider-Fixtures anbinden. Der Sync kennt Aktivitäts-ID, Providerrevision beziehungsweise Inhaltsfingerprint, Messkanäle, Abdeckung und Ladezustand. Bereits aktuelle Details werden wiederverwendet; geänderte Providerdaten invalidieren betroffene Ableitungen.
 
-**Daten und Architektur:** `backend/providers/intervals.py` besitzt den Transport; `backend/sync/` besitzt Job, Wiederholung und Speicherung. `backend/activities/read_service.py` liefert lokale Details. Die Speicherform wird in diesem Paket festgelegt: vorhandene Snapshot-Speicherung verwenden, sofern Details bei inkrementellem Sync erhalten bleiben; eine fokussierte Detailtabelle ist nur nötig, wenn ihre eigene Lebensdauer oder Größe dies verlangt. Requests, Antwortgröße, Punktzahl, Laufzeit und Batchumfang erhalten harte, in Tests geprüfte Grenzen. Verfügbare Kanäle werden einzeln ausgewiesen.
+**Daten und Architektur:** `backend/providers/intervals.py` besitzt den Transport; `backend/sync/activity_details.py` und der vorhandene Job-/Cache-Pfad besitzen Abruf und Speicherung. `backend/activities/read_service.py` liefert lokale Details. Neue Kanäle verwenden die vorhandene Detailpersistenz; zusätzliche Tabellen sind nur nötig, wenn Lebensdauer oder Größe dies erfordern. Requests, Antwortgröße, Punktzahl, Laufzeit und Batchumfang erhalten harte, in Tests geprüfte Grenzen. Verfügbare Kanäle werden einzeln ausgewiesen.
 
 **Oberfläche und Coach:** Ein Button in der absolvierten Kalenderkarte öffnet die Detailansicht. Ein authentifizierter lokaler GET liefert die bereinigte Ansicht. Fehlende Details zeigen den Button „Detaildaten laden“, dessen POST mit CSRF einen Sync-Job startet. Das Öffnen allein ruft keinen Provider auf. Die Ansicht zeigt Datum, Sport, Dauer, Belastung, verfügbare Kurven und Quellen. „Mit dem Coach besprechen“ übernimmt die genaue Aktivitätsreferenz als sichtbaren Entwurf; der Nutzer sendet ihn selbst. Browser-Zurück stellt Datum, Filter und Scrollposition wieder her.
 
@@ -118,6 +143,28 @@ Größe bezeichnet den relativen Umfang einschließlich Tests und UI. Die belast
 
 **Abnahme:** Ein synthetischer gleichmäßiger Verlauf ergibt den erwarteten Effizienz- und Driftwert. Ein Verlauf mit steigendem Puls bei konstanter Leistung zeigt den korrekten Drift. Fehlende Herzfrequenz, Stopps und variable Intervalle erzeugen keine scheinbar belastbare Ausdauerverbesserung. Providerwert und eigene Methode werden nicht vermischt.
 
+## Paket 5a Body
+
+**Umsetzung:** Den Analyse-Tab ausdrücklich **Body** nennen. Die gemeinsame normalisierte Datenbasis führt Intervals-Wellness (`weight`, `bodyFat`) und Garmin-Körpermessungen zusammen. Zuerst den bereits geladenen `get_weigh_ins`-Datensatz auf KFA und vollständige Messungen prüfen; `get_body_composition(startdate, enddate)` nur ergänzen, wenn dort benötigte Felder fehlen. Kein doppelter Abruf identischer Messungen. Bei konkurrierenden Messungen bleiben beide Quellen, Messzeit und Abrufzeit sichtbar. Bestätigte manuelle Angaben bleiben im Profil maßgeblich und werden durch keinen Sync überschrieben; historische Messserien und manuelle Profilwerte sind getrennt.
+
+**Diagramme:** Drei getrennte, mobile SVG-Diagramme zeigen Gewicht in kg, Körperfettanteil in Prozent und Rad-W/kg. Der Nutzer kann zwischen **14 Tagen** und **12 Wochen** wechseln; alle drei Karten verwenden denselben Zeitraum. Tagesansicht zeigt die letzte gültige Messung je Tag und Quelle. Die Wochenansicht zeigt den Median tatsächlich gemessener Gewicht-/KFA-/W/kg-Werte mit Anzahl und ursprünglichen Messdaten. Leere Tage beziehungsweise Wochen bleiben Lücken.
+
+**W/kg:** Grundlage ist Rad-FTP in W geteilt durch Gewicht in kg. Intervals-eFTP und Garmin-FTP bleiben getrennte, beschriftete Serien. Garmin-Historie wird mit `get_functional_threshold_power_range(..., sport="CYCLING", aggregation="daily")` gelesen; der Bibliotheksstandard `RUNNING` ist für Rad-W/kg ungeeignet. Es werden nur Werte kombiniert, deren Gültigkeit zum Zeitpunkt nachvollziehbar ist. Als Startregel höchstens sieben Tage altes Gewicht verwenden und dessen Alter anzeigen; nie zukünftige Messungen rückwirkend zuordnen. Ein aktueller Profilwert allein erzeugt keine historische Kurve. Bei fehlender oder veralteter Grundlage erscheint `insufficient_data`. Wochenwerte werden aus gültigen täglichen Quotienten gebildet, nicht aus unabhängig gemittelten Eingangswerten.
+
+**Owner und Abnahme:** `backend/performance/` normalisiert und berechnet, `backend/providers/garmin.py` und der bestehende Intervals-Sync sammeln, `public/analysis.js` rendert die drei Diagramme. Mobile-small zeigt jede Grafik mit lesbaren Achsen, Quelle und Messdatum ohne horizontales Überlaufen. Tests decken Providerwechsel, doppelte Messungen, Lücken, veraltetes FTP, KFA ohne Gewicht und einen 14-Tage-/12-Wochen-Wechsel ab. Keine medizinische Bewertung wird aus KFA oder Gewicht abgeleitet.
+
+## Paket 5b Garmin-Tagesverbrauch im Ernährungstagebuch
+
+**Umsetzung:** Den aktuellen, datierten Garmin-Gesamtverbrauch aus den bereits gesammelten Tagesstatistiken im Ernährungstagebuch anzeigen. `get_calories_daily(start, end)` ergänzt bei Bedarf aktive und Ruhekalorien sowie die Historie. Kein 7-Tage-Durchschnitt und keine bloße Summe der Trainingskalorien dient als Tagesverbrauch. Abweichende Endpunkte werden über eine dokumentierte Quellenregel aufgelöst. Die Daten kommen ausschließlich aus dem vorhandenen Garmin-Sync; das Öffnen des Tagebuchs liest lokalen Zustand.
+
+**Aktueller Tag:** Beschriftung „Garmin-Tagesverbrauch · aktueller Schätzwert“ mit Abrufzeit und vorläufigem Status. Angezeigt wird der von Garmin bereitgestellte Wert für den ganzen Kalendertag einschließlich Ruhe-/Alltagsverbrauch. Eine bereits enthaltene Aktivitätsenergie wird nicht zusätzlich addiert. Die Ansicht erklärt, ob die Quelle einen bisher erfassten Wert oder eine Ganztagesschätzung liefert; sie extrapoliert nicht selbständig den restlichen Tag. Erst nach bestätigter Datenabdeckung gilt ein zurückliegender Tag als vollständig.
+
+**Oberfläche:** Die Tageskarte zeigt zuerst den Gesamtverbrauch in kcal. Aktive und Ruhekalorien sind aufklappbar, soweit vorhanden. Aufnahme, Verbrauch und eine optionale Differenz werden klar getrennt; eine Differenz ist keine automatische Empfehlung und schreibt keinen Tagebucheintrag. Bei Sync-Fehler bleibt ein vorhandener Wert mit Veraltet-Hinweis sichtbar. Ohne Messung erscheint „Nicht verfügbar“; null wird nur bei tatsächlich gemessenem Nullwert angezeigt.
+
+**Abnahme:** Tageswechsel und Athletenzeitzone stimmen, Teilwerte werden nicht doppelt addiert, fehlende Teilwerte werden als unvollständig markiert, und ein neuer Sync aktualisiert nur die betroffenen Tage. Der Garmin-Fehler darf Ernährung, Intervals-Sync oder andere Garmin-Bereiche nicht verwerfen.
+
+**Bibliotheksdetail:** `get_calories_daily` gibt `calendarDate`, `active`, `resting` und `total` zurück. Die Bibliothek berechnet `total` mit `(active or 0) + (resting or 0)` auch bei fehlendem Teilwert. Der Adapter muss daher die Teilwerte prüfen; eine solche Summe darf nicht als vollständiger Gesamtverbrauch gelten. Ein legitimer gemessener Nullwert bleibt von `None` unterscheidbar.
+
 ## Paket 5 Persönliche Erholung und Schlaf
 
 **Umsetzung:** Den neuen Analyse-Unterbereich Erholung einführen. HRV, Ruhepuls und Schlaf gegen persönliche datierte Verteilungen auswerten. Als vorgeschlagene Startregel ein gleitendes Fenster von 42 Tagen verwenden; unter 14 passenden Nächten keine Normalbereich-Einordnung ausgeben und bis 28 Nächten den Bereich als vorläufig kennzeichnen. Diese Zahlen sind Abdeckungsregeln für die erste Version, keine medizinischen Schwellen.
@@ -126,15 +173,19 @@ Größe bezeichnet den relativen Umfang einschließlich Tests und UI. Die belast
 
 **Schlaf:** Bestätigtes persönliches Schlafziel im Profil ergänzen. Das Defizit der letzten sieben Nächte aus bekannten Dauern und diesem Ziel ableiten, ohne einzelne lange Nächte als vollständigen Ausgleich zu behaupten. Schlafregelmäßigkeit nur mit tatsächlichen Schlafbeginn-/Endzeiten und korrekter Behandlung von Mitternacht, Zeitzone und Zeitumstellung anzeigen. Garmin-Schlafstadien bleiben Provider-Schätzungen.
 
+**Provider-Erweiterung:** Vorhandene Intervals-Wellness-Werte für Müdigkeit, Muskelkater, Stress und Verletzung mit Quellenlabel nutzbar machen. Garmin-Stress, Atmung, SpO₂ und Hydration folgen als optionale Kontextreihen bei ausreichender Abdeckung. Messverfahren und fehlende Geräteunterstützung bleiben sichtbar. Diese Reihen ergänzen die bestehende Erholungsansicht; sie erzeugen keinen zweiten Readiness-Score.
+
 **Oberfläche und Owner:** Analyse → Erholung enthält Tageskarte und Verläufe; im Kalender erscheint nur die kurze Einordnung mit Verknüpfung. Die vorhandenen Besitzer `backend/performance/recovery*.py`, `history.py`, `garmin_projection.py` und `backend/athlete/` erweitern. Gesundheitshistorie im bestehenden datierten Garmin-/Wellness-Pfad verfügbar halten.
 
 **Abnahme:** Bei wenigen, veralteten oder inkompatiblen Messungen bleibt die Bewertung offen. Baselines enthalten keine zukünftigen Tage. Wechsel des Providers verschiebt den Normalbereich nicht unbemerkt. Fehlendes Schlafziel erzeugt kein erfundenes Defizit. Krankheit/Schmerz wird nicht durch eine günstige HRV relativiert.
 
 ## Paket 6 Leistungsprofil und wiederkehrende Trainings
 
-**Umsetzung:** Für Radfahren zunächst beste beobachtete mittlere Leistung über 5 Sekunden, 1, 5 und 20 Minuten sowie eine Leistungs-Dauer-Kurve erstellen. Für Laufen passende Geschwindigkeits-/Distanzbestwerte anbieten. 28- und 90-Tage-Vergleiche genügen für die erste Version. Absolute Werte und W/kg werden nur mit passendem datiertem Gewicht angeboten.
+**Umsetzung:** Für Radfahren zunächst beste beobachtete mittlere Leistung über 5 Sekunden, 1, 5 und 20 Minuten sowie eine Leistungs-Dauer-Kurve erstellen. Dafür zuerst Intervals `/athlete/{id}/power-curves`, `/athlete/{id}/activity-power-curves` und `/activity/{id}/best-efforts` prüfen; Garmin historische FTP-Werte über `get_functional_threshold_power_range` nur ergänzend verwenden. Für Laufen passende Geschwindigkeits-/Distanzbestwerte aus Pace-Kurven und Best Efforts anbieten. 28- und 90-Tage-Vergleiche genügen für die erste Version. Absolute Werte und W/kg werden nur mit passendem datiertem Gewicht angeboten.
 
 **Vergleich:** Zuerst wiederkehrende Bibliotheksvorlagen und Indoor-Protokolle über stabile Referenzen vergleichen. Streckenvergleich folgt innerhalb dieses Pakets nur, wenn geeignete GPS-/Streckenreferenzen verfügbar sind. Strecke und Ergebnis werden innerhalb der privaten Anwendung verarbeitet. Eine manuelle Vergleichsgruppe ist möglich; die dauerhafte Zuordnung wird bestätigt gespeichert.
+
+**Provider-Erweiterung:** `interval-search` findet Kandidaten mit ähnlicher Dauer und Intensität; `interval-stats` liefert Statistik für ausgewählte Aktivitätsabschnitte. Eine Provider-Suche allein beweist keine Vergleichbarkeit. Intervals-Power-Kurven können zusätzlich ermüdete Kurven (`-kj0`/`-kj1`) liefern: als spätere Erweiterung für Leistung nach Vorbelastung in Paket 4/6 einplanen, mit ausgewiesener Vorarbeit und Datendeckung. Herzfrequenzkurven sind Belastungskontext, keine Rangliste nach maximalem Puls.
 
 **Grenzen:** Die Kurve zeigt beobachtete Bestleistungen. Weniger Maximalversuche bedeuten nicht automatisch Leistungsverlust. Eine genaue Critical-Power-/W′-Schätzung wird erst ergänzt, wenn belastbare Eingangsdaten und eine überprüfte Fit-Methode vorliegen. Xerts proprietäre Fitness-Signature und TrainerRoad-Levels werden nicht behauptet oder nachgebildet.
 
@@ -174,6 +225,8 @@ Größe bezeichnet den relativen Umfang einschließlich Tests und UI. Die belast
 
 **Daten und Coach:** Lebensmittelwerte und Portionen durch den bestehenden `FoodDatabaseService` und Nutrition-Service berechnen. Ein bestätigter Verpflegungsplan speichert die zugehörige lokale Einheit und deren Revision. Mahlzeitenvorlagen bleiben unabhängig. Verzehr wird erst nach tatsächlicher, ausdrücklich erfasster Aufnahme ins Tagebuch geschrieben; Planung erzeugt keinen Ernährungseintrag.
 
+**Tagesenergie:** Paket 5b stellt Garmin-Verbrauch bereit. Intervals `kcalConsumed`, `carbohydrates`, `protein` und `fatTotal` können optional als externe Referenz angezeigt werden. Das lokale, ausdrücklich geführte Tagebuch bleibt maßgeblich; Provideraufnahme wird nicht automatisch als zweite Mahlzeit importiert. Garmin-Hydration kann eine getrennte Trinkmengenreferenz ergänzen, sofern sie tatsächlich protokolliert wurde.
+
 **Oberfläche:** Kurzer Hinweis in der geplanten Einheit, vollständige zeitliche Abfolge unter Ernährung → Trainingsverpflegung. Dort „Mit dem Coach anpassen“ und „Verzehr erfassen“ als unterschiedliche Aktionen.
 
 **Abnahme:** Änderung von Dauer oder Intensität kennzeichnet einen älteren Vorschlag als überholt. Unvollständiges Ernährungstagebuch ergibt keinen sicheren Energiemangel. Portionen und Nährwerte stimmen mit gespeicherten Vorlagen überein. Hypothetischer oder verneinter Verzehr wird nicht gespeichert.
@@ -188,23 +241,63 @@ Größe bezeichnet den relativen Umfang einschließlich Tests und UI. Die belast
 
 **Abnahme:** Wenig Daten, selektive Erfassung, fehlende Gruppenzuordnung oder Providerwechsel führen zu einer eingeschränkten Aussage. Korrigierte Tags aktualisieren das Ergebnis. Ungetaggte Tage werden nicht als bestätigter Verzicht auf Alkohol, spätes Essen oder andere Einflüsse interpretiert.
 
+## Paket 11 Geprüfte Intervals-/Garmin-Erweiterungen
+
+Die folgenden Daten sind in der offiziellen Intervals.icu-Open-API beziehungsweise in `garminconnect==0.3.17` vorhanden, werden aktuell aber nicht vollständig genutzt. Sie werden nur aufgenommen, wenn eine konkrete lokale Ansicht oder Berechnung den Nutzen belegt. Jeder Abruf bleibt optional, erhält Capability-, Fehler- und Freshness-Metadaten und darf den übrigen Sync nicht ausfallen lassen.
+
+**Priorität 1 – direkt in bestehende Pakete einbauen:**
+
+- Intervals `/athlete/{id}/power-curves`, `/athlete/{id}/pace-curves` und `/athlete/{id}/hr-curves` sowie die Aktivitätsvarianten für robuste Leistungs-, Pace- und Herzfrequenzverläufe. Diese speisen Paket 6, ohne Bestwerte aus der begrenzten Coach-Projektion zu berechnen. Bestleistungen werden im Body-Tab nicht stillschweigend als FTP verwendet.
+- Intervals `/activity/{id}/best-efforts`, `/athlete/{id}/activities/interval-search` und `/activity/{id}/interval-stats`. Sie ergänzen Paket 1 und 3 um belegte Bestleistungen, ähnliche Einheiten und wiederholbare Intervallvergleiche.
+- Garmin-Körperzusammensetzung und Tageskalorien sind verbindliche Ergebnisse von Paket 5a/5b. `get_body_composition` und `get_calories_daily` sind zusätzliche Datenwege, wenn vorhandene Gewichts-/Tagesstatistiken die benötigten Felder nicht liefern.
+- Garmin `get_functional_threshold_power_range` für historische FTP-Werte. Es verhindert, dass eine aktuelle Schwelle ältere W/kg- oder Intervallbewertungen verfälscht.
+
+**Priorität 2 – Aktivitätsverständnis und Erholung:**
+
+- Intervals `/activity/{id}/weather-summary`, `/activity/{id}/map`, `/activity/{id}/power-vs-hr`, `/activity/{id}/power-histogram`, `/activity/{id}/pace-histogram`, `/activity/{id}/hr-histogram` und `/activity/{id}/gap-histogram`. Wetter, Strecke, Gelände und Effizienz werden in der Aktivitätsansicht nur angezeigt, wenn sie für die konkrete Aktivität vorhanden sind; keine nachträgliche Wetterbehauptung aus einer Prognose. Garmin `get_activity_weather`, `get_activity_splits` und `get_activity_split_summaries` sind mögliche Alternativen bei Garmin-only-Aktivitäten. Keine doppelten Detailreihen derselben Aufzeichnung; rohe Routenkoordinaten bleiben außerhalb des Coach-Kontexts.
+- Garmin `get_endurance_score`, `get_hill_score` und `get_running_tolerance` als getrennte Providerwerte unter Analyse → Leistung. Sie werden nicht mit eigener Fitness- oder Wettkampfberechnung verrechnet. Beim Endurance Score liefert ein Datumsbereich aggregierte Wochenwerte; diese dürfen nicht als tägliche Messungen erscheinen. Running Tolerance unterstützt tägliche oder wöchentliche Aggregation und muss entsprechend beschriftet sein.
+- Garmin `get_intensity_minutes_data`, `get_weekly_intensity_minutes`, `get_weekly_steps` und `get_weekly_stress` als optionale Wochenkontextwerte. Sie ergänzen den Wochenrückblick, ersetzen aber keine sportartspezifische Belastungsanalyse. Garmin-Intensitätsminuten können anders gewichtet sein als tatsächliche Trainingsdauer und werden nicht als Zonenzeit ausgegeben.
+- Intervals-Wellness `soreness`, `fatigue`, `stress`, `injury`, `spO2`, `hydration`, `respiration`, `steps`, `carbohydrates`, `protein` und `fatTotal`. Zunächst nur Felder mit ausreichender Abdeckung und nachvollziehbarer Darstellung aktivieren; keine automatische Gesundheitsbewertung aus Einzelwerten.
+
+**Priorität 3 – spätere, getrennte Erweiterung:**
+
+- Garmin `get_stress_data`, `get_respiration_data`, `get_spo2_data` und `get_hydration_data` für die Erholungskarte, jeweils mit Messzeit und Geräte-/Providerhinweis.
+- Garmin `get_activity_exercise_sets` für Krafttraining. Übungssätze gehören in eine eigene Aktivitätsdetailkarte und werden nicht aus Herzfrequenz oder Kalorien in Ausdauerbelastung umgerechnet.
+- Garmin `get_devices`, `get_training_plans`, `get_scheduled_workouts` und Detailmethoden können später Gerätefähigkeit und einen ausdrücklich angeforderten Planvergleich erklären. Intervals-Sport-/Zoneneinstellungen kommen nur hinzu, wenn sie eine konkrete Berechnung fundieren; aktuelle Einstellungen sind kein Ersatz für fehlende historische Schwellen. Automatische Planübernahme und Geräteübertragung sind separate Nutzeraufträge.
+
+**Abnahme und Reihenfolge:** Priorität 1 wird in den jeweiligen Paketen umgesetzt; Paket 11 bündelt die nachfolgenden Ergänzungen. Für jeden aktivierten Abruf gibt es synthetische Antwort-Fixtures und einen optionalen Fehlerfall. Ein fehlender Endpunkt erzeugt einen erklärten Bereichsstatus, keine Nullserie. Für Priorität 2 werden Datenabdeckung, Quellenwechsel und UI-Platzbedarf auf mobile-small geprüft. Vor neuen dauerhaften Zeitreihen wird entschieden, ob vorhandene Snapshot-Persistenz ausreicht; andernfalls sind SQLCipher-Migration, Export und Restore Bestandteil derselben Lieferung.
+
 ## Paket 12 Ausrüstung
 
-**Umsetzung:** Unter Mehr → Athletenprofil Ausrüstung verwalten: Schuhe, Fahrrad und Komponenten, Sportart, Status, Anfangsstand und persönliche Wartungsintervalle. Einheiten über eine stabile Referenz zuordnen; Erfassung und Änderungen werden ausdrücklich bestätigt.
+**Festgestelltes Problem:** `renderTrainingRecords` in `public/analysis.js` gruppiert nach Sport, aber nicht nach aktiv/ausgemustert. Garmin-Karten erscheinen direkt; der allgemeine lokale `<details>`-Block mischt aktive und archivierte Einträge. Ein eigener Archivbereich fehlt. Der Lebensdauerbalken existiert nur in `garminEquipmentCard` für die Übergangsprojektion `garmin_items`. Nach dem Erstimport setzt `EquipmentService.read` diese Liste leer und liefert Garmin-verknüpfte Gegenstände als lokale `items`; `localEquipmentCard` zeichnet keinen Balken. Zusätzlich speichert `_insert_initial_garmin_item` das Garmin-Ziel `maximumMeters` nicht. Der Fehler betrifft somit Datenprojektion und Renderer; ein CSS-Fix allein stellt den Balken nicht wieder her.
+
+**Umsetzung:** Die vorhandene Ausrüstungsansicht unter Mehr → Ausrüstung und Wartung reparieren: Schuhe, Fahrrad und Komponenten, Sportart, Status, Anfangsstand und persönliche Ziele. Einheiten über eine stabile Referenz zuordnen; Erfassung und Änderungen werden ausdrücklich bestätigt. Bestehende `items`/`garmin_items` für UI und Coach kompatibel erweitern, statt eine zweite Verwaltung einzuführen. Beide erhalten normalisierten Status und dieselbe begrenzte Lebensdauerprojektion. Die Rohbezeichnung von Garmin bleibt als Provenienz erhalten, steuert aber nicht direkt die Darstellung.
+
+**Darstellung:** Aktive Hauptausrüstung und aktive Komponenten werden zuerst angezeigt. Ausgemusterte beziehungsweise archivierte Einträge werden standardmäßig aus der aktiven Liste entfernt und je Sportart in genau einem geschlossenen `<details>`-Bereich „Ausgemusterte Ausrüstung (N)“ gesammelt, einschließlich Komponenten. Der Bereich enthält lokale und Garmin-Einträge, zeigt ihren letzten bekannten Stand und bleibt bei null Einträgen unsichtbar. Archivierte Gegenstände bleiben in alten Aktivitäten referenzierbar und sind für neue Zuordnungen nicht auswählbar. Unbekannter Status erhält einen erklärten Zustand und wird nicht pauschal aus dem Namen abgeleitet.
+
+**Lebensdauerbalken:** Das Garmin-Lebensdauerziel `maximumMeters` beim Erstimport erhalten und in km normalisieren. Bereits importierte Gegenstände über `garmin_uuid` mit einem gültigen Ziel im vorhandenen Snapshot ergänzen; ein bestätigtes lokales Ziel darf dabei nicht überschrieben werden. Fehlt das Ziel auch dort, gezielt im regulären Sync ergänzen oder über den Coach ausdrücklich erfassen. Lokal angelegte Gegenstände können ein bestätigtes Lebensdauerziel in km oder Stunden erhalten. Eine gemeinsame Leseprojektion liefert bekannte Nutzung, Ziel, Prozentwert, Einheit, Quelle und Abdeckung für beide Kartenarten. Garmin-Kilometer werden weiterhin führend übernommen und niemals zusätzlich zu denselben lokalen Aktivitätskilometern addiert.
+
+Der Balken zeigt verbrauchte Lebensdauer mit sichtbarem Text wie „250 von 1.000 km · 25 %“ und zugänglicher Beschriftung. Die Füllung bleibt zwischen 0 und 100 %, während der Text einen überschrittenen Wert wie 120 % mit „Ziel überschritten“ bewahrt. Ein echter Nullstand zeigt 0 %; fehlende Werte erscheinen als unbekannt. Ein Ziel muss positiv sein, Nutzung darf nicht negativ oder nichtendlich sein. Ohne Ziel oder Zähler erscheint eine präzise Erklärung ohne irreführenden Balken. Wartungsintervalle bleiben separat als „Seit letzter Wartung“ gekennzeichnet: Wartung darf die gesamte Lebensdauernutzung nicht zurücksetzen.
+
+**Status und Datenhoheit:** Beim Erstimport die tatsächlich unterstützten Garmin-Statusfelder und Werte normalisieren, einschließlich retired/archived/inactive. Nach dem Import bleibt der bestätigte lokale Lebenszyklus maßgeblich; der Garmin-Sync überschreibt keine lokale Archivierung, Reaktivierung oder Komponenten-Zuordnung. Abweichender Garmin-Status wird als Quellenkonflikt kenntlich und kann über eine ausdrückliche Coach-Aktion übernommen werden. Fehlt ein Gegenstand im nächsten Snapshot, gilt dies nicht als Löschung oder automatische Ausmusterung. Ziel, Status und Nutzung bleiben im Backup-/Exportpfad erhalten; vorhandene KV-Daten werden kompatibel erweitert.
+
+**Mobile UX:** Die Sporttabs bleiben erhalten. Aktive Karten haben eine kompakte Kennzahl, den Balken und den Status; Wartungshistorie und ausgemusterte Karten sind aufklappbar. Auf 320–390 px darf kein horizontaler Überlauf entstehen. Der Summary-Text nennt Anzahl und letzte Aktualisierung, damit ausgemusterte Komponenten auffindbar bleiben, ohne den aktiven Bereich zu überladen.
 
 **Zähler:** Kilometer, Nutzungszeit und Wartungsstand aus kanonischen Aktivitäten und bestätigtem Anfangsstand ableiten. Wechsel einer Komponente bekommt einen eigenen Start-/Wartungszeitpunkt. Fehlende Zuordnung zählt nicht automatisch zum bevorzugten Fahrrad oder Schuh. Provider-Duplikate, korrigierte Distanz und Archivierung werden bei der Ableitung berücksichtigt.
 
-**Oberfläche:** Ausrüstung beim Aktivitätsfeedback zuordnen; persönliche Wartungshinweise in Aktivitätsdetails und beim betroffenen Gegenstand anzeigen. Hinweise beschreiben erreichte Nutzerintervalle und behaupten keine Material- oder Verletzungsdiagnose.
+**Oberfläche:** Ausrüstung beim Aktivitätsfeedback zuordnen; aktive Ausrüstung erhält den einheitlichen Lebensdauerbalken und persönliche Wartungshinweise in Aktivitätsdetails sowie beim betroffenen Gegenstand. Historische Aktivitätsreferenzen dürfen archivierte Gegenstände verlinken, aber keine neue Zuordnung erlauben. Hinweise beschreiben erreichte Nutzerintervalle und behaupten keine Material- oder Verletzungsdiagnose.
 
 **Owner:** Athletenbezogene Ausrüstungsdaten unter `backend/athlete/`, Aktivitätszuordnung unter `backend/activities/`, vorhandene Coach-Schreibwege entsprechend erweitern. Keine eigenständige neue Navigationsrubrik nötig.
 
-**Abnahme:** Eine doppelt aufgezeichnete Fahrt zählt einmal. Umbuchung auf einen anderen Schuh korrigiert beide Zähler. Wartung setzt nur den betreffenden Wartungszähler zurück und löscht keine Historie. Archivierte Gegenstände bleiben in älteren Einheiten referenzierbar.
+**Abnahme:** Eine doppelt aufgezeichnete Fahrt zählt einmal. Umbuchung auf einen anderen Schuh korrigiert beide Zähler. Wartung setzt nur den betreffenden Wartungszähler zurück und löscht keine Historie. Archivierte Gegenstände bleiben in älteren Einheiten referenzierbar, erscheinen aber standardmäßig nur im geschlossenen Archivbereich. Garmin-Status „retired“, „archived“ und „inactive“ werden normalisiert und gemeinsam mit lokal archivierten Einträgen geprüft. Tests decken Garmin-Ziele in Metern, lokale km-/Stundenlimits, unbekannte Zähler, fehlende Limits, 0-%- und über-100-%-Werte, aktive Komponenten, archivierte Komponenten, gemischte Quellen, Zähleraktualisierung und mobile Ausklappbarkeit ab. Browser-Abnahme prüft `progress`-Wert, sichtbaren Text, `aria-label`, geschlossenen Archivbereich und `scrollWidth <= innerWidth` auf mobile-small.
 
 ## Prüfung und Abschluss jedes Pakets
 
 Für jedes Paket zuerst fokussierte Unit-Tests mit synthetischen Zeitreihen, temporärer Datenbank und gemockten Providern. Relevante Fälle sind Datenlücken, Zeitumstellung, ungleichmäßige Messabstände, Duplikate, geänderte Schwellen, Wiederholungen, Abbruch und veraltete Referenzen. Analysen benötigen bekannte Eingänge mit fachlich nachvollziehbaren erwarteten Ergebnissen; reine Spiegeltests des Implementierungscodes genügen nicht.
 
 Bei Backend-Änderungen Ruff, Formatprüfung, mypy und `python -m compileall -q server.py backend tests` ausführen. Vor Abschluss einer Feature-PR die vollständige Unit-Suite ausführen. Bei Schema-Änderungen Schema-Vertrag, frische SQLCipher-Initialisierung, Same-build-Restart, Privacy-Export und Restore eines aktuellen Backups prüfen.
+
+Schemaänderungen enthalten außerdem eine eingefrorene Fixture des vorherigen Release-Schemas mit bestehenden Daten, direkte Upgrades der unterstützten Releases einschließlich übersprungener Zwischenversionen sowie Rollback bei fehlgeschlagener Migration. Backup-/Exportlisten und die Standard-Fixture werden in derselben PR angepasst; ein leeres Datenverzeichnis ist kein Upgrade-Nachweis.
 
 Browser-Flows auf mobile-small und desktop prüfen; zusätzliche Projekte wählen, wenn Layout oder Interaktion sie betrifft. Die Integration läuft mit einem frisch gebauten Docker-Image, isoliertem Fixture-Datenverzeichnis und frischem Browserprofil. Login/CSRF, sichere Texte/Markdown, Kalender-Zurücknavigation, Enter/Shift+Enter, PWA-Assets, Offlinezustand und relevante Berechtigungsabläufe erhalten ihre bestehenden Verträge. UI-Änderungen synchronisieren Assetversionen, Service-Worker-Cache und Contract-Tests.
 
@@ -214,9 +307,33 @@ Jede PR beschreibt auf Englisch Nutzerproblem, Ergebnis, Abhängigkeit und Prüf
 
 ## Erste Lieferung und nächster Umsetzungsschritt
 
-Die erste vollständige Lieferung umfasst Pakete 1 bis 4: eine Aktivität aus dem Kalender öffnen, den erreichten Trainingszweck sehen, die Ausdauerentwicklung prüfen und die Woche mit dem Coach besprechen. Paket 5 ergänzt anschließend die persönliche Erholung. Die restlichen Pakete bauen in der dokumentierten Reihenfolge darauf auf; Daten aus Paket 5 können schon während der Umsetzung weiterer Features gesammelt werden.
+Der gemeldete Ausrüstungsfehler aus Paket 12 gehört ebenfalls zur ersten Lieferung: geschlossener Archivbereich für ausgemusterte Komponenten und ein Lebensdauerbalken für lokale sowie Garmin-verknüpfte Gegenstände. Weitergehende Aktivitätszuordnungen und neue Wartungsabläufe aus Paket 12 bleiben nachfolgende Erweiterungen. Die Standard-Fixture enthält aktive und ausgemusterte Komponenten, fehlende Ziele, einen echten Nullstand und ein überschrittenes Lebensdauerziel; die mobile Abnahme prüft alle diese Zustände.
 
-Der konkrete nächste Schritt ist Paket 1: dokumentierte Detail-Endpunkte und passende Fixtures prüfen, die Speicherentscheidung festhalten und den lokalen Detail-Leseweg mit Ladejob umsetzen. Erst danach die Kalenderdetailansicht integrieren. Die erste PR enthält diesen vollständigen Ablauf mit Tests; bei notwendiger Teilung liefert die erste Teil-PR die getestete Datenbasis und die unmittelbar folgende Teil-PR die bedienbare Ansicht.
+Die nächste Lieferung umfasst zuerst **Paket 0**, danach **5a und 5b**: beide Kalender-Flags zuverlässig beachten, Körperentwicklung im Tab Body zeigen und Garmin-Tagesverbrauch im Ernährungstagebuch lesen. Die Pakete können getrennte PRs bilden; die normalisierte Körper-/Tagesdatenbasis muss vor ihrer Darstellung verfügbar sein. Anschließend werden Leistungsprofile und Aktivitätsdetails aus Priorität 1 ergänzt. Weitere Erholungs-, Belastbarkeits- und Kraftdaten folgen anhand ihres konkreten Nutzens und ihrer Verfügbarkeit.
+
+Der konkrete nächste Schritt ist Paket 0: die beiden Fehlerfälle mit synthetischen iCal-Terminen reproduzierbar machen, eine gemeinsame Prüfung für `[NO_TRAINING]` und `[NO_INTENSITY]` implementieren und alle betroffenen Schreibwege daran anschließen. Die erste PR enthält sichtbare Kalenderhinweise und Backend-Abnahme für beide Flags. Danach Körper-/Kaloriendaten normalisieren und Body sowie die Ernährungskarte ergänzen.
+
+### Standard-Testdaten für die mobile Vorschau
+
+Die isolierte Docker-Fixture erhält einen wiederholbar ladbaren Standarddatensatz mit mindestens 12 Wochen realistischen synthetischen Daten. Er deckt Gewicht, sporadische KFA-Messungen, datierte FTP-/eFTP-Änderungen, legitime Nullwerte, Lücken, Quellenwechsel und Garmin-Verbrauch einschließlich unvollständigem aktuellem Tag ab. Kalenderbeispiele enthalten beide Flags einzeln und kombiniert, Titel-/Beschreibungsmischungen, Serienausnahmen, mehrtägige und stornierte Termine sowie Konflikte mit bereits geplanten Einheiten. Außerdem bleiben Ernährung, Aktivitäten, Erholung, Coach, Wettkämpfe und Ausrüstung sinnvoll befüllt.
+
+Der Standard wird als synthetische Fixture im Repository versioniert und in einem getrennten Test-Container geladen. Relative Datumsanker halten die Vorschau aktuell; Inhalt und Seed-Version bleiben reproduzierbar. Er benötigt weder Live-Accounts noch Garmin-Token und verändert keine echten Athletendaten. Die mobile Vorschau ist der gemeinsame Einstieg zum Sammeln weiterer Probleme und Feature-Ideen.
+
+## Geprüfte API-Erweiterungen und Primärquellen
+
+Am 6. Oktober 2026 wurden die öffentliche Intervals-Spezifikation sowie Methoden, Signaturen und relevante Implementierungen der Bibliothek **0.3.17 im laufenden Fixture-Image** abgeglichen. Das bestätigt die dokumentierte Schnittstelle, nicht die Verfügbarkeit auf einem konkreten Garmin-Gerät oder Konto. Es wurden keine Live-Provider-Accounts abgefragt.
+
+| Quelle | Geprüfter Umfang | Konsequenz |
+| --- | --- | --- |
+| Intervals OpenAPI | Kurven einschließlich ermüdeter Power-Kurven, Best Efforts, Intervallsuche/-statistik, Wetter, Karte, Histogramme und Wellness-Felder | Abrufe anhand konkreter Auswertungen ergänzen; Parameter und Antwortschema je Endpunkt dokumentieren |
+| Garmin 0.3.17 | Körperzusammensetzung, Tageskalorien, historische FTP, zusätzliche Gesundheitsdaten, Scores, Laufbelastbarkeit, Intensitätsminuten und Übungssätze | Geräte-/Kontoverfügbarkeit gesondert erkennen; neue Bereichsfehler isolieren |
+| Garmin-Aggregation | Endurance-Range kann Wochenwerte liefern; FTP-Sport ist standardmäßig `RUNNING`; Calories Daily ersetzt fehlende Summanden intern durch null | Aggregation erhalten, `CYCLING` explizit setzen und Teilwerte vor Verwendung als Gesamtwert prüfen |
+| Intervals athlete-summary | Zusammenfassung gefolgter Athleten; Bearer-Token beschränkt auf den eigenen Athleten | Kein zusätzlicher Abruf ohne konkreten Nutzen für die bestehende Ein-Athleten-App |
+
+- [Intervals.icu Open API](https://www.intervals.icu/features/open-api/)
+- [Intervals.icu OpenAPI-Spezifikation](https://intervals.icu/api/v1/docs) – Pfade einschließlich `/api/v1`, bei Kurven optionalem `{ext}`; die verkürzten Pfade im Plan beziehen sich auf diese Basis.
+- [python-garminconnect Repository](https://github.com/cyberjunky/python-garminconnect)
+- [Garmin Connect Bibliothek 0.3.17 auf PyPI](https://pypi.org/project/garminconnect/0.3.17/)
 
 ## Vergleichsquellen
 
