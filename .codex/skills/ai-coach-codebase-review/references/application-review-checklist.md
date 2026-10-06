@@ -30,7 +30,7 @@ Use this as a coverage map, not as a request to manufacture one finding per sect
 
 - Confirm startup fails closed without SQLCipher and never silently creates or opens plaintext SQLite. Review key use without revealing the key.
 - Inventory all tables and durable records: profile/settings, competitions/tombstones, provider snapshots/cursors/status, workouts/plans/check-ins/feedback/adjustments, Coach commands/actions/conversation, sessions, usage, public calendars, change history, and backups.
-- Review fresh SQLCipher initialization, same-build restarts and current-schema validation, transaction boundaries, foreign/uniqueness constraints, indexes, type/JSON validation, and crash consistency. Do not add schema migrations or old-installation compatibility paths.
+- Review fresh SQLCipher initialization, same-build restarts, versioned schema migrations, current-schema validation, transaction boundaries, foreign/uniqueness constraints, indexes, type/JSON validation, and crash consistency. Migrations must preserve durable data, be transactional, reject unknown/newer schemas, and include upgrade tests.
 - Check multi-threaded connection ownership, writer serialization, lock scope, atomic read-modify-write operations, and rollback behavior.
 - Verify updates preserve last-known-good snapshots and locally authoritative records on provider, parsing, or commit failure.
 - Review deletion/tombstone semantics, idempotency, orphan cleanup, pagination state, and data retention without accidental loss.

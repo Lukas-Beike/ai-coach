@@ -310,6 +310,37 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
+CURRENT_SCHEMA_VERSION = 2
+
+NUTRITION_PRODUCTS_DDL = """
+    CREATE TABLE nutrition_products (
+        id TEXT PRIMARY KEY,
+        barcode TEXT UNIQUE,
+        name TEXT NOT NULL,
+        brand TEXT NOT NULL DEFAULT '',
+        basis_amount REAL NOT NULL CHECK (basis_amount > 0),
+        basis_unit TEXT NOT NULL CHECK (basis_unit IN ('g', 'ml', 'portion')),
+        kcal REAL,
+        carbs_g REAL,
+        protein_g REAL,
+        fat_g REAL,
+        sugar_g REAL,
+        fiber_g REAL,
+        salt_g REAL,
+        source TEXT NOT NULL CHECK (source IN ('packaging_label', 'manual', 'open_food_facts', 'bls', 'fddb_export')),
+        source_url TEXT NOT NULL DEFAULT '',
+        external_id TEXT NOT NULL DEFAULT '',
+        provenance TEXT NOT NULL DEFAULT 'manual',
+        extraction_confidence REAL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_nutrition_products_name ON nutrition_products(name COLLATE NOCASE);
+    CREATE INDEX idx_nutrition_products_status ON nutrition_products(status, updated_at DESC);
+"""
+
+
 def initialize_schema(db: Any) -> None:
     """Create the exact current schema on a new database connection."""
     db.executescript(
@@ -617,31 +648,6 @@ def initialize_schema(db: Any) -> None:
         updated_at TEXT NOT NULL
     );
     CREATE INDEX idx_nutrition_logs_date ON nutrition_logs(meal_date, logged_at DESC);
-    CREATE TABLE nutrition_products (
-        id TEXT PRIMARY KEY,
-        barcode TEXT UNIQUE,
-        name TEXT NOT NULL,
-        brand TEXT NOT NULL DEFAULT '',
-        basis_amount REAL NOT NULL CHECK (basis_amount > 0),
-        basis_unit TEXT NOT NULL CHECK (basis_unit IN ('g', 'ml', 'portion')),
-        kcal REAL,
-        carbs_g REAL,
-        protein_g REAL,
-        fat_g REAL,
-        sugar_g REAL,
-        fiber_g REAL,
-        salt_g REAL,
-        source TEXT NOT NULL CHECK (source IN ('packaging_label', 'manual', 'open_food_facts', 'bls', 'fddb_export')),
-        source_url TEXT NOT NULL DEFAULT '',
-        external_id TEXT NOT NULL DEFAULT '',
-        provenance TEXT NOT NULL DEFAULT 'manual',
-        extraction_confidence REAL,
-        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    );
-    CREATE INDEX idx_nutrition_products_name ON nutrition_products(name COLLATE NOCASE);
-    CREATE INDEX idx_nutrition_products_status ON nutrition_products(status, updated_at DESC);
     CREATE TABLE nutrition_sync_dates (
         meal_date TEXT PRIMARY KEY,
         revision INTEGER NOT NULL DEFAULT 1,
@@ -657,6 +663,9 @@ def initialize_schema(db: Any) -> None:
     );
         """
     )
+    for statement in NUTRITION_PRODUCTS_DDL.split(";"):
+        if statement.strip():
+            db.execute(statement)
     db.execute(
         "CREATE UNIQUE INDEX idx_workout_library_external_id ON workout_library(external_id) WHERE external_id IS NOT NULL"
     )
@@ -669,6 +678,8 @@ def initialize_schema(db: Any) -> None:
     db.execute(
         "CREATE INDEX idx_planned_units_date ON planned_units(json_extract(payload, '$.date'))"
     )
+
+    db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 
 def configure_cipher(db: Any, password: str) -> None:
@@ -699,7 +710,9 @@ def database_index_names(db: Any) -> set[str]:
 
 def database_schema_is_current(db: Any) -> bool:
     if (
-        database_table_names(db) != set(CURRENT_DATABASE_SCHEMA)
+        db.execute("PRAGMA user_version").fetchone()["user_version"]
+        not in (0, CURRENT_SCHEMA_VERSION)
+        or database_table_names(db) != set(CURRENT_DATABASE_SCHEMA)
         or database_index_names(db) != CURRENT_DATABASE_INDEXES
     ):
         return False

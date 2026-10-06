@@ -20,14 +20,20 @@ Intervals Coach is intentionally standalone and designed for operation on a trus
 
 ---
 
-## Fresh Installation Contract
+## Release and Database Compatibility
 
-Intervals Coach adheres to a clean-slate installation and maintenance model:
-- **Clean Storage Mount**: Start the application with an empty `/data` directory and a fresh browser profile.
-- **Direct Schema Initialization**: The application initializes the current SQLCipher schema directly upon first startup.
-- **No Migration Shims**: There are no automatic schema migrations, legacy database converters, or backward-compatibility upgrade paths. Deprecated code and schemas are removed rather than shimmed.
-- **Safe State Recovery**: Same-build process restarts, provider resynchronization, and current-schema backup restoration remain fully supported.
-- **Isolated State**: The application will not overwrite, migrate, or delete databases from prior major installations located outside its designated storage directory.
+Releases preserve the athlete's existing encrypted database. Schema changes use
+explicit, versioned and transactional migrations with upgrade regression tests;
+supported previous releases can be upgraded directly, including when an
+intermediate release was skipped. A fresh database is only required when the
+athlete explicitly chooses to start over. Unknown or newer schemas are rejected
+without deleting or partially changing the data.
+
+Version 1.12.21 supports direct updates from 1.12.19 and 1.12.20. Keep the existing
+`/data` bind mount and `APP_PASSWORD` when recreating the container. Startup
+automatically adds the missing nutrition-product table and indexes before
+workers start, retaining existing records and SQLCipher encryption. A failed
+migration rolls back; do not replace or reset the data directory to resolve it.
 
 ---
 

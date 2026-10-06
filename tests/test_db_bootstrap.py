@@ -11,7 +11,7 @@ from pathlib import Path
 import backend
 from backend.db.bootstrap import initialize_application_database
 from backend.db.repositories import KeyValueRepository
-from backend.db.schema import database_schema_is_current
+from backend.db.schema import database_schema_is_current, initialize_schema
 
 
 class DatabaseBootstrapTests(unittest.TestCase):
@@ -89,6 +89,23 @@ class DatabaseBootstrapTests(unittest.TestCase):
             ["unexpected_records"],
         )
         self.assertEqual(db.execute("SELECT id FROM unexpected_records").fetchone()[0], "synthetic")
+
+    def test_1_12_19_schema_is_migrated_without_losing_existing_rows(self):
+        db = self.make_connection()
+        self.addCleanup(db.close)
+        initialize_schema(db)
+        db.execute("INSERT INTO nutrition_logs(id, meal_date, logged_at, meal_type, description, kcal, created_at, updated_at) VALUES ('meal-1', '2026-09-15', ?, 'lunch', 'Synthetic meal', 500, ?, ?)", (self.now, self.now, self.now))
+        db.execute("DROP TABLE nutrition_products")
+        db.execute("PRAGMA user_version = 1")
+        db.commit()
+
+        self.bootstrap(db)
+
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(db.execute("SELECT description FROM nutrition_logs WHERE id='meal-1'").fetchone()[0], "Synthetic meal")
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
+        db.execute("INSERT INTO nutrition_products(id, name, basis_amount, basis_unit, source, created_at, updated_at) VALUES ('product-1', 'Synthetic oats', 100, 'g', 'manual', ?, ?)", (self.now, self.now))
+        self.assertEqual(db.execute("SELECT name FROM nutrition_products").fetchone()[0], "Synthetic oats")
 
     def test_bounded_retention_clamps_to_thirty_days_and_resets_gemini(self):
         db = self.make_connection()
