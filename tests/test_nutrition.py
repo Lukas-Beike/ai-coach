@@ -116,6 +116,83 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
             for nutrient in ("carbs_g", "protein_g", "fat_g"):
                 self.assertIsNone(result[nutrient])
 
+    def test_composite_components_resolve_and_freeze_mixed_sources(self):
+        product = self.service.save_product({
+            "name": "Synthetic whey", "basis_amount": 100, "basis_unit": "g",
+            "kcal": 376, "carbs_g": 8, "protein_g": 78, "fat_g": 5.5,
+        })
+        components = [
+            {"kind": "local_product", "product_id": product["id"], "amount": 25, "unit": "g"},
+            {"kind": "database", "food_id": "bls:C133000", "amount": 10, "unit": "g"},
+            {"kind": "manual", "name": "Creatine", "amount": 5, "unit": "g", "kcal": 0, "carbs_g": 0, "protein_g": 0, "fat_g": 0},
+        ]
+        result = self.service.calculate_components(components)
+        self.assertEqual(result["nutrition_basis"]["kind"], "composite")
+        self.assertEqual([item["kind"] for item in result["nutrition_basis"]["components"]], ["local_product", "database", "manual"])
+        self.assertEqual(result["nutrition_basis"]["components"][2]["kcal"], 0)
+        entry = self.service.log_meal({"description": "Whey, honey, creatine", "components": components})
+        self.assertEqual(entry["nutrition_basis"], result["nutrition_basis"])
+        self.assertEqual(entry["kcal"], result["kcal"])
+        self.assertEqual(self.service.get_day_summary(entry["meal_date"])["entry_count"], 1)
+        self.service.update_product(product["id"], {"kcal": 400})
+        self.assertEqual(self.service.get_meal(entry["id"])["kcal"], result["kcal"])
+
+    def test_composite_rejects_forged_authoritative_values_and_unknown_macros_propagate(self):
+        for component in (
+            {"kind": "database", "food_id": "bls:C133000", "amount": 10, "unit": "g", "kcal": 0},
+            {"kind": "estimate", "name": "Estimate", "amount": 1, "unit": "portion", "kcal": 10, "carbs_g": None, "protein_g": 1, "fat_g": 1, "nutrition_basis": {"kind": "database"}},
+        ):
+            with self.subTest(component=component), self.assertRaises(AppError):
+                self.service.calculate_components([component])
+        estimated = {"kind": "estimate", "name": "Unknown carbs", "amount": 1, "unit": "portion", "kcal": 50, "carbs_g": None, "protein_g": 2, "fat_g": 1}
+        entry = self.service.log_meal({"description": "Snack", "components": [estimated]})
+        self.assertIsNone(entry["carbs_g"])
+        self.assertIsNone(self.service.get_day_summary(entry["meal_date"])["total_carbs_g"])
+        self.assertIsNone(self.service.get_sync_snapshot(entry["meal_date"])["total_carbs_g"])
+        self.assertIsNone(self.service.get_range_summary(entry["meal_date"], entry["meal_date"])[0]["total_carbs_g"])
+
+    def test_composite_template_expected_calculation_covers_snapshot(self):
+        components = [{"kind": "manual", "name": "Gel", "amount": 1, "unit": "portion", "kcal": 90, "carbs_g": 22, "protein_g": 0, "fat_g": 0}]
+        calculation = self.service.calculate_components(components)
+        template = self.service.save_template({"name": "Gel", "description": "Race gel", "components": components}, expected_calculation=calculation)
+        self.assertEqual(template["nutrition_basis"], calculation["nutrition_basis"])
+        stale = {**calculation, "nutrition_basis": {**calculation["nutrition_basis"], "components": []}}
+        with self.assertRaises(AppError) as raised:
+            self.service.save_template({"name": "Stale gel", "description": "Race gel", "components": components}, expected_calculation=stale)
+        self.assertEqual(raised.exception.reason, "food_calculation_changed")
+
+    def test_component_replacement_metadata_and_template_portion_snapshots(self):
+        first = [{"kind": "manual", "name": "Manual", "amount": 1, "unit": "portion", "kcal": 10, "carbs_g": 1, "protein_g": 0, "fat_g": 0}]
+        second = [{"kind": "estimate", "name": "Estimate", "amount": 1, "unit": "portion", "kcal": 10, "carbs_g": 1, "protein_g": 0, "fat_g": 0}]
+        entry = self.service.log_meal({"description": "Meal", "components": first})
+        changed = self.service.correct_meal(entry["id"], {"components": second})
+        self.assertEqual(changed["nutrition_basis"]["components"][0]["kind"], "estimate")
+        template = self.service.save_template({"name": "Meal", "description": "Meal", "components": first})
+        replaced = self.service.save_template({"id": template["id"], "name": "Meal", "components": second})
+        self.assertEqual(replaced["nutrition_basis"]["components"][0]["kind"], "estimate")
+        scaled = self.service.save_template({"name": "Fraction", "description": "Fraction", "components": [{"kind": "estimate", "name": "Fraction", "amount": 1, "unit": "portion", "kcal": 1.4, "carbs_g": 0.04, "protein_g": 0, "fat_g": 0}]})
+        logged = self.service.log_template(scaled["id"], 2)
+        self.assertEqual(logged["kcal"], 3)
+        self.assertEqual(logged["carbs_g"], 0.1)
+        item = logged["nutrition_basis"]["components"][0]
+        self.assertEqual(item["amount"], 2)
+        self.assertEqual(item["kcal"], 2.8)
+
+    def test_composite_limits_validate_before_any_write_and_metadata_preserves_archived_snapshot(self):
+        invalids = (None, [], [{"kind": "manual", "name": "x", "amount": 0, "unit": "g", "kcal": 1, "carbs_g": 0, "protein_g": 0, "fat_g": 0}], [{"kind": "manual", "name": "x", "amount": 1, "unit": "g", "kcal": 10001, "carbs_g": 0, "protein_g": 0, "fat_g": 0}])
+        for components in invalids:
+            with self.subTest(components=components), self.assertRaises(AppError):
+                self.service.log_meal({"description": "Invalid", "components": components})
+        many = [{"kind": "manual", "name": "x", "amount": 1, "unit": "g", "kcal": 1, "carbs_g": 0, "protein_g": 0, "fat_g": 0}] * 21
+        with self.assertRaises(AppError):
+            self.service.save_template({"name": "Too many", "description": "Invalid", "components": many})
+        self.assertEqual(self.service.get_today_summary()["entry_count"], 0)
+        product = self.service.save_product({"name": "Archive test", "basis_amount": 100, "basis_unit": "g", "kcal": 100, "carbs_g": 10, "protein_g": 5, "fat_g": 2})
+        consumed = self.service.log_meal({"description": "Product", "components": [{"kind": "local_product", "product_id": product["id"], "amount": 10, "unit": "g"}]})
+        self.service.archive_product(product["id"])
+        renamed = self.service.update_meal(consumed["id"], {"description": "Renamed"})
+        self.assertEqual(renamed["nutrition_basis"], consumed["nutrition_basis"])
+
     def test_database_values_override_model_values_and_provenance_survives_corrections(self):
         payload = {"description": "50 g oats", "kcal": 999,
                    "food_ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}], "source": "coach"}

@@ -752,18 +752,14 @@ class NutritionRepository:
     def day_summary(self, db: Any, meal_date: str) -> dict[str, Any]:
         entries = self.list_by_date(db, meal_date)
         total_kcal = sum(int(e["kcal"]) for e in entries)
-        total_carbs = round(
-            sum(float(e["carbs_g"]) for e in entries if e.get("carbs_g") is not None), 1
-        )
-        total_protein = round(
-            sum(
-                float(e["protein_g"]) for e in entries if e.get("protein_g") is not None
-            ),
-            1,
-        )
-        total_fat = round(
-            sum(float(e["fat_g"]) for e in entries if e.get("fat_g") is not None), 1
-        )
+        def total(field: str) -> float | None:
+            if any(entry.get(field) is None for entry in entries):
+                return None if entries else 0.0
+            return round(sum(float(entry[field]) for entry in entries), 1)
+
+        total_carbs = total("carbs_g")
+        total_protein = total("protein_g")
+        total_fat = total("fat_g")
         return {
             "date": meal_date,
             "total_kcal": total_kcal,
@@ -791,16 +787,6 @@ class NutritionRepository:
                 (meal_date, self._now()),
             )
         snapshot = self.day_summary(db, meal_date)
-        entries = snapshot["entries"]
-        for field in ("carbs_g", "protein_g", "fat_g"):
-            known = [entry[field] for entry in entries if entry.get(field) is not None]
-            total_field = "total_" + field
-            if known:
-                snapshot[total_field] = round(sum(float(value) for value in known), 1)
-            elif not entries:
-                snapshot[total_field] = 0
-            else:
-                snapshot[total_field] = None
         row = db.execute(
             "SELECT revision FROM nutrition_sync_dates WHERE meal_date = ?",
             (meal_date,),
