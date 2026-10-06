@@ -66,7 +66,15 @@ class IntervalsNutritionSyncService:
         endpoint = f"/athlete/{athlete}/wellness/{meal_date}"
         try:
             remote_record = self._api_client.put(endpoint, payload)
-            current = self._nutrition_service.mark_date_synced(meal_date, revision)
+            has_unknown_macros = any(
+                summary.get(field) is None
+                for field in ("total_carbs_g", "total_protein_g", "total_fat_g")
+            )
+            current = (
+                False
+                if has_unknown_macros
+                else self._nutrition_service.mark_date_synced(meal_date, revision)
+            )
             return {
                 "ok": True,
                 "date": meal_date,
@@ -90,9 +98,14 @@ class IntervalsNutritionSyncService:
         """Validate the complete approval, then sync only its frozen dates."""
         if not isinstance(manifest, list) or len(manifest) > 31:
             raise AppError(409, "The approved nutrition manifest is invalid.")
-        dates = [entry.get("date") for entry in manifest if isinstance(entry, dict)]
-        if len(dates) != len(manifest) or len(set(dates)) != len(dates):
+        raw_dates = [entry.get("date") for entry in manifest if isinstance(entry, dict)]
+        if (
+            len(raw_dates) != len(manifest)
+            or any(not isinstance(value, str) for value in raw_dates)
+            or len(set(raw_dates)) != len(raw_dates)
+        ):
             raise AppError(409, "The approved nutrition manifest is invalid.")
+        dates: list[str] = [value for value in raw_dates if isinstance(value, str)]
         current = self._nutrition_service.approval_manifest(dates=dates)
         if len(current) != len(manifest) or any(
             not nutrition_approval_item_matches(expected, actual)
@@ -111,7 +124,7 @@ class IntervalsNutritionSyncService:
                 (pending if result["pending"] else synced).append(meal_date)
             except AppError as exc:
                 errors[meal_date] = str(exc)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 errors[meal_date] = str(exc)
         return {
             "ok": not pending and not errors,
@@ -138,7 +151,7 @@ class IntervalsNutritionSyncService:
             try:
                 result = self.sync_day(d)
                 (pending if result["pending"] else synced).append(d)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 errors[d] = str(exc)
 
         return {

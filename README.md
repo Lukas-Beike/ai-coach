@@ -606,6 +606,8 @@ Intervals Coach is open-source software licensed under the **GNU Affero General 
 
 ### Ernährung und gespeicherte Mahlzeiten
 
+Das Tagebuch zeigt jedes zusammengesetzte Essen als einen Eintrag; Zutaten lassen sich in der Karte aufklappen. Gespeicherte Produkt- und Datenbank-Snapshots bewahren die verwendete Herkunft auch nach späteren Produktänderungen. Unbekannte Nährwerte bleiben unbekannt und werden in Karten und Tagessummen nicht als Null ausgegeben. Der Eintrag bleibt lokal; eine Synchronisierung nach Intervals.icu erfolgt nur nach ausdrücklicher Freigabe.
+
 Der Tab **Ernährung** zeigt das Tagebuch mit Kalorien und Makros sowie **Meine Mahlzeiten**. Erfassung, Korrekturen und Löschen laufen über den Coach per Text, Sprache oder Foto. Aktionen im Tab bereiten eine bearbeitbare Nachricht vor; sie speichern und senden nichts automatisch. Ein vorhandener Chatentwurf bleibt erhalten.
 
 Mit "Definiere mein Standardfrühstück" lassen sich wiederverwendbare Mahlzeiten mit Zutaten, Mengen und Nährwerten für eine Portion anlegen. Der Coach zeigt die Vorlage zur Bestätigung, bevor er sie speichert. Eine Vorlage zählt noch nicht als gegessen. "Ich habe eine halbe Portion meines Standardfrühstücks gegessen" erfasst den Verzehr mit entsprechend skalierten Nährwerten. Einmalige Abweichungen verändern nur den Tagebucheintrag; dauerhafte Änderungen verändern die Vorlage und niemals frühere Einträge.
