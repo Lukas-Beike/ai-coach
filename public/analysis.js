@@ -32,6 +32,7 @@ function analysisLatestPoint(item) {
 }
 
 function analysisUsesCurrentLine(item) {
+  if (item.noCurrentLine) return false;
   return Boolean(analysisLatestPoint(item)) && new Set(item.points.filter(analysisValidPoint).map((point) => Number(point.value))).size < 3;
 }
 
@@ -126,6 +127,8 @@ function appendAnalysisReferenceNotes(section, series, unit) {
 function analysisReadingDetails(point, unit) {
   let details = point.count ? ` · ${point.count} Messungen` : "";
   if (point.observedDate && point.observedDate !== point.date) details += ` · letzter Messwert ${dateLabel(point.observedDate)}`;
+  if (point.ftp_observed_at) details += ` · ${point.power_method || "FTP"} ${dateLabel(point.ftp_observed_at)}`;
+  if (point.weight_observed_at) details += ` · Gewicht ${dateLabel(point.weight_observed_at)} (${point.weight_source || "Quelle unbekannt"})`;
   if (point.lower != null) details += ` · Streuung ${analysisValue(point.lower, unit)} bis ${analysisValue(point.upper, unit)}`;
   return details;
 }
@@ -470,6 +473,7 @@ globalThis.matchMedia("(max-width: 599px)").addEventListener("change", () => {
 function renderAnalysisHistory(history) { // NOSONAR
   const root = document.querySelector("#analysisHistoryCharts");
   const loadRoot = document.querySelector("#analysisLoadCharts");
+  renderBodyAnalysis(history?.body);
   const openDetails = new Set([...root.querySelectorAll("details[open]"), ...loadRoot.querySelectorAll("details[open]")].map((details) => `${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`));
   root.replaceChildren(); loadRoot.replaceChildren();
   if (!history?.start || !history?.end) return;
@@ -509,6 +513,84 @@ function renderAnalysisHistory(history) { // NOSONAR
     root.append(analysisChartGroup(`Leistungsentwicklung · ${title}`, charts, sportSeries, "Letzte 12 Kalenderwochen einschließlich der laufenden Woche: letzter gültiger Wochenwert für FTP und Schwellenpace, Wochenmedian für eFTP und VO₂max. Jede Woche mit Messung bleibt als Punkt sichtbar; fehlende Wochen bleiben Lücken. Garmin; nur eFTP: Intervals.icu. VO₂max und eFTP sind Schätzungen. Quellen und Messdatum bleiben sichtbar."));
   }
   for (const target of [root, loadRoot]) target.querySelectorAll("details").forEach((details) => { details.open = openDetails.has(`${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`); });
+}
+
+let bodyHistoryPeriod = "twelveWeeks";
+
+function bodyWeeklyPoints(points, start, end) {
+  const weeks = [];
+  for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
+    const boundedEnd = addDateKey(weekStart, 6) > end ? end : addDateKey(weekStart, 6);
+    const readings = points.filter((point) => point.date >= weekStart && point.date <= boundedEnd && analysisValidPoint(point));
+    const values = readings.map((point) => Number(point.value)).sort((a, b) => a - b);
+    const middle = Math.floor(values.length / 2);
+    const value = values.length ? values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2 : null;
+    const latest = readings.at(-1);
+    weeks.push(latest
+      ? { ...latest, date: boundedEnd, value, count: readings.length, observedDate: latest.observed_at || latest.date }
+      : { date: boundedEnd, value: null, count: 0 });
+  }
+  return weeks;
+}
+
+function bodySeriesPoints(item, window) {
+  const points = (item.points || []).filter((point) => point.date >= window.start && point.date <= window.end)
+    .map((point) => ({ ...point, observedDate: point.observed_at || point.date }));
+  return bodyHistoryPeriod === "twelveWeeks" ? bodyWeeklyPoints(points, window.start, window.end) : points;
+}
+
+function renderBodyAnalysis(body) {
+  const root = document.getElementById("bodyAnalysisCharts");
+  if (!root) return;
+  const openDetails = new Set([...root.querySelectorAll("details[open]")].map((item) => item.querySelector("summary")?.textContent));
+  root.replaceChildren();
+  const key = bodyHistoryPeriod === "fortnight" ? "14d" : "12w";
+  const window = body?.windows?.[key];
+  root.append(analysisPeriodControls("Zeitraum für Body", bodyHistoryPeriod, (period) => {
+    bodyHistoryPeriod = period;
+    renderBodyAnalysis(body);
+  }));
+  if (!window?.start || !window?.end) {
+    root.append(reportNode("p", "Noch keine Body-Historie verfügbar.", "empty"));
+    return;
+  }
+  const metrics = [
+    ["weight_kg", "Gewicht", "kg"],
+    ["body_fat_pct", "Körperfett", "%"],
+    ["cycling_w_per_kg", "Rad-Leistung pro Gewicht", "W/kg"],
+  ];
+  for (const [metric, title, unit] of metrics) {
+    const entries = window.metrics?.[metric] || [];
+    const series = entries.map((item, index) => ({
+      label: `${item.power_method ? `${item.power_method} · ` : ""}${item.source}`,
+      legendLabel: item.source,
+      source: item.source,
+      unit,
+      color: index,
+      noCurrentLine: true,
+      sparse: true,
+      cadenceDays: bodyHistoryPeriod === "twelveWeeks" ? 7 : 1,
+      explanation: metric === "cycling_w_per_kg"
+        ? "Tageswert aus FTP oder eFTP geteilt durch das letzte Körpergewicht der vorherigen sieben Tage."
+        : "Nur gemessene Tageswerte; fehlende Tage bleiben Lücken.",
+      points: bodySeriesPoints(item, window),
+    }));
+    const chart = analysisChart(title, series, unit, window.start, window.end,
+      metric === "cycling_w_per_kg"
+        ? "W/kg verwendet FTP (Garmin Connect) oder eFTP (Intervals.icu) und ein höchstens sieben Tage altes gemessenes Gewicht."
+        : "Gemessene Verlaufswerte aus Intervals.icu Wellness oder Garmin Connect. Fehlende Messungen werden nicht ergänzt.",
+      { sparse: true });
+    chart.dataset.bodyMetric = metric;
+    if (bodyHistoryPeriod === "twelveWeeks") chart.querySelectorAll(".analysis-info-tooltip").forEach((info) => {
+      info.append(reportNode("p", "12 rollierende Wochen: Median der Messungen je Woche. Datum nennt den letzten Messwert der Woche.", "analysis-reference-note"));
+    });
+    if (metric === "cycling_w_per_kg") chart.querySelectorAll(".analysis-info-tooltip").forEach((info, index) => {
+      const item = entries[index];
+      if (item?.power_method) info.append(reportNode("p", `Methode: ${item.power_method}. FTP- und Gewichtsdatum sind in den Einzelwerten getrennt ausgewiesen.`, "analysis-reference-note"));
+    });
+    root.append(chart);
+  }
+  root.querySelectorAll("details").forEach((details) => { details.open = openDetails.has(details.querySelector("summary")?.textContent); });
 }
 
 let seasonGeneration = 0;
@@ -632,8 +714,9 @@ async function renderSeasonPreparation() {
 }
 
 function renderAnalysisSegments(route = state.route) {
-  const segment = { "analysis/load": "load", "analysis/recovery": "recovery" }[route] || "performance";
+  const segment = { "analysis/load": "load", "analysis/body": "body", "analysis/recovery": "recovery" }[route] || "performance";
   document.getElementById("analysisHistoryCharts").hidden = segment !== "performance";
+  document.getElementById("bodyAnalysisCharts").hidden = segment !== "body";
   document.getElementById("performancePredictions").hidden = segment !== "performance" || !document.getElementById("performancePredictions").childElementCount;
   document.getElementById("sessionPerformance").hidden = segment !== "load";
   document.getElementById("trainingZoneCharts").hidden = segment !== "load";

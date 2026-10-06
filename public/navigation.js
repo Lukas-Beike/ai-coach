@@ -11,6 +11,7 @@ const NAV_ROUTES = Object.freeze({
   analysis: "dataPanel",
   "analysis/performance": "dataPanel",
   "analysis/load": "dataPanel",
+  "analysis/body": "dataPanel",
   "analysis/recovery": "dataPanel",
   more: "settingsPanel",
   "more/connections": "settingsPanel",
