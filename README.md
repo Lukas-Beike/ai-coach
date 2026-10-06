@@ -481,7 +481,7 @@ When a database restore is initiated:
 1. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 2. Active background sync jobs and Coach turns are allowed to finish gracefully.
 3. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`.
-4. The replacement database must match the current schema and pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed.
+4. Supported older schemas are migrated on the staged backup copy. The replacement database must then match the current schema and pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
 5. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss.
 
 ### Privacy Export & Data Purge

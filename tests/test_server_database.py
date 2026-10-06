@@ -92,6 +92,40 @@ class ServerDatabaseTests(ServerTestCase):
             finally:
                 DATABASE_MANAGER_CACHE.reset()
 
+    @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher requires the Docker runtime on Windows")
+    def test_restore_migrates_encrypted_1_12_19_backup_before_replacement(self):
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root)
+            config = replace(server.CONFIG, app_password="synthetic-upgrade-password", data_retention_days=-1)
+            backup = directory / "old-backup.db"
+            connection = server.sqlite_backend.connect(backup)
+            try:
+                configure_cipher(connection, config.app_password)
+                schema = Path(__file__).with_name("fixtures") / "schema_1_12_19.sql.txt"
+                connection.executescript(schema.read_text(encoding="utf-8"))
+                connection.execute("INSERT INTO kv(key, value, updated_at) VALUES ('restore-marker', 'preserved-old-backup', 'now')")
+                connection.execute("INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES ('token', 'csrf', 1, 'now', 'now')")
+                connection.commit()
+            finally:
+                connection.close()
+            try:
+                with patch.object(server, "DATA_DIR", directory), patch.object(server, "DB_PATH", directory / "live.db"), patch.object(server, "CONFIG", config):
+                    server.initialise_database()
+                    result = server.BACKUP_ASSEMBLY.restore_service().restore(backup.read_bytes())
+                    self.assertEqual(result["status"], "ok")
+                    self.assertEqual(server.key_value_service().get("restore-marker"), "preserved-old-backup")
+                    with server.database_manager().reader() as db:
+                        self.assertTrue(database_schema_is_current(db))
+                        self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM sessions").fetchone()["count"], 0)
+                    original = server.sqlite_backend.connect(backup)
+                    try:
+                        configure_cipher(original, config.app_password)
+                        self.assertEqual(original.execute("PRAGMA user_version").fetchone()[0], 0)
+                    finally:
+                        original.close()
+            finally:
+                DATABASE_MANAGER_CACHE.reset()
+
     def test_provider_state_service_is_recreated_with_database_manager(self):
         first = server.provider_state_service()
         first_http_client = server.PROVIDER_TRANSPORT.json_http_client()

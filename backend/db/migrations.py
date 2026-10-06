@@ -5,32 +5,21 @@ from __future__ import annotations
 from typing import Any
 
 from backend.db.schema import (
-    CURRENT_DATABASE_INDEXES,
-    CURRENT_DATABASE_SCHEMA,
     CURRENT_SCHEMA_VERSION,
     NUTRITION_PRODUCTS_DDL,
-    database_index_names,
+    current_schema_signature,
     database_schema_is_current,
-    database_table_names,
+    database_schema_signature,
 )
 
 
 def _schema_is_1_12_19(db: Any) -> bool:
-    expected_tables = set(CURRENT_DATABASE_SCHEMA) - {"nutrition_products"}
-    expected_indexes = CURRENT_DATABASE_INDEXES - {
-        "idx_nutrition_products_name",
-        "idx_nutrition_products_status",
-    }
-    if (
-        database_table_names(db) != expected_tables
-        or database_index_names(db) != expected_indexes
-    ):
-        return False
-    return all(
-        columns == {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
-        for table, columns in CURRENT_DATABASE_SCHEMA.items()
-        if table != "nutrition_products"
+    expected = tuple(
+        definition
+        for definition in current_schema_signature()
+        if definition[2] != "nutrition_products"
     )
+    return database_schema_signature(db) == expected
 
 
 def migrate_schema(db: Any) -> None:

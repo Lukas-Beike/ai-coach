@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
+from functools import lru_cache
 from typing import Any
 
 CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
@@ -708,6 +711,26 @@ def database_index_names(db: Any) -> set[str]:
     }
 
 
+def database_schema_signature(db: Any) -> tuple[tuple[str, str, str, str], ...]:
+    """Compare all declared tables, constraints, indexes, triggers and views."""
+    return tuple(
+        (row["type"], row["name"], row["tbl_name"], " ".join(row["sql"].split()))
+        for row in db.execute(
+            "SELECT type, name, tbl_name, sql FROM sqlite_master "
+            "WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
+        )
+    )
+
+
+@lru_cache(maxsize=1)
+def current_schema_signature() -> tuple[tuple[str, str, str, str], ...]:
+    # An empty in-memory reference contains schema only, never athlete data.
+    with closing(sqlite3.connect(":memory:")) as reference:
+        reference.row_factory = sqlite3.Row
+        initialize_schema(reference)
+        return database_schema_signature(reference)
+
+
 def database_schema_is_current(db: Any) -> bool:
     if (
         db.execute("PRAGMA user_version").fetchone()["user_version"]
@@ -716,7 +739,7 @@ def database_schema_is_current(db: Any) -> bool:
         or database_index_names(db) != CURRENT_DATABASE_INDEXES
     ):
         return False
-    return all(
+    return database_schema_signature(db) == current_schema_signature() and all(
         columns
         == {row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
         for table, columns in CURRENT_DATABASE_SCHEMA.items()
