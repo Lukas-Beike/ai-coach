@@ -548,6 +548,17 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertIn("components", schemas["save_nutrition_entry"]["parameters"]["properties"]["payload"]["properties"])
         self.assertIn("components", schemas["update_nutrition_entry"]["parameters"]["properties"]["changes"]["properties"])
 
+        database_component = schemas["calculate_food_nutrition"]["parameters"]["properties"]["components"]["items"]["anyOf"][1]
+        self.assertEqual(database_component["properties"]["unit"]["enum"], ["g", "ml"])
+
+        template_payload = schemas["save_nutrition_template"]["parameters"]["properties"]["payload"]
+        alternatives = {tuple(item["required"]) for item in template_payload["anyOf"]}
+        self.assertEqual(alternatives, {("components",), ("food_ingredients",), ("kcal",), ("id",)})
+        self.assertTrue(any("components" in required for required in alternatives))
+        self.assertTrue(any("food_ingredients" in required for required in alternatives))
+        self.assertTrue(any("kcal" in required for required in alternatives))
+        self.assertTrue(any("id" in required for required in alternatives))
+
     def test_mixed_origin_meal_is_saved_once_with_frozen_source_components(self):
         product = self.run_tool("save_nutrition_product", {"payload": {
             "name": "Synthetic meal yogurt", "basis_amount": 100, "basis_unit": "g",

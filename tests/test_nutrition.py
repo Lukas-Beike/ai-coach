@@ -137,6 +137,21 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.service.update_product(product["id"], {"kcal": 400})
         self.assertEqual(self.service.get_meal(entry["id"])["kcal"], result["kcal"])
 
+    def test_database_component_resolution_happens_before_database_lock(self):
+        component = {"kind": "database", "food_id": "bls:C133000", "amount": 10, "unit": "g"}
+        original_resolve = self.service.food_database.resolve
+        calls = []
+
+        def resolve_outside_lock(food_id):
+            self.assertFalse(self.lock.locked())
+            calls.append(food_id)
+            return original_resolve(food_id)
+
+        with patch.object(self.service.food_database, "resolve", side_effect=resolve_outside_lock):
+            self.service.calculate_components([component])
+
+        self.assertEqual(calls, ["bls:C133000"])
+
     def test_composite_rejects_forged_authoritative_values_and_unknown_macros_propagate(self):
         for component in (
             {"kind": "database", "food_id": "bls:C133000", "amount": 10, "unit": "g", "kcal": 0},

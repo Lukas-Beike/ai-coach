@@ -103,7 +103,7 @@ def build_tool_contracts(
                             "exclusiveMinimum": 0,
                             "maximum": 10000,
                         },
-                        "unit": {"type": "string", "enum": ["g", "ml", "portion"]},
+                        "unit": {"type": "string", "enum": ["g", "ml"]},
                     },
                 },
                 {
@@ -1123,6 +1123,14 @@ def build_tool_contracts(
                         "properties": template_properties,
                         "additionalProperties": False,
                         "required": ["name", "description"],
+                        # New templates need nutritional data. An update may
+                        # omit nutrition fields to retain the stored values.
+                        "anyOf": [
+                            {"required": ["components"]},
+                            {"required": ["food_ingredients"]},
+                            {"required": ["kcal"]},
+                            {"required": ["id"]},
+                        ],
                     }
                 },
             ),
