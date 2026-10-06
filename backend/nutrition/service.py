@@ -363,10 +363,7 @@ class NutritionService:
         kind = item.get("kind") if isinstance(item, dict) else None
         if not isinstance(kind, str) or kind not in kinds:
             raise AppError(400, "Ungültige Mahlzeitenkomponente.")
-        if kind in {"local_product", "database"}:
-            reference_key = "product_id" if kind == "local_product" else "food_id"
-            if not isinstance(item.get(reference_key), str) or not item[reference_key].strip():
-                raise AppError(400, "Komponentenreferenz muss eine Zeichenkette sein.")
+        NutritionService._validate_component_reference(item, kind)
         amount = item.get("amount")
         if isinstance(amount, bool) or not isinstance(amount, (int, float, str)):
             raise AppError(400, "Ungültige Komponentenmenge.")
@@ -380,6 +377,14 @@ class NutritionService:
         if not isinstance(unit, str) or unit not in {"g", "ml", "portion"}:
             raise AppError(400, "Einheit muss g, ml oder portion sein.")
         return kind, quantity, unit
+
+    @staticmethod
+    def _validate_component_reference(item: dict[str, Any], kind: str) -> None:
+        if kind not in {"local_product", "database"}:
+            return
+        key = "product_id" if kind == "local_product" else "food_id"
+        if not isinstance(item.get(key), str) or not item[key].strip():
+            raise AppError(400, "Komponentenreferenz muss eine Zeichenkette sein.")
 
     def _resolve_local_product_component(
         self, db: Any, item: dict[str, Any], quantity: float, unit: str
@@ -796,7 +801,11 @@ class NutritionService:
         components = payload["nutrition_basis"]["components"]
         for key in NUTRIENTS:
             values = [item.get(key) for item in components]
-            payload[key] = None if any(value is None for value in values) else round(sum(values), 0 if key == "kcal" else 1)
+            if any(value is None for value in values):
+                payload[key] = None
+            else:
+                precision = 0 if key == "kcal" else 1
+                payload[key] = round(sum(values), precision)
 
     def log_meal(self, payload: Any) -> dict[str, Any]:
         """Normalize, validate and store a meal entry."""
