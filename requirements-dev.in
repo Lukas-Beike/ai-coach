@@ -1,0 +1,4 @@
+-r requirements.in
+coverage==7.16.2
+mypy==2.4.0
+ruff==0.16.10

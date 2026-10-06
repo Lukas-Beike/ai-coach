@@ -16,6 +16,42 @@ SPEC.loader.exec_module(release_source)
 
 
 class WorkflowSourceTests(unittest.TestCase):
+    def test_dependabot_pip_compile_updates_the_hash_locked_docker_inputs(self):
+        root = Path(__file__).resolve().parents[1]
+        dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
+        dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
+        workflow = (root / ".github/workflows/publish-container.yml").read_text(encoding="utf-8")
+        self.assertIn("package-ecosystem: pip", dependabot)
+        self.assertIn('directory: "/"', dependabot)
+
+        def pinned_requirements(path):
+            content = (root / path).read_text(encoding="utf-8")
+            return {
+                match.group(1).lower().replace("_", "-"): match.group(2)
+                for match in re.finditer(r"(?m)^([A-Za-z0-9_.-]+)==([^\\\s;]+)", content)
+            }
+
+        for manifest, lock in (
+            ("requirements.in", "requirements.txt"),
+            ("requirements-dev.in", "requirements-dev.txt"),
+        ):
+            lock_content = (root / lock).read_text(encoding="utf-8")
+            header = "\n".join(lock_content.splitlines()[:8])
+            self.assertIn(f"--output-file={lock} {manifest}", header)
+            self.assertNotIn("--no-index", header)
+            lock_pins = pinned_requirements(lock)
+            manifests = pinned_requirements(manifest)
+            if manifest == "requirements-dev.in":
+                manifests.update(pinned_requirements("requirements.in"))
+            for name, version in manifests.items():
+                self.assertEqual(lock_pins.get(name), version, f"{name} differs in {lock}")
+
+        self.assertIn("COPY requirements.txt /app/requirements.txt", dockerfile)
+        self.assertIn("--require-hashes -r /app/requirements.txt", dockerfile)
+        self.assertIn("--require-hashes -r requirements.txt", workflow)
+        self.assertIn("--require-hashes -r requirements-dev.txt", workflow)
+        self.assertNotIn("requirements.lock", dockerfile + workflow)
+
     def test_daily_release_limits_default_token_permissions(self):
         workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml").read_text(encoding="utf-8")
         self.assertIn("permissions:\n  contents: read", workflow)
@@ -117,6 +153,7 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("github.rest.pulls.listCommits", workflow)
         self.assertIn("commit.author?.login === dependabotLogin", workflow)
         self.assertIn("allowedDependencyFiles", workflow)
+        self.assertIn("'requirements.in'", workflow)
         self.assertIn("actionPinLinePattern", workflow)
         self.assertIn("const manualReviewCheckName = 'Codex manual review request'", workflow)
         self.assertIn("getManualReviewRequest", workflow)

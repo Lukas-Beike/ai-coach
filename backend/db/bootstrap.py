@@ -6,16 +6,12 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
+from backend.db.migrations import migrate_schema
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import (
     database_schema_is_current,
-    database_table_names,
+    database_schema_signature,
     initialize_schema,
-)
-
-_INVALID_SCHEMA_ERROR = (
-    "Die vorhandene Datenbank entspricht nicht exakt dem aktuellen Schema. "
-    "Für diesen Release ist ein leerer Datenbestand erforderlich."
 )
 
 
@@ -31,18 +27,21 @@ def initialize_application_database(
     all_sync_days: int,
 ) -> None:
     """Create and validate the application schema, then apply startup state."""
-    existing_tables = database_table_names(db)
-    if existing_tables and not database_schema_is_current(db):
-        raise RuntimeError(_INVALID_SCHEMA_ERROR)
-    if not existing_tables:
+    if db.execute("PRAGMA user_version").fetchone()[
+        "user_version"
+    ] == 0 and not database_schema_signature(db):
         initialize_schema(db)
+    else:
+        migrate_schema(db)
 
     db.execute(
         "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
         (now,),
     )
     if not database_schema_is_current(db):
-        raise RuntimeError("Die neue Datenbank konnte nicht mit dem aktuellen Schema initialisiert werden.")
+        raise RuntimeError(
+            "Die neue Datenbank konnte nicht mit dem aktuellen Schema initialisiert werden."
+        )
 
     if key_values.get(db, "profile") is None:
         key_values.set(db, "profile", default_profile_json)

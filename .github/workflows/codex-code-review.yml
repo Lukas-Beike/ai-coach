@@ -631,7 +631,9 @@ jobs:
                   /Signed-off-by: dependabot\[bot\] <support@github\.com>/.test(commit.commit?.message || '')
                 ));
                 const allowedDependencyFiles = new Set([
+                  'requirements.in',
                   'requirements.txt',
+                  'requirements-dev.in',
                   'requirements-dev.txt',
                   'package.json',
                   'package-lock.json',

@@ -20,14 +20,20 @@ Intervals Coach is intentionally standalone and designed for operation on a trus
 
 ---
 
-## Fresh Installation Contract
+## Release and Database Compatibility
 
-Intervals Coach adheres to a clean-slate installation and maintenance model:
-- **Clean Storage Mount**: Start the application with an empty `/data` directory and a fresh browser profile.
-- **Direct Schema Initialization**: The application initializes the current SQLCipher schema directly upon first startup.
-- **No Migration Shims**: There are no automatic schema migrations, legacy database converters, or backward-compatibility upgrade paths. Deprecated code and schemas are removed rather than shimmed.
-- **Safe State Recovery**: Same-build process restarts, provider resynchronization, and current-schema backup restoration remain fully supported.
-- **Isolated State**: The application will not overwrite, migrate, or delete databases from prior major installations located outside its designated storage directory.
+Releases preserve the athlete's existing encrypted database. Schema changes use
+explicit, versioned and transactional migrations with upgrade regression tests;
+supported previous releases can be upgraded directly, including when an
+intermediate release was skipped. A fresh database is only required when the
+athlete explicitly chooses to start over. Unknown or newer schemas are rejected
+without deleting or partially changing the data.
+
+Version 1.12.21 supports direct updates from 1.12.19 and 1.12.20. Keep the existing
+`/data` bind mount and `APP_PASSWORD` when recreating the container. Startup
+automatically adds the missing nutrition-product table and indexes before
+workers start, retaining existing records and SQLCipher encryption. A failed
+migration rolls back; do not replace or reset the data directory to resolve it.
 
 ---
 
@@ -475,7 +481,7 @@ When a database restore is initiated:
 1. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 2. Active background sync jobs and Coach turns are allowed to finish gracefully.
 3. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`.
-4. The replacement database must match the current schema and pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed.
+4. Supported older schemas are migrated on the staged backup copy. The replacement database must then match the current schema and pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
 5. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss.
 
 ### Privacy Export & Data Purge
@@ -564,8 +570,23 @@ Configured viewports in `playwright.config.cjs`:
 - `tablet-landscape`: 844x390 (Mobile/tablet landscape)
 - `desktop`: 1440x1000 (Desktop workstation)
 
+### Dependency lock maintenance
+
+`requirements.in` and `requirements-dev.in` contain direct pins. The matching
+`requirements.txt` and `requirements-dev.txt` files are pip-tools outputs with
+hashes; Docker and CI install those locked files with `--require-hashes`.
+Dependabot recognizes this `.in`/`.txt` pairing and updates both files. When
+regenerating locally, use Python 3.14 on Linux (the SQLCipher wheel is not
+available on native Windows):
+
+```text
+pip-compile --allow-unsafe --generate-hashes --output-file=requirements.txt requirements.in
+pip-compile --allow-unsafe --generate-hashes --output-file=requirements-dev.txt requirements-dev.in
+```
+
 ### Continuous Integration & Codex Review Gate
 - **Conventional Commits**: All commit messages and pull request titles must follow the Conventional Commits specification (e.g., `feat(coach): add Gemini 3.8 Flash support` or `fix(sync): resolve Garmin sleep retry backoff`).
+
 - **Codex PR Review Gate**: Pull requests targeting `develop` or `main` require a subscription-backed Codex review gate. Request review by commenting `@codex review` on the pull request. All review findings must be resolved before merging.
 - **Automated Daily Releases**: At 03:00 UTC, an automated workflow inspects `develop`. If new commits exist, it creates a version-bump PR and a promotion PR to protected `main`. Both branches require native, SQLCipher container, quality and browser checks without bypass actors. After successful main tests, the workflow creates an immutable GitHub release and publishes the container. The container digest is signed and verified before promoting `latest`; the version tag and `latest` must resolve to that same digest. A read-only release preflight also verifies `APP_VERSION` before its tag exists. Actions use read-only default permissions, with explicit job-level write permissions where needed.
 
@@ -595,11 +616,11 @@ Der Coach bevorzugt **BLS 4.0** für Grundnahrungsmittel und **Open Food Facts**
 
 **Datenquellen:** Max Rubner-Institut (2025): *Bundeslebensmittelschlüssel (BLS), Version 4.0 — Deutsche Nährstoffdatenbank*, Karlsruhe, [DOI 10.25826/Data20251217-134202-0](https://doi.org/10.25826/Data20251217-134202-0), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de). Die eingebundene Ableitung enthält Lebensmittelbezeichnung, Energie, Kohlenhydrate, Protein, Fett und Datenherkunft pro 100 g essbarem Anteil; fehlende Werte, Spuren und Angaben unter der Nachweisgrenze bleiben unbekannt. Reproduzierbare Extraktion: `python tools/extract_bls.py <BLS_4_0_2025_DE.zip>` mit dem [offiziellen Download](https://www.blsdb.de/download). Open Food Facts: [Datenbank unter ODbL 1.0, Inhalte unter Database Contents License](https://openfoodfacts.github.io/openfoodfacts-server/api/); gemeinschaftlich gepflegte Produktwerte sind auf Produkt, Einheit und Vollständigkeit zu prüfen. BLS-Daten und OFF-Cache bleiben getrennt. Es werden keine Produktdaten oder Bilder zu Open Food Facts hochgeladen.
 
-Ernährungseinträge bleiben lokal; eine Übertragung der Tagessummen zu Intervals.icu erfolgt nur nach explizitem Auftrag und Freigabe. Vorlagen und Quellenangaben gehören zu Datenschutzexport, verschlüsseltem Backup und der Löschkategorie Ernährung. Das erweiterte Schema gilt für eine frische Installation mit leerem Datenverzeichnis; bestehende Installationen werden nicht konvertiert.
+Ernährungseinträge bleiben lokal; eine Übertragung der Tagessummen zu Intervals.icu erfolgt nur nach explizitem Auftrag und Freigabe. Vorlagen und Quellenangaben gehören zu Datenschutzexport, verschlüsseltem Backup und der Löschkategorie Ernährung. Release 1.12.21 migriert das vorhandene SQLCipher-Schema von 1.12.19 und 1.12.20 automatisch beim Start; ein leeres Datenverzeichnis ist für dieses Update nicht erforderlich.
 
 ### Analysis history
 
-Analyse has three sections: Belastung, Leistung and Erholung. Belastung shows one Garmin Connect acute-load chart, with the latest 14 daily readings or twelve calendar weeks (last valid reading per week, including the current week). Garmin training status is imported for the configured sync window; missing or ambiguous device readings stay unknown. Training focus follows over 28 days, then permanently visible HF and power zone diagrams. Focus groups recorded Garmin activity loads by primary Training Effect, rather than deriving categories from zones. Zones sum recorded sport-specific durations across all sports over the same 28 days; missing measurements are not zero. The Woche section and its cumulative Intervals.icu load charts are removed. Leistung separates running and cycling charts for threshold pace, FTP/eFTP and VO2max over twelve calendar weeks. FTP and threshold pace use the last valid weekly measurement; eFTP and VO2max use weekly medians. Every measured week has a point, including unchanged values; missing weeks remain gaps. Only available race predictions and weight appear as supplementary cards, without duplicate health, threshold or load cards. Erholung shows daily sleep, HRV and resting heart rate over the last fourteen days, with an optional twelve-week weekly-average view.
+Analyse has three sections: Belastung, Leistung and Erholung. Belastung shows one Garmin Connect acute-load chart, with the latest 14 daily readings or twelve calendar weeks (last valid reading per week, including the current week). Garmin training status is imported for the configured sync window; missing or ambiguous device readings stay unknown. Coach context also keeps Garmin's current daily acute and chronic load and the reported acute-to-chronic ratio separate from its four-week aerobic-low, aerobic-high and anaerobic balance values and target ranges. These values retain Garmin provenance and freshness; ambiguous device values and missing fields stay unknown, and they are not combined with Intervals.icu load. Training focus follows over 28 days, then permanently visible HF and power zone diagrams. Focus groups recorded Garmin activity loads by primary Training Effect, rather than deriving categories from zones. Zones sum recorded sport-specific durations across all sports over the same 28 days; missing measurements are not zero. The Woche section and its cumulative Intervals.icu load charts are removed. Leistung separates running and cycling charts for threshold pace, FTP/eFTP and VO2max over twelve calendar weeks. FTP and threshold pace use the last valid weekly measurement; eFTP and VO2max use weekly medians. Every measured week has a point, including unchanged values; missing weeks remain gaps. Only available race predictions and weight appear as supplementary cards, without duplicate health, threshold or load cards. Erholung shows daily sleep, HRV and resting heart rate over the last fourteen days, with an optional twelve-week weekly-average view.
 
 Erholung shows the latest fourteen days including today without a period selector, using three aligned charts with independent scales for sleep duration, nightly HRV and resting heart rate. Daily sleep is shown as bars starting at zero, with an average line; hours are formatted as hours and minutes. HRV and resting heart rate show the existing source-specific 42-day personal quartiles only when at least 14 comparable earlier measurements support them; provisional ranges and insufficient or stale baselines remain explicit. Every day retains its original observation; missing days remain gaps, and no missing measurement counts as zero. Each metric uses one source and measurement method: the freshest series wins, with Intervals.icu preferred on equal dates and Garmin used when fresher or unavailable from Intervals.icu. Sources, measurement dates and coverage remain available in tooltips; tap or keyboard-activate a day for details, or open the original-value table. Chart legends show only metric names. Values, dates, sources, coverage, changes and explanatory notes are available in legend and point tooltips; expandable tables retain the original values. Personal reference ranges use a green background band. Recovery bands update with new observations; load and performance charts do not show personal reference bands. Mixed-unit secondary axes have been removed. Personal deviations and positive TSB do not constitute a medical or training clearance.
 

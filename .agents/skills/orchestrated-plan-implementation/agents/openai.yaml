@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orchestrated Plan Implementation"
+  short_description: "Delegate work with guarded patch adoption"
+  default_prompt: "Use $orchestrated-plan-implementation to execute this plan through isolated subagents and a parent review gate."
