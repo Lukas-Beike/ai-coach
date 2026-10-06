@@ -30,7 +30,8 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await expect(root.locator(".analysis-subchart")).toHaveCount(3);
   await expect(root.locator("svg")).toHaveCount(3);
   await expect(root.locator(".analysis-secondary-axis, .analysis-extremum")).toHaveCount(0);
-  await expect(root.getByRole("heading", { name: "Erholung · Letzte 14 Tage", exact: true })).toBeVisible();
+  await expect(root.getByRole("heading", { name: /^Erholung · Letzte 14 Tage/ })).toBeVisible();
+  await expect(root.getByRole("button", { name: "Erholung · Letzte 14 Tage: Informationen", exact: true })).toBeVisible();
   await expect(root.locator(".analysis-period-controls")).toHaveCount(1);
   expect((await new AxeBuilder({ page }).include("#personalRecovery").analyze()).violations).toEqual([]);
   expect(await root.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
