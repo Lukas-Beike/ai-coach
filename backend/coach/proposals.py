@@ -517,15 +517,13 @@ class CoachProposalCreationService:
             )
             if existing:
                 preview_values = {**existing, **preview_values}
-            elif payload.get("tool") == "save_nutrition_product":
-                try:
-                    existing_product = self._nutrition_service().get_product(
-                        template_id
-                    )
-                except AppError:
-                    existing_product = None
-                if existing_product:
-                    preview_values = {**existing_product, **preview_values}
+        elif payload.get("tool") == "save_nutrition_product":
+            try:
+                existing_product = self._nutrition_service().get_product(template_id)
+            except AppError:
+                existing_product = None
+            if existing_product:
+                preview_values = {**existing_product, **preview_values}
         return preview_values
 
     def _calculate_local_write_preview(
@@ -534,7 +532,15 @@ class CoachProposalCreationService:
         values: dict[str, Any],
         payload: dict[str, Any],
     ) -> None:
-        if "food_ingredients" in values:
+        if "components" in values:
+            if self._nutrition_service is None:
+                raise AppError(503, "Lebensmitteldatenbank ist nicht verfuegbar.")
+            calculation = self._nutrition_service().calculate_components(
+                values["components"]
+            )
+            preview_values.update(calculation)
+            payload["arguments"]["_food_calculation"] = calculation
+        elif "food_ingredients" in values:
             if self._nutrition_service is None:
                 raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
             calculation = self._nutrition_service().food_database.calculate(
@@ -562,6 +568,11 @@ class CoachProposalCreationService:
             diff["source"] = "; ".join(
                 f"{item['source']}: {item['name']}, {item['amount']:g} {item['unit']} (Basis 100 {item['basis_unit']})"
                 for item in preview_values["nutrition_basis"]["ingredients"]
+            )
+        elif preview_values.get("nutrition_basis", {}).get("kind") == "composite":
+            diff["source"] = "; ".join(
+                f"{item['kind']}: {item['name']}, {item['amount']:g} {item['unit']}"
+                for item in preview_values["nutrition_basis"].get("components", [])
             )
         if preview_values.get("basis_amount") and preview_values.get("source"):
             diff["source"] = str(preview_values["source"])

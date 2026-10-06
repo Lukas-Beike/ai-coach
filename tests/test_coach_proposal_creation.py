@@ -245,6 +245,33 @@ class CoachProposalCreationTests(unittest.TestCase):
         stored = json.loads(self._rows()[0]["payload"])
         self.assertEqual(stored["arguments"]["_food_calculation"]["kcal"], 174)
 
+    def test_composite_preview_freezes_complete_totals_and_provenance(self) -> None:
+        nutrition = Mock()
+        components = [{"kind": "estimate", "name": "Synthetic topping", "amount": 1,
+                       "unit": "portion", "kcal": 25, "carbs_g": 4,
+                       "protein_g": 1, "fat_g": 0.5}]
+        calculation = {"kcal": 25, "carbs_g": 4, "protein_g": 1, "fat_g": 0.5,
+                       "nutrition_basis": {"kind": "composite", "version": 1,
+                           "components": [{"kind": "estimate", "name": "Synthetic topping",
+                               "amount": 1, "unit": "portion", "kcal": 25,
+                               "carbs_g": 4, "protein_g": 1, "fat_g": 0.5,
+                               "nutrition_basis": {"kind": "estimate"}}]}}
+        nutrition.calculate_components.return_value = calculation
+        arguments = {"payload": {"name": "Synthetic bowl", "description": "Mixed recipe",
+                                  "components": components}}
+        intent = {"operation": "save_nutrition_template", "target_system": "local",
+                  "authorization_scope": ["local_nutrition"], "request": {"source_message_ids": [7]}}
+        result = self._service(nutrition_service=lambda: nutrition).create_local_write(
+            "save_nutrition_template", arguments, intent,
+            conversation_id="conversation-1", client_turn_id="turn-1",
+            session_csrf_hash="session-1",
+        )
+        self.assertEqual(result["proposed_action"]["diff"][0]["kcal"], "25")
+        self.assertIn("estimate: Synthetic topping", result["proposed_action"]["diff"][0]["source"])
+        stored = json.loads(self._rows()[0]["payload"])
+        self.assertEqual(stored["arguments"]["_food_calculation"], calculation)
+        nutrition.calculate_components.assert_called_once_with(components)
+
     def test_competition_remote_write_binds_dirty_rows_and_tombstones_to_approval(self) -> None:
         with self.database_manager.unit_of_work() as db:
             db.execute(

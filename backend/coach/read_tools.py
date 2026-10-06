@@ -162,12 +162,24 @@ class CoachReadToolService:
             if arguments.get("barcode") or arguments.get("query"):
                 return nutrition.lookup_product(arguments)
             return nutrition.food_database.lookup(arguments)
+        if "components" in arguments and (
+            "ingredients" in arguments or "product_id" in arguments
+        ):
+            raise AppError(
+                400,
+                "Komponenten koennen nicht mit Legacy-Lebensmittelreferenzen kombiniert werden.",
+            )
         if arguments.get("product_id"):
             return nutrition.calculate_product(
                 str(arguments.get("product_id")),
                 arguments.get("amount"),
                 str(arguments.get("unit") or ""),
             )
+        if "components" in arguments:
+            return {
+                "ok": True,
+                **nutrition.calculate_components(arguments["components"]),
+            }
         return {
             "ok": True,
             **nutrition.food_database.calculate(arguments.get("ingredients")),
