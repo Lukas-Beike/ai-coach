@@ -194,6 +194,15 @@ class DatabaseMigrationTests(unittest.TestCase):
 
         self.assertEqual(list(db.iterdump()), before)
 
+    def test_unknown_trigger_with_sqlite_like_name_is_rejected(self):
+        db = self.old_database()
+        db.execute("CREATE TRIGGER sqlitecustom AFTER INSERT ON kv BEGIN SELECT 1; END")
+        db.commit()
+        before = list(db.iterdump())
+        with self.assertRaises(RuntimeError):
+            migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), before)
+
     def test_caller_rollback_also_rolls_back_schema_and_version(self):
         with tempfile.TemporaryDirectory() as root:
             manager = DatabaseManager(

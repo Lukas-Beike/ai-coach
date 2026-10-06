@@ -717,7 +717,7 @@ def database_schema_signature(db: Any) -> tuple[tuple[str, str, str, str], ...]:
         (row["type"], row["name"], row["tbl_name"], " ".join(row["sql"].split()))
         for row in db.execute(
             "SELECT type, name, tbl_name, sql FROM sqlite_master "
-            "WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
+            "WHERE sql IS NOT NULL AND name NOT GLOB 'sqlite_*' ORDER BY type, name"
         )
     )
 
