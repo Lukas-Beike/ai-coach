@@ -1,5 +1,31 @@
 const { test, expect } = require("@playwright/test");
 
+test("@responsive chart readings keep their coordinates and legible labels", async ({ page }) => {
+  await page.goto("/#analysis/performance");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const result = await page.evaluate(() => {
+    const points = [{ date: "2026-10-01", value: 53.5 }, { date: "2026-10-04", value: 54 }, { date: "2026-10-08", value: 54.5 }];
+    const series = [{ label: "VO2max", points, currentPoint: { date: "2026-10-08", value: 53 }, cadenceDays: 7 }];
+    const chart = analysisChart("Coordinates", series, "ml/kg/min", "2026-10-01", "2026-10-08", "", { sparse: true });
+    document.querySelector("#analysisHistoryCharts").replaceChildren(chart);
+    const path = chart.querySelector("path[data-series]").getAttribute("d");
+    const dotsOnPath = [...chart.querySelectorAll("circle")].every((dot) => path.includes(`${Number(dot.getAttribute("cx")).toFixed(2)},${Number(dot.getAttribute("cy")).toFixed(2)}`));
+    const sleep = analysisChart("Sleep", [{ label: "Sleep", bars: true, points: [{ date: "2026-10-01", value: 8.2 }, { date: "2026-10-08", value: 6.5 }] }], "h", "2026-10-01", "2026-10-08", "");
+    chart.after(sleep);
+    const bars = [...sleep.querySelectorAll(".recovery-sleep-bar")];
+    const bar = bars.sort((a, b) => Number(a.getAttribute("y")) - Number(b.getAttribute("y")))[0];
+    const label = [...sleep.querySelectorAll(".analysis-point-value")].find((node) => node.textContent === "8:12");
+    return {
+      currentLines: chart.querySelectorAll(".analysis-current-line").length,
+      dotsOnPath,
+      labelCentered: Math.abs(Number(label.getAttribute("x")) - Number(bar.getAttribute("x")) - Number(bar.getAttribute("width")) / 2) < .01,
+      labelAboveBar: Number(bar.getAttribute("y")) - Number(label.getAttribute("y")),
+      halo: getComputedStyle(label).paintOrder,
+    };
+  });
+  expect(result).toEqual({ currentLines: 0, dotsOnPath: true, labelCentered: true, labelAboveBar: 10, halo: "stroke" });
+});
+
 test("@responsive recovery, power, training focus, season and calendar profiles show local facts", async ({ page, request }) => {
   const seed = await request.get("/api/fixture/features");
   expect(seed.ok(), await seed.text()).toBeTruthy();
