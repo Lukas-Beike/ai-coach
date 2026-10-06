@@ -2,9 +2,10 @@
 import json
 import os
 import sys
-from datetime import timedelta, datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 BLS_OATS_ID = "bls:C133000"
+FIXTURE_DEMO_SEED_VERSION = "2"
 
 # This file is mounted only in disposable test containers, never normal startup.
 os.environ.update({
@@ -236,11 +237,7 @@ def seed_training_features():
             {"id": f"Z{index + 1}", "secs": seconds}
             for index, seconds in enumerate([600, 1500, 600, 450, 300, 100, 50])
         ]
-    wellness = [{"id": (now.date() - timedelta(days=offset)).isoformat(), "sleepSecs": (7 + offset % 3 / 4) * 3600,
-                 "restingHR": 50 + offset % 3, "hrv": None if offset == 3 else 45 + offset % 4,
-                 "hrv_method": "RMSSD", "ctl": 27 + (89 - offset) * .18 + [0, 1, 2, 1, -1, -2, -1][offset % 7],
-                 "atl": 26 + (89 - offset) * .08 + [0, 2, 4, 1, -1, -2, 1][offset % 7],
-                 "eftp": 260 + (89 - offset) * .25} for offset in range(90)]
+    wellness = _fixture_demo_wellness(now.date())
     week_start = now.date() - timedelta(days=now.date().weekday())
     for weeks_ago in range(2, 8):
         rows.append({"id": f"feature-history-{weeks_ago}", "name": "Fixture historical ride", "type": "Ride",
@@ -253,7 +250,7 @@ def seed_training_features():
                          "start_date_local": day.isoformat() + FIXTURE_ACTIVITY_TIME, "moving_time": duration,
                          "distance": distance, "icu_training_load": 30})
     snapshot = {"synced_at": server.runtime_clock.utc_now(), "athlete": {}, "recent_wellness": wellness,
-                "recent_activities": rows, "raw_provider_data": {"activities": rows}}
+                "recent_activities": rows, "raw_provider_data": {"activities": rows, "wellness": wellness}}
     with server.database_manager().unit_of_work() as db:
         server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
         server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps({"synced_at": snapshot["synced_at"],
@@ -290,11 +287,445 @@ def seed_training_features():
     return {"planned_unit_id": planned["id"], "equipment_id": equipment["id"]}
 
 
+def _fixture_demo_wellness(today):
+    """Return 90 dated Intervals wellness samples with deliberate body gaps."""
+    return [
+        {
+            "id": (today - timedelta(days=offset)).isoformat(),
+            "sleepSecs": (7 + offset % 3 / 4) * 3600,
+            "restingHR": 50 + offset % 3,
+            "hrv": None if offset == 3 else 45 + offset % 4,
+            "hrv_method": "RMSSD",
+            "ctl": 27 + (89 - offset) * 0.18 + [0, 1, 2, 1, -1, -2, -1][offset % 7],
+            "atl": 26 + (89 - offset) * 0.08 + [0, 2, 4, 1, -1, -2, 1][offset % 7],
+            "eftp": 260 + (89 - offset) * 0.25,
+            "weight": round(73.4 - (89 - offset) * 0.018 + (offset % 5) * 0.12, 2)
+            if offset % 5 != 4
+            else None,
+            "bodyFat": round(16.8 - (89 - offset) * 0.015 + (offset % 3) * 0.2, 1)
+            if offset % 9 == 0
+            else None,
+            "sport_info": [
+                {
+                    "types": ["Ride"],
+                    "mmp_model": {
+                        "ftp": round(258 + (89 - offset) * 0.28 + (offset % 4) * 1.4)
+                    },
+                }
+            ],
+        }
+        for offset in range(90)
+    ]
+
+
+def _fixture_demo_garmin(today, history):
+    """Return a provider-shaped Garmin payload with dated and sparse metrics."""
+    daily_stats = []
+    weight = []
+    for offset in range(90):
+        day = today - timedelta(days=offset)
+        daily_stats.append(
+            {
+                "calendarDate": day.isoformat(),
+                "activeKilocalories": 0 if offset == 12 else 420 + (offset % 6) * 35,
+                "bmrKilocalories": 0 if offset == 12 else 1540 + (offset % 4) * 8,
+                "totalKilocalories": 0 if offset == 12 else 1960 + (offset % 6) * 42,
+                "totalSteps": 6500 + (offset % 5) * 900,
+            }
+        )
+        # Weight is measured every other day; body fat is intentionally sparse.
+        if offset % 2 != 1:
+            row = {
+                "calendarDate": day.isoformat(),
+                "weightKg": round(
+                    73.8 - (89 - min(offset, 89)) * 0.02 + (offset % 4) * 0.1, 2
+                ),
+            }
+            if offset % 10 == 0:
+                row.update(
+                    {
+                        "bodyFat": round(17.4 - (89 - min(offset, 89)) * 0.02, 1),
+                        "bodyFatUnit": "percent",
+                    }
+                )
+            weight.append(row)
+    return {
+        "source": "synthetic fixture",
+        "synced_at": server.runtime_clock.utc_now(),
+        "performance_history": history,
+        "weight": weight,
+        "daily_stats": daily_stats,
+        "training_status": [
+            {
+                "calendarDate": (today - timedelta(days=offset)).isoformat(),
+                "acuteTrainingLoadDTO": {"acuteTrainingLoad": 420 + offset % 12 * 15},
+            }
+            for offset in range(90)
+        ],
+        "activities": [
+            {
+                "activityId": f"demo-{index}",
+                "startTimeLocal": today.isoformat() + FIXTURE_ACTIVITY_TIME,
+                "trainingEffectLabel": label,
+                "activityTrainingLoad": load,
+            }
+            for index, (label, load) in enumerate(
+                [("AEROBIC_BASE", 40), ("TEMPO", 80), ("ANAEROBIC_CAPACITY", 30)]
+            )
+        ],
+        "gear": [
+            {
+                "gearUUID": "11111111-1111-4111-8111-111111111111",
+                "gearName": "Demo-Rennrad",
+                "gearTypeName": "Fahrrad",
+                "gearStatusName": "Aktiv",
+                "maximumMeters": 1000000,
+                "stats": {"totalDistance": 425000, "totalActivities": 128},
+            },
+            {
+                "gearUUID": "22222222-2222-4222-8222-222222222222",
+                "gearName": "Demo-Laufschuhe",
+                "gearTypeName": "Laufschuhe",
+                "gearStatusName": "Aktiv",
+                "maximumMeters": 300000,
+                "stats": {"totalDistance": 410000, "totalActivities": 62},
+            },
+            {
+                "gearUUID": "33333333-3333-4333-8333-333333333333",
+                "gearName": "Demo chain component",
+                "gearTypeName": "Component",
+                "gearStatusName": "Aktiv",
+                "maximumMeters": 250000,
+                "stats": {"totalDistance": 0, "totalActivities": 0},
+            },
+        ],
+        "max_metrics": [
+            {
+                "calendarDate": today.isoformat(),
+                "running": {"vo2MaxPreciseValue": 50.7},
+                "cycling": {"vo2MaxPreciseValue": 53.1},
+            }
+        ],
+        "cycling_ftp": {"power": 284, "calendarDate": today.isoformat()},
+        "sleep": [
+            {
+                "calendarDate": (today - timedelta(days=offset)).isoformat(),
+                "sleepTimeSeconds": (7.2 + offset % 3 / 4) * 3600,
+            }
+            for offset in range(90)
+        ],
+        "resting_hr": [
+            {
+                "calendarDate": (today - timedelta(days=offset)).isoformat(),
+                "restingHeartRate": 49 + offset % 3,
+            }
+            for offset in range(90)
+        ],
+        "hrv": [
+            {
+                "calendarDate": (today - timedelta(days=offset)).isoformat(),
+                "lastNightAvg": 46 + offset % 5,
+            }
+            for offset in range(90)
+        ],
+    }
+
+
+def _fixture_equipment_definitions(road_id):
+    """Return active/archived gear and target boundary examples."""
+    return [
+        (road_id, "Fixture road bike", "Ride", "bike", "active", None, 20, None),
+        (
+            "00000000-0000-4000-8000-000000000002",
+            "Fixture archived trainer",
+            "Ride",
+            "bike",
+            "archived",
+            None,
+            None,
+            None,
+        ),
+        (
+            "00000000-0000-4000-8000-000000000003",
+            "Fixture Garmin linked bike",
+            "Ride",
+            "bike",
+            "active",
+            "11111111-1111-4111-8111-111111111111",
+            1000,
+            1000000,
+        ),
+        (
+            "00000000-0000-4000-8000-000000000004",
+            "Fixture Garmin archived shoes",
+            "Run",
+            "shoes",
+            "archived",
+            "22222222-2222-4222-8222-222222222222",
+            None,
+            300000,
+        ),
+        (
+            "00000000-0000-4000-8000-000000000005",
+            "Fixture replacement chain",
+            "Ride",
+            "component",
+            "active",
+            None,
+            250,
+            None,
+        ),
+        (
+            "00000000-0000-4000-8000-000000000006",
+            "Fixture Garmin-linked chain",
+            "Ride",
+            "component",
+            "active",
+            "33333333-3333-4333-8333-333333333333",
+            200,
+            250000,
+        ),
+        (
+            "00000000-0000-4000-8000-000000000007",
+            "Fixture archived chain",
+            "Ride",
+            "component",
+            "archived",
+            None,
+            None,
+            None,
+        ),
+    ]
+
+
+def _fixture_seed_equipment(today):
+    """Seed local and Garmin-linked gear, including boundary counter examples."""
+    service = server.ATHLETE_DATA.equipment()
+    items = service.read().get("items", [])
+    existing = {item.get("name"): item for item in items}
+    road = existing.get("Fixture road bike")
+    road_id = road["id"] if road else None
+    saved = {}
+    for (
+        item_id,
+        name,
+        sport,
+        kind,
+        status,
+        garmin_uuid,
+        target_km,
+        maximum_meters,
+    ) in _fixture_equipment_definitions(road_id):
+        item = existing.get(name)
+        if item is None:
+            payload = {
+                "name": name,
+                "sport": sport,
+                "kind": kind,
+                "status": status,
+                "start_date": (today - timedelta(days=35)).isoformat(),
+                "initial_distance_km": 0,
+                "initial_hours": 0,
+                "maintenance_km": 250 if kind == "bike" else None,
+            }
+            if kind == "component" and road_id:
+                payload["parent_id"] = road_id
+            result = service.save(payload)
+            item = result["equipment"]
+            existing[name] = item
+            if name == "Fixture road bike":
+                road_id = item["id"]
+        item.update(
+            {"lifetime_target_km": target_km, "garmin_maximum_meters": maximum_meters}
+        )
+        if name == "Fixture road bike":
+            item["initial_distance_km"] = 0
+            item["fixture_usage_km"] = 25
+        if garmin_uuid:
+            item["garmin_uuid"] = garmin_uuid
+            item["garmin_distance_km"] = (
+                1000 if garmin_uuid.endswith("111111111111") else 0
+            )
+        saved[item["id"]] = item
+    now = server.runtime_clock.utc_now()
+    with server.database_manager().unit_of_work() as db:
+        for item_id, item in saved.items():
+            db.execute(
+                "UPDATE kv SET value=?, updated_at=? WHERE key=?",
+                (json.dumps(item, ensure_ascii=False), now, "equipment:" + item_id),
+            )
+    if not any(
+        item.get("activity_id") == "feature-ride-1"
+        and item.get("equipment_id") == road_id
+        for item in service.read().get("assignments", [])
+    ):
+        service.assign({"activity_id": "feature-ride-1", "equipment_id": road_id})
+    return saved
+
+
+def _fixture_calendar_payload(today):
+    """Build the fixture feed with descriptive titles and parsed markers."""
+    start = today + timedelta(days=2)
+
+    def stamp(day, hour="090000"):
+        return day.strftime("%Y%m%d") + "T" + hour
+
+    return "\n".join(
+        [
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "PRODID:-//Intervals Coach Fixture//EN",
+            f"BEGIN:VEVENT\nUID:fixture-no-training\nDTSTART:{stamp(start)}\nDTEND:{stamp(start, '100000')}\nSUMMARY:Fixture [NO_TRAINING] recovery marker\nDESCRIPTION:Fixture rest marker from the event title\nEND:VEVENT",
+            f"BEGIN:VEVENT\nUID:fixture-no-intensity\nDTSTART:{stamp(start + timedelta(days=1))}\nDTEND:{stamp(start + timedelta(days=1), '103000')}\nSUMMARY:Fixture easy ride\nDESCRIPTION:[NO_INTENSITY]\nEND:VEVENT",
+            f"BEGIN:VEVENT\nUID:fixture-title-description\nDTSTART:{stamp(start + timedelta(days=2))}\nDTEND:{stamp(start + timedelta(days=2), '110000')}\nSUMMARY:Fixture title example\nDESCRIPTION:Description from synthetic calendar\nEND:VEVENT",
+            f"BEGIN:VEVENT\nUID:fixture-both\nDTSTART:{stamp(start + timedelta(days=3))}\nDTEND:{stamp(start + timedelta(days=3), '100000')}\nSUMMARY:Fixture both markers\nDESCRIPTION:[NO_TRAINING] [NO_INTENSITY]\nEND:VEVENT",
+            f"BEGIN:VEVENT\nUID:fixture-multiday\nDTSTART;VALUE=DATE:{(start + timedelta(days=4)).strftime('%Y%m%d')}\nDTEND;VALUE=DATE:{(start + timedelta(days=6)).strftime('%Y%m%d')}\nSUMMARY:Fixture camp [NO_INTENSITY]\nDESCRIPTION:Two day synthetic camp\nEND:VEVENT",
+            f"BEGIN:VEVENT\nUID:fixture-series\nDTSTART:{stamp(start + timedelta(days=7))}\nDTEND:{stamp(start + timedelta(days=7), '100000')}\nRRULE:FREQ=WEEKLY;COUNT=3\nSUMMARY:Fixture weekly series\nDESCRIPTION:[SHORT_ONLY]\nEND:VEVENT",
+            f"BEGIN:VEVENT\nUID:fixture-series\nRECURRENCE-ID:{stamp(start + timedelta(days=14))}\nSTATUS:CANCELLED\nSUMMARY:Fixture cancelled series occurrence\nEND:VEVENT",
+            "END:VCALENDAR",
+            "",
+        ]
+    ).encode()
+
+
+def _fixture_seed_calendar(today):
+    """Parse a representative iCalendar payload and persist its expanded rows."""
+    from zoneinfo import ZoneInfo
+
+    from backend.providers.calendar import parse_ical_calendar
+
+    events = parse_ical_calendar(
+        _fixture_calendar_payload(today),
+        local_zone=ZoneInfo("Europe/Berlin"),
+        today=today,
+        window_start=today,
+        window_end=today + timedelta(days=56),
+    )
+    now = server.runtime_clock.utc_now()
+    with server.database_manager().unit_of_work() as db:
+        db.execute("DELETE FROM external_calendar_events WHERE uid LIKE 'fixture-%'")
+        for event in events:
+            fields = [
+                "id",
+                "uid",
+                "name",
+                "event_date",
+                "start_local",
+                "end_local",
+                "duration_minutes",
+                "all_day",
+                "training_relevant",
+                "no_training",
+                "no_intensity",
+                "short_only",
+                "updated_at",
+            ]
+            values = [
+                event["id"],
+                event["uid"],
+                event["name"],
+                event["event_date"],
+                event["start_local"],
+                event["end_local"],
+                event["duration_minutes"],
+                int(event["all_day"]),
+                int(event.get("training_relevant", True)),
+                int(event.get("no_training", False)),
+                int(event.get("no_intensity", False)),
+                int(event.get("short_only", False)),
+                now,
+            ]
+            db.execute(
+                f"INSERT OR REPLACE INTO external_calendar_events ({', '.join(fields)}) VALUES ({', '.join('?' for _ in fields)})",
+                values,
+            )
+        server.KEY_VALUE_REPOSITORY.set(db, "last_external_calendar_sync_at", now)
+    return len(events)
+
+
+def _upgrade_preview_demo(today):
+    """Add the expanded standard-fixture records without duplicating v1 data."""
+    with server.database_manager().unit_of_work() as db:
+        payload = server.SNAPSHOT_REPOSITORY.latest_payload(db)
+        snapshot = json.loads(payload) if payload else {}
+    wellness = snapshot.get("recent_wellness")
+    if not isinstance(wellness, list):
+        wellness = []
+    if not wellness:
+        wellness = [
+            {
+                "id": (today - timedelta(days=offset)).isoformat(),
+                "eftp": 260 + offset / 4,
+            }
+            for offset in range(90)
+        ]
+    for row in wellness:
+        try:
+            day = datetime.fromisoformat(
+                str(row.get("id") or row.get("date"))[:10]
+            ).date()
+        except (TypeError, ValueError):
+            continue
+        offset = (today - day).days
+        if not 0 <= offset < 90:
+            continue
+        row.setdefault(
+            "weight",
+            round(73.4 - (89 - offset) * 0.018 + (offset % 5) * 0.12, 2)
+            if offset % 5 != 4
+            else None,
+        )
+        row.setdefault(
+            "bodyFat",
+            round(16.8 - (89 - offset) * 0.015 + (offset % 3) * 0.2, 1)
+            if offset % 9 == 0
+            else None,
+        )
+        row.setdefault(
+            "sport_info",
+            [
+                {
+                    "types": ["Ride"],
+                    "mmp_model": {
+                        "ftp": round(258 + (89 - offset) * 0.28 + (offset % 4) * 1.4)
+                    },
+                }
+            ],
+        )
+    raw = snapshot.get("raw_provider_data")
+    raw = raw if isinstance(raw, dict) else {}
+    snapshot.update(
+        {
+            "recent_wellness": wellness,
+            "raw_provider_data": {**raw, "wellness": wellness},
+        }
+    )
+    snapshot.setdefault("synced_at", server.runtime_clock.utc_now())
+    with server.database_manager().unit_of_work() as db:
+        server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
+        server.KEY_VALUE_REPOSITORY.set(
+            db,
+            "garmin_snapshot",
+            json.dumps(_fixture_demo_garmin(today, demo_performance_history(today))),
+        )
+    _fixture_seed_equipment(today)
+    _fixture_seed_calendar(today)
+    with server.database_manager().unit_of_work() as db:
+        server.KEY_VALUE_REPOSITORY.set(
+            db, "preview_demo_seed_version", FIXTURE_DEMO_SEED_VERSION
+        )
+    return {"ready": True, "seed_version": FIXTURE_DEMO_SEED_VERSION}
+
+
 def seed_preview_demo():
     """Populate only the disposable preview with fake data across the main areas."""
     with server.database_manager().unit_of_work() as db:
-        if server.KEY_VALUE_REPOSITORY.get(db, "preview_demo_seeded"):
+        version = server.KEY_VALUE_REPOSITORY.get(db, "preview_demo_seed_version")
+        legacy_seeded = server.KEY_VALUE_REPOSITORY.get(db, "preview_demo_seeded")
+        if version == FIXTURE_DEMO_SEED_VERSION:
             return {"ready": True}
+    if legacy_seeded or version:
+        return _upgrade_preview_demo(server.ATHLETE_CLOCK.now().date())
     seed_training_features()
     today = server.ATHLETE_CLOCK.now().date()
     server.ATHLETE_DATA.profile().save({
@@ -329,24 +760,16 @@ def seed_preview_demo():
                     (5, "Grundlagenausfahrt", "Ride", 90, "- 90m 65%")]]
     server.PLANNING_WORKFLOWS.local_plan_creation_service().save(workouts)
     history = demo_performance_history(today)
-    garmin = {"synced_at": server.runtime_clock.utc_now(), "performance_history": history,
-        "training_status": [{"calendarDate": (today - timedelta(days=offset)).isoformat(), "acuteTrainingLoadDTO": {"acuteTrainingLoad": 420 + offset % 12 * 15}} for offset in range(90)],
-        "activities": [{"activityId": f"demo-{index}", "startTimeLocal": today.isoformat() + FIXTURE_ACTIVITY_TIME,
-            "trainingEffectLabel": label, "activityTrainingLoad": load}
-            for index, (label, load) in enumerate([("AEROBIC_BASE", 40), ("TEMPO", 80), ("ANAEROBIC_CAPACITY", 30)])],
-        "gear": [{"gearUUID": "11111111-1111-4111-8111-111111111111", "gearName": "Demo-Rennrad", "gearTypeName": "Fahrrad", "gearStatusName": "Aktiv", "maximumMeters": 10000000, "stats": {"totalDistance": 4250000, "totalActivities": 128}},
-                 {"gearUUID": "22222222-2222-4222-8222-222222222222", "gearName": "Demo-Laufschuhe", "gearTypeName": "Laufschuhe", "gearStatusName": "Aktiv", "maximumMeters": 600000, "stats": {"totalDistance": 410000, "totalActivities": 62}}],
-        "max_metrics": [{"calendarDate": today.isoformat(), "running": {"vo2MaxPreciseValue": 50.7}, "cycling": {"vo2MaxPreciseValue": 53.1}}],
-        "cycling_ftp": {"power": 284, "calendarDate": today.isoformat()},
-        "sleep": [{"calendarDate": (today - timedelta(days=offset)).isoformat(), "sleepTimeSeconds": (7.2 + offset % 3 / 4) * 3600} for offset in range(90)],
-        "resting_hr": [{"calendarDate": (today - timedelta(days=offset)).isoformat(), "restingHeartRate": 49 + offset % 3} for offset in range(90)],
-        "hrv": [{"calendarDate": (today - timedelta(days=offset)).isoformat(), "lastNightAvg": 46 + offset % 5} for offset in range(90)]}
+    garmin = _fixture_demo_garmin(today, history)
+    _fixture_seed_equipment(today)
+    _fixture_seed_calendar(today)
     with server.database_manager().unit_of_work() as db:
         server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps(garmin))
         for role, content in [("user", "Wie sieht meine Trainingswoche aus?"),
                 ("assistant", "## Deine Beispielwoche\n\nDu hast Rad- und Laufeinheiten absolviert. Für die nächsten Tage sind ein lockerer Lauf, Radintervalle und eine Grundlagenausfahrt geplant.\n\nAchte auf ausreichenden Schlaf und regelmäßige Mahlzeiten. Diese Unterhaltung und alle Werte sind synthetische Testdaten.")]:
             server.CHAT_REPOSITORY.add(db, role, content)
         server.KEY_VALUE_REPOSITORY.set(db, "preview_demo_seeded", "1")
+        server.KEY_VALUE_REPOSITORY.set(db, "preview_demo_seed_version", FIXTURE_DEMO_SEED_VERSION)
     return {"ready": True}
 
 
@@ -368,8 +791,14 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
             return
         if self.path == "/api/fixture/activity":
             self.auth_service.require_auth(self)
-            from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
-            from backend.performance.session_analysis import aerobic_analysis, interval_quality
+            from backend.activities.detail_store import (
+                ActivityDetailStore,
+                summary_fingerprint,
+            )
+            from backend.performance.session_analysis import (
+                aerobic_analysis,
+                interval_quality,
+            )
 
             today = server.ATHLETE_CLOCK.now().date().isoformat()
             activity = {"id": "FixtureCase-1", "name": "Synthetic ride <img src=x>",
@@ -380,7 +809,7 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
             with server.database_manager().unit_of_work() as db:
                 server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
             detailed = {**activity, "icu_ftp": 250, "streams": {
-                    "time": list(range(0, 3601)), "watts": [200] * 3601,
+                    "time": list(range(3601)), "watts": [200] * 3601,
                     "heartrate": [140] * 3601}}
             ActivityDetailStore(server.database_manager()).save(activity["id"], {
                 "activity_id": activity["id"], "activity": detailed,
@@ -409,4 +838,5 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
 
 server.initialise_database = initialise_fixture
 server.HTTP_API.request_handler_class = lambda: FixtureHandler
-server.main()
+if __name__ == "__main__":
+    server.main()

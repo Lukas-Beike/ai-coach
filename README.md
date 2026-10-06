@@ -570,6 +570,19 @@ Configured viewports in `playwright.config.cjs`:
 - `tablet-landscape`: 844x390 (Mobile/tablet landscape)
 - `desktop`: 1440x1000 (Desktop workstation)
 
+#### Standard synthetic preview data
+
+The disposable fixture runtime exposes `GET /api/fixture/demo` for a reusable,
+mobile-safe preview. It seeds profile, check-ins, nutrition, competitions,
+library workouts, activity details, recovery, body history, Garmin daily
+calories, dated Garmin FTP and Intervals.icu eFTP, calendar marker examples,
+and active, archived, component, zero-target, no-target, and over-target gear.
+All values are synthetic and providers remain blocked; no credentials or live
+athlete data are read. The seed is idempotent and carries a version marker so
+an older demo seed is upgraded in place when the disposable database is reused.
+Use a fresh fixture browser profile and check the mobile-small and mobile
+projects when reviewing this preview.
+
 ### Dependency lock maintenance
 
 `requirements.in` and `requirements-dev.in` contain direct pins. The matching
