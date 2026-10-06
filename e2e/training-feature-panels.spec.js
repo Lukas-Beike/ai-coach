@@ -116,7 +116,7 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
 
   await page.evaluate(async () => { await applyNavigationRoute("more/equipment", { historyMode: "replace" }); });
   await expect(page.locator("#equipmentItems").getByRole("heading", { name: "Fixture Garmin bike" })).toBeVisible();
-  await expect(page.locator("#equipmentItems").getByText("25 km", { exact: true })).toBeVisible();
+  await expect(page.locator("#equipmentItems").getByText("25 km von 100 km · 25%", { exact: true })).toBeVisible();
   await expect(page.locator("#equipmentItems progress")).toHaveAttribute("value", "25");
   const localGear = page.locator("#equipmentItems details");
   await localGear.locator("summary").click();
