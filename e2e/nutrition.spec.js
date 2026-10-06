@@ -1,27 +1,5 @@
 const { test, expect } = require("@playwright/test");
 
-test("@responsive composite meal shows immutable ingredient snapshots and provenance", async ({ page }) => {
-  await page.goto("/#coach");
-  await page.locator("#messageInput").fill("E2E nutrition: mixed meal");
-  await page.locator("#messageInput").press("Enter");
-  await expect.poll(() => page.evaluate(() => !state.busy && !state.chatServerOperationId && !state.chatRequest)).toBe(true);
-  await expect.poll(() => page.evaluate(async () => (await api("/api/nutrition/day")).entry_count)).toBe(1);
-  await page.goto("/#nutrition/diary");
-  const card = page.locator("#nutritionEntries .nutrition-card").filter({ hasText: "Mixed meal" });
-  await expect(card).toHaveCount(1);
-  await expect(card).toContainText("kcal");
-  await card.locator("summary").click();
-  await expect(card).toContainText("Synthetic whey");
-  await expect(card).toContainText("Max Rubner-Institut");
-  await expect(card).toContainText("Haferflocken");
-  await expect(card).toContainText("Verpackungsangabe");
-  await expect(card).toContainText("Creatine");
-  await expect(card.locator("img")).toHaveCount(0);
-  await page.reload();
-  await expect(page.locator("#nutritionEntries .nutrition-card")).toHaveCount(1);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-});
-
 test("@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption", async ({ page }) => {
   const showNutrition = async (route) => {
     await page.evaluate(async (nextRoute) => {
@@ -252,4 +230,28 @@ test("@responsive a small undecodable image falls back to attachment and allows 
   await page.locator("#attachmentInput").setInputFiles({ name: "label.png", mimeType: "image/png", buffer: validPng });
   await expect(page.locator("#chatAttachments")).toContainText("label.png");
   await expect(page.locator("#sendButton")).toBeEnabled();
+});
+
+test("@responsive composite meal shows immutable ingredient snapshots and provenance", async ({ page }) => {
+  await page.goto("/#nutrition/diary");
+  const initialEntries = await page.evaluate(async () => (await api("/api/nutrition/day")).entry_count);
+  await page.goto("/#coach");
+  await page.locator("#messageInput").fill("E2E nutrition: mixed meal");
+  await page.locator("#messageInput").press("Enter");
+  await expect.poll(() => page.evaluate(() => !state.busy && !state.chatServerOperationId && !state.chatRequest)).toBe(true);
+  await expect.poll(() => page.evaluate(async () => (await api("/api/nutrition/day")).entry_count)).toBe(initialEntries + 1);
+  await page.goto("/#nutrition/diary");
+  const card = page.locator("#nutritionEntries .nutrition-card").filter({ hasText: "Mixed meal" });
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText("kcal");
+  await card.locator("summary").click();
+  await expect(card).toContainText("Synthetic whey");
+  await expect(card).toContainText("Max Rubner-Institut");
+  await expect(card).toContainText("Hafer Flocken");
+  await expect(card).toContainText("Verpackungsangabe");
+  await expect(card).toContainText("Creatine");
+  await expect(card.locator("img")).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator("#nutritionEntries .nutrition-card").filter({ hasText: "Mixed meal" })).toHaveCount(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
