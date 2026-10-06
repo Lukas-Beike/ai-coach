@@ -32,7 +32,7 @@ function analysisLatestPoint(item) {
 }
 
 function analysisUsesCurrentLine(item) {
-  return Boolean(analysisLatestPoint(item)) && new Set(item.points.filter(analysisValidPoint).map((point) => Number(point.value))).size < 3;
+  return Boolean(analysisLatestPoint(item)) && new Set([...item.points, item.currentPoint].filter(analysisValidPoint).map((point) => Number(point.value))).size <= 1;
 }
 
 let analysisInfoId = 0;
@@ -262,7 +262,11 @@ function appendAnalysisBarExtremaLabels(item, unit, index, scales, labels) {
   const extrema = [...new Set([Math.min(...values), Math.max(...values)])];
   for (const [extremeIndex, value] of extrema.entries()) {
     const point = item.points.find((candidate) => analysisValidPoint(candidate) && Number(candidate.value) === value);
-    if (point) labels.push({ label: analysisValue(value, item.unit || unit).split(" ")[0], x: x(point.date), y: y(value) - (extremeIndex ? 24 : 10), anchor: "middle", width: 50, index, latest: false, extrema: true });
+    if (point) {
+      const width = Math.min(24, (scales.chartRight - 60) / Math.max(1, item.points.length) * .55);
+      const center = Math.max(60, Math.min(scales.chartRight - width, x(point.date) - width / 2)) + width / 2;
+      labels.push({ label: analysisValue(value, item.unit || unit).split(" ")[0], x: center, y: y(value) - 10, anchor: "middle", width: 50, index, latest: false, extrema: true });
+    }
   }
 }
 
@@ -327,7 +331,7 @@ function appendAnalysisSeries(svg, series, unit, scales, zeroCentered, sparse) {
   const labels = [];
   series.forEach((item, index) => {
     const currentLine = analysisUsesCurrentLine(item);
-    const hasTrend = !currentLine && (!sparse || item.points.filter(analysisValidPoint).length >= 3);
+    const hasTrend = !currentLine;
     const color = item.color ?? index;
     appendAnalysisReferenceLines(svg, item, index, unit, scales, currentLine);
     const path = appendAnalysisSeriesPoints(svg, item, { index, unit, scales, zeroCentered, currentLine, labels });
@@ -657,7 +661,7 @@ function renderRecoveryCharts(report, root) {
     const measurement = metric === "hrv" ? " · " + item.measurement : "";
     const rangeDescription = range ? " - persönlicher Bereich aus " + item.nights + " früheren Nächten" : "";
     return { label: `${title} · ${item.source}${measurement}`, legendLabel: title, source: item.source, unit, color,
-      bars: metric === "sleep", average: true, averageInHeading: true, cadenceDays: 1, range, target,
+      bars: metric === "sleep", average: true, averageInHeading: true, cadenceDays: recoveryHistoryPeriod === "twelveWeeks" ? 7 : 1, range, target,
       currentPoint: points.some(analysisValidPoint) ? null : item.history.findLast((point) => point.date <= today && analysisValidPoint(point)),
       referenceLabel: metric === "sleep" ? "Durchschnitt der angezeigten Werte" : recoveryReferenceLabel(item, range, target, unit, position),
       coverageShort: `${readings.length}/${expectedDays} Tage mit Messung`,
