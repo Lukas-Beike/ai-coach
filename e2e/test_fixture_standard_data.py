@@ -195,7 +195,8 @@ class StandardFixtureDataTests(unittest.TestCase):
         )
         self.assertEqual(second, {"ready": True})
         save_snapshot_mock.assert_called_once()
-        seed_equipment_mock.assert_called_once_with(self.today)
+        seeded_garmin = json.loads(values["garmin_snapshot"])
+        seed_equipment_mock.assert_called_once_with(self.today, seeded_garmin)
         seed_calendar_mock.assert_called_once_with(self.today)
         self.assertEqual(len(snapshot["recent_wellness"]), 90)
         self.assertEqual(len(snapshot["raw_provider_data"]["wellness"]), 90)
@@ -303,10 +304,16 @@ class StandardFixtureDataTests(unittest.TestCase):
         self.assertEqual(repeated_equipment_count, upgraded_equipment_count)
         self.assertTrue(any(item.get("kind") == "component" for item in equipment))
         chain = next(item for item in equipment if item["name"] == "Fixture Garmin-linked chain")
-        bike = next(item for item in equipment if item["name"] == "Fixture road bike")
+        bike = next(item for item in equipment if item["name"] == "Fixture Garmin linked bike")
+        shoes = next(item for item in equipment if item["name"] == "Fixture Garmin archived shoes")
         self.assertEqual(chain["lifetime_target_km"], 200)
+        self.assertEqual(chain["lifetime_target_source"], "local")
         self.assertEqual(chain["usage"]["distance_km"], 0)
-        self.assertGreater(bike["fixture_usage_km"], bike["lifetime_target_km"])
+        self.assertEqual(bike["usage"]["distance_km"], 425)
+        self.assertEqual(shoes["usage"]["distance_km"], 410)
+        self.assertEqual(shoes["lifetime_target_source"], "garmin")
+        self.assertEqual(shoes["lifetime"]["target_km"], 300)
+        self.assertGreater(shoes["lifetime"]["percent"], 100)
 
 
 if __name__ == "__main__":

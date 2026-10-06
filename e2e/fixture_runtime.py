@@ -498,9 +498,18 @@ def _fixture_equipment_definitions(road_id):
     ]
 
 
-def _fixture_seed_equipment(today):
+def _fixture_seed_equipment(today, garmin_snapshot):
     """Seed local and Garmin-linked gear, including boundary counter examples."""
     service = server.ATHLETE_DATA.equipment()
+    garmin_distances_km = {}
+    for row in garmin_snapshot.get("gear") or []:
+        if not isinstance(row, dict) or not row.get("gearUUID"):
+            continue
+        stats = row.get("stats")
+        distance = stats.get("totalDistance") if isinstance(stats, dict) else None
+        if not isinstance(distance, (int, float)) or isinstance(distance, bool):
+            continue
+        garmin_distances_km[str(row["gearUUID"])] = round(distance / 1000, 2)
     items = service.read().get("items", [])
     existing = {item.get("name"): item for item in items}
     road = existing.get("Fixture road bike")
@@ -538,14 +547,15 @@ def _fixture_seed_equipment(today):
         item.update(
             {"lifetime_target_km": target_km, "garmin_maximum_meters": maximum_meters}
         )
+        if target_km is not None:
+            item["lifetime_target_source"] = "local"
+        elif maximum_meters is not None:
+            item["lifetime_target_source"] = "garmin"
         if name == "Fixture road bike":
             item["initial_distance_km"] = 0
-            item["fixture_usage_km"] = 25
         if garmin_uuid:
             item["garmin_uuid"] = garmin_uuid
-            item["garmin_distance_km"] = (
-                1000 if garmin_uuid.endswith("111111111111") else 0
-            )
+            item["garmin_distance_km"] = garmin_distances_km.get(garmin_uuid)
         saved[item["id"]] = item
     now = server.runtime_clock.utc_now()
     with server.database_manager().unit_of_work() as db:
@@ -701,14 +711,13 @@ def _upgrade_preview_demo(today):
         }
     )
     snapshot.setdefault("synced_at", server.runtime_clock.utc_now())
+    garmin = _fixture_demo_garmin(today, demo_performance_history(today))
     with server.database_manager().unit_of_work() as db:
         server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
         server.KEY_VALUE_REPOSITORY.set(
-            db,
-            "garmin_snapshot",
-            json.dumps(_fixture_demo_garmin(today, demo_performance_history(today))),
+            db, "garmin_snapshot", json.dumps(garmin)
         )
-    _fixture_seed_equipment(today)
+    _fixture_seed_equipment(today, garmin)
     _fixture_seed_calendar(today)
     with server.database_manager().unit_of_work() as db:
         server.KEY_VALUE_REPOSITORY.set(
@@ -761,7 +770,7 @@ def seed_preview_demo():
     server.PLANNING_WORKFLOWS.local_plan_creation_service().save(workouts)
     history = demo_performance_history(today)
     garmin = _fixture_demo_garmin(today, history)
-    _fixture_seed_equipment(today)
+    _fixture_seed_equipment(today, garmin)
     _fixture_seed_calendar(today)
     with server.database_manager().unit_of_work() as db:
         server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps(garmin))
