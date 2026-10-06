@@ -12,15 +12,24 @@ synchronization to Intervals.icu.
 The application is intentionally standalone. Keep it on a trusted LAN or
 private VPN; it must not be exposed directly to the public internet.
 
-## Fresh installation contract
+## Release and database compatibility contract
 
-- Run the remediated application with a new, empty data directory and a fresh
-  browser profile. Initialise only the current SQLCipher schema.
-- Keep one current Coach, API and persistence contract. Remove obsolete code
-  and its tests instead of adding migration, upgrade or compatibility paths.
-- Same-build restarts, current-schema backup/restore, provider synchronisation
-  and editing newly created data remain supported operations.
-- Do not convert or delete the previous installation as part of development.
+- Releases preserve existing athlete data. Schema changes require explicit,
+  versioned, transactional SQLCipher migrations and upgrade regression tests.
+- Every schema change must include an upgrade path from the previously released
+  schema. Preserve that schema as a frozen test fixture and verify the migration
+  with existing data, rollback on failure and same-build restart coverage. A
+  schema-changing pull request is not release-ready without this evidence.
+- Updates must support the documented previous release schemas, including
+  direct updates that skip an intermediate release. Never require an empty
+  data directory as a default release or development policy.
+- Use a fresh database only when the user explicitly requests starting with
+  their fresh database. Isolated tests continue to use temporary storage.
+- Keep one current Coach, API and persistence contract while retaining the
+  migrations needed to upgrade supported installations safely.
+- Same-build restarts, backup/restore, provider synchronisation and editing
+  existing data remain supported operations. Reject unknown or newer schemas
+  without deleting, resetting or partially changing athlete data.
 
 ## Important boundaries
 
@@ -37,7 +46,8 @@ private VPN; it must not be exposed directly to the public internet.
   and database recovery backups. Do not delete, reset, truncate, or replace the
   live database except through the implemented, validated restore workflow.
 - A new database is created directly as SQLCipher when `APP_PASSWORD` is
-  configured. There is no in-place database upgrade path.
+  configured. Existing SQLCipher databases are upgraded in place through
+  validated, data-preserving migrations; encryption must remain enabled.
 - Workouts created by the coach are local training-library entries until the
   athlete explicitly synchronizes the library to Intervals.icu. Do not add
   implicit remote workout writes.

@@ -52,7 +52,7 @@ UI-Diagramme dürfen Daten zur Darstellung verdichten. Intervallbewertung und Be
 
 Leseansichten und normale Coach-Nachrichten verwenden gespeicherte Daten. Ein fehlender Detaildatensatz wird über eine ausdrückliche Ladeaktion und einen bestehenden Sync-Job beschafft. Neue Berechnungen lösen keine dauernden Providerabrufe aus. Der Wochenrückblick lässt sich ohne AI-Aufruf anzeigen; eine Coach-Erklärung startet auf Nutzerwunsch.
 
-Neue dauerhafte Daten werden mit dem aktuellen SQLCipher-Schema initialisiert. Schema-Erweiterungen verwenden frische, isolierte Datenverzeichnisse und Browserprofile. Es entstehen keine Migrationen oder Konvertierungen; vorhandene Installationen und Backups werden im Rahmen dieser Umsetzung nicht ersetzt. Same-build-Restart und Restore eines Backups mit dem aktuellen Schema bleiben überprüfbare Verträge.
+Neue dauerhafte Daten werden mit dem aktuellen SQLCipher-Schema initialisiert. Schema-Erweiterungen erhalten versionierte, transaktionale Migrationen mit Upgrade-Regressionstests; unterstützte vorherige Releases können direkt aktualisiert werden. Unbekannte oder neuere Schemata werden ohne Datenänderung abgewiesen. Same-build-Restart und Restore eines Backups mit dem aktuellen Schema bleiben überprüfbare Verträge.
 
 ## Reihenfolge der Arbeitspakete
 
