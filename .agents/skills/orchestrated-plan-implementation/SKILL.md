@@ -10,8 +10,8 @@ The current parent model owns the plan, coordination, review, and integration. S
 ## Establish the execution contract
 
 1. Identify the plan, acceptance criteria, applicable repository instructions, integration worktree, and its initial commit and working-tree state. Preserve pre-existing user changes.
-2. Before the first spawn, ask which available model to use for subagents. Offer the current model as recommended and other models actually exposed by the delegation tool; allow a per-task mapping. Reasoning effort is optional. Reuse an explicit selection already made for this plan. Do not spawn dependent workers while awaiting the answer.
-3. Verify the selection against supported model and effort values. If unavailable, report it and obtain a replacement; never silently substitute. Model selection does not authorize provider, account, or API setup.
+2. Inspect the actual delegation tool schema before asking for a worker model. Only offer models and reasoning efforts for which the tool exposes an override parameter. Before the first spawn, ask which of those models to use; offer the current model as recommended and allow a per-task mapping. Reuse an explicit selection already made for this plan. Do not spawn dependent workers while awaiting the answer.
+3. Verify the selection against supported model and effort values and pass the selected override on every relevant spawn. If the tool has no model override, or a selection is unavailable, report that the requested delegation contract cannot be honored and stop before spawning; never silently substitute the current model. Model selection does not authorize provider, account, or API setup.
 4. Use explicit model overrides only with a fork mode that permits them. With `collaboration.spawn_agent`, use `fork_turns="none"` or a numeric history window for overrides, and provide a complete brief when no history is passed.
 
 If delegation is unavailable, explain the limitation and preserve the plan; do not silently implement it as a single agent. Do not ask again for permission to execute already-authorized work.
