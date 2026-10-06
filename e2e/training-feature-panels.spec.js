@@ -140,3 +140,38 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.locator("#nutritionPanel").getByRole("button", { name: /Coach/ })).toHaveCount(0);
   await expect(page.locator("#seasonPreparation").getByRole("button", { name: /Vorbereitung besprechen|Vorschau anfragen/ })).toHaveCount(0);
 });
+
+test("@responsive equipment keeps local authority and groups archived sources", async ({ page }) => {
+  await page.route("**/api/analysis/training-records", (route) => route.fulfill({ json: { equipment: {
+    items: [
+      { id: "local-active", name: "Local running shoes", sport: "Run", kind: "shoes", status: "active", garmin_status: "Retired", revision: 1, usage: { distance_km: 125, hours: 0, assigned_sessions: 2 }, lifetime: { usage_km: 125, target_km: 100, percent: 125, progress_percent: 100 } },
+      { id: "local-retired-component", name: "Retired chain", sport: "Ride", kind: "component", status: "archived", garmin_uuid: "local-garmin-chain", revision: 1, usage: { distance_km: 50, hours: 0, assigned_sessions: 1 }, lifetime: { usage_km: 50, target_km: 100, percent: 50, progress_percent: 50 } },
+      { id: "local-unlinked-component", name: "Coach-only retired cassette", sport: "Ride", kind: "component", status: "archived", revision: 1, usage: { distance_km: 0, hours: 0, assigned_sessions: 0 } },
+    ],
+    garmin_items: [
+      { id: "garmin-active", name: "Garmin active shoes", kind: "Running Shoes", status: "active", garmin_status: "Active", distance_km: 25, goal_km: 50, lifetime: { usage_km: 25, target_km: 50, percent: 50, progress_percent: 50 } },
+      { id: "garmin-retired-chain", name: "Garmin retired chain", kind: "Bike component", status: "archived", garmin_status: "Retired", distance_km: 150, goal_km: 100, lifetime: { usage_km: 150, target_km: 100, percent: 150, progress_percent: 100 } },
+    ],
+  } } }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#more/equipment");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const bikePanel = page.locator("#equipmentPanel-bike");
+  const archive = bikePanel.locator("details.equipment-archive");
+  await expect(archive).toHaveCount(1);
+  await expect(archive).not.toHaveAttribute("open", "");
+  await expect(archive.locator("summary")).toContainText("3");
+  await expect(archive.getByRole("heading", { name: "Retired chain" })).toBeAttached();
+  await expect(archive.getByRole("heading", { name: "Garmin retired chain" })).toBeAttached();
+  const unlinkedLocal = archive.locator("section").filter({ hasText: "Coach-only retired cassette" });
+  await expect(unlinkedLocal).toContainText("Revision 1");
+  await page.getByRole("tab", { name: "Laufschuhe" }).click();
+  const runPanel = page.locator("#equipmentPanel-run");
+  await expect(runPanel.getByRole("heading", { name: "Local running shoes" })).toBeAttached();
+  await expect(runPanel.locator("progress")).toHaveAttribute("value", "100");
+  await expect(runPanel).toContainText("125%");
+  await expect(runPanel).toContainText("Ziel überschritten");
+  await expect(runPanel).toContainText("Statuskonflikt");
+  await expect(runPanel.locator("progress")).toHaveAttribute("aria-label", /Lebensdauer/);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});

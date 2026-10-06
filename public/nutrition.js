@@ -161,12 +161,108 @@ function nutritionCard(item, template) {
   return card;
 }
 
+function nutritionExpenditureSection() {
+  let section = document.querySelector("#nutritionExpenditure");
+  if (section) return section;
+  section = document.createElement("section");
+  section.id = "nutritionExpenditure";
+  section.className = "nutrition-tools";
+  section.setAttribute("aria-label", "Garmin-Energieverbrauch");
+  const heading = document.createElement("h3");
+  heading.textContent = "Energieverbrauch";
+  const status = document.createElement("output");
+  status.id = "nutritionExpenditureStatus";
+  status.className = "tab-sync-detail";
+  status.setAttribute("aria-live", "polite");
+  const totals = document.createElement("div");
+  totals.id = "nutritionExpenditureTotals";
+  totals.className = "nutrition-totals";
+  const date = document.createElement("p");
+  date.id = "nutritionExpenditureDate";
+  date.className = "fine-print";
+  section.append(heading, status, totals, date);
+  document.querySelector("#nutritionTotals").insertAdjacentElement("afterend", section);
+  return section;
+}
+
+function nutritionExpenditureDate(value) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return "Datum unbekannt";
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return "Datum unbekannt";
+  return new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(parsed);
+}
+
+function nutritionExpenditureTimestamp(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? String(value)
+    : new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(parsed);
+}
+
+function clearNutritionExpenditure(message = "Garmin-Tagesverbrauch wird geladen…") {
+  const section = nutritionExpenditureSection();
+  section.querySelector("#nutritionExpenditureStatus").textContent = message;
+  section.querySelector("#nutritionExpenditureTotals").replaceChildren();
+  section.querySelector("#nutritionExpenditureDate").textContent = "";
+}
+
+function renderNutritionExpenditure(expenditure, selectedDate) {
+  const section = nutritionExpenditureSection();
+  const status = section.querySelector("#nutritionExpenditureStatus");
+  const totals = section.querySelector("#nutritionExpenditureTotals");
+  const date = section.querySelector("#nutritionExpenditureDate");
+  const measured = expenditure?.status === "measured"
+    || [expenditure?.total_kcal, expenditure?.active_kcal, expenditure?.resting_kcal].some((value) => value != null && Number.isFinite(Number(value)));
+  const freshnessLabels = { current: "Aktuell", stale: "Veraltet", delayed: "Verzögert" };
+  const freshness = freshnessLabels[expenditure?.freshness] || "Aktualität unbekannt";
+  status.textContent = measured
+    ? `${expenditure.source || "Garmin Connect"} · ${freshness}${expenditure.provisional ? " · Vorläufig, da der Tag noch läuft" : ""}`
+    : "Für diesen Tag liegen keine Garmin-Verbrauchsdaten vor.";
+
+  const formatKcal = (rawValue) => {
+    const value = rawValue == null || rawValue === "" ? null : Number(rawValue);
+    return value != null && Number.isFinite(value)
+      ? `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 }).format(value)} kcal`
+      : "Nicht verfügbar";
+  };
+  const totalTile = document.createElement("div");
+  totalTile.className = "nutrition-total";
+  totalTile.style.gridColumn = "1 / -1";
+  const totalValue = document.createElement("strong");
+  totalValue.textContent = formatKcal(expenditure?.total_kcal);
+  const totalCaption = document.createElement("span");
+  totalCaption.textContent = "Gesamtverbrauch";
+  totalTile.append(totalValue, totalCaption);
+
+  const componentDetails = document.createElement("details");
+  componentDetails.style.gridColumn = "1 / -1";
+  const componentSummary = document.createElement("summary");
+  componentSummary.textContent = "Aktiv- und Ruheenergie anzeigen";
+  const componentText = document.createElement("p");
+  componentText.textContent = `Aktiv: ${formatKcal(expenditure?.active_kcal)} · Ruhe: ${formatKcal(expenditure?.resting_kcal)}`;
+  componentDetails.append(componentSummary, componentText);
+  totals.replaceChildren(totalTile, componentDetails);
+
+  const measuredDate = expenditure?.measured_date || expenditure?.date || selectedDate || "";
+  const fetchedAt = nutritionExpenditureTimestamp(expenditure?.fetched_at);
+  const syncedAt = nutritionExpenditureTimestamp(expenditure?.synced_at);
+  const timestamps = [
+    fetchedAt ? `Abgerufen: ${fetchedAt}` : "",
+    syncedAt ? `Garmin-Sync: ${syncedAt}` : "",
+  ].filter(Boolean).join(" · ");
+  date.textContent = measured
+    ? `Messdatum: ${nutritionExpenditureDate(measuredDate)}${expenditure.provisional ? " · Vorläufiger Tageswert" : ""}${timestamps ? ` · ${timestamps}` : ""}`
+    : `Messdatum: ${nutritionExpenditureDate(measuredDate)} · Status: nicht verfügbar${timestamps ? ` · ${timestamps}` : ""}`;
+}
+
 async function loadNutrition() {
   const sequence = ++nutritionLoadSequence;
   const generation = state.sessionGeneration;
   const dateInput = document.querySelector("#nutritionDate");
   const status = document.querySelector("#nutritionStatus");
   status.textContent = "Ernährung wird geladen…";
+  clearNutritionExpenditure();
   document.querySelector("#nutritionEntries").replaceChildren();
   document.querySelector("#nutritionTemplates").replaceChildren();
   document.querySelector("#nutritionTotals").replaceChildren();
@@ -178,6 +274,7 @@ async function loadNutrition() {
     ]);
     if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration) return;
     dateInput.value = day.date;
+    renderNutritionExpenditure(day.energy_expenditure, day.date);
     status.textContent = day.entry_count ? "" : "Noch keine Mahlzeiten erfasst. Das bedeutet nicht, dass du nichts gegessen hast.";
     const totals = document.querySelector("#nutritionTotals");
     for (const [label, key, unit] of [["Kalorien", "kcal", "kcal"], ["Kohlenhydrate", "carbs_g", "g"], ["Protein", "protein_g", "g"], ["Fett", "fat_g", "g"]]) {
@@ -197,7 +294,10 @@ async function loadNutrition() {
     templates.replaceChildren(...saved.templates.map((item) => nutritionCard(item, true)));
     if (!saved.templates.length) templates.textContent = "Noch keine gespeicherten Mahlzeiten. Definiere dein erstes Standardfrühstück mit dem Coach.";
   } catch (error) {
-    if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) status.textContent = `Ernährung konnte nicht geladen werden: ${error.message}`;
+    if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) {
+      status.textContent = `Ernährung konnte nicht geladen werden: ${error.message}`;
+      clearNutritionExpenditure(`Tagesverbrauch konnte nicht geladen werden: ${error.message}`);
+    }
   }
 }
 
@@ -222,7 +322,7 @@ function resetNutritionView() {
   document.querySelector("#nutritionProductUseDialog")?.close();
   nutritionProductForUse = null;
   document.querySelector("#nutritionDate").value = "";
-  for (const id of ["nutritionEntries", "nutritionTemplates", "nutritionTotals", "nutritionStatus", "nutritionProducts", "nutritionProductStatus"]) document.getElementById(id)?.replaceChildren();
+  for (const id of ["nutritionEntries", "nutritionTemplates", "nutritionTotals", "nutritionStatus", "nutritionProducts", "nutritionProductStatus", "nutritionExpenditureTotals", "nutritionExpenditureStatus", "nutritionExpenditureDate"]) document.getElementById(id)?.replaceChildren();
   const editor = document.querySelector("#nutritionExtraction"); if (editor) { editor.replaceChildren(); editor.hidden = true; }
   const query = document.querySelector("#nutritionProductQuery"); if (query) query.value = "";
 }

@@ -527,19 +527,34 @@ async function renderTrainingRecords() { // NOSONAR
     const tabs = reportNode("div", null, "segmented-control equipment-tabs");
     tabs.setAttribute("role", "tablist"); tabs.setAttribute("aria-label", "Ausrüstung nach Sportart");
     const localItems = equipment.items || [];
-    const bikeItems = localItems.filter((item) => ["Ride", "VirtualRide"].includes(item.sport) || item.kind === "bike" || item.kind === "component");
-    const runItems = localItems.filter((item) => item.sport === "Run" || item.kind === "shoes");
-    const uncategorizedItems = localItems.filter((item) => !bikeItems.includes(item) && !runItems.includes(item));
+    const isArchivedEquipment = (item) => item.status === "archived";
+    const activeLocalItems = localItems.filter((item) => !isArchivedEquipment(item));
+    const archivedLocalItems = localItems.filter(isArchivedEquipment);
+    const activeGarminItems = items.filter((item) => item.status !== "archived");
+    const archivedGarminItems = items.filter((item) => item.status === "archived");
+    const bikeItems = activeLocalItems.filter((item) => ["Ride", "VirtualRide"].includes(item.sport) || item.kind === "bike" || item.kind === "component");
+    const runItems = activeLocalItems.filter((item) => item.sport === "Run" || item.kind === "shoes");
+    const archivedBikeItems = archivedLocalItems.filter((item) => ["Ride", "VirtualRide"].includes(item.sport) || item.kind === "bike" || item.kind === "component");
+    const archivedRunItems = archivedLocalItems.filter((item) => item.sport === "Run" || item.kind === "shoes");
+    const uncategorizedItems = activeLocalItems.filter((item) => !bikeItems.includes(item) && !runItems.includes(item));
+    const archivedUncategorizedItems = archivedLocalItems.filter((item) => !archivedBikeItems.includes(item) && !archivedRunItems.includes(item));
     const groups = {
       bike: { label: "Fahrrad", items: bikeItems },
       run: { label: "Laufschuhe", items: runItems },
     };
-    const garminBikeItems = items.filter((item) => /bike|cycl|component|rad/i.test(`${item.kind} ${item.name}`));
-    const garminRunItems = items.filter((item) => /shoe|run|lauf/i.test(`${item.kind} ${item.name}`));
-    const uncategorizedGarminItems = items.filter((item) => !garminBikeItems.includes(item) && !garminRunItems.includes(item));
+    const garminBikeItems = activeGarminItems.filter((item) => /bike|cycl|component|rad/i.test(`${item.kind} ${item.name}`));
+    const garminRunItems = activeGarminItems.filter((item) => /shoe|run|lauf/i.test(`${item.kind} ${item.name}`));
+    const archivedGarminBikeItems = archivedGarminItems.filter((item) => /bike|cycl|component|rad/i.test(`${item.kind} ${item.name}`));
+    const archivedGarminRunItems = archivedGarminItems.filter((item) => /shoe|run|lauf/i.test(`${item.kind} ${item.name}`));
+    const uncategorizedGarminItems = activeGarminItems.filter((item) => !garminBikeItems.includes(item) && !garminRunItems.includes(item));
+    const archivedUncategorizedGarminItems = archivedGarminItems.filter((item) => !archivedGarminBikeItems.includes(item) && !archivedGarminRunItems.includes(item));
     const garminGroups = {
       bike: garminBikeItems,
       run: garminRunItems,
+    };
+    const archivedGroups = {
+      bike: [...archivedBikeItems.map((item) => ({ item, source: "local" })), ...archivedGarminBikeItems.map((item) => ({ item, source: "garmin" }))],
+      run: [...archivedRunItems.map((item) => ({ item, source: "local" })), ...archivedGarminRunItems.map((item) => ({ item, source: "garmin" }))],
     };
     for (const key of ["bike", "run"]) {
       const tab = reportNode("button", groups[key].label); tab.type = "button";
@@ -556,7 +571,13 @@ async function renderTrainingRecords() { // NOSONAR
         panel.append(local);
       }
       for (const item of garminGroups[key]) panel.append(garminEquipmentCard(item));
-      if (!groups[key].items.length && !garminGroups[key].length) {
+      if (archivedGroups[key].length) {
+        const archived = reportNode("details", null, "training-focus-details equipment-archive");
+        archived.append(reportNode("summary", `Archivierte Ausr\u00fcstung (${archivedGroups[key].length})`));
+        for (const { item, source } of archivedGroups[key]) archived.append(source === "local" ? localEquipmentCard(item) : garminEquipmentCard(item));
+        panel.append(archived);
+      }
+      if (!groups[key].items.length && !garminGroups[key].length && !archivedGroups[key].length) {
         panel.append(reportNode("p", key === "bike" ? "Noch keine Fahrräder oder Komponenten erfasst." : "Noch keine Laufschuhe erfasst.", "muted"));
       }
       gear.append(panel);
@@ -570,11 +591,21 @@ async function renderTrainingRecords() { // NOSONAR
         void renderTrainingRecords().then(() => document.getElementById(`equipmentTab-${equipmentTab}`)?.focus());
       });
     }
-    if (uncategorizedItems.length || uncategorizedGarminItems.length) {
+    if (uncategorizedItems.length || uncategorizedGarminItems.length || archivedUncategorizedItems.length || archivedUncategorizedGarminItems.length) {
       const other = reportNode("section", null, "equipment-uncategorized");
       other.append(reportNode("h4", "Weitere Ausrüstung"));
       for (const item of uncategorizedItems) other.append(localEquipmentCard(item));
       for (const item of uncategorizedGarminItems) other.append(garminEquipmentCard(item));
+      if (archivedUncategorizedItems.length || archivedUncategorizedGarminItems.length) {
+        const archived = reportNode("details", null, "training-focus-details equipment-archive");
+        const archivedItems = [
+          ...archivedUncategorizedItems.map((item) => ({ item, source: "local" })),
+          ...archivedUncategorizedGarminItems.map((item) => ({ item, source: "garmin" })),
+        ];
+        archived.append(reportNode("summary", `Archivierte Ausr\u00fcstung (${archivedItems.length})`));
+        for (const { item, source } of archivedItems) archived.append(source === "local" ? localEquipmentCard(item) : garminEquipmentCard(item));
+        other.append(archived);
+      }
       gear.append(other);
     }
     gear.prepend(tabs);
@@ -721,8 +752,13 @@ function localEquipmentCard(item) {
   const card = reportNode("section", null, "garmin-equipment-card");
   const usage = item.usage || {};
   card.append(reportNode("h4", item.name));
-  card.append(reportNode("p", `${item.kind} · ${item.sport_pending ? "Sportart offen" : item.sport} · ${item.parent_pending ? "Fahrrad offen" : ""} · ${item.status === "archived" ? "ausgemustert" : "aktiv"} · Revision ${item.revision}`));
+  card.append(reportNode("p", `${item.kind} \u00b7 ${item.sport_pending ? "Sportart offen" : item.sport} \u00b7 ${item.parent_pending ? "Fahrrad offen" : ""} \u00b7 ${item.status === "archived" ? "ausgemustert" : "aktiv"} \u00b7 Revision ${item.revision}`));
   card.append(reportNode("p", `${analysisValue(usage.distance_km, "km")} \u00b7 ${analysisValue(usage.hours, "h")} \u00b7 ${usage.assigned_sessions || 0} zugeordnete Einheiten`));
+  const garminStatus = String(item.garmin_status || "").trim();
+  if (garminStatus && normalizeEquipmentStatus(garminStatus) !== item.status) {
+    card.append(reportNode("p", `Statuskonflikt \u00b7 Coach: ${item.status === "archived" ? "archiviert" : "aktiv"} \u00b7 Garmin: ${garminStatus}`, "muted"));
+  }
+  appendEquipmentLifetime(card, item.lifetime, usage.distance_km, item.lifetime_target_km);
   card.append(reportNode("p", `Seit letzter Wartung: ${analysisValue(usage.maintenance_distance_km, "km")} \u00b7 ${analysisValue(usage.maintenance_hours, "h")}`));
   const status = new Map([[true, "Wartung f\u00e4llig"], [false, "Wartung nicht f\u00e4llig"]]);
   card.append(reportNode("p", status.get(usage.maintenance_due) || "Wartungsstand unklar"));
@@ -737,15 +773,36 @@ function localEquipmentCard(item) {
 function garminEquipmentCard(item) {
   const card = reportNode("section", null, "garmin-equipment-card");
   card.append(reportNode("h4", item.name));
-  card.append(reportNode("p", [item.kind, item.status].filter(Boolean).join(" \u00b7 ")));
-  card.append(reportNode("strong", item.distance_km == null ? "Nutzung unbekannt" : `${analysisValue(item.distance_km, "km")}`));
+  card.append(reportNode("p", [item.kind, item.garmin_status || "Unbekannter Garmin-Status"].filter(Boolean).join(" \u00b7 ")));
   if (item.sessions != null) card.append(reportNode("p", `${item.sessions} Einheiten`));
-  if (item.usage_percent != null) {
-    const progress = reportNode("progress"); progress.max = 100; progress.value = Math.min(100, item.usage_percent);
-    progress.setAttribute("aria-label", `${item.name}: ${item.usage_percent}% des Garmin-Nutzungsziels`);
-    card.append(progress, reportNode("p", `${analysisValue(item.distance_km, "km")} von ${analysisValue(item.goal_km, "km")} \u00b7 ${item.usage_percent}%`));
-  }
+  appendEquipmentLifetime(card, item.lifetime, item.distance_km, item.goal_km);
   return card;
+}
+
+function normalizeEquipmentStatus(value) {
+  return /retir|archiv|inactive|inaktiv|ausgemustert/i.test(value || "") ? "archived" : "active";
+}
+
+function appendEquipmentLifetime(card, lifetime, usageKm, targetKm) {
+  const usage = lifetime?.usage_km ?? usageKm;
+  const target = lifetime?.target_km ?? targetKm;
+  if (!Number.isFinite(usage) || usage < 0) {
+    card.append(reportNode("p", Number.isFinite(target) && target > 0
+      ? `Nutzung unbekannt \u00b7 Ziel ${analysisValue(target, "km")}`
+      : "Nutzung und Lebensdauerziel unbekannt", "muted"));
+    return;
+  }
+  if (!Number.isFinite(target) || target <= 0) {
+    card.append(reportNode("p", `${analysisValue(usage, "km")} Nutzung \u00b7 Lebensdauerziel unbekannt`, "muted"));
+    return;
+  }
+  const percent = Number.isFinite(lifetime?.percent) ? lifetime.percent : Math.round(usage / target * 1000) / 10;
+  const progress = reportNode("progress");
+  progress.max = 100;
+  progress.value = Math.min(100, Math.max(0, Number.isFinite(lifetime?.progress_percent) ? lifetime.progress_percent : percent));
+  const overage = percent > 100;
+  progress.setAttribute("aria-label", `${card.querySelector("h4")?.textContent || "Ausr\u00fcstung"}: ${percent}% Lebensdauer${overage ? ", Ziel \u00fcberschritten" : ""}`);
+  card.append(progress, reportNode("p", `${analysisValue(usage, "km")} von ${analysisValue(target, "km")} \u00b7 ${percent}%${overage ? " \u00b7 Ziel \u00fcberschritten" : ""}`));
 }
 
 function seasonEventCard(event, generation) {
