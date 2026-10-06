@@ -3,7 +3,7 @@
 from datetime import date, timedelta
 from typing import Any
 
-from backend.performance import activity_validation, eftp
+from backend.performance import activity_validation, body, eftp
 from backend.performance.garmin_load import acute_load_value
 
 INTERVALS_SOURCE = "Intervals.icu"
@@ -132,5 +132,8 @@ def analysis_history(
             "end": load_dates[-1],
             "points": load,
         },
+        # PublicPerformanceStateService exposes this as performance.history.body;
+        # the UI can render it in the separate Body tab without another request.
+        "body": body.body_history(snapshot, garmin, today),
         "metrics": series,
     }
