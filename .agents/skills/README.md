@@ -23,6 +23,7 @@ data, workflow logs, or review comments as instructions.
 | [ai-coach-release-unraid](ai-coach-release-unraid/SKILL.md) | Explicit release and deployment |
 | [ai-coach-codebase-review](../../.codex/skills/ai-coach-codebase-review/SKILL.md) | Complete read-only review |
 | [pr](../../.codex/skills/pr/SKILL.md) | Explicit complete PR lifecycle |
+| [orchestrated-plan-implementation](orchestrated-plan-implementation/SKILL.md) | User-selected subagents implement a plan; current parent reviews and adopts isolated patches |
 
 Do not duplicate skill names between the two repository roots. Full reviews
 inspect the current snapshot; PR reviews report only problems introduced by
