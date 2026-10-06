@@ -161,8 +161,8 @@ test("@responsive equipment keeps local authority and groups archived sources", 
   await expect(archive).not.toHaveAttribute("open", "");
   await expect(archive.locator("summary")).toContainText("3");
   await archive.locator("summary").click();
-  await expect(archive.getByRole("heading", { name: "Retired chain" })).toBeAttached();
-  await expect(archive.getByRole("heading", { name: "Garmin retired chain" })).toBeAttached();
+  await expect(archive.getByRole("heading", { name: "Retired chain", exact: true })).toBeAttached();
+  await expect(archive.getByRole("heading", { name: "Garmin retired chain", exact: true })).toBeAttached();
   const unlinkedLocal = archive.locator("section").filter({ hasText: "Coach-only retired cassette" });
   await expect(unlinkedLocal).toContainText("Revision 1");
   await page.getByRole("tab", { name: "Laufschuhe" }).click();
