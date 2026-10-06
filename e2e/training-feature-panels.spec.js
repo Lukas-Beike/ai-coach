@@ -153,7 +153,6 @@ test("@responsive equipment keeps local authority and groups archived sources", 
       { id: "garmin-retired-chain", name: "Garmin retired chain", kind: "Bike component", status: "archived", garmin_status: "Retired", distance_km: 150, goal_km: 100, lifetime: { usage_km: 150, target_km: 100, percent: 150, progress_percent: 100 } },
     ],
   } } }));
-  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/#more/equipment");
   await expect(page.locator("#appShell")).toBeVisible();
   const bikePanel = page.locator("#equipmentPanel-bike");
@@ -167,11 +166,14 @@ test("@responsive equipment keeps local authority and groups archived sources", 
   await expect(unlinkedLocal).toContainText("Revision 1");
   await page.getByRole("tab", { name: "Laufschuhe" }).click();
   const runPanel = page.locator("#equipmentPanel-run");
-  await expect(runPanel.getByRole("heading", { name: "Local running shoes" })).toBeAttached();
-  await expect(runPanel.locator("progress")).toHaveAttribute("value", "100");
-  await expect(runPanel).toContainText("125%");
-  await expect(runPanel).toContainText("Ziel überschritten");
-  await expect(runPanel).toContainText("Statuskonflikt");
-  await expect(runPanel.locator("progress")).toHaveAttribute("aria-label", /Lebensdauer/);
+  const localCard = runPanel.locator(".garmin-equipment-card").filter({ hasText: "Local running shoes" });
+  const garminCard = runPanel.locator(".garmin-equipment-card").filter({ hasText: "Garmin active shoes" });
+  await expect(localCard.getByRole("heading", { name: "Local running shoes" })).toBeAttached();
+  await expect(localCard.locator("progress")).toHaveAttribute("value", "100");
+  await expect(localCard).toContainText("125%");
+  await expect(localCard).toContainText("Ziel überschritten");
+  await expect(localCard).toContainText("Statuskonflikt");
+  await expect(localCard.locator("progress")).toHaveAttribute("aria-label", /Lebensdauer/);
+  await expect(garminCard.locator("progress")).toHaveAttribute("value", "50");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
