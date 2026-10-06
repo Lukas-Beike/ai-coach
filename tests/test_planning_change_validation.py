@@ -27,6 +27,13 @@ class _CalendarConflictService:
     def __init__(self, conflict_dates: set[str] | None = None) -> None:
         self.conflict_dates = conflict_dates or set()
         self.calls: list[tuple[dict[str, Any], set[str]]] = []
+        self.constraint_calls: list[dict[str, Any]] = []
+
+    def constraints(self, workout: dict[str, Any]) -> list[dict[str, Any]]:
+        self.constraint_calls.append(workout)
+        if workout.get("name") == "Hard intervals":
+            return [{"constraint": "[NO_INTENSITY]"}]
+        return []
 
     def conflicts(
         self, workout: dict[str, Any], exclude_library_ids: set[str]
@@ -237,8 +244,42 @@ class StructuredTrainingChangeValidatorTests(unittest.TestCase):
             reason="plan_date_conflict",
         )
         self.assertEqual(
-            self.calendar.calls,
-            [({"date": "2031-06-03"}, {"move-me"})],
+            [
+                (candidate["date"], excluded_ids)
+                for candidate, excluded_ids in self.calendar.calls
+            ],
+            [("2031-06-03", {"move-me"})],
+        )
+
+    def test_every_active_candidate_in_moved_batch_is_checked(self) -> None:
+        self._add_unit("move-me", date="2031-06-01")
+
+        self._assert_app_error(
+            lambda: self.validator.validate(
+                [
+                    {
+                        "action": "create",
+                        "date": "2031-06-03",
+                        "name": "Easy recovery",
+                    },
+                    {
+                        "action": "update",
+                        "local_id": "move-me",
+                        "date": "2031-06-03",
+                        "name": "Hard intervals",
+                    },
+                ],
+                {},
+                self.db,
+                False,
+            ),
+            status=409,
+            message="F\u00fcr den 2031-06-03 gilt eine Kalenderbeschr\u00e4nkung.",
+            reason="plan_date_conflict",
+        )
+        self.assertEqual(
+            [candidate["name"] for candidate in self.calendar.constraint_calls],
+            ["Easy recovery", "Hard intervals"],
         )
 
     def test_delete_and_archive_make_existing_rows_inactive(self) -> None:

@@ -15,9 +15,30 @@ from backend.db.schema import (
 
 def _schema_is_1_12_19(db: Any) -> bool:
     expected = tuple(
-        definition
+        (
+            definition[0],
+            definition[1],
+            definition[2],
+            definition[3].replace(", no_training INTEGER NOT NULL DEFAULT 0", ""),
+        )
         for definition in current_schema_signature()
         if definition[2] != "nutrition_products"
+    )
+    return database_schema_signature(db) == expected
+
+
+def _schema_is_previous_calendar_schema(db: Any) -> bool:
+    """Recognize the released schema immediately before no_training."""
+    expected = tuple(
+        (
+            definition[0],
+            definition[1],
+            definition[2],
+            definition[3].replace(", no_training INTEGER NOT NULL DEFAULT 0", ""),
+        )
+        if definition[2] == "external_calendar_events"
+        else definition
+        for definition in current_schema_signature()
     )
     return database_schema_signature(db) == expected
 
@@ -29,14 +50,19 @@ def migrate_schema(db: Any) -> None:
     executescript(), whose implicit commit would break rollback on failure.
     """
     version = db.execute("PRAGMA user_version").fetchone()["user_version"]
-    if version not in (0, 1, CURRENT_SCHEMA_VERSION):
+    if version not in (0, 1, 2, CURRENT_SCHEMA_VERSION):
         raise RuntimeError(
             "Die Datenbankversion wird von diesem Release nicht unterstützt."
         )
     current = database_schema_is_current(db)
-    if not current and (
-        version == CURRENT_SCHEMA_VERSION or not _schema_is_1_12_19(db)
-    ):
+    previous_calendar_schema = not current and _schema_is_previous_calendar_schema(db)
+    old_schema = not current and _schema_is_1_12_19(db)
+    if not current and version == CURRENT_SCHEMA_VERSION:
+        raise RuntimeError(
+            "Die vorhandene Datenbank entspricht keinem unterstÃ¼tzten Schema. "
+            "Der Datenbestand bleibt erhalten; bitte ein kompatibles Release verwenden."
+        )
+    if not current and not (old_schema or previous_calendar_schema):
         raise RuntimeError(
             "Die vorhandene Datenbank entspricht keinem unterstützten Schema. "
             "Der Datenbestand bleibt erhalten; bitte ein kompatibles Release verwenden."
@@ -48,9 +74,19 @@ def migrate_schema(db: Any) -> None:
     db.execute("SAVEPOINT schema_migration")
     try:
         if not current:
-            for statement in NUTRITION_PRODUCTS_DDL.split(";"):
-                if statement.strip():
-                    db.execute(statement)
+            if old_schema:
+                for statement in NUTRITION_PRODUCTS_DDL.split(";"):
+                    if statement.strip():
+                        db.execute(statement)
+            if old_schema or previous_calendar_schema:
+                db.execute(
+                    "ALTER TABLE external_calendar_events "
+                    "ADD COLUMN no_training INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execute(
+                    "UPDATE external_calendar_events SET no_training=1 "
+                    "WHERE instr(upper(name), '[NO_TRAINING]') > 0"
+                )
         db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
         if not database_schema_is_current(db):
             raise RuntimeError("Die Datenbankmigration konnte nicht validiert werden.")

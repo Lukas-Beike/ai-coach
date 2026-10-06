@@ -131,26 +131,42 @@ class ExternalCalendarSyncService:
         synced_at = self._utc_now()
         with self._database_manager.unit_of_work() as db:
             db.execute("DELETE FROM external_calendar_events")
+            columns = {
+                str(row["name"])
+                for row in db.execute("PRAGMA table_info(external_calendar_events)")
+            }
+            has_no_training = "no_training" in columns
             for event in events:
-                db.execute(
-                    "INSERT INTO external_calendar_events "
-                    "(id, uid, name, event_date, start_local, end_local, "
-                    "duration_minutes, all_day, training_relevant, no_intensity, "
-                    "short_only, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        event["id"],
-                        event["uid"],
-                        event["name"],
-                        event["event_date"],
-                        event["start_local"],
-                        event["end_local"],
-                        event["duration_minutes"],
-                        int(event["all_day"]),
-                        int(event.get("training_relevant", True)),
+                fields = (
+                    "id, uid, name, event_date, start_local, end_local, "
+                    "duration_minutes, all_day, training_relevant, "
+                    + ("no_training, " if has_no_training else "")
+                    + "no_intensity, short_only, updated_at"
+                )
+                values = [
+                    event["id"],
+                    event["uid"],
+                    event["name"],
+                    event["event_date"],
+                    event["start_local"],
+                    event["end_local"],
+                    event["duration_minutes"],
+                    int(event["all_day"]),
+                    int(event.get("training_relevant", True)),
+                ]
+                if has_no_training:
+                    values.append(int(event.get("no_training", False)))
+                values.extend(
+                    [
                         int(event.get("no_intensity", False)),
                         int(event.get("short_only", False)),
                         synced_at,
-                    ),
+                    ]
+                )
+                db.execute(
+                    f"INSERT INTO external_calendar_events ({fields}) VALUES "
+                    f"({','.join('?' for _ in values)})",
+                    values,
                 )
             self._key_value_repository.set(
                 db, "last_external_calendar_sync_at", synced_at

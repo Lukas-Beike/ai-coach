@@ -159,6 +159,33 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
             ("preview", {"illness": "Infekt", "approved": False}),
         )
 
+    def test_no_training_event_is_visible_and_preview_archives_future_workout(self):
+        self.events[:] = [
+            {
+                "event_date": "2026-09-21",
+                "name": "Travel",
+                "training_relevant": False,
+                "no_training": True,
+                "duration_minutes": 1440,
+            }
+        ]
+        self.drafts[:] = [
+            {
+                "id": "draft-1",
+                "date": "2026-09-21",
+                "name": "Easy ride",
+                "description": "- 30m Z1",
+                "duration_minutes": 30,
+            }
+        ]
+
+        preview = self.service.preview()
+
+        self.assertEqual(preview["changes"][0]["blocking_triggers"], ["calendar"])
+        self.assertTrue(
+            preview["changes"][0]["after"]["description"].startswith("Sportpause")
+        )
+
     def test_corrupt_latest_payload_is_empty_and_invalid_illness_payload_is_skipped(
         self,
     ):

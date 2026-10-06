@@ -1068,6 +1068,7 @@ WORKOUT_LIBRARY_SYNC = WorkoutLibrarySyncAssembly(
             database_manager=database_manager,
             intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
             workout_library_service=PLANNING_DATA.workout_library,
+            calendar_conflict_service=PLANNING_WORKFLOWS.calendar_conflict_service,
         ),
         state=WorkoutLibraryState(
             key_values=KEY_VALUE_REPOSITORY,

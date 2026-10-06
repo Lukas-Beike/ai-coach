@@ -14,6 +14,40 @@ class CalendarConflictService:
         self._database_manager = database_manager
         self._external_calendar_reader = external_calendar_reader
 
+    def constraints(
+        self, workout: dict[str, Any], events: list[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]]:
+        """Return current marker decisions with source and freshness evidence."""
+        conflicts = []
+        source_events = (
+            self._external_calendar_reader.list_events(
+                1000, training_relevant_only=True
+            )
+            if events is None
+            else events
+        )
+        for event in source_events:
+            decision = calendar.calendar_constraint_decision(workout, event)
+            matches, _match = calendar._calendar_items_conflict(workout, event)
+            if not matches or not decision:
+                continue
+            event_date = str(event.get("event_date") or event.get("start_local") or "")[
+                :10
+            ]
+            conflicts.append(
+                {
+                    "id": event.get("id"),
+                    "name": event.get("name") or "Kalendereintrag",
+                    "date": event_date,
+                    "source": "external_calendar",
+                    "match": "calendar_constraint",
+                    "constraint": decision["marker"],
+                    "reason": decision["reason"],
+                    "updated_at": event.get("updated_at"),
+                }
+            )
+        return conflicts
+
     def conflicts(
         self,
         workout: dict[str, Any],
@@ -42,14 +76,28 @@ class CalendarConflictService:
         external_events = self._external_calendar_reader.list_events(
             1000, training_relevant_only=True
         )
+        constraint_conflicts = self.constraints(workout, external_events)
+        ordinary_events = []
+        for event in external_events:
+            marker_text = str(event.get("name") or "").casefold()
+            is_marked = bool(
+                event.get("no_training")
+                or event.get("no_intensity")
+                or "[no_training]" in marker_text
+                or "[no_intensity]" in marker_text
+            )
+            event_matches, _match = calendar._calendar_items_conflict(workout, event)
+            if not event_matches or not is_marked:
+                ordinary_events.append(event)
         return (
-            calendar.calendar_conflicts_for_items(
+            constraint_conflicts
+            + calendar.calendar_conflicts_for_items(
                 workout, library_entries, "local_library"
             )
             + calendar.calendar_conflicts_for_items(
                 workout, competitions, "local_competition"
             )
             + calendar.calendar_conflicts_for_items(
-                workout, external_events, "external_calendar"
+                workout, ordinary_events, "external_calendar"
             )
         )

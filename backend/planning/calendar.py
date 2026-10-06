@@ -2,10 +2,77 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
 _UTC_OFFSET_SUFFIX = "+00:00"
+_HARD_EFFORT_PATTERN = re.compile(
+    r"\b(?:intervals?|vo2(?:max)?|threshold|tempo|sprints?|race|tabata|hiit|hard|sweet\s*spot)\b|\b(?:9[0-9]|100|10[5-9]|11[0-9])%"
+)
+_EASY_EFFORT_PATTERN = re.compile(
+    r"\b(?:easy|recovery|regeneration|locker|ruhetag|z1|zone\s*1)\b"
+)
+
+
+def workout_is_explicitly_easy(workout: dict[str, Any]) -> bool:
+    """Return whether a workout explicitly opts into easy effort."""
+    text = (
+        f"{workout.get('name', '')} {workout.get('description', '')} "
+        f"{workout.get('target', '')} "
+        f"{workout.get('steps', '')} {workout.get('intervals', '')} "
+        f"{workout.get('workout_steps', '')}"
+    ).casefold()
+    if _HARD_EFFORT_PATTERN.search(text):
+        return False
+    return bool(_EASY_EFFORT_PATTERN.search(text))
+
+
+def workout_is_rest(workout: dict[str, Any]) -> bool:
+    text = f"{workout.get('name', '')} {workout.get('description', '')}".casefold()
+    if _HARD_EFFORT_PATTERN.search(text):
+        return False
+    if any(
+        workout.get(key) not in (None, "", [], {})
+        for key in ("steps", "intervals", "distance", "distance_meters")
+    ):
+        return False
+    duration = workout.get("duration_minutes")
+    if duration in (None, "") and workout.get("moving_time") not in (None, ""):
+        try:
+            duration = float(workout["moving_time"]) / 60
+        except (TypeError, ValueError):
+            duration = None
+    try:
+        if duration not in (None, "") and float(duration) <= 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    if duration not in (None, ""):
+        return False
+    return bool(re.search(r"\b(?:rest|ruhetag|sportpause)\b", text))
+
+
+def calendar_constraint_decision(
+    workout: dict[str, Any], event: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Centralize external event constraints used by every planning mutation."""
+    marker_text = f"{event.get('name', '')} {event.get('description', '')}".casefold()
+    no_training = bool(event.get("no_training")) or "[no_training]" in marker_text
+    no_intensity = bool(event.get("no_intensity")) or "[no_intensity]" in marker_text
+    if no_training and not workout_is_rest(workout):
+        return {
+            "blocked": True,
+            "reason": "no_training",
+            "marker": "[NO_TRAINING]",
+        }
+    if no_intensity and not workout_is_explicitly_easy(workout):
+        return {
+            "blocked": True,
+            "reason": "no_intensity",
+            "marker": "[NO_INTENSITY]",
+        }
+    return None
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -98,15 +165,15 @@ def _calendar_items_conflict(
     )[:10]
     candidate_interval = _calendar_interval(candidate)
     existing_interval = _calendar_interval(existing)
-    if (
-        candidate_interval
-        and existing_interval
-        and candidate_interval[2]
-        and existing_interval[2]
-    ):
-        return (
+    if candidate_interval and existing_interval:
+        overlaps = (
             candidate_interval[0] < existing_interval[1]
-            and existing_interval[0] < candidate_interval[1],
+            and existing_interval[0] < candidate_interval[1]
+        )
+        if not candidate_interval[2] or not existing_interval[2]:
+            return overlaps, "date"
+        return (
+            overlaps,
             "time_window",
         )
     return bool(candidate_date and candidate_date == existing_date), "date"

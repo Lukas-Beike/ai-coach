@@ -122,7 +122,8 @@ def adaptive_quick_action_blockers(
         return []
     horizon = today + timedelta(days=2)
     blockers = []
-    changes = preview.get("changes") if isinstance(preview.get("changes"), list) else []
+    changes_value = preview.get("changes")
+    changes = changes_value if isinstance(changes_value, list) else []
     for change in changes:
         if not isinstance(change, dict):
             continue
@@ -237,12 +238,14 @@ class AdaptiveReplanApplyService:
         revision_service: Any,
         today: Callable[[], date],
         now: Callable[[], str],
+        calendar_conflict_service: Any | None = None,
     ):
         self._database_manager = database_manager
         self._adjustment_repository = adjustment_repository
         self._revision_service = revision_service
         self._today = today
         self._now = now
+        self._calendar_conflict_service = calendar_conflict_service
 
     def apply(self, adjustment_id: Any) -> dict[str, Any]:
         try:
@@ -271,7 +274,35 @@ class AdaptiveReplanApplyService:
             )
             now = self._now()
             today = self._today()
-            updated, stale = self._apply_changes(db, payload.get("changes"), now, today)
+            calendar_stale: list[dict[str, Any]] = []
+            applicable_changes = []
+            if self._calendar_conflict_service is not None:
+                for change in payload.get("changes") or []:
+                    replacement = (
+                        change.get("payload") if isinstance(change, dict) else None
+                    )
+                    if isinstance(replacement, dict) and not replacement.get(
+                        "archived"
+                    ):
+                        blockers = self._calendar_conflict_service.constraints(
+                            replacement
+                        )
+                        if blockers:
+                            calendar_stale.append(
+                                {
+                                    "library_workout_id": change.get(
+                                        "library_workout_id"
+                                    ),
+                                    "reason": "calendar_constraint_changed",
+                                    "events": blockers,
+                                }
+                            )
+                            continue
+                    applicable_changes.append(change)
+            else:
+                applicable_changes = payload.get("changes")
+            updated, stale = self._apply_changes(db, applicable_changes, now, today)
+            stale = calendar_stale + stale
             updated_checkins = 0
             if updated:
                 self._revision_service.bump(db)

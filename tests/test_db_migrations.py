@@ -17,6 +17,7 @@ from backend.db.schema import (
 )
 
 RELEASE_SCHEMA = Path(__file__).with_name("fixtures") / "schema_1_12_19.sql.txt"
+PREVIOUS_SCHEMA = Path(__file__).with_name("fixtures") / "schema_v2.sql.txt"
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -34,6 +35,13 @@ class DatabaseMigrationTests(unittest.TestCase):
     def old_database(self):
         db = self.connect()
         db.executescript(RELEASE_SCHEMA.read_text(encoding="utf-8"))
+        return db
+
+    def previous_database(self):
+        db = self.connect()
+        db.executescript(PREVIOUS_SCHEMA.read_text(encoding="utf-8"))
+        # A prior release may have left the v2 schema unversioned.
+        db.execute("PRAGMA user_version = 0")
         return db
 
     def seed_all_tables(self, db):
@@ -66,7 +74,12 @@ class DatabaseMigrationTests(unittest.TestCase):
 
     def rows(self, db):
         return {
-            table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
+            table: [
+                tuple(row)
+                for row in db.execute(
+                    f"SELECT {','.join(column['name'] for column in db.execute(f'PRAGMA table_info({table})') if not (table == 'external_calendar_events' and column['name'] == 'no_training'))} FROM {table}"
+                )
+            ]
             for table in CURRENT_DATABASE_SCHEMA
             if table != "nutrition_products"
         }
@@ -89,6 +102,48 @@ class DatabaseMigrationTests(unittest.TestCase):
         )
         self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
         self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_previous_schema_upgrade_adds_calendar_signal_and_is_restart_safe(self):
+        db = self.previous_database()
+        db.execute(
+            "INSERT INTO external_calendar_events "
+            "(id, uid, name, event_date, start_local, end_local, duration_minutes, updated_at) "
+            "VALUES ('calendar', 'uid', 'Synthetic event', '2026-10-07', "
+            "'2026-10-07T00:00:00', '2026-10-08T00:00:00', 1440, 'before')"
+        )
+        db.commit()
+
+        migrate_schema(db)
+        db.commit()
+        migrate_schema(db)
+        db.commit()
+
+        row = db.execute(
+            "SELECT name, no_training FROM external_calendar_events WHERE id='calendar'"
+        ).fetchone()
+        self.assertEqual(tuple(row), ("Synthetic event", 0))
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
+
+    def test_previous_schema_marked_as_current_is_rejected_without_mutation(self):
+        db = self.previous_database()
+        db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
+        before = db.execute(
+            "SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name"
+        ).fetchall()
+
+        with self.assertRaises(RuntimeError):
+            migrate_schema(db)
+
+        after = db.execute(
+            "SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name"
+        ).fetchall()
+        self.assertEqual(after, before)
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
 
     def test_unversioned_1_12_20_preserves_existing_products(self):
         db = self.connect()

@@ -281,14 +281,34 @@ class StructuredTrainingChangeValidator:
             final_dates, final_active, original_dates, restore_identities
         )
         for candidate_date in dates_to_check:
-            if self.calendar_conflict_service.conflicts(
-                {"date": candidate_date}, batch_ids
-            ):
-                raise AppError(
-                    409,
-                    f"Für den {candidate_date} existiert bereits eine lokale Kalendereinheit.",
-                    reason="plan_date_conflict",
+            candidates = [
+                change
+                for identity, change in (changes_by_identity or {}).items()
+                if final_dates.get(identity) == candidate_date
+                and final_active.get(identity, True)
+            ] or [{"date": candidate_date}]
+            for candidate in candidates:
+                if hasattr(
+                    self.calendar_conflict_service, "constraints"
+                ) and self.calendar_conflict_service.constraints(candidate):
+                    raise AppError(
+                        409,
+                        f"F\u00fcr den {candidate_date} gilt eine Kalenderbeschr\u00e4nkung.",
+                        reason="plan_date_conflict",
+                    )
+                conflict_candidate = (
+                    candidate
+                    if hasattr(self.calendar_conflict_service, "constraints")
+                    else {"date": candidate_date}
                 )
+                if self.calendar_conflict_service.conflicts(
+                    conflict_candidate, batch_ids
+                ):
+                    raise AppError(
+                        409,
+                        f"F\u00fcr den {candidate_date} existiert bereits eine lokale Kalendereinheit.",
+                        reason="plan_date_conflict",
+                    )
 
     def _validate_training_change_batch(
         self, changes: list[dict[str, Any]], db: Any

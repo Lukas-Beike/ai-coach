@@ -191,6 +191,18 @@ class PlannedUnitService:
             else {"date": str(workout_or_date or "")[:10]}
         )
         restore_date = str(workout.get("date") or "")[:10]
+        if (
+            restore_date
+            and not workout.get("archived")
+            and not workout.get("local_deleted")
+            and hasattr(self._calendar_conflict_service, "constraints")
+            and self._calendar_conflict_service.constraints(workout)
+        ):
+            raise AppError(
+                409,
+                "Die lokale Einheit kann wegen einer aktuellen KalenderbeschrÃ¤nkung nicht wiederhergestellt werden.",
+                reason="plan_date_conflict",
+            )
         if restore_date and self._calendar_conflict_service.conflicts(
             workout, {entity_id}
         ):
@@ -215,6 +227,18 @@ class PlannedUnitService:
         workouts.validate_workout_description(entry)
 
         def persist(connection: Any) -> None:
+            if (
+                not entry.get("archived")
+                and not entry.get("local_deleted")
+                and hasattr(self._calendar_conflict_service, "constraints")
+            ):
+                conflicts = self._calendar_conflict_service.constraints(entry)
+                if conflicts:
+                    raise AppError(
+                        409,
+                        "Die lokale Einheit verletzt eine aktuelle KalenderbeschrÃ¤nkung.",
+                        reason="plan_date_conflict",
+                    )
             self.insert(connection, entry)
             change_history.record_change(
                 connection,
@@ -455,7 +479,19 @@ class PlannedUnitService:
             current, action, values
         )
         date_changed = planned_units.prepare_planned_workout_date(candidate, current)
-        if not skip_calendar_conflict and date_changed:
+        is_active = not candidate.get("archived") and not candidate.get("local_deleted")
+        if (
+            is_active
+            and not skip_calendar_conflict
+            and hasattr(self._calendar_conflict_service, "constraints")
+            and self._calendar_conflict_service.constraints(candidate)
+        ):
+            raise AppError(
+                409,
+                "Die lokale Einheit verletzt eine aktuelle KalenderbeschrÃ¤nkung.",
+                reason="plan_date_conflict",
+            )
+        if is_active and not skip_calendar_conflict and date_changed:
             conflicts = self._calendar_conflict_service.conflicts(
                 candidate, {normalized_id}
             )

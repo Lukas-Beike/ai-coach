@@ -247,6 +247,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "duration_minutes",
         "all_day",
         "training_relevant",
+        "no_training",
         "no_intensity",
         "short_only",
         "updated_at",
@@ -313,7 +314,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 NUTRITION_PRODUCTS_DDL = """
     CREATE TABLE nutrition_products (
@@ -626,6 +627,7 @@ def initialize_schema(db: Any) -> None:
         no_intensity INTEGER NOT NULL DEFAULT 0,
         short_only INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL,
+        no_training INTEGER NOT NULL DEFAULT 0,
         UNIQUE(uid, start_local)
     );
     CREATE TABLE nutrition_templates (

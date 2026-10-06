@@ -196,6 +196,128 @@ class CalendarConflictServiceTests(unittest.TestCase):
             ["external-1"],
         )
 
+    def test_no_intensity_rejects_unknown_effort_but_allows_explicit_easy(self) -> None:
+        self.external_reader.events = [
+            {
+                "id": "easy-only",
+                "name": "Family event",
+                "event_date": "2026-10-04",
+                "no_intensity": True,
+            }
+        ]
+        conflicts = self.service.conflicts(
+            {"date": "2026-10-04", "name": "Intervals", "description": "4x5m"}
+        )
+        self.assertEqual(conflicts[0]["constraint"], "[NO_INTENSITY]")
+        self.assertEqual(
+            self.service.conflicts(
+                {"date": "2026-10-04", "name": "Easy recovery", "description": "Z1"}
+            ),
+            [],
+        )
+
+    def test_no_training_dominates_and_preserves_source_freshness_evidence(
+        self,
+    ) -> None:
+        self.external_reader.events = [
+            {
+                "id": "blocked",
+                "name": "Travel",
+                "event_date": "2026-10-04",
+                "no_training": True,
+                "updated_at": "sync-1",
+            }
+        ]
+        conflicts = self.service.conflicts(
+            {"date": "2026-10-04", "name": "Easy recovery", "description": "Z1"}
+        )
+        self.assertEqual(conflicts[0]["constraint"], "[NO_TRAINING]")
+        self.assertEqual(conflicts[0]["updated_at"], "sync-1")
+
+    def test_no_intensity_rejects_hard_workout_even_with_easy_warmup(self) -> None:
+        self.external_reader.events = [
+            {
+                "id": "hard",
+                "name": "Family event",
+                "event_date": "2026-10-04",
+                "no_intensity": True,
+            }
+        ]
+        conflicts = self.service.conflicts(
+            {
+                "date": "2026-10-04",
+                "name": "Easy warmup + intervals",
+                "description": "- 10m easy\n- 4x5m threshold",
+            }
+        )
+        self.assertEqual(conflicts[0]["constraint"], "[NO_INTENSITY]")
+
+    def test_no_intensity_rejects_hard_structured_steps_with_easy_name(self) -> None:
+        self.external_reader.events = [
+            {
+                "id": "hard",
+                "name": "Family event",
+                "event_date": "2026-10-04",
+                "no_intensity": True,
+            }
+        ]
+        conflicts = self.service.conflicts(
+            {
+                "date": "2026-10-04",
+                "name": "Easy recovery",
+                "description": "Z1",
+                "steps": [{"type": "threshold intervals", "duration": 900}],
+            }
+        )
+        self.assertEqual(conflicts[0]["constraint"], "[NO_INTENSITY]")
+
+    def test_no_training_rejects_zero_duration_rest_conversion_with_training_steps(
+        self,
+    ) -> None:
+        self.external_reader.events = [
+            {
+                "id": "blocked",
+                "name": "Travel",
+                "event_date": "2026-10-04",
+                "no_training": True,
+            }
+        ]
+        conflicts = self.service.conflicts(
+            {
+                "date": "2026-10-04",
+                "name": "Rest",
+                "description": "Recovery day",
+                "duration_minutes": 0,
+                "steps": [{"duration": 300, "target": "power"}],
+            }
+        )
+        self.assertEqual(conflicts[0]["constraint"], "[NO_TRAINING]")
+
+    def test_multi_day_no_training_event_blocks_each_overlapped_day(self) -> None:
+        self.external_reader.events = [
+            {
+                "id": "trip",
+                "name": "Travel",
+                "event_date": "2026-10-04",
+                "start_local": "2026-10-04T00:00:00",
+                "end_local": "2026-10-06T00:00:00",
+                "all_day": True,
+                "no_training": True,
+            }
+        ]
+        for day in ("2026-10-04", "2026-10-05"):
+            with self.subTest(day=day):
+                conflicts = self.service.conflicts(
+                    {"date": day, "name": "Easy recovery", "description": "Z1"}
+                )
+                self.assertEqual(conflicts[0]["constraint"], "[NO_TRAINING]")
+        self.assertEqual(
+            self.service.conflicts(
+                {"date": "2026-10-06", "name": "Easy recovery", "description": "Z1"}
+            ),
+            [],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

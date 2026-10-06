@@ -86,7 +86,8 @@ class ExternalCalendarSyncTests(unittest.TestCase):
                 "id TEXT PRIMARY KEY, uid TEXT NOT NULL, name TEXT NOT NULL, "
                 "event_date TEXT NOT NULL, start_local TEXT NOT NULL, end_local TEXT NOT NULL, "
                 "duration_minutes INTEGER NOT NULL, all_day INTEGER NOT NULL DEFAULT 0, "
-                "training_relevant INTEGER NOT NULL DEFAULT 1, no_intensity INTEGER NOT NULL DEFAULT 0, "
+                "training_relevant INTEGER NOT NULL DEFAULT 1, no_training INTEGER NOT NULL DEFAULT 0, "
+                "no_intensity INTEGER NOT NULL DEFAULT 0, "
                 "short_only INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, UNIQUE(uid, start_local))"
             )
         self.key_values = KeyValueRepository(lambda: NOW)
@@ -155,6 +156,7 @@ class ExternalCalendarSyncTests(unittest.TestCase):
             "duration_minutes": 90,
             "all_day": False,
             "training_relevant": True,
+            "no_training": True,
             "no_intensity": True,
             "short_only": False,
             **overrides,
@@ -233,6 +235,7 @@ class ExternalCalendarSyncTests(unittest.TestCase):
                 "duration_minutes",
                 "all_day",
                 "training_relevant",
+                "no_training",
                 "no_intensity",
                 "short_only",
                 "updated_at",
@@ -240,6 +243,7 @@ class ExternalCalendarSyncTests(unittest.TestCase):
         )
         self.assertEqual(rows[0]["id"], "event-new")
         self.assertEqual(rows[0]["no_intensity"], 1)
+        self.assertEqual(rows[0]["no_training"], 1)
         self.assertEqual(rows[0]["updated_at"], NOW)
         self.assertEqual(self.kv("last_external_calendar_sync_at"), NOW)
         self.assertEqual(self.kv("sync_calendar_last_success_at"), LOCAL.isoformat())
@@ -405,7 +409,9 @@ class ExternalCalendarSyncTests(unittest.TestCase):
                 "backend.providers.calendar.external_calendar_url",
                 return_value="https://calendar.example/feed.ics",
             ),
-            patch("backend.providers.calendar.fetch_calendar_feed", return_value=b"feed"),
+            patch(
+                "backend.providers.calendar.fetch_calendar_feed", return_value=b"feed"
+            ),
             patch(
                 "backend.providers.calendar.parse_ical_calendar",
                 return_value=[self.parsed_event()],
