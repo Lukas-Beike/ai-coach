@@ -167,9 +167,11 @@ test("@responsive equipment keeps local authority and groups archived sources", 
   await expect(unlinkedLocal).toContainText("Revision 1");
   await page.getByRole("tab", { name: "Laufschuhe" }).click();
   const runPanel = page.locator("#equipmentPanel-run");
-  const localCard = runPanel.locator(".garmin-equipment-card").filter({ hasText: "Local running shoes" });
+  const localEquipment = runPanel.locator("details.training-focus-details");
+  await localEquipment.locator("summary").click();
+  const localCard = localEquipment.locator(".garmin-equipment-card").filter({ hasText: "Local running shoes" });
   const garminCard = runPanel.locator(".garmin-equipment-card").filter({ hasText: "Garmin active shoes" });
-  await expect(localCard.getByRole("heading", { name: "Local running shoes" })).toBeAttached();
+  await expect(localCard.getByRole("heading", { name: "Local running shoes", exact: true })).toBeVisible();
   await expect(localCard.locator("progress")).toHaveAttribute("value", "100");
   await expect(localCard).toContainText("125%");
   await expect(localCard).toContainText("Ziel überschritten");
