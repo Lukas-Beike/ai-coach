@@ -482,7 +482,6 @@ class PlannedUnitService:
         is_active = not candidate.get("archived") and not candidate.get("local_deleted")
         if (
             is_active
-            and not skip_calendar_conflict
             and hasattr(self._calendar_conflict_service, "constraints")
             and self._calendar_conflict_service.constraints(candidate)
         ):

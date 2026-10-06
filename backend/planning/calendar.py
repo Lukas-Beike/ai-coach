@@ -8,7 +8,7 @@ from typing import Any
 
 _UTC_OFFSET_SUFFIX = "+00:00"
 _HARD_EFFORT_PATTERN = re.compile(
-    r"\b(?:intervals?|vo2(?:max)?|threshold|tempo|sprints?|race|tabata|hiit|hard|sweet\s*spot)\b|\b(?:9[0-9]|100|10[5-9]|11[0-9])%"
+    r"\b(?:intervals?|vo2(?:max)?|threshold|tempo|sprints?|race|tabata|hiit|hard|sweet\s*spot)\b|\b(?:z(?:one)?\s*[2-9])\b|\b(?:9[0-9]|1[0-9]{2}|[2-9][0-9]{2})%"
 )
 _EASY_EFFORT_PATTERN = re.compile(
     r"\b(?:easy|recovery|regeneration|locker|ruhetag|z1|zone\s*1)\b"
@@ -128,7 +128,7 @@ def _calendar_interval(
     value: dict[str, Any], default_minutes: int = 60
 ) -> tuple[datetime, datetime, bool] | None:
     raw_start = _first_present(
-        value, ("start_date_local", "start_local", "start", "date")
+        value, ("start_date_local", "start_local", "start", "date", "event_date")
     )
     if raw_start in (None, ""):
         return None
@@ -177,6 +177,27 @@ def _calendar_items_conflict(
             "time_window",
         )
     return bool(candidate_date and candidate_date == existing_date), "date"
+
+
+def _calendar_items_share_local_day(
+    candidate: dict[str, Any], existing: dict[str, Any]
+) -> bool:
+    """Return whether two intervals touch any local calendar day."""
+    candidate_interval = _calendar_interval(candidate)
+    existing_interval = _calendar_interval(existing)
+    if not candidate_interval or not existing_interval:
+        return False
+    candidate_start, candidate_end, _ = candidate_interval
+    existing_start, existing_end, _ = existing_interval
+    candidate_days = (
+        candidate_start.date(),
+        (candidate_end - timedelta(microseconds=1)).date() + timedelta(days=1),
+    )
+    existing_days = (
+        existing_start.date(),
+        (existing_end - timedelta(microseconds=1)).date() + timedelta(days=1),
+    )
+    return candidate_days[0] < existing_days[1] and existing_days[0] < candidate_days[1]
 
 
 def _calendar_conflict_record(

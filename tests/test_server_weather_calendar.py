@@ -380,7 +380,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                         1000, training_relevant_only=True
                     )
                 ],
-                ["family-2"],
+                ["family-2", "unmarked"],
             )
             self.assertFalse(state["events"][1]["training_relevant"])
             fetch.assert_called_once_with(config.calendar_ical_url, app_version=server.APP_VERSION)

@@ -271,6 +271,45 @@ class CalendarConflictServiceTests(unittest.TestCase):
         )
         self.assertEqual(conflicts[0]["constraint"], "[NO_INTENSITY]")
 
+    def test_no_intensity_uses_local_day_scope_for_timed_events(self) -> None:
+        self.external_reader.events = [
+            {
+                "id": "short",
+                "name": "Family event",
+                "start_local": "2026-10-04T08:00:00",
+                "end_local": "2026-10-04T09:00:00",
+                "no_intensity": True,
+            }
+        ]
+        conflicts = self.service.conflicts(
+            {
+                "date": "2026-10-04",
+                "start_date_local": "2026-10-04T17:00:00",
+                "duration_minutes": 30,
+                "name": "Hard intervals",
+            }
+        )
+        self.assertEqual(conflicts[0]["constraint"], "[NO_INTENSITY]")
+
+    def test_structured_zone_target_overrides_easy_name(self) -> None:
+        self.external_reader.events = [
+            {
+                "id": "hard",
+                "name": "Family event",
+                "event_date": "2026-10-04",
+                "no_intensity": True,
+            }
+        ]
+        conflicts = self.service.conflicts(
+            {
+                "date": "2026-10-04",
+                "name": "Easy warmup",
+                "description": "Z1",
+                "steps": [{"target": {"zone": "Z4"}, "duration": 900}],
+            }
+        )
+        self.assertEqual(conflicts[0]["constraint"], "[NO_INTENSITY]")
+
     def test_no_training_rejects_zero_duration_rest_conversion_with_training_steps(
         self,
     ) -> None:

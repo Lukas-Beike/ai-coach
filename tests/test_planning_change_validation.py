@@ -282,6 +282,28 @@ class StructuredTrainingChangeValidatorTests(unittest.TestCase):
             ["Easy recovery", "Hard intervals"],
         )
 
+    def test_same_date_edit_is_checked_for_calendar_constraints(self) -> None:
+        self._add_unit(
+            "unit",
+            date="2031-06-03",
+            raw_payload=json.dumps({"date": "2031-06-03", "name": "Easy recovery"}),
+        )
+        self._assert_app_error(
+            lambda: self.validator.validate(
+                [{"action": "update", "local_id": "unit", "name": "Hard intervals"}],
+                {},
+                self.db,
+                False,
+            ),
+            status=409,
+            message="F\u00fcr den 2031-06-03 gilt eine Kalenderbeschr\u00e4nkung.",
+            reason="plan_date_conflict",
+        )
+        self.assertEqual(
+            [candidate["name"] for candidate in self.calendar.constraint_calls],
+            ["Hard intervals"],
+        )
+
     def test_delete_and_archive_make_existing_rows_inactive(self) -> None:
         self._add_unit("delete-me", date="2031-06-03")
         self._add_unit("archive-me", date="2031-06-03")

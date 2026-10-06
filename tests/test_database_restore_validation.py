@@ -139,6 +139,7 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
             with closing(sqlite3.connect(path)) as connection:
                 initialize_schema(connection)
                 connection.execute("DROP TABLE nutrition_products")
+                connection.execute("ALTER TABLE external_calendar_events DROP COLUMN no_training")
                 connection.execute("PRAGMA user_version = 1")
                 connection.execute(
                     "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES ('token', 'csrf', 1, 'now', 'now')"
@@ -165,6 +166,7 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
             with closing(sqlite3.connect(path)) as connection:
                 initialize_schema(connection)
                 connection.execute("DROP TABLE nutrition_products")
+                connection.execute("ALTER TABLE external_calendar_events DROP COLUMN no_training")
                 connection.execute("PRAGMA user_version = 1")
                 connection.execute(
                     "INSERT INTO sync_job_items(id, job_id, item_key, operation, payload_hash, status, created_at, updated_at) VALUES ('item', 'missing-job', 'key', 'pull', 'hash', 'pending', 'now', 'now')"

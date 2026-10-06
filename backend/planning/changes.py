@@ -257,11 +257,6 @@ class StructuredTrainingChangeValidator:
             candidate_date
             for change_identity, candidate_date in final_dates.items()
             if final_active.get(change_identity, True)
-            and (
-                change_identity.startswith("create:")
-                or original_dates.get(change_identity) != candidate_date
-                or change_identity in restore_identities
-            )
         }
 
     def _validate_training_change_dates(
@@ -280,6 +275,16 @@ class StructuredTrainingChangeValidator:
         dates_to_check = self._dates_needing_calendar_check(
             final_dates, final_active, original_dates, restore_identities
         )
+        ordinary_conflict_dates = {
+            final_date
+            for identity, final_date in final_dates.items()
+            if final_active.get(identity, True)
+            and (
+                identity.startswith("create:")
+                or original_dates.get(identity) != final_date
+                or identity in restore_identities
+            )
+        }
         for candidate_date in dates_to_check:
             candidates = [
                 change
@@ -301,6 +306,8 @@ class StructuredTrainingChangeValidator:
                     if hasattr(self.calendar_conflict_service, "constraints")
                     else {"date": candidate_date}
                 )
+                if candidate_date not in ordinary_conflict_dates:
+                    continue
                 if self.calendar_conflict_service.conflicts(
                     conflict_candidate, batch_ids
                 ):

@@ -28,7 +28,7 @@ class CalendarConflictService:
         )
         for event in source_events:
             decision = calendar.calendar_constraint_decision(workout, event)
-            matches, _match = calendar._calendar_items_conflict(workout, event)
+            matches = calendar._calendar_items_share_local_day(workout, event)
             if not matches or not decision:
                 continue
             event_date = str(event.get("event_date") or event.get("start_local") or "")[
