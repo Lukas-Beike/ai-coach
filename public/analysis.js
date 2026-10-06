@@ -32,7 +32,7 @@ function analysisLatestPoint(item) {
 }
 
 function analysisUsesCurrentLine(item) {
-  return Boolean(analysisLatestPoint(item)) && new Set([...item.points, item.currentPoint].filter(analysisValidPoint).map((point) => Number(point.value))).size <= 1;
+  return Boolean(analysisLatestPoint(item)) && new Set(item.points.filter(analysisValidPoint).map((point) => Number(point.value))).size < 3;
 }
 
 let analysisInfoId = 0;
@@ -331,7 +331,7 @@ function appendAnalysisSeries(svg, series, unit, scales, zeroCentered, sparse) {
   const labels = [];
   series.forEach((item, index) => {
     const currentLine = analysisUsesCurrentLine(item);
-    const hasTrend = !currentLine;
+    const hasTrend = !currentLine && (!sparse || item.points.filter(analysisValidPoint).length >= 3);
     const color = item.color ?? index;
     appendAnalysisReferenceLines(svg, item, index, unit, scales, currentLine);
     const path = appendAnalysisSeriesPoints(svg, item, { index, unit, scales, zeroCentered, currentLine, labels });
