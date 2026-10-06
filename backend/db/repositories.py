@@ -752,6 +752,7 @@ class NutritionRepository:
     def day_summary(self, db: Any, meal_date: str) -> dict[str, Any]:
         entries = self.list_by_date(db, meal_date)
         total_kcal = sum(int(e["kcal"]) for e in entries)
+
         def total(field: str) -> float | None:
             if any(entry.get(field) is None for entry in entries):
                 return None if entries else 0.0
