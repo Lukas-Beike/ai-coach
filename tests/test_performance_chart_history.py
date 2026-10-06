@@ -39,6 +39,43 @@ class AnalysisHistoryTests(unittest.TestCase):
         )
         self.assertIsNone(result["load"]["points"][-1]["value"])
 
+    def test_garmin_acute_load_accepts_summary_date_from_training_status(self):
+        result = analysis_history(
+            None,
+            {
+                "training_status": [
+                    {
+                        "summaryDate": "2026-10-01",
+                        "acuteTrainingLoadDTO": {
+                            "dailyTrainingLoadAcute": 475
+                        },
+                    }
+                ]
+            },
+            date(2026, 10, 2),
+        )
+        self.assertEqual(
+            result["load"]["points"][-2], {"date": "2026-10-01", "value": 475}
+        )
+
+    def test_garmin_acute_load_falls_back_to_valid_summary_date(self):
+        result = analysis_history(
+            None,
+            {
+                "training_status": [
+                    {
+                        "calendarDate": "invalid",
+                        "summaryDate": "2026-10-01",
+                        "acuteTrainingLoadDTO": {"acuteTrainingLoad": 475},
+                    }
+                ]
+            },
+            date(2026, 10, 2),
+        )
+        self.assertEqual(
+            result["load"]["points"][-2], {"date": "2026-10-01", "value": 475}
+        )
+
     def test_acute_load_rejects_invalid_and_conflicting_device_values(self):
         from backend.performance.garmin_load import acute_load_value
 
