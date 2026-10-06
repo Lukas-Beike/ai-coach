@@ -12,8 +12,9 @@ test("@responsive chart readings keep their coordinates and legible labels", asy
     const dotsOnPath = [...chart.querySelectorAll("circle")].every((dot) => path.includes(`${Number(dot.getAttribute("cx")).toFixed(2)},${Number(dot.getAttribute("cy")).toFixed(2)}`));
     const sleep = analysisChart("Sleep", [{ label: "Sleep", bars: true, points: [{ date: "2026-10-01", value: 8.2 }, { date: "2026-10-08", value: 6.5 }] }], "h", "2026-10-01", "2026-10-08", "");
     chart.after(sleep);
-    const bar = sleep.querySelector(".recovery-sleep-bar");
-    const label = sleep.querySelector(".analysis-point-value");
+    const bars = [...sleep.querySelectorAll(".recovery-sleep-bar")];
+    const bar = bars.sort((a, b) => Number(a.getAttribute("y")) - Number(b.getAttribute("y")))[0];
+    const label = [...sleep.querySelectorAll(".analysis-point-value")].find((node) => node.textContent === "8:12");
     return {
       currentLines: chart.querySelectorAll(".analysis-current-line").length,
       dotsOnPath,
