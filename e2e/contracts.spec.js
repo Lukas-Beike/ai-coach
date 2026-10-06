@@ -644,8 +644,10 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await page.getByRole("link", { name: "Analyse", exact: true }).click();
   const charts = page.locator("#analysisHistoryCharts");
   await expect(charts.locator("svg")).toHaveCount(4);
-  const running = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: "Leistungsentwicklung · Laufen", exact: true }) });
-  const cycling = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: "Leistungsentwicklung · Rad", exact: true }) });
+  const running = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: /^Leistungsentwicklung · Laufen/ }) });
+  const cycling = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: /^Leistungsentwicklung · Rad/ }) });
+  await expect(running.getByRole("button", { name: "Leistungsentwicklung · Laufen: Informationen", exact: true })).toBeVisible();
+  await expect(cycling.getByRole("button", { name: "Leistungsentwicklung · Rad: Informationen", exact: true })).toBeVisible();
   await expect(running).toContainText("Schwellenpace: 5:05 min/km");
   await expect(running).toContainText("VO₂max: 59,4 ml/kg/min");
   await expect(cycling).toContainText("FTP: 255,5 W");
