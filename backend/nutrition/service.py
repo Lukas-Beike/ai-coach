@@ -31,6 +31,7 @@ from backend.nutrition.photo import (
 )
 
 PRODUCT_NOT_FOUND = "Produkt nicht gefunden."
+INVALID_COMPONENT_COUNT = "1 bis 20 Mahlzeitenkomponenten sind erforderlich."
 
 SAVED_MEAL_NOT_FOUND = "Gespeicherte Mahlzeit nicht gefunden."
 INVALID_ENTRY_ID = "Ungültige Eintrags-ID."
@@ -292,7 +293,7 @@ class NutritionService:
     def calculate_components(self, components: Any) -> dict[str, Any]:
         """Resolve a flat meal recipe into immutable, trusted nutrient snapshots."""
         if not isinstance(components, list) or not 1 <= len(components) <= 20:
-            raise AppError(400, "1 bis 20 Mahlzeitenkomponenten sind erforderlich.")
+            raise AppError(400, INVALID_COMPONENT_COUNT)
         resolved_database = self._prepare_component_resolutions(components)
         with self._db_lock, self._database_manager.unit_of_work() as db:
             return self._calculate_components(db, components, resolved_database)
@@ -304,7 +305,7 @@ class NutritionService:
         resolved_database: dict[int, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if not isinstance(components, list) or not 1 <= len(components) <= 20:
-            raise AppError(400, "1 bis 20 Mahlzeitenkomponenten sind erforderlich.")
+            raise AppError(400, INVALID_COMPONENT_COUNT)
         totals, snapshots = self._resolve_component_totals(
             db, components, resolved_database
         )
@@ -344,7 +345,7 @@ class NutritionService:
     ) -> dict[int, dict[str, Any]]:
         """Resolve provider-backed foods before taking the database lock."""
         if not isinstance(components, list) or not 1 <= len(components) <= 20:
-            raise AppError(400, "1 bis 20 Mahlzeitenkomponenten sind erforderlich.")
+            raise AppError(400, INVALID_COMPONENT_COUNT)
         resolved: dict[int, dict[str, Any]] = {}
         for index, item in enumerate(components):
             kind, _quantity, _unit = self._validate_component_header(item)
