@@ -27,7 +27,7 @@ from backend.sync.state import SyncStateRepository
 
 GARMIN_CAPABILITY_FAILURE_LIMIT = 3
 GARMIN_CAPABILITY_PAUSE_SECONDS = 24 * 60 * 60
-GARMIN_INITIAL_SYNC_DAYS = 60
+GARMIN_INITIAL_SYNC_DAYS = 84
 GARMIN_CATCHUP_MAX_DAYS = 90
 
 GARMIN_COLLECTION_SOURCES = (
@@ -37,6 +37,7 @@ GARMIN_COLLECTION_SOURCES = (
     "activities",
     "daily_stats",
     "resting_hr",
+    "training_status",
 )
 GARMIN_METRIC_SOURCES = (
     "gear",
@@ -146,7 +147,7 @@ class GarminPayloadService:
         snapshot = self.snapshot()
         freshness = snapshot.get("source_freshness") or {}
         sources = {"activities", "sleep", "hrv"} | (
-            set(freshness) & {"daily_stats", "resting_hr"}
+            set(freshness) & {"daily_stats", "resting_hr", "training_status"}
         )
         today = self._local_today()
         oldest_end: date | None = None

@@ -45,6 +45,8 @@ class _Database:
             )
         if "FROM nutrition_templates" in query:
             return _Rows([{ "payload": '{"id":"template-1","name":"Synthetic breakfast"}' }])
+        if "FROM nutrition_products" in query:
+            return _Rows([{"id": "product-1", "name": "Synthetic whey", "source": "packaging_label"}])
         return _Rows([])
 
 
@@ -135,9 +137,11 @@ class PrivacyDataExportServiceTests(unittest.TestCase):
             exported = service.export()
 
         self.assertEqual(manager.entries, 3)
-        self.assertEqual(len(db.queries), 6)
+        self.assertEqual(len(db.queries), 7)
         self.assertEqual(exported["nutrition_templates"][0]["id"], "template-1")
         self.assertTrue(any("FROM nutrition_templates" in query for query in db.queries))
+        self.assertEqual(exported["nutrition_products"][0]["id"], "product-1")
+        self.assertTrue(any("FROM nutrition_products" in query for query in db.queries))
         self.assertEqual(exported["application_state"], {"ordinary": "{broken"})
         self.assertEqual(exported["garmin_snapshot"], {})
         self.assertEqual(exported["weather_cache"], [])

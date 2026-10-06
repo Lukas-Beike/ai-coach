@@ -716,6 +716,9 @@ class ServerSyncTests(ServerTestCase):
             def get_training_readiness(self, current):
                 return {"date": current, "score": 75}
 
+            def get_training_status(self, current):
+                return {"acuteTrainingLoadDTO": {"acuteTrainingLoad": 480}}
+
             def get_race_predictions(self):
                 return [{"race": "local fixture"}]
 
@@ -768,6 +771,8 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(result["daily_stats"][0]["calendarDate"], "2026-08-30")
         self.assertEqual(result["daily_stats"][1]["totalSteps"], 1234)
         self.assertEqual(result["provider_sync"]["pagination"]["daily_stats"]["records"], 2)
+        self.assertEqual([row["calendarDate"] for row in result["training_status"]], ["2026-08-30", "2026-08-31"])
+        self.assertEqual(result["provider_sync"]["pagination"]["training_status"]["records"], 2)
 
     def test_garmin_source_observed_at_uses_latest_nested_valid_date(self):
         observed_at = garmin_observations.garmin_source_observed_at({
@@ -888,6 +893,13 @@ class ServerSyncTests(ServerTestCase):
         self.assertTrue(preview["snapshot_compacted"])
         self.assertFalse(preview["snapshot_truncated"])
         self.assertTrue(preview["projection"]["within_total_budget"])
+
+    def test_activity_sync_defaults_cover_twelve_weeks_and_preserve_saved_choices(self):
+        repository = server.SYNC_PERSISTENCE.state_repository()
+        for provider in ("intervals", "garmin"):
+            self.assertEqual(repository.sync_period(provider, server.SYNC_PERIOD_DEFAULTS, server.ALL_SYNC_DAYS), 84)
+            repository.set_sync_period(provider, 14, server.ALL_SYNC_DAYS)
+            self.assertEqual(repository.sync_period(provider, server.SYNC_PERIOD_DEFAULTS, server.ALL_SYNC_DAYS), 14)
 
     def test_sync_period_supports_all_available_data_marker(self):
         from backend.sync.windows import split_date_windows

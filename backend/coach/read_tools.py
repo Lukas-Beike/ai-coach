@@ -145,13 +145,33 @@ class CoachReadToolService:
         if name == "read_nutrition":
             return self._read_nutrition(arguments)
         if name in {"lookup_food", "calculate_food_nutrition"}:
-            if self._nutrition_service is None:
-                raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
-            foods = self._nutrition_service().food_database
-            if name == "lookup_food":
-                return foods.lookup(arguments)
-            return {"ok": True, **foods.calculate(arguments.get("ingredients"))}
+            return self._food_database_read(name, arguments)
         return None
+
+    def _food_database_read(
+        self, name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        if self._nutrition_service is None:
+            raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
+        nutrition = self._nutrition_service()
+        if name == "lookup_food":
+            source = str(arguments.get("source") or "").strip().lower()
+            query = str(arguments.get("query") or arguments.get("q") or "").strip()
+            if query and not arguments.get("barcode") and source in {"bls", "off"}:
+                return nutrition.food_database.lookup(arguments)
+            if arguments.get("barcode") or arguments.get("query"):
+                return nutrition.lookup_product(arguments)
+            return nutrition.food_database.lookup(arguments)
+        if arguments.get("product_id"):
+            return nutrition.calculate_product(
+                str(arguments.get("product_id")),
+                arguments.get("amount"),
+                str(arguments.get("unit") or ""),
+            )
+        return {
+            "ok": True,
+            **nutrition.food_database.calculate(arguments.get("ingredients")),
+        }
 
     def _read_nutrition(self, arguments: dict[str, Any]) -> dict[str, Any]:
         if not self._nutrition_service:
@@ -163,10 +183,15 @@ class CoachReadToolService:
                 "fueling": service.fueling().read(arguments["planned_unit_id"]),
             }
         templates = service.list_templates()
+        products = service.list_products()
+        product_projection = (
+            {"products": products} if isinstance(products, list) else {}
+        )
         if arguments.get("date"):
             return {
                 "ok": True,
                 "templates": templates,
+                **product_projection,
                 **service.get_day_summary(str(arguments["date"])),
             }
         if arguments.get("start") and arguments.get("end"):
@@ -181,9 +206,15 @@ class CoachReadToolService:
             return {
                 "ok": True,
                 "templates": templates,
+                **product_projection,
                 "summaries": service.get_range_summary(start, end),
             }
-        return {"ok": True, "templates": templates, **service.get_today_summary()}
+        return {
+            "ok": True,
+            "templates": templates,
+            **product_projection,
+            **service.get_today_summary(),
+        }
 
     @staticmethod
     def _bounded_integer(

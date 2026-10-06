@@ -215,6 +215,7 @@ from backend.nutrition.assembly import (
     NutritionPersistence,
     NutritionRuntime,
 )
+from backend.nutrition.photo import NutritionPhotoExtractionService
 from backend.sync.command_assembly import (
     IllnessPauseDependencies,
     SyncCommandAssembly,
@@ -391,7 +392,7 @@ OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
 SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
-APP_VERSION = "1.12.19"
+APP_VERSION = "1.12.20"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -751,7 +752,7 @@ def key_value_service() -> KeyValueService:
     return KeyValueService(database_manager(), KEY_VALUE_REPOSITORY, DB_LOCK)
 
 
-SYNC_PERIOD_DEFAULTS = {"intervals": 90, "garmin": 30}
+SYNC_PERIOD_DEFAULTS = {"intervals": 84, "garmin": 84}
 ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
 SYNC_EARLIEST_DATE = date(2000, 1, 1)
@@ -941,6 +942,15 @@ NUTRITION_ASSEMBLY = NutritionAssembly(
             intervals_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
             read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500, future_only=True),
             read_profile=lambda: ATHLETE_DATA.profile().get(),
+            photo_extractor=lambda: NutritionPhotoExtractionService(
+                selected_provider=SETTINGS.selected_ai_provider,
+                selected_model=SETTINGS.selected_model,
+                openai_request=lambda path, payload: MODEL_TRANSPORT.openai_responses_client().request(path, payload),
+                openai_path=OPENAI_RESPONSES_PATH,
+                gemini_generate=lambda model, payload: MODEL_TRANSPORT.gemini_json_client().generate(
+                    model, payload, operation="nutrition_packaging_extraction"
+                ),
+            ),
         ),
     )
 )

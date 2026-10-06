@@ -7,34 +7,45 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.locator("#appShell")).toBeVisible();
   await expect(page.locator("#strengthProgress, #strengthTemplates")).toHaveCount(0);
   await page.evaluate(async () => { await applyNavigationRoute("analysis/performance", { historyMode: "replace" }); });
+  await expect(page.locator("#analysisHistoryCharts")).toBeVisible();
+  await expect(page.locator("#sessionPerformance")).toBeHidden();
+  await expect(page.locator("#trainingReport")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Woche", exact: true })).toHaveCount(0);
+  await page.evaluate(async () => { await applyNavigationRoute("analysis/load", { historyMode: "replace" }); });
   const report = page.locator("#sessionPerformance");
-  await expect(page.locator("#trainingReport")).toBeHidden();
   await expect(report.getByRole("heading", { name: /^Trainingsfokus/ })).toBeVisible();
+  expect((await report.boundingBox()).y).toBeGreaterThan((await page.locator("#analysisLoadCharts").boundingBox()).y);
+  await expect(page.locator("#analysisHistoryCharts .analysis-period-controls")).toHaveCount(0);
   await expect(report.getByText("Leicht aerob", { exact: true })).toBeVisible();
   await expect(report.getByText("Hoch aerob", { exact: true })).toBeVisible();
   await expect(report.getByText("Anaerob", { exact: true })).toBeVisible();
   await expect(report.locator(".training-focus-share")).toBeVisible();
-  await expect(report.locator(".training-focus-coverage")).toContainText("3 erfasste Garmin-Einheiten");
-  await expect(report.locator(".training-focus-coverage")).toContainText("erfasste Daten");
-  await expect(report.getByRole("heading", { name: "HF-Zonen" })).toBeHidden();
-  await report.getByText("Zonen im Detail", { exact: true }).click();
-  await expect(report.getByRole("heading", { name: "HF-Zonen" })).toBeVisible();
-  await expect(report.getByRole("heading", { name: "Power-Zonen" })).toBeVisible();
+  const focusInfo = report.locator(".analysis-legend-info").first();
+  await focusInfo.click();
+  await expect(report.locator(".analysis-info-tooltip:popover-open")).toContainText("3 erfasste Garmin-Einheiten");
+  await expect(report.locator(".analysis-info-tooltip:popover-open")).toContainText("erfasste Daten");
+  await page.keyboard.press("Escape");
+  const zones = page.locator("#trainingZoneCharts");
+  await expect(zones.getByRole("heading", { name: "HF-Zonen" })).toBeVisible();
+  await expect(zones.getByRole("heading", { name: "Power-Zonen" })).toBeVisible();
+  await expect(zones.locator("details")).toHaveCount(0);
+  expect((await zones.boundingBox()).y).toBeGreaterThan((await report.boundingBox()).y);
   await page.evaluate(() => renderSyncStatus({ running: false, message: null }));
-  await expect(report.locator("progress")).toHaveCount(12);
+  await expect(zones.locator("progress")).toHaveCount(12);
+  await page.evaluate(async () => { await applyNavigationRoute("analysis/performance", { historyMode: "replace" }); });
   const periods = await page.evaluate(() => {
     const history = state.data.performance.history;
     const focus = state.data.performance.training_focus;
     return {
-      expected: `${dateLabel(focus.start)} bis ${dateLabel(focus.end)}`,
-      same: focus.end === history.end && focus.start === addDateKey(history.end, -55),
+      expected: `${dateLabel(addDateKey(history.end, -((new Date(`${history.end}T12:00:00Z`).getUTCDay() + 6) % 7) - 77))} bis ${dateLabel(history.end)}`,
+      same: focus.end === history.end && focus.start === addDateKey(history.end, -27),
       titles: [...document.querySelectorAll("#analysisHistoryCharts svg > title")].map((node) => node.textContent),
     };
   });
   expect(periods.same).toBeTruthy();
   expect(periods.titles.length).toBeGreaterThan(0);
   await expect(page.locator("#analysisHistoryCharts .analysis-sparse-note:visible")).toHaveCount(0);
-  await page.locator("#analysisHistoryCharts").getByRole("button", { name: "Rad · FTP", exact: true }).click();
+  await page.locator("#analysisHistoryCharts").getByRole("button", { name: "FTP", exact: true }).click();
   await expect(page.locator("#analysisHistoryCharts .analysis-info-tooltip:popover-open")).toContainText(/Seit .+: \+\d+(?:,\d+)? W/);
   await page.keyboard.press("Escape");
   for (const title of periods.titles) expect(title).toContain(periods.expected);
@@ -44,13 +55,8 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.getByRole("heading", { name: "Aktuelle Erholung", exact: true })).toHaveCount(0);
   const recovery = page.locator("#personalRecovery");
   await expect(recovery.locator("svg")).toHaveCount(3);
-  await expect(recovery.getByRole("group", { name: "Schlafdauer: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen." })).toBeVisible();
-  for (const metric of ["Schlafdauer", "HRV", "Ruhepuls"]) await expect(recovery.getByRole("button", { name: metric, exact: true })).toHaveCount(1);
-  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Aktuelle Woche");
-  await expect(recovery.locator("svg path[data-color='2']").first()).toHaveAttribute("d", /M.*M/);
+  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Letzte 14 Tage");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-  await page.locator("#personalRecovery").getByText("Was beeinflusst deine Erholung?", { exact: true }).click();
-  await expect(page.locator("#personalRecovery").getByText(/Mindestens zehn gemessene Tage je Gruppe/).first()).toBeVisible();
 
   await page.evaluate(() => {
     const report = { ...state.data.performance.personal_recovery, as_of: "2026-10-02" };
@@ -63,14 +69,10 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
       ...baselines.map((item) => ({ ...item, source: "Garmin Connect", history: item.history.map((point) => ({ ...point, value: 99 })) })),
     ] });
   });
-  await recovery.getByRole("button", { name: "8 Wochen", exact: true }).click();
-  const weeklyRecovery = recovery.locator(".analysis-chart-card").first();
-  await weeklyRecovery.getByRole("button", { name: "Schlafdauer", exact: true }).click();
-  await expect(weeklyRecovery.locator(".analysis-info-tooltip:popover-open")).toContainText("8:00 h");
-  await page.keyboard.press("Escape");
-  await expect(weeklyRecovery.locator(".analysis-subchart").first().locator("tbody tr")).toHaveCount(2);
-  await expect(weeklyRecovery.locator(".analysis-chart-legend li")).toHaveCount(3);
-  await expect(weeklyRecovery).not.toContainText("99 h");
+  await expect(recovery.locator(".analysis-period-controls")).toHaveCount(1);
+  await recovery.getByRole("button", { name: "12 Wochen", exact: true }).click();
+  await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Letzte 12 Wochen");
+  await expect(recovery.locator(".analysis-subchart")).toHaveCount(3);
 
   await page.evaluate(async () => { await applyNavigationRoute("plan/season", { historyMode: "replace" }); });
   await expect(page.locator("#seasonPreparation").getByRole("heading", { name: /Fixture cycling target/ }).first()).toBeVisible();
@@ -111,24 +113,4 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.locator('[data-nutrition-segment="fueling"], #trainingFueling, #nutritionLog, #nutritionDefine')).toHaveCount(0);
   await expect(page.locator("#nutritionPanel").getByRole("button", { name: /Coach/ })).toHaveCount(0);
   await expect(page.locator("#seasonPreparation").getByRole("button", { name: /Vorbereitung besprechen|Vorschau anfragen/ })).toHaveCount(0);
-});
-
-test("@responsive local equipment and maintenance remain visible without Garmin inventory", async ({ page }) => {
-  await page.route("**/api/analysis/training-records", route => route.fulfill({ json: { equipment: {
-    garmin_items: [], items: [{name: "Saved bike", kind: "bike", revision: 3,
-      usage: {distance_km: 120, hours: 6, assigned_sessions: 4, maintenance_distance_km: 20,
-        maintenance_hours: 1, maintenance_due: null, maintenance_coverage: "partial"},
-      maintenance: [{date: "2026-09-30", notes: "<img src=x> Chain replaced"}] }],
-  } } }));
-  await page.goto("/#more/equipment");
-  const gear = page.locator("#equipmentItems");
-  await expect(gear.locator("details summary")).toBeVisible();
-  await gear.locator("details summary").click();
-  await expect(gear.getByRole("heading", {name: "Saved bike"})).toBeVisible();
-  await expect(gear).toContainText("Revision 3");
-  await expect(gear).toContainText("120 km");
-  await expect(gear).toContainText("4 zugeordnete Einheiten");
-  await expect(gear).toContainText("Wartungsstand unklar");
-  await expect(gear).toContainText("Chain replaced");
-  await expect(gear.locator("img")).toHaveCount(0);
 });

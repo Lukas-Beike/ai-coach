@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=264">
+  <link rel="stylesheet" href="/styles.css?v=266">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -143,23 +143,19 @@
 
       <section id="dataPanel" class="panel" aria-label="Analyse">
         <div class="section-heading">
-          <div><span class="eyebrow">AUSWERTUNG</span><h2>Analyse</h2><span class="tab-sync-detail">Leistungsdaten und aktuelle Trainingsform</span></div>
+          <div><span class="eyebrow">AUSWERTUNG</span><h2>Analyse</h2><span class="tab-sync-detail">Leistung, Belastung und Erholung</span></div>
         </div>
         <nav class="plan-segment-nav" aria-label="Analysebereiche">
           <a href="#analysis/load" data-analysis-segment="load">Belastung</a>
           <a href="#analysis/performance" data-analysis-segment="performance">Leistung</a>
           <a href="#analysis/recovery" data-analysis-segment="recovery">Erholung</a>
-          <a href="#analysis/review" data-analysis-segment="review">Woche</a>
         </nav>
         <section id="personalRecovery" class="analysis-history-charts" aria-label="Persönliche Erholung" hidden></section>
-        <section id="trainingReport" class="analysis-chart-card" aria-label="Trainingsbericht" hidden></section>
-        <div id="analysisLoadCharts" class="analysis-history-charts" aria-label="Belastung und Form" hidden></div>
-        <div id="analysisHistoryCharts" class="analysis-history-charts" aria-label="Fitness und Leistungsentwicklung"></div>
-        <section id="analysisPerformanceSegment" class="analysis-segment" aria-labelledby="analysisPerformanceTitle">
-          <section id="sessionPerformance" class="analysis-chart-card" aria-label="Trainingsfokus"></section>
-          <div class="analysis-segment-heading"><div><span class="eyebrow">LEISTUNG</span><h3 id="analysisPerformanceTitle">Leistungsdaten</h3></div></div>
-          <div id="performanceSummary" class="performance-card" aria-live="polite"></div>
-        </section>
+        <div id="analysisLoadCharts" class="analysis-history-charts" aria-label="Garmin-Trainingsbelastung" hidden></div>
+        <section id="sessionPerformance" class="analysis-chart-card" aria-label="Trainingsfokus"></section>
+        <div id="trainingZoneCharts" class="analysis-history-charts" aria-label="Trainingszonen" hidden></div>
+        <div id="analysisHistoryCharts" class="analysis-history-charts" aria-label="Leistungsentwicklung der letzten 12 Wochen"></div>
+        <section id="performancePredictions" class="analysis-chart-card" aria-label="Laufprognosen" hidden></section>
       </section>
 
       <section id="nutritionPanel" class="panel" aria-label="Ernährung">
@@ -167,8 +163,28 @@
         <nav class="plan-segment-nav" aria-label="Ernährungsbereiche">
           <a href="#nutrition/diary" data-nutrition-segment="diary">Tagebuch</a>
           <a href="#nutrition/meals" data-nutrition-segment="meals">Meine Mahlzeiten</a>
+          <a href="#nutrition/products" data-nutrition-segment="products">Produkte</a>
         </nav>
         <output id="nutritionStatus" class="tab-sync-detail"></output>
+        <section id="nutritionProductsPanel" aria-label="Produktbibliothek" hidden>
+        <div class="nutrition-tools" aria-label="Produkte erfassen">
+          <h3>Produkte</h3>
+          <p class="fine-print">Scanne den Barcode oder fotografiere die Nährwerttabelle. Prüfe die Werte und speichere das Produkt anschließend lokal.</p>
+          <div class="nutrition-actions">
+            <button type="button" class="push-button" id="nutritionBarcodeButton">Barcode scannen</button>
+            <button type="button" class="secondary-button" id="nutritionLabelButton">Nährwerttabelle fotografieren</button>
+            <button type="button" class="secondary-button" id="nutritionProductManual">Produkt manuell erfassen</button>
+            <label for="nutritionLabelInput" class="visually-hidden">Nährwerttabelle auswählen</label><input id="nutritionLabelInput" type="file" accept="image/*" capture="environment" hidden>
+          </div>
+          <form id="nutritionProductSearch" class="nutrition-search">
+            <label for="nutritionProductQuery">Lokale Produkte suchen</label>
+            <div class="nutrition-search-row"><input id="nutritionProductQuery" type="search" autocomplete="off" placeholder="Name, Marke oder EAN"><button type="submit" class="secondary-button">Suchen</button></div>
+          </form>
+          <output id="nutritionProductStatus" class="tab-sync-detail" aria-live="polite"></output>
+          <div id="nutritionProducts" class="nutrition-list"></div>
+          <div id="nutritionExtraction" class="nutrition-product-editor" hidden></div>
+        </div>
+        </section>
         <section id="nutritionDiary" aria-label="Ernährungstagebuch">
           <div class="nutrition-toolbar"><button class="secondary-button" type="button" id="nutritionPrevious" aria-label="Vorheriger Tag">←</button><label>Tag <input type="date" id="nutritionDate"></label><button class="secondary-button" type="button" id="nutritionNext" aria-label="Nächster Tag">→</button><button class="secondary-button" type="button" id="nutritionToday">Heute</button></div>
           <div id="nutritionTotals" class="nutrition-totals"></div>
@@ -201,6 +217,11 @@
               <label>Sportarten<select name="sports" multiple size="4" aria-describedby="sportsHelp"><option value="Cycling">Radfahren</option><option value="Running">Laufen</option><option value="Swimming">Schwimmen</option><option value="Strength">Krafttraining</option><option value="Triathlon">Triathlon</option><option value="Other">Andere</option></select><small id="sportsHelp">Mit Strg/Ctrl oder Cmd mehrere Sportarten auswählen.</small></label>
             </div>
             <label>Trainingserfahrung<textarea name="training_background" rows="3" placeholder="Erfahrung, Trainingshistorie, Stärken und Schwächen…"></textarea></label>
+            <div class="form-grid">
+              <label>Größe (cm)<input name="height_cm" type="number" min="50" max="250" step="0.1"></label>
+              <label>Gewicht (kg)<input name="weight_kg" type="number" min="20" max="300" step="0.1"></label>
+              <label>Körperfettanteil (%)<input name="body_fat_pct" type="number" min="1" max="70" step="0.1"></label>
+            </div>
             <label>Typischer Wochenumfang<input name="typical_weekly_volume" placeholder="Zum Beispiel: 8–10 Stunden, 5 Trainingstage"></label>
             <label>Langfristige Ziele<textarea name="goals" rows="4" placeholder="Saisonziele und Wettkampfziele…"></textarea></label>
             <label>Verfügbarkeit pro Woche<textarea name="availability" rows="3" placeholder="Tage, Zeiten, bevorzugter Ruhetag…"></textarea></label>
@@ -264,8 +285,8 @@
             <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small></div><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Gemini</strong><span id="geminiConnectionStatus">Status wird geprüft…</span><small id="geminiConnectionDetail"></small></div><button id="chatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="90"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="systemIntervalsFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="intervalsFullResyncStatus" class="connection-resync-status">Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.</small></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="30"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="84"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="systemIntervalsFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="intervalsFullResyncStatus" class="connection-resync-status">Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.</small></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus">Status wird geprüft…</span><small>Nur lesen · Termine erscheinen im Tab „Plan“ als Zeit- und Erholungssignal</small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
           </div>
           <section class="provider-freshness" aria-labelledby="providerFreshnessTitle">
@@ -389,6 +410,23 @@
       </button>
     </form>
   </dialog>
+  <dialog id="nutritionBarcodeDialog" aria-labelledby="nutritionBarcodeTitle">
+    <form method="dialog" class="confirmation-dialog" id="nutritionBarcodeForm">
+      <span class="eyebrow">PRODUKT</span><h2 id="nutritionBarcodeTitle">Barcode scannen</h2>
+      <video id="nutritionBarcodeVideo" playsinline muted aria-label="Kamerabild für Barcode-Scan"></video>
+      <p id="nutritionBarcodeStatus" class="tab-sync-detail" aria-live="polite">Kamera wird vorbereitet …</p>
+      <label for="nutritionBarcodeManual">EAN manuell eingeben<input id="nutritionBarcodeManual" inputmode="numeric" pattern="[0-9]{8,14}" maxlength="14" autocomplete="off"></label>
+      <div class="dialog-actions"><button type="button" id="nutritionBarcodeCancel" class="secondary-button">Abbrechen</button><button type="submit" id="nutritionBarcodeLookup" class="adaptive-planning-button">Produkt suchen</button></div>
+    </form>
+  </dialog>
+  <dialog id="nutritionProductUseDialog" aria-labelledby="nutritionProductUseTitle">
+    <form id="nutritionProductUseForm" class="confirmation-dialog">
+      <span class="eyebrow">MAHLZEIT</span><h2 id="nutritionProductUseTitle">Produkt erfassen</h2>
+      <p id="nutritionProductUseName"></p>
+      <label for="nutritionProductUseAmount">Verzehrte Menge <span id="nutritionProductUseUnit"></span><input id="nutritionProductUseAmount" type="number" min="0.1" step="0.1" required></label>
+      <div class="dialog-actions"><button type="button" id="nutritionProductUseCancel" class="secondary-button">Abbrechen</button><button type="submit" class="adaptive-planning-button">Coach-Entwurf erstellen</button></div>
+    </form>
+  </dialog>
   <dialog id="confirmationDialog" aria-labelledby="confirmationDialogTitle" aria-describedby="confirmationDialogMessage">
     <form id="confirmationDialogForm" method="dialog" class="confirmation-dialog">
       <span class="eyebrow">BESTÄTIGUNG</span>
@@ -404,15 +442,15 @@
     </form>
   </dialog>
   <script src="/api.js?v=221" defer></script>
-  <script src="/navigation.js?v=226" defer></script>
+  <script src="/navigation.js?v=228" defer></script>
   <script src="/state.js?v=218" defer></script>
   <script src="/views.js?v=218" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
   <script src="/coach.js?v=6" defer></script>
-  <script src="/nutrition.js?v=6" defer></script>
-  <script src="/analysis.js?v=54" defer></script>
+  <script src="/nutrition.js?v=13" defer></script>
+  <script src="/analysis.js?v=68" defer></script>
   <script src="/activity-details.js?v=7" defer></script>
-  <script src="/app.js?v=261" defer></script>
+  <script src="/app.js?v=268" defer></script>
 </body>
 </html>

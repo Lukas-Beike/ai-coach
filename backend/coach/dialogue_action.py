@@ -26,6 +26,7 @@ OBJECT_SCOPE_TABLES = {
     "change": ("change_history", "id"),
     "sync_job": ("sync_jobs", "id"),
     "nutrition_template": ("nutrition_templates", "id"),
+    "nutrition_product": ("nutrition_products", "id"),
 }
 BROAD_SCOPES = frozenset(
     {
@@ -42,6 +43,7 @@ BROAD_SCOPES = frozenset(
         "calendar_refresh",
         "weather_refresh",
         "local_nutrition",
+        "local_nutrition_product",
         "local_equipment",
     }
 )
@@ -353,6 +355,15 @@ class CoachDialogueActionService:
     def _apply_object_scope(
         name: str, arguments: dict[str, Any], action: dict[str, Any]
     ) -> None:
+        CoachDialogueActionService._apply_training_object_scope(name, arguments, action)
+        CoachDialogueActionService._apply_nutrition_object_scope(
+            name, arguments, action
+        )
+
+    @staticmethod
+    def _apply_training_object_scope(
+        name: str, arguments: dict[str, Any], action: dict[str, Any]
+    ) -> None:
         if name == "update_training_plan":
             require_coach_scope(
                 action,
@@ -363,15 +374,30 @@ class CoachDialogueActionService:
             require_coach_scope(
                 action, "adaptive_replan:" + str(arguments.get("adjustment_id") or "")
             )
+
+    @staticmethod
+    def _apply_nutrition_object_scope(
+        name: str, arguments: dict[str, Any], action: dict[str, Any]
+    ) -> None:
         if name in {
             "save_nutrition_template",
+            "save_nutrition_product",
             "delete_nutrition_template",
             "log_nutrition_template",
             "save_nutrition_entry",
             "update_nutrition_entry",
             "delete_nutrition_entry",
         }:
-            require_coach_scope(action, "local_nutrition")
+            if name == "save_nutrition_product":
+                product_id = str((arguments.get("payload") or {}).get("id") or "")
+                require_coach_scope(
+                    action,
+                    f"nutrition_product:{product_id}"
+                    if product_id
+                    else "local_nutrition_product",
+                )
+            else:
+                require_coach_scope(action, "local_nutrition")
             if name in {"delete_nutrition_template", "log_nutrition_template"}:
                 template_id = str(arguments.get("id") or "")
                 require_coach_scope(action, f"nutrition_template:{template_id}")

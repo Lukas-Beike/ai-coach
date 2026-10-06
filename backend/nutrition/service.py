@@ -12,7 +12,11 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import NutritionRepository, NutritionTemplateRepository
+from backend.db.repositories import (
+    NutritionProductRepository,
+    NutritionRepository,
+    NutritionTemplateRepository,
+)
 from backend.errors import AppError
 from backend.nutrition.food_database import NUTRIENTS, FoodDatabaseService
 from backend.nutrition.models import (
@@ -20,6 +24,10 @@ from backend.nutrition.models import (
     NutritionEntry,
     normalize_nutrition_entry,
     validate_iso_date,
+)
+from backend.nutrition.photo import (
+    NutritionPhotoExtractionService,
+    validate_packaging_extraction,
 )
 
 SAVED_MEAL_NOT_FOUND = "Gespeicherte Mahlzeit nicht gefunden."
@@ -82,6 +90,7 @@ class NutritionService:
         local_now: Callable[[], datetime],
         food_database: FoodDatabaseService | None = None,
         fueling_service: Callable[[], Any] | None = None,
+        photo_extractor: NutritionPhotoExtractionService | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._db_lock = db_lock
@@ -89,8 +98,256 @@ class NutritionService:
         self._utc_now = utc_now
         self._local_now = local_now
         self._templates = NutritionTemplateRepository()
+        self._products = NutritionProductRepository()
+        self._photo_extractor = photo_extractor
         self.food_database = food_database or FoodDatabaseService()
         self._fueling_service = fueling_service
+
+    def list_products(
+        self,
+        *,
+        query: str | None = None,
+        barcode: str | None = None,
+        include_archived: bool = False,
+    ) -> list[dict[str, Any]]:
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            return self._products.list(
+                db, query=query, barcode=barcode, include_archived=include_archived
+            )
+
+    def get_product(self, product_id: str) -> dict[str, Any]:
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            product = self._products.get(db, str(product_id or "").strip())
+        if not product:
+            raise AppError(
+                404, "Produkt nicht gefunden.", reason="nutrition_product_not_found"
+            )
+        return product
+
+    def save_product(self, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized = self._normalize_product(payload)
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            existing = (
+                self._products.list(
+                    db, barcode=normalized["barcode"], include_archived=True
+                )
+                if normalized.get("barcode")
+                else []
+            )
+            if existing and existing[0]["id"] != normalized["id"]:
+                raise AppError(
+                    409,
+                    "Diese EAN ist bereits einem lokalen Produkt zugeordnet.",
+                    reason="nutrition_product_barcode_conflict",
+                )
+            return self._products.save(db, normalized)
+
+    def update_product(
+        self, product_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        current = self.get_product(product_id)
+        merged = {**current, **(payload if isinstance(payload, dict) else {})}
+        merged["id"] = str(product_id)
+        return self.save_product(merged)
+
+    def archive_product(self, product_id: str) -> dict[str, Any]:
+        product_id = str(product_id or "").strip()
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            if not self._products.archive(db, product_id, self._utc_now()):
+                raise AppError(
+                    404, "Produkt nicht gefunden.", reason="nutrition_product_not_found"
+                )
+            return self._products.get(db, product_id) or {
+                "id": product_id,
+                "status": "archived",
+            }
+
+    def lookup_product(
+        self, arguments: dict[str, Any], *, online_fallback: bool = True
+    ) -> dict[str, Any]:
+        barcode = str(arguments.get("barcode") or "").strip()
+        query = str(arguments.get("query") or arguments.get("q") or "").strip()
+        if barcode:
+            local = self.list_products(barcode=barcode)
+            if local:
+                return {
+                    "ok": True,
+                    "foods": local,
+                    "product": local[0],
+                    "local": True,
+                    "source": "local",
+                }
+            result = self.food_database.lookup({"barcode": barcode})
+            remote = (result.get("foods") or [None])[0]
+            return {
+                **result,
+                "product": remote,
+                "local": False,
+                "source": "open_food_facts",
+            }
+        if len(query) < 2:
+            raise AppError(400, "Suchbegriff muss mindestens 2 Zeichen enthalten.")
+        local = self.list_products(query=query)
+        if local:
+            return {
+                "ok": True,
+                "foods": local,
+                "product": local[0],
+                "local": True,
+                "source": "local",
+            }
+        if online_fallback:
+            result = self.food_database.lookup({**arguments, "query": query})
+            return {
+                **result,
+                "product": (result.get("foods") or [None])[0],
+                "local": False,
+            }
+        return {
+            "ok": True,
+            "foods": [],
+            "product": None,
+            "local": True,
+            "source": "local",
+        }
+
+    def extract_packaging_photo(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise AppError(400, "Ungültiger Fotoinhalt.")
+        if payload.get("image_data_url"):
+            if not self._photo_extractor:
+                raise AppError(
+                    503,
+                    "Fotoerkennung ist nicht verfügbar.",
+                    reason="provider_unavailable",
+                )
+            result = self._photo_extractor.extract(payload["image_data_url"])
+        else:
+            result = validate_packaging_extraction(payload)
+        return {**result, "extraction": result["candidate"]}
+
+    def calculate_product(
+        self, product_id: str, amount: Any, unit: str
+    ) -> dict[str, Any]:
+        product = self.get_product(product_id)
+        if product.get("status") != "active":
+            raise AppError(
+                409,
+                "Archivierte Produkte können nicht erfasst werden.",
+                reason="nutrition_product_archived",
+            )
+        try:
+            quantity = float(amount)
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, "Ungültige Produktmenge.") from exc
+        if not math.isfinite(quantity) or not 0 < quantity <= 10000:
+            raise AppError(400, "Produktmenge muss zwischen 0 und 10000 liegen.")
+        if unit != product["basis_unit"]:
+            raise AppError(
+                400,
+                "Gramm und Milliliter dürfen ohne bekannte Dichte nicht umgerechnet werden.",
+                reason="food_unit_mismatch",
+            )
+        ratio = quantity / float(product["basis_amount"])
+        nutrients = {
+            key: None
+            if product.get(key) is None
+            else round(float(product[key]) * ratio, 1)
+            for key in ("kcal", "carbs_g", "protein_g", "fat_g")
+        }
+        return {
+            "ok": True,
+            "product": product,
+            "amount": quantity,
+            "unit": unit,
+            **nutrients,
+            "nutrition_basis": {
+                "kind": "local_product",
+                "product": product,
+                "amount": quantity,
+                "unit": unit,
+            },
+        }
+
+    def log_product(
+        self,
+        product_id: str,
+        amount: Any,
+        unit: str,
+        *,
+        meal_date: str | None = None,
+        meal_time: str | None = None,
+    ) -> dict[str, Any]:
+        calculation = self.calculate_product(product_id, amount, unit)
+        if calculation.get("kcal") is None:
+            raise AppError(
+                400,
+                "Für dieses Produkt fehlt der Kalorienwert.",
+                reason="food_energy_missing",
+            )
+        entry = self.log_meal(
+            {
+                "product_id": product_id,
+                "amount": amount,
+                "unit": unit,
+                "meal_date": meal_date,
+                "meal_time": meal_time,
+                "description": f"{calculation['product']['name']} · {calculation['amount']:g} {unit}",
+                "kcal": calculation["kcal"],
+                "carbs_g": calculation["carbs_g"],
+                "protein_g": calculation["protein_g"],
+                "fat_g": calculation["fat_g"],
+                "nutrition_basis": calculation["nutrition_basis"],
+                "source": "manual",
+            }
+        )
+        return entry
+
+    def _normalize_product(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise AppError(400, "Produkt muss ein Objekt sein.")
+        extracted = validate_packaging_extraction(
+            {**payload, "source": payload.get("source", "packaging_label")}
+        )
+        candidate = extracted["candidate"]
+        if not candidate.get("basis_amount") or not candidate.get("basis_unit"):
+            raise AppError(
+                400,
+                "Bezugsmenge und Einheit sind erforderlich.",
+                reason="invalid_food_extraction",
+            )
+        source = str(payload.get("source") or "packaging_label").strip().lower()
+        if source not in {
+            "packaging_label",
+            "manual",
+            "open_food_facts",
+            "bls",
+            "fddb_export",
+        }:
+            raise AppError(400, "Ungültige Produktquelle.")
+        now = self._utc_now()
+        source_url = str(payload.get("source_url") or "")[:500]
+        external_id = str(payload.get("external_id") or "")[:200]
+        extraction_confidence = candidate.get("confidence")
+        return {
+            **candidate,
+            "id": str(payload.get("id") or uuid.uuid4().hex),
+            "source": source,
+            "provenance": {
+                "kind": source,
+                "source_url": source_url or None,
+                "external_id": external_id or None,
+                "extraction_confidence": extraction_confidence,
+            },
+            "extraction_confidence": extraction_confidence,
+            "source_url": source_url,
+            "external_id": external_id,
+            "status": str(payload.get("status") or "active")
+            if payload.get("status") in {"active", "archived"}
+            else "active",
+            "created_at": str(payload.get("created_at") or now),
+            "updated_at": now,
+        }
 
     def fueling(self) -> Any:
         if not self._fueling_service:
@@ -306,9 +563,20 @@ class NutritionService:
         """Normalize, validate and store a meal entry."""
         if not isinstance(payload, dict):
             raise AppError(400, "Ernährungseintrag muss ein Objekt sein.")
-        entry = normalize_nutrition_entry(
-            self._prepare_values(payload), local_now_factory=self._local_now
-        )
+        values = self._prepare_values(payload)
+        if payload.get("product_id"):
+            calculation = self.calculate_product(
+                str(payload["product_id"]),
+                payload.get("amount"),
+                str(payload.get("unit") or ""),
+            )
+            values.update(
+                {key: calculation[key] for key in NUTRIENTS},
+                nutrition_basis=calculation["nutrition_basis"],
+                description=payload.get("description")
+                or f"{calculation['product']['name']} · {calculation['amount']:g} {calculation['unit']}",
+            )
+        entry = normalize_nutrition_entry(values, local_now_factory=self._local_now)
         if not entry.get("id"):
             entry["id"] = uuid.uuid4().hex
 
