@@ -100,6 +100,11 @@ class EquipmentService:
         if not _current_garmin_gear(snapshot):
             return
         rows = [row for row in snapshot.get("gear") or [] if isinstance(row, dict)]
+        rows = [row for row in rows if row.get("gearUUID")]
+        # A current but empty or malformed inventory is not proof that the
+        # initial import succeeded. Leave initialization open for recovery.
+        if not rows:
+            return
         with self._manager.unit_of_work() as db:
             initialized = db.execute(
                 SELECT_VALUE, ("garmin_equipment_initialized",)
@@ -117,7 +122,11 @@ class EquipmentService:
                 if item.get("garmin_uuid")
             }
             now = self._utc_now()
-            if not initialized:
+            # Legacy builds marked an empty first sync as initialized. A marker
+            # with no linked local Garmin rows is the bounded recovery case;
+            # once any rows are linked, later syncs remain mileage-only.
+            initial_import = not initialized or not by_garmin
+            if initial_import:
                 for row in rows:
                     gear_id = str(row.get("gearUUID") or "")
                     if gear_id and gear_id not in by_garmin:
@@ -446,7 +455,7 @@ def _garmin_item(row: dict) -> dict[str, Any]:
     goal = number(row.get("maximumMeters"))
     return {
         "id": str(row.get("gearUUID") or ""),
-        "name": str(row.get("gearName") or "Ausrüstung")[:200],
+        "name": str(row.get("gearName") or "Ausr\u00fcstung")[:200],
         "kind": str(row.get("gearTypeName") or "")[:100],
         "status": str(row.get("gearStatusName") or "")[:100],
         "distance_km": round(distance / 1000, 2) if distance is not None else None,

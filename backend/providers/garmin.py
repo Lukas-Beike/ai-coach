@@ -394,14 +394,35 @@ def _gear_inventory(client: Any, external_call: ExternalCall) -> list[dict[str, 
         raise ValueError("Invalid Garmin gear inventory")
     result = []
     for item in inventory:
-        if not isinstance(item, dict) or not item.get("gearUUID"):
-            # Garmin sometimes includes placeholder or malformed inventory rows.
-            # They cannot be looked up for usage, so omit only those rows and
-            # retain valid gear instead of failing the entire optional source.
+        normalized = _normalize_gear_row(item)
+        if normalized is None:
             continue
-        stats = _gear_usage_stats(client, item["gearUUID"], external_call)
-        result.append({**item, "stats": stats or {}})
+        stats = _gear_usage_stats(client, normalized["gearUUID"], external_call)
+        result.append({**normalized, "stats": stats or {}})
     return result
+
+
+def _normalize_gear_row(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    gear_uuid = item.get("gearUUID") or item.get("uuid")
+    if not gear_uuid:
+        return None
+    gear_name = (
+        item.get("gearName")
+        or item.get("displayName")
+        or item.get("customMakeModel")
+        or " ".join(
+            str(item.get(key) or "").strip()
+            for key in ("gearMakeName", "gearModelName")
+            if item.get(key)
+        )
+    )
+    return {
+        **item,
+        "gearUUID": str(gear_uuid),
+        **({"gearName": str(gear_name)} if gear_name else {}),
+    }
 
 
 def _gear_usage_stats(

@@ -362,6 +362,37 @@ class GarminPayloadServiceTests(unittest.TestCase):
             _gear_inventory(client, call)
         client.get_gear.assert_called_once_with(123)
 
+    def test_gear_collection_normalizes_actual_garmin_uuid_and_display_fields(self):
+        raw = {
+            "uuid": "gear-uuid",
+            "displayName": "Race bike",
+            "gearMakeName": "Example",
+            "gearModelName": "Road 1",
+            "customMakeModel": "My race bike",
+            "gearTypeName": "Bike",
+            "gearStatusName": "Active",
+            "dateBegin": "2025-01-01",
+            "dateEnd": None,
+            "maximumMeters": 100000,
+        }
+        client = SimpleNamespace(
+            get_user_profile=lambda: {"id": 123},
+            get_gear=lambda profile: [raw],
+            get_gear_stats=lambda identity: {
+                "totalDistance": 25000,
+                "totalActivities": 4,
+            },
+        )
+        result = _gear_inventory(
+            client, lambda service, operation, fetch, details: fetch()
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["uuid"], "gear-uuid")
+        self.assertEqual(result[0]["gearUUID"], "gear-uuid")
+        self.assertEqual(result[0]["displayName"], "Race bike")
+        self.assertEqual(result[0]["gearName"], "Race bike")
+        self.assertEqual(result[0]["stats"]["totalDistance"], 25000)
+
     def test_garmin_gear_empty_inventory_replaces_old_and_failed_read_preserves_it(
         self,
     ):
