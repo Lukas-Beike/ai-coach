@@ -507,23 +507,23 @@ class CoachProposalCreationService:
     ) -> dict[str, Any]:
         template_id = str(values.get("id") or "").strip()
         if template_id and self._nutrition_service:
-            existing = next(
-                (
-                    template
-                    for template in self._nutrition_service().list_templates()
-                    if template.get("id") == template_id
-                ),
-                None,
-            )
+            nutrition = self._nutrition_service()
+            if payload.get("tool") == "save_nutrition_product":
+                try:
+                    existing = nutrition.get_product(template_id)
+                except AppError:
+                    existing = None
+            else:
+                existing = next(
+                    (
+                        template
+                        for template in nutrition.list_templates()
+                        if template.get("id") == template_id
+                    ),
+                    None,
+                )
             if existing:
                 preview_values = {**existing, **preview_values}
-        elif payload.get("tool") == "save_nutrition_product":
-            try:
-                existing_product = self._nutrition_service().get_product(template_id)
-            except AppError:
-                existing_product = None
-            if existing_product:
-                preview_values = {**existing_product, **preview_values}
         return preview_values
 
     def _calculate_local_write_preview(
