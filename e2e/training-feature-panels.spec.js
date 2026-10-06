@@ -4,7 +4,7 @@ test("@responsive chart readings keep their coordinates and legible labels", asy
   await page.goto("/#analysis/performance");
   await expect(page.locator("#appShell")).toBeVisible();
   const result = await page.evaluate(() => {
-    const points = [{ date: "2026-10-01", value: 53.5 }, { date: "2026-10-08", value: 54 }];
+    const points = [{ date: "2026-10-01", value: 53.5 }, { date: "2026-10-04", value: 54 }, { date: "2026-10-08", value: 54.5 }];
     const series = [{ label: "VO2max", points, currentPoint: { date: "2026-10-08", value: 53 }, cadenceDays: 7 }];
     const chart = analysisChart("Coordinates", series, "ml/kg/min", "2026-10-01", "2026-10-08", "", { sparse: true });
     document.querySelector("#analysisHistoryCharts").replaceChildren(chart);
