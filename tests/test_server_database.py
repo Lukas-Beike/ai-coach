@@ -70,7 +70,7 @@ class ServerDatabaseTests(ServerTestCase):
             connection = server.sqlite_backend.connect(path)
             try:
                 configure_cipher(connection, config.app_password)
-                schema = Path(__file__).with_name("fixtures") / "schema_1_12_19.sql"
+                schema = Path(__file__).with_name("fixtures") / "schema_1_12_19.sql.txt"
                 connection.executescript(schema.read_text(encoding="utf-8"))
                 connection.execute("INSERT INTO kv(key, value, updated_at) VALUES ('profile', ?, '2026-10-01')", ('{"name":"Synthetic upgrade athlete"}',))
                 connection.execute("INSERT INTO messages(role, content, created_at) VALUES ('user', 'Synthetic saved chat', '2026-10-01')")

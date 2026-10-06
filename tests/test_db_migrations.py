@@ -16,7 +16,7 @@ from backend.db.schema import (
     initialize_schema,
 )
 
-RELEASE_SCHEMA = Path(__file__).with_name("fixtures") / "schema_1_12_19.sql"
+RELEASE_SCHEMA = Path(__file__).with_name("fixtures") / "schema_1_12_19.sql.txt"
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
