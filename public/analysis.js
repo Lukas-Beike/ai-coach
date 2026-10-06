@@ -260,7 +260,7 @@ function appendAnalysisBarExtremaLabels(item, unit, index, scales, labels) {
   if (!values.length) return;
   const { x, y } = scales;
   const extrema = [...new Set([Math.min(...values), Math.max(...values)])];
-  for (const [extremeIndex, value] of extrema.entries()) {
+  for (const value of extrema) {
     const point = item.points.find((candidate) => analysisValidPoint(candidate) && Number(candidate.value) === value);
     if (point) {
       const width = Math.min(24, (scales.chartRight - 60) / Math.max(1, item.points.length) * .55);
