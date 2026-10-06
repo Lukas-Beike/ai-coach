@@ -97,35 +97,12 @@ def _garmin_activity_coverage(
     observed_dates = []
     activities = garmin.get("activities")
     activities = activities if isinstance(activities, list) else []
-    loads = garmin.get("training_load_activities")
-    loads_by_id = (
-        {
-            str(row.get("activityId") or row.get("id")): row
-            for row in loads[:1000]
-            if isinstance(row, dict) and (row.get("activityId") or row.get("id"))
-        }
-        if isinstance(loads, list)
-        else {}
-    )
+    loads_by_id = _training_load_by_id(garmin.get("training_load_activities"))
     for index, activity in enumerate(activities[:1000]):
-        if not isinstance(activity, dict):
+        row_data = _coverage_row(activity, index, loads_by_id, start, end, timezone)
+        if row_data is None:
             continue
-        identity = str(activity.get("activityId") or activity.get("id") or "")
-        row = dict(activity)
-        if identity and identity in loads_by_id:
-            load_record = loads_by_id[identity]
-            for key in ("activityTrainingLoad", "trainingEffectLabel"):
-                if load_record.get(key) is not None:
-                    row[key] = load_record[key]
-        day = activity_day(
-            {
-                "start_date_local": row.get("startTimeLocal")
-                or row.get("start_date_local")
-            },
-            timezone,
-        )
-        if not day or not start <= day <= end:
-            continue
+        identity, day, row = row_data
         if identity and identity in seen:
             continue
         seen.add(identity or f"row:{index}")
@@ -145,3 +122,39 @@ def _garmin_activity_coverage(
             categories[category]["load"] += activity_load
             categories[category]["sessions"] += 1
     return seen, unknown, observed_dates
+
+
+def _training_load_by_id(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, list):
+        return {}
+    return {
+        str(row.get("activityId") or row.get("id")): row
+        for row in value[:1000]
+        if isinstance(row, dict) and (row.get("activityId") or row.get("id"))
+    }
+
+
+def _coverage_row(
+    activity: Any,
+    index: int,
+    loads_by_id: dict[str, dict[str, Any]],
+    start: str,
+    end: str,
+    timezone: str,
+) -> tuple[str, str, dict[str, Any]] | None:
+    if not isinstance(activity, dict):
+        return None
+    identity = str(activity.get("activityId") or activity.get("id") or "")
+    row = dict(activity)
+    load_record = loads_by_id.get(identity)
+    if identity and load_record is not None:
+        for key in ("activityTrainingLoad", "trainingEffectLabel"):
+            if load_record.get(key) is not None:
+                row[key] = load_record[key]
+    day = activity_day(
+        {"start_date_local": row.get("startTimeLocal") or row.get("start_date_local")},
+        timezone,
+    )
+    if not day or not start <= day <= end:
+        return None
+    return identity or f"row:{index}", day, row

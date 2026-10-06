@@ -225,20 +225,40 @@ def _primary_device_record(
     candidates = [
         dict(item) for item in list(devices.values())[:100] if isinstance(item, dict)
     ]
-    primary = [item for item in candidates if item.get("primaryTrainingDevice") is True]
-    if len(primary) == 1:
-        return primary[0] if _date(primary[0].get("calendarDate")) else None
+    primary = _primary_candidates(candidates)
     if primary:
-        return None
+        return (
+            primary[0]
+            if len(primary) == 1 and _date(primary[0].get("calendarDate"))
+            else None
+        )
     dated: list[tuple[str, dict[str, Any]]] = []
     for item in candidates:
         day = _date(item.get("calendarDate"))
         if day is not None:
             dated.append((day, item))
-    latest = max((day for day, _ in dated), default="")
-    matches = [item for day, item in dated if day == latest and latest]
+    return _latest_unambiguous_record(dated, comparable_fields)
+
+
+def _primary_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [item for item in candidates if item.get("primaryTrainingDevice") is True]
+
+
+def _latest_unambiguous_record(
+    dated: list[tuple[str, dict[str, Any]]], comparable_fields: tuple[str, ...]
+) -> dict[str, Any] | None:
+    latest = max((day for day, _ in dated), default=None)
+    if latest is None:
+        return None
+    matches = [item for day, item in dated if day == latest]
+    return _one_unambiguous_record(matches, comparable_fields)
+
+
+def _one_unambiguous_record(
+    matches: list[dict[str, Any]], comparable_fields: tuple[str, ...]
+) -> dict[str, Any] | None:
     if len(matches) == 1:
-        return matches[0]
+        return matches[0] if _date(matches[0].get("calendarDate")) else None
     if not matches:
         return None
 
