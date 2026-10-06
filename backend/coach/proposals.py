@@ -969,6 +969,20 @@ class CoachProposalExecutionService:
         session_csrf_hash: str,
         payload_hash: Any,
     ) -> dict[str, Any]:
+        row, action_type, payload = self._load_ready_action(
+            token, session_csrf_hash, payload_hash
+        )
+        validated_context = self._validate_action_before_consume(
+            action_type, payload, session_csrf_hash
+        )
+        self._consume_action(row["id"])
+        return self._dispatch_action(
+            row, action_type, payload, session_csrf_hash, validated_context
+        )
+
+    def _load_ready_action(
+        self, token: Any, session_csrf_hash: str, payload_hash: Any
+    ) -> tuple[Any, str, dict[str, Any]]:
         raw_token = str(token or "").strip()
         if len(raw_token) < 32:
             raise AppError(400, "Ungültiges Coach-Aktionstoken.")
@@ -984,22 +998,59 @@ class CoachProposalExecutionService:
                 raise AppError(
                     409,
                     "Das Coach-Aktionstoken ist ungültig, abgelaufen oder bereits verwendet.",
+                    reason="proposal_invalid",
                 )
             if float(row["expires_at"]) <= now:
-                raise AppError(409, "Das Coach-Aktionstoken ist abgelaufen.")
+                raise AppError(
+                    409,
+                    "Das Coach-Aktionstoken ist abgelaufen.",
+                    reason="proposal_expired",
+                )
             if payload_hash is not None and str(payload_hash) != str(
                 row["payload_hash"]
             ):
-                raise AppError(409, "Der bestätigte Aktions-Payload wurde verändert.")
-            consumed = db.execute(
-                "UPDATE coach_action_proposals SET status='used', used_at=? WHERE id=? AND status='ready'",
-                (self._utc_now(), row["id"]),
-            ).rowcount
-            if consumed != 1:
-                raise AppError(409, "Das Coach-Aktionstoken wurde bereits verwendet.")
+                raise AppError(
+                    409,
+                    "Der bestätigte Aktions-Payload wurde verändert.",
+                    reason="proposal_payload_changed",
+                )
             action_type = str(row["action_type"])
             payload = json.loads(row["payload"])
+        return row, action_type, payload
 
+    def _validate_action_before_consume(
+        self, action_type: str, payload: dict[str, Any], session_csrf_hash: str
+    ) -> tuple[str, dict[str, Any], dict[str, Any], str, str] | None:
+        """Reject stale provenance before consuming the one-shot token."""
+        if action_type in {"remote_coach_write", "local_coach_write"}:
+            return self._validate_remote_write_context(payload, session_csrf_hash)
+        if action_type not in {"delete_duplicate_intervals_activity", "undo_change"}:
+            raise AppError(
+                400, "Unbekannte Coach-Aktion.", reason="unknown_coach_action"
+            )
+        return None
+
+    def _consume_action(self, proposal_id: str) -> None:
+        with self._database_manager.unit_of_work() as db:
+            consumed = db.execute(
+                "UPDATE coach_action_proposals SET status='used', used_at=? WHERE id=? AND status='ready'",
+                (self._utc_now(), proposal_id),
+            ).rowcount
+            if consumed != 1:
+                raise AppError(
+                    409,
+                    "Das Coach-Aktionstoken wurde bereits verwendet.",
+                    reason="proposal_used",
+                )
+
+    def _dispatch_action(
+        self,
+        row: Any,
+        action_type: str,
+        payload: dict[str, Any],
+        session_csrf_hash: str,
+        validated_context: tuple[str, dict[str, Any], dict[str, Any], str, str] | None,
+    ) -> dict[str, Any]:
         if action_type == "delete_duplicate_intervals_activity":
             result = {
                 "ok": True,
@@ -1010,7 +1061,21 @@ class CoachProposalExecutionService:
         elif action_type == "undo_change":
             result = self._history_undo_service.apply(payload)
         elif action_type in {"remote_coach_write", "local_coach_write"}:
-            result = self._execute_coach_write(payload, session_csrf_hash)
+            assert validated_context is not None
+            try:
+                result = self._execute_coach_write(session_csrf_hash, validated_context)
+            except AppError:
+                if action_type == "local_coach_write":
+                    # Local nutrition validation failures have no durable
+                    # effect. Keep their proposal available so a conflict is
+                    # not misreported as an expired confirmation.
+                    with self._database_manager.unit_of_work() as db:
+                        db.execute(
+                            "UPDATE coach_action_proposals SET status='ready', used_at=NULL "
+                            "WHERE id=? AND status='used'",
+                            (row["id"],),
+                        )
+                raise
         else:
             raise AppError(400, "Unbekannte Coach-Aktion.")
         LOGGER.info(
@@ -1027,13 +1092,13 @@ class CoachProposalExecutionService:
         return result
 
     def _execute_coach_write(
-        self, payload: dict[str, Any], session_csrf_hash: str
+        self,
+        session_csrf_hash: str,
+        validated_context: tuple[str, dict[str, Any], dict[str, Any], str, str],
     ) -> dict[str, Any]:
         if not self._tool_dispatch_service:
             raise AppError(503, "Die Coach-Aktionsausführung ist nicht verfügbar.")
-        tool, arguments, intent, conversation_id, client_turn_id = (
-            self._validate_remote_write_context(payload, session_csrf_hash)
-        )
+        tool, arguments, intent, conversation_id, client_turn_id = validated_context
         if tool in LOCAL_COACH_WRITE_TOOLS:
             result = self._tool_dispatch_service().execute(
                 tool,

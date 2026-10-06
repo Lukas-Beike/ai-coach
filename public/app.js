@@ -1720,7 +1720,13 @@ async function executeCoachActionProposal(proposal, button) {
     else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) void applyNavigationRoute("plan", { historyMode: "push" });
   } catch (error) {
     addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
-    if ([409, 410].includes(error.status)) { proposal.status = "expired"; renderCoachActionReview(); }
+    if (error.reason === "proposal_expired") {
+      proposal.status = "expired";
+      renderCoachActionReview();
+    } else if (["proposal_invalid", "proposal_used", "proposal_unavailable"].includes(error.reason)) {
+      proposal.status = "used";
+      renderCoachActionReview();
+    }
     toast(error.message, true);
     button.disabled = false;
   }
