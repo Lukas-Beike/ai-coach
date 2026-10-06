@@ -16,6 +16,10 @@ private VPN; it must not be exposed directly to the public internet.
 
 - Releases preserve existing athlete data. Schema changes require explicit,
   versioned, transactional SQLCipher migrations and upgrade regression tests.
+- Every schema change must include an upgrade path from the previously released
+  schema. Preserve that schema as a frozen test fixture and verify the migration
+  with existing data, rollback on failure and same-build restart coverage. A
+  schema-changing pull request is not release-ready without this evidence.
 - Updates must support the documented previous release schemas, including
   direct updates that skip an intermediate release. Never require an empty
   data directory as a default release or development policy.
