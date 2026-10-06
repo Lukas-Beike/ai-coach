@@ -400,6 +400,11 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
         self.assertEqual(dict(response.headers)["Cache-Control"], "public, max-age=31536000, immutable")
 
+    def test_nutrition_source_label_leaves_sync_state_to_card(self):
+        source = (server.PUBLIC_DIR / "nutrition.js").read_text(encoding="utf-8")
+        self.assertIn("return sourceLabel;", source)
+        self.assertNotIn('return sourceLabel + (item.template ? "" : item.syncLabel);', source)
+
     def test_analysis_asset_is_served_and_precached_as_javascript(self):
         response = StaticAssetService(server.PUBLIC_DIR).render("/analysis.js", "/analysis.js?v=69", None)
         self.assertEqual(response.status, 200)

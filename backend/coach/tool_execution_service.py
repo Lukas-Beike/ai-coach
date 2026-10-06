@@ -19,7 +19,12 @@ from backend.db.repositories import KeyValueRepository
 from backend.sync.state import SyncStateRepository
 
 COACH_EXTERNAL_FOOD_LOOKUP_TOOLS = frozenset(
-    {"lookup_food", "calculate_food_nutrition"}
+    {
+        "lookup_food",
+        "calculate_food_nutrition",
+        "save_nutrition_template",
+        "save_nutrition_product",
+    }
 )
 
 

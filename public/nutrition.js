@@ -112,7 +112,7 @@ function nutritionBasisLabel(basis, item, sourceLabel) {
   }
   if (basis?.kind === "manual_correction") return "Manuell korrigierte Nährwerte";
   if (basis?.kind === "packaging_label") return "Verpackungsangabe";
-  return sourceLabel + (item.template ? "" : item.syncLabel);
+  return sourceLabel;
 }
 
 function nutritionComponentDetails(item) {

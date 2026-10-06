@@ -132,7 +132,7 @@ def build_tool_contracts(
                         },
                         "unit": {"type": "string", "enum": ["g", "ml", "portion"]},
                         "kcal": {
-                            "type": ["number", "null"],
+                            "type": "number",
                             "minimum": 0,
                             "maximum": 10000,
                         },
@@ -866,6 +866,24 @@ def build_tool_contracts(
                         },
                         "components": nutrition_components,
                     },
+                    "oneOf": [
+                        {
+                            "required": ["components", "description"],
+                            "not": {
+                                "anyOf": [
+                                    {"required": ["kcal"]},
+                                    {"required": ["carbs_g"]},
+                                    {"required": ["protein_g"]},
+                                    {"required": ["fat_g"]},
+                                    {"required": ["food_ingredients"]},
+                                    {"required": ["product_id"]},
+                                    {"required": ["amount"]},
+                                    {"required": ["unit"]},
+                                ]
+                            },
+                        },
+                        {"not": {"required": ["components"]}},
+                    ],
                 }
             },
         ),
