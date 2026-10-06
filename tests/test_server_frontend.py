@@ -487,7 +487,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"/forms.js"', source)
         self.assertIn('"/coach.js?v=6"', source)
         self.assertIn('"/app.js?v=269"', source)
-        self.assertIn('"/nutrition.js?v=13"', source)
+        self.assertIn('"/nutrition.js?v=14"', source)
         self.assertIn('"/icon.svg?v=217"', source)
         self.assertIn('"/styles.css?v=268"', source)
         self.assertIn('pathname.startsWith("/api/")', source)

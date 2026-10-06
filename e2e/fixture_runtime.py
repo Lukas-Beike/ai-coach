@@ -64,10 +64,18 @@ def fixture_coach_response(payload, **kwargs):
         })
     context = decoded["dialogue"]
     current_id = context["current_user_message_id"]
-    if current_message in {"E2E nutrition: confirm meal", "E2E nutrition: half portion", "E2E nutrition: update meal", "E2E nutrition: delete meal", "E2E nutrition: database oats", "E2E nutrition: confirm database meal"}:
+    if current_message in {"E2E nutrition: confirm meal", "E2E nutrition: half portion", "E2E nutrition: update meal", "E2E nutrition: delete meal", "E2E nutrition: database oats", "E2E nutrition: confirm database meal", "E2E nutrition: mixed meal"}:
         nutrition = server.NUTRITION_ASSEMBLY.service()
         templates = nutrition.list_templates()
-        if current_message == "E2E nutrition: confirm database meal":
+        if current_message == "E2E nutrition: mixed meal":
+            product = nutrition.save_product({"name": "Synthetic whey <img src=x>", "brand": "Fixture", "source": "packaging_label", "basis_amount": 100, "basis_unit": "g", "kcal": 400, "carbs_g": 8.3, "protein_g": 80, "fat_g": 5})
+            name = "save_nutrition_entry"
+            arguments = {"payload": {"description": "Mixed meal <script>alert(1)</script>", "source": "manual", "components": [
+                {"kind": "local_product", "product_id": product["id"], "amount": 60, "unit": "g"},
+                {"kind": "database", "food_id": "bls:C133000", "amount": 3, "unit": "g"},
+                {"kind": "manual", "name": "Creatine", "amount": 8, "unit": "g", "kcal": 0, "carbs_g": 0, "protein_g": 0, "fat_g": 0}
+            ]}}
+        elif current_message == "E2E nutrition: confirm database meal":
             name = "save_nutrition_template"
             arguments = {"payload": {"name": "Database oats", "description": "50 g Haferflocken", "kcal": 999, "source": "coach", "food_ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]}}
         elif current_message == "E2E nutrition: database oats":
