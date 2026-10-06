@@ -7,7 +7,12 @@ from datetime import date, timedelta
 from statistics import median
 from typing import Any
 
-from backend.performance import activity_validation, eftp, garmin_weight
+from backend.performance import (
+    activity_validation,
+    eftp,
+    garmin_metric_history,
+    garmin_weight,
+)
 
 INTERVALS_SOURCE = "Intervals.icu Wellness"
 GARMIN_SOURCE = "Garmin Connect"
@@ -127,6 +132,14 @@ def _garmin_ftp(
 ) -> dict[date, tuple[float, str, Any]]:
     result: dict[date, tuple[float, str, Any]] = {}
     synced_at = _sync_timestamp(garmin, "cycling_ftp")
+    for row in garmin_metric_history.ftp_points(
+        garmin.get("cycling_ftp_history"),
+        start=today - timedelta(days=89),
+        end=today,
+    ):
+        observed = _day(row["date"])
+        if observed is not None:
+            result[observed] = (float(row["value"]), row["date"], synced_at)
     for row in _rows(garmin.get("performance_history")):
         observed = _day(row.get("date"))
         metrics = row.get("metrics")

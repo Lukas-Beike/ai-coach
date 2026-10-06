@@ -21,13 +21,23 @@
     const section = node("section", null, "activity-series");
     section.append(node("h3", `${label} (${unit})`));
     const svg = document.createElementNS(SVG_NS, "svg");
-    svg.setAttribute("viewBox", "0 0 640 160");
+    const width = 680; const height = 220; const left = 64; const right = 12; const top = 16; const bottom = 34;
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", `${label}, Zeitachse in Minuten`);
+    svg.setAttribute("aria-label", `${label}, Zeitachse in Minuten; Messwerte und Lücken sind in der Tabelle aufgeführt`);
     const min = Math.min(...points.map((point) => point[1]));
     const max = Math.max(...points.map((point) => point[1]));
     const start = points[0][0];
     const duration = Math.max(1, points.at(-1)[0] - start);
+    const y = (value) => top + (max - value) / Math.max(1, max - min) * (height - top - bottom);
+    const x = (time) => left + (time - start) / duration * (width - left - right);
+    const ticks = max === min ? [min] : [max, (max + min) / 2, min];
+    ticks.forEach((value) => {
+      const line = document.createElementNS(SVG_NS, "line"); line.setAttribute("x1", String(left)); line.setAttribute("x2", String(width - right)); line.setAttribute("y1", String(y(value))); line.setAttribute("y2", String(y(value))); line.setAttribute("class", "activity-gridline"); svg.append(line);
+      const tick = document.createElementNS(SVG_NS, "text"); tick.setAttribute("x", String(left - 8)); tick.setAttribute("y", String(y(value) + 4)); tick.setAttribute("text-anchor", "end"); tick.textContent = Number(value).toLocaleString("de-DE", { maximumFractionDigits: 1 }); svg.append(tick);
+    });
+    const xTicks = [start, start + duration / 2, points.at(-1)[0]];
+    xTicks.forEach((time) => { const tick = document.createElementNS(SVG_NS, "text"); tick.setAttribute("x", String(x(time))); tick.setAttribute("y", String(height - 8)); tick.setAttribute("text-anchor", "middle"); tick.textContent = `${Math.round(time / 60)} min`; svg.append(tick); });
     const path = document.createElementNS(SVG_NS, "path");
     let continuing = false;
     path.setAttribute("d", times.map((time, index) => {
@@ -35,14 +45,21 @@
       if (typeof time !== "number" || typeof value !== "number" || !Number.isFinite(time) || !Number.isFinite(value)) { continuing = false; return ""; }
       const command = continuing ? "L" : "M";
       continuing = true;
-      return `${command}${(10 + (time - start) / duration * 620).toFixed(1)},${(130 - (value - min) / Math.max(1, max - min) * 115).toFixed(1)}`;
+      return `${command}${x(time).toFixed(1)},${y(value).toFixed(1)}`;
     }).join(" "));
     svg.append(path);
-    section.append(svg, node("p", `${Math.round(min)}–${Math.round(max)} ${unit} · ${Math.round(start / 60)}–${Math.round(points.at(-1)[0] / 60)} min`, "muted"));
+    section.append(svg, node("p", `${Math.round(min * 10) / 10}–${Math.round(max * 10) / 10} ${unit} · ${Math.round(start / 60)}–${Math.round(points.at(-1)[0] / 60)} min · ${times.length - points.length} fehlende Messpunkte`, "muted"));
+    const details = node("details", null, "activity-values"); details.append(node("summary", `Alle ${points.length} Messwerte ansehen`));
+    const tableWrap = node("div", null, "analysis-chart-table"); const table = node("table");
+    table.append(node("caption", `${label} in ${unit}; fehlende Werte sind als Lücke markiert.`));
+    const thead = node("thead"); const heading = node("tr"); ["Zeit", label].forEach((value) => { const cell = node("th", value); cell.scope = "col"; heading.append(cell); }); thead.append(heading); table.append(thead);
+    const body = node("tbody");
+    times.forEach((time, index) => { if (typeof time !== "number" || !Number.isFinite(time)) return; const row = node("tr"); const timeCell = node("th", `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, "0")}`); timeCell.scope = "row"; row.append(timeCell); const value = values[index]; row.append(node("td", typeof value === "number" && Number.isFinite(value) ? `${value.toLocaleString("de-DE", { maximumFractionDigits: 2 })} ${unit}` : "Lücke")); body.append(row); });
+    table.append(body); tableWrap.append(table); details.append(tableWrap); section.append(details);
     return section;
   }
 
-  function render(payload, content) {
+  function render(payload, content, api, activityId) {
     content.replaceChildren();
     const activity = payload.activity || {};
     const metadata = payload.detail_data || {};
@@ -52,14 +69,27 @@
     renderIntervalQuality(payload, content);
     renderAerobic(payload, content);
     renderPower(payload, content);
-    const feedback = payload.activity_feedback;
     for (const item of payload.equipment || []) content.append(node("p", `Ausrüstung: ${item.name} · ${item.usage.distance_km} km${item.usage.maintenance_due ? " · persönliches Wartungsintervall erreicht" : ""}`));
-    if (feedback && (feedback.notes || feedback.session_rpe != null || feedback.deviation_reason)) {
-      content.append(node("h3", "Dein Feedback"));
-      if (feedback.notes) content.append(node("p", feedback.notes));
-      if (feedback.session_rpe != null) content.append(node("p", `Session-RPE: ${feedback.session_rpe}/10`));
-      if (feedback.deviation_reason) content.append(node("p", feedback.deviation_reason));
-    }
+    renderFeedback(payload.activity_feedback, payload.activity, api, activityId, content);
+  }
+
+  function renderFeedback(feedback, activity, api, activityId, content) {
+    const section = node("section", null, "activity-feedback"); section.append(node("h3", "Dein Feedback"));
+    const form = document.createElement("form"); form.className = "activity-feedback-form";
+    const rpeLabel = node("label", "Session-RPE (0–10)"); const rpe = document.createElement("input"); rpe.name = "session_rpe"; rpe.type = "number"; rpe.min = "0"; rpe.max = "10"; rpe.step = "0.5"; rpe.inputMode = "decimal"; rpe.value = feedback?.session_rpe ?? ""; rpeLabel.append(rpe);
+    const reasonLabel = node("label", "Abweichungsgrund"); const reason = document.createElement("input"); reason.name = "deviation_reason"; reason.maxLength = 500; reason.value = feedback?.deviation_reason || ""; reasonLabel.append(reason);
+    const notesLabel = node("label", "Notizen"); const notes = document.createElement("textarea"); notes.name = "notes"; notes.rows = 3; notes.maxLength = 4000; notes.value = feedback?.notes || ""; notesLabel.append(notes);
+    const status = node("p", "", "muted"); status.setAttribute("role", "status"); const save = node("button", "Feedback speichern"); save.type = "submit";
+    form.append(rpeLabel, reasonLabel, notesLabel, save); section.append(form, status); content.append(section);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault(); save.disabled = true; status.textContent = "Speichere …";
+      try {
+        const raw = rpe.value.trim(); const value = { activity_name: activity?.name || "", activity_date: String(activity?.start_date_local || "").slice(0, 40), notes: notes.value, deviation_reason: reason.value, session_rpe: raw === "" ? null : Number(raw) };
+        if (raw !== "" && (!Number.isFinite(value.session_rpe) || value.session_rpe < 0 || value.session_rpe > 10)) throw new Error("RPE muss zwischen 0 und 10 liegen.");
+        const result = await api(`/api/activities/${encodeURIComponent(activityId)}/feedback`, { method: "POST", body: JSON.stringify(value) });
+        status.textContent = result.activity_feedback ? "Feedback gespeichert." : "Feedback entfernt.";
+      } catch (error) { status.textContent = error.message; } finally { save.disabled = false; }
+    });
   }
 
 
@@ -86,7 +116,12 @@
 
   function renderSeries(activity, content) {
     let charts = 0;
-    for (const [key, label, unit] of [["watts", "Leistung", "W"], ["heartrate", "Herzfrequenz", "bpm"], ["velocity_smooth", "Geschwindigkeit", "m/s"], ["speed", "Geschwindigkeit", "m/s"], ["altitude", "Höhe", "m"], ["cadence", "Kadenz", "rpm"]]) {
+    const labels = { watts: ["Leistung", "W"], power: ["Leistung", "W"], heartrate: ["Herzfrequenz", "bpm"], velocity_smooth: ["Geschwindigkeit", "m/s"], velocity: ["Geschwindigkeit", "m/s"], speed: ["Geschwindigkeit", "m/s"], altitude: ["Höhe", "m"], distance: ["Distanz", "m"], grade: ["Steigung", "%"], grade_smooth: ["Steigung geglättet", "%"], pace: ["Pace", "s/km"], cadence: ["Kadenz", "rpm"], temperature: ["Temperatur", "°C"] };
+    const streams = activity.streams || {};
+    const preferred = new Set(["watts", "heartrate", "velocity_smooth", "speed", "altitude", "distance", "grade_smooth", "grade", "pace", "cadence", "temperature"]);
+    const channels = Object.keys(labels).filter((key) => preferred.has(key) && Array.isArray(streams[key]) && !(key === "speed" && streams.velocity_smooth) && !(key === "grade" && streams.grade_smooth) && !(key === "power" && streams.watts));
+    for (const key of channels) {
+      const [label, unit] = labels[key];
       const series = chart(activity.streams || {}, key, label, unit);
       if (series) { content.append(series); charts += 1; }
     }
@@ -194,7 +229,7 @@
     async function load() {
       const payload = await api(`/api/activities/${encodeURIComponent(activityId)}`);
       if (token !== generation) return;
-      render(payload, content);
+      render(payload, content, api, activityId);
       title.textContent = payload.activity?.name || activity.name || "Aktivitätsdetails";
       refresh.textContent = payload.detail_data?.observed_at ? "Detaildaten aktualisieren" : "Detaildaten laden";
       status.textContent = "";

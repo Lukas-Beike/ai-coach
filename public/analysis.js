@@ -465,6 +465,109 @@ function analysisPeriodControls(label, value, change) {
 
 let analysisHistoryPeriod = "twelveWeeks";
 let recoveryHistoryPeriod = "fortnight";
+let analysisReportGeneration = 0;
+
+function reportMetric(label, value, detail = "") {
+  const item = reportNode("div");
+  item.append(reportNode("strong", value), reportNode("span", label));
+  if (detail) item.append(reportNode("small", detail));
+  return item;
+}
+
+function reportNumber(value, unit = "") {
+  if (value == null) return "unbekannt";
+  return `${Number(value).toLocaleString("de-DE", { maximumFractionDigits: 1 })}${unit ? ` ${unit}` : ""}`;
+}
+
+function currentWeekChart(report) {
+  const points = (report.daily || []).map((day) => ({ date: day.date, value: day.totals?.icu_training_load?.value }));
+  const valid = points.filter((point) => point.value != null);
+  const section = reportNode("section", null, "weekly-chart");
+  section.append(reportNode("h4", "Tagesbelastung"));
+  if (!valid.length) { section.append(reportNode("p", "Keine gemessenen Belastungswerte in dieser Woche.", "muted")); return section; }
+  const width = 520; const height = 180; const left = 42; const right = 12; const top = 16; const bottom = 34;
+  const max = Math.max(1, ...valid.map((point) => Number(point.value))); const min = 0;
+  const x = (index) => left + index * ((width - left - right) / Math.max(1, points.length - 1));
+  const y = (value) => top + (max - Number(value)) / Math.max(1, max - min) * (height - top - bottom);
+  const svg = analysisSvg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "Tagesbelastung mit sichtbaren Lücken" });
+  svg.append(analysisSvg("title", {}, "Tagesbelastung der aktuellen Woche"));
+  svg.append(analysisSvg("text", { x: 4, y: top + 4 }, reportNumber(max)));
+  svg.append(analysisSvg("text", { x: 4, y: height - bottom + 4 }, "0"));
+  let path = ""; let open = false;
+  points.forEach((point, index) => {
+    if (point.value == null) { open = false; return; }
+    path += `${open ? "L" : "M"}${x(index).toFixed(1)},${y(point.value).toFixed(1)} `; open = true;
+    const circle = analysisSvg("circle", { cx: x(index), cy: y(point.value), r: 3, class: "weekly-load-point", tabindex: 0, role: "button", "aria-label": `${dateLabel(point.date)}: ${reportNumber(point.value)}` });
+    svg.append(circle);
+    circle.addEventListener("focus", () => circle.setAttribute("aria-description", `${dateLabel(point.date)} ${reportNumber(point.value)}`));
+  });
+  svg.insertBefore(analysisSvg("path", { d: path.trim(), class: "weekly-load-line" }), svg.querySelector("circle"));
+  points.forEach((point, index) => svg.append(analysisSvg("text", { x: x(index), y: height - 8, "text-anchor": "middle" }, dateLabel(point.date).slice(0, 2))));
+  section.append(svg);
+  const details = reportNode("details"); details.append(reportNode("summary", "Tageswerte ansehen"));
+  const table = reportNode("table"); table.append(reportNode("caption", "Belastung pro Tag; unbekannte Werte bleiben Lücken."));
+  const head = reportNode("tr"); ["Tag", "Belastung"].forEach((label) => head.append(reportNode("th", label))); const thead = reportNode("thead"); thead.append(head); table.append(thead);
+  const body = reportNode("tbody"); points.forEach((point) => { const row = reportNode("tr"); row.append(reportNode("th", dateLabel(point.date)), reportNode("td", reportNumber(point.value))); body.append(row); }); table.append(body); details.append(table); section.append(details);
+  return section;
+}
+
+function renderCurrentWeek(report) {
+  const root = document.querySelector("#currentWeekReport");
+  root.replaceChildren();
+  if (!report) { root.append(reportNode("p", "Wochenbericht nicht verfügbar.", "empty")); return; }
+  const heading = reportNode("h3", `Aktuelle Woche · ${dateLabel(report.start)} bis ${dateLabel(report.end)}`);
+  root.append(heading, reportNode("p", `${report.partial_period ? "Laufende, unvollständige Woche" : "Abgeschlossene Woche"} · ${report.source || "Quelle unbekannt"} · Methode ${report.method || "unbekannt"}`, "muted"));
+  const totals = report.totals || {}; const metrics = reportNode("div", null, "weekly-metrics");
+  metrics.append(reportMetric("Einheiten", reportNumber(totals.sessions)), reportMetric("Zeit", totals.moving_time?.value == null ? "unbekannt" : formatDuration(totals.moving_time.value)), reportMetric("Distanz", reportNumber(totals.distance?.value == null ? null : totals.distance.value / 1000, "km")), reportMetric("Belastung", reportNumber(totals.icu_training_load?.value)));
+  root.append(metrics, reportNode("p", report.coverage_note || "Nur bekannte lokale Datensätze werden zusammengefasst.", "muted"));
+  const planned = report.planning || {}; root.append(reportNode("p", `Planabgleich: ${planned.available ? `${planned.completed || 0}/${planned.sessions || 0} geplante Einheiten absolviert` : "Plan nicht verfügbar"}${planned.missed ? ` · ${planned.missed} verpasst` : ""}.`, "muted"));
+  if (report.key_sessions?.length) { root.append(reportNode("h4", "Schlüsseleinheiten")); const list = reportNode("ul"); report.key_sessions.forEach((item) => list.append(reportNode("li", `${dateLabel(item.date)} · ${item.name} · ${item.training_load == null ? "Belastung unbekannt" : reportNumber(item.training_load)}`))); root.append(list); }
+  if (report.zones?.length || report.activity_feedback?.length) { root.append(reportNode("h4", "Zonen und Feedback")); report.zones?.forEach((zone) => root.append(reportNode("p", `${zone.sport} · ${zone.sensor} · ${reportNumber(zone.measured_seconds, "s")} gemessen (${zone.measured_sessions}/${zone.total_sessions} Einheiten)`))); (report.activity_feedback || []).forEach((item) => root.append(reportNode("p", `${dateLabel(item.date)} · RPE ${item.session_rpe == null ? "unbekannt" : `${item.session_rpe}/10`}${item.deviation_reason ? ` · ${item.deviation_reason}` : ""}${item.notes ? ` · ${item.notes}` : ""}`))); }
+  root.append(currentWeekChart(report));
+}
+
+function renderExistingPerformanceReports(endurance, profiles) {
+  const root = document.querySelector("#existingPerformanceReports"); root.replaceChildren();
+  const heading = reportNode("h3", "Ausdauer und beobachtete Bestleistungen"); root.append(heading);
+  const sourceText = (payload) => `${payload?.status === "ok" ? "Daten vorhanden" : "Unzureichende Daten"} · Quelle/Methode: ${payload?.scope || payload?.method || "unbekannt"}`;
+  const enduranceCard = reportNode("section", null, "analysis-chart-card"); enduranceCard.append(reportNode("h4", "Ausdauer-Effizienz"), reportNode("p", sourceText(endurance), "muted"));
+  const bySport = new Map();
+  (endurance?.activities || []).forEach((item) => { const sport = String(item.sport || "Sportart unbekannt"); if (!bySport.has(sport)) bySport.set(sport, []); bySport.get(sport).push(item); });
+  if (!bySport.size) enduranceCard.append(reportNode("p", endurance?.comparison || "Noch keine auswertbaren lokalen Detailaufzeichnungen vorhanden."));
+  bySport.forEach((items, sport) => { enduranceCard.append(reportNode("h5", sport)); items.forEach((item) => {
+    const row = reportNode("p", `${dateLabel(item.date)} · ${item.aerobic?.efficiency == null ? item.aerobic?.reason || "unbekannt" : `${item.aerobic.efficiency} ${item.aerobic.unit || ""} · Drift ${item.aerobic.drift_percent}%`}`);
+    row.append(document.createTextNode(" · "));
+    row.append(analysisActivityLink(item.activity_id, item.name, item.date, item.sport)); enduranceCard.append(row);
+  }); });
+  const profileCard = reportNode("section", null, "analysis-chart-card"); profileCard.append(reportNode("h4", "Power-Profile / beste beobachtete Fenster"), reportNode("p", sourceText(profiles), "muted"));
+  const table = reportNode("table"); const head = reportNode("tr"); ["Sport", "Fenster", "Watt", "Aktivität / Datum"].forEach((label) => head.append(reportNode("th", label))); const thead = reportNode("thead"); thead.append(head); table.append(thead); const body = reportNode("tbody");
+  const detailById = new Map((profiles?.activities || []).map((item) => [String(item.activity_id), item]));
+  const order = new Map([[5, 0], [60, 1], [300, 2], [1200, 3]]);
+  (profiles?.best || []).slice().sort((a, b) => String(a.sport).localeCompare(String(b.sport)) || (order.get(a.duration_seconds) ?? 9) - (order.get(b.duration_seconds) ?? 9)).forEach((item) => {
+    const detail = detailById.get(String(item.activity_id)) || {}; const row = reportNode("tr"); row.append(reportNode("td", item.sport || "unbekannt"), reportNode("td", item.duration_seconds < 60 ? `${item.duration_seconds} s` : `${item.duration_seconds / 60} min`), reportNode("td", item.watts == null ? "unbekannt" : `${item.watts} W`));
+    const reference = reportNode("td"); reference.append(analysisActivityLink(item.activity_id, detail.name || item.activity_id, item.date, item.sport)); reference.append(document.createTextNode(` · ${dateLabel(item.date)}`)); row.append(reference); body.append(row);
+  });
+  if (!body.childElementCount) { const row = reportNode("tr"); const empty = reportNode("td", "Keine lückenlosen 5 s, 1 min, 5 min oder 20 min Fenster verfügbar."); empty.colSpan = 4; row.append(empty); body.append(row); }
+  table.append(body); profileCard.append(table, reportNode("p", profiles?.scope || "Messmethode und Bereich unbekannt.", "muted"));
+  root.append(enduranceCard, profileCard);
+}
+
+function analysisActivityLink(activityId, name, date, sport) {
+  const button = reportNode("button", name || activityId || "Aktivität nicht verfügbar", "secondary-button"); button.type = "button";
+  button.disabled = !activityId || !globalThis.ActivityDetails;
+  button.addEventListener("click", () => globalThis.ActivityDetails.open({ id: activityId, name, type: sport, start_date_local: date }, { api, showDialog: showAccessibleDialog }));
+  return button;
+}
+
+async function loadAnalysisReports() {
+  const generation = ++analysisReportGeneration;
+  try {
+    const results = await Promise.allSettled([api("/api/analysis/report"), api("/api/analysis/endurance"), api("/api/analysis/power-profiles")]);
+    if (generation !== analysisReportGeneration) return;
+    renderCurrentWeek(results[0].status === "fulfilled" ? results[0].value : null);
+    renderExistingPerformanceReports(results[1].status === "fulfilled" ? results[1].value : null, results[2].status === "fulfilled" ? results[2].value : null);
+  } catch (_) { /* individual report failures stay scoped to their cards */ }
+}
 
 globalThis.matchMedia("(max-width: 599px)").addEventListener("change", () => {
   if (state.data) { renderAnalysisHistory(state.data.performance?.history); renderPersonalRecovery(state.data.performance?.personal_recovery); }
@@ -714,8 +817,10 @@ async function renderSeasonPreparation() {
 }
 
 function renderAnalysisSegments(route = state.route) {
-  const segment = { "analysis/load": "load", "analysis/body": "body", "analysis/recovery": "recovery" }[route] || "performance";
+  const segment = { "analysis/load": "load", "analysis/week": "week", "analysis/body": "body", "analysis/recovery": "recovery" }[route] || "performance";
   document.getElementById("analysisHistoryCharts").hidden = segment !== "performance";
+  document.getElementById("existingPerformanceReports").hidden = segment !== "performance";
+  document.getElementById("currentWeekReport").hidden = segment !== "week";
   document.getElementById("bodyAnalysisCharts").hidden = segment !== "body";
   document.getElementById("performancePredictions").hidden = segment !== "performance" || !document.getElementById("performancePredictions").childElementCount;
   document.getElementById("sessionPerformance").hidden = segment !== "load";

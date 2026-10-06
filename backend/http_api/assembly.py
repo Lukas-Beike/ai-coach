@@ -470,7 +470,9 @@ class HttpApiAssembly:
             coach_planning_command_service,
             coach_provision_service,
         )
-        self.feedback_post_routes = FeedbackPostRoutes(checkin_service)
+        self.feedback_post_routes = FeedbackPostRoutes(
+            checkin_service, athlete.activity_feedback
+        )
         self.chat_cancel_post_routes = ChatCancelPostRoutes(
             coach_job_cancellation_service
         )

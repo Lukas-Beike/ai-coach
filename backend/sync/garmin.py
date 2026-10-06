@@ -51,6 +51,9 @@ GARMIN_METRIC_SOURCES = (
     "cycling_ftp",
     "running_threshold",
     "weight",
+    "cycling_ftp_history",
+    "endurance_score",
+    "running_tolerance",
 )
 
 
@@ -312,7 +315,14 @@ def _merge_source_records(
     previous: dict[str, Any],
     payload: dict[str, Any],
 ) -> None:
-    if source in GARMIN_COLLECTION_SOURCES and (
+    if source == "cycling_ftp_history" and (source in previous or source in payload):
+        incoming_rows = [incoming] if isinstance(incoming, dict) else incoming
+        previous_rows = previous.get(source)
+        previous_rows = (
+            [previous_rows] if isinstance(previous_rows, dict) else previous_rows
+        )
+        payload[source] = merge_garmin_records(incoming_rows, previous_rows)
+    elif source in GARMIN_COLLECTION_SOURCES and (
         source in previous or source in payload
     ):
         payload[source] = merge_garmin_records(incoming, previous.get(source))

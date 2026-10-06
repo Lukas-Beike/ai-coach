@@ -1,11 +1,13 @@
 """Personal recovery distributions, separated by provider and measurement field."""
 
 import math
-from datetime import date, timedelta
+from datetime import date, timedelta, timezone
 from functools import partial
 from statistics import median, quantiles
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from backend.performance.morning_battery import timestamp
 from backend.performance.recovery import (
     dated_garmin_recovery_records,
     garmin_recovery_metric,
@@ -51,16 +53,16 @@ def personal_recovery(
     except (ValueError, TypeError):
         target = float("nan")
     deficits = _sleep_deficits(groups, target, today)
+    regularity = sleep_regularity(
+        wellness, garmin, str(profile.get("timezone") or "UTC"), today
+    )
     return {
         "method": "personal-quartiles-v1",
         "as_of": current_day,
         "baselines": baselines,
         "sleep_deficits": deficits,
         "sleep_target_hours": target if math.isfinite(target) else None,
-        "regularity": {
-            "status": "insufficient_data",
-            "reason": "Keine geprüften datierten Schlafbeginn- und Endzeiten verfügbar.",
-        },
+        "regularity": regularity,
         "note": "Persönliche Quartile beschreiben Abweichungen, keine medizinische Trainingsfreigabe. Krankheit und Schmerzen separat berücksichtigen. Quellen und Messfelder werden nicht gemischt; lange Nächte gleichen Defizite nicht rechnerisch aus.",
     }
 
@@ -181,3 +183,255 @@ def _add_garmin_records(
             )
             if observed == day:
                 add(("Garmin Connect", metric, field), day, value, scale)
+
+
+_SLEEP_START_FIELDS = (
+    "sleepStartTimestampGMT",
+    "sleepStartTimestamp",
+    "sleep_start_at",
+    "sleepStart",
+    "sleep_start",
+    "onset_at",
+)
+_SLEEP_END_FIELDS = (
+    "sleepEndTimestampGMT",
+    "sleepEndTimestamp",
+    "sleep_end_at",
+    "sleepEnd",
+    "sleep_end",
+    "wake_at",
+)
+
+
+def sleep_regularity(
+    wellness: list[dict[str, Any]],
+    garmin: dict[str, Any],
+    timezone_name: str,
+    today: date,
+) -> dict[str, Any]:
+    """Summarize actual sleep intervals without turning them into a score."""
+    try:
+        zone = ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = timezone.utc
+    groups: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for row in wellness:
+        for item in _sleep_intervals(row, zone, today):
+            groups.setdefault(("Intervals.icu", item["method"]), {})[item["date"]] = (
+                item
+            )
+    for item in _sleep_intervals(garmin.get("sleep"), zone, today):
+        groups.setdefault(("Garmin Connect", item["method"]), {})[item["date"]] = item
+    series = []
+    for (source, method), records in sorted(groups.items()):
+        ordered = [records[key] for key in sorted(records)]
+        latest = ordered[-1]
+        prior = [
+            item
+            for item in ordered
+            if (today - timedelta(days=42)).isoformat() <= item["date"] < latest["date"]
+        ]
+        count = len(prior)
+        status = (
+            "ok"
+            if count >= 28
+            else "provisional"
+            if count >= 14
+            else "insufficient_data"
+        )
+        reason = (
+            None
+            if count >= 14
+            else (
+                "Mindestens 14 fruehere datierte Schlafintervalle erforderlich."
+                if count
+                else "Keine geprueften datierten Schlafbeginn- und Endzeiten verfuegbar."
+            )
+        )
+        onset = (
+            _circular_median([item["onset_minutes_local"] for item in prior])
+            if prior
+            else None
+        )
+        wake = (
+            _circular_median([item["wake_minutes_local"] for item in prior])
+            if prior
+            else None
+        )
+        points = [
+            {
+                **item,
+                "source": source,
+                "method": method,
+                "onset_deviation_minutes": _circular_deviation(
+                    item["onset_minutes_local"], onset
+                ),
+                "wake_deviation_minutes": _circular_deviation(
+                    item["wake_minutes_local"], wake
+                ),
+            }
+            for item in ordered
+        ]
+        by_date = {item["date"]: item for item in points}
+
+        def display(
+            days: int, *, _by_date=by_date, _source=source, _method=method
+        ) -> list[dict[str, Any]]:
+            first = today - timedelta(days=days - 1)
+            result = []
+            for offset in range(days):
+                day = first + timedelta(days=offset)
+                result.append(
+                    _by_date.get(day.isoformat())
+                    or {
+                        "date": day.isoformat(),
+                        "source": _source,
+                        "method": _method,
+                        "observed_at": None,
+                        "onset_at": None,
+                        "wake_at": None,
+                        "duration_hours": None,
+                        "onset_deviation_minutes": None,
+                        "wake_deviation_minutes": None,
+                    }
+                )
+            return result
+
+        onset_dev = [
+            item["onset_deviation_minutes"]
+            for item in points
+            if item["onset_deviation_minutes"] is not None
+        ]
+        wake_dev = [
+            item["wake_deviation_minutes"]
+            for item in points
+            if item["wake_deviation_minutes"] is not None
+        ]
+        series.append(
+            {
+                "source": source,
+                "method": method,
+                "status": status,
+                "reason": reason,
+                "unknown_reason": reason,
+                "coverage": {
+                    "baseline_nights": count,
+                    "valid_nights_42_days": count,
+                    "required_nights": 14,
+                    "provisional_until_nights": 27,
+                },
+                "source_observed_at": latest["wake_at_utc"],
+                "observed_at": latest["wake_at_utc"],
+                "baseline": {
+                    "onset_median_minutes_local": onset,
+                    "wake_median_minutes_local": wake,
+                    "onset_deviation_median_minutes": median(onset_dev)
+                    if prior
+                    else None,
+                    "wake_deviation_median_minutes": median(wake_dev)
+                    if prior
+                    else None,
+                },
+                "points": points,
+                "points_14": display(14),
+                "points_84": display(84),
+            }
+        )
+    if not series:
+        reason = "Keine geprueften datierten Schlafbeginn- und Endzeiten verfuegbar."
+        return {
+            "method": "sleep-regularity-v1",
+            "timezone": timezone_name,
+            "status": "insufficient_data",
+            "reason": reason,
+            "unknown_reason": reason,
+            "series": [],
+            "sources": [],
+            "coverage": {"baseline_nights": 0, "required_nights": 14},
+            "points_14": [],
+            "points_84": [],
+        }
+    rank = {"insufficient_data": 0, "provisional": 1, "ok": 2}
+    return {
+        "method": "sleep-regularity-v1",
+        "timezone": timezone_name,
+        "status": max((item["status"] for item in series), key=rank.get),
+        "series": series,
+        "sources": series,
+        "points_14": [point for item in series for point in item["points_14"]],
+        "points_84": [point for item in series for point in item["points_84"]],
+        "coverage": {
+            "baseline_nights": sum(
+                item["coverage"]["baseline_nights"] for item in series
+            ),
+            "required_nights": 14,
+        },
+    }
+
+
+def _sleep_intervals(payload: Any, zone: Any, today: date) -> list[dict[str, Any]]:
+    result: dict[tuple[str, str], dict[str, Any]] = {}
+    pending, visited = [payload], 0
+    while pending and visited < 2000:
+        current = pending.pop()
+        visited += 1
+        if isinstance(current, dict):
+            sf = next(
+                (
+                    key
+                    for key in _SLEEP_START_FIELDS
+                    if current.get(key) not in (None, "")
+                ),
+                "unknown",
+            )
+            ef = next(
+                (
+                    key
+                    for key in _SLEEP_END_FIELDS
+                    if current.get(key) not in (None, "")
+                ),
+                "unknown",
+            )
+            start, end = timestamp(current.get(sf)), timestamp(current.get(ef))
+            if (
+                start is not None
+                and end is not None
+                and timedelta(0) < end - start <= timedelta(hours=24)
+            ):
+                local_start, local_end = start.astimezone(zone), end.astimezone(zone)
+                if today - timedelta(days=83) <= local_end.date() <= today:
+                    result[(start.isoformat(), end.isoformat())] = {
+                        "method": f"{sf}/{ef}",
+                        "date": local_end.date().isoformat(),
+                        "onset_at": local_start.isoformat(),
+                        "wake_at": local_end.isoformat(),
+                        "onset_at_utc": start.isoformat(),
+                        "wake_at_utc": end.isoformat(),
+                        "duration_hours": round(
+                            (end - start).total_seconds() / 3600, 3
+                        ),
+                        "onset_minutes_local": local_start.hour * 60
+                        + local_start.minute,
+                        "wake_minutes_local": local_end.hour * 60 + local_end.minute,
+                    }
+            pending.extend(
+                value for value in current.values() if isinstance(value, (dict, list))
+            )
+        elif isinstance(current, list):
+            pending.extend(current[:500])
+    return list(result.values())
+
+
+def _circular_median(values: list[float]) -> float:
+    return min(
+        values,
+        key=lambda candidate: sum(
+            abs((value - candidate + 720) % 1440 - 720) for value in values
+        ),
+    )
+
+
+def _circular_deviation(value: float, center: float | None) -> float | None:
+    return (
+        None if center is None else round(abs((value - center + 720) % 1440 - 720), 1)
+    )

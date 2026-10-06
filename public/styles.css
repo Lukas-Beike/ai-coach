@@ -1262,6 +1262,17 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 }
 .activity-series svg { width: 100%; height: auto; }
 .activity-series path { fill: none; stroke: var(--accent, #65d6b4); stroke-width: 2; }
+.activity-series svg text { fill: var(--muted); font-size: 11px; }
+.activity-series .activity-gridline { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; }
+.activity-values { margin-top: 8px; }
+.activity-feedback-form { display: grid; gap: 10px; margin-top: 8px; }
+.activity-feedback-form label { display: grid; gap: 5px; color: var(--muted); font-size: .8rem; }
+.activity-feedback-form input, .activity-feedback-form textarea { width: 100%; }
+@media (max-width: 420px) {
+  :root .activity-detail-dialog { padding: 14px; }
+  .weekly-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .activity-series svg { min-width: 0; }
+}
 .activity-laps { padding-left: 22px; }
 .report-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .weekly-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 16px 0; }

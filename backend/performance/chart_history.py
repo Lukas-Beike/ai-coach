@@ -3,7 +3,7 @@
 from datetime import date, timedelta
 from typing import Any
 
-from backend.performance import activity_validation, body, eftp
+from backend.performance import activity_validation, body, eftp, garmin_metric_history
 from backend.performance.garmin_load import acute_load_value
 
 INTERVALS_SOURCE = "Intervals.icu"
@@ -135,5 +135,18 @@ def analysis_history(
         # PublicPerformanceStateService exposes this as performance.history.body;
         # the UI can render it in the separate Body tab without another request.
         "body": body.body_history(snapshot, garmin, today),
+        "provider_metrics": garmin.get("provider_metrics")
+        if isinstance(garmin.get("provider_metrics"), dict)
+        else {
+            key: garmin_metric_history.projected_metric(
+                garmin.get(key),
+                start=start,
+                end=today,
+                aggregation="weekly",
+                metric=key,
+                synced_at=garmin.get("synced_at"),
+            )
+            for key in ("endurance_score", "running_tolerance")
+        },
         "metrics": series,
     }
