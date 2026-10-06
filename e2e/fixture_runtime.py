@@ -4,6 +4,8 @@ import os
 import sys
 from datetime import timedelta, datetime, timezone
 
+BLS_OATS_ID = "bls:C133000"
+
 # This file is mounted only in disposable test containers, never normal startup.
 os.environ.update({
     "DATA_DIR": "/data/coach-fixture-data",
@@ -72,15 +74,15 @@ def fixture_coach_response(payload, **kwargs):
             name = "save_nutrition_entry"
             arguments = {"payload": {"description": "Mixed meal <script>alert(1)</script>", "source": "manual", "components": [
                 {"kind": "local_product", "product_id": product["id"], "amount": 60, "unit": "g"},
-                {"kind": "database", "food_id": "bls:C133000", "amount": 3, "unit": "g"},
+                {"kind": "database", "food_id": BLS_OATS_ID, "amount": 3, "unit": "g"},
                 {"kind": "manual", "name": "Creatine", "amount": 8, "unit": "g", "kcal": 0, "carbs_g": 0, "protein_g": 0, "fat_g": 0}
             ]}}
         elif current_message == "E2E nutrition: confirm database meal":
             name = "save_nutrition_template"
-            arguments = {"payload": {"name": "Database oats", "description": "50 g Haferflocken", "kcal": 999, "source": "coach", "food_ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]}}
+            arguments = {"payload": {"name": "Database oats", "description": "50 g Haferflocken", "kcal": 999, "source": "coach", "food_ingredients": [{"food_id": BLS_OATS_ID, "amount": 50, "unit": "g"}]}}
         elif current_message == "E2E nutrition: database oats":
             name = "save_nutrition_entry"
-            arguments = {"payload": {"description": "50 g Haferflocken", "kcal": 999, "source": "coach", "food_ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]}}
+            arguments = {"payload": {"description": "50 g Haferflocken", "kcal": 999, "source": "coach", "food_ingredients": [{"food_id": BLS_OATS_ID, "amount": 50, "unit": "g"}]}}
         elif current_message == "E2E nutrition: confirm meal":
             name = "save_nutrition_template"
             arguments = {"payload": {"name": "Fixture breakfast", "description": "80 g oats - <img src=x onerror=alert(1)>", "kcal": 400, "carbs_g": 60, "protein_g": 12, "fat_g": 8, "source": "coach"}}

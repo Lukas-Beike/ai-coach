@@ -85,7 +85,8 @@ function nutritionComponentSource(basis) {
   if (kind === "local_product" || kind === "product") {
     const product = basis.product || basis;
     const source = product.source === "packaging_label" ? "Verpackungsangabe" : product.source;
-    return `Gespeichertes Produkt: ${product.product_name || product.name || "Gespeichertes Produkt"}${source ? ` · ${source}` : ""}`;
+    const label = product.product_name || product.name || "Gespeichertes Produkt";
+    return ["Gespeichertes Produkt: " + label, source].filter(Boolean).join(" · ");
   }
   if (kind === "database") {
     const food = basis.food || basis;
@@ -95,6 +96,23 @@ function nutritionComponentSource(basis) {
   if (kind === "manual") return "Manuelle Angabe";
   if (kind === "estimate") return "Schätzung";
   return "Quelle unbekannt";
+}
+
+function nutritionBasisLabel(basis, item, sourceLabel) {
+  if (basis?.kind === "composite") return "Zusammengesetztes Essen · Herkunft je Zutat";
+  if (basis?.kind === "database") {
+    return "Datenbankberechnung · " + basis.ingredients.map((food) => `${food.source}: ${food.name}, ${food.amount} ${food.unit} (Basis 100 ${food.basis_unit})`).join("; ");
+  }
+  if (basis?.kind === "product" || basis?.kind === "local_product") {
+    const product = basis.product || basis;
+    const name = product.product_name || product.name || "Produkt";
+    const source = product.source ? ` (${product.source})` : "";
+    const amount = basis.amount != null ? ` · ${basis.amount} ${basis.unit || "g"}` : "";
+    return `Lokales Produkt · ${name}${source}${amount}`;
+  }
+  if (basis?.kind === "manual_correction") return "Manuell korrigierte Nährwerte";
+  if (basis?.kind === "packaging_label") return "Verpackungsangabe";
+  return sourceLabel + (item.template ? "" : item.syncLabel);
 }
 
 function nutritionComponentDetails(item) {
@@ -133,19 +151,7 @@ function nutritionCard(item, template) {
   const sourceLabels = { coach: "Coach-Schätzung", photo: "Foto-Schätzung", voice: "Sprach-Schätzung", manual: "Manuelle Angabe" };
   const sourceLabel = sourceLabels[item.source] || "Erfasst";
   const syncLabel = item.sync_state === "synced" ? " · Synchronisiert" : " · Lokal";
-  const basis = item.nutrition_basis;
-  let basisLabel = sourceLabel;
-  if (basis?.kind === "composite") basisLabel = "Zusammengesetztes Essen · Herkunft je Zutat";
-  else if (basis?.kind === "database") basisLabel = "Datenbankberechnung · " + basis.ingredients.map((food) => `${food.source}: ${food.name}, ${food.amount} ${food.unit} (Basis 100 ${food.basis_unit})`).join("; ");
-  else if (basis?.kind === "product" || basis?.kind === "local_product") {
-    const product = basis.product || basis;
-    const name = product.product_name || product.name || "Produkt";
-    const source = product.source ? ` (${product.source})` : "";
-    const amount = basis.amount != null ? ` · ${basis.amount} ${basis.unit || "g"}` : "";
-    basisLabel = `Lokales Produkt · ${name}${source}${amount}`;
-  }
-  else if (basis?.kind === "manual_correction") basisLabel = "Manuell korrigierte Nährwerte";
-  else if (basis?.kind === "packaging_label") basisLabel = "Verpackungsangabe";
+  const basisLabel = nutritionBasisLabel(item.nutrition_basis, { template, syncLabel }, sourceLabel);
   source.textContent = basisLabel + (template ? "" : syncLabel);
   card.append(title, description, values, source);
   if (!template) {

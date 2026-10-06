@@ -72,7 +72,7 @@ class NutritionFrontendContractTests(unittest.TestCase):
         self.assertIn("name.textContent = component.name", details)
         self.assertIn("nutritionComponentSource(component.nutrition_basis)", details)
         self.assertIn('if (value == null || value === "") return "–";', nutrition)
-        self.assertIn('basisLabel = "Zusammengesetztes Essen', nutrition)
+        self.assertIn('basis?.kind === "composite") return "Zusammengesetztes Essen', nutrition)
         self.assertNotIn("innerHTML", details)
 
     def test_barcode_camera_stops_tracks_on_close_and_start_failure(self):

@@ -155,13 +155,21 @@ class CoachReadToolService:
             raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
         nutrition = self._nutrition_service()
         if name == "lookup_food":
-            source = str(arguments.get("source") or "").strip().lower()
-            query = str(arguments.get("query") or arguments.get("q") or "").strip()
-            if query and not arguments.get("barcode") and source in {"bls", "off"}:
-                return nutrition.food_database.lookup(arguments)
-            if arguments.get("barcode") or arguments.get("query"):
-                return nutrition.lookup_product(arguments)
+            return self._lookup_food(nutrition, arguments)
+        return self._calculate_food(nutrition, arguments)
+
+    @staticmethod
+    def _lookup_food(nutrition: NutritionService, arguments: dict[str, Any]) -> dict[str, Any]:
+        source = str(arguments.get("source") or "").strip().lower()
+        query = str(arguments.get("query") or arguments.get("q") or "").strip()
+        if query and not arguments.get("barcode") and source in {"bls", "off"}:
             return nutrition.food_database.lookup(arguments)
+        if arguments.get("barcode") or arguments.get("query"):
+            return nutrition.lookup_product(arguments)
+        return nutrition.food_database.lookup(arguments)
+
+    @staticmethod
+    def _calculate_food(nutrition: NutritionService, arguments: dict[str, Any]) -> dict[str, Any]:
         if "components" in arguments and (
             "ingredients" in arguments or "product_id" in arguments
         ):

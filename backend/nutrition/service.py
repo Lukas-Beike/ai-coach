@@ -30,6 +30,8 @@ from backend.nutrition.photo import (
     validate_packaging_extraction,
 )
 
+PRODUCT_NOT_FOUND = "Produkt nicht gefunden."
+
 SAVED_MEAL_NOT_FOUND = "Gespeicherte Mahlzeit nicht gefunden."
 INVALID_ENTRY_ID = "Ungültige Eintrags-ID."
 ENTRY_NOT_FOUND = "Ernährungseintrag nicht gefunden."
@@ -140,7 +142,7 @@ class NutritionService:
             product = self._products.get(db, str(product_id or "").strip())
         if not product:
             raise AppError(
-                404, "Produkt nicht gefunden.", reason="nutrition_product_not_found"
+                404, PRODUCT_NOT_FOUND, reason="nutrition_product_not_found"
             )
         return product
 
@@ -175,7 +177,7 @@ class NutritionService:
         with self._db_lock, self._database_manager.unit_of_work() as db:
             if not self._products.archive(db, product_id, self._utc_now()):
                 raise AppError(
-                    404, "Produkt nicht gefunden.", reason="nutrition_product_not_found"
+                    404, PRODUCT_NOT_FOUND, reason="nutrition_product_not_found"
                 )
             return self._products.get(db, product_id) or {
                 "id": product_id,
@@ -299,33 +301,9 @@ class NutritionService:
     def _calculate_components(self, db: Any, components: list[Any]) -> dict[str, Any]:
         if not isinstance(components, list) or not 1 <= len(components) <= 20:
             raise AppError(400, "1 bis 20 Mahlzeitenkomponenten sind erforderlich.")
-        totals: dict[str, float | None] = {key: 0.0 for key in NUTRIENTS}
-        snapshots = []
-        for item in components:
-            snapshot = self._resolve_component(db, item)
-            for key in NUTRIENTS:
-                value = snapshot[key]
-                current = totals[key]
-                totals[key] = (
-                    None if value is None or current is None else current + value
-                )
-            snapshots.append(snapshot)
-        if totals["kcal"] is not None and totals["kcal"] > 10000:
-            raise AppError(400, "Kalorien müssen zwischen 0 und 10000 liegen.")
-        if any(
-            value is not None and value > 1000
-            for key, value in totals.items()
-            if key != "kcal"
-        ):
-            raise AppError(400, "Makronährwerte überschreiten das Maximum von 1000 g.")
-        rounded = {
-            key: None
-            if value is None
-            else round(value)
-            if key == "kcal"
-            else round(value, 1)
-            for key, value in totals.items()
-        }
+        totals, snapshots = self._resolve_component_totals(db, components)
+        self._validate_component_totals(totals)
+        rounded = self._round_component_totals(totals)
         return {
             **rounded,
             "nutrition_basis": {
@@ -335,30 +313,30 @@ class NutritionService:
             },
         }
 
+    def _resolve_component_totals(self, db: Any, components: list[Any]) -> tuple[dict[str, float | None], list[dict[str, Any]]]:
+        totals: dict[str, float | None] = {key: 0.0 for key in NUTRIENTS}
+        snapshots = []
+        for item in components:
+            snapshot = self._resolve_component(db, item)
+            for key in NUTRIENTS:
+                value, current = snapshot[key], totals[key]
+                totals[key] = None if value is None or current is None else current + value
+            snapshots.append(snapshot)
+        return totals, snapshots
+
+    @staticmethod
+    def _validate_component_totals(totals: dict[str, float | None]) -> None:
+        if totals["kcal"] is not None and totals["kcal"] > 10000:
+            raise AppError(400, "Kalorien müssen zwischen 0 und 10000 liegen.")
+        if any(value is not None and value > 1000 for key, value in totals.items() if key != "kcal"):
+            raise AppError(400, "Makronährwerte überschreiten das Maximum von 1000 g.")
+
+    @staticmethod
+    def _round_component_totals(totals: dict[str, float | None]) -> dict[str, float | None]:
+        return {key: None if value is None else round(value) if key == "kcal" else round(value, 1) for key, value in totals.items()}
+
     def _resolve_component(self, db: Any, item: Any) -> dict[str, Any]:
-        kinds = {"local_product", "database", "estimate", "packaging_label", "manual"}
-        kind = item.get("kind") if isinstance(item, dict) else None
-        if not isinstance(kind, str) or kind not in kinds:
-            raise AppError(400, "Ungültige Mahlzeitenkomponente.")
-        if kind in {"local_product", "database"}:
-            reference_key = "product_id" if kind == "local_product" else "food_id"
-            if (
-                not isinstance(item.get(reference_key), str)
-                or not item[reference_key].strip()
-            ):
-                raise AppError(400, "Komponentenreferenz muss eine Zeichenkette sein.")
-        amount = item.get("amount")
-        if isinstance(amount, bool) or not isinstance(amount, (int, float, str)):
-            raise AppError(400, "Ungültige Komponentenmenge.")
-        try:
-            quantity = float(amount)
-        except (TypeError, ValueError):
-            raise AppError(400, "Ungültige Komponentenmenge.") from None
-        if not math.isfinite(quantity) or not 0 < quantity <= 10000:
-            raise AppError(400, "Komponentenmenge muss größer als 0 sein.")
-        unit = item.get("unit")
-        if not isinstance(unit, str) or unit not in {"g", "ml", "portion"}:
-            raise AppError(400, "Einheit muss g, ml oder portion sein.")
+        kind, quantity, unit = self._validate_component_header(item)
 
         if kind == "local_product":
             name, nutrients, origin = self._resolve_local_product_component(
@@ -379,6 +357,30 @@ class NutritionService:
             "nutrition_basis": origin,
         }
 
+    @staticmethod
+    def _validate_component_header(item: Any) -> tuple[str, float, str]:
+        kinds = {"local_product", "database", "estimate", "packaging_label", "manual"}
+        kind = item.get("kind") if isinstance(item, dict) else None
+        if not isinstance(kind, str) or kind not in kinds:
+            raise AppError(400, "Ungültige Mahlzeitenkomponente.")
+        if kind in {"local_product", "database"}:
+            reference_key = "product_id" if kind == "local_product" else "food_id"
+            if not isinstance(item.get(reference_key), str) or not item[reference_key].strip():
+                raise AppError(400, "Komponentenreferenz muss eine Zeichenkette sein.")
+        amount = item.get("amount")
+        if isinstance(amount, bool) or not isinstance(amount, (int, float, str)):
+            raise AppError(400, "Ungültige Komponentenmenge.")
+        try:
+            quantity = float(amount)
+        except (TypeError, ValueError):
+            raise AppError(400, "Ungültige Komponentenmenge.") from None
+        if not math.isfinite(quantity) or not 0 < quantity <= 10000:
+            raise AppError(400, "Komponentenmenge muss größer als 0 sein.")
+        unit = item.get("unit")
+        if not isinstance(unit, str) or unit not in {"g", "ml", "portion"}:
+            raise AppError(400, "Einheit muss g, ml oder portion sein.")
+        return kind, quantity, unit
+
     def _resolve_local_product_component(
         self, db: Any, item: dict[str, Any], quantity: float, unit: str
     ) -> tuple[str, dict[str, float | None], dict[str, Any]]:
@@ -387,7 +389,7 @@ class NutritionService:
         product = self._products.get(db, item["product_id"])
         if not product:
             raise AppError(
-                404, "Produkt nicht gefunden.", reason="nutrition_product_not_found"
+                404, PRODUCT_NOT_FOUND, reason="nutrition_product_not_found"
             )
         if product.get("status") != "active":
             raise AppError(
@@ -462,29 +464,28 @@ class NutritionService:
                 400, "Manuelle Komponente benötigt Name und alle Nährwertfelder."
             )
         name = item["name"].strip()[:200]
-        nutrients: dict[str, float | None] = {}
-        for key in NUTRIENTS:
-            value = item[key]
-            if value is None:
-                nutrients[key] = None
-                continue
-            if isinstance(value, bool):
-                raise AppError(400, "Ungültiger Nährwert.")
-            try:
-                number = float(value)
-            except (TypeError, ValueError):
-                raise AppError(400, "Ungültiger Nährwert.") from None
-            if not math.isfinite(number) or number < 0:
-                raise AppError(400, "Nährwert muss endlich und nicht negativ sein.")
-            limit = 10000 if key == "kcal" else 1000
-            if number > limit:
-                raise AppError(400, "Nährwert überschreitet das zulässige Maximum.")
-            nutrients[key] = number
+        nutrients = {key: self._validate_component_nutrient(key, item[key]) for key in NUTRIENTS}
         if nutrients["kcal"] is None:
             raise AppError(
                 400, "Kalorienwert ist erforderlich.", reason="food_energy_missing"
             )
         return name, nutrients, {"kind": kind}
+
+    @staticmethod
+    def _validate_component_nutrient(key: str, value: Any) -> float | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            raise AppError(400, "Ungültiger Nährwert.")
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise AppError(400, "Ungültiger Nährwert.") from None
+        if not math.isfinite(number) or number < 0:
+            raise AppError(400, "Nährwert muss endlich und nicht negativ sein.")
+        if number > (10000 if key == "kcal" else 1000):
+            raise AppError(400, "Nährwert überschreitet das zulässige Maximum.")
+        return number
 
     def log_product(
         self,
@@ -772,55 +773,30 @@ class NutritionService:
             )
             for key in ("kcal", "carbs_g", "protein_g", "fat_g"):
                 payload[key] = None if template[key] is None else template[key] * amount
-            if template.get("nutrition_basis", {}).get("kind") == "database":
-                payload["nutrition_basis"] = {
-                    "kind": "database",
-                    "ingredients": [
-                        {**item, "amount": item["amount"] * amount}
-                        for item in template["nutrition_basis"]["ingredients"]
-                    ],
-                }
-            elif template.get("nutrition_basis", {}).get("kind") == "composite":
-                basis = template["nutrition_basis"]
-                payload["nutrition_basis"] = {
-                    **basis,
-                    "components": [
-                        {
-                            **item,
-                            "amount": item["amount"] * amount,
-                            **{
-                                key: None
-                                if item.get(key) is None
-                                else item[key] * amount
-                                for key in NUTRIENTS
-                            },
-                        }
-                        for item in basis.get("components", [])
-                    ],
-                }
-            elif template.get("nutrition_basis", {}).get("kind") == "local_product":
-                payload["nutrition_basis"] = {
-                    **template["nutrition_basis"],
-                    "amount": template["nutrition_basis"]["amount"] * amount,
-                }
-            if template.get("nutrition_basis", {}).get("kind") == "composite":
-                basis_components = payload["nutrition_basis"]["components"]
-                for key in NUTRIENTS:
-                    values = [item.get(key) for item in basis_components]
-                    payload[key] = (
-                        None
-                        if any(value is None for value in values)
-                        else (
-                            round(sum(values))
-                            if key == "kcal"
-                            else round(sum(values), 1)
-                        )
-                    )
+            basis = template.get("nutrition_basis", {})
+            if basis.get("kind") == "database":
+                payload["nutrition_basis"] = {"kind": "database", "ingredients": [{**item, "amount": item["amount"] * amount} for item in basis["ingredients"]]}
+            elif basis.get("kind") == "composite":
+                payload["nutrition_basis"] = self._scale_composite_basis(basis, amount)
+                self._set_composite_totals(payload)
+            elif basis.get("kind") == "local_product":
+                payload["nutrition_basis"] = {**basis, "amount": basis["amount"] * amount}
             entry = normalize_nutrition_entry(
                 payload, local_now_factory=self._local_now
             )
             entry["id"] = uuid.uuid4().hex
             return self._nutrition_repository.create(db, entry)
+
+    @staticmethod
+    def _scale_composite_basis(basis: dict[str, Any], amount: float) -> dict[str, Any]:
+        return {**basis, "components": [{**item, "amount": item["amount"] * amount, **{key: None if item.get(key) is None else item[key] * amount for key in NUTRIENTS}} for item in basis.get("components", [])]}
+
+    @staticmethod
+    def _set_composite_totals(payload: dict[str, Any]) -> None:
+        components = payload["nutrition_basis"]["components"]
+        for key in NUTRIENTS:
+            values = [item.get(key) for item in components]
+            payload[key] = None if any(value is None for value in values) else round(sum(values), 0 if key == "kcal" else 1)
 
     def log_meal(self, payload: Any) -> dict[str, Any]:
         """Normalize, validate and store a meal entry."""
@@ -915,6 +891,23 @@ class NutritionService:
         clean_id = str(entry_id or "").strip()
         if not clean_id:
             raise AppError(400, INVALID_ENTRY_ID)
+        if not self._is_valid_meal_correction(changes):
+            raise AppError(
+                400, "Korrektur muss mindestens ein gültiges Ernährungsfeld enthalten."
+            )
+        calculation = self.food_database.calculate(changes["food_ingredients"]) if "food_ingredients" in changes else None
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            existing = self._nutrition_repository.get(db, clean_id)
+            if not existing:
+                raise AppError(404, ENTRY_NOT_FOUND)
+            entry = self._apply_meal_correction(db, existing, changes, calculation)
+            updated = self._nutrition_repository.update(db, clean_id, entry)
+        if not updated:
+            raise AppError(404, ENTRY_NOT_FOUND)
+        return updated
+
+    @staticmethod
+    def _is_valid_meal_correction(changes: Any) -> bool:
         editable = {
             "meal_date",
             "date",
@@ -935,63 +928,23 @@ class NutritionService:
             "components",
             "packaging_label",
         }
-        if not isinstance(changes, dict) or not changes or set(changes) - editable:
-            raise AppError(
-                400, "Korrektur muss mindestens ein gültiges Ernährungsfeld enthalten."
-            )
-        calculation = (
-            self.food_database.calculate(changes["food_ingredients"])
-            if "food_ingredients" in changes
-            else None
-        )
-        with self._db_lock, self._database_manager.unit_of_work() as db:
-            existing = self._nutrition_repository.get(db, clean_id)
-            if not existing:
-                raise AppError(404, ENTRY_NOT_FOUND)
-            aliases = {
-                "date": "meal_date",
-                "meal_time": "logged_at",
-                "calories": "kcal",
-                "carbs": "carbs_g",
-                "carbohydrates": "carbs_g",
-                "protein": "protein_g",
-                "fat": "fat_g",
-            }
-            canonical_changes: dict[str, Any] = {
-                str(aliases.get(key, key)): value for key, value in changes.items()
-            }
-            merged = {**existing, **canonical_changes}
-            if "components" in changes:
-                _validate_component_payload(changes)
-                merged = {
-                    **merged,
-                    **self._calculate_components(db, changes["components"]),
-                }
-                merged.pop("components", None)
-            if set(canonical_changes) & {
-                *NUTRIENTS,
-                "food_ingredients",
-                "components",
-                "packaging_label",
-            }:
-                if "components" not in canonical_changes:
-                    merged = (
-                        {**merged, **calculation}
-                        if calculation is not None
-                        else self._prepare_values(merged)
-                    )
-                if "components" not in canonical_changes and (
-                    "food_ingredients" not in canonical_changes
-                    and canonical_changes.get("packaging_label") is not True
-                ):
-                    merged["nutrition_basis"] = {"kind": "manual_correction"}
-            entry = normalize_nutrition_entry(merged, local_now_factory=self._local_now)
-            entry["id"] = clean_id
-            entry["source"] = existing["source"]
-            updated = self._nutrition_repository.update(db, clean_id, entry)
-        if not updated:
-            raise AppError(404, ENTRY_NOT_FOUND)
-        return updated
+        return isinstance(changes, dict) and bool(changes) and not (set(changes) - editable)
+
+    def _apply_meal_correction(self, db: Any, existing: dict[str, Any], changes: dict[str, Any], calculation: dict[str, Any] | None) -> dict[str, Any]:
+        aliases = {"date": "meal_date", "meal_time": "logged_at", "calories": "kcal", "carbs": "carbs_g", "carbohydrates": "carbs_g", "protein": "protein_g", "fat": "fat_g"}
+        canonical = {str(aliases.get(key, key)): value for key, value in changes.items()}
+        merged = {**existing, **canonical}
+        if "components" in changes:
+            _validate_component_payload(changes)
+            merged.update(self._calculate_components(db, changes["components"]))
+            merged.pop("components", None)
+        elif set(canonical) & {*NUTRIENTS, "food_ingredients", "packaging_label"}:
+            merged.update(calculation if calculation is not None else self._prepare_values(merged))
+            if "food_ingredients" not in canonical and canonical.get("packaging_label") is not True:
+                merged["nutrition_basis"] = {"kind": "manual_correction"}
+        entry = normalize_nutrition_entry(merged, local_now_factory=self._local_now)
+        entry.update(id=existing["id"], source=existing["source"])
+        return entry
 
     def delete_meal(self, entry_id: str) -> dict[str, Any]:
         """Delete an existing meal entry by ID."""
