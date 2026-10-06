@@ -1,6 +1,6 @@
 # Umsetzungsplan für Trainingsanalysen und neue Funktionen
 
-Stand: 6. Oktober 2026. Grundlage ist der aktuelle Planungsstand auf Commit `33e244011039d051d1af6f4a3dd047b82aead2d9`. Status: erste Lieferung lokal umgesetzt; abschließende Integrationsprüfung läuft.
+Stand: 6. Oktober 2026. Grundlage ist der aktuelle Planungsstand auf Commit `33e244011039d051d1af6f4a3dd047b82aead2d9`. Status: erste Lieferung lokal umgesetzt und geprüft; weitere Analysepakete bleiben geplant.
 
 Der Plan ergänzt Intervals Coach um nachvollziehbare Trainingsanalysen, persönliche Erholung, Wettkampfvorbereitung und praktische Trainingsfunktionen. Neu aufgenommen sind der Analyse-Tab **Body**, die verlässliche Auswertung beider Kalender-Flags **`[NO_TRAINING]` und `[NO_INTENSITY]`** sowie der Garmin-Tagesverbrauch im Ernährungstagebuch. Die nächste Lieferung behebt zuerst die Kalenderregeln und ergänzt danach Body und Tagesenergie. Bestehende Pakete für Kalenderdetails, Wochenrückblick, Intervallqualität, Ausdauerentwicklung, Erholung, Leistungsprofile, Planungsszenarien, Verpflegung, Einflussanalysen und Ausrüstung werden gezielt erweitert.
 
@@ -345,3 +345,18 @@ Die Plattformen dienen als Produktinspiration. Die Berechnungen werden unabhäng
 - [Athlytic persönliche Erholung und Journal](https://athlyticapp.com/getting-started/).
 - [Xert Funktionen und Forecast](https://www.baronbiosys.com/features/).
 - [TrainingPeaks Fueling Insights](https://www.trainingpeaks.com/coach-blog/fueling-insights-inigo-san-millan-carbohydrate-intake/).
+
+## Abschluss der ersten Lieferung
+
+Worker: gpt-6-luna, Reasoning high; Prüfung und Übernahme durch den Orchestrator.
+
+| Umfang | Status |
+| --- | --- |
+| Paket 0: beide Kalender-Flags | Lokal umgesetzt und geprüft |
+| Paket 5a: Body mit drei Diagrammen und zwei Zeiträumen | Lokal umgesetzt und geprüft |
+| Paket 5b: Garmin-Tagesverbrauch | Lokal umgesetzt und geprüft |
+| Paket 12: Archiv und Lebensdauerbalken | Gemeldete Fehler lokal behoben; weitere Zuordnungsfunktionen bleiben geplant |
+| Standard-Testdaten | Versionierte synthetische Fixture, idempotenter Seed und Upgrade |
+| Zusätzliche API-Features | Bewerteter Backlog; noch keine Umsetzung |
+
+Abnahme: 3.289 Unit-Tests (16 übersprungen), 11 SQLCipher-Migrationsprüfungen, sechs Standard-Fixture-Tests sowie Body-, Ernährungs- und Ausrüstungs-Browserabläufe auf 320 px, 390 px und Desktop. PWA-Offline- und Markdown-Verträge bestanden. Ruff, gezieltes mypy, Syntaxprüfung und Docker-Build bestanden. Die Vorschau läuft lokal auf http://127.0.0.1:8091 in der mobilen Ansicht. Keine PR, Veröffentlichung oder produktive Bereitstellung wurde ausgelöst.
