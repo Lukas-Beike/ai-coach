@@ -32,7 +32,7 @@ function bodyHistory() {
 }
 
 test("@responsive Body tab plots dated measurements, source gaps and W/kg provenance", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+  if (test.info().project.name === "mobile-small") expect(page.viewportSize().width).toBe(320);
   await page.route("**/api/performance", async (route) => {
     const response = await route.fetch();
     const data = await response.json();
@@ -53,6 +53,7 @@ test("@responsive Body tab plots dated measurements, source gaps and W/kg proven
   await details.locator(".analysis-day-marker[data-date='2026-10-06']").focus();
   await page.keyboard.press("Enter");
   await expect(details.locator(".analysis-info-tooltip:popover-open")).toContainText("FTP 06.10.2026");
+  await expect(details.locator(".analysis-info-tooltip:popover-open")).toContainText("eFTP 06.10.2026");
   await expect(details.locator(".analysis-info-tooltip:popover-open")).toContainText("Gewicht 05.10.2026 (Garmin Connect)");
   await page.keyboard.press("Escape");
   await root.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();

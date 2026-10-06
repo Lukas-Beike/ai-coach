@@ -535,7 +535,7 @@ function bodyWeeklyPoints(points, start, end) {
 
 function bodySeriesPoints(item, window) {
   const points = (item.points || []).filter((point) => point.date >= window.start && point.date <= window.end)
-    .map((point) => ({ ...point, observedDate: point.observed_at || point.date }));
+    .map((point) => ({ ...point, power_method: item.power_method, observedDate: point.observed_at || point.date }));
   return bodyHistoryPeriod === "twelveWeeks" ? bodyWeeklyPoints(points, window.start, window.end) : points;
 }
 

@@ -129,7 +129,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("Array.isArray(result.model_options)", app)
         self.assertIn("renderModel(model)", app)
         self.assertIn('/api.js?v=221', index)
-        self.assertIn('/navigation.js?v=228', index)
+        self.assertIn('/navigation.js?v=229', index)
         self.assertIn('/appearance.js?v=218', index)
         self.assertNotIn('<script>', index)
         self.assertIn('/state.js?v=218', index)
@@ -139,8 +139,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('/coach.js?v=6', index)
         self.assertIn('/app.js?v=269', index)
         self.assertIn('/styles.css?v=269', index)
-        self.assertIn('intervals-coach-v338', service_worker)
-        self.assertIn('"/navigation.js?v=228"', service_worker)
+        self.assertIn('intervals-coach-v340', service_worker)
+        self.assertIn('"/navigation.js?v=229"', service_worker)
         self.assertIn('"/appearance.js?v=218"', service_worker)
         self.assertIn('"/state.js?v=218"', service_worker)
         self.assertIn('"/views.js?v=218"', service_worker)
@@ -324,7 +324,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split('app.js?v=', 1)[1].split('"', 1)[0]
         self.assertIn(f'app.js?v={asset_version}', markup)
-        self.assertIn('intervals-coach-v338', service_worker)
+        self.assertIn('intervals-coach-v340', service_worker)
         self.assertIn(f'/app.js?v={asset_version}', service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -406,13 +406,13 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn('return sourceLabel + (item.template ? "" : item.syncLabel);', source)
 
     def test_analysis_asset_is_served_and_precached_as_javascript(self):
-        response = StaticAssetService(server.PUBLIC_DIR).render("/analysis.js", "/analysis.js?v=71", None)
+        response = StaticAssetService(server.PUBLIC_DIR).render("/analysis.js", "/analysis.js?v=72", None)
         self.assertEqual(response.status, 200)
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
         self.assertEqual(dict(response.headers)["Cache-Control"], "public, max-age=31536000, immutable")
         self.assertIn(b"function renderAnalysisHistory", response.body)
         worker = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/analysis.js?v=71"', worker)
+        self.assertIn('"/analysis.js?v=72"', worker)
         source = response.body.decode("utf-8")
         self.assertIn("equipment-archive", source)
         self.assertIn("function appendEquipmentLifetime", source)
@@ -489,7 +489,7 @@ class ServerFrontendTests(ServerTestCase):
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
         self.assertIn('"/api.js?v=221"', source)
-        self.assertIn('"/navigation.js?v=228"', source)
+        self.assertIn('"/navigation.js?v=229"', source)
         self.assertIn('"/appearance.js?v=218"', source)
         self.assertIn('"/state.js?v=218"', source)
         self.assertIn('"/views.js?v=218"', source)
