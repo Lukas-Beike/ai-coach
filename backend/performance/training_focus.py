@@ -102,10 +102,10 @@ def _garmin_activity_coverage(
         row_data = _coverage_row(activity, index, loads_by_id, start, end, timezone)
         if row_data is None:
             continue
-        identity, day, row = row_data
-        if identity and identity in seen:
+        identity, dedupe_key, day, row = row_data
+        if dedupe_key in seen:
             continue
-        seen.add(identity or f"row:{index}")
+        seen.add(dedupe_key)
         observed_dates.append(day)
         if not identity:
             unknown += 1
@@ -141,7 +141,7 @@ def _coverage_row(
     start: str,
     end: str,
     timezone: str,
-) -> tuple[str, str, dict[str, Any]] | None:
+) -> tuple[str, str, str, dict[str, Any]] | None:
     if not isinstance(activity, dict):
         return None
     identity = str(activity.get("activityId") or activity.get("id") or "")
@@ -157,4 +157,4 @@ def _coverage_row(
     )
     if not day or not start <= day <= end:
         return None
-    return identity or f"row:{index}", day, row
+    return identity, identity or f"row:{index}", day, row

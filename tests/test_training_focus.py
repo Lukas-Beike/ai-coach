@@ -78,3 +78,22 @@ class TrainingFocusTests(unittest.TestCase):
             result["category_freshness"]["training_load_activities"]["freshness"],
             "partial",
         )
+
+    def test_activity_without_identity_is_not_classified_from_its_category(self):
+        result = training_focus(
+            {},
+            {
+                "activities": [
+                    {
+                        "startTimeLocal": "2026-10-02T09:00:00",
+                        "trainingEffectLabel": "TEMPO",
+                        "activityTrainingLoad": 40,
+                    }
+                ]
+            },
+            date(2026, 10, 2),
+        )
+        self.assertEqual(result["coverage"]["known_sessions"], 1)
+        self.assertEqual(result["classified_sessions"], 0)
+        self.assertEqual(result["unclassified_sessions"], 1)
+        self.assertEqual(result["categories"]["high_aerobic"]["sessions"], 0)
