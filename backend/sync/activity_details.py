@@ -18,7 +18,7 @@ from backend.activities.detail_projection import (
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.target_snapshot import freeze_targets
 from backend.errors import AppError
-from backend.performance.power_profile import power_profile
+from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
 
 MAX_STREAM_POINTS = 172_800
@@ -116,6 +116,7 @@ class ActivityDetailRefreshService:
                 "interval_quality": interval_quality(projected, targets),
                 "aerobic": aerobic_analysis(projected),
                 "power_profile": power_profile(projected),
+                "running_profile": running_profile(projected),
             },
             "full_resolution": True,
             "available_streams": sorted(streams),

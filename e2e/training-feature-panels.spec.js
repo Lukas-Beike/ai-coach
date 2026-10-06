@@ -103,6 +103,9 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await page.evaluate(async () => { await applyNavigationRoute("plan/season", { historyMode: "replace" }); });
   await expect(page.locator("#seasonPreparation").getByRole("heading", { name: /Fixture cycling target/ }).first()).toBeVisible();
   await expect(page.locator("#seasonPreparation").getByText(/Wochen mit erfasstem sportartspezifischem Training/).first()).toBeVisible();
+  await expect(page.locator("#seasonPreparation .season-evidence svg")).toHaveCount(2);
+  await expect(page.locator("#seasonPreparation .season-evidence")).toContainText("Zieldistanzvergleich");
+  await expect(page.locator("#seasonPreparation .season-evidence")).toContainText("bekannt");
   await page.locator("#seasonPreparation").getByRole("button", { name: /Szenarien vergleichen/ }).first().click();
   await expect(page.locator("#seasonPreparation").getByText(/Lokales Standardmodell/).first()).toBeVisible();
 

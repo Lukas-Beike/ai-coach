@@ -615,7 +615,82 @@ function renderAnalysisHistory(history) { // NOSONAR
     const charts = [[primaryUnit, primaryUnit === "W" ? "Leistungsschwelle · FTP / eFTP" : "Schwellenpace"], ["ml/kg/min", "VO₂max · Schätzung"]].map(([unit, metric]) => analysisChart(metric, sportSeries.filter((item) => item.unit === unit), unit, performanceStart, end, "", { compactInfo: true, sparse: true, includeCoverage: false, showLegend: unit === "W" }));
     root.append(analysisChartGroup(`Leistungsentwicklung · ${title}`, charts, sportSeries, "Letzte 12 Kalenderwochen einschließlich der laufenden Woche: letzter gültiger Wochenwert für FTP und Schwellenpace, Wochenmedian für eFTP und VO₂max. Jede Woche mit Messung bleibt als Punkt sichtbar; fehlende Wochen bleiben Lücken. Garmin; nur eFTP: Intervals.icu. VO₂max und eFTP sind Schätzungen. Quellen und Messdatum bleiben sichtbar."));
   }
+  renderProviderMetrics(history.provider_metrics, root);
   for (const target of [root, loadRoot]) target.querySelectorAll("details").forEach((details) => { details.open = openDetails.has(`${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`); });
+}
+
+function providerMetricStatus(status) {
+  return {
+    current: "aktuell",
+    ok: "bestätigt",
+    provisional: "vorläufig",
+    insufficient_data: "nicht genügend Daten",
+    partial: "teilweise",
+    unavailable: "nicht verfügbar",
+    failed: "fehlgeschlagen",
+    stale: "veraltet",
+    unsupported: "nicht unterstützt",
+    unknown: "unbekannt",
+  }[status] || "unbekannt";
+}
+
+function providerMetricLabel(key) {
+  return { endurance_score: "Endurance Score", running_tolerance: "Running Tolerance" }[key] || key;
+}
+
+function renderProviderMetrics(metrics, root) {
+  if (!metrics || typeof metrics !== "object") return;
+  const entries = Object.entries(metrics).filter(([, item]) => item && typeof item === "object");
+  if (!entries.length) return;
+  const card = reportNode("section", null, "analysis-chart-card provider-metrics");
+  card.append(reportNode("h3", "Garmin-Provider-Metriken"));
+  card.append(reportNode("p", "Rohfelder aus Garmin Connect. Wochenaggregation und Einheit werden nur angezeigt, wenn der Provider sie ausweist; unbekannte Einheiten bleiben unbekannt.", "muted"));
+  for (const [key, item] of entries) {
+    const status = item.status || "unknown";
+    const block = reportNode("section", null, "analysis-subchart");
+    const title = reportNode("h4", providerMetricLabel(key));
+    block.append(title);
+    const unit = item.unit === "unknown" || !item.unit ? "unbekannt" : item.unit;
+    block.append(reportNode("p", `Quelle: ${item.source || "Garmin Connect"} · Aggregation: ${item.aggregation === "weekly" ? "wöchentlich" : item.aggregation || "unbekannt"} · Einheit: ${unit} · Status: ${providerMetricStatus(status)} (${status})`, "muted"));
+    const points = Array.isArray(item.points) ? item.points : [];
+    const rows = points.flatMap((point) => Object.entries(point?.values || {}).map(([field, value]) => ({ date: point.date, field, value })));
+    if (!rows.length) {
+      block.append(reportNode("p", `Keine Messpunkte verfügbar · Status: ${providerMetricStatus(status)} (${status}).`, "muted"));
+      card.append(block);
+      continue;
+    }
+    const tableWrap = reportNode("div", null, "analysis-chart-table");
+    const table = reportNode("table");
+    table.append(reportNode("caption", `${providerMetricLabel(key)} · Einheit ${unit}`));
+    const head = reportNode("thead");
+    const header = reportNode("tr");
+    for (const label of ["Datum", "Rohfeld", "Wert", "Quelle"]) header.append(reportNode("th", label));
+    head.append(header); table.append(head);
+    const body = reportNode("tbody");
+    for (const row of rows) {
+      const tr = reportNode("tr");
+      tr.append(reportNode("td", row.date ? dateLabel(row.date) : "Datum unbekannt"));
+      const fieldCell = reportNode("td");
+      fieldCell.append(reportNode("span", providerRawFieldLabel(key, row.field)));
+      if (providerRawFieldLabel(key, row.field) !== row.field) {
+        const raw = reportNode("details"); raw.append(reportNode("summary", "Providerfeld"), reportNode("code", row.field)); fieldCell.append(raw);
+      } else fieldCell.textContent = row.field;
+      tr.append(fieldCell);
+      tr.append(reportNode("td", row.value == null ? "unbekannt" : String(row.value)));
+      tr.append(reportNode("td", item.source || "Garmin Connect"));
+      body.append(tr);
+    }
+    table.append(body); tableWrap.append(table); block.append(tableWrap); card.append(block);
+  }
+  root.append(card);
+}
+
+function providerRawFieldLabel(metric, field) {
+  const known = {
+    endurance_score: { enduranceScore: "Endurance Score" },
+    running_tolerance: { runningTolerance: "Running Tolerance" },
+  };
+  return known[metric]?.[field] || field;
 }
 
 let bodyHistoryPeriod = "twelveWeeks";
@@ -845,12 +920,111 @@ function selectedRecoveryBaselines(report) {
 }
 
 function recoveryReferenceLabel(item, range, target, unit, position) {
+  const status = `Status: ${providerMetricStatus(item.status || "unknown")}`;
   if (range) {
     const provisional = item.status === "provisional" ? " · vorläufig" : "";
-    return `${position || "Persönlicher Bereich"} · Basis ${analysisValue(range.lower, unit)}–${analysisValue(range.upper, unit)}${provisional}`;
+    return `${position || "Persönlicher Bereich"} · Basis ${analysisValue(range.lower, unit)}–${analysisValue(range.upper, unit)}${provisional} · ${status}`;
   }
-  if (target != null) return `Persönliches Schlafziel: ${analysisValue(target, unit)}`;
-  return `Persönliche Basis: ${item.reason || "noch nicht verfügbar"}`;
+  if (target != null) return `Persönliches Schlafziel: ${analysisValue(target, unit)} · ${status}`;
+  return `Persönliche Basis: ${item.reason || "noch nicht verfügbar"} · ${status}`;
+}
+
+function recoveryClock(value) {
+  const match = String(value || "").match(/T(\d{2}:\d{2})/);
+  return match ? match[1] : "unbekannt";
+}
+
+function recoverySleepDeficits(report, root) {
+  const target = Number(report?.sleep_target_hours);
+  if (!Number.isFinite(target) || target < 4 || target > 12) {
+    root.append(reportNode("p", "Schlafdefizit: unbekannt · persönliches Schlafziel fehlt.", "muted"));
+    return;
+  }
+  const deficits = Array.isArray(report?.sleep_deficits) ? report.sleep_deficits : [];
+  if (!deficits.length) {
+    root.append(reportNode("p", `Schlafdefizit: vorläufig · Ziel ${analysisValue(target, "h")} · keine bekannten Nächte für die Berechnung.`, "muted"));
+    return;
+  }
+  const details = reportNode("details", null, "analysis-chart-table");
+  details.append(reportNode("summary", `Schlafdefizit · Ziel ${analysisValue(target, "h")}`));
+  const table = reportNode("table");
+  const head = reportNode("thead"); const header = reportNode("tr");
+  for (const label of ["Quelle", "Bekannte Nächte", "Defizit", "Status"]) header.append(reportNode("th", label));
+  head.append(header); table.append(head);
+  const body = reportNode("tbody");
+  for (const item of deficits) {
+    const row = reportNode("tr");
+    row.append(reportNode("td", item.source || "unbekannt"));
+    row.append(reportNode("td", `${item.known_nights ?? 0}/7`));
+    row.append(reportNode("td", item.deficit_hours == null ? "unbekannt" : analysisValue(item.deficit_hours, "h")));
+    const deficitStatus = item.status || "unknown";
+    row.append(reportNode("td", `${providerMetricStatus(deficitStatus)} (${deficitStatus})`));
+    body.append(row);
+  }
+  table.append(body); details.append(table); root.append(details);
+}
+
+function renderRecoveryRegularity(regularity, root) {
+  const card = reportNode("section", null, "analysis-chart-card recovery-regularity");
+  card.append(reportNode("h3", "Schlafregelmäßigkeit"));
+  const method = regularity?.method || "unbekannt";
+  const timezone = regularity?.timezone || "unbekannt";
+  const status = regularity?.status || "insufficient_data";
+  card.append(reportNode("p", `Methode: ${method} · Zeitzone: ${timezone} · Status: ${providerMetricStatus(status)} (${status})`, "muted"));
+  const series = Array.isArray(regularity?.series) ? regularity.series : [];
+  if (!series.length) {
+    card.append(reportNode("p", `Keine geprüften Schlafintervalle verfügbar · ${regularity?.reason || "unbekannter Grund"}.`, "muted"));
+    root.append(card);
+    return;
+  }
+  const days = recoveryHistoryPeriod === "twelveWeeks" ? "points_84" : "points_14";
+  const periodLabel = recoveryHistoryPeriod === "twelveWeeks" ? "12 Wochen" : "14 Tage";
+  for (const item of series) {
+    const block = reportNode("details", null, "analysis-chart-table");
+    block.open = true;
+    const source = item.source || "Quelle unbekannt";
+    const intervalLabel = source === "Garmin Connect" ? "Garmin-Schlafintervall" : source === "Intervals.icu" ? "Intervals.icu-Schlafintervall" : "Schlafintervall";
+    block.append(reportNode("summary", `${source} · ${intervalLabel} · ${periodLabel}`));
+    const coverage = item.coverage || {};
+    block.append(reportNode("p", `Status: ${providerMetricStatus(item.status || "insufficient_data")} (${item.status || "insufficient_data"}) · Basisabdeckung: ${coverage.baseline_nights ?? 0}/${coverage.required_nights ?? 14} Nächte · Fehlende Nächte bleiben unbekannt.`, "muted"));
+    block.append(reportNode("p", `Erkannte Providerfelder: ${item.method || "unbekannt"}`, "muted"));
+    const table = reportNode("table");
+    table.append(reportNode("caption", `${source} · lokale Zeiten`));
+    const head = reportNode("thead"); const header = reportNode("tr");
+    for (const label of ["Datum", "Beginn lokal", "Aufwachen lokal", "Dauer"]) header.append(reportNode("th", label));
+    head.append(header); table.append(head);
+    const body = reportNode("tbody");
+    const points = Array.isArray(item[days]) ? item[days] : [];
+    for (const point of points) {
+      const row = reportNode("tr");
+      row.append(reportNode("td", point.date ? dateLabel(point.date) : "Datum unbekannt"));
+      row.append(reportNode("td", recoveryClock(point.onset_at)));
+      row.append(reportNode("td", recoveryClock(point.wake_at)));
+      row.append(reportNode("td", point.duration_hours != null && Number.isFinite(Number(point.duration_hours)) ? analysisValue(point.duration_hours, "h") : "unbekannt"));
+      body.append(row);
+    }
+    table.append(body); block.append(table); card.append(block);
+    const makeDeviationChart = (title, key) => {
+      const points = (item[days] || []).map((point) => ({ date: point.date, value: point[key] ?? null }));
+      const firstDate = points[0]?.date || item.points?.[0]?.date;
+      const lastDate = points.at(-1)?.date || item.points?.at(-1)?.date;
+      if (!firstDate || !lastDate || !points.some(analysisValidPoint)) return;
+      const chart = analysisChart(`${intervalLabel} · ${title}abweichung`, [{
+        label: title,
+        legendLabel: title,
+        source,
+        unit: "min",
+        noCurrentLine: true,
+        cadenceDays: recoveryHistoryPeriod === "twelveWeeks" ? 7 : 1,
+        explanation: `Abweichung zum persönlichen lokalen Median · ${providerMetricStatus(item.status || "insufficient_data")} · ${coverage.baseline_nights ?? 0}/${coverage.required_nights ?? 14} Nächte Basis.`,
+        points,
+      }], "min", firstDate, lastDate, "Fehlende Schlafintervalle bleiben als Lücken sichtbar.", { sparse: true });
+      card.append(chart);
+    };
+    makeDeviationChart("Beginn", "onset_deviation_minutes");
+    makeDeviationChart("Aufwachzeit", "wake_deviation_minutes");
+  }
+  root.append(card);
 }
 
 function renderRecoveryCharts(report, root) {
@@ -882,7 +1056,7 @@ function renderRecoveryCharts(report, root) {
     return { label: `${title} · ${item.source}${measurement}`, legendLabel: title, source: item.source, unit, color,
       bars: metric === "sleep", average: true, averageInHeading: true, cadenceDays: recoveryHistoryPeriod === "twelveWeeks" ? 7 : 1, range, target,
       currentPoint: points.some(analysisValidPoint) ? null : item.history.findLast((point) => point.date <= today && analysisValidPoint(point)),
-      referenceLabel: metric === "sleep" ? "Durchschnitt der angezeigten Werte" : recoveryReferenceLabel(item, range, target, unit, position),
+      referenceLabel: metric === "sleep" ? `Durchschnitt der angezeigten Werte · Status: ${providerMetricStatus(item.status || "unknown")} (${item.status || "unknown"})` : recoveryReferenceLabel(item, range, target, unit, position),
       coverageShort: `${readings.length}/${expectedDays} Tage mit Messung`,
       coverage: `${readings.length}/${expectedDays} Tage mit Messung${rangeDescription}`, points };
   });
@@ -901,6 +1075,8 @@ function renderPersonalRecovery(report) {
   const root = document.getElementById("personalRecovery");
   root.replaceChildren();
   renderRecoveryCharts(report, root);
+  recoverySleepDeficits(report, root);
+  renderRecoveryRegularity(report?.regularity, root);
   renderAnalysisSegments(state.route);
 }
 
@@ -1001,6 +1177,7 @@ function seasonEventCard(event, generation) {
   const weekly = reportNode("details"); weekly.append(reportNode("summary", `${event.preparation.weeks_with_recorded_training}/12 Wochen mit erfasstem sportartspezifischem Training`));
   for (const week of event.preparation.weeks || []) weekly.append(reportNode("p", seasonWeekSummary(week)));
   weekly.append(reportNode("p", "Wochen ohne Aufzeichnung beweisen keine Trainingspause; Umfang enthält nur lokal bekannte Einheiten.", "muted")); section.append(weekly);
+  appendSeasonEvidence(event.preparation, section);
   for (const item of event.preparation.long_sessions) {
     const button = reportNode("button", `${dateLabel(item.date)} · ${item.name} · ${item.duration_seconds == null ? "Dauer unbekannt" : formatDuration(item.duration_seconds)}`, "secondary-button");
     button.type = "button";
@@ -1013,6 +1190,71 @@ function seasonEventCard(event, generation) {
     appendSeasonScenario(event, section, generation);
   }
   return section;
+}
+
+function seasonStatusLabel(status) {
+  return { observations: "Beobachtungen", observed: "beobachtet", insufficient_data: "nicht genügend Daten", unknown: "unbekannt" }[status] || status || "unbekannt";
+}
+
+function seasonDistance(value) {
+  return value == null ? "unbekannt" : `${(Number(value) / 1000).toLocaleString("de-DE", { maximumFractionDigits: 1 })} km`;
+}
+
+function seasonDuration(value) {
+  return value == null ? "unbekannt" : formatDuration(Number(value));
+}
+
+function appendSeasonEvidence(preparation, section) {
+  const target = preparation?.target_context || {};
+  const weekly = preparation?.weekly_observed_volume || {};
+  const long = preparation?.long_session_evidence || {};
+  const specificity = preparation?.specificity_evidence || {};
+  const comparison = preparation?.target_distance_comparison || {};
+  const details = reportNode("details", null, "season-evidence");
+  details.open = true;
+  details.append(reportNode("summary", "Beobachtete Nachweise und Lücken"));
+  details.append(reportNode("p", `Zielkontext · Sport: ${target.sport || "unbekannt"} · Distanz: ${target.distance_confirmed ? seasonDistance(target.distance_meters) : "unbekannt"} · Ziel: ${target.target_confirmed ? target.target : "unbekannt"} · Quelle: ${target.source || "unbekannt"}`));
+  details.append(reportNode("p", `Wöchentlicher beobachteter Umfang · Status: ${seasonStatusLabel(weekly.status)} · ${weekly.weeks_with_sessions ?? 0}/${weekly.weeks_total ?? 12} Wochen mit Einheiten · ${weekly.sessions ?? 0} Einheiten · Dauer: ${seasonDuration(weekly.duration_seconds)} (${weekly.duration_known_sessions ?? 0} bekannte Einheiten) · Distanz: ${seasonDistance(weekly.distance_meters)} (${weekly.distance_known_sessions ?? 0} bekannte Einheiten) · Quelle: ${weekly.source || "unbekannt"}`));
+  appendSeasonWeeklyHistory(preparation.weeks || [], weekly.source || "Intervals.icu recorded activities", details);
+  details.append(reportNode("p", `Lange Einheit · Status: ${seasonStatusLabel(long.status)} · ${long.sessions ?? 0} Nachweise · längste Dauer: ${seasonDuration(long.duration_seconds)} · längste Distanz: ${seasonDistance(long.distance_meters)} · Quelle: ${long.source || "unbekannt"}`));
+  const dimensions = specificity.known_dimensions || {};
+  details.append(reportNode("p", `Spezifitätsnachweise · Status: ${seasonStatusLabel(specificity.status)} · Ausdauer: ${dimensions.aerobic ?? 0} · Power-Profil: ${dimensions.power_profile ?? 0} · Intervallqualität: ${dimensions.interval_quality ?? 0} · Quelle: ${specificity.source || "unbekannt"}`));
+  details.append(reportNode("p", `Zieldistanzvergleich · Status: ${seasonStatusLabel(comparison.status)} · Ziel: ${seasonDistance(comparison.target_distance_meters)} · beobachtete lange Einheit: ${seasonDistance(comparison.observed_long_session_distance_meters)} · Quelle: ${comparison.source || "unbekannt"}`));
+  section.append(details);
+}
+
+function appendSeasonWeeklyHistory(weeks, source, root) {
+  const validWeeks = weeks.filter((week) => week?.start && week?.end);
+  if (!validWeeks.length) {
+    root.append(reportNode("p", "Wöchentlicher Verlauf: unbekannt · keine datierten Wochen verfügbar.", "muted"));
+    return;
+  }
+  const start = validWeeks[0].end;
+  const end = validWeeks.at(-1).end;
+  const duration = validWeeks.map((week) => ({ date: week.end, value: week.duration_seconds == null ? null : Number(week.duration_seconds) / 3600, count: week.duration_known_sessions ?? 0 }));
+  const distance = validWeeks.map((week) => ({ date: week.end, value: week.distance_meters == null ? null : Number(week.distance_meters) / 1000, count: week.distance_known_sessions ?? 0 }));
+  const durationSeries = [{ label: "Dauer", legendLabel: "Dauer", source, unit: "h", cadenceDays: 7, noCurrentLine: true, points: duration }];
+  const distanceSeries = [{ label: "Distanz", legendLabel: "Distanz", source, unit: "km", cadenceDays: 7, noCurrentLine: true, points: distance }];
+  if (duration.some(analysisValidPoint)) root.append(analysisChart("Beobachtete Trainingsdauer je Woche", durationSeries, "h", start, end, "Nur bekannte Aktivitätsdauern; fehlende Wochen bleiben Lücken.", { sparse: true }));
+  else root.append(reportNode("p", "Wöchentliche Dauer: unbekannt · keine bekannten Aktivitätsdauern.", "muted"));
+  if (distance.some(analysisValidPoint)) root.append(analysisChart("Beobachtete Trainingsdistanz je Woche", distanceSeries, "km", start, end, "Nur bekannte Aktivitätsdistanzen; fehlende Wochen bleiben Lücken.", { sparse: true }));
+  else root.append(reportNode("p", "Wöchentliche Distanz: unbekannt · keine bekannten Aktivitätsdistanzen.", "muted"));
+  const table = reportNode("table");
+  table.append(reportNode("caption", `Wochenabdeckung · ${source}`));
+  const head = reportNode("thead"); const header = reportNode("tr");
+  for (const label of ["Woche", "Einheiten", "Dauer · bekannt", "Distanz · bekannt"]) header.append(reportNode("th", label));
+  head.append(header); table.append(head);
+  const body = reportNode("tbody");
+  for (const week of validWeeks) {
+    const row = reportNode("tr");
+    row.append(reportNode("td", `${dateLabel(week.start)} – ${dateLabel(week.end)}`));
+    row.append(reportNode("td", String(week.sessions ?? 0)));
+    row.append(reportNode("td", `${seasonDuration(week.duration_seconds)} · ${week.duration_known_sessions ?? 0}/${week.sessions ?? 0}`));
+    row.append(reportNode("td", `${seasonDistance(week.distance_meters)} · ${week.distance_known_sessions ?? 0}/${week.sessions ?? 0}`));
+    body.append(row);
+  }
+  table.append(body);
+  const wrap = reportNode("div", null, "analysis-chart-table"); wrap.append(table); root.append(wrap);
 }
 
 function appendSeasonScenario(event, section, generation) {

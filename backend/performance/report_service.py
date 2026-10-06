@@ -170,41 +170,57 @@ class TrainingReportService:
         }
 
     def power_profiles(self) -> dict[str, Any]:
-        records = [
-            row
-            for row in self._observations()
+        records = self._observations()
+        today = self._today()
+        eligible_records = [row for row in records if str(row.get("date") or "") <= today.isoformat()]
+        valid = [
+            row for row in eligible_records
             if (row.get("power_profile") or {}).get("status") == "ok"
+            or (row.get("running_profile") or {}).get("status") == "ok"
         ]
-        best = []
+        # Keep one compatibility winner per sport/duration.
+        compatibility = []
         for sport in ("Ride", "VirtualRide"):
             for duration in (5, 60, 300, 1200):
-                candidates = [
-                    (point["watts"], row)
-                    for row in records
-                    if row["sport"] == sport
-                    for point in row["power_profile"]["points"]
-                    if point["duration_seconds"] == duration
-                    and point["watts"] is not None
-                ]
+                candidates = [(p.get("watts"), row) for row in eligible_records if row.get("sport") == sport for p in (row.get("power_profile") or {}).get("points", []) if p.get("duration_seconds") == duration and p.get("watts") is not None]
                 if candidates:
-                    watts, row = max(candidates, key=lambda candidate: candidate[0])
-                    best.append(
-                        {
-                            "sport": sport,
-                            "duration_seconds": duration,
-                            "watts": watts,
-                            "activity_id": row["activity_id"],
-                            "date": row["date"],
-                            "observed_at": row["observed_at"],
-                        }
-                    )
+                    watts, row = max(candidates, key=lambda item: item[0])
+                    compatibility.append({"sport": sport, "duration_seconds": duration, "watts": watts, "activity_id": row["activity_id"], "date": row["date"], "observed_at": row["observed_at"]})
+        windows = {str(days): self._profile_window(valid, today, days) for days in (28, 90)}
         return {
-            "status": "ok" if best else "insufficient_data",
-            "best": best,
+            "status": "ok" if compatibility or valid else "insufficient_data",
+            "best": compatibility,
             "activities": records,
+            "windows": windows,
+            "running": {"name": "running_best_efforts", "type": "running", "windows": {key: value["running"] for key, value in windows.items()}},
             "method": "original-stream-integral-v1",
-            "scope": "Up to 100 current locally loaded recordings. Indoor and outdoor sports stay separate. Observed means are not FTP or model estimates.",
+            "scope": "Observed windows from current locally cached detail records. Missing or invalid windows remain unknown; no FTP or pace inference.",
         }
+
+    @staticmethod
+    def _profile_window(records: list[dict[str, Any]], today: date, days: int) -> dict[str, Any]:
+        start = today - timedelta(days=days - 1)
+        eligible = [row for row in records if start.isoformat() <= str(row.get("date") or "") <= today.isoformat()]
+        source = "Intervals.icu original streams via local activity detail cache"
+        result: dict[str, Any] = {"date_start": start.isoformat(), "date_end": today.isoformat(), "source": source, "cache_coverage": {"records": len(eligible), "eligible_activities": [row["activity_id"] for row in eligible]}, "power": [], "running": {"speed": [], "distance": []}}
+        for sport in ("Ride", "VirtualRide"):
+            for duration in (5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600):
+                candidates = [(p, row) for row in eligible if row.get("sport") == sport for p in (row.get("power_profile") or {}).get("duration_curve", []) if p.get("duration_seconds") == duration and p.get("watts") is not None]
+                result["power"].append(TrainingReportService._winner(candidates, sport, duration, "watts", "duration_seconds"))
+        for key, field, values in (("speed", "speed_mps", (60, 300, 1200)), ("distance", "seconds", (1000, 5000))):
+            for value in values:
+                candidates = [(p, row) for row in eligible if row.get("sport") in {"Run", "VirtualRun", "TrailRun"} for p in (row.get("running_profile") or {}).get(key, []) if p.get(field) is not None and p.get("duration_seconds", p.get("distance_meters")) == value]
+                result["running"][key].append(TrainingReportService._winner(candidates, "Run", value, field, "duration_seconds" if key == "speed" else "distance_meters", minimum=True))
+        return result
+
+    @staticmethod
+    def _winner(candidates: list[tuple[dict[str, Any], dict[str, Any]]], sport: str, value: int, field: str, label: str, minimum: bool = False) -> dict[str, Any]:
+        if not candidates:
+            return {"sport": sport, label: value, field: None, "status": "unknown", "reason": "No complete valid local window."}
+        point, row = (min if minimum else max)(candidates, key=lambda item: item[0][field])
+        actual_sport = row.get("sport", sport)
+        environment = "indoor" if actual_sport in {"VirtualRide", "VirtualRun", "IndoorCycling"} else "outdoor"
+        return {"sport": actual_sport, "environment": environment, label: value, field: point[field], "activity_id": row.get("activity_id"), "date": row.get("date"), "observed_at": row.get("observed_at"), "status": "ok", "source": "original activity stream"}
 
     def archive(self, values: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(values, dict):

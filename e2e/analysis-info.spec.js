@@ -203,3 +203,43 @@ test("@responsive performance keeps predictions in the dedicated table", async (
   await expect(page.locator("#performancePredictions")).toContainText("20:00");
   await expect(page.locator("#performanceSummary")).toBeHidden();
 });
+
+test("@responsive provider metrics and sleep regularity keep source, raw fields and unknown gaps", async ({ page }) => {
+  await performanceFixture(page, {
+    history: {
+      start: "2026-09-01", end: "2026-10-01", load: { points: [] }, metrics: {},
+      provider_metrics: {
+        endurance_score: { source: "Garmin Connect", aggregation: "weekly", unit: "unknown", status: "stale", points: [{ date: "2026-09-28", values: { enduranceScore: 712 } }] },
+        running_tolerance: { source: "Garmin Connect", aggregation: "weekly", unit: "unknown", status: "failed", points: [] },
+      },
+    },
+    personal_recovery: {
+      as_of: "2026-10-01", sleep_target_hours: null, baselines: [], sleep_deficits: [],
+      regularity: {
+        method: "sleep-regularity-v1", timezone: "Europe/Berlin", status: "provisional", series: [{
+          source: "Garmin Connect", method: "sleepStartTimestampGMT/sleepEndTimestampGMT", status: "provisional",
+          coverage: { baseline_nights: 3, required_nights: 14 },
+          points_14: [{ date: "2026-10-01", onset_at: "2026-09-30T22:15:00+02:00", wake_at: "2026-10-01T06:45:00+02:00", duration_hours: 8.5 }, { date: "2026-09-30" }],
+          points_84: [],
+        }],
+      },
+    },
+  });
+  const performance = page.locator("#analysisHistoryCharts");
+  await expect(performance).toContainText("Endurance Score");
+  await expect(performance).toContainText("Running Tolerance");
+  await expect(performance).toContainText("Garmin Connect");
+  await expect(performance).toContainText("enduranceScore");
+  await expect(performance).toContainText("Einheit: unbekannt");
+  await expect(performance).toContainText("veraltet (stale)");
+  await expect(performance).toContainText("fehlgeschlagen (failed)");
+  await page.evaluate(async () => { await applyNavigationRoute("analysis/recovery", { historyMode: "replace" }); });
+  const recovery = page.locator("#personalRecovery");
+  await expect(recovery).toContainText("Schlafdefizit: unbekannt");
+  await expect(recovery).toContainText("sleep-regularity-v1");
+  await expect(recovery).toContainText("Basisabdeckung: 3/14");
+  await expect(recovery).toContainText("22:15");
+  await expect(recovery).toContainText("unbekannt");
+  await expect(recovery.locator(".recovery-regularity svg")).toHaveCount(2);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
