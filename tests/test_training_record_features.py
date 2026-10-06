@@ -162,6 +162,110 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self.assertEqual(len(service.read()["items"]), 1)
         self.assertEqual(service.read()["garmin_items"], [])
 
+    def test_empty_initial_gear_snapshot_does_not_finalize_import(self):
+        service = EquipmentService(
+            self.manager, dict, lambda: date(2026, 10, 2), lambda: "now"
+        )
+        service.sync_garmin_snapshot(
+            {
+                "source_freshness": {"gear": {"freshness": "current"}},
+                "gear": [],
+            }
+        )
+        self.assertIsNone(
+            self.manager.connection.execute(
+                "SELECT value FROM kv WHERE key='garmin_equipment_initialized'"
+            ).fetchone()
+        )
+        service.sync_garmin_snapshot(
+            {
+                "source_freshness": {"gear": {"freshness": "current"}},
+                "gear": [{"gearUUID": "gear-1", "gearName": "Bike"}],
+            }
+        )
+        self.assertEqual(len(service.read()["items"]), 1)
+
+    def test_legacy_empty_import_recovers_once_and_preserves_local_equipment(self):
+        service = EquipmentService(
+            self.manager, dict, lambda: date(2026, 10, 2), lambda: "now"
+        )
+        local = {
+            "id": "local-item",
+            "name": "Local shoes",
+            "sport": "Run",
+            "kind": "shoes",
+            "status": "active",
+            "parent_id": None,
+            "start_date": "2026-09-01",
+            "initial_distance_km": 0,
+            "initial_hours": 0,
+            "revision": 1,
+        }
+        self.manager.connection.executemany(
+            "INSERT INTO kv VALUES (?, ?, 'now')",
+            [
+                ("garmin_equipment_initialized", "1"),
+                ("equipment:local-item", json.dumps(local)),
+            ],
+        )
+        current = {
+            "source_freshness": {"gear": {"freshness": "current"}},
+            "gear": [{"gearUUID": "gear-1", "gearName": "Road bike"}],
+        }
+        service.sync_garmin_snapshot(current)
+        service.sync_garmin_snapshot(current)
+        items = service.read()["items"]
+        self.assertEqual({item["name"] for item in items}, {"Local shoes", "Road bike"})
+        self.assertEqual(len([item for item in items if item.get("garmin_uuid")]), 1)
+
+    def test_legacy_marker_with_archived_garmin_item_never_imports_new_gear(self):
+        service = EquipmentService(
+            self.manager, dict, lambda: date(2026, 10, 2), lambda: "now"
+        )
+        existing = {
+            "id": "garmin-linked",
+            "name": "Archived bike",
+            "sport": "Ride",
+            "kind": "bike",
+            "status": "archived",
+            "parent_id": None,
+            "start_date": "2026-09-01",
+            "initial_distance_km": 10,
+            "initial_hours": 0,
+            "garmin_uuid": "gear-1",
+            "garmin_distance_km": 10,
+            "revision": 1,
+        }
+        self.manager.connection.executemany(
+            "INSERT INTO kv VALUES (?, ?, 'now')",
+            [
+                ("garmin_equipment_initialized", "1"),
+                ("equipment:garmin-linked", json.dumps(existing)),
+            ],
+        )
+        current = {
+            "source_freshness": {"gear": {"freshness": "current"}},
+            "gear": [
+                {
+                    "gearUUID": "gear-1",
+                    "gearName": "Renamed remotely",
+                    "stats": {"totalDistance": 25000},
+                },
+                {
+                    "gearUUID": "gear-2",
+                    "gearName": "New bike",
+                    "stats": {"totalDistance": 1000},
+                },
+            ],
+        }
+        service.sync_garmin_snapshot(current)
+        service.sync_garmin_snapshot(current)
+        items = service.read()["items"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["status"], "archived")
+        self.assertEqual(items[0]["name"], "Archived bike")
+        self.assertEqual(items[0]["garmin_distance_km"], 25)
+
     def test_recurring_comparison_keeps_historical_targets_and_device_provenance_separate(
         self,
     ):

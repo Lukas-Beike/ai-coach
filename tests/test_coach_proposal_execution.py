@@ -214,6 +214,53 @@ class CoachProposalExecutionTests(unittest.TestCase):
             self.service.execute(token, "owner-session", payload_hash)
 
         dispatcher.execute.assert_not_called()
+        self.assertEqual(self.row()["status"], "ready")
+
+    def test_local_write_validation_conflict_keeps_approved_proposal_retryable(self) -> None:
+        token = "local-token-" + "x" * 32
+        session_key = hashlib.sha256(b"owner-session").hexdigest()
+        intent = {
+            "operation": "save_nutrition_template",
+            "target_system": "local",
+            "authorization_scope": ["local_nutrition"],
+            "request": {"source_message_ids": [1]},
+        }
+        payload = {
+            "tool": "save_nutrition_template",
+            "arguments": {"payload": {"name": "Synthetic meal", "description": "Synthetic ingredients"}},
+            "intent": intent,
+            "conversation_id": "conversation-1",
+            "client_turn_id": "turn-1",
+        }
+        payload_hash = coach_action_hash(payload)
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO messages(id, role, content, client_turn_id, created_at) "
+                "VALUES (1, 'user', 'save synthetic meal', 'turn-1', 'now')"
+            )
+            db.execute(
+                "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, "
+                "status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("command-1", "turn-1", "conversation-1", "{}", "local", "complete",
+                 json.dumps({"session_key": session_key}), "now", "now"),
+            )
+            db.execute(
+                "INSERT INTO coach_action_proposals "
+                "(id, session_csrf_hash, action_type, target_system, object_ids, diff, payload, "
+                "payload_hash, status, expires_at, created_at, action_token_hash) "
+                "VALUES (?, ?, 'local_coach_write', 'local', '{}', '[]', ?, ?, 'ready', ?, ?, ?)",
+                ("local-proposal", "owner-session", json.dumps(payload), payload_hash, 200.0,
+                 "now", hashlib.sha256(token.encode()).hexdigest()),
+            )
+        dispatcher = Mock()
+        dispatcher.execute.side_effect = AppError(409, "Synthetic duplicate template")
+        self.service._tool_dispatch_service = lambda: dispatcher
+
+        with self.assertRaises(AppError):
+            self.service.execute(token, "owner-session", payload_hash)
+
+        self.assertEqual(self.row()["status"], "ready")
+        dispatcher.execute.assert_called_once()
 
 
 if __name__ == "__main__":

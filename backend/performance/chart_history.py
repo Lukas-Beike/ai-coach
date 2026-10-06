@@ -32,6 +32,13 @@ def _rows(value: Any) -> list[dict[str, Any]]:
     )
 
 
+def _garmin_day(row: dict[str, Any]) -> date | None:
+    for field in ("calendarDate", "summaryDate", "date"):
+        if (day := _day(row.get(field))) is not None:
+            return day
+    return None
+
+
 def _wellness_history(
     raw: dict[str, Any], snapshot: dict[str, Any], start: date, today: date
 ) -> dict[date, dict[str, Any]]:
@@ -47,7 +54,7 @@ def _load_history(dates: list[str], garmin: dict[str, Any]) -> list[dict[str, An
     observations = {
         day.isoformat(): acute_load_value(row)
         for row in _rows(garmin.get("training_status"))
-        if (day := _day(row.get("calendarDate") or row.get("date"))) is not None
+        if (day := _garmin_day(row)) is not None
     }
     return [{"date": day, "value": observations.get(day)} for day in dates]
 
