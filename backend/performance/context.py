@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-from backend.performance import activity_validation
+from backend.performance import activity_validation, garmin_projection
 from backend.performance import comparisons as performance_comparisons
 from backend.performance import current_metrics as performance_current_metrics
 from backend.performance import daily_health as performance_daily_health
@@ -36,7 +36,7 @@ def current_performance_context(
 ) -> dict[str, Any]:
     """Compose the current performance projection from explicit inputs."""
     if not snapshot:
-        return {
+        unavailable = {
             "available": False,
             "source": performance_current_metrics.PROVIDER_INTERVALS_NAME,
             "as_of": None,
@@ -46,6 +46,12 @@ def current_performance_context(
                 None, garmin, today, str(profile.get("timezone") or "UTC")
             ),
         }
+        load_projection = garmin_projection.garmin_training_load_projection(
+            garmin, today
+        )
+        if load_projection:
+            unavailable["garmin_training_load"] = load_projection
+        return unavailable
 
     athlete_value = snapshot.get("athlete")
     athlete: dict[str, Any] = athlete_value if isinstance(athlete_value, dict) else {}
@@ -116,6 +122,9 @@ def current_performance_context(
     return {
         "available": True,
         "personal_recovery": personal_recovery(wellness_rows, garmin, profile, today),
+        "garmin_training_load": garmin_projection.garmin_training_load_projection(
+            garmin, today
+        ),
         "training_focus": training_focus(
             snapshot, garmin, today, str(profile.get("timezone") or "UTC")
         ),

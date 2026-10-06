@@ -126,6 +126,7 @@ def _collect_ranges(
     payload: dict[str, Any],
     pagination: dict[str, dict[str, Any]],
     include_recovery: bool,
+    include_current_metrics: bool,
     status: StatusCallback | None,
     external_call: ExternalCall,
     redact: Redact,
@@ -138,6 +139,14 @@ def _collect_ranges(
         if status:
             status(f"Garmin: Zeitraum {index}/{len(windows)} wird synchronisiert…")
         requests = [("activities", client.get_activities_by_date)]
+        include_load = include_recovery or include_current_metrics
+        training_load_fetch = (
+            getattr(client, "get_training_load_activities", None)
+            if include_load
+            else None
+        )
+        if include_load and callable(training_load_fetch):
+            requests.append(("training_load_activities", training_load_fetch))
         if include_recovery:
             requests[0:0] = [
                 ("sleep", client.get_sleep_daily),
@@ -302,6 +311,16 @@ def _collect_current_metrics(
     max_metrics_range = getattr(client, "get_max_metrics_range", None)
     metrics = (
         (
+            "daily_training_status",
+            lambda: client.get_daily_training_status(today.isoformat()),
+            {"date": today.isoformat()},
+        ),
+        (
+            "training_load_balance",
+            lambda: client.get_training_four_week_load_balance(today.isoformat()),
+            {"date": today.isoformat()},
+        ),
+        (
             "readiness",
             lambda: client.get_training_readiness(today.isoformat()),
             {"date": today.isoformat()},
@@ -320,6 +339,14 @@ def _collect_current_metrics(
         ),
     )
     for key, metric_fetch, details in metrics:
+        if key == "daily_training_status" and not callable(
+            getattr(client, "get_daily_training_status", None)
+        ):
+            continue
+        if key == "training_load_balance" and not callable(
+            getattr(client, "get_training_four_week_load_balance", None)
+        ):
+            continue
         _collect_optional_metric(
             payload, key, metric_fetch, details, external_call, redact, warn
         )
@@ -411,6 +438,8 @@ def _validate_current_metrics(
     payload: dict[str, Any], redact: Redact, warn: WarningLogger | None
 ) -> None:
     keys = (
+        "daily_training_status",
+        "training_load_balance",
         "heart_rate_zones",
         "readiness",
         "race_predictions",
@@ -421,6 +450,18 @@ def _validate_current_metrics(
         "gear",
     )
     for key in keys:
+        if key in ("daily_training_status", "training_load_balance") and key in payload:
+            if isinstance(payload[key], dict):
+                continue
+            payload.pop(key)
+            _add_error(
+                payload,
+                key,
+                ValueError(f"Invalid Garmin {key} response"),
+                redact,
+                warn,
+            )
+            continue
         if key in payload and not isinstance(payload[key], (dict, list)):
             payload.pop(key)
             _add_error(
@@ -460,6 +501,7 @@ def collect_garmin_data(
         payload,
         pagination,
         collection_options.include_recovery,
+        collection_options.include_current_metrics,
         status,
         external_call,
         redact,

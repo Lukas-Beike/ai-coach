@@ -17,7 +17,14 @@ from backend.sync.state import SyncStateRepository
 
 class GarminPayloadServiceTests(unittest.TestCase):
     def collection_payload(self, start, end, *, failed=None):
-        sources = ("activities", "sleep", "hrv", "daily_stats", "resting_hr")
+        sources = (
+            "activities",
+            "sleep",
+            "hrv",
+            "daily_stats",
+            "resting_hr",
+            "training_load_activities",
+        )
         return {
             "start": start,
             "end": end,
@@ -79,6 +86,150 @@ class GarminPayloadServiceTests(unittest.TestCase):
             del payload["provider_sync"]["pagination"][source]
         self.store_garmin_snapshot(self.service.prepare_remote(payload))
         self.assertEqual(self.service.automatic_sync_days(2), 2)
+
+    def test_training_load_coverage_is_recorded_without_driving_recovery_backfill(self):
+        required = self.collection_payload("2026-06-27", "2026-09-18")
+        del required["training_load_activities"]
+        del required["provider_sync"]["pagination"]["training_load_activities"]
+        self.store_garmin_snapshot(self.service.prepare_remote(required))
+
+        load_refresh = {
+            "start": "2026-09-19",
+            "end": "2026-09-20",
+            "synced_at": "2026-09-20T13:00:00",
+            "errors": [],
+            "training_load_activities": [
+                {"activityId": 21, "activityTrainingLoad": 45}
+            ],
+            "provider_sync": {
+                "pagination": {
+                    "training_load_activities": {"complete": True, "records": 1}
+                }
+            },
+        }
+
+        refreshed = self.service.prepare_remote(load_refresh)
+
+        self.assertEqual(
+            refreshed["source_freshness"]["training_load_activities"]["synced_start"],
+            "2026-09-19",
+        )
+        self.assertEqual(
+            refreshed["source_freshness"]["training_load_activities"]["synced_end"],
+            "2026-09-20",
+        )
+        self.assertEqual(
+            refreshed["source_freshness"]["activities"]["synced_end"],
+            "2026-09-18",
+        )
+        self.assertEqual(
+            refreshed["source_freshness"]["sleep"]["synced_end"],
+            "2026-09-18",
+        )
+        self.assertEqual(self.service.automatic_sync_days(2), 3)
+
+    def test_load_source_failures_keep_last_good_values_stale_and_do_not_advance_coverage(
+        self,
+    ):
+        previous = self.collection_payload("2026-06-27", "2026-09-18")
+        previous["training_load_activities"] = [
+            {"activityId": 21, "activityTrainingLoad": 45}
+        ]
+        previous["training_load_balance"] = {"load": 210}
+        previous["daily_training_status"] = {"acuteLoad": 68}
+        previous["source_freshness"] = {
+            "training_load_balance": {
+                "freshness": "current",
+                "fetched_at": "2026-09-18T12:00:00",
+                "observed_at": "2026-09-18",
+            },
+            "daily_training_status": {
+                "freshness": "current",
+                "fetched_at": "2026-09-18T12:00:00",
+                "observed_at": "2026-09-18",
+            },
+        }
+        self.store_garmin_snapshot(self.service.prepare_remote(previous))
+
+        failed = {
+            "start": "2026-09-19",
+            "end": "2026-09-20",
+            "synced_at": "2026-09-20T13:00:00",
+            "errors": [
+                {"source": "training_load_activities", "message": "synthetic timeout"},
+                {"source": "training_load_balance", "message": "synthetic timeout"},
+                {"source": "daily_training_status", "message": "synthetic timeout"},
+            ],
+            "training_load_activities": [
+                {"activityId": 22, "activityTrainingLoad": 48}
+            ],
+            "provider_sync": {
+                "pagination": {
+                    "training_load_activities": {"complete": False, "records": 0}
+                }
+            },
+        }
+        refreshed = self.service.prepare_remote(failed)
+
+        self.assertEqual(
+            refreshed["training_load_activities"],
+            [
+                {"activityId": 22, "activityTrainingLoad": 48},
+                {"activityId": 21, "activityTrainingLoad": 45},
+            ],
+        )
+        self.assertEqual(
+            refreshed["training_load_balance"], previous["training_load_balance"]
+        )
+        self.assertEqual(
+            refreshed["daily_training_status"], previous["daily_training_status"]
+        )
+        self.assertEqual(
+            refreshed["source_freshness"]["training_load_activities"]["freshness"],
+            "partial",
+        )
+        self.assertEqual(
+            refreshed["source_freshness"]["training_load_activities"]["synced_end"],
+            "2026-09-18",
+        )
+        for source in ("training_load_balance", "daily_training_status"):
+            self.assertEqual(
+                refreshed["source_freshness"][source]["freshness"], "stale"
+            )
+        self.assertEqual(self.service.automatic_sync_days(2), 3)
+
+    def test_empty_current_load_metrics_do_not_mark_retained_values_fresh(self):
+        previous = {
+            "synced_at": "2026-09-18T12:00:00",
+            "training_load_balance": {"load": 210},
+            "daily_training_status": {"acuteLoad": 68},
+            "source_freshness": {
+                source: {
+                    "freshness": "current",
+                    "fetched_at": "2026-09-18T12:00:00",
+                    "observed_at": "2026-09-18",
+                }
+                for source in ("training_load_balance", "daily_training_status")
+            },
+        }
+        self.store_garmin_snapshot(previous)
+        payload = {
+            "synced_at": "2026-09-20T12:00:00",
+            "errors": [],
+            "training_load_balance": {},
+            "daily_training_status": {},
+        }
+
+        refreshed = self.service.prepare_remote(payload)
+
+        for source, expected in (
+            ("training_load_balance", {"load": 210}),
+            ("daily_training_status", {"acuteLoad": 68}),
+        ):
+            self.assertEqual(refreshed[source], expected)
+            self.assertEqual(
+                refreshed["source_freshness"][source]["freshness"], "stale"
+            )
 
     def test_failed_initial_recovery_is_retried_despite_activity_backfill(self):
         seed = self.service.prepare_remote(

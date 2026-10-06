@@ -68,7 +68,7 @@ jobs:
         with:
           python-version: '3.14'
       - name: Install dependencies
-        run: python -m pip install "--only-binary=:all:" --require-hashes -r requirements.lock
+        run: python -m pip install "--only-binary=:all:" --require-hashes -r requirements.txt
       - name: Run unit tests
         run: python tests/run_tests.py --shard "${{ matrix.shard }}" --total 4
 
@@ -103,6 +103,11 @@ jobs:
           docker run --rm --read-only --security-opt no-new-privileges:true --cap-drop=ALL
           --pids-limit=256 --memory=512m --cpus=1 --tmpfs /tmp
           --volume "${GITHUB_WORKSPACE}/tests:/review/tests:ro"
+          --volume "${GITHUB_WORKSPACE}/Dockerfile:/review/Dockerfile:ro"
+          --volume "${GITHUB_WORKSPACE}/requirements.in:/review/requirements.in:ro"
+          --volume "${GITHUB_WORKSPACE}/requirements.txt:/review/requirements.txt:ro"
+          --volume "${GITHUB_WORKSPACE}/requirements-dev.in:/review/requirements-dev.in:ro"
+          --volume "${GITHUB_WORKSPACE}/requirements-dev.txt:/review/requirements-dev.txt:ro"
           --volume "${GITHUB_WORKSPACE}/docs:/review/docs:ro"
           --volume "${GITHUB_WORKSPACE}/public:/review/public:ro"
           --volume "${GITHUB_WORKSPACE}/server.py:/review/server.py:ro"
@@ -149,7 +154,7 @@ jobs:
         with:
           python-version: '3.14'
       - name: Install application and quality dependencies
-        run: python -m pip install "--only-binary=:all:" --require-hashes -r requirements-dev.lock
+        run: python -m pip install "--only-binary=:all:" --require-hashes -r requirements-dev.txt
       - name: Collect coverage baseline
         run: |
           coverage run --branch --source=server.py,backend tests/run_tests.py --shard 1 --total 4

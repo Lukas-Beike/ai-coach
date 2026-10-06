@@ -38,8 +38,11 @@ GARMIN_COLLECTION_SOURCES = (
     "daily_stats",
     "resting_hr",
     "training_status",
+    "training_load_activities",
 )
 GARMIN_METRIC_SOURCES = (
+    "training_load_balance",
+    "daily_training_status",
     "gear",
     "heart_rate_zones",
     "readiness",

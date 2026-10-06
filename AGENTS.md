@@ -84,8 +84,9 @@ private VPN; it must not be exposed directly to the public internet.
 - `tests/`: standard-library unit tests. Its scoped instructions are in
   `tests/AGENTS.md`.
 - `garmin-login.py`: one-time interactive Garmin login/token setup helper.
-- `requirements.txt`: pinned third-party dependencies, including Garmin and
-  SQLCipher support.
+- `requirements.in` and `requirements-dev.in`: direct dependency pins;
+  `requirements.txt` and `requirements-dev.txt` are the hash-locked pip-tools
+  outputs used by CI and Docker.
 - `public/service-worker.js`: PWA cache and notification handling.
 - `.github/workflows/`: convention validation, tests/container publishing,
   Dependabot auto-merge, and daily releases.
