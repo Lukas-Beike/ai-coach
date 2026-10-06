@@ -159,7 +159,9 @@ class CoachReadToolService:
         return self._calculate_food(nutrition, arguments)
 
     @staticmethod
-    def _lookup_food(nutrition: NutritionService, arguments: dict[str, Any]) -> dict[str, Any]:
+    def _lookup_food(
+        nutrition: NutritionService, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
         source = str(arguments.get("source") or "").strip().lower()
         query = str(arguments.get("query") or arguments.get("q") or "").strip()
         if query and not arguments.get("barcode") and source in {"bls", "off"}:
@@ -169,7 +171,9 @@ class CoachReadToolService:
         return nutrition.food_database.lookup(arguments)
 
     @staticmethod
-    def _calculate_food(nutrition: NutritionService, arguments: dict[str, Any]) -> dict[str, Any]:
+    def _calculate_food(
+        nutrition: NutritionService, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
         if "components" in arguments and (
             "ingredients" in arguments or "product_id" in arguments
         ):
