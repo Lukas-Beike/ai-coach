@@ -119,7 +119,7 @@ class IntervalsNutritionSyncService:
                 (pending if result["pending"] else synced).append(meal_date)
             except AppError as exc:
                 errors[meal_date] = str(exc)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 errors[meal_date] = str(exc)
         return {
             "ok": not pending and not errors,
@@ -146,7 +146,7 @@ class IntervalsNutritionSyncService:
             try:
                 result = self.sync_day(d)
                 (pending if result["pending"] else synced).append(d)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 errors[d] = str(exc)
 
         return {
