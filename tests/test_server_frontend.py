@@ -138,8 +138,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('/components.js?v=217', index)
         self.assertIn('/coach.js?v=6', index)
         self.assertIn('/app.js?v=269', index)
-        self.assertIn('/styles.css?v=266', index)
-        self.assertIn('intervals-coach-v332', service_worker)
+        self.assertIn('/styles.css?v=269', index)
+        self.assertIn('intervals-coach-v335', service_worker)
         self.assertIn('"/navigation.js?v=228"', service_worker)
         self.assertIn('"/appearance.js?v=218"', service_worker)
         self.assertIn('"/state.js?v=218"', service_worker)
@@ -324,7 +324,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split('app.js?v=', 1)[1].split('"', 1)[0]
         self.assertIn(f'app.js?v={asset_version}', markup)
-        self.assertIn('intervals-coach-v332', service_worker)
+        self.assertIn('intervals-coach-v335', service_worker)
         self.assertIn(f'/app.js?v={asset_version}', service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -400,14 +400,19 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
         self.assertEqual(dict(response.headers)["Cache-Control"], "public, max-age=31536000, immutable")
 
+    def test_nutrition_source_label_leaves_sync_state_to_card(self):
+        source = (server.PUBLIC_DIR / "nutrition.js").read_text(encoding="utf-8")
+        self.assertIn("return sourceLabel;", source)
+        self.assertNotIn('return sourceLabel + (item.template ? "" : item.syncLabel);', source)
+
     def test_analysis_asset_is_served_and_precached_as_javascript(self):
-        response = StaticAssetService(server.PUBLIC_DIR).render("/analysis.js", "/analysis.js?v=68", None)
+        response = StaticAssetService(server.PUBLIC_DIR).render("/analysis.js", "/analysis.js?v=69", None)
         self.assertEqual(response.status, 200)
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
         self.assertEqual(dict(response.headers)["Cache-Control"], "public, max-age=31536000, immutable")
         self.assertIn(b"function renderAnalysisHistory", response.body)
         worker = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/analysis.js?v=68"', worker)
+        self.assertIn('"/analysis.js?v=69"', worker)
 
     def test_versioned_static_assets_are_immutable_and_support_etag_revalidation(self):
         response = StaticAssetService(server.PUBLIC_DIR).render("/appearance.js", "/appearance.js?v=218", None)
@@ -487,9 +492,9 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"/forms.js"', source)
         self.assertIn('"/coach.js?v=6"', source)
         self.assertIn('"/app.js?v=269"', source)
-        self.assertIn('"/nutrition.js?v=13"', source)
+        self.assertIn('"/nutrition.js?v=14"', source)
         self.assertIn('"/icon.svg?v=217"', source)
-        self.assertIn('"/styles.css?v=266"', source)
+        self.assertIn('"/styles.css?v=269"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)

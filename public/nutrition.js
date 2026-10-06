@@ -74,6 +74,67 @@ function renderNutritionSegments(route) {
   });
 }
 
+function nutritionNumber(value) {
+  if (value == null || value === "") return "–";
+  const number = Number(value);
+  return Number.isFinite(number) ? String(Math.round(number * 10) / 10) : String(value);
+}
+
+function nutritionComponentSource(basis) {
+  const kind = basis?.kind;
+  if (kind === "local_product" || kind === "product") {
+    const product = basis.product || basis;
+    const source = product.source === "packaging_label" ? "Verpackungsangabe" : product.source;
+    const label = product.product_name || product.name || "Gespeichertes Produkt";
+    return ["Gespeichertes Produkt: " + label, source].filter(Boolean).join(" · ");
+  }
+  if (kind === "database") {
+    const food = basis.food || basis;
+    return [food.source || "Datenbank", food.name].filter(Boolean).join(": ");
+  }
+  if (kind === "packaging_label") return "Verpackungsangabe";
+  if (kind === "manual") return "Manuelle Angabe";
+  if (kind === "estimate") return "Schätzung";
+  return "Quelle unbekannt";
+}
+
+function nutritionBasisLabel(basis, item, sourceLabel) {
+  if (basis?.kind === "composite") return "Zusammengesetztes Essen · Herkunft je Zutat";
+  if (basis?.kind === "database") {
+    return "Datenbankberechnung · " + basis.ingredients.map((food) => `${food.source}: ${food.name}, ${food.amount} ${food.unit} (Basis 100 ${food.basis_unit})`).join("; ");
+  }
+  if (basis?.kind === "product" || basis?.kind === "local_product") {
+    const product = basis.product || basis;
+    const name = product.product_name || product.name || "Produkt";
+    const source = product.source ? ` (${product.source})` : "";
+    const amount = basis.amount != null ? ` · ${basis.amount} ${basis.unit || "g"}` : "";
+    return `Lokales Produkt · ${name}${source}${amount}`;
+  }
+  if (basis?.kind === "manual_correction") return "Manuell korrigierte Nährwerte";
+  if (basis?.kind === "packaging_label") return "Verpackungsangabe";
+  return sourceLabel;
+}
+
+function nutritionComponentDetails(item) {
+  const components = item.nutrition_basis?.kind === "composite" ? item.nutrition_basis.components : [];
+  if (!Array.isArray(components) || !components.length) return null;
+  const details = document.createElement("details");
+  details.className = "nutrition-components";
+  const summary = document.createElement("summary");
+  summary.textContent = `Zutaten anzeigen (${components.length})`;
+  const list = document.createElement("ul");
+  list.className = "nutrition-component-list";
+  for (const component of components) {
+    const row = document.createElement("li");
+    const name = document.createElement("strong"); name.textContent = component.name || "Unbenannte Zutat";
+    const amount = document.createElement("span"); amount.textContent = ` · ${component.amount ?? "–"} ${component.unit || ""}`.trim();
+    const nutrients = document.createElement("span"); nutrients.textContent = ` · ${nutritionNumber(component.kcal)} kcal · KH ${nutritionNumber(component.carbs_g)} g · Protein ${nutritionNumber(component.protein_g)} g · Fett ${nutritionNumber(component.fat_g)} g`;
+    const source = document.createElement("small"); source.textContent = nutritionComponentSource(component.nutrition_basis);
+    row.append(name, amount, nutrients, source); list.append(row);
+  }
+  details.append(summary, list); return details;
+}
+
 function nutritionCard(item, template) {
   const card = document.createElement("article");
   card.className = "nutrition-card";
@@ -85,25 +146,18 @@ function nutritionCard(item, template) {
   const description = document.createElement("p");
   description.textContent = item.description;
   const values = document.createElement("p");
-  values.textContent = `${item.kcal == null ? "–" : item.kcal} kcal · KH ${item.carbs_g ?? "–"} g · Protein ${item.protein_g ?? "–"} g · Fett ${item.fat_g ?? "–"} g${template ? " / Portion" : ""}`;
+  values.textContent = `${nutritionNumber(item.kcal)} kcal · KH ${nutritionNumber(item.carbs_g)} g · Protein ${nutritionNumber(item.protein_g)} g · Fett ${nutritionNumber(item.fat_g)} g${template ? " / Portion" : ""}`;
   const source = document.createElement("small");
   const sourceLabels = { coach: "Coach-Schätzung", photo: "Foto-Schätzung", voice: "Sprach-Schätzung", manual: "Manuelle Angabe" };
   const sourceLabel = sourceLabels[item.source] || "Erfasst";
   const syncLabel = item.sync_state === "synced" ? " · Synchronisiert" : " · Lokal";
-  const basis = item.nutrition_basis;
-  let basisLabel = sourceLabel;
-  if (basis?.kind === "database") basisLabel = "Datenbankberechnung · " + basis.ingredients.map((food) => `${food.source}: ${food.name}, ${food.amount} ${food.unit} (Basis 100 ${food.basis_unit})`).join("; ");
-  else if (basis?.kind === "product" || basis?.kind === "local_product") {
-    const product = basis.product || basis;
-    const name = product.product_name || product.name || "Produkt";
-    const source = product.source ? ` (${product.source})` : "";
-    const amount = basis.amount != null ? ` · ${basis.amount} ${basis.unit || "g"}` : "";
-    basisLabel = `Lokales Produkt · ${name}${source}${amount}`;
-  }
-  else if (basis?.kind === "manual_correction") basisLabel = "Manuell korrigierte Nährwerte";
-  else if (basis?.kind === "packaging_label") basisLabel = "Verpackungsangabe";
+  const basisLabel = nutritionBasisLabel(item.nutrition_basis, { template, syncLabel }, sourceLabel);
   source.textContent = basisLabel + (template ? "" : syncLabel);
   card.append(title, description, values, source);
+  if (!template) {
+    const details = nutritionComponentDetails(item);
+    if (details) card.append(details);
+  }
   return card;
 }
 
@@ -132,7 +186,7 @@ async function loadNutrition() {
       const value = document.createElement("strong");
       const known = day.entries.some((entry) => entry[key] != null);
       const total = day[`total_${key}`];
-      value.textContent = `${known ? total : "–"} ${unit}`;
+      value.textContent = `${known && total != null ? nutritionNumber(total) : "–"} ${unit}`;
       const caption = document.createElement("span");
       caption.textContent = label + (known && day.entries.some((entry) => entry[key] == null) ? " · unvollständig" : "");
       tile.append(value, caption);

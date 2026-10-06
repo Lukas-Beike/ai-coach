@@ -41,9 +41,13 @@ class NutritionHttpApiTests(unittest.TestCase):
     def test_templates_route_requires_authentication(self) -> None:
         self.handler.path = "/api/nutrition/templates"
         self.nutrition_service.list_templates.return_value = [{"id": "template-1"}]
-        self.assertTrue(self.get_routes.handle(self.handler, "/api/nutrition/templates"))
+        self.assertTrue(
+            self.get_routes.handle(self.handler, "/api/nutrition/templates")
+        )
         self.auth.require_auth.assert_called_once_with(self.handler)
-        self.handler.send_json.assert_called_once_with(200, {"ok": True, "templates": [{"id": "template-1"}]})
+        self.handler.send_json.assert_called_once_with(
+            200, {"ok": True, "templates": [{"id": "template-1"}]}
+        )
 
     def test_get_day_route(self) -> None:
         self.handler.path = "/api/nutrition/day?date=2026-09-24"
@@ -332,6 +336,33 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
             },
         )
         nutrition.mark_date_synced.assert_called_once_with("2026-09-24", 7)
+
+    def test_sync_keeps_date_pending_when_macro_totals_are_unknown(self) -> None:
+        config = Mock(spec=Config)
+        config.intervals_athlete_id = "i12345"
+        api = Mock()
+        nutrition = Mock()
+        nutrition.get_sync_snapshot.return_value = {
+            "date": "2026-09-24",
+            "total_kcal": 500,
+            "total_carbs_g": None,
+            "total_protein_g": 20,
+            "total_fat_g": 10,
+            "entry_count": 1,
+            "sync_revision": 7,
+        }
+
+        result = IntervalsNutritionSyncService(config, api, nutrition).sync_day(
+            "2026-09-24"
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["pending"])
+        self.assertEqual(
+            api.put.call_args.args[1],
+            {"id": "2026-09-24", "kcalConsumed": 500, "protein": 20, "fat": 10},
+        )
+        nutrition.mark_date_synced.assert_not_called()
 
     def test_sync_pending_processes_all_dates(self) -> None:
         mock_config = Mock(spec=Config)

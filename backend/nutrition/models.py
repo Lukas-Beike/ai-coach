@@ -111,9 +111,9 @@ class NutritionEntry:
 class NutritionDaySummary:
     date: str
     total_kcal: int
-    total_carbs_g: float
-    total_protein_g: float
-    total_fat_g: float
+    total_carbs_g: float | None
+    total_protein_g: float | None
+    total_fat_g: float | None
     entry_count: int
     entries: list[dict[str, Any]]
 

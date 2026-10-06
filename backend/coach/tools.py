@@ -69,6 +69,94 @@ def build_tool_contracts(
         },
     }
 
+    nutrition_components = {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 20,
+        "description": "All components of one consumed meal in a single call. Mix local products, database foods, estimates, packaging labels and manual values; the server calculates totals and freezes provenance.",
+        "items": {
+            "anyOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["kind", "product_id", "amount", "unit"],
+                    "properties": {
+                        "kind": {"type": "string", "enum": ["local_product"]},
+                        "product_id": {"type": "string"},
+                        "amount": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 10000,
+                        },
+                        "unit": {"type": "string", "enum": ["g", "ml", "portion"]},
+                    },
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["kind", "food_id", "amount", "unit"],
+                    "properties": {
+                        "kind": {"type": "string", "enum": ["database"]},
+                        "food_id": {"type": "string"},
+                        "amount": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 10000,
+                        },
+                        "unit": {"type": "string", "enum": ["g", "ml"]},
+                    },
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "kind",
+                        "name",
+                        "amount",
+                        "unit",
+                        "kcal",
+                        "carbs_g",
+                        "protein_g",
+                        "fat_g",
+                    ],
+                    "properties": {
+                        "kind": {
+                            "type": "string",
+                            "enum": ["estimate", "packaging_label", "manual"],
+                        },
+                        "name": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "amount": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 10000,
+                        },
+                        "unit": {"type": "string", "enum": ["g", "ml", "portion"]},
+                        "kcal": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 10000,
+                        },
+                        "carbs_g": {
+                            "type": ["number", "null"],
+                            "minimum": 0,
+                            "maximum": 1000,
+                        },
+                        "protein_g": {
+                            "type": ["number", "null"],
+                            "minimum": 0,
+                            "maximum": 1000,
+                        },
+                        "fat_g": {
+                            "type": ["number", "null"],
+                            "minimum": 0,
+                            "maximum": 1000,
+                        },
+                    },
+                },
+            ]
+        },
+    }
+
     COACH_STRUCTURED_TOOLS = [
         _canonical_coach_tool(
             "lookup_food",
@@ -81,9 +169,10 @@ def build_tool_contracts(
         ),
         _canonical_coach_tool(
             "calculate_food_nutrition",
-            "Calculate a meal from looked-up food IDs and known quantities without saving it. Returns totals and source/basis information. Missing macros stay unknown. Use these ingredients again when saving so the server calculates and preserves provenance.",
+            "Calculate a meal without saving it. Use components for a mixed-origin meal, ingredients for database-only foods, or product_id for one saved product. Preview all components together, then save the meal in one call.",
             {
                 "ingredients": food_ingredients,
+                "components": nutrition_components,
                 "product_id": {"type": "string"},
                 "amount": {"type": "number", "exclusiveMinimum": 0, "maximum": 10000},
                 "unit": {"type": "string", "enum": ["g", "ml", "portion"]},
@@ -721,7 +810,7 @@ def build_tool_contracts(
         ),
         _canonical_coach_tool(
             "save_nutrition_entry",
-            "Save a meal, snack, or nutritional intake with calories and macronutrients (carbs, protein, fat). Use when the athlete describes what they ate via speech/text or shares a food photo.",
+            "Save one complete consumed meal, snack, or nutritional intake in one call. For mixed-origin foods pass every item in payload.components; never split one meal into separate entries by source.",
             {
                 "payload": {
                     "type": "object",
@@ -775,13 +864,32 @@ def build_tool_contracts(
                             "type": "boolean",
                             "description": "True only when the athlete supplied values copied from the product packaging",
                         },
+                        "components": nutrition_components,
                     },
+                    "oneOf": [
+                        {
+                            "required": ["components", "description"],
+                            "not": {
+                                "anyOf": [
+                                    {"required": ["kcal"]},
+                                    {"required": ["carbs_g"]},
+                                    {"required": ["protein_g"]},
+                                    {"required": ["fat_g"]},
+                                    {"required": ["food_ingredients"]},
+                                    {"required": ["product_id"]},
+                                    {"required": ["amount"]},
+                                    {"required": ["unit"]},
+                                ]
+                            },
+                        },
+                        {"not": {"required": ["components"]}},
+                    ],
                 }
             },
         ),
         _canonical_coach_tool(
             "update_nutrition_entry",
-            "Correct an existing meal by ID after reading the matching entry. Supply only changed fields; omitted date, time, description, macros, and source stay unchanged.",
+            "Correct an existing meal by ID after reading the matching entry. Supply only changed fields; use changes.components for all components of a mixed-origin meal. Omitted date, time, description, macros, and source stay unchanged.",
             {
                 "id": {
                     "type": "string",
@@ -816,6 +924,7 @@ def build_tool_contracts(
                             "maximum": 1000,
                         },
                         "packaging_label": {"type": "boolean"},
+                        "components": nutrition_components,
                     },
                 },
             },
@@ -1031,7 +1140,15 @@ def build_tool_contracts(
                         "type": "object",
                         "properties": template_properties,
                         "additionalProperties": False,
-                        "required": ["name", "description", "kcal"],
+                        "required": ["name", "description"],
+                        # New templates need nutritional data. An update may
+                        # omit nutrition fields to retain the stored values.
+                        "anyOf": [
+                            {"required": ["components"]},
+                            {"required": ["food_ingredients"]},
+                            {"required": ["kcal"]},
+                            {"required": ["id"]},
+                        ],
                     }
                 },
             ),

@@ -534,6 +534,66 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["nutrition_basis"]["kind"], "database")
         self.assertEqual(server.NUTRITION_ASSEMBLY.service().get_today_summary()["entry_count"], 0)
 
+        mixed = self.run_tool("calculate_food_nutrition", {"components": [
+            {"kind": "database", "food_id": "bls:C133000", "amount": 50, "unit": "g"},
+            {"kind": "estimate", "name": "Synthetic banana", "amount": 1, "unit": "portion",
+             "kcal": 90, "carbs_g": 20, "protein_g": 1, "fat_g": 0},
+        ]})
+        self.assertEqual(mixed["nutrition_basis"]["kind"], "composite")
+        self.assertEqual(len(mixed["nutrition_basis"]["components"]), 2)
+        self.assertEqual(server.NUTRITION_ASSEMBLY.service().get_today_summary()["entry_count"], 0)
+
+        schemas = {tool["name"]: tool for tool in server.COACH_DIALOGUE_TOOLS}
+        self.assertIn("components", schemas["calculate_food_nutrition"]["parameters"]["properties"])
+        self.assertIn("components", schemas["save_nutrition_entry"]["parameters"]["properties"]["payload"]["properties"])
+        self.assertIn("components", schemas["update_nutrition_entry"]["parameters"]["properties"]["changes"]["properties"])
+
+        database_component = schemas["calculate_food_nutrition"]["parameters"]["properties"]["components"]["items"]["anyOf"][1]
+        self.assertEqual(database_component["properties"]["unit"]["enum"], ["g", "ml"])
+
+        template_payload = schemas["save_nutrition_template"]["parameters"]["properties"]["payload"]
+        alternatives = {tuple(item["required"]) for item in template_payload["anyOf"]}
+        self.assertEqual(alternatives, {("components",), ("food_ingredients",), ("kcal",), ("id",)})
+        self.assertTrue(any("components" in required for required in alternatives))
+        self.assertTrue(any("food_ingredients" in required for required in alternatives))
+        self.assertTrue(any("kcal" in required for required in alternatives))
+        self.assertTrue(any("id" in required for required in alternatives))
+
+        component_schema = schemas["calculate_food_nutrition"]["parameters"]["properties"]["components"]
+        estimate_schema = component_schema["items"]["anyOf"][2]
+        self.assertEqual(estimate_schema["properties"]["kcal"]["type"], "number")
+        entry_payload = schemas["save_nutrition_entry"]["parameters"]["properties"]["payload"]
+        component_form = next(branch for branch in entry_payload["oneOf"] if "required" in branch and "components" in branch["required"])
+        self.assertEqual(component_form["required"], ["components", "description"])
+        self.assertIn("anyOf", component_form["not"])
+
+    def test_mixed_origin_meal_is_saved_once_with_frozen_source_components(self):
+        product = self.run_tool("save_nutrition_product", {"payload": {
+            "name": "Synthetic meal yogurt", "basis_amount": 100, "basis_unit": "g",
+            "kcal": 60, "carbs_g": 4, "protein_g": 5, "fat_g": 2,
+            "source": "packaging_label",
+        }}, ["local_nutrition_product"],
+            message="Die angezeigten Angaben stimmen; speichere dieses Produkt lokal.") ["product"]
+        components = [
+            {"kind": "local_product", "product_id": product["id"], "amount": 150, "unit": "g"},
+            {"kind": "database", "food_id": "bls:C133000", "amount": 40, "unit": "g"},
+            {"kind": "estimate", "name": "Synthetic berries", "amount": 30, "unit": "g",
+             "kcal": 15, "carbs_g": 3, "protein_g": 0.3, "fat_g": 0.1},
+        ]
+        preview = self.run_tool("calculate_food_nutrition", {"components": components})
+        self.assertEqual(preview["nutrition_basis"]["kind"], "composite")
+        entry = self.run_tool("save_nutrition_entry", {"payload": {
+            "meal_date": "2026-09-07", "meal_type": "breakfast", "description": "Synthetic mixed-origin bowl",
+            "components": components,
+        }}, ["local_nutrition"], message="Ich habe diese Mahlzeit gegessen; erfasse sie einmal.")["entry"]
+        self.assertEqual(entry["kcal"], preview["kcal"])
+        self.assertEqual(entry["nutrition_basis"]["kind"], "composite")
+        self.assertEqual([item["kind"] for item in entry["nutrition_basis"]["components"]],
+                         ["local_product", "database", "estimate"])
+        self.assertEqual(entry["nutrition_basis"]["components"][0]["nutrition_basis"]["product"]["id"], product["id"])
+        day = self.run_tool("read_nutrition", {"date": "2026-09-07"})
+        self.assertEqual(day["entry_count"], 1)
+
     @covers("save_nutrition_template:success", "log_nutrition_template:success", "delete_nutrition_template:success")
     def test_saved_meals_run_through_authorized_coach_and_receipts(self):
         template = self.run_tool("save_nutrition_template", {"payload": {"name": "Synthetic breakfast", "description": "80 g oats", "kcal": 400}}, ["local_nutrition"], message="Ja, speichere diese Mahlzeitvorlage.")["template"]
