@@ -98,9 +98,14 @@ class IntervalsNutritionSyncService:
         """Validate the complete approval, then sync only its frozen dates."""
         if not isinstance(manifest, list) or len(manifest) > 31:
             raise AppError(409, "The approved nutrition manifest is invalid.")
-        dates = [entry.get("date") for entry in manifest if isinstance(entry, dict)]
-        if len(dates) != len(manifest) or len(set(dates)) != len(dates):
+        raw_dates = [entry.get("date") for entry in manifest if isinstance(entry, dict)]
+        if (
+            len(raw_dates) != len(manifest)
+            or any(not isinstance(value, str) for value in raw_dates)
+            or len(set(raw_dates)) != len(raw_dates)
+        ):
             raise AppError(409, "The approved nutrition manifest is invalid.")
+        dates: list[str] = [value for value in raw_dates if isinstance(value, str)]
         current = self._nutrition_service.approval_manifest(dates=dates)
         if len(current) != len(manifest) or any(
             not nutrition_approval_item_matches(expected, actual)
