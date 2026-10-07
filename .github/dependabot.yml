@@ -1,15 +1,31 @@
 version: 2
 updates:
+  - package-ecosystem: npm
+    directory: "/"
+    target-branch: develop
+    schedule:
+      interval: daily
+    commit-message:
+      prefix: build
   - package-ecosystem: pip
     directory: "/"
+    target-branch: develop
+    commit-message:
+      prefix: build
     schedule:
       interval: daily
     open-pull-requests-limit: 10
   - package-ecosystem: docker
     directory: "/"
+    target-branch: develop
+    commit-message:
+      prefix: build
     schedule:
       interval: daily
   - package-ecosystem: github-actions
     directory: "/"
+    target-branch: develop
+    commit-message:
+      prefix: ci
     schedule:
       interval: weekly
