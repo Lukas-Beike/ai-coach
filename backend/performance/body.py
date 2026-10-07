@@ -182,26 +182,26 @@ def _visit_direct_ftp(
         return
     budget[0] -= 1
     if isinstance(value, dict):
-        observed = _direct_ftp_record(
-            value, inherited or fallback_day, today, synced_at, result
+        _visit_direct_dict(
+            value, inherited, depth, budget, today, fallback_day, synced_at, result
         )
-        for child in value.values():
-            if isinstance(child, (dict, list)):
-                _visit_direct_ftp(
-                    child,
-                    observed,
-                    depth + 1,
-                    budget,
-                    today,
-                    fallback_day,
-                    synced_at,
-                    result,
-                )
     elif isinstance(value, list):
-        for child in value[:500]:
+        _visit_direct_list(
+            value, inherited, depth, budget, today, fallback_day, synced_at, result
+        )
+
+
+def _visit_direct_dict(
+    value, inherited, depth, budget, today, fallback_day, synced_at, result
+) -> None:
+    observed = _direct_ftp_record(
+        value, inherited or fallback_day, today, synced_at, result
+    )
+    for child in value.values():
+        if isinstance(child, (dict, list)):
             _visit_direct_ftp(
                 child,
-                inherited,
+                observed,
                 depth + 1,
                 budget,
                 today,
@@ -209,6 +209,15 @@ def _visit_direct_ftp(
                 synced_at,
                 result,
             )
+
+
+def _visit_direct_list(
+    value, inherited, depth, budget, today, fallback_day, synced_at, result
+) -> None:
+    for child in value[:500]:
+        _visit_direct_ftp(
+            child, inherited, depth + 1, budget, today, fallback_day, synced_at, result
+        )
 
 
 def _direct_ftp_record(value, fallback_day, today, synced_at, result):

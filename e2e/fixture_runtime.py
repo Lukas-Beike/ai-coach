@@ -820,32 +820,9 @@ def _fixture_seed_equipment(today, garmin_snapshot):
     existing = {item.get("name"): item for item in items}
     road = existing.get(FIXTURE_BIKE_NAME)
     road_id = road["id"] if road else None
-    saved = {}
-    for (
-        item_id,
-        name,
-        sport,
-        kind,
-        status,
-        garmin_uuid,
-        target_km,
-        maximum_meters,
-    ) in _fixture_equipment_definitions(road_id):
-        item = existing.get(name)
-        item, road_id = _fixture_get_gear_item(
-            service,
-            existing,
-            today,
-            name,
-            sport,
-            kind,
-            status,
-            road_id,
-        )
-        _fixture_gear_metadata(
-            item, name, target_km, maximum_meters, garmin_uuid, garmin_distances_km
-        )
-        saved[item["id"]] = item
+    saved, road_id = _fixture_save_equipment_items(
+        service, existing, today, road_id, garmin_distances_km
+    )
     now = server.runtime_clock.utc_now()
     with server.database_manager().unit_of_work() as db:
         for item_id, item in saved.items():
@@ -860,6 +837,31 @@ def _fixture_seed_equipment(today, garmin_snapshot):
     ):
         service.assign({"activity_id": "feature-ride-1", "equipment_id": road_id})
     return saved
+
+
+def _fixture_save_equipment_items(
+    service, existing, today, road_id, garmin_distances_km
+):
+    saved = {}
+    for definition in _fixture_equipment_definitions(road_id):
+        (
+            _item_id,
+            name,
+            sport,
+            kind,
+            status,
+            garmin_uuid,
+            target_km,
+            maximum_meters,
+        ) = definition
+        item, road_id = _fixture_get_gear_item(
+            service, existing, today, name, sport, kind, status, road_id
+        )
+        _fixture_gear_metadata(
+            item, name, target_km, maximum_meters, garmin_uuid, garmin_distances_km
+        )
+        saved[item["id"]] = item
+    return saved, road_id
 
 
 def _fixture_get_gear_item(
