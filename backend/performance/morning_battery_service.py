@@ -44,7 +44,9 @@ class MorningBatteryStore:
             existing and existing.get("sleep_date") == checkin_date.isoformat()
         )
         record["attempts"] = 1 + (
-            int(existing.get("attempts") or 1) if same_date else 0
+            int(existing.get("attempts") or 1)
+            if same_date and existing is not None
+            else 0
         )
         with self._manager.unit_of_work() as db:
             current = self._read_snapshot(db)

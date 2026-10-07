@@ -52,6 +52,8 @@ class PlanRepairManifestService:
         if not isinstance(period, dict) or intent.get("_sync_all_pending"):
             raise AppError(400, _REPAIR_REQUEST_ERROR, reason="request_sync")
         start, end = period.get("start"), period.get("end")
+        if not isinstance(start, str) or not isinstance(end, str):
+            raise AppError(400, _REPAIR_REQUEST_ERROR, reason="request_sync")
         try:
             start_day = date.fromisoformat(start)
             end_day = date.fromisoformat(end)
@@ -104,7 +106,7 @@ class PlanRepairManifestService:
         if supplied is None:
             expected_revision = arguments.get("expected_revision")
             supplied_entries = None
-            groups = (("local_plan",),)
+            groups: tuple[tuple[str, ...], ...] = (("local_plan",),)
         else:
             selected = planning_library.library_bulk_request_entries(
                 supplied, require_hash=True

@@ -1,7 +1,7 @@
 """Personal recovery distributions, separated by provider and measurement field."""
 
 import math
-from datetime import date, timedelta, timezone
+from datetime import date, timedelta, timezone, tzinfo
 from functools import partial
 from statistics import median, quantiles
 from typing import Any
@@ -211,7 +211,7 @@ def sleep_regularity(
 ) -> dict[str, Any]:
     """Summarize actual sleep intervals without turning them into a score."""
     try:
-        zone = ZoneInfo(timezone_name)
+        zone: tzinfo = ZoneInfo(timezone_name)
     except (ZoneInfoNotFoundError, ValueError):
         zone = timezone.utc
     groups: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
@@ -355,7 +355,9 @@ def sleep_regularity(
     return {
         "method": "sleep-regularity-v1",
         "timezone": timezone_name,
-        "status": max((item["status"] for item in series), key=rank.get),
+        "status": max(
+            (item["status"] for item in series), key=lambda status: rank[status]
+        ),
         "series": series,
         "sources": series,
         "points_14": [point for item in series for point in item["points_14"]],
