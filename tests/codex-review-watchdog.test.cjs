@@ -40,7 +40,8 @@ async function scenario(options = {}) {
         user: { login: options.impostor ? 'other-bot' : bot },
         created_at: new Clock(options.old || options.updated ? epoch - 1000 : epoch + elapsed).toISOString(),
         ...(options.updated ? { updated_at: new Clock(epoch + elapsed).toISOString() } : {}),
-        body: options.blocked ? '### Blocked: Required Secret Scanner Is Unavailable' :
+        body: options.limitAndBlocked ? 'Review unavailable: reached your Codex usage limits' :
+          options.blocked ? '### Blocked: Required Secret Scanner Is Unavailable' :
           options.limit ? 'You have reached your Codex usage limits' :
           options.progress ? 'Codex review started' : options.unrelated ? 'Unrelated comment' :
             "Codex Review: Didn't find any major issues.",
@@ -118,8 +119,10 @@ test('watchdog resumes when Codex posts a late comment or review', () => {
   assert.match(workflow, /pull_request_review:\n\s+types: \[submitted\]/);
   assert.match(workflow, /github\.event\.comment\.user\.login == 'chatgpt-codex-connector\[bot\]'/);
   assert.match(workflow, /github\.event\.review\.user\.login == 'chatgpt-codex-connector\[bot\]'/);
+  assert.match(workflow, /github\.run_id/);
   assert.match(workflow, /github\.event\.issue\.number \|\| inputs\.pull_request_number/);
-  assert.match(workflow, /codex-watchdog-\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.issue\.number \|\| inputs\.pull_request_number \}\}/);
+  assert.match(workflow, /github\.event_name == 'issue_comment'/);
+  assert.match(workflow, /github\.event_name == 'pull_request_review'/);
   assert.doesNotMatch(workflow, /current\.base\.sha !== base/);
 });
 
@@ -141,6 +144,13 @@ test('integration-blocked comments fail and are not treated as usage exhaustion'
   assert.equal(result.writes.length, 0);
   assert.equal(result.results[0].conclusion, 'failure');
   assert.match(result.results[0].output.title, /blocked/i);
+});
+
+test('usage-limit wording wins over a generic blocked match', async () => {
+  const result = await scenario({ active: true, limitAndBlocked: true });
+  assert.equal(result.writes.length, 0);
+  assert.equal(result.results[0].conclusion, 'success');
+  assert.match(result.results[0].output.title, /usage limit/);
 });
 
 test('only a review of the current head proves activity', async () => {
