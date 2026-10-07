@@ -12,7 +12,6 @@ from backend.coach.context import CoachTrainingContextService
 from backend.coach.context_selection import (
     compact_coach_dialogue,
     select_coach_context,
-    select_coach_tools,
 )
 from backend.settings import SettingsService
 
@@ -91,7 +90,7 @@ class CoachRequestPayloadService:
             "input": json.dumps(
                 dialogue_input, ensure_ascii=False, separators=(",", ":")
             ),
-            "tools": select_coach_tools(tools, selection),
+            "tools": tools,
             "tool_choice": "auto",
             "max_output_tokens": self._max_output_tokens,
             "truncation": "auto",

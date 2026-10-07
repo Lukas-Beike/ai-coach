@@ -416,7 +416,7 @@ OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
 SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
-APP_VERSION = "1.12.25"
+APP_VERSION = "1.12.26"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -472,7 +472,7 @@ def database_manager() -> DatabaseManager:
     if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
         database_manager_runtime.DATABASE_MANAGER_CACHE.reset()
         raise RuntimeError(
-            "SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich."
+            "SQLCipher ist für eine verschlüsselte Datenbank erforderlich."
         )
     return database_manager_runtime.DATABASE_MANAGER_CACHE.get(
         signature,

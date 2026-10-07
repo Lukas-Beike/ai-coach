@@ -417,6 +417,7 @@ test("provider source retains visible stale and partial measurement context", as
 test("fresh service worker keeps the current shell available offline", async ({ page }) => {
   await ready(page);
   await page.evaluate(() => navigator.serviceWorker.ready);
+  expect(await page.evaluate(() => caches.keys())).toEqual(["intervals-coach-v364"]);
   await page.context().setOffline(true);
   try {
     await page.reload();
@@ -424,7 +425,8 @@ test("fresh service worker keeps the current shell available offline", async ({ 
     await expect(page.locator("#loginPassword")).toBeEditable();
     expect(await page.evaluate(async () => {
       const names = await caches.keys();
-      const cache = await caches.open(names[0]);
+      const cacheName = names.find((name) => /^intervals-coach-v/.test(name));
+      const cache = await caches.open(cacheName);
       return (await cache.keys()).some((request) => new URL(request.url).pathname.startsWith("/api/"));
     })).toBe(false);
   } finally { await page.context().setOffline(false); }

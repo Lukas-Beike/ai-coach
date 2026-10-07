@@ -200,7 +200,7 @@ class PlannedUnitService:
         ):
             raise AppError(
                 409,
-                "Die lokale Einheit kann wegen einer aktuellen KalenderbeschrÃ¤nkung nicht wiederhergestellt werden.",
+                "Die lokale Einheit kann wegen einer aktuellen Kalenderbeschränkung nicht wiederhergestellt werden.",
                 reason="plan_date_conflict",
             )
         if restore_date and self._calendar_conflict_service.conflicts(
@@ -236,7 +236,7 @@ class PlannedUnitService:
                 if conflicts:
                     raise AppError(
                         409,
-                        "Die lokale Einheit verletzt eine aktuelle KalenderbeschrÃ¤nkung.",
+                        "Die lokale Einheit verletzt eine aktuelle Kalenderbeschränkung.",
                         reason="plan_date_conflict",
                     )
             self.insert(connection, entry)
@@ -487,7 +487,7 @@ class PlannedUnitService:
         ):
             raise AppError(
                 409,
-                "Die lokale Einheit verletzt eine aktuelle KalenderbeschrÃ¤nkung.",
+                "Die lokale Einheit verletzt eine aktuelle Kalenderbeschränkung.",
                 reason="plan_date_conflict",
             )
         if is_active and not skip_calendar_conflict and date_changed:

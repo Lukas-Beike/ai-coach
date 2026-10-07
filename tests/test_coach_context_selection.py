@@ -1,14 +1,44 @@
 import unittest
+from unittest.mock import Mock
+
+from server_test_support import server
 
 from backend.coach.context_selection import (
     CoachContextSelection,
     compact_coach_dialogue,
     select_coach_context,
-    select_coach_tools,
 )
+from backend.coach.request_payload import CoachRequestPayloadService
 
 
 class CoachContextSelectionTests(unittest.TestCase):
+    def setUp(self):
+        training_context = Mock()
+        training_context.build.return_value = "Synthetic local context"
+        settings = Mock()
+        settings.selected_model.return_value = "synthetic-model"
+        settings.selected_thinking_level.return_value = "medium"
+        self.payload_service = CoachRequestPayloadService(
+            training_context, settings, max_output_tokens=1024
+        )
+
+    def offered_tools(self, message):
+        _, payload = self.payload_service.build(
+            message=message,
+            context={"local_date": "2026-10-07"},
+            command_receipts=[],
+            tools=server.COACH_DIALOGUE_TOOLS,
+            allow_mutations=True,
+            ai_provider="openai",
+            model="synthetic-model",
+            thinking_level="medium",
+            conversation_id="synthetic-conversation",
+            attachments=[],
+            retain_openai_attachment_context=False,
+            has_prior_openai_attachments=False,
+        )
+        return {tool["name"] for tool in payload["tools"]}
+
     def test_explicit_dates_without_planning_keywords_use_full_context(self):
         for message in (
             "What should I train on 2026-12-01?",
@@ -89,8 +119,10 @@ class CoachContextSelectionTests(unittest.TestCase):
     def test_attachments_preserve_full_tool_availability(self):
         selection = select_coach_context("Prüfe die Route", {}, attachments=True)
         self.assertEqual(selection.name, "attachment_analysis")
-        tools = [{"name": "read_coach_context"}, {"name": "save_nutrition_entry"}]
-        self.assertEqual(select_coach_tools(tools, selection), tools)
+        self.assertEqual(
+            self.offered_tools("Prüfe die Route"),
+            {tool["name"] for tool in server.COACH_DIALOGUE_TOOLS},
+        )
 
     def test_food_keyword_does_not_match_latest_or_weather(self):
         for message, expected in (
@@ -193,33 +225,25 @@ class CoachContextSelectionTests(unittest.TestCase):
         )
         self.assertEqual(compact["messages"], context["messages"])
 
-    def test_tool_filter_keeps_detail_read_but_no_remote_write(self):
-        tools = [
-            {"name": name}
-            for name in (
-                "read_coach_context",
-                "read_profile",
-                "get_activity_details",
-                "apply_training_patch",
-                "start_intervals_plan_sync",
+    def test_rephrased_requests_offer_required_registered_tools(self):
+        cases = {
+            "Ich bin krank und habe Fieber": {
                 "save_checkin",
-            )
-        ]
-        general = select_coach_tools(
-            tools, select_coach_context("How is recovery?", {})
-        )
-        self.assertEqual(
-            {tool["name"] for tool in general},
-            {
-                "read_coach_context",
-                "read_profile",
-                "get_activity_details",
+                "preview_adaptive_replan",
             },
-        )
-        planning = select_coach_tools(
-            tools, select_coach_context("Plane nächste Woche", {})
-        )
-        self.assertIn("apply_training_patch", {tool["name"] for tool in planning})
-        self.assertNotIn(
-            "start_intervals_plan_sync", {tool["name"] for tool in planning}
-        )
+            "Trag 2 Bananen ein": {"save_nutrition_entry"},
+            "Mein Ruhepuls war heute 48, Schlaf 6 von 10": {"save_checkin"},
+            "Ich will am 12. Oktober beim Stadtlauf starten": {"save_competition"},
+            "Lösche die doppelte Aktivität von gestern": {
+                "delete_duplicate_intervals_activity"
+            },
+            "Gleiche die Ernährung mit Intervals ab": {"sync_nutrition"},
+            "Speichere einen Verpflegungsplan für den Halbmarathon": {
+                "save_fueling_plan"
+            },
+        }
+        registered = {tool["name"] for tool in server.COACH_DIALOGUE_TOOLS}
+        for message, expected in cases.items():
+            with self.subTest(message=message):
+                self.assertTrue(expected <= registered)
+                self.assertTrue(expected <= self.offered_tools(message))

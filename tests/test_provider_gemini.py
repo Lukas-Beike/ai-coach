@@ -386,7 +386,7 @@ class GeminiStreamAccumulatorTests(unittest.TestCase):
                 self.assertEqual(raised.exception.reason, "invalid_response")
                 self.assertEqual(
                     raised.exception.message,
-                    "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben.",
+                    "Gemini hat ein ungültiges Streaming-Ereignis zurückgegeben.",
                 )
 
 

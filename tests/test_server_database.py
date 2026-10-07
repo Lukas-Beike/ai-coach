@@ -1316,7 +1316,7 @@ class ServerDatabaseTests(ServerTestCase):
 
     @unittest.skipUnless(
         server.SQLCIPHER_AVAILABLE,
-        "SQLCipher ist in dieser Testumgebung nicht verfÃ¼gbar.",
+        "SQLCipher ist in dieser Testumgebung nicht verfügbar.",
     )
     def test_session_is_persisted_and_restored_from_database(self):
         class Handler:

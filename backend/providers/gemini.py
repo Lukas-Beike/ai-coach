@@ -17,12 +17,10 @@ from backend.errors import COACH_ABORTED_ERROR, GEMINI_API_KEY_ERROR, AppError
 from backend.providers import http as provider_http
 from backend.providers.http import urlopen
 
-_STREAMING_EVENT_ERROR = (
-    "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben."
-)
-_STREAMING_RESPONSE_TOO_LARGE = "Die Streaming-Antwort von Gemini ist zu\\u00df."
+_STREAMING_EVENT_ERROR = "Gemini hat ein ungültiges Streaming-Ereignis zurückgegeben."
+_STREAMING_RESPONSE_TOO_LARGE = "Die Streaming-Antwort von Gemini ist zu groß."
 _STREAMING_TIMEOUT = "Gemini hat nicht rechtzeitig geantwortet."
-_STREAMING_UNAVAILABLE = "Gemini ist vor\\u00fcbergehend nicht verf\\u00fcgbar."
+_STREAMING_UNAVAILABLE = "Gemini ist vorübergehend nicht verfügbar."
 
 
 class GeminiStreamClient:
@@ -67,7 +65,7 @@ class GeminiStreamClient:
         if not self.api_key:
             raise AppError(503, GEMINI_API_KEY_ERROR)
         if not re.fullmatch(r"(?a:[\w.-]{1,128})", str(model or "")):
-            raise AppError(400, "Ung\\u00fcltiges Gemini-Modell.")
+            raise AppError(400, "Ungültiges Gemini-Modell.")
 
         body = json.dumps(payload).encode("utf-8")
         endpoint = (

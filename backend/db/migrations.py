@@ -59,7 +59,7 @@ def migrate_schema(db: Any) -> None:
     old_schema = not current and _schema_is_1_12_19(db)
     if not current and version == CURRENT_SCHEMA_VERSION:
         raise RuntimeError(
-            "Die vorhandene Datenbank entspricht keinem unterstÃ¼tzten Schema. "
+            "Die vorhandene Datenbank entspricht keinem unterstützten Schema. "
             "Der Datenbestand bleibt erhalten; bitte ein kompatibles Release verwenden."
         )
     if not current and not (old_schema or previous_calendar_schema):

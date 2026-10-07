@@ -714,7 +714,10 @@ async function renderTrainingRecords() { // NOSONAR
   try {
     const result = await api("/api/analysis/training-records");
     if (generation !== trainingRecordsGeneration || session !== state.sessionGeneration) return;
-    const gear = document.getElementById("equipmentItems"); gear.replaceChildren(reportNode("h3", "Ausrüstung und Wartung"));
+    const gear = document.getElementById("equipmentItems");
+    const openDetails = new Set([...gear.querySelectorAll("details[open]")]
+      .map((details) => `${details.closest(".equipment-tab-panel")?.id || "other"}:${details.querySelector("summary")?.textContent || ""}`));
+    gear.replaceChildren(reportNode("h3", "Ausrüstung und Wartung"));
     const equipment = result.equipment || {};
     const items = equipment.garmin_items || [];
     const tabs = reportNode("div", null, "segmented-control equipment-tabs");
@@ -802,6 +805,10 @@ async function renderTrainingRecords() { // NOSONAR
       gear.append(other);
     }
     gear.prepend(tabs);
+    gear.querySelectorAll("details").forEach((details) => {
+      const key = `${details.closest(".equipment-tab-panel")?.id || "other"}:${details.querySelector("summary")?.textContent || ""}`;
+      details.open = openDetails.has(key);
+    });
     if (equipment.garmin_synced_at) gear.append(reportNode("p", `Garmin \u00b7 Stand ${new Date(equipment.garmin_synced_at).toLocaleString("de-DE")}${equipment.garmin_freshness === "stale" ? " \u00b7 letzter erfolgreicher Abruf" : ""}`, "muted"));
   } catch (error) {
     if (generation === trainingRecordsGeneration && session === state.sessionGeneration) {

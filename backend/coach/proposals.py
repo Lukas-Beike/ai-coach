@@ -94,7 +94,7 @@ def validated_coach_action_preview_input(
     if action_type == "local_coach_write":
         if target_system != "local" or not diff:
             raise AppError(
-                400, "Die lokale Coach-Aktion benÃ¶tigt einen sichtbaren Diff."
+                400, "Die lokale Coach-Aktion benötigt einen sichtbaren Diff."
             )
         _validate_local_coach_write(payload)
     elif target_system != expected_target or not diff:
@@ -182,7 +182,7 @@ def _validate_local_coach_write(payload: dict[str, Any]) -> None:
         )
         or not valid_payload
     ):
-        raise AppError(400, "Die lokale Coach-Aktion ist ungÃ¼ltig.")
+        raise AppError(400, "Die lokale Coach-Aktion ist ungültig.")
 
 
 REMOTE_WRITE_LABELS = {
@@ -914,7 +914,7 @@ class CoachProposalConfirmationService:
                 (token_hash, normalized_id),
             ).rowcount
             if confirmed != 1:
-                raise AppError(409, "Die Aktionsvorschau wurde bereits bestÃ¤tigt.")
+                raise AppError(409, "Die Aktionsvorschau wurde bereits bestätigt.")
             updated = db.execute(
                 "SELECT * FROM coach_action_proposals WHERE id=?", (normalized_id,)
             ).fetchone()

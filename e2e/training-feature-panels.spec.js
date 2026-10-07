@@ -163,6 +163,8 @@ test("@responsive equipment keeps local authority and groups archived sources", 
   await expect(archive).not.toHaveAttribute("open", "");
   await expect(archive.locator("summary")).toContainText("3");
   await archive.locator("summary").click();
+  await page.getByRole("tab", { name: "Fahrrad" }).click();
+  await expect(archive).toHaveAttribute("open", "");
   await expect(archive.getByRole("heading", { name: "Retired chain", exact: true })).toBeAttached();
   await expect(archive.getByRole("heading", { name: "Garmin retired chain", exact: true })).toBeAttached();
   const unlinkedLocal = archive.locator("section").filter({ hasText: "Coach-only retired cassette" });
@@ -171,6 +173,8 @@ test("@responsive equipment keeps local authority and groups archived sources", 
   const runPanel = page.locator("#equipmentPanel-run");
   const localEquipment = runPanel.locator("details.training-focus-details");
   await localEquipment.locator("summary").click();
+  await page.getByRole("tab", { name: "Laufschuhe" }).click();
+  await expect(localEquipment).toHaveAttribute("open", "");
   const localCard = localEquipment.locator(".garmin-equipment-card").filter({ hasText: "Local running shoes" });
   const garminCard = runPanel.locator(".garmin-equipment-card").filter({ hasText: "Garmin active shoes" });
   await expect(localCard.getByRole("heading", { name: "Local running shoes", exact: true })).toBeVisible();
@@ -191,7 +195,10 @@ test("@responsive active local gear offers a maintenance button, archived gear d
   await page.goto("/#more/equipment");
   await page.getByRole("tab", { name: "Laufschuhe" }).click();
   const runPanel = page.locator("#equipmentPanel-run");
-  await runPanel.locator("details.training-focus-details").first().locator("summary").click();
+  const localEquipment = runPanel.locator("details.training-focus-details").first();
+  await localEquipment.locator("summary").click();
+  await page.getByRole("tab", { name: "Laufschuhe" }).click();
+  await expect(localEquipment).toHaveAttribute("open", "");
   await expect(runPanel.getByRole("button", { name: "Wartung erledigt" })).toHaveCount(1);
   await runPanel.getByRole("button", { name: "Wartung erledigt" }).click();
   await expect.poll(() => posted?.equipment_id).toBe("a");
