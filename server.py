@@ -472,7 +472,7 @@ def database_manager() -> DatabaseManager:
     if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
         database_manager_runtime.DATABASE_MANAGER_CACHE.reset()
         raise RuntimeError(
-            "SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich."
+            "SQLCipher ist für eine verschlüsselte Datenbank erforderlich."
         )
     return database_manager_runtime.DATABASE_MANAGER_CACHE.get(
         signature,
