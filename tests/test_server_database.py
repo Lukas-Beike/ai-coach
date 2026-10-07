@@ -25,6 +25,7 @@ from backend.db.manager import DATABASE_LOCK, DATABASE_MANAGER_CACHE
 from backend.db.schema import (
     CURRENT_DATABASE_INDEXES,
     CURRENT_DATABASE_SCHEMA,
+    CURRENT_SCHEMA_VERSION,
     configure_cipher,
     database_index_names,
     database_schema_is_current,
