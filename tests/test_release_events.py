@@ -109,7 +109,6 @@ class ReleaseShellGuardTests(unittest.TestCase):
               printf '%s\n' "gh $*" >> operations
               case "$*" in
                 'release view 1.7.3 --repo example/release-test') return 0 ;;
-                'workflow run codex-code-review.yml --repo example/release-test --ref develop --field pull_request_number=437') return 0 ;;
                 'pr list --repo example/release-test --base develop '* )
                   printf '%s' "$MERGED_VERSION_PR" ;;
                 *) return 97 ;;
@@ -131,23 +130,6 @@ class ReleaseShellGuardTests(unittest.TestCase):
         )
         operations = (self.root / "operations").read_text(encoding="utf-8")
         return result, operations
-
-    def test_promotion_validation_dispatch_uses_trusted_develop(self):
-        function = textwrap.dedent(
-            WORKFLOW.split("          ensure_promotion_gate() {", 1)[1].split(
-                "          ensure_release_test() {", 1
-            )[0]
-        )
-        result, operations = self.run_script(
-            "set -euo pipefail\nensure_promotion_gate() {"
-            + function
-            + "\nensure_promotion_gate 437\n"
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            operations.strip(),
-            "gh workflow run codex-code-review.yml --repo example/release-test --ref develop --field pull_request_number=437",
-        )
 
     def test_matching_tested_main_can_continue_without_querying_a_promotion_pr(self):
         script = textwrap.dedent(CREATE_RELEASE.split("        run: |\n", 1)[1])

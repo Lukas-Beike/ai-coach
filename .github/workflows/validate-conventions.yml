@@ -10,9 +10,6 @@ permissions:
 
 jobs:
   validate:
-    # Dependabot's generated titles/commits use GitHub's own format and are
-    # handled by the dedicated Dependabot auto-merge workflow.
-    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Validate PR title and commit subjects
