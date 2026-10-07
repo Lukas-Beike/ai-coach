@@ -1011,7 +1011,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_provider_authentication_errors_do_not_use_the_session_status(self):
         provider_error = server.AppError(
-            401, "Gemini-SchlÃ¼ssel ungÃ¼ltig.", reason="authentication_or_permission"
+            401, "Gemini-Schlüssel ungültig.", reason="authentication_or_permission"
         )
         self.assertEqual(server.public_app_error_status(provider_error), 502)
         self.assertEqual(

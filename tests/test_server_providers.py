@@ -349,7 +349,7 @@ class ServerProvidersTests(ServerTestCase):
                 {
                     "_ai_provider": "gemini",
                     "model": "gemini-3.8-flash",
-                    "input": "BegrÃ¼ÃŸe mich.",
+                    "input": "Begrüße mich.",
                 },
                 deltas.append,
             )

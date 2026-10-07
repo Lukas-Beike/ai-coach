@@ -229,7 +229,7 @@ class CoachAthleteRecordToolService:
 
     def _nutrition_service(self) -> NutritionService:
         if self._nutrition is None:
-            raise AppError(500, "NutritionService ist nicht verfÃ¼gbar.")
+            raise AppError(500, "NutritionService ist nicht verfügbar.")
         return self._nutrition
 
     @staticmethod

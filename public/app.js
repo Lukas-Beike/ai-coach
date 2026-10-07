@@ -3391,7 +3391,7 @@ function renderThinkingLevel(thinkingLevel) {
   }
   select.value = thinkingLevel.selected;
   const selected = (thinkingLevel.options || []).find((option) => option.id === thinkingLevel.selected);
-  $("#thinkingLevelDescription").textContent = selected?.description || "Steuert die GrÃ¼ndlichkeit der Antwort.";
+  $("#thinkingLevelDescription").textContent = selected?.description || "Steuert die Gründlichkeit der Antwort.";
   const modelSelect = $("#modelSelect");
   const modelSummary = $("#modelSettingsSummary");
   if (modelSummary) modelSummary.textContent = [modelSelect?.selectedOptions?.[0]?.textContent, selected?.label || select.selectedOptions?.[0]?.textContent].filter(Boolean).join(" · ");
