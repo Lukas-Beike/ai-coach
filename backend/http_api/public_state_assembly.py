@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
@@ -97,7 +96,7 @@ class PublicStateAssembly:
         operations: PublicStateOperationalServices
         calendar: PublicStateCalendarSettings
 
-    def __init__(self, *, dependencies: "PublicStateAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: PublicStateAssembly.Inputs) -> None:
         core = dependencies.core
         owners = dependencies.owners
         projections = dependencies.projections
@@ -130,8 +129,12 @@ class PublicStateAssembly:
         self._intervals_sync_lock = operations.intervals_sync_lock
         self._workout_library_sync_running = operations.workout_library_sync_running
         self._daily_planning_context_service = operations.daily_planning_context_service
-        self._adaptive_preview_followup_service = operations.adaptive_preview_followup_service
-        self._adaptive_replan_preview_service = operations.adaptive_replan_preview_service
+        self._adaptive_preview_followup_service = (
+            operations.adaptive_preview_followup_service
+        )
+        self._adaptive_replan_preview_service = (
+            operations.adaptive_replan_preview_service
+        )
         self._morning_checkin_state_service = operations.morning_checkin_state_service
         self._coach_quick_actions_service = operations.coach_quick_actions_service
         self._provider_state_service = operations.provider_state_service
@@ -166,7 +169,9 @@ class PublicStateAssembly:
 
     def feedback_state_service(self) -> PublicFeedbackStateService:
         athlete = self._athlete_data()
-        return PublicFeedbackStateService(athlete.checkin(), athlete.activity_feedback())
+        return PublicFeedbackStateService(
+            athlete.checkin(), athlete.activity_feedback()
+        )
 
     def sync_public_state_service(self) -> SyncPublicStateService:
         config = self._config()
@@ -197,48 +202,50 @@ class PublicStateAssembly:
         provider = self._provider_sync()
         garmin = self._garmin()
         conversation = self._coach_conversation()
-        return PublicBootstrapService(PublicBootstrapDependencies(
-            database_manager=self._database_manager,
-            database_lock=self._database_lock(),
-            config=config,
-            app_name=self._app_name,
-            app_version=self._app_version,
-            key_values=self._key_values(),
-            sync_state_repository=sync.state_repository,
-            planned_unit_service=planning.planned_unit,
-            competition_service=planning.competition,
-            external_calendar_reader=calendar.reader,
-            profile_service=athlete.profile,
-            provider_freshness_service=provider.freshness_service,
-            garmin_sync_state_service=garmin.sync_state_service,
-            garmin_sync_service=garmin.sync_service,
-            sync_job_queue_service=self._sync_job_queue().service,
-            state_version_service=self.state_version_service,
-            coach_message_service=conversation.message_service,
-            training_plan_service=planning.training_plan,
-            local_calendar_events=self._calendar_local().local_calendar_events,
-            planning_state=self._planning_season().planning_state,
-            adaptive_replan_preview_service=self._adaptive_replan_preview_service,
-            external_calendar_sync_service=calendar.sync_service,
-            external_calendar_window_days=self._external_calendar_window_days(),
-            planned_calendar_history_days=self._calendar_history_days(),
-            planned_calendar_future_days=self._calendar_future_days(),
-            garmin_projection_service=garmin.projection_service,
-            diagnostic_capture=self._diagnostic_capture(),
-            intervals_public_state=self._intervals_state().public_state,
-            intervals_sync_lock=self._intervals_sync_lock(),
-            workout_library_sync_running=self._workout_library_sync_running(),
-            workout_library_sync_state_service=self._workout_library_sync().sync_state_service,
-            full_provider_resync_service=self._provider_resync().full_resync_service,
-            sync_public_state_service=self.sync_public_state_service,
-            sync_period_defaults=self._sync_period_defaults(),
-            all_sync_days=self._all_sync_days(),
-            settings=self._settings(),
-            local_date=self._local_date,
-            morning_checkin_state_service=self._morning_checkin_state_service,
-            coach_quick_actions_service=self._coach_quick_actions_service,
-            provider_state_service=self._provider_state_service,
-        ))
+        return PublicBootstrapService(
+            PublicBootstrapDependencies(
+                database_manager=self._database_manager,
+                database_lock=self._database_lock(),
+                config=config,
+                app_name=self._app_name,
+                app_version=self._app_version,
+                key_values=self._key_values(),
+                sync_state_repository=sync.state_repository,
+                planned_unit_service=planning.planned_unit,
+                competition_service=planning.competition,
+                external_calendar_reader=calendar.reader,
+                profile_service=athlete.profile,
+                provider_freshness_service=provider.freshness_service,
+                garmin_sync_state_service=garmin.sync_state_service,
+                garmin_sync_service=garmin.sync_service,
+                sync_job_queue_service=self._sync_job_queue().service,
+                state_version_service=self.state_version_service,
+                coach_message_service=conversation.message_service,
+                training_plan_service=planning.training_plan,
+                local_calendar_events=self._calendar_local().local_calendar_events,
+                planning_state=self._planning_season().planning_state,
+                adaptive_replan_preview_service=self._adaptive_replan_preview_service,
+                external_calendar_sync_service=calendar.sync_service,
+                external_calendar_window_days=self._external_calendar_window_days(),
+                planned_calendar_history_days=self._calendar_history_days(),
+                planned_calendar_future_days=self._calendar_future_days(),
+                garmin_projection_service=garmin.projection_service,
+                diagnostic_capture=self._diagnostic_capture(),
+                intervals_public_state=self._intervals_state().public_state,
+                intervals_sync_lock=self._intervals_sync_lock(),
+                workout_library_sync_running=self._workout_library_sync_running(),
+                workout_library_sync_state_service=self._workout_library_sync().sync_state_service,
+                full_provider_resync_service=self._provider_resync().full_resync_service,
+                sync_public_state_service=self.sync_public_state_service,
+                sync_period_defaults=self._sync_period_defaults(),
+                all_sync_days=self._all_sync_days(),
+                settings=self._settings(),
+                local_date=self._local_date,
+                morning_checkin_state_service=self._morning_checkin_state_service,
+                coach_quick_actions_service=self._coach_quick_actions_service,
+                provider_state_service=self._provider_state_service,
+            )
+        )
 
     def plan_state_service(self) -> PublicPlanStateService:
         sync = self._sync_persistence()
@@ -246,28 +253,30 @@ class PublicStateAssembly:
         athlete = self._athlete_data()
         calendar = self._external_calendar()
         config = self._config()
-        return PublicPlanStateService(PublicPlanDependencies(
-            sync_state=sync.state_repository(),
-            planned_units=planning.planned_unit(),
-            activity_feedback=athlete.activity_feedback(),
-            weather=self._weather().service(),
-            adaptive_followup=self._adaptive_preview_followup_service(),
-            database_manager_factory=self._database_manager,
-            db_lock=self._database_lock(),
-            key_values=self._key_values(),
-            training_plans=planning.training_plan(),
-            external_calendar=calendar.reader(),
-            external_calendar_sync=calendar.sync_service(),
-            daily_context=self._daily_planning_context_service(),
-            checkins=athlete.checkin(),
-            competitions=planning.competition(),
-            adaptive_preview=self._adaptive_replan_preview_service(),
-            coach_quick_actions=self._coach_quick_actions_service(),
-            today=self._local_date,
-            external_calendar_configured=bool(config.calendar_ical_url),
-            external_calendar_window_days=self._external_calendar_window_days(),
-            default_workout_name=self._planned_workout_label(),
-        ))
+        return PublicPlanStateService(
+            PublicPlanDependencies(
+                sync_state=sync.state_repository(),
+                planned_units=planning.planned_unit(),
+                activity_feedback=athlete.activity_feedback(),
+                weather=self._weather().service(),
+                adaptive_followup=self._adaptive_preview_followup_service(),
+                database_manager_factory=self._database_manager,
+                db_lock=self._database_lock(),
+                key_values=self._key_values(),
+                training_plans=planning.training_plan(),
+                external_calendar=calendar.reader(),
+                external_calendar_sync=calendar.sync_service(),
+                daily_context=self._daily_planning_context_service(),
+                checkins=athlete.checkin(),
+                competitions=planning.competition(),
+                adaptive_preview=self._adaptive_replan_preview_service(),
+                coach_quick_actions=self._coach_quick_actions_service(),
+                today=self._local_date,
+                external_calendar_configured=bool(config.calendar_ical_url),
+                external_calendar_window_days=self._external_calendar_window_days(),
+                default_workout_name=self._planned_workout_label(),
+            )
+        )
 
     def local_prelude_service(self) -> PublicStateLocalPrelude:
         return PublicStateLocalPrelude(
@@ -278,7 +287,9 @@ class PublicStateAssembly:
             self._database_manager(),
             self._database_lock(),
             self._local_date,
-            CalendarWindowRange(self._calendar_history_days(), self._calendar_future_days()),
+            CalendarWindowRange(
+                self._calendar_history_days(), self._calendar_future_days()
+            ),
         )
 
     def weather_prelude_service(self) -> PublicStateWeatherPrelude:
@@ -312,39 +323,41 @@ class PublicStateAssembly:
             sync = self._sync_persistence()
             garmin = self._garmin()
             provider = self._provider_sync()
-            return PublicStateService(PublicStateDependencies(
-                local_prelude=self.local_prelude_service(),
-                weather_prelude=self.weather_prelude_service(),
-                calendar_projection=self.calendar_projection_service(),
-                database_manager=self._database_manager,
-                database_lock=database_lock,
-                key_values=self._key_values(),
-                app_name=self._app_name,
-                app_version=self._app_version,
-                config=config,
-                settings=self._settings(),
-                coach_messages=self._coach_conversation().message_service(),
-                training_plans=planning.training_plan(),
-                workout_library=planning.workout_library(),
-                profile=athlete.profile(),
-                public_feedback=self.feedback_state_service(),
-                public_performance=self.performance_state_service(),
-                sync_state=sync.state_repository(),
-                provider_freshness=provider.freshness_service(),
-                garmin_sync_state=garmin.sync_state_service(),
-                sync_public_state=self.sync_public_state_service(),
-                intervals_sync_lock=self._intervals_sync_lock(),
-                workout_library_sync_running=self._workout_library_sync_running(),
-                workout_library_sync_state=self._workout_library_sync().sync_state_service(),
-                garmin_sync=garmin.sync_service(),
-                provider_resync=self._provider_resync().full_resync_service(),
-                planning_preview=self._adaptive_replan_preview_service(),
-                morning_checkin=self._morning_checkin_state_service(),
-                coach_quick_actions=self._coach_quick_actions_service(),
-                provider_state=self._provider_state_service(),
-                sync_period_defaults=self._sync_period_defaults(),
-                all_sync_days=self._all_sync_days(),
-                calendar_history_days=self._calendar_history_days(),
-                calendar_future_days=self._calendar_future_days(),
-                local_now=self._local_now(),
-            ))
+            return PublicStateService(
+                PublicStateDependencies(
+                    local_prelude=self.local_prelude_service(),
+                    weather_prelude=self.weather_prelude_service(),
+                    calendar_projection=self.calendar_projection_service(),
+                    database_manager=self._database_manager,
+                    database_lock=database_lock,
+                    key_values=self._key_values(),
+                    app_name=self._app_name,
+                    app_version=self._app_version,
+                    config=config,
+                    settings=self._settings(),
+                    coach_messages=self._coach_conversation().message_service(),
+                    training_plans=planning.training_plan(),
+                    workout_library=planning.workout_library(),
+                    profile=athlete.profile(),
+                    public_feedback=self.feedback_state_service(),
+                    public_performance=self.performance_state_service(),
+                    sync_state=sync.state_repository(),
+                    provider_freshness=provider.freshness_service(),
+                    garmin_sync_state=garmin.sync_state_service(),
+                    sync_public_state=self.sync_public_state_service(),
+                    intervals_sync_lock=self._intervals_sync_lock(),
+                    workout_library_sync_running=self._workout_library_sync_running(),
+                    workout_library_sync_state=self._workout_library_sync().sync_state_service(),
+                    garmin_sync=garmin.sync_service(),
+                    provider_resync=self._provider_resync().full_resync_service(),
+                    planning_preview=self._adaptive_replan_preview_service(),
+                    morning_checkin=self._morning_checkin_state_service(),
+                    coach_quick_actions=self._coach_quick_actions_service(),
+                    provider_state=self._provider_state_service(),
+                    sync_period_defaults=self._sync_period_defaults(),
+                    all_sync_days=self._all_sync_days(),
+                    calendar_history_days=self._calendar_history_days(),
+                    calendar_future_days=self._calendar_future_days(),
+                    local_now=self._local_now(),
+                )
+            )

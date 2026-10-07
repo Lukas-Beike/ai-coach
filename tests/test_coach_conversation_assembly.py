@@ -6,10 +6,10 @@ from unittest.mock import Mock, patch
 from backend.coach import conversation_assembly
 from backend.coach.conversation_assembly import (
     CoachConversationAssembly,
+    ConversationModelDependencies,
     ConversationPersistence,
     ConversationProfile,
     ConversationRuntime,
-    ConversationModelDependencies,
 )
 
 
@@ -86,10 +86,18 @@ class CoachConversationAssemblyTests(unittest.TestCase):
         dependencies["openai_provider"].assert_not_called()
 
         with (
-            patch.object(conversation_assembly, "CoachMessageService") as message_factory,
-            patch.object(conversation_assembly, "CoachConversationHistoryService") as history_factory,
-            patch.object(conversation_assembly, "GeminiConversationHistoryService") as gemini_factory,
-            patch.object(conversation_assembly, "GeminiLocalChatHistoryService") as local_factory,
+            patch.object(
+                conversation_assembly, "CoachMessageService"
+            ) as message_factory,
+            patch.object(
+                conversation_assembly, "CoachConversationHistoryService"
+            ) as history_factory,
+            patch.object(
+                conversation_assembly, "GeminiConversationHistoryService"
+            ) as gemini_factory,
+            patch.object(
+                conversation_assembly, "GeminiLocalChatHistoryService"
+            ) as local_factory,
         ):
             assembly.message_service()
             assembly.history_service()
@@ -110,8 +118,12 @@ class CoachConversationAssemblyTests(unittest.TestCase):
     def test_provision_and_reset_retain_gate_and_stream_owners(self):
         assembly, dependencies = self.make_assembly()
         with (
-            patch.object(conversation_assembly, "CoachConversationProvisionService") as provision_factory,
-            patch.object(conversation_assembly, "CoachConversationResetService") as reset_factory,
+            patch.object(
+                conversation_assembly, "CoachConversationProvisionService"
+            ) as provision_factory,
+            patch.object(
+                conversation_assembly, "CoachConversationResetService"
+            ) as reset_factory,
         ):
             assembly.provision_service()
             assembly.reset_service()
@@ -122,7 +134,9 @@ class CoachConversationAssemblyTests(unittest.TestCase):
         self.assertIs(provision_factory.call_args.args[4], dependencies["lock"])
         self.assertIs(reset_factory.call_args.args[3], dependencies["streams"])
         self.assertIs(reset_factory.call_args.args[4], dependencies["lock"])
-        self.assertIs(reset_factory.call_args.args[5], dependencies["conversation_lock"])
+        self.assertIs(
+            reset_factory.call_args.args[5], dependencies["conversation_lock"]
+        )
         self.assertEqual(dependencies["openai_provider"].call_count, 2)
 
     def test_dialogue_and_gemini_services_keep_shared_factories_and_lazy_config(self):
@@ -130,18 +144,26 @@ class CoachConversationAssemblyTests(unittest.TestCase):
         with (
             patch.object(conversation_assembly, "CoachDialogueReadService") as dialogue,
             patch.object(conversation_assembly, "CoachMessageService") as message,
-            patch.object(conversation_assembly, "GeminiConversationResponseService") as gemini,
+            patch.object(
+                conversation_assembly, "GeminiConversationResponseService"
+            ) as gemini,
         ):
             assembly.dialogue_read_service()
             assembly.gemini_conversation_response_service()
 
         self.assertIs(dialogue.call_args.args[0], dependencies["manager"])
         self.assertIs(dialogue.call_args.args[1], message.return_value)
-        self.assertIs(dialogue.call_args.args[3], dependencies["profile_service"].return_value)
+        self.assertIs(
+            dialogue.call_args.args[3], dependencies["profile_service"].return_value
+        )
         self.assertEqual(dependencies["default_thinking_level"].call_count, 1)
         self.assertEqual(dependencies["manager_provider"].call_count, 7)
-        self.assertEqual(dependencies["model_transport"].gemini_json_client.call_count, 1)
-        self.assertEqual(dependencies["model_transport"].gemini_stream_client.call_count, 1)
+        self.assertEqual(
+            dependencies["model_transport"].gemini_json_client.call_count, 1
+        )
+        self.assertEqual(
+            dependencies["model_transport"].gemini_stream_client.call_count, 1
+        )
         self.assertIsNotNone(gemini.call_args)
 
 

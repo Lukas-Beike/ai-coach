@@ -6,28 +6,41 @@ import tempfile
 import threading
 import unittest
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import datetime as _local_datetime
+from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import call, Mock, patch
+from typing import ClassVar
+from unittest.mock import Mock, call, patch
 from urllib.error import HTTPError
 
-from backend.providers import openai as openai_provider
+from server_test_support import (
+    ServerTestCase,
+    _transcribe_via_http_route,
+    create_test_session,
+    server,
+)
+
 from backend.coach import streams as coach_streams
 from backend.errors import ClientDisconnected
-from backend.http_api import auth as http_auth, readiness as readiness_module, response_transport, responses
+from backend.http_api import auth as http_auth
+from backend.http_api import readiness as readiness_module
+from backend.http_api import response_transport, responses
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.state_events_get import StateEventsGetRoutes
 from backend.http_api.state_events_transport import StateEventTransport
-from backend.providers import http as provider_http, weather as weather_provider
-from backend.runtime import events as runtime_events, maintenance as runtime_maintenance
-from server_test_support import _transcribe_via_http_route, create_test_session, server, ServerTestCase
+from backend.providers import http as provider_http
+from backend.providers import openai as openai_provider
+from backend.providers import weather as weather_provider
+from backend.runtime import events as runtime_events
+from backend.runtime import maintenance as runtime_maintenance
 
 
 class ServerHttpTests(ServerTestCase):
-
-    def test_http_assembly_keeps_dispatchers_shared_and_handler_configuration_lazy(self):
+    def test_http_assembly_keeps_dispatchers_shared_and_handler_configuration_lazy(
+        self,
+    ):
         initial = server.HTTP_API._handler_configuration()
         updated = replace(
             initial,
@@ -47,9 +60,15 @@ class ServerHttpTests(ServerTestCase):
             first.server_version, f"IntervalsCoach/{initial.identity.app_version}"
         )
         self.assertEqual(second.server_version, "IntervalsCoach/synthetic-next")
-        self.assertIs(first.dependencies.route_dispatcher, server.HTTP_API.route_dispatcher)
-        self.assertIs(second.dependencies.post_dispatcher, server.HTTP_API.post_dispatcher)
-        self.assertIs(first.dependencies.response_transport, server.HTTP_API.response_transport)
+        self.assertIs(
+            first.dependencies.route_dispatcher, server.HTTP_API.route_dispatcher
+        )
+        self.assertIs(
+            second.dependencies.post_dispatcher, server.HTTP_API.post_dispatcher
+        )
+        self.assertIs(
+            first.dependencies.response_transport, server.HTTP_API.response_transport
+        )
         self.assertIsNot(first.static_asset_service, second.static_asset_service)
 
     def test_weather_handler_calls_public_weather_service_after_auth(self):
@@ -60,14 +79,21 @@ class ServerHttpTests(ServerTestCase):
         endpoint.state.return_value = {"configured": True, "loading": True}
 
         auth = Mock()
-        with patch.object(
-            server.HTTP_API.planning_get_routes, "_session_auth_service", return_value=auth
-        ) as auth_factory, patch.object(
-            server.HTTP_API.planning_get_routes,
-            "_public_weather_state_service",
-            return_value=endpoint,
-        ) as factory:
-            self.assertTrue(server.HTTP_API.planning_get_routes.handle(handler, "/api/weather"))
+        with (
+            patch.object(
+                server.HTTP_API.planning_get_routes,
+                "_session_auth_service",
+                return_value=auth,
+            ) as auth_factory,
+            patch.object(
+                server.HTTP_API.planning_get_routes,
+                "_public_weather_state_service",
+                return_value=endpoint,
+            ) as factory,
+        ):
+            self.assertTrue(
+                server.HTTP_API.planning_get_routes.handle(handler, "/api/weather")
+            )
 
         auth.require_auth.assert_called_once_with(handler)
         auth_factory.assert_called_once_with()
@@ -77,16 +103,26 @@ class ServerHttpTests(ServerTestCase):
             200, {"configured": True, "loading": True}
         )
 
-    def test_sync_post_handler_keeps_bodyless_routes_and_unknown_posts_transport_only(self):
+    def test_sync_post_handler_keeps_bodyless_routes_and_unknown_posts_transport_only(
+        self,
+    ):
         handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.read_json = Mock(return_value={"ignored": True})
         handler.send_json = Mock()
         endpoint = Mock()
         endpoint.execute.return_value = (202, {"id": "job-3"})
-        with patch.object(server.HTTP_API, "sync_command_endpoint", return_value=endpoint) as factory:
-            self.assertFalse(server.HTTP_API.sync_command_post_route.handle(handler, "/api/unknown"))
+        with patch.object(
+            server.HTTP_API, "sync_command_endpoint", return_value=endpoint
+        ) as factory:
+            self.assertFalse(
+                server.HTTP_API.sync_command_post_route.handle(handler, "/api/unknown")
+            )
             factory.assert_not_called()
-            self.assertTrue(server.HTTP_API.sync_command_post_route.handle(handler, "/api/weather/sync"))
+            self.assertTrue(
+                server.HTTP_API.sync_command_post_route.handle(
+                    handler, "/api/weather/sync"
+                )
+            )
         handler.read_json.assert_not_called()
         endpoint.execute.assert_called_once_with("/api/weather/sync", None)
         handler.send_json.assert_called_once_with(202, {"id": "job-3"})
@@ -112,7 +148,9 @@ class ServerHttpTests(ServerTestCase):
                         return_value=service,
                     ) as service_factory,
                 ):
-                    self.assertTrue(server.HTTP_API.planning_get_routes.handle(handler, "/api/plan"))
+                    self.assertTrue(
+                        server.HTTP_API.planning_get_routes.handle(handler, "/api/plan")
+                    )
                 auth.require_auth.assert_called_once_with(handler)
                 auth_factory.assert_called_once_with()
                 service_factory.assert_called_once_with()
@@ -120,53 +158,104 @@ class ServerHttpTests(ServerTestCase):
                 handler.send_json.assert_called_once_with(200, {"plans": []})
 
     def test_mixed_edit_scope_cannot_authorize_unrelated_existing_unit(self):
-        first = server.PLANNING_DATA.planned_unit().create({
-            "date": (date.today() + timedelta(days=1)).isoformat(),
-            "sport": "Ride", "name": "First", "description": "- 20m 60% easy",
-        })
-        second = server.PLANNING_DATA.planned_unit().create({
-            "date": (date.today() + timedelta(days=2)).isoformat(),
-            "sport": "Run", "name": "Second", "description": "- 20m 60% easy",
-        })
+        first = server.PLANNING_DATA.planned_unit().create(
+            {
+                "date": (
+                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                ).isoformat(),
+                "sport": "Ride",
+                "name": "First",
+                "description": "- 20m 60% easy",
+            }
+        )
+        second = server.PLANNING_DATA.planned_unit().create(
+            {
+                "date": (
+                    _local_datetime.now().astimezone().date() + timedelta(days=2)
+                ).isoformat(),
+                "sport": "Run",
+                "name": "Second",
+                "description": "- 20m 60% easy",
+            }
+        )
         intent = {
-            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
-            "artifact_id": None, "ambiguities": [],
+            "intent": "local_action",
+            "operation": "apply_training_changes",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
             "authorization_scope": ["local_plan_create", f"planned_unit:{first['id']}"],
         }
         with self.assertRaises(server.AppError) as error:
             server.COACH_TOOL_DISPATCH.service().execute(
                 "apply_training_changes",
-                {"changes": [{"local_id": second["id"], "action": "archive"}, {
-                    "action": "create", "date": (date.today() + timedelta(days=3)).isoformat(),
-                    "sport": "Run", "name": "Recovery", "description": "- 20m 60% easy",
-                    "duration_minutes": 20, "target": "AUTO", "rationale": "Recovery",
-                }]},
-                intent=intent, conversation_id="conversation-mixed-scope", client_turn_id="turn-mixed-scope",
-                session_csrf_hash="", sync_job_ids=[],
+                {
+                    "changes": [
+                        {"local_id": second["id"], "action": "archive"},
+                        {
+                            "action": "create",
+                            "date": (
+                                _local_datetime.now().astimezone().date()
+                                + timedelta(days=3)
+                            ).isoformat(),
+                            "sport": "Run",
+                            "name": "Recovery",
+                            "description": "- 20m 60% easy",
+                            "duration_minutes": 20,
+                            "target": "AUTO",
+                            "rationale": "Recovery",
+                        },
+                    ]
+                },
+                intent=intent,
+                conversation_id="conversation-mixed-scope",
+                client_turn_id="turn-mixed-scope",
+                session_csrf_hash="",
+                sync_job_ids=[],
             )
         self.assertEqual(error.exception.reason, "intent_scope_denied")
-        self.assertIsNotNone(next(item for item in server.PLANNING_DATA.planned_unit().list() if item["id"] == second["id"]))
+        self.assertIsNotNone(
+            next(
+                item
+                for item in server.PLANNING_DATA.planned_unit().list()
+                if item["id"] == second["id"]
+            )
+        )
 
     def test_local_public_state_does_not_fetch_weather(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
-        with patch.object(weather_provider.WeatherClient, "fetch", side_effect=AssertionError("weather must stay local")):
+        with patch.object(
+            weather_provider.WeatherClient,
+            "fetch",
+            side_effect=AssertionError("weather must stay local"),
+        ):
             state = server.PUBLIC_STATE.state_service().read(local_only=True)
         self.assertTrue(state["configured"]["weather"])
         self.assertTrue(state["weather"]["loading"])
 
-    def test_session_cookies_secure_flag_is_configurable_without_changing_csrf_visibility(self):
-        insecure = server.session_auth_service().session_cookie_headers("session-token", "csrf-token")
+    def test_session_cookies_secure_flag_is_configurable_without_changing_csrf_visibility(
+        self,
+    ):
+        insecure = server.session_auth_service().session_cookie_headers(
+            "session-token", "csrf-token"
+        )
         self.assertNotIn("; Secure", insecure[0])
         self.assertNotIn("; Secure", insecure[1])
         self.assertIn("HttpOnly", insecure[0])
         self.assertNotIn("HttpOnly", insecure[1])
-        with patch.object(server, "CONFIG", replace(server.CONFIG, secure_cookies=True)):
-            secure = server.session_auth_service().session_cookie_headers("session-token", "csrf-token")
+        with patch.object(
+            server, "CONFIG", replace(server.CONFIG, secure_cookies=True)
+        ):
+            secure = server.session_auth_service().session_cookie_headers(
+                "session-token", "csrf-token"
+            )
         self.assertIn("; Secure", secure[0])
         self.assertIn("; Secure", secure[1])
         self.assertIn("Max-Age=2592000", secure[0])
 
-    def test_authenticated_session_throttles_last_seen_without_extending_fixed_expiry(self):
+    def test_authenticated_session_throttles_last_seen_without_extending_fixed_expiry(
+        self,
+    ):
         class Handler:
             client_address = ("127.0.0.1", 8090)
 
@@ -178,15 +267,26 @@ class ServerHttpTests(ServerTestCase):
         token_hash = auth.session_token_hash(token)
         old_seen = "2020-01-01T00:00:00+00:00"
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            original = db.execute("SELECT expires_at FROM sessions WHERE token_hash=?", (token_hash,)).fetchone()["expires_at"]
-            db.execute("UPDATE sessions SET last_seen=? WHERE token_hash=?", (old_seen, token_hash))
+            original = db.execute(
+                "SELECT expires_at FROM sessions WHERE token_hash=?", (token_hash,)
+            ).fetchone()["expires_at"]
+            db.execute(
+                "UPDATE sessions SET last_seen=? WHERE token_hash=?",
+                (old_seen, token_hash),
+            )
 
         first = auth.authenticated_session(Handler(f"ic_session={token}"))
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            touched = db.execute("SELECT expires_at, last_seen FROM sessions WHERE token_hash=?", (token_hash,)).fetchone()
+            touched = db.execute(
+                "SELECT expires_at, last_seen FROM sessions WHERE token_hash=?",
+                (token_hash,),
+            ).fetchone()
         second = auth.authenticated_session(Handler(f"ic_session={token}"))
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            unchanged = db.execute("SELECT expires_at, last_seen FROM sessions WHERE token_hash=?", (token_hash,)).fetchone()
+            unchanged = db.execute(
+                "SELECT expires_at, last_seen FROM sessions WHERE token_hash=?",
+                (token_hash,),
+            ).fetchone()
 
         self.assertIsNotNone(first)
         self.assertIsNotNone(second)
@@ -205,10 +305,18 @@ class ServerHttpTests(ServerTestCase):
         token = create_test_session(server)
         auth = server.session_auth_service()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            db.execute("UPDATE sessions SET expires_at=? WHERE token_hash=?", (server.time.time() - 1, auth.session_token_hash(token)))
+            db.execute(
+                "UPDATE sessions SET expires_at=? WHERE token_hash=?",
+                (server.time.time() - 1, auth.session_token_hash(token)),
+            )
         self.assertIsNone(auth.authenticated_session(Handler(f"ic_session={token}")))
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            self.assertIsNone(db.execute("SELECT token_hash FROM sessions WHERE token_hash=?", (auth.session_token_hash(token),)).fetchone())
+            self.assertIsNone(
+                db.execute(
+                    "SELECT token_hash FROM sessions WHERE token_hash=?",
+                    (auth.session_token_hash(token),),
+                ).fetchone()
+            )
 
     def test_expired_session_cleanup_is_bounded_and_periodic(self):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -219,7 +327,9 @@ class ServerHttpTests(ServerTestCase):
                 )
             auth = server.session_auth_service()
             deleted = auth.cleanup_expired_sessions(db, server.time.time(), force=True)
-            remaining = db.execute("SELECT COUNT(*) AS count FROM sessions").fetchone()["count"]
+            remaining = db.execute("SELECT COUNT(*) AS count FROM sessions").fetchone()[
+                "count"
+            ]
         self.assertEqual(deleted, http_auth.SESSION_CLEANUP_BATCH_SIZE)
         self.assertEqual(remaining, 1)
 
@@ -239,8 +349,12 @@ class ServerHttpTests(ServerTestCase):
         def authenticate():
             try:
                 barrier.wait(timeout=5)
-                results.append(server.session_auth_service().authenticated_session(Handler(cookies)))
-            except Exception as exc:
+                results.append(
+                    server.session_auth_service().authenticated_session(
+                        Handler(cookies)
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - Collect every worker-thread failure for the main-thread assertion.
                 errors.append(exc)
 
         threads = [threading.Thread(target=authenticate) for _ in range(8)]
@@ -254,17 +368,31 @@ class ServerHttpTests(ServerTestCase):
 
     def test_csrf_rejects_missing_or_foreign_token(self):
         class MissingTokenHandler:
-            headers = {}
+            headers: ClassVar = {}
 
         with self.assertRaises(server.AppError) as missing:
-            server.session_auth_service().require_csrf(MissingTokenHandler(), {"csrf_hash": server.session_auth_service().session_token_hash("expected")})
+            server.session_auth_service().require_csrf(
+                MissingTokenHandler(),
+                {
+                    "csrf_hash": server.session_auth_service().session_token_hash(
+                        "expected"
+                    )
+                },
+            )
         self.assertEqual(missing.exception.status, 403)
 
         class Handler:
-            headers = {"X-CSRF-Token": "foreign"}
+            headers: ClassVar = {"X-CSRF-Token": "foreign"}
 
         with self.assertRaises(server.AppError) as foreign:
-            server.session_auth_service().require_csrf(Handler(), {"csrf_hash": server.session_auth_service().session_token_hash("expected")})
+            server.session_auth_service().require_csrf(
+                Handler(),
+                {
+                    "csrf_hash": server.session_auth_service().session_token_hash(
+                        "expected"
+                    )
+                },
+            )
         self.assertEqual(foreign.exception.status, 403)
 
     def test_logout_removes_session_immediately(self):
@@ -302,7 +430,17 @@ class ServerHttpTests(ServerTestCase):
 
     def test_public_state_exposes_daily_planning_context(self):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot({"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [{"name": "Locker", "start_date_local": f"{today}T08:00:00"}]})
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+            {
+                "synced_at": "now",
+                "athlete": {},
+                "recent_activities": [],
+                "recent_wellness": [],
+                "upcoming_calendar": [
+                    {"name": "Locker", "start_date_local": f"{today}T08:00:00"}
+                ],
+            }
+        )
         server.ATHLETE_DATA.checkin().save({"checkin_date": today, "motivation": 8})
         state = server.PUBLIC_STATE.state_service().read(local_only=True)
         self.assertEqual(state["daily_planning_context"][0]["date"], today)
@@ -310,33 +448,64 @@ class ServerHttpTests(ServerTestCase):
 
     def test_activity_pagination_has_stable_cursor_without_duplicates(self):
         today = server.ATHLETE_CLOCK.now().date()
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot({
-            "synced_at": "now", "athlete": {}, "recent_wellness": [], "upcoming_calendar": [],
-            "recent_activities": [
-                {"id": f"activity-{index}", "name": f"Activity {index}", "type": "Ride", "start_date_local": today.isoformat()}
-                for index in range(5)
-            ] + [{"id": "old", "name": "Old", "type": "Ride", "start_date_local": "2000-01-01"}],
-        })
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+            {
+                "synced_at": "now",
+                "athlete": {},
+                "recent_wellness": [],
+                "upcoming_calendar": [],
+                "recent_activities": [
+                    {
+                        "id": f"activity-{index}",
+                        "name": f"Activity {index}",
+                        "type": "Ride",
+                        "start_date_local": today.isoformat(),
+                    }
+                    for index in range(5)
+                ]
+                + [
+                    {
+                        "id": "old",
+                        "name": "Old",
+                        "type": "Ride",
+                        "start_date_local": "2000-01-01",
+                    }
+                ],
+            }
+        )
         service = server.ATHLETE_DATA.activity_read()
         first = service.page(limit=2, days=1, today=today)
         second = service.page(first["next_cursor"], 2, 1, today=today)
         third = service.page(second["next_cursor"], 2, 1, today=today)
-        ids = [item["id"] for page in (first, second, third) for item in page["activities"]]
-        self.assertEqual(ids, ["activity-4", "activity-3", "activity-2", "activity-1", "activity-0"])
+        ids = [
+            item["id"] for page in (first, second, third) for item in page["activities"]
+        ]
+        self.assertEqual(
+            ids, ["activity-4", "activity-3", "activity-2", "activity-1", "activity-0"]
+        )
         self.assertIsNone(third["next_cursor"])
 
     def test_chat_history_pagination_and_bounded_search_use_message_id_cursor(self):
         for index in range(5):
-            server.COACH_CONVERSATION.message_service().add("user", f"searchable {index}")
+            server.COACH_CONVERSATION.message_service().add(
+                "user", f"searchable {index}"
+            )
         page_service = server.HTTP_API.chat_history_page_service()
         first = page_service.page(limit=2)
         second = page_service.page(cursor=first["next_cursor"], limit=2)
         page_ids = [item["id"] for item in first["messages"] + second["messages"]]
-        page_contents = [item["content"] for item in first["messages"] + second["messages"]]
-        self.assertEqual(set(page_contents), {"searchable 1", "searchable 2", "searchable 3", "searchable 4"})
+        page_contents = [
+            item["content"] for item in first["messages"] + second["messages"]
+        ]
+        self.assertEqual(
+            set(page_contents),
+            {"searchable 1", "searchable 2", "searchable 3", "searchable 4"},
+        )
         self.assertEqual(len(page_ids), len(set(page_ids)))
         search = page_service.page(limit=10, search="searchable 3")
-        self.assertEqual([item["content"] for item in search["messages"]], ["searchable 3"])
+        self.assertEqual(
+            [item["content"] for item in search["messages"]], ["searchable 3"]
+        )
 
     def test_chat_history_search_escapes_like_metacharacters(self):
         contents = (
@@ -358,15 +527,26 @@ class ServerHttpTests(ServerTestCase):
         ):
             with self.subTest(search_term=search_term):
                 page = page_service.page(search=search_term)
-                self.assertEqual([item["content"] for item in page["messages"]], [expected])
+                self.assertEqual(
+                    [item["content"] for item in page["messages"]], [expected]
+                )
 
     def test_library_pagination_has_stable_type_name_id_cursor(self):
-        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile([
-            {"id": f"template-{index}", "name": f"Template {index}", "type": "Ride", "description": "- 30m Z2"}
-            for index in range(3)
-        ])
+        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile(
+            [
+                {
+                    "id": f"template-{index}",
+                    "name": f"Template {index}",
+                    "type": "Ride",
+                    "description": "- 30m Z2",
+                }
+                for index in range(3)
+            ]
+        )
         first = server.HTTP_API.library_page_service().page(limit=2)
-        second = server.HTTP_API.library_page_service().page(cursor=first["next_cursor"], limit=2)
+        second = server.HTTP_API.library_page_service().page(
+            cursor=first["next_cursor"], limit=2
+        )
         names = [item["name"] for page in (first, second) for item in page["workouts"]]
         self.assertEqual(names, ["Template 0", "Template 1", "Template 2"])
         self.assertIsNone(second["next_cursor"])
@@ -380,62 +560,117 @@ class ServerHttpTests(ServerTestCase):
                     (
                         f"archived-{index:03d}",
                         f"archived-{index:03d}",
-                        json.dumps({
-                            "id": f"archived-{index:03d}",
-                            "type": "Ride",
-                            "name": f"000 archived {index:03d}",
-                            "archived": True,
-                        }),
+                        json.dumps(
+                            {
+                                "id": f"archived-{index:03d}",
+                                "type": "Ride",
+                                "name": f"000 archived {index:03d}",
+                                "archived": True,
+                            }
+                        ),
                         "synthetic-now",
                     )
                     for index in range(100)
                 ]
-                + [(
-                    "active-after-limit",
-                    "active-after-limit",
-                    json.dumps({
-                        "id": "active-after-limit",
-                        "type": "Ride",
-                        "name": "zzz active",
-                    }),
-                    "synthetic-now",
-                )],
+                + [
+                    (
+                        "active-after-limit",
+                        "active-after-limit",
+                        json.dumps(
+                            {
+                                "id": "active-after-limit",
+                                "type": "Ride",
+                                "name": "zzz active",
+                            }
+                        ),
+                        "synthetic-now",
+                    )
+                ],
             )
 
         coach_entries = server.PLANNING_DATA.workout_library().list(limit=100)
-        http_entries = server.HTTP_API.library_page_service().page(limit=100)["workouts"]
+        http_entries = server.HTTP_API.library_page_service().page(limit=100)[
+            "workouts"
+        ]
         self.assertEqual(
             [entry["id"] for entry in coach_entries],
             [entry["id"] for entry in http_entries],
         )
-        self.assertEqual([entry["id"] for entry in coach_entries], ["active-after-limit"])
+        self.assertEqual(
+            [entry["id"] for entry in coach_entries], ["active-after-limit"]
+        )
 
     def test_bootstrap_is_bounded_and_excludes_history_collections(self):
         today = server.ATHLETE_CLOCK.now().date()
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot({
-            "synced_at": "now", "athlete": {}, "recent_wellness": [], "upcoming_calendar": [],
-            "recent_activities": [
-                {"id": f"activity-{index}", "type": "Ride", "start_date_local": today.isoformat()}
-                for index in range(500)
-            ],
-        })
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+            {
+                "synced_at": "now",
+                "athlete": {},
+                "recent_wellness": [],
+                "upcoming_calendar": [],
+                "recent_activities": [
+                    {
+                        "id": f"activity-{index}",
+                        "type": "Ride",
+                        "start_date_local": today.isoformat(),
+                    }
+                    for index in range(500)
+                ],
+            }
+        )
         for index in range(500):
             server.COACH_CONVERSATION.message_service().add("user", f"message {index}")
         bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(
             list(bootstrap),
             [
-                "schema_version", "state_versions", "plan_revision", "app", "skeleton",
-                "messages", "messages_next_cursor", "plans", "library", "activities",
-                "planned", "training_calendar", "calendar", "planning_view",
-                "planning_compliance", "weather", "parallel_cycling", "profile",
-                "competitions", "checkins", "local_feedback", "activity_feedback",
-                "planning", "external_calendar", "daily_planning_context", "performance",
-                "garmin", "diagnostic_capture", "intervals", "provider_freshness",
-                "provider_states", "garmin_sync", "provider_resync", "sync", "running_jobs",
-                "library_sync", "sync_settings", "calendar_display", "competition_sync",
-                "performance_refresh", "morning_checkin", "coach_quick_actions",
-                "ai_provider", "model", "thinking_level", "configured", "usage",
+                "schema_version",
+                "state_versions",
+                "plan_revision",
+                "app",
+                "skeleton",
+                "messages",
+                "messages_next_cursor",
+                "plans",
+                "library",
+                "activities",
+                "planned",
+                "training_calendar",
+                "calendar",
+                "planning_view",
+                "planning_compliance",
+                "weather",
+                "parallel_cycling",
+                "profile",
+                "competitions",
+                "checkins",
+                "local_feedback",
+                "activity_feedback",
+                "planning",
+                "external_calendar",
+                "daily_planning_context",
+                "performance",
+                "garmin",
+                "diagnostic_capture",
+                "intervals",
+                "provider_freshness",
+                "provider_states",
+                "garmin_sync",
+                "provider_resync",
+                "sync",
+                "running_jobs",
+                "library_sync",
+                "sync_settings",
+                "calendar_display",
+                "competition_sync",
+                "performance_refresh",
+                "morning_checkin",
+                "coach_quick_actions",
+                "ai_provider",
+                "model",
+                "thinking_level",
+                "configured",
+                "usage",
             ],
         )
         self.assertEqual(bootstrap["schema_version"], 3)
@@ -450,17 +685,36 @@ class ServerHttpTests(ServerTestCase):
         self.assertLess(len(json.dumps(bootstrap, ensure_ascii=False)), 20_000)
 
     def test_bootstrap_never_refreshes_provider_network(self):
-        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "request", side_effect=AssertionError("network")), patch.object(
-            server.provider_http, "external_call", side_effect=AssertionError("network")
+        with (
+            patch.object(
+                server.PROVIDER_TRANSPORT.json_http_client(),
+                "request",
+                side_effect=AssertionError("network"),
+            ),
+            patch.object(
+                server.provider_http,
+                "external_call",
+                side_effect=AssertionError("network"),
+            ),
         ):
             bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(bootstrap["schema_version"], 3)
-        self.assertIn(bootstrap["provider_states"]["intervals"]["status"], {"not_configured", "loading", "ready", "stale", "degraded", "error"})
+        self.assertIn(
+            bootstrap["provider_states"]["intervals"]["status"],
+            {"not_configured", "loading", "ready", "stale", "degraded", "error"},
+        )
 
     def test_state_events_report_missed_retention_and_redact_content(self):
         runtime_events.STATE_EVENT_BUFFER.clear()
         for index in range(501):
-            runtime_events.STATE_EVENT_BUFFER.publish("job", {"job_id": f"job-{index}", "status": "running", "progress": {"completed": index, "total": 501}})
+            runtime_events.STATE_EVENT_BUFFER.publish(
+                "job",
+                {
+                    "job_id": f"job-{index}",
+                    "status": "running",
+                    "progress": {"completed": index, "total": 501},
+                },
+            )
         gap = runtime_events.STATE_EVENT_BUFFER.since(0)
         self.assertTrue(gap["gap"])
         self.assertEqual(gap["events"], [])
@@ -473,29 +727,55 @@ class ServerHttpTests(ServerTestCase):
         with self.assertRaises(server.AppError) as raised:
             runtime_events.STATE_EVENT_BUFFER.since("not-a-number")
         self.assertEqual(raised.exception.reason, "invalid_event_cursor")
-        event = runtime_events.STATE_EVENT_BUFFER.publish("job", {"job_id": "job-1", "status": "completed", "progress": {"completed": 1, "total": 1}})
-        self.assertEqual(runtime_events.STATE_EVENT_BUFFER.since(event["event_id"] - 1)["events"][0]["data"]["progress"]["completed"], 1)
+        event = runtime_events.STATE_EVENT_BUFFER.publish(
+            "job",
+            {
+                "job_id": "job-1",
+                "status": "completed",
+                "progress": {"completed": 1, "total": 1},
+            },
+        )
+        self.assertEqual(
+            runtime_events.STATE_EVENT_BUFFER.since(event["event_id"] - 1)["events"][0][
+                "data"
+            ]["progress"]["completed"],
+            1,
+        )
 
     def test_state_event_batch_sends_events_and_resets_for_gaps(self):
         transport = StateEventTransport(runtime_events.STATE_EVENT_BUFFER)
         sent = []
-        since, gap = transport.send_batch({
-            "gap": False,
-            "latest_event_id": 5,
-            "events": [
-                {"event_id": 4, "event": "provider", "data": {"status": "running"}},
-                {"event_id": 5, "event": "provider", "data": {"status": "completed"}},
-            ],
-        }, 3, lambda event, payload, event_id=None: sent.append((event, payload, event_id)))
+        since, gap = transport.send_batch(
+            {
+                "gap": False,
+                "latest_event_id": 5,
+                "events": [
+                    {"event_id": 4, "event": "provider", "data": {"status": "running"}},
+                    {
+                        "event_id": 5,
+                        "event": "provider",
+                        "data": {"status": "completed"},
+                    },
+                ],
+            },
+            3,
+            lambda event, payload, event_id=None: sent.append(
+                (event, payload, event_id)
+            ),
+        )
         self.assertEqual((since, gap), (5, False))
         self.assertEqual(sent[-1], ("provider", {"status": "completed"}, 5))
         since, gap = transport.send_batch(
             {"gap": True, "latest_event_id": 9, "events": []},
             since,
-            lambda event, payload, event_id=None: sent.append((event, payload, event_id)),
+            lambda event, payload, event_id=None: sent.append(
+                (event, payload, event_id)
+            ),
         )
         self.assertEqual((since, gap), (9, True))
-        self.assertEqual(sent[-1], ("reset", {"reason": "gap", "latest_event_id": 9}, 9))
+        self.assertEqual(
+            sent[-1], ("reset", {"reason": "gap", "latest_event_id": 9}, 9)
+        )
 
     def test_state_events_route_requires_auth_before_starting_transport(self):
         handler = object.__new__(server.HTTP_API.request_handler_class())
@@ -555,20 +835,40 @@ class ServerHttpTests(ServerTestCase):
         self.assertNotIn("import server", source)
         self.assertEqual(responses.json_bytes({"text": "ä"}), b'{"text": "\xc3\xa4"}')
         self.assertEqual(
-            list(responses.header_items({"Set-Cookie": ["one", "two"], "X-Test": "value"})),
+            list(
+                responses.header_items(
+                    {"Set-Cookie": ["one", "two"], "X-Test": "value"}
+                )
+            ),
             [("Set-Cookie", "one"), ("Set-Cookie", "two"), ("X-Test", "value")],
         )
         self.assertEqual(
             responses.response_headers("application/json", 12),
-            (("Content-Type", "application/json"), ("Content-Length", "12"), ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff"), ("X-Frame-Options", "DENY")),
+            (
+                ("Content-Type", "application/json"),
+                ("Content-Length", "12"),
+                ("Cache-Control", "no-store"),
+                ("X-Content-Type-Options", "nosniff"),
+                ("X-Frame-Options", "DENY"),
+            ),
         )
         self.assertEqual(
-            responses.session_cookies("session", "csrf", "token", "csrf-token", ttl_seconds=60, secure=True),
-            ["session=token; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=60", "csrf=csrf-token; Path=/; SameSite=Strict; Secure; Max-Age=60"],
+            responses.session_cookies(
+                "session", "csrf", "token", "csrf-token", ttl_seconds=60, secure=True
+            ),
+            [
+                "session=token; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=60",
+                "csrf=csrf-token; Path=/; SameSite=Strict; Secure; Max-Age=60",
+            ],
         )
         self.assertEqual(
-            responses.session_cookies("session", "csrf", "token", "csrf-token", ttl_seconds=60, clear=True),
-            ["session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0", "csrf=; Path=/; SameSite=Strict; Max-Age=0"],
+            responses.session_cookies(
+                "session", "csrf", "token", "csrf-token", ttl_seconds=60, clear=True
+            ),
+            [
+                "session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0",
+                "csrf=; Path=/; SameSite=Strict; Max-Age=0",
+            ],
         )
 
     def test_http_request_helpers_are_dependency_light_and_preserve_limits(self):
@@ -577,10 +877,18 @@ class ServerHttpTests(ServerTestCase):
         source = Path(requests.__file__).read_text(encoding="utf-8")
         self.assertNotIn("import server", source)
         headers = {"Content-Length": "7"}
-        self.assertEqual(requests.read_body(headers, BytesIO(b"payload").read, 10, error=server.AppError), b"payload")
+        self.assertEqual(
+            requests.read_body(
+                headers, BytesIO(b"payload").read, 10, error=server.AppError
+            ),
+            b"payload",
+        )
         self.assertEqual(
             requests.read_json(
-                {"Content-Type": "application/json; charset=utf-8", "Content-Length": "12"},
+                {
+                    "Content-Type": "application/json; charset=utf-8",
+                    "Content-Length": "12",
+                },
                 BytesIO(b'{"ok": true}').read,
                 100,
                 error=server.AppError,
@@ -599,7 +907,12 @@ class ServerHttpTests(ServerTestCase):
             b"audio",
         )
         with self.assertRaises(server.AppError) as oversized:
-            requests.read_body({"Content-Length": "11"}, BytesIO(b"x" * 11).read, 10, error=server.AppError)
+            requests.read_body(
+                {"Content-Length": "11"},
+                BytesIO(b"x" * 11).read,
+                10,
+                error=server.AppError,
+            )
         self.assertEqual(oversized.exception.status, 413)
         with self.assertRaises(server.AppError) as malformed:
             requests.read_json(
@@ -638,35 +951,75 @@ class ServerHttpTests(ServerTestCase):
 
     def test_public_state_exposes_provider_calendar_window(self):
         today = server.ATHLETE_CLOCK.now().date()
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot({
-            "synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [],
-            "provider_sync": {"calendar_window": {"start": (today - timedelta(days=10)).isoformat(), "end": (today + timedelta(days=20)).isoformat()}},
-        })
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+            {
+                "synced_at": "now",
+                "athlete": {},
+                "recent_activities": [],
+                "recent_wellness": [],
+                "upcoming_calendar": [],
+                "provider_sync": {
+                    "calendar_window": {
+                        "start": (today - timedelta(days=10)).isoformat(),
+                        "end": (today + timedelta(days=20)).isoformat(),
+                    }
+                },
+            }
+        )
         state = server.PUBLIC_STATE.state_service().read(local_only=True)
-        self.assertEqual(state["planning_view"]["provider_window"]["end"], (today + timedelta(days=20)).isoformat())
+        self.assertEqual(
+            state["planning_view"]["provider_window"]["end"],
+            (today + timedelta(days=20)).isoformat(),
+        )
         self.assertNotIn("public_calendar", state)
 
     def test_intervals_collection_pagination_is_bounded_and_reported(self):
-        client = server.PROVIDER_TRANSPORT.intervals_client(replace(server.CONFIG, intervals_api_key="test-key"))
+        client = server.PROVIDER_TRANSPORT.intervals_client(
+            replace(server.CONFIG, intervals_api_key="test-key")
+        )
         first_page = [{"id": f"activity-{index}"} for index in range(500)]
         second_page = [{"id": "activity-500"}]
-        with patch.object(client._api, "get", side_effect=[first_page, second_page]) as get:
-            rows = client.get_paged_collection("/athlete/0/activities", {"oldest": "2026-01-01"}, "activities")
+        with patch.object(
+            client._api, "get", side_effect=[first_page, second_page]
+        ) as get:
+            rows = client.get_paged_collection(
+                "/athlete/0/activities", {"oldest": "2026-01-01"}, "activities"
+            )
         self.assertEqual(len(rows), 501)
-        self.assertEqual(client.pagination["activities"], {"pages": 2, "records": 501, "complete": True})
+        self.assertEqual(
+            client.pagination["activities"],
+            {"pages": 2, "records": 501, "complete": True},
+        )
         self.assertEqual(get.call_args_list[1].args[1]["offset"], 500)
 
     def test_body_battery_only_error_does_not_degrade_garmin_public_state(self):
-        server.key_value_service().set("last_garmin_error", json.dumps([
-            {"source": "body_battery", "message": "optional request unavailable"},
-        ]))
+        server.key_value_service().set(
+            "last_garmin_error",
+            json.dumps(
+                [
+                    {
+                        "source": "body_battery",
+                        "message": "optional request unavailable",
+                    },
+                ]
+            ),
+        )
 
-        self.assertIsNone(server.GARMIN_ASSEMBLY.projection_service().public_state()["last_error"])
+        self.assertIsNone(
+            server.GARMIN_ASSEMBLY.projection_service().public_state()["last_error"]
+        )
 
     def test_provider_authentication_errors_do_not_use_the_session_status(self):
-        provider_error = server.AppError(401, "Gemini-SchlÃ¼ssel ungÃ¼ltig.", reason="authentication_or_permission")
+        provider_error = server.AppError(
+            401, "Gemini-SchlÃ¼ssel ungÃ¼ltig.", reason="authentication_or_permission"
+        )
         self.assertEqual(server.public_app_error_status(provider_error), 502)
-        self.assertEqual(server.public_app_error_status(server.AppError(401, "Anmeldung erforderlich.")), 401)
+        self.assertEqual(
+            server.public_app_error_status(
+                server.AppError(401, "Anmeldung erforderlich.")
+            ),
+            401,
+        )
 
     def test_http_json_cancels_while_waiting_for_provider_headers(self):
         started = threading.Event()
@@ -677,7 +1030,7 @@ class ServerHttpTests(ServerTestCase):
 
         class Response:
             status = 200
-            headers = {}
+            headers: ClassVar = {}
 
             def read(self, *args):
                 return b"{}"
@@ -699,11 +1052,21 @@ class ServerHttpTests(ServerTestCase):
 
         def send_request():
             try:
-                server.PROVIDER_TRANSPORT.json_http_client().request("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {}, service="gemini", cancel_event=cancelled)
+                server.PROVIDER_TRANSPORT.json_http_client().request(
+                    "POST",
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+                    {},
+                    service="gemini",
+                    cancel_event=cancelled,
+                )
             except server.AppError as exc:
                 outcome["error"] = exc
 
-        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", side_effect=blocked_urlopen):
+        with patch.object(
+            server.PROVIDER_TRANSPORT.json_http_client(),
+            "opener",
+            side_effect=blocked_urlopen,
+        ):
             caller = threading.Thread(target=send_request)
             caller.start()
             self.assertTrue(started.wait(1))
@@ -717,9 +1080,10 @@ class ServerHttpTests(ServerTestCase):
 
     def test_http_json_clears_provider_response_handle_after_read(self):
         cancel_event = threading.Event()
+
         class Response:
             status = 200
-            headers = {}
+            headers: ClassVar = {}
 
             def read(self, *_args):
                 return b"{}"
@@ -734,10 +1098,17 @@ class ServerHttpTests(ServerTestCase):
                 self.close()
 
         response = Response()
-        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", return_value=response):
+        with patch.object(
+            server.PROVIDER_TRANSPORT.json_http_client(),
+            "opener",
+            return_value=response,
+        ):
             self.assertEqual(
                 server.PROVIDER_TRANSPORT.json_http_client().request(
-                    "GET", "https://intervals.icu/api/v1/athlete/0", service="intervals", cancel_event=cancel_event
+                    "GET",
+                    "https://intervals.icu/api/v1/athlete/0",
+                    service="intervals",
+                    cancel_event=cancel_event,
                 ),
                 {},
             )
@@ -748,7 +1119,7 @@ class ServerHttpTests(ServerTestCase):
 
         class Response:
             status = 200
-            headers = {}
+            headers: ClassVar = {}
 
             def read(self, *_args):
                 raise AssertionError("cancelled response must not be read")
@@ -763,22 +1134,32 @@ class ServerHttpTests(ServerTestCase):
                 self.close()
 
         response = Response()
+
         def return_cancelled_response(*_args, **_kwargs):
             cancel_event.set()
             return response
 
-        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", side_effect=return_cancelled_response):
-            with self.assertRaises(server.AppError) as raised:
-                server.PROVIDER_TRANSPORT.json_http_client().request(
-                    "GET", "https://intervals.icu/api/v1/athlete/0", service="intervals", cancel_event=cancel_event
-                )
+        with (
+            patch.object(
+                server.PROVIDER_TRANSPORT.json_http_client(),
+                "opener",
+                side_effect=return_cancelled_response,
+            ),
+            self.assertRaises(server.AppError) as raised,
+        ):
+            server.PROVIDER_TRANSPORT.json_http_client().request(
+                "GET",
+                "https://intervals.icu/api/v1/athlete/0",
+                service="intervals",
+                cancel_event=cancel_event,
+            )
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         self.assertIsNone(getattr(cancel_event, "_provider_response", None))
 
     def test_http_json_preserves_empty_body_and_oversized_response_contracts(self):
         class EmptyResponse:
             status = 204
-            headers = {}
+            headers: ClassVar = {}
 
             def __enter__(self):
                 return self
@@ -789,8 +1170,18 @@ class ServerHttpTests(ServerTestCase):
             def read(self, *_args):
                 return b""
 
-        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", return_value=EmptyResponse()):
-            self.assertIsNone(server.PROVIDER_TRANSPORT.json_http_client().request("DELETE", "https://intervals.icu/api/v1/athlete/0", service="intervals"))
+        with patch.object(
+            server.PROVIDER_TRANSPORT.json_http_client(),
+            "opener",
+            return_value=EmptyResponse(),
+        ):
+            self.assertIsNone(
+                server.PROVIDER_TRANSPORT.json_http_client().request(
+                    "DELETE",
+                    "https://intervals.icu/api/v1/athlete/0",
+                    service="intervals",
+                )
+            )
 
         class OversizedResponse(EmptyResponse):
             status = 200
@@ -799,33 +1190,76 @@ class ServerHttpTests(ServerTestCase):
                 return b"1234"
 
         with (
-            patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "max_response_bytes", 3),
-            patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", return_value=OversizedResponse()),
+            patch.object(
+                server.PROVIDER_TRANSPORT.json_http_client(), "max_response_bytes", 3
+            ),
+            patch.object(
+                server.PROVIDER_TRANSPORT.json_http_client(),
+                "opener",
+                return_value=OversizedResponse(),
+            ),
             self.assertRaises(server.AppError) as raised,
         ):
-            server.PROVIDER_TRANSPORT.json_http_client().request("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
+            server.PROVIDER_TRANSPORT.json_http_client().request(
+                "GET", "https://intervals.icu/api/v1/athlete/0", service="intervals"
+            )
         self.assertEqual(raised.exception.status, 502)
-        self.assertEqual(raised.exception.message, "Die Antwort des externen Dienstes ist zu groß.")
+        self.assertEqual(
+            raised.exception.message, "Die Antwort des externen Dienstes ist zu groß."
+        )
 
     def test_transcribe_audio_sends_bounded_multipart_request(self):
         captured = {}
 
-        def fake_http_json(method, url, payload=None, headers=None, timeout=45, service=None, raw_body=None, content_type=None):
-            captured.update({
-                "method": method, "url": url, "payload": payload, "headers": headers,
-                "timeout": timeout, "service": service, "raw_body": raw_body, "content_type": content_type,
-            })
+        def fake_http_json(
+            method,
+            url,
+            payload=None,
+            headers=None,
+            timeout=45,
+            service=None,
+            raw_body=None,
+            content_type=None,
+        ):
+            captured.update(
+                {
+                    "method": method,
+                    "url": url,
+                    "payload": payload,
+                    "headers": headers,
+                    "timeout": timeout,
+                    "service": service,
+                    "raw_body": raw_body,
+                    "content_type": content_type,
+                }
+            )
             return {"text": "Wie soll ich morgen trainieren?"}
 
         audio = b"fake-webm-audio"
-        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="test-key", openai_base_url="https://foundry.example.invalid/openai/v1/")), patch.object(
-            server.PROVIDER_TRANSPORT.json_http_client(), "request", side_effect=fake_http_json
+        with (
+            patch.object(
+                server,
+                "CONFIG",
+                replace(
+                    server.CONFIG,
+                    openai_api_key="test-key",
+                    openai_base_url="https://foundry.example.invalid/openai/v1/",
+                ),
+            ),
+            patch.object(
+                server.PROVIDER_TRANSPORT.json_http_client(),
+                "request",
+                side_effect=fake_http_json,
+            ),
         ):
             result = _transcribe_via_http_route(audio, "audio/webm;codecs=opus")
 
         self.assertEqual(result, {"transcript": "Wie soll ich morgen trainieren?"})
         self.assertEqual(captured["method"], "POST")
-        self.assertEqual(captured["url"], "https://foundry.example.invalid/openai/v1/audio/transcriptions")
+        self.assertEqual(
+            captured["url"],
+            "https://foundry.example.invalid/openai/v1/audio/transcriptions",
+        )
         self.assertEqual(captured["service"], "openai")
         self.assertEqual(captured["timeout"], 90)
         self.assertIsNone(captured["payload"])
@@ -841,45 +1275,102 @@ class ServerHttpTests(ServerTestCase):
             with self.assertRaises(server.AppError) as unsupported:
                 _transcribe_via_http_route(b"audio", "audio/flac")
             with self.assertRaises(server.AppError) as oversized:
-                _transcribe_via_http_route(b"x" * (server.MAX_AUDIO_BODY_BYTES + 1), "audio/webm")
+                _transcribe_via_http_route(
+                    b"x" * (server.MAX_AUDIO_BODY_BYTES + 1), "audio/webm"
+                )
         self.assertEqual(unsupported.exception.status, 415)
         self.assertEqual(oversized.exception.status, 413)
 
     def test_complete_plan_replace_can_create_more_sessions_and_archive_old_ones(self):
-        old = server.PLANNING_DATA.planned_unit().create({
-            "date": (date.today() + timedelta(days=1)).isoformat(),
-            "sport": "Ride", "name": "Old", "description": "- 30m 60% easy",
-        })
+        old = server.PLANNING_DATA.planned_unit().create(
+            {
+                "date": (
+                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                ).isoformat(),
+                "sport": "Ride",
+                "name": "Old",
+                "description": "- 30m 60% easy",
+            }
+        )
         state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
         intent = {
-            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
-            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "intent": "local_action",
+            "operation": "replace_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
             "follow_up_operations": [],
         }
         result = server.COACH_TOOL_DISPATCH.service().execute(
             "replace_training_plan",
             {
                 "expected_revision": state["planning_revision"],
-                "payload": {"plan_name": "Replacement", "goal": "Base", "workouts": [
-                    {"date": (date.today() + timedelta(days=2)).isoformat(), "sport": "Ride", "name": "New 1", "description": "- 40m 60% easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Base"},
-                    {"date": (date.today() + timedelta(days=3)).isoformat(), "sport": "Run", "name": "New 2", "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Base"},
-                ]},
+                "payload": {
+                    "plan_name": "Replacement",
+                    "goal": "Base",
+                    "workouts": [
+                        {
+                            "date": (
+                                _local_datetime.now().astimezone().date()
+                                + timedelta(days=2)
+                            ).isoformat(),
+                            "sport": "Ride",
+                            "name": "New 1",
+                            "description": "- 40m 60% easy",
+                            "duration_minutes": 40,
+                            "target": "AUTO",
+                            "rationale": "Base",
+                        },
+                        {
+                            "date": (
+                                _local_datetime.now().astimezone().date()
+                                + timedelta(days=3)
+                            ).isoformat(),
+                            "sport": "Run",
+                            "name": "New 2",
+                            "description": "- 30m 60% easy",
+                            "duration_minutes": 30,
+                            "target": "AUTO",
+                            "rationale": "Base",
+                        },
+                    ],
+                },
             },
-            intent=intent, conversation_id="conversation-replace", client_turn_id="turn-replace",
-            session_csrf_hash="", sync_job_ids=[],
+            intent=intent,
+            conversation_id="conversation-replace",
+            client_turn_id="turn-replace",
+            session_csrf_hash="",
+            sync_job_ids=[],
         )
         self.assertEqual(result["status"], "replaced")
         self.assertEqual(result["archived_count"], 1)
         self.assertEqual(result["created_count"], 2)
-        self.assertEqual({item["name"] for item in server.PLANNING_DATA.planned_unit().list()}, {"New 1", "New 2"})
-        archived = next(item for item in server.PLANNING_DATA.planned_unit().list(20, include_archived=True) if item["id"] == old["id"])
+        self.assertEqual(
+            {item["name"] for item in server.PLANNING_DATA.planned_unit().list()},
+            {"New 1", "New 2"},
+        )
+        archived = next(
+            item
+            for item in server.PLANNING_DATA.planned_unit().list(
+                20, include_archived=True
+            )
+            if item["id"] == old["id"]
+        )
         self.assertTrue(archived["archived"])
         self.assertTrue(archived["local_deleted"])
 
-    def test_openai_background_request_routes_checkpoint_and_cancellation_to_provider_client(self):
+    def test_openai_background_request_routes_checkpoint_and_cancellation_to_provider_client(
+        self,
+    ):
         checkpoints = []
         checkpoint = checkpoints.append
-        expected = {"id": "resp_background_1", "status": "completed", "output_text": "fertig", "usage": {}}
+        expected = {
+            "id": "resp_background_1",
+            "status": "completed",
+            "output_text": "fertig",
+            "usage": {},
+        }
         payload = {"model": "gpt-6-luna", "input": "fake"}
         with patch.object(
             openai_provider.OpenAIResponsesClient, "background", return_value=expected
@@ -904,24 +1395,32 @@ class ServerHttpTests(ServerTestCase):
             operation_id="operation-background-persisted",
         )
         self.assertEqual(job["status"], "queued")
-        status = server.COACH_BACKGROUND_JOBS.job_submission_service().stream_status("csrf-background-owner")
+        status = server.COACH_BACKGROUND_JOBS.job_submission_service().stream_status(
+            "csrf-background-owner"
+        )
         self.assertEqual(status["mode"], "background")
         self.assertEqual(status["operation_id"], "operation-background-persisted")
         self.assertEqual(
-            server.COACH_BACKGROUND_JOBS.job_submission_service().stream_status("csrf-other"),
+            server.COACH_BACKGROUND_JOBS.job_submission_service().stream_status(
+                "csrf-other"
+            ),
             {"status": "idle", "operation_id": None},
         )
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             command = db.execute(
                 "SELECT status, receipt FROM coach_commands WHERE client_turn_id='turn-background-persisted'"
             ).fetchone()
-            user_message = db.execute("SELECT role, content FROM messages ORDER BY id DESC LIMIT 1").fetchone()
+            user_message = db.execute(
+                "SELECT role, content FROM messages ORDER BY id DESC LIMIT 1"
+            ).fetchone()
         self.assertEqual(command["status"], "queued")
         self.assertNotIn("csrf-background-owner", command["receipt"])
         self.assertEqual(user_message["role"], "user")
         self.assertIn("2 Wochen", user_message["content"])
 
-    def test_background_submission_atomically_allows_only_one_active_turn_per_session(self):
+    def test_background_submission_atomically_allows_only_one_active_turn_per_session(
+        self,
+    ):
         service = server.COACH_BACKGROUND_JOBS.job_submission_service()
         original_active = service.active
         barrier = threading.Barrier(2)
@@ -935,10 +1434,14 @@ class ServerHttpTests(ServerTestCase):
 
         def submit(client_turn_id):
             try:
-                results.append(service.enqueue(
-                    "Erstelle eine längere Planung", client_turn_id,
-                    "csrf-background-concurrent-session", operation_id=f"operation-{client_turn_id}",
-                ))
+                results.append(
+                    service.enqueue(
+                        "Erstelle eine längere Planung",
+                        client_turn_id,
+                        "csrf-background-concurrent-session",
+                        operation_id=f"operation-{client_turn_id}",
+                    )
+                )
             except server.AppError as error:
                 errors.append(error)
 
@@ -978,15 +1481,33 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(len(messages), 1)
 
     def test_public_state_exposes_completed_and_planned_activity_tabs(self):
-        server.PLANNING_DATA.planned_unit().create({"date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "Intervalle", "description": "- 30m Z2", "duration_minutes": 30})
-        snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [{"name": "Morgenlauf"}], "recent_wellness": [], "upcoming_calendar": []}
+        server.PLANNING_DATA.planned_unit().create(
+            {
+                "date": (
+                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                ).isoformat(),
+                "sport": "Ride",
+                "name": "Intervalle",
+                "description": "- 30m Z2",
+                "duration_minutes": 30,
+            }
+        )
+        snapshot = {
+            "synced_at": "now",
+            "athlete": {},
+            "recent_activities": [{"name": "Morgenlauf"}],
+            "recent_wellness": [],
+            "upcoming_calendar": [],
+        }
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
         state = server.PUBLIC_STATE.state_service().read()
         self.assertEqual(state["app"]["name"], "Intervals Coach")
         self.assertEqual(state["app"]["version"], server.APP_VERSION)
         self.assertEqual(state["activities"][0]["name"], "Morgenlauf")
         self.assertEqual(state["planned"][0]["name"], "Intervalle")
-        self.assertEqual(state["calendar_display"], {"past_weeks": 1, "future_weeks": 4})
+        self.assertEqual(
+            state["calendar_display"], {"past_weeks": 1, "future_weeks": 4}
+        )
 
     def test_json_response_ignores_client_disconnect(self):
         handler = object.__new__(server.HTTP_API.request_handler_class())
@@ -999,7 +1520,9 @@ class ServerHttpTests(ServerTestCase):
         handler.wfile = Mock()
         handler.log_client_disconnect = Mock()
 
-        server.HTTP_API.request_handler_class().send_json(handler, 200, {"status": "ok"})
+        server.HTTP_API.request_handler_class().send_json(
+            handler, 200, {"status": "ok"}
+        )
 
         handler.log_client_disconnect.assert_called_once_with()
         handler.wfile.write.assert_not_called()
@@ -1018,14 +1541,18 @@ class ServerHttpTests(ServerTestCase):
         handler.wfile = Mock()
 
         with patch.object(server.LOGGER, "info") as logger:
-            server.HTTP_API.request_handler_class().send_json(handler, 200, {"activities": []})
+            server.HTTP_API.request_handler_class().send_json(
+                handler, 200, {"activities": []}
+            )
 
         context = logger.call_args.kwargs["extra"]["context"]
         self.assertEqual(context["method"], "GET")
         self.assertEqual(context["path"], "/api/activities")
         self.assertEqual(context["request_id"], "request-2")
         self.assertEqual(context["response_status"], 200)
-        self.assertEqual(context["response_bytes"], len(responses.json_bytes({"activities": []})))
+        self.assertEqual(
+            context["response_bytes"], len(responses.json_bytes({"activities": []}))
+        )
         self.assertEqual(context["error_type"], "ConnectionResetError")
         self.assertGreaterEqual(context["response_duration_ms"], 0)
 
@@ -1038,39 +1565,63 @@ class ServerHttpTests(ServerTestCase):
             {},
             response_body,
         )
-        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", side_effect=upstream_error):
-            with self.assertRaises(server.AppError):
-                server.PROVIDER_TRANSPORT.json_http_client().request("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
+        with (
+            patch.object(
+                server.PROVIDER_TRANSPORT.json_http_client(),
+                "opener",
+                side_effect=upstream_error,
+            ),
+            self.assertRaises(server.AppError),
+        ):
+            server.PROVIDER_TRANSPORT.json_http_client().request(
+                "GET", "https://intervals.icu/api/v1/athlete/0", service="intervals"
+            )
         self.assertTrue(response_body.closed)
 
     def test_intervals_public_state_reports_sync_health(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
-            server.key_value_service().set("last_library_sync_at", "2026-08-31T08:00:00+00:00")
-            state = server.PUBLIC_STATE.state_service().read(local_only=True)["intervals"]
+            server.key_value_service().set(
+                "last_library_sync_at", "2026-08-31T08:00:00+00:00"
+            )
+            state = server.PUBLIC_STATE.state_service().read(local_only=True)[
+                "intervals"
+            ]
         self.assertEqual(state["state"], "connected")
         self.assertIsNone(state["last_sync_at"])
-        self.assertEqual(state["library_sync"]["last_sync_at"], "2026-08-31T08:00:00+00:00")
+        self.assertEqual(
+            state["library_sync"]["last_sync_at"], "2026-08-31T08:00:00+00:00"
+        )
         self.assertIsNone(state["last_error"])
 
     def test_intervals_public_state_reports_library_error(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
-            server.key_value_service().set("last_library_sync_error", "Intervals.icu weist die Anfrage zurück (422): Invalid workout type")
-            state = server.PUBLIC_STATE.state_service().read(local_only=True)["intervals"]
+            server.key_value_service().set(
+                "last_library_sync_error",
+                "Intervals.icu weist die Anfrage zurück (422): Invalid workout type",
+            )
+            state = server.PUBLIC_STATE.state_service().read(local_only=True)[
+                "intervals"
+            ]
         self.assertEqual(state["state"], "error")
         self.assertIn("422", state["last_error"])
 
     def test_readiness_is_safe_and_separate_from_liveness(self):
         with tempfile.TemporaryDirectory() as data_dir:
             readiness = ReadinessService(
-                server.database_manager, server.DB_LOCK, Path(data_dir),
+                server.database_manager,
+                server.DB_LOCK,
+                Path(data_dir),
                 runtime_maintenance.MAINTENANCE_GATE,
             ).state()
             self.assertEqual([], list(Path(data_dir).glob(".readiness-*.probe")))
         self.assertEqual(readiness["status"], "ready")
         self.assertTrue(readiness["ready"])
-        self.assertEqual(set(readiness["checks"]), {"database", "schema", "data_directory", "maintenance"})
+        self.assertEqual(
+            set(readiness["checks"]),
+            {"database", "schema", "data_directory", "maintenance"},
+        )
         self.assertNotIn("path", json.dumps(readiness).casefold())
         self.assertNotIn("athlete", json.dumps(readiness).casefold())
         self.assertNotIn("password", json.dumps(readiness).casefold())
@@ -1109,10 +1660,22 @@ class ServerHttpTests(ServerTestCase):
             seen_managers.append(service._manager_factory())
             return ready if len(seen_managers) == 1 else not_ready
 
-        with patch.object(server, "database_manager", side_effect=[original_manager, switched_manager]), \
-                patch.object(ReadinessService, "state", autospec=True, side_effect=projected_state):
-            self.assertTrue(server.HTTP_API.public_get_routes.handle(handler, "/api/readiness"))
-            self.assertTrue(server.HTTP_API.public_get_routes.handle(handler, "/api/readiness"))
+        with (
+            patch.object(
+                server,
+                "database_manager",
+                side_effect=[original_manager, switched_manager],
+            ),
+            patch.object(
+                ReadinessService, "state", autospec=True, side_effect=projected_state
+            ),
+        ):
+            self.assertTrue(
+                server.HTTP_API.public_get_routes.handle(handler, "/api/readiness")
+            )
+            self.assertTrue(
+                server.HTTP_API.public_get_routes.handle(handler, "/api/readiness")
+            )
 
         self.assertEqual(seen_managers, [original_manager, switched_manager])
         self.assertEqual(
@@ -1123,10 +1686,16 @@ class ServerHttpTests(ServerTestCase):
     def test_readiness_handler_returns_503_when_manager_composition_fails(self):
         handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.send_json = Mock()
-        with tempfile.TemporaryDirectory() as data_dir, \
-                patch.object(server, "DATA_DIR", Path(data_dir)), \
-                patch.object(server, "database_manager", side_effect=OSError("mount unavailable")):
-            self.assertTrue(server.HTTP_API.public_get_routes.handle(handler, "/api/readiness"))
+        with (
+            tempfile.TemporaryDirectory() as data_dir,
+            patch.object(server, "DATA_DIR", Path(data_dir)),
+            patch.object(
+                server, "database_manager", side_effect=OSError("mount unavailable")
+            ),
+        ):
+            self.assertTrue(
+                server.HTTP_API.public_get_routes.handle(handler, "/api/readiness")
+            )
         status, payload = handler.send_json.call_args.args
         self.assertEqual(status, 503)
         self.assertEqual(payload["status"], "not_ready")
@@ -1135,12 +1704,18 @@ class ServerHttpTests(ServerTestCase):
         self.assertNotIn("mount unavailable", json.dumps(payload))
 
     def test_readiness_fails_when_data_directory_is_read_only(self):
-        with tempfile.TemporaryDirectory() as data_dir, patch.object(
-            readiness_module.tempfile, "NamedTemporaryFile",
-            side_effect=OSError("read-only"),
+        with (
+            tempfile.TemporaryDirectory() as data_dir,
+            patch.object(
+                readiness_module.tempfile,
+                "NamedTemporaryFile",
+                side_effect=OSError("read-only"),
+            ),
         ):
             readiness = ReadinessService(
-                server.database_manager, server.DB_LOCK, Path(data_dir),
+                server.database_manager,
+                server.DB_LOCK,
+                Path(data_dir),
                 runtime_maintenance.MAINTENANCE_GATE,
             ).state()
         self.assertEqual(readiness["status"], "not_ready")
@@ -1170,10 +1745,14 @@ class ServerHttpTests(ServerTestCase):
                 return BrokenWriter()
 
             with patch.object(
-                readiness_module.tempfile, "NamedTemporaryFile", side_effect=broken_probe
+                readiness_module.tempfile,
+                "NamedTemporaryFile",
+                side_effect=broken_probe,
             ):
                 readiness = ReadinessService(
-                    server.database_manager, server.DB_LOCK, Path(data_dir),
+                    server.database_manager,
+                    server.DB_LOCK,
+                    Path(data_dir),
                     runtime_maintenance.MAINTENANCE_GATE,
                 ).state()
             self.assertFalse(readiness["checks"]["data_directory"])
@@ -1190,7 +1769,10 @@ class ServerHttpTests(ServerTestCase):
 
     def test_rate_limiter_enforces_limit_retry_after_and_independent_keys(self):
         limiter = RateLimiter()
-        with patch("backend.http_api.rate_limit.time.monotonic", side_effect=(1000.0, 1002.0, 1002.0)):
+        with patch(
+            "backend.http_api.rate_limit.time.monotonic",
+            side_effect=(1000.0, 1002.0, 1002.0),
+        ):
             self.assertEqual(limiter.allow("login:one", 1, 10), (True, 10))
             self.assertEqual(limiter.allow("login:one", 1, 10), (False, 8))
             self.assertEqual(limiter.allow("login:two", 1, 10), (True, 10))
@@ -1198,19 +1780,29 @@ class ServerHttpTests(ServerTestCase):
     def test_api_auth_uses_rate_limiter_and_preserves_retry_response(self):
         handler = Mock(client_address=("203.0.113.7", 0))
         auth = server.session_auth_service()
-        with patch.object(server.app_config, "security_configuration_error", return_value=None), \
-                patch.object(auth, "authenticated_session", return_value={"csrf_hash": "unused"}), \
-                patch.object(RateLimiter, "allow", autospec=True, return_value=(False, 17)) as rate_limit, \
-                self.assertRaises(server.AppError) as raised:
+        with (
+            patch.object(
+                server.app_config, "security_configuration_error", return_value=None
+            ),
+            patch.object(
+                auth, "authenticated_session", return_value={"csrf_hash": "unused"}
+            ),
+            patch.object(
+                RateLimiter, "allow", autospec=True, return_value=(False, 17)
+            ) as rate_limit,
+            self.assertRaises(server.AppError) as raised,
+        ):
             auth.require_auth(handler)
         self.assertEqual(raised.exception.status, 429)
         self.assertIn("17 Sekunden", raised.exception.message)
-        rate_limit.assert_called_once_with(http_auth.RATE_LIMITER, "api:203.0.113.7", 180, 60)
+        rate_limit.assert_called_once_with(
+            http_auth.RATE_LIMITER, "api:203.0.113.7", 180, 60
+        )
 
     def test_openai_rate_limit_headers_are_exposed_without_local_limits(self):
         class FakeResponse:
             status = 200
-            headers = {
+            headers: ClassVar = {
                 "x-ratelimit-remaining-requests": "19",
                 "x-ratelimit-remaining-tokens": "12000",
                 "x-ratelimit-reset-requests": "30s",
@@ -1225,8 +1817,17 @@ class ServerHttpTests(ServerTestCase):
             def read(self, *args):
                 return b"{}"
 
-        with patch.object(server.PROVIDER_TRANSPORT.json_http_client(), "opener", return_value=FakeResponse()):
-            server.PROVIDER_TRANSPORT.json_http_client().request("POST", "https://api.openai.com/v1/responses", payload={}, service="openai")
+        with patch.object(
+            server.PROVIDER_TRANSPORT.json_http_client(),
+            "opener",
+            return_value=FakeResponse(),
+        ):
+            server.PROVIDER_TRANSPORT.json_http_client().request(
+                "POST",
+                "https://api.openai.com/v1/responses",
+                payload={},
+                service="openai",
+            )
         summary = server.provider_state_service().summary("openai")
         self.assertNotIn("request_limit", summary)
         self.assertNotIn("token_limit", summary)
@@ -1256,7 +1857,9 @@ class ServerHttpTests(ServerTestCase):
             "stream",
             return_value={"status": "completed"},
         ) as stream:
-            result = server.COACH_CONVERSATION.response_transport().stream_request(payload, on_delta, cancel_event, on_response_id)
+            result = server.COACH_CONVERSATION.response_transport().stream_request(
+                payload, on_delta, cancel_event, on_response_id
+            )
 
         self.assertEqual(result["status"], "completed")
         stream.assert_called_once_with(
@@ -1266,17 +1869,25 @@ class ServerHttpTests(ServerTestCase):
             on_response_id=on_response_id,
         )
 
-    def test_chat_stream_registration_rejects_duplicate_stream_and_wrong_operation_id(self):
+    def test_chat_stream_registration_rejects_duplicate_stream_and_wrong_operation_id(
+        self,
+    ):
         session_key = "session-stream-test"
-        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
+        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(
+            session_key
+        )
         try:
             with self.assertRaises(server.AppError) as duplicate:
                 coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
             self.assertEqual(duplicate.exception.reason, "chat_already_running")
             with self.assertRaises(server.AppError) as raised:
-                server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(session_key, "other-operation")
+                server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(
+                    session_key, "other-operation"
+                )
             self.assertEqual(raised.exception.status, 409)
-            result = server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(session_key, operation_id)
+            result = server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(
+                session_key, operation_id
+            )
             self.assertEqual(result["status"], "cancelling")
             self.assertTrue(cancel_event.is_set())
         finally:
@@ -1285,11 +1896,21 @@ class ServerHttpTests(ServerTestCase):
     def test_chat_stream_status_is_scoped_to_the_session(self):
         session_key = "session-stream-status-test"
         service = server.COACH_BACKGROUND_JOBS.job_submission_service()
-        self.assertEqual(service.stream_status(session_key), {"status": "idle", "operation_id": None})
-        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
+        self.assertEqual(
+            service.stream_status(session_key), {"status": "idle", "operation_id": None}
+        )
+        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(
+            session_key
+        )
         try:
-            self.assertEqual(service.stream_status(session_key), {"status": "running", "operation_id": operation_id})
-            self.assertEqual(service.stream_status("other-session"), {"status": "idle", "operation_id": None})
+            self.assertEqual(
+                service.stream_status(session_key),
+                {"status": "running", "operation_id": operation_id},
+            )
+            self.assertEqual(
+                service.stream_status("other-session"),
+                {"status": "idle", "operation_id": None},
+            )
             self.assertFalse(cancel_event.is_set())
         finally:
             coach_streams.CHAT_STREAM_REGISTRY.unregister(session_key, operation_id)
@@ -1302,15 +1923,21 @@ class ServerHttpTests(ServerTestCase):
             self.assertNotEqual(first_operation, second_operation)
             self.assertIsNone(registry.events("session-two", first_operation))
             self.assertTrue(registry.publish(first_operation, "delta", {"text": "one"}))
-            self.assertTrue(registry.publish(first_operation, "completed", {"status": "done"}))
+            self.assertTrue(
+                registry.publish(first_operation, "completed", {"status": "done"})
+            )
             first_events = registry.events("session-one", first_operation)
             self.assertEqual(first_events.get_nowait(), ("delta", {"text": "one"}))
-            self.assertEqual(first_events.get_nowait(), ("completed", {"status": "done"}))
+            self.assertEqual(
+                first_events.get_nowait(), ("completed", {"status": "done"})
+            )
             self.assertFalse(registry.publish("unknown-operation", "error", {}))
         finally:
             registry.unregister("session-one", first_operation)
             registry.unregister("session-two", second_operation)
-        self.assertFalse(registry.publish(first_operation, "delta", {"text": "after detach"}))
+        self.assertFalse(
+            registry.publish(first_operation, "delta", {"text": "after detach"})
+        )
 
     def test_disconnected_chat_stream_continues_and_does_not_cancel_provider_work(self):
         session_key = "session-stream-disconnect-test"
@@ -1318,7 +1945,12 @@ class ServerHttpTests(ServerTestCase):
         cancel_event = threading.Event()
         handler_class = server.HTTP_API.request_handler_class()
         handler = handler_class.__new__(handler_class)
-        handler.read_json = Mock(return_value={"message": "Bleibt bestehen", "client_turn_id": "turn-disconnect-test"})
+        handler.read_json = Mock(
+            return_value={
+                "message": "Bleibt bestehen",
+                "client_turn_id": "turn-disconnect-test",
+            }
+        )
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
         handler.send_sse_event = Mock(side_effect=[None, ClientDisconnected()])
@@ -1327,13 +1959,23 @@ class ServerHttpTests(ServerTestCase):
         events.put(("completed", {"message": {"id": 2}}))
 
         registry = coach_streams.CHAT_STREAM_REGISTRY
-        with patch.object(registry, "register", return_value=(operation_id, cancel_event)), \
-                patch.object(registry, "unregister") as unregister, \
-                patch.object(registry, "events", return_value=events):
-            server.HTTP_API.chat_stream_transport.handle(handler, {"csrf_hash": session_key})
+        with (
+            patch.object(
+                registry, "register", return_value=(operation_id, cancel_event)
+            ),
+            patch.object(registry, "unregister") as unregister,
+            patch.object(registry, "events", return_value=events),
+        ):
+            server.HTTP_API.chat_stream_transport.handle(
+                handler, {"csrf_hash": session_key}
+            )
 
         with server.database_manager().unit_of_work() as db:
-            self.assertIsNotNone(db.execute("SELECT 1 FROM coach_commands WHERE client_turn_id='turn-disconnect-test' AND status='queued'").fetchone())
+            self.assertIsNotNone(
+                db.execute(
+                    "SELECT 1 FROM coach_commands WHERE client_turn_id='turn-disconnect-test' AND status='queued'"
+                ).fetchone()
+            )
         self.assertFalse(cancel_event.is_set())
         unregister.assert_called_once_with(session_key, operation_id)
 
@@ -1343,23 +1985,39 @@ class ServerHttpTests(ServerTestCase):
         cancel_event = threading.Event()
         handler_class = server.HTTP_API.request_handler_class()
         handler = handler_class.__new__(handler_class)
-        handler.read_json = Mock(return_value={
-            "message": "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
-            "client_turn_id": "turn-background-stream-test",
-        })
+        handler.read_json = Mock(
+            return_value={
+                "message": "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
+                "client_turn_id": "turn-background-stream-test",
+            }
+        )
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
         handler.send_sse_event = Mock()
         events = queue.Queue()
         events.put(("delta", {"text": "Dein Plan "}))
         events.put(("delta", {"text": "ist fertig."}))
-        events.put(("completed", {"status": "completed", "message": {"id": 2, "content": "Dein Plan ist fertig."}}))
+        events.put(
+            (
+                "completed",
+                {
+                    "status": "completed",
+                    "message": {"id": 2, "content": "Dein Plan ist fertig."},
+                },
+            )
+        )
 
         registry = coach_streams.CHAT_STREAM_REGISTRY
-        with patch.object(registry, "register", return_value=(operation_id, cancel_event)), patch.object(
-            registry, "unregister"
-        ) as unregister, patch.object(registry, "events", return_value=events):
-            server.HTTP_API.chat_stream_transport.handle(handler, {"csrf_hash": session_key})
+        with (
+            patch.object(
+                registry, "register", return_value=(operation_id, cancel_event)
+            ),
+            patch.object(registry, "unregister") as unregister,
+            patch.object(registry, "events", return_value=events),
+        ):
+            server.HTTP_API.chat_stream_transport.handle(
+                handler, {"csrf_hash": session_key}
+            )
 
         events = [call.args[0] for call in handler.send_sse_event.call_args_list]
         self.assertEqual(events, ["started", "delta", "delta", "completed"])
@@ -1369,11 +2027,15 @@ class ServerHttpTests(ServerTestCase):
 
     def test_chat_stream_cancel_closes_the_active_provider_response(self):
         session_key = "session-stream-close-test"
-        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
+        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(
+            session_key
+        )
         response = Mock()
         cancel_event._openai_response = response
         try:
-            result = server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(session_key, operation_id)
+            result = server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(
+                session_key, operation_id
+            )
             self.assertEqual(result["status"], "cancelling")
             response.close.assert_called_once_with()
             self.assertTrue(cancel_event.is_set())
@@ -1385,6 +2047,7 @@ class ServerHttpTests(ServerTestCase):
         acquired = [gate._queue.acquire(blocking=False) for _ in range(3)]
         self.assertTrue(all(acquired))
         try:
+
             @gate.wrap
             def queued_operation():
                 return "completed"
@@ -1428,8 +2091,13 @@ class ServerHttpTests(ServerTestCase):
                     database_lock = ObservedDatabaseLock()
                     errors = []
 
-                    with patch.object(server, "DB_LOCK", database_lock), patch.object(
-                        provider_http, "urlopen", side_effect=AssertionError("State must stay local")
+                    with (
+                        patch.object(server, "DB_LOCK", database_lock),
+                        patch.object(
+                            provider_http,
+                            "urlopen",
+                            side_effect=AssertionError("State must stay local"),
+                        ),
                     ):
                         state = server.provider_state_service()
 
@@ -1437,18 +2105,25 @@ class ServerHttpTests(ServerTestCase):
                             try:
                                 if update:
                                     state.record_usage(
-                                        "openai", {"usage": {"output_tokens": 2}}, "test"
+                                        "openai",
+                                        {"usage": {"output_tokens": 2}},
+                                        "test",
                                     )
                                 else:
                                     state.summary("openai")
-                            except Exception as exc:
+                            except Exception as exc:  # noqa: BLE001 - Collect every worker-thread failure for the main-thread assertion.
                                 errors.append(exc)
 
                         thread = threading.Thread(target=worker)
                         try:
-                            with server.DB_LOCK, server.database_manager().unit_of_work():
+                            with (
+                                server.DB_LOCK,
+                                server.database_manager().unit_of_work(),
+                            ):
                                 thread.start()
-                                self.assertTrue(database_lock.worker_waiting.wait(timeout=3))
+                                self.assertTrue(
+                                    database_lock.worker_waiting.wait(timeout=3)
+                                )
                                 state = state_reader()
                                 self.assertIn("usage", state)
                         finally:

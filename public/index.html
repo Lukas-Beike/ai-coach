@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=269">
+  <link rel="stylesheet" href="/styles.css?v=278">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -148,13 +148,16 @@
         <nav class="plan-segment-nav" aria-label="Analysebereiche">
           <a href="#analysis/load" data-analysis-segment="load">Belastung</a>
           <a href="#analysis/performance" data-analysis-segment="performance">Leistung</a>
+          <a href="#analysis/body" data-analysis-segment="body">Body</a>
           <a href="#analysis/recovery" data-analysis-segment="recovery">Erholung</a>
         </nav>
+        <section id="bodyAnalysisCharts" class="analysis-history-charts" aria-label="Body-Analyse" hidden></section>
         <section id="personalRecovery" class="analysis-history-charts" aria-label="Persönliche Erholung" hidden></section>
         <div id="analysisLoadCharts" class="analysis-history-charts" aria-label="Garmin-Trainingsbelastung" hidden></div>
         <section id="sessionPerformance" class="analysis-chart-card" aria-label="Trainingsfokus"></section>
         <div id="trainingZoneCharts" class="analysis-history-charts" aria-label="Trainingszonen" hidden></div>
         <div id="analysisHistoryCharts" class="analysis-history-charts" aria-label="Leistungsentwicklung der letzten 12 Wochen"></div>
+        <section id="existingPerformanceReports" class="analysis-history-charts" aria-label="Ausdauer und beobachtete Bestleistungen"></section>
         <section id="performancePredictions" class="analysis-chart-card" aria-label="Laufprognosen" hidden></section>
       </section>
 
@@ -442,15 +445,15 @@
     </form>
   </dialog>
   <script src="/api.js?v=221" defer></script>
-  <script src="/navigation.js?v=228" defer></script>
+  <script src="/navigation.js?v=230" defer></script>
   <script src="/state.js?v=218" defer></script>
   <script src="/views.js?v=218" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
   <script src="/coach.js?v=6" defer></script>
-  <script src="/nutrition.js?v=14" defer></script>
-  <script src="/analysis.js?v=69" defer></script>
-  <script src="/activity-details.js?v=7" defer></script>
-  <script src="/app.js?v=269" defer></script>
+  <script src="/nutrition.js?v=19" defer></script>
+  <script src="/analysis.js?v=92" defer></script>
+  <script src="/activity-details.js?v=9" defer></script>
+  <script src="/app.js?v=270" defer></script>
 </body>
 </html>

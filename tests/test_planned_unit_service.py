@@ -50,6 +50,12 @@ class CalendarConflictFake:
     def __init__(self):
         self.calls = []
         self.results = []
+        self.constraint_calls = []
+        self.constraint_results = []
+
+    def constraints(self, workout):
+        self.constraint_calls.append(workout)
+        return self.constraint_results
 
     def conflicts(self, workout, exclude_library_ids):
         self.calls.append((workout, exclude_library_ids))
@@ -500,6 +506,21 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertEqual(result["library_entry"]["date"], "2026-09-23")
         self.assertEqual(len(self.calendar_conflicts.calls), 1)
         self.assertEqual(self.state()[2], 2)
+
+    def test_skip_flag_does_not_bypass_calendar_constraints(self):
+        self.service.create(self.workout())
+        self.calendar_conflicts.constraint_results = [{"constraint": "[NO_INTENSITY]"}]
+
+        with self.assertRaises(AppError) as caught:
+            self.service.update(
+                str(self.id),
+                {"name": "Hard intervals"},
+                skip_calendar_conflict=True,
+            )
+
+        self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(caught.exception.reason, "plan_date_conflict")
+        self.assertEqual(len(self.calendar_conflicts.constraint_calls), 2)
 
     def test_external_transaction_owns_commit_revision_and_event_publication(self):
         manager = CountingDatabaseManager(self.manager)

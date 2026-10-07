@@ -31,6 +31,7 @@ class ExternalCalendarTests(unittest.TestCase):
                 duration_minutes INTEGER NOT NULL,
                 all_day INTEGER NOT NULL,
                 training_relevant INTEGER NOT NULL,
+                no_training INTEGER NOT NULL,
                 no_intensity INTEGER NOT NULL,
                 short_only INTEGER NOT NULL,
                 updated_at TEXT NOT NULL
@@ -56,7 +57,7 @@ class ExternalCalendarTests(unittest.TestCase):
         relevant=1,
     ):
         self.db.execute(
-            "INSERT INTO external_calendar_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO external_calendar_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 event_id,
                 f"uid-{event_id}",
@@ -67,6 +68,7 @@ class ExternalCalendarTests(unittest.TestCase):
                 60,
                 0,
                 relevant,
+                0,
                 0,
                 0,
                 "updated",
@@ -108,6 +110,7 @@ class ExternalCalendarTests(unittest.TestCase):
                 "duration_minutes",
                 "all_day",
                 "training_relevant",
+                "no_training",
                 "no_intensity",
                 "short_only",
                 "updated_at",
@@ -125,6 +128,36 @@ class ExternalCalendarTests(unittest.TestCase):
         )
         self.assertEqual(
             ["relevant"],
+            [
+                event["id"]
+                for event in list_events(
+                    self.db, today=self.today, training_relevant_only=True
+                )
+            ],
+        )
+
+    def test_training_relevance_filter_keeps_no_training_blockers(self):
+        self.add_event("irrelevant", relevant=0)
+        self.db.execute(
+            "UPDATE external_calendar_events SET no_training=1 WHERE id='irrelevant'"
+        )
+        self.assertEqual(
+            ["irrelevant"],
+            [
+                event["id"]
+                for event in list_events(
+                    self.db, today=self.today, training_relevant_only=True
+                )
+            ],
+        )
+
+    def test_training_relevance_filter_keeps_title_only_no_intensity_markers(self):
+        self.add_event("easy-only", relevant=0)
+        self.db.execute(
+            "UPDATE external_calendar_events SET no_intensity=1 WHERE id='easy-only'"
+        )
+        self.assertEqual(
+            ["easy-only"],
             [
                 event["id"]
                 for event in list_events(

@@ -14,8 +14,8 @@ from backend.coach.conversation import (
     CoachConversationProvisionService,
     CoachConversationResetService,
     CoachMessageService,
-    GeminiConversationResponseService,
     GeminiConversationHistoryService,
+    GeminiConversationResponseService,
     GeminiLocalChatHistoryService,
     GeminiRequestPayloadService,
     GeminiResponseNormalizationService,
@@ -92,9 +92,8 @@ class CoachConversationAssembly:
         self._default_thinking_level = model.default_thinking_level
         self._default_max_output_tokens = model.default_max_output_tokens
         self._json_media_type = model.json_media_type
-        self._max_gemini_inline_image_bytes = (
-            model.max_gemini_inline_image_bytes
-            or (lambda: MAX_GEMINI_INLINE_IMAGE_BYTES)
+        self._max_gemini_inline_image_bytes = model.max_gemini_inline_image_bytes or (
+            lambda: MAX_GEMINI_INLINE_IMAGE_BYTES
         )
 
     def provision_service(self) -> CoachConversationProvisionService:
@@ -121,7 +120,9 @@ class CoachConversationAssembly:
         )
 
     def gemini_history_service(self) -> GeminiConversationHistoryService:
-        return GeminiConversationHistoryService(self._database_manager(), self._key_values)
+        return GeminiConversationHistoryService(
+            self._database_manager(), self._key_values
+        )
 
     def message_service(self) -> CoachMessageService:
         return CoachMessageService(
@@ -146,7 +147,9 @@ class CoachConversationAssembly:
     def dialogue_read_service(self) -> CoachDialogueReadService:
         manager = self._database_manager()
         return CoachDialogueReadService(
-            manager, self.message_service(), self._key_values,
+            manager,
+            self.message_service(),
+            self._key_values,
             self._profile_service(),
         )
 
@@ -155,14 +158,20 @@ class CoachConversationAssembly:
 
     def gemini_request_payload_service(self) -> GeminiRequestPayloadService:
         return GeminiRequestPayloadService(
-            self.gemini_history_service(), self.gemini_local_history_service(),
-            self._database_manager(), self._key_values,
+            self.gemini_history_service(),
+            self.gemini_local_history_service(),
+            self._database_manager(),
+            self._key_values,
         )
 
-    def gemini_response_normalization_service(self) -> GeminiResponseNormalizationService:
+    def gemini_response_normalization_service(
+        self,
+    ) -> GeminiResponseNormalizationService:
         return GeminiResponseNormalizationService(
-            self.gemini_history_service(), self._database_manager(),
-            self._key_values, self._uuid_factory,
+            self.gemini_history_service(),
+            self._database_manager(),
+            self._key_values,
+            self._uuid_factory,
         )
 
     def gemini_conversation_response_service(self) -> GeminiConversationResponseService:

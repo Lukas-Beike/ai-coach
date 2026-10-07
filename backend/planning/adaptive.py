@@ -122,7 +122,8 @@ def adaptive_quick_action_blockers(
         return []
     horizon = today + timedelta(days=2)
     blockers = []
-    changes = preview.get("changes") if isinstance(preview.get("changes"), list) else []
+    changes_value = preview.get("changes")
+    changes = changes_value if isinstance(changes_value, list) else []
     for change in changes:
         if not isinstance(change, dict):
             continue
@@ -237,12 +238,14 @@ class AdaptiveReplanApplyService:
         revision_service: Any,
         today: Callable[[], date],
         now: Callable[[], str],
+        calendar_conflict_service: Any | None = None,
     ):
         self._database_manager = database_manager
         self._adjustment_repository = adjustment_repository
         self._revision_service = revision_service
         self._today = today
         self._now = now
+        self._calendar_conflict_service = calendar_conflict_service
 
     def apply(self, adjustment_id: Any) -> dict[str, Any]:
         try:
@@ -271,7 +274,11 @@ class AdaptiveReplanApplyService:
             )
             now = self._now()
             today = self._today()
-            updated, stale = self._apply_changes(db, payload.get("changes"), now, today)
+            applicable_changes, calendar_stale = self._calendar_changes(
+                payload.get("changes") or []
+            )
+            updated, stale = self._apply_changes(db, applicable_changes, now, today)
+            stale = calendar_stale + stale
             updated_checkins = 0
             if updated:
                 self._revision_service.bump(db)
@@ -302,6 +309,55 @@ class AdaptiveReplanApplyService:
             "stale": stale,
             "illness_pause": illness_pause,
         }
+
+    def _calendar_changes(
+        self, changes: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if self._calendar_conflict_service is None:
+            return changes, []
+        applicable, stale = [], []
+        for change in changes:
+            replacement = change.get("payload")
+            if not isinstance(replacement, dict):
+                applicable.append(change)
+                continue
+            archived = bool(replacement.get("archived"))
+            candidate = replacement
+            if archived:
+                candidate = {**(change.get("before") or {}), "date": change.get("date")}
+            blockers = self._calendar_conflict_service.constraints(candidate)
+            calendar_archive = archived and "calendar" in (
+                change.get("blocking_triggers") or []
+            )
+            changed = calendar_archive and not self._original_calendar_blocker_present(
+                change, blockers
+            )
+            if changed or (not archived and blockers):
+                stale.append(
+                    {
+                        "library_workout_id": change.get("library_workout_id"),
+                        "reason": "calendar_constraint_changed",
+                        "events": blockers,
+                    }
+                )
+            else:
+                applicable.append(change)
+        return applicable, stale
+
+    @staticmethod
+    def _original_calendar_blocker_present(
+        change: dict[str, Any], blockers: list[dict[str, Any]]
+    ) -> bool:
+        original_ids = {
+            str(event["id"])
+            for event in change.get("external_events") or []
+            if isinstance(event, dict) and event.get("id") and event.get("no_training")
+        }
+        return any(
+            event.get("reason") == "no_training"
+            and str(event.get("id") or "") in original_ids
+            for event in blockers
+        )
 
     @staticmethod
     def _illness_checkin_values(

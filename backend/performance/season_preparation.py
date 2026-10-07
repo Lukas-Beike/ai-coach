@@ -11,6 +11,8 @@ from backend.performance.training_report import activity_day, canonical_rows, nu
 from backend.planning.competitions import supported_competition_sport
 from backend.planning.season import season_plan_summary
 
+ACTIVITY_SOURCE = "Intervals.icu recorded activities"
+
 
 def season_preparation(
     snapshot: dict[str, Any],
@@ -38,6 +40,7 @@ def season_preparation(
         )[:3]
         weeks = _preparation_weeks(eligible, today, timezone)
         analyses = {row["activity_id"]: row for row in (observations or [])}
+        target_context = _target_context(event)
         event["preparation"] = {
             "status": "observations" if eligible else "insufficient_data",
             "sport": sport,
@@ -46,6 +49,19 @@ def season_preparation(
             "weeks_with_recorded_training": sum(
                 bool(week["sessions"]) for week in weeks
             ),
+            "target_context": _target_context(event),
+            "weekly_observed_volume": _weekly_volume(weeks),
+            "long_session_evidence": _long_session_evidence(longest),
+            "target_distance_comparison": _target_distance_comparison(
+                target_context, longest
+            ),
+            "specificity_evidence": _specificity_evidence(eligible, analyses),
+            "source_counts": {
+                ACTIVITY_SOURCE: len(eligible),
+                "cached activity analyses": len(
+                    [row for row in eligible if str(row.get("id")) in analyses]
+                ),
+            },
             "long_sessions": [
                 {
                     "activity_id": str(row.get("id")),
@@ -64,6 +80,114 @@ def season_preparation(
         "method": "season-observed-training-v1",
         "observed_at": snapshot.get("synced_at"),
         "timezone": timezone,
+    }
+
+
+def _target_context(event: dict[str, Any]) -> dict[str, Any]:
+    raw = str(event.get("distance") or "").strip().lower()
+    distance = None
+    try:
+        value = float(raw.replace(",", ".").replace("km", "").replace("m", "").strip())
+        if "km" in raw:
+            distance = value * 1000
+        elif raw.endswith("m") or value >= 100:
+            distance = value
+    except ValueError:
+        pass
+    target = str(event.get("target") or "").strip()
+    return {
+        "sport": supported_competition_sport(event.get("sport")),
+        "distance_meters": int(distance)
+        if distance is not None and distance.is_integer()
+        else distance,
+        "distance_confirmed": distance is not None,
+        "target": target or None,
+        "target_confirmed": bool(target),
+        "source": "confirmed local competition",
+    }
+
+
+def _weekly_volume(weeks: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "status": "observations"
+        if any(week["sessions"] for week in weeks)
+        else "insufficient_data",
+        "weeks_with_sessions": sum(bool(week["sessions"]) for week in weeks),
+        "weeks_total": len(weeks),
+        "sessions": sum(week["sessions"] for week in weeks),
+        "duration_seconds": sum(week["duration_seconds"] or 0 for week in weeks)
+        or None,
+        "duration_known_sessions": sum(
+            week["duration_known_sessions"] for week in weeks
+        ),
+        "distance_meters": sum(week["distance_meters"] or 0 for week in weeks) or None,
+        "distance_known_sessions": sum(
+            week["distance_known_sessions"] for week in weeks
+        ),
+        "source": ACTIVITY_SOURCE,
+    }
+
+
+def _long_session_evidence(sessions: list[dict[str, Any]]) -> dict[str, Any]:
+    durations = [
+        value
+        for row in sessions
+        if (value := number(row.get("moving_time"))) is not None
+    ]
+    distances = [
+        value for row in sessions if (value := number(row.get("distance"))) is not None
+    ]
+    return {
+        "status": "observations" if sessions else "insufficient_data",
+        "sessions": len(sessions),
+        "duration_seconds": max(durations) if durations else None,
+        "duration_known_sessions": len(durations),
+        "distance_meters": max(distances) if distances else None,
+        "distance_known_sessions": len(distances),
+        "source": ACTIVITY_SOURCE,
+    }
+
+
+def _target_distance_comparison(
+    target_context: dict[str, Any], sessions: list[dict[str, Any]]
+) -> dict[str, Any]:
+    target = target_context.get("distance_meters")
+    distances = [
+        value for row in sessions if (value := number(row.get("distance"))) is not None
+    ]
+    if target is None or not distances:
+        return {
+            "status": "unknown",
+            "target_distance_meters": target,
+            "observed_long_session_distance_meters": max(distances)
+            if distances
+            else None,
+            "source": "confirmed competition and recorded activities",
+        }
+    return {
+        "status": "observed",
+        "target_distance_meters": target,
+        "observed_long_session_distance_meters": max(distances),
+        "source": "confirmed competition and recorded activities",
+    }
+
+
+def _specificity_evidence(
+    eligible: list[dict[str, Any]], analyses: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    cached = [
+        analyses[str(row.get("id"))]
+        for row in eligible
+        if str(row.get("id")) in analyses
+    ]
+    return {
+        "status": "observations" if cached else "insufficient_data",
+        "cached_analyses": len(cached),
+        "known_dimensions": {
+            key: sum((item.get(key) or {}).get("status") == "ok" for item in cached)
+            for key in ("aerobic", "power_profile", "interval_quality")
+        },
+        "source": "cached activity analyses",
     }
 
 

@@ -4,11 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from backend.coach.conversation import GeminiConversationHistoryService
 from backend.db import row_factory
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
-from backend.coach.conversation import GeminiConversationHistoryService
 
 
 class _FailingCallNamesRepository(KeyValueRepository):
@@ -29,7 +29,9 @@ class GeminiConversationHistoryStoreTests(unittest.TestCase):
         with self.database_manager.unit_of_work() as db:
             initialize_schema(db)
         self.key_values = KeyValueRepository(lambda: "2026-09-23T00:00:00+00:00")
-        self.service = GeminiConversationHistoryService(self.database_manager, self.key_values)
+        self.service = GeminiConversationHistoryService(
+            self.database_manager, self.key_values
+        )
 
     def tearDown(self):
         self.database_manager.close()
@@ -63,29 +65,42 @@ class GeminiConversationHistoryStoreTests(unittest.TestCase):
         self.assertEqual(loaded[-1]["parts"][0]["text"], "model 34")
 
     def test_save_sanitizes_inline_and_fit_raw_media_and_preserves_other_values(self):
-        history = [{"role": "user", "parts": [
-            {"text": "Keep this prompt"},
-            {"inlineData": {"mimeType": "image/png", "data": "secret"}},
-            {"text": '{"untrusted_fit_raw_base64":"secret"}'},
-            {"text": '{"untrusted_attachment_name":"route.fit"}'},
-        ]}]
+        history = [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": "Keep this prompt"},
+                    {"inlineData": {"mimeType": "image/png", "data": "secret"}},
+                    {"text": '{"untrusted_fit_raw_base64":"secret"}'},
+                    {"text": '{"untrusted_attachment_name":"route.fit"}'},
+                ],
+            }
+        ]
         self._set("unrelated_setting", "leave me alone")
 
         self.service.save(history)
 
         self.assertEqual(
             json.loads(self._get("gemini_conversation_history")),
-            [{"role": "user", "parts": [
-                {"text": "Keep this prompt"},
-                {"text": '{"untrusted_attachment_name":"route.fit"}'},
-            ]}],
+            [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": "Keep this prompt"},
+                        {"text": '{"untrusted_attachment_name":"route.fit"}'},
+                    ],
+                }
+            ],
         )
         self.assertEqual(self._get("unrelated_setting"), "leave me alone")
 
     def test_repair_drops_only_unexecuted_trailing_call_and_clears_names(self):
         history = [
             {"role": "user", "parts": [{"text": "Save this"}]},
-            {"role": "model", "parts": [{"functionCall": {"name": "save", "args": {}}}]},
+            {
+                "role": "model",
+                "parts": [{"functionCall": {"name": "save", "args": {}}}],
+            },
         ]
         self._set("gemini_conversation_history", json.dumps(history))
         self._set("gemini_call_names", '{"call-1":"save"}')
@@ -93,13 +108,18 @@ class GeminiConversationHistoryStoreTests(unittest.TestCase):
         with self.database_manager.unit_of_work() as db:
             self.service.repair_incomplete(db)
 
-        self.assertEqual(json.loads(self._get("gemini_conversation_history")), history[:1])
+        self.assertEqual(
+            json.loads(self._get("gemini_conversation_history")), history[:1]
+        )
         self.assertEqual(self._get("gemini_call_names"), "{}")
 
     def test_repair_rolls_back_both_writes_if_call_names_write_fails(self):
         history = [
             {"role": "user", "parts": [{"text": "Save this"}]},
-            {"role": "model", "parts": [{"functionCall": {"name": "save", "args": {}}}]},
+            {
+                "role": "model",
+                "parts": [{"functionCall": {"name": "save", "args": {}}}],
+            },
         ]
         history_json = json.dumps(history)
         call_names_json = '{"call-1":"save"}'
@@ -110,9 +130,11 @@ class GeminiConversationHistoryStoreTests(unittest.TestCase):
             _FailingCallNamesRepository(lambda: "2026-09-23T00:00:00+00:00"),
         )
 
-        with self.assertRaisesRegex(RuntimeError, "call names write failed"):
-            with self.database_manager.unit_of_work() as db:
-                service.repair_incomplete(db)
+        with (
+            self.assertRaisesRegex(RuntimeError, "call names write failed"),
+            self.database_manager.unit_of_work() as db,
+        ):
+            service.repair_incomplete(db)
 
         self.assertEqual(self._get("gemini_conversation_history"), history_json)
         self.assertEqual(self._get("gemini_call_names"), call_names_json)
@@ -120,8 +142,16 @@ class GeminiConversationHistoryStoreTests(unittest.TestCase):
     def test_repair_leaves_completed_tool_exchange_unchanged(self):
         history = [
             {"role": "user", "parts": [{"text": "Save this"}]},
-            {"role": "model", "parts": [{"functionCall": {"name": "save", "args": {}}}]},
-            {"role": "user", "parts": [{"functionResponse": {"name": "save", "response": {"ok": True}}}]},
+            {
+                "role": "model",
+                "parts": [{"functionCall": {"name": "save", "args": {}}}],
+            },
+            {
+                "role": "user",
+                "parts": [
+                    {"functionResponse": {"name": "save", "response": {"ok": True}}}
+                ],
+            },
             {"role": "model", "parts": [{"text": "Saved"}]},
         ]
         history_json = json.dumps(history)

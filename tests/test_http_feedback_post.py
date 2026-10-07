@@ -43,3 +43,22 @@ class FeedbackPostRoutesTests(unittest.TestCase):
             self.routes.handle(self.handler, "/api/feedback")
         self.assertIs(raised.exception, error)
         self.handler.send_json.assert_not_called()
+
+
+class ActivityFeedbackPostRouteTests(unittest.TestCase):
+    def test_activity_feedback_route_uses_existing_service(self) -> None:
+        service = Mock()
+        service.save_coach.return_value = {
+            "status": "ok",
+            "activity_feedback": {"session_rpe": 6},
+        }
+        handler = SimpleNamespace(
+            read_json=Mock(return_value={"session_rpe": 6}), send_json=Mock()
+        )
+        route = FeedbackPostRoutes(lambda: Mock(), lambda: service)
+
+        self.assertTrue(route.handle(handler, "/api/activities/ride-1/feedback"))
+        service.save_coach.assert_called_once_with("ride-1", {"session_rpe": 6})
+        handler.send_json.assert_called_once_with(
+            200, {"status": "ok", "activity_feedback": {"session_rpe": 6}}
+        )

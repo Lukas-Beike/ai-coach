@@ -72,6 +72,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
                 {
                     "gearUUID": "gear-one",
                     "gearName": "Bike",
+                    "gearStatusName": "Retired",
                     "maximumMeters": 10000,
                     "stats": {"totalDistance": 2500, "totalActivities": 3},
                 },
@@ -85,6 +86,8 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         items = service.read()["garmin_items"]
         self.assertEqual(items[0]["distance_km"], 2.5)
         self.assertEqual(items[0]["usage_percent"], 25)
+        self.assertEqual(items[0]["garmin_status"], "Retired")
+        self.assertEqual(items[0]["lifetime"]["target_km"], 10)
         self.assertEqual(items[0]["sessions"], 3)
         self.assertIsNone(items[1]["distance_km"])
         snapshot["gear"][0]["stats"]["totalDistance"] = 3000
@@ -107,6 +110,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
                     "gearName": "Road bike",
                     "gearTypeName": "bike",
                     "gearStatusName": "Active",
+                    "maximumMeters": 150000,
                     "stats": {"totalDistance": 120000},
                 }
             ],
@@ -115,6 +119,9 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         imported = service.read()["items"][0]
         self.assertEqual(imported["initial_distance_km"], 120)
         self.assertEqual(imported["garmin_distance_km"], 120)
+        self.assertEqual(imported["garmin_maximum_meters"], 150000)
+        self.assertEqual(imported["lifetime_target_km"], 150)
+        self.assertEqual(imported["lifetime"]["percent"], 80)
         self.assertEqual(imported["status"], "active")
         service.save(
             {
@@ -140,6 +147,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
                     "gearName": "New Garmin name",
                     "gearTypeName": "bike",
                     "gearStatusName": "Active",
+                    "maximumMeters": 250000,
                     "stats": {"totalDistance": 145000},
                 },
                 {
@@ -159,6 +167,9 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self.assertEqual(item["status"], "archived")
         self.assertEqual(item["name"], "Road bike")
         self.assertEqual(item["usage"]["distance_km"], 145)
+        self.assertEqual(item["garmin_status"], "Active")
+        self.assertEqual(item["garmin_maximum_meters"], 250000)
+        self.assertEqual(item["lifetime_target_km"], 250)
         self.assertEqual(len(service.read()["items"]), 1)
         self.assertEqual(service.read()["garmin_items"], [])
 
@@ -491,6 +502,29 @@ class TrainingRecordFeatureTests(unittest.TestCase):
                 }
             )
         self.assertEqual(len(service.read()["items"]), 2)
+
+    def test_local_lifetime_target_must_be_positive_and_is_projected(self):
+        service = EquipmentService(
+            self.manager,
+            dict,
+            lambda: date(2026, 9, 1),
+            lambda: "2026-09-01T00:00:00Z",
+        )
+        payload = {
+            "name": "Bike",
+            "sport": "Ride",
+            "kind": "bike",
+            "start_date": "2026-08-01",
+            "initial_distance_km": 125,
+            "initial_hours": 0,
+            "lifetime_target_km": 100,
+        }
+        for value in (0, -1, float("nan"), float("inf"), True):
+            with self.subTest(value=value), self.assertRaises(AppError):
+                service.save({**payload, "lifetime_target_km": value})
+        item = service.save(payload)["equipment"]
+        self.assertEqual(item["lifetime_target_km"], 100)
+        self.assertEqual(service.read()["items"][0]["lifetime"]["percent"], 125)
 
     def test_backdated_garmin_maintenance_keeps_distance_baseline_unknown(self):
         service = EquipmentService(

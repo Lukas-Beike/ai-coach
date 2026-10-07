@@ -90,7 +90,7 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 - **Overnight Body Battery Tracking**: Targeted extraction of resting stress metrics capturing the final level before sleep and the initial waking level within one hour of rising.
 - **Bounded Sleep Retry Engine**: Three-tier exponential retry schedule (15-minute intervals, max 3 attempts) handling delayed Garmin cloud sleep processing.
 - **Garmin-Specific Metric Labeling**: Clear source labeling distinguishing Garmin-calculated FTP, running threshold power, threshold HR, threshold pace, and VO2 max from Intervals.icu metrics.
-- **Daily Wellness Summaries**: Calendar-integrated daily summaries tracking total steps, floors climbed, active calories, resting heart rate, and overnight HRV.
+- **Daily Wellness Summaries**: Calendar-integrated daily summaries tracking total steps, floors climbed, active calories, resting heart rate, and overnight HRV. Garmin's dated daily energy expenditure is also shown alongside the nutrition diary, with current-day values marked provisional.
 - **Rolling Health Averages**: Automated calculation of 7-day rolling health baselines displayed alongside acute readings on the performance dashboard.
 - **Transparent Metric Fallback**: Resilient metric aggregation preserving Intervals.icu values as labeled fallbacks when Garmin biometric readings are absent.
 
@@ -107,7 +107,7 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 - **Rolling 8-Week Event Horizon**: Bounded calendar expansion mapping external life events across an 8-week (56-day) forward-looking window.
 - **RFC 5545 Recurrence Engine**: Comprehensive expansion of standard recurring rules (daily, weekly, monthly, yearly) and Google Calendar recurrence exceptions capped at 1,000 instances.
 - **Bounded Calendar Processing**: Feeds are limited to 5 MB and 10,000 parsed event components; folded lines, RDATE deduplication and recurrence-exception lookup are processed linearly. Instance records are generated incrementally and feeds exceeding 1,000 unique events in the sync window are rejected. Connected calendar HTTP transfers have a 30-second total deadline.
-- **Actionable Calendar Description Tags**: Selective tag parsing recognizing `[NO_TRAINING]`, `[NO_INTENSITY]`, and `[SHORT_ONLY]` within event descriptions to steer adaptive planning.
+- **Calendar Training Constraints**: `[NO_TRAINING]`, `[NO_INTENSITY]`, and `[SHORT_ONLY]` are recognized in event titles and descriptions. `[NO_TRAINING]` and `[NO_INTENSITY]` are enforced against planned-workout changes on the affected local calendar day: training is blocked for the former, the latter requires an explicitly easy workout, and `[SHORT_ONLY]` blocks workouts longer than 60 minutes.
 - **Visual Schedule Conflict Markers**: Distinctive visual indicators on the planned calendar alerting the athlete to busy days and potential scheduling conflicts.
 - **Adaptive Session Replanning**: Heuristic session adjustments that suggest shorter durations or lower-intensity replacements for scheduled workouts on congested days.
 
@@ -570,6 +570,27 @@ Configured viewports in `playwright.config.cjs`:
 - `tablet-landscape`: 844x390 (Mobile/tablet landscape)
 - `desktop`: 1440x1000 (Desktop workstation)
 
+#### Standard synthetic preview data
+
+The disposable fixture runtime exposes `GET /api/fixture/demo` for a reusable,
+mobile-safe preview. It seeds profile, check-ins, nutrition, competitions,
+library workouts, activity details, recovery, body history, Garmin daily
+calories, dated Garmin FTP and Intervals.icu eFTP, calendar marker examples,
+and active, archived, component, zero-target, no-target, and over-target gear.
+All values are synthetic and providers remain blocked; no credentials or live
+athlete data are read. The seed is idempotent and carries a version marker so
+an older demo seed is upgraded in place when the disposable database is reused.
+Use a fresh fixture browser profile and check the mobile-small and mobile
+projects when reviewing this preview.
+
+`scripts/demo-container.ps1` builds the image and starts a disposable demo
+container that seeds this data itself on every start (`FIXTURE_AUTO_SEED=1`;
+idempotent). Run it with
+`powershell -ExecutionPolicy Bypass -File scripts/demo-container.ps1`; add
+`-Persist` to keep the data in a named volume and `-Port`/`-Name` to adjust the
+container. The login password is the fixture password
+`e2e-fixture-password-1234`. Never point it at a real `/data` directory.
+
 ### Dependency lock maintenance
 
 `requirements.in` and `requirements-dev.in` contain direct pins. The matching
@@ -620,9 +641,13 @@ Der Coach bevorzugt **BLS 4.0** für Grundnahrungsmittel und **Open Food Facts**
 
 Ernährungseinträge bleiben lokal; eine Übertragung der Tagessummen zu Intervals.icu erfolgt nur nach explizitem Auftrag und Freigabe. Vorlagen und Quellenangaben gehören zu Datenschutzexport, verschlüsseltem Backup und der Löschkategorie Ernährung. Release 1.12.21 migriert das vorhandene SQLCipher-Schema von 1.12.19 und 1.12.20 automatisch beim Start; ein leeres Datenverzeichnis ist für dieses Update nicht erforderlich.
 
+Garmins gemessener Gesamt-, Aktivitäts- und Ruheenergieverbrauch wird für das ausgewählte Tagebuchdatum getrennt von der erfassten Nahrungsaufnahme angezeigt. Datum, Quelle und Aktualität bleiben sichtbar; Werte für heute sind vorläufig, solange Garmins Tagesdatensatz noch ergänzt wird. Fehlende Komponenten bleiben unbekannt und werden nicht zu einem erfundenen Gesamtwert addiert.
+
 ### Analysis history
 
-Analyse has three sections: Belastung, Leistung and Erholung. Belastung shows one Garmin Connect acute-load chart, with the latest 14 daily readings or twelve calendar weeks (last valid reading per week, including the current week). Garmin training status is imported for the configured sync window; missing or ambiguous device readings stay unknown. Coach context also keeps Garmin's current daily acute and chronic load and the reported acute-to-chronic ratio separate from its four-week aerobic-low, aerobic-high and anaerobic balance values and target ranges. These values retain Garmin provenance and freshness; ambiguous device values and missing fields stay unknown, and they are not combined with Intervals.icu load. Training focus follows over 28 days, then permanently visible HF and power zone diagrams. Focus groups recorded Garmin activity loads by primary Training Effect, rather than deriving categories from zones. Zones sum recorded sport-specific durations across all sports over the same 28 days; missing measurements are not zero. The Woche section and its cumulative Intervals.icu load charts are removed. Leistung separates running and cycling charts for threshold pace, FTP/eFTP and VO2max over twelve calendar weeks. FTP and threshold pace use the last valid weekly measurement; eFTP and VO2max use weekly medians. Every measured week has a point, including unchanged values; missing weeks remain gaps. Only available race predictions and weight appear as supplementary cards, without duplicate health, threshold or load cards. Erholung shows daily sleep, HRV and resting heart rate over the last fourteen days, with an optional twelve-week weekly-average view.
+The **Analyse** tab has four sections: Belastung, Leistung, Body and Erholung. Belastung shows one Garmin Connect acute-load chart, with the latest 14 daily readings or twelve calendar weeks (last valid reading per week, including the current week). Garmin training status is imported for the configured sync window; missing or ambiguous device readings stay unknown. Coach context also keeps Garmin's current daily acute and chronic load and the reported acute-to-chronic ratio separate from its four-week aerobic-low, aerobic-high and anaerobic balance values and target ranges. These values retain Garmin provenance and freshness; ambiguous device values and missing fields stay unknown, and they are not combined with Intervals.icu load. Training focus follows over 28 days, then permanently visible HF and power zone diagrams. Focus groups recorded Garmin activity loads by primary Training Effect, rather than deriving categories from zones. Zones sum recorded sport-specific durations across all sports over the same 28 days; missing measurements are not zero. The Woche section and its cumulative Intervals.icu load charts are removed. Leistung separates running and cycling charts for threshold pace, FTP/eFTP and VO2max over twelve calendar weeks. FTP and threshold pace use the last valid weekly measurement; eFTP and VO2max use weekly medians. Every measured week has a point, including unchanged values; missing weeks remain gaps. Only available race predictions and weight appear as supplementary cards, without duplicate health, threshold or load cards. Erholung shows daily sleep, HRV and resting heart rate over the last fourteen days, with an optional twelve-week weekly-average view.
+
+The **Body** section charts measured weight and body-fat history from Intervals.icu Wellness and Garmin Connect, plus cycling power-to-weight from Garmin FTP or Intervals.icu eFTP divided by a measured weight from the preceding seven days. It offers the latest 14 days or twelve rolling weeks; weekly points use the median of dated readings. Source, observation date and sync time remain available with each series, and W/kg values keep FTP/eFTP and weight provenance separate. Unmeasured dates and weeks remain gaps; profile values do not fill missing observations.
 
 Erholung shows the latest fourteen days including today without a period selector, using three aligned charts with independent scales for sleep duration, nightly HRV and resting heart rate. Daily sleep is shown as bars starting at zero, with an average line; hours are formatted as hours and minutes. HRV and resting heart rate show the existing source-specific 42-day personal quartiles only when at least 14 comparable earlier measurements support them; provisional ranges and insufficient or stale baselines remain explicit. Every day retains its original observation; missing days remain gaps, and no missing measurement counts as zero. Each metric uses one source and measurement method: the freshest series wins, with Intervals.icu preferred on equal dates and Garmin used when fresher or unavailable from Intervals.icu. Sources, measurement dates and coverage remain available in tooltips; tap or keyboard-activate a day for details, or open the original-value table. Chart legends show only metric names. Values, dates, sources, coverage, changes and explanatory notes are available in legend and point tooltips; expandable tables retain the original values. Personal reference ranges use a green background band. Recovery bands update with new observations; load and performance charts do not show personal reference bands. Mixed-unit secondary axes have been removed. Personal deviations and positive TSB do not constitute a medical or training clearance.
 
@@ -640,7 +665,7 @@ Punkte je Messreihe; gespeichert werden die vollständigen Reihen bis zur
 unterstützten Grenze von 172.800 Punkten und 24 MiB je Aktivität.
 „Mit dem Coach besprechen“ bereitet einen sichtbaren, bearbeitbaren Entwurf vor.
 
-Equipment and maintenance has its own More section, separate from Profile. The Garmin sync reads the Garmin gear inventory and per-item usage statistics; the page mirrors those reported distance counters and Garmin usage goals without adding locally recorded activity distances. Retired status is retained. Failed reads retain the last successful inventory, while a successful empty inventory clears the mirrored list.
+Equipment and maintenance has its own More section, separate from Profile. Coach-managed local equipment records are authoritative for lifecycle actions, including assignment, maintenance, archive and restore; archived items are kept in collapsed archive groups. Garmin inventory and per-item statistics supply linked usage readings and status context without taking over the local lifecycle. Garmin's `maximumMeters` is a lifetime target used for target/progress display, not additional distance: it is never added to Garmin's usage counter or assigned activity distances. A progress bar appears only when a valid target is known. Failed Garmin reads retain the last successful inventory, while a successful empty inventory clears the mirrored Garmin list.
 
 Calendar cards include a compact interval profile when explicit timed workout steps or current locally cached original samples are available. Width represents time, height represents intensity, and known zones supply colors. Recorded sample gaps remain empty; stale detail profiles are excluded. Absolute targets without known historical zones use neutral colors. No provider requests are triggered by rendering the calendar.
 

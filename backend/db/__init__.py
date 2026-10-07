@@ -7,11 +7,13 @@ from typing import Any
 
 def row_factory(cursor: Any, row: tuple[Any, ...]) -> dict[str, Any]:
     """Return mapping-like rows for sqlite3 and SQLCipher backends."""
-    return {description[0]: row[index] for index, description in enumerate(cursor.description)}
+    return {
+        description[0]: row[index]
+        for index, description in enumerate(cursor.description)
+    }
 
 
 from .manager import DatabaseManager
-
 
 __all__ = [
     "DatabaseManager",

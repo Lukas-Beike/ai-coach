@@ -11,8 +11,8 @@ from backend.http_api.nutrition import (
     NutritionPostRoutes,
     NutritionPutRoutes,
 )
-from backend.nutrition.sync import IntervalsNutritionSyncService
 from backend.nutrition.service import nutrition_approval_item
+from backend.nutrition.sync import IntervalsNutritionSyncService
 
 
 class NutritionHttpApiTests(unittest.TestCase):
@@ -98,7 +98,6 @@ class NutritionHttpApiTests(unittest.TestCase):
             "description": "Porridge",
             "kcal": 350,
         }
-        session = {"csrf_hash": "abc"}
         handled = self.post_routes.handle(self.handler, "/api/nutrition/entry")
         self.assertTrue(handled)
         self.nutrition_service.log_meal.assert_called_once()
@@ -116,7 +115,6 @@ class NutritionHttpApiTests(unittest.TestCase):
             "status": "ok",
             "deleted_id": "entry-123",
         }
-        session = {"csrf_hash": "abc"}
         handled = self.post_routes.handle(self.handler, "/api/nutrition/entry/delete")
         self.assertTrue(handled)
         self.nutrition_service.delete_meal.assert_called_once_with("entry-123")
@@ -128,7 +126,6 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.handler.headers = {"Content-Length": "15"}
         self.handler.read_json.return_value = {"date": "2026-09-24"}
         self.sync_service.sync_day.return_value = {"ok": True, "date": "2026-09-24"}
-        session = {"csrf_hash": "abc"}
         handled = self.post_routes.handle(self.handler, "/api/nutrition/sync")
         self.assertTrue(handled)
         self.sync_job_queue.enqueue.assert_called_once_with(

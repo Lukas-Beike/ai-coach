@@ -4,12 +4,135 @@ from datetime import date, timedelta
 
 from backend.performance.daily_health import (
     GARMIN_DAILY_HEALTH_FIELDS,
+    garmin_daily_expenditure,
     garmin_daily_health_by_date,
     garmin_daily_health_metrics,
 )
 
 
 class GarminDailyHealthTests(unittest.TestCase):
+    def test_daily_expenditure_keeps_components_total_provenance_and_freshness(self):
+        snapshot = {
+            "daily_stats": [
+                {
+                    "calendarDate": "2026-08-31",
+                    "activeKilocalories": 0,
+                    "bmrKilocalories": 1420,
+                    "totalKilocalories": 1420,
+                }
+            ],
+            "source_freshness": {
+                "daily_stats": {
+                    "freshness": "partial",
+                    "fetched_at": "2026-09-01T08:00:00Z",
+                }
+            },
+        }
+
+        result = garmin_daily_expenditure(snapshot, "2026-08-31", date(2026, 9, 1))
+
+        self.assertEqual(result["active_kcal"], 0)
+        self.assertEqual(result["resting_kcal"], 1420)
+        self.assertEqual(result["total_kcal"], 1420)
+        self.assertEqual(result["source"], "Garmin Connect")
+        self.assertEqual(result["measured_date"], "2026-08-31")
+        self.assertEqual(result["freshness"], "partial")
+        self.assertEqual(result["fetched_at"], "2026-09-01T08:00:00Z")
+        self.assertEqual(result["measurement_age_days"], 1)
+        self.assertFalse(result["provisional"])
+        self.assertEqual(result["status"], "measured")
+        self.assertIsNone(result["synced_at"])
+
+    def test_daily_expenditure_does_not_invent_a_total_or_reuse_another_date(self):
+        snapshot = {
+            "daily_stats": [
+                {
+                    "date": "2026-08-30",
+                    "activeCalories": 900,
+                    "restingCalories": 1500,
+                }
+            ]
+        }
+
+        result = garmin_daily_expenditure(snapshot, "2026-08-31", date(2026, 8, 31))
+
+        self.assertEqual(result["active_kcal"], None)
+        self.assertEqual(result["resting_kcal"], None)
+        self.assertEqual(result["total_kcal"], None)
+        self.assertIsNone(result["source"])
+        self.assertIsNone(result["measured_date"])
+        self.assertEqual(result["freshness"], "unknown")
+        self.assertTrue(result["provisional"])
+        self.assertEqual(result["status"], "unavailable")
+
+        prior_day = garmin_daily_expenditure(snapshot, "2026-08-31", date(2026, 9, 1))
+        self.assertFalse(prior_day["provisional"])
+        self.assertEqual(prior_day["status"], "unavailable")
+
+    def test_daily_expenditure_rejects_negative_and_nonfinite_values_but_keeps_zero(
+        self,
+    ):
+        result = garmin_daily_expenditure(
+            {
+                "daily_stats": [
+                    {
+                        "date": "2026-08-31",
+                        "activeKilocalories": 0,
+                        "bmrKilocalories": -1500,
+                        "totalKilocalories": "inf",
+                    }
+                ]
+            },
+            "2026-08-31",
+            date(2026, 9, 1),
+        )
+
+        self.assertEqual(result["active_kcal"], 0)
+        self.assertIsNone(result["resting_kcal"])
+        self.assertIsNone(result["total_kcal"])
+        self.assertEqual(result["status"], "measured")
+
+    def test_daily_expenditure_ignores_malformed_snapshots_and_future_records(self):
+        for snapshot in (
+            {"daily_stats": None, "source_freshness": []},
+            {
+                "daily_stats": [
+                    {
+                        "date": "2026-09-02",
+                        "activeKilocalories": 500,
+                        "totalKilocalories": 2000,
+                    }
+                ]
+            },
+        ):
+            with self.subTest(snapshot=snapshot):
+                result = garmin_daily_expenditure(
+                    snapshot, "2026-09-02", date(2026, 9, 1)
+                )
+                self.assertIsNone(result["active_kcal"])
+                self.assertIsNone(result["total_kcal"])
+                self.assertIsNone(result["measured_date"])
+                self.assertEqual(result["status"], "unavailable")
+
+    def test_daily_expenditure_exposes_components_without_summing_them(self):
+        result = garmin_daily_expenditure(
+            {
+                "daily_stats": [
+                    {
+                        "date": "2026-08-31",
+                        "active_calories": 500,
+                        "resting_calories": 1500,
+                    }
+                ]
+            },
+            "2026-08-31",
+            date(2026, 8, 31),
+        )
+
+        self.assertEqual(result["active_kcal"], 500)
+        self.assertEqual(result["resting_kcal"], 1500)
+        self.assertIsNone(result["total_kcal"])
+
     def test_nested_records_aliases_and_same_date_merge(self):
         snapshot = {
             "daily_stats": {

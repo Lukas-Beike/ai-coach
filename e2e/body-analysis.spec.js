@@ -1,0 +1,65 @@
+const { test, expect } = require("@playwright/test");
+const AxeBuilder = require("@axe-core/playwright").default;
+
+function bodyHistory() {
+  const start = "2026-07-15";
+  const dates = Array.from({ length: 84 }, (_, index) => new Date(Date.parse(`${start}T12:00:00Z`) + index * 86400000).toISOString().slice(0, 10));
+  const make = (source, metric, transform) => ({ source, unit: metric === "weight_kg" ? "kg" : metric === "body_fat_pct" ? "%" : "W/kg",
+    ...(metric === "cycling_w_per_kg" ? { power_method: source === "Garmin Connect" ? "FTP" : "eFTP" } : {}),
+    points: dates.map((date, index) => {
+      const missingWeek = index >= 35 && index <= 41;
+      const value = missingWeek || (metric === "body_fat_pct" && source === "Intervals.icu Wellness") ? null : transform(index);
+      if (value == null) return { date, value: null };
+      const point = { date, value: Math.round(value * 1000) / 1000, observed_at: date, synced_at: `${source} sync` };
+      if (metric === "cycling_w_per_kg") Object.assign(point, {
+        ftp_watts: 280 + index, ftp_observed_at: date, ftp_synced_at: `${source} FTP sync`,
+        weight_kg: 70, weight_observed_at: dates[Math.max(0, index - 1)], weight_synced_at: "Garmin weight sync",
+        weight_source: "Garmin Connect", weight_age_days: 1,
+      });
+      return point;
+    }),
+  });
+  const metrics = {
+    weight_kg: [make("Intervals.icu Wellness", "weight_kg", (index) => 70 + index / 100), make("Garmin Connect", "weight_kg", (index) => 71 + index / 100)],
+    body_fat_pct: [make("Intervals.icu Wellness", "body_fat_pct", () => 18), make("Garmin Connect", "body_fat_pct", (index) => 19 + index / 100)],
+    cycling_w_per_kg: [make("Garmin Connect", "cycling_w_per_kg", (index) => (280 + index) / 70), make("Intervals.icu", "cycling_w_per_kg", (index) => (270 + index) / 71)],
+  };
+  const end = dates.at(-1);
+  return { start, end, load: { points: [] }, metrics: {}, body: { version: 1, default_window: "12w", windows: {
+    "14d": { start: dates.at(-14), end, days: 14, metrics: Object.fromEntries(Object.entries(metrics).map(([key, values]) => [key, values.map((item) => ({ ...item, points: item.points.slice(-14) }))])) },
+    "12w": { start, end, days: 84, metrics },
+  } } };
+}
+
+test("@responsive Body tab plots dated measurements, source gaps and W/kg provenance", async ({ page }) => {
+  if (test.info().project.name === "mobile-small") expect(page.viewportSize().width).toBe(320);
+  await page.route("**/api/performance", async (route) => {
+    const response = await route.fetch();
+    const data = await response.json();
+    data.performance.history = bodyHistory();
+    await route.fulfill({ response, json: data });
+  });
+  await page.goto("/#analysis/body");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const root = page.locator("#bodyAnalysisCharts");
+  await expect(root).toBeVisible();
+  await expect(root.locator("[data-body-metric]")).toHaveCount(3);
+  await expect(root.locator("[data-body-metric='weight_kg'] svg")).toHaveCount(1);
+  await expect(root).toContainText("Intervals.icu Wellness");
+  await expect(root).toContainText("Garmin Connect");
+  const missing = root.locator("[data-body-metric='weight_kg']");
+  await expect(missing.locator("circle[data-series='0']")).toHaveCount(11);
+  const details = root.locator("[data-body-metric='cycling_w_per_kg']");
+  await details.locator(".analysis-day-marker[data-date='2026-10-06']").focus();
+  await page.keyboard.press("Enter");
+  await expect(details.locator(".analysis-info-tooltip:popover-open")).toContainText("FTP 06.10.2026");
+  await expect(details.locator(".analysis-info-tooltip:popover-open")).toContainText("eFTP 06.10.2026");
+  await expect(details.locator(".analysis-info-tooltip:popover-open")).toContainText("Gewicht 05.10.2026 (Garmin Connect)");
+  await page.keyboard.press("Escape");
+  await root.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
+  await expect(root.locator("[data-body-metric='weight_kg'] circle[data-series='0']")).toHaveCount(14);
+  await expect(root.locator("[data-body-metric='body_fat_pct'] circle[data-series='0']")).toHaveCount(0);
+  await expect(root.locator("[data-body-metric='body_fat_pct'] circle[data-series='1']")).toHaveCount(14);
+  expect(await new AxeBuilder({ page }).include("#bodyAnalysisCharts").analyze()).toEqual(expect.objectContaining({ violations: [] }));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

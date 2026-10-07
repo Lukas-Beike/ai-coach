@@ -81,6 +81,7 @@ class ActivityDetailStore:
                 "json_extract(value, '$.observed_at') AS observed_at, "
                 "json_extract(value, '$.session_analysis.aerobic') AS aerobic "
                 ", json_extract(value, '$.session_analysis.power_profile') AS power_profile "
+                ", json_extract(value, '$.session_analysis.running_profile') AS running_profile "
                 ", json_extract(value, '$.target_snapshot') AS targets "
                 ", json_extract(value, '$.session_analysis.interval_quality') AS interval_quality "
                 "FROM kv WHERE key LIKE 'activity_detail:%' ORDER BY updated_at DESC LIMIT 100"
@@ -93,6 +94,9 @@ class ActivityDetailStore:
                 "aerobic": json.loads(row["aerobic"]),
                 "power_profile": json.loads(row["power_profile"])
                 if row["power_profile"]
+                else None,
+                "running_profile": json.loads(row["running_profile"])
+                if row["running_profile"]
                 else None,
                 "target_snapshot": json.loads(row["targets"])
                 if row["targets"]

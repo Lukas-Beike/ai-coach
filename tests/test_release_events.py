@@ -1,14 +1,13 @@
 """Exercise release events and shell guards without GitHub or repository writes."""
 
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import textwrap
-from types import SimpleNamespace
 import unittest
-
+from pathlib import Path
+from types import SimpleNamespace
 
 WORKFLOW = (
     Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml"
@@ -18,9 +17,9 @@ CREATE_RELEASE = WORKFLOW.split("  create-release:\n", 1)[1]
 
 class ReleaseEventTests(unittest.TestCase):
     def test_only_successful_main_push_tests_can_create_a_release(self):
-        condition = CREATE_RELEASE.split("    if: >-\n", 1)[1].split(
-            "    runs-on:", 1
-        )[0]
+        condition = CREATE_RELEASE.split("    if: >-\n", 1)[1].split("    runs-on:", 1)[
+            0
+        ]
         condition = " ".join(condition.split()).replace("&&", "and").replace("||", "or")
         cases = [
             ("workflow_run", "push", "main", "success", True),
@@ -28,33 +27,57 @@ class ReleaseEventTests(unittest.TestCase):
             ("workflow_run", "push", "main", "cancelled", False),
             ("workflow_run", "push", "develop", "success", False),
             ("workflow_run", "workflow_dispatch", "main", "success", False),
-            ("workflow_run", "workflow_dispatch", "chore/release-promotion-1.7.3", "success", False),
-            ("workflow_run", "pull_request", "chore/release-promotion-1.7.3", "success", False),
+            (
+                "workflow_run",
+                "workflow_dispatch",
+                "chore/release-promotion-1.7.3",
+                "success",
+                False,
+            ),
+            (
+                "workflow_run",
+                "pull_request",
+                "chore/release-promotion-1.7.3",
+                "success",
+                False,
+            ),
             ("pull_request", "push", "main", "success", False),
         ]
         for event_name, event, branch, conclusion, expected in cases:
-            with self.subTest(event_name=event_name, event=event, branch=branch, conclusion=conclusion):
+            with self.subTest(
+                event_name=event_name, event=event, branch=branch, conclusion=conclusion
+            ):
                 github = SimpleNamespace(
                     event_name=event_name,
                     repository="Lukas-Beike/ai-coach",
-                    event=SimpleNamespace(workflow_run=SimpleNamespace(
-                        name="Test and publish container image",
-                        event=event,
-                        head_branch=branch,
-                        head_repository=SimpleNamespace(full_name="Lukas-Beike/ai-coach"),
-                        conclusion=conclusion,
-                    )),
+                    event=SimpleNamespace(
+                        workflow_run=SimpleNamespace(
+                            name="Test and publish container image",
+                            event=event,
+                            head_branch=branch,
+                            head_repository=SimpleNamespace(
+                                full_name="Lukas-Beike/ai-coach"
+                            ),
+                            conclusion=conclusion,
+                        )
+                    ),
                 )
-                self.assertIs(eval(condition, {"__builtins__": {}}, {"github": github}), expected)
+                self.assertIs(
+                    eval(condition, {"__builtins__": {}}, {"github": github}), expected
+                )
 
 
-@unittest.skipIf(os.name == "nt" or not shutil.which("bash"), "Requires the Linux CI Bash runtime")
+@unittest.skipIf(
+    os.name == "nt" or not shutil.which("bash"), "Requires the Linux CI Bash runtime"
+)
 class ReleaseShellGuardTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        (self.root / "server.py").write_text('APP_VERSION = "1.7.3"\n', encoding="utf-8")
+        (self.root / "server.py").write_text(
+            'APP_VERSION = "1.7.3"\n', encoding="utf-8"
+        )
         (self.root / "operations").touch()
 
     def run_script(self, script, **overrides):
@@ -110,16 +133,20 @@ class ReleaseShellGuardTests(unittest.TestCase):
         return result, operations
 
     def test_promotion_validation_dispatch_uses_trusted_develop(self):
-        function = textwrap.dedent(WORKFLOW.split('          ensure_promotion_gate() {', 1)[1].split(
-            '          ensure_release_test() {', 1
-        )[0])
+        function = textwrap.dedent(
+            WORKFLOW.split("          ensure_promotion_gate() {", 1)[1].split(
+                "          ensure_release_test() {", 1
+            )[0]
+        )
         result, operations = self.run_script(
-            'set -euo pipefail\nensure_promotion_gate() {' + function + '\nensure_promotion_gate 437\n'
+            "set -euo pipefail\nensure_promotion_gate() {"
+            + function
+            + "\nensure_promotion_gate 437\n"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             operations.strip(),
-            'gh workflow run codex-code-review.yml --repo example/release-test --ref develop --field pull_request_number=437',
+            "gh workflow run codex-code-review.yml --repo example/release-test --ref develop --field pull_request_number=437",
         )
 
     def test_matching_tested_main_can_continue_without_querying_a_promotion_pr(self):
@@ -147,9 +174,11 @@ class ReleaseShellGuardTests(unittest.TestCase):
         self.assertIn("git reset --hard origin/main", operations)
 
     def test_unmerged_version_test_defers_without_waiting_or_mutating(self):
-        script = textwrap.dedent(WORKFLOW.split("        run: |\n", 1)[1].split(
-            '          app_version="', 1
-        )[0])
+        script = textwrap.dedent(
+            WORKFLOW.split("        run: |\n", 1)[1].split(
+                '          app_version="', 1
+            )[0]
+        )
         result, operations = self.run_script(script)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("its merged event will resume promotion", result.stdout)
@@ -157,9 +186,11 @@ class ReleaseShellGuardTests(unittest.TestCase):
         self.assertNotIn("sleep", operations)
 
     def test_already_merged_version_test_refreshes_develop_without_waiting(self):
-        script = textwrap.dedent(WORKFLOW.split("        run: |\n", 1)[1].split(
-            '          app_version="', 1
-        )[0])
+        script = textwrap.dedent(
+            WORKFLOW.split("        run: |\n", 1)[1].split(
+                '          app_version="', 1
+            )[0]
+        )
         result, operations = self.run_script(script, MERGED_VERSION_PR="123")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("git reset --hard origin/develop", operations)
@@ -182,7 +213,9 @@ class ReleaseShellGuardTests(unittest.TestCase):
             prepare,
         )
         self.assertLess(
-            prepare.index('if [[ "$version_merge" != "true" && -n "$REQUESTED_VERSION" ]]'),
+            prepare.index(
+                'if [[ "$version_merge" != "true" && -n "$REQUESTED_VERSION" ]]'
+            ),
             prepare.index('if [[ "$main_tree" == "$develop_tree" ]]; then'),
         )
 

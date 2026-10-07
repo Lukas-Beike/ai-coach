@@ -52,10 +52,12 @@ class CoachActivityReadToolService:
                 "tag_impact",
                 "season",
                 "comparisons",
+                "body_history",
+                "sleep_regularity",
             }
             if (
                 not isinstance(sections, list)
-                or not 1 <= len(sections) <= 6
+                or not 1 <= len(sections) <= 8
                 or any(
                     not isinstance(section, str) or section not in allowed
                     for section in sections
@@ -69,6 +71,8 @@ class CoachActivityReadToolService:
                 "tag_impact": self._report_service.impact,
                 "season": self._report_service.season,
                 "comparisons": self._report_service.comparisons,
+                "body_history": self._report_service.body_history,
+                "sleep_regularity": self._report_service.sleep_regularity,
             }
             payload = {
                 section: readers[section]() for section in dict.fromkeys(sections)

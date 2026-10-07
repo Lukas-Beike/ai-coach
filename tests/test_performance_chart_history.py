@@ -46,9 +46,7 @@ class AnalysisHistoryTests(unittest.TestCase):
                 "training_status": [
                     {
                         "summaryDate": "2026-10-01",
-                        "acuteTrainingLoadDTO": {
-                            "dailyTrainingLoadAcute": 475
-                        },
+                        "acuteTrainingLoadDTO": {"dailyTrainingLoadAcute": 475},
                     }
                 ]
             },
@@ -103,6 +101,43 @@ class AnalysisHistoryTests(unittest.TestCase):
         self.assertEqual(result["load"]["end"], "2026-10-02")
         self.assertIsNone(points[-2]["value"])
         self.assertEqual(result["start"], "2026-07-05")
+
+    def test_training_time_counts_each_activity_once_and_keeps_unknown_days_missing(
+        self,
+    ):
+        snapshot = {
+            "recent_activities": [
+                {
+                    "id": "a1",
+                    "start_date_local": "2026-10-01T07:00:00",
+                    "moving_time": 3600,
+                },
+                {
+                    "id": "a1",
+                    "start_date_local": "2026-10-01T07:00:00",
+                    "moving_time": 3600,
+                },
+                {
+                    "id": "a2",
+                    "start_date_local": "2026-10-01T18:00:00",
+                    "moving_time": 1800,
+                },
+                {
+                    "id": "a3",
+                    "start_date_local": "2026-10-02T08:00:00",
+                    "moving_time": None,
+                },
+            ]
+        }
+        points = {
+            p["date"]: p["value"]
+            for p in analysis_history(snapshot, {}, date(2026, 10, 2))["training_time"][
+                "points"
+            ]
+        }
+        self.assertEqual(points["2026-10-01"], 1.5)
+        self.assertIsNone(points["2026-10-02"])
+        self.assertEqual(len(points), 90)
 
     def test_raw_history_retains_older_dates_and_compact_rows_take_precedence(self):
         snapshot = {

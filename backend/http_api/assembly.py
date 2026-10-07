@@ -18,6 +18,7 @@ from backend.http_api.coach_actions_post import CoachActionsPostRoutes
 from backend.http_api.coach_get import CoachGetRoutes
 from backend.http_api.diagnostics_delete_post import DiagnosticsDeletePostRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
+from backend.http_api.equipment_post import EquipmentPostRoutes
 from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.http_api.handler import (
@@ -416,6 +417,9 @@ class HttpApiAssembly:
                 .performance_state()["performance"]
                 .get("personal_recovery", {})
             ),
+            read_performance=lambda: (
+                public_performance_state_service().performance_state()["performance"]
+            ),
         )
         self.analysis_routes = AnalysisRoutes(
             session_auth_service, self.training_reports
@@ -470,7 +474,12 @@ class HttpApiAssembly:
             coach_planning_command_service,
             coach_provision_service,
         )
-        self.feedback_post_routes = FeedbackPostRoutes(checkin_service)
+        self.feedback_post_routes = FeedbackPostRoutes(
+            checkin_service, athlete.activity_feedback
+        )
+        self.equipment_post_routes = (
+            EquipmentPostRoutes(athlete.equipment) if athlete.equipment else None
+        )
         self.chat_cancel_post_routes = ChatCancelPostRoutes(
             coach_job_cancellation_service
         )
@@ -526,6 +535,7 @@ class HttpApiAssembly:
             self.diagnostics_delete_post_routes,
             self.nutrition_post_routes,
             self.analysis_routes,
+            self.equipment_post_routes,
         )
         self.post_dispatcher = HttpPostDispatcher(
             self.auth_post_routes,

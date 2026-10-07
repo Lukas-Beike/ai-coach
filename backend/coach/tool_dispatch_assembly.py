@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
@@ -14,19 +13,21 @@ from backend.coach.plan_artifact_tools import CoachPlanArtifactToolService
 from backend.coach.planning_action_tools import CoachPlanningActionToolService
 from backend.coach.planning_change_tools import CoachPlanningChangeToolService
 from backend.coach.profile_update import CoachProfileUpdateService
+from backend.coach.proposals import CoachProposalCreationService
 from backend.coach.read_tools import CoachReadToolService
 from backend.coach.sync_tools import CoachSyncToolService
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.coach.training_template_tools import TrainingTemplateToolService
 from backend.db.manager import DatabaseManager
 from backend.history.undo_service import HistoryUndoService
-from backend.planning.training_plans import TrainingPlanService
-from backend.planning.library_service import WorkoutLibraryService
-from backend.planning.training_plan_artifact_service import TrainingPlanArtifactService
-from backend.planning.replacement_service import StructuredTrainingPlanReplacementService
 from backend.planning import changes as planning_changes
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
-from backend.coach.proposals import CoachProposalCreationService
+from backend.planning.library_service import WorkoutLibraryService
+from backend.planning.replacement_service import (
+    StructuredTrainingPlanReplacementService,
+)
+from backend.planning.training_plan_artifact_service import TrainingPlanArtifactService
+from backend.planning.training_plans import TrainingPlanService
 
 
 @dataclass(frozen=True)
@@ -71,7 +72,7 @@ class CoachToolDispatchAssembly:
         sync: CoachSyncToolOwners
         proposals: CoachProposalToolOwners
 
-    def __init__(self, *, dependencies: "CoachToolDispatchAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: CoachToolDispatchAssembly.Inputs) -> None:
         reads = dependencies.reads
         planning = dependencies.planning
         sync = dependencies.sync
@@ -105,7 +106,9 @@ class CoachToolDispatchAssembly:
                     self._training_plan_replacement, self._training_changes
                 ),
                 TrainingTemplateToolService(
-                    self._database_manager, self._database_lock, self._workout_library_service
+                    self._database_manager,
+                    self._database_lock,
+                    self._workout_library_service,
                 ),
                 self._library_plan_tools,
                 self._sync_tools,

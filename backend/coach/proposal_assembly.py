@@ -55,7 +55,7 @@ class CoachProposalAssembly:
     def __init__(
         self,
         *,
-        dependencies: "CoachProposalAssembly.Inputs",
+        dependencies: CoachProposalAssembly.Inputs,
     ) -> None:
         persistence = dependencies.persistence
         execution = dependencies.execution

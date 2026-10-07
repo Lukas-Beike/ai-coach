@@ -13,6 +13,7 @@ from typing import Any
 
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import (
+    KeyValueRepository,
     NutritionProductRepository,
     NutritionRepository,
     NutritionTemplateRepository,
@@ -29,6 +30,7 @@ from backend.nutrition.photo import (
     NutritionPhotoExtractionService,
     validate_packaging_extraction,
 )
+from backend.performance.daily_health import garmin_daily_expenditure
 
 PRODUCT_NOT_FOUND = "Produkt nicht gefunden."
 INVALID_COMPONENT_COUNT = "1 bis 20 Mahlzeitenkomponenten sind erforderlich."
@@ -118,6 +120,7 @@ class NutritionService:
         self._database_manager = database_manager
         self._db_lock = db_lock
         self._nutrition_repository = nutrition_repository
+        self._key_value_repository = KeyValueRepository(utc_now)
         self._utc_now = utc_now
         self._local_now = local_now
         self._templates = NutritionTemplateRepository()
@@ -1097,10 +1100,21 @@ class NutritionService:
         return {"status": "ok", "deleted_id": clean_id}
 
     def get_day_summary(self, meal_date: str) -> dict[str, Any]:
-        """Return all meal entries and totals for a single ISO-8601 date."""
+        """Return local diary totals plus Garmin's measured expenditure for a day."""
         validated_date = validate_iso_date(meal_date)
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            return self._nutrition_repository.day_summary(db, validated_date)
+            summary = self._nutrition_repository.day_summary(db, validated_date)
+            serialized_garmin = self._key_value_repository.get(db, "garmin_snapshot")
+        try:
+            garmin_snapshot = json.loads(serialized_garmin or "{}")
+        except (TypeError, ValueError):
+            garmin_snapshot = {}
+        if not isinstance(garmin_snapshot, dict):
+            garmin_snapshot = {}
+        summary["energy_expenditure"] = garmin_daily_expenditure(
+            garmin_snapshot, validated_date, self._local_now().date()
+        )
+        return summary
 
     def get_sync_snapshot(self, meal_date: str) -> dict[str, Any]:
         """Capture totals and a revision for race-safe provider synchronization."""

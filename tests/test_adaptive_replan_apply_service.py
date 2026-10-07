@@ -50,13 +50,14 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         self.manager.close()
         self.temporary_directory.cleanup()
 
-    def make_service(self, repository=None):
+    def make_service(self, repository=None, calendar_conflict_service=None):
         return AdaptiveReplanApplyService(
             self.manager,
             repository or self.repository,
             self.revisions,
             lambda: TODAY,
             lambda: NOW,
+            calendar_conflict_service,
         )
 
     @staticmethod
@@ -307,6 +308,112 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
             self.service.apply(stale_preview_id),
             {"status": "already_stale", "id": stale_preview_id},
         )
+
+    def test_apply_rechecks_current_calendar_constraints_and_keeps_evidence(self):
+        workout_id = str(uuid.uuid4())
+        original = self.workout(workout_id, "2026-09-22", name="Tempo ride")
+        self.add_workout(workout_id, original)
+        preview_id = self.add_preview(
+            {
+                "changes": [
+                    {
+                        "library_workout_id": workout_id,
+                        "source_fingerprint": adaptive.adaptive_workout_fingerprint(
+                            original
+                        ),
+                        "payload": {
+                            **original,
+                            "name": "Easy recovery",
+                            "description": "- 20m Z1",
+                        },
+                    }
+                ]
+            }
+        )
+
+        class Constraints:
+            def constraints(self, _workout):
+                return [
+                    {
+                        "id": "event-1",
+                        "source": "external_calendar",
+                        "constraint": "[NO_TRAINING]",
+                        "updated_at": "fresh-sync",
+                    }
+                ]
+
+        service = self.make_service(calendar_conflict_service=Constraints())
+        result = service.apply(preview_id)
+
+        self.assertEqual(result["status"], "stale")
+        self.assertEqual(result["updated"], 0)
+        self.assertEqual(result["stale"][0]["reason"], "calendar_constraint_changed")
+        self.assertEqual(result["stale"][0]["events"][0]["updated_at"], "fresh-sync")
+        saved = json.loads(
+            self.row(
+                "SELECT payload FROM planned_units WHERE local_id=?", (workout_id,)
+            )["payload"]
+        )
+        self.assertEqual(saved["name"], "Tempo ride")
+
+    def test_calendar_archive_requires_original_blocker_at_original_date(self):
+        for blocker_id in (None, "replacement-event", "original-event"):
+            with self.subTest(blocker_id=blocker_id):
+                workout_id = str(uuid.uuid4())
+                original = self.workout(workout_id, "2026-09-22")
+                self.add_workout(workout_id, original)
+                preview_id = self.add_preview(
+                    {
+                        "changes": [
+                            {
+                                "library_workout_id": workout_id,
+                                "date": original["date"],
+                                "before": original,
+                                "blocking_triggers": ["calendar"],
+                                "external_events": [
+                                    {"id": "original-event", "no_training": True}
+                                ],
+                                "source_fingerprint": adaptive.adaptive_workout_fingerprint(
+                                    original
+                                ),
+                                "payload": {
+                                    **original,
+                                    "archived": True,
+                                    "duration_minutes": 0,
+                                },
+                            }
+                        ]
+                    }
+                )
+                checked = []
+
+                class Constraints:
+                    def constraints(
+                        self, candidate, blocker_id=blocker_id, checked=checked
+                    ):
+                        checked.append(candidate)
+                        if blocker_id is None:
+                            return []
+                        return [{"id": blocker_id, "reason": "no_training"}]
+
+                result = self.make_service(
+                    calendar_conflict_service=Constraints()
+                ).apply(preview_id)
+                expected = blocker_id == "original-event"
+                self.assertEqual(result["updated"], int(expected))
+                self.assertEqual(checked[0]["date"], original["date"])
+                self.assertEqual(checked[0]["duration_minutes"], 30)
+                saved = json.loads(
+                    self.row(
+                        "SELECT payload FROM planned_units WHERE local_id=?",
+                        (workout_id,),
+                    )["payload"]
+                )
+                self.assertEqual(bool(saved.get("archived")), expected)
+                if not expected:
+                    self.assertEqual(
+                        result["stale"][0]["reason"], "calendar_constraint_changed"
+                    )
 
     def test_invalid_uuid_and_missing_preview_raise_app_errors(self):
         with self.assertRaises(AppError) as invalid:

@@ -44,7 +44,9 @@ class MorningBatteryStore:
             existing and existing.get("sleep_date") == checkin_date.isoformat()
         )
         record["attempts"] = 1 + (
-            int(existing.get("attempts") or 1) if same_date else 0
+            int(existing.get("attempts") or 1)
+            if same_date and existing is not None
+            else 0
         )
         with self._manager.unit_of_work() as db:
             current = self._read_snapshot(db)
@@ -208,7 +210,9 @@ class MorningBatteryRetryPolicy:
 class MorningBatteryEvents:
     """Own sanitized provider state events and refresh warning logs."""
 
-    def __init__(self, publish_event: Callable[[str, dict[str, Any]], None], logger: Any):
+    def __init__(
+        self, publish_event: Callable[[str, dict[str, Any]], None], logger: Any
+    ):
         self._publish_event = publish_event
         self._logger = logger
 
@@ -261,7 +265,10 @@ class MorningBodyBatteryService:
                 return cached
             with self._execution_gate.shared_lock() as acquired:
                 if not acquired:
-                    return {"status": "already_running", "sleep_date": checkin_date.isoformat()}
+                    return {
+                        "status": "already_running",
+                        "sleep_date": checkin_date.isoformat(),
+                    }
                 return self._sync_locked(checkin_date)
 
     def refresh(self, checkin_date: date | None = None) -> None:

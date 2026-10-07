@@ -11,7 +11,9 @@ from backend.db.schema import database_schema_is_current, initialize_schema
 
 class DatabaseManagerTests(unittest.TestCase):
     def make_manager(self, root: str) -> DatabaseManager:
-        return DatabaseManager(Path(root) / "test.db", sqlite3, reader_count=4, row_factory=sqlite3.Row)
+        return DatabaseManager(
+            Path(root) / "test.db", sqlite3, reader_count=4, row_factory=sqlite3.Row
+        )
 
     def test_cache_reuses_replaces_and_resets_the_active_manager(self):
         with tempfile.TemporaryDirectory() as root:
@@ -20,28 +22,36 @@ class DatabaseManagerTests(unittest.TestCase):
             second_signature = (str(Path(root) / "second.db"), "", False)
 
             first = cache.get(first_signature, first_signature[0], sqlite3)
-            self.assertIs(cache.get(first_signature, first_signature[0], sqlite3), first)
+            self.assertIs(
+                cache.get(first_signature, first_signature[0], sqlite3), first
+            )
             self.assertTrue(cache.matches(first_signature))
 
             second = cache.get(second_signature, second_signature[0], sqlite3)
             self.assertIsNot(second, first)
             self.assertFalse(cache.matches(first_signature))
-            with self.assertRaisesRegex(RuntimeError, "database manager is closed"):
-                with first.unit_of_work():
-                    pass
+            with (
+                self.assertRaisesRegex(RuntimeError, "database manager is closed"),
+                first.unit_of_work(),
+            ):
+                pass
 
             cache.reset()
             self.assertFalse(cache.matches(second_signature))
-            with self.assertRaisesRegex(RuntimeError, "database manager is closed"):
-                with second.unit_of_work():
-                    pass
+            with (
+                self.assertRaisesRegex(RuntimeError, "database manager is closed"),
+                second.unit_of_work(),
+            ):
+                pass
 
     def test_cache_unit_of_work_uses_the_current_manager_lazily(self):
         with tempfile.TemporaryDirectory() as root:
             cache = DatabaseManagerCache()
-            with self.assertRaisesRegex(RuntimeError, "not initialized"):
-                with cache.unit_of_work():
-                    pass
+            with (
+                self.assertRaisesRegex(RuntimeError, "not initialized"),
+                cache.unit_of_work(),
+            ):
+                pass
 
             first_signature = (str(Path(root) / "first.db"), "", False)
             second_signature = (str(Path(root) / "second.db"), "", False)
@@ -98,12 +108,13 @@ class DatabaseManagerTests(unittest.TestCase):
             self.addCleanup(manager.close)
             with manager.unit_of_work() as db:
                 db.execute("CREATE TABLE records (value TEXT NOT NULL)")
-            with self.assertRaises(RuntimeError):
-                with manager.unit_of_work() as db:
-                    db.execute("INSERT INTO records(value) VALUES (?)", ("discarded",))
-                    raise RuntimeError("rollback")
+            with self.assertRaises(RuntimeError), manager.unit_of_work() as db:
+                db.execute("INSERT INTO records(value) VALUES (?)", ("discarded",))
+                raise RuntimeError("rollback")
             with manager.reader() as db:
-                self.assertEqual(db.execute("SELECT COUNT(*) FROM records").fetchone()[0], 0)
+                self.assertEqual(
+                    db.execute("SELECT COUNT(*) FROM records").fetchone()[0], 0
+                )
             with manager.reader() as first:
                 first_id = id(first)
             with manager.reader() as second:
@@ -131,20 +142,26 @@ class DatabaseManagerTests(unittest.TestCase):
                     with state_lock:
                         active -= 1
 
-            threads = [threading.Thread(target=write, args=(value,)) for value in (1, 2, 3, 4)]
+            threads = [
+                threading.Thread(target=write, args=(value,)) for value in (1, 2, 3, 4)
+            ]
             for thread in threads:
                 thread.start()
             for thread in threads:
                 thread.join()
             self.assertEqual(maximum, 1)
             with manager.reader() as db:
-                self.assertEqual(db.execute("SELECT COUNT(*) FROM records").fetchone()[0], 4)
+                self.assertEqual(
+                    db.execute("SELECT COUNT(*) FROM records").fetchone()[0], 4
+                )
             manager.close()
 
     def test_writer_wait_is_bounded(self):
         with tempfile.TemporaryDirectory() as root:
             manager = DatabaseManager(
-                Path(root) / "bounded-writer.db", sqlite3, timeout=0.05,
+                Path(root) / "bounded-writer.db",
+                sqlite3,
+                timeout=0.05,
                 row_factory=sqlite3.Row,
             )
             with manager.unit_of_work() as db:
@@ -186,7 +203,10 @@ class DatabaseManagerTests(unittest.TestCase):
     def test_readers_are_bounded_and_nested_reader_calls_reuse_the_lease(self):
         with tempfile.TemporaryDirectory() as root:
             manager = DatabaseManager(
-                Path(root) / "bounded.db", sqlite3, reader_count=1, timeout=0.05,
+                Path(root) / "bounded.db",
+                sqlite3,
+                reader_count=1,
+                timeout=0.05,
                 row_factory=sqlite3.Row,
             )
             self.addCleanup(manager.close)

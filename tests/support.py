@@ -1,7 +1,6 @@
 """Reusable test setup; deliberately independent of any test case class."""
 
 from __future__ import annotations
-from backend.runtime import clock as runtime_clock
 
 from contextlib import contextmanager
 from dataclasses import replace
@@ -11,6 +10,7 @@ from unittest.mock import patch
 from backend.coach import limits as coach_limits
 from backend.coach import streams as coach_streams
 from backend.db.manager import DATABASE_MANAGER_CACHE
+from backend.runtime import clock as runtime_clock
 
 
 def build_gemini_request_payload(server, payload, model):
@@ -42,15 +42,24 @@ class IntervalsRequestRecorder:
 
     @property
     def mutations(self):
-        return [call for call in self.calls if call["method"] in {"POST", "PUT", "DELETE"}]
+        return [
+            call for call in self.calls if call["method"] in {"POST", "PUT", "DELETE"}
+        ]
 
 
-def parsed_workout_fixture(duration=1800, *, sport="Ride", kind="power", units="%ftp", value=85, distance=None):
+def parsed_workout_fixture(
+    duration=1800, *, sport="Ride", kind="power", units="%ftp", value=85, distance=None
+):
     """One synthetic provider-parsed step using the documented response schema."""
     step = {"duration": duration, kind: {"units": units, "value": value}}
     if distance is not None:
         step["distance"] = distance
-    return {"type": sport, "moving_time": duration, "icu_training_load": 20, "workout_doc": {"duration": duration, "steps": [step]}}
+    return {
+        "type": sport,
+        "moving_time": duration,
+        "icu_training_load": 20,
+        "workout_doc": {"duration": duration, "steps": [step]},
+    }
 
 
 class RecordedIntervalsClient:
@@ -69,7 +78,9 @@ class RecordedIntervalsClient:
         self.library = list(library or [])
 
     def fetch_snapshot(self, activity_days):
-        self.recorder.record("GET", "/athlete/0/activities", {"activity_days": activity_days})
+        self.recorder.record(
+            "GET", "/athlete/0/activities", {"activity_days": activity_days}
+        )
         return self.snapshot
 
     def fetch_competition_events(self):
@@ -83,7 +94,9 @@ class RecordedIntervalsClient:
     def upsert_competition_events(self, events):
         if events:
             self.recorder.record("POST", "/athlete/0/events", events)
-        return [{**event, "id": event.get("id") or "remote-event-1"} for event in events]
+        return [
+            {**event, "id": event.get("id") or "remote-event-1"} for event in events
+        ]
 
     def bulk_delete_events(self, identifiers):
         if identifiers:
@@ -93,20 +106,28 @@ class RecordedIntervalsClient:
     def create_library_workouts(self, workouts):
         if workouts:
             self.recorder.record("POST", "/athlete/0/workouts", workouts)
-        return [{**workout, "id": workout.get("id") or "remote-workout-1"} for workout in workouts]
+        return [
+            {**workout, "id": workout.get("id") or "remote-workout-1"}
+            for workout in workouts
+        ]
 
     def update_library_workout(self, workout_id, workout):
         self.recorder.record("PUT", f"/athlete/0/workouts/{workout_id}", workout)
         return {**workout, "id": workout_id}
 
     def plan_library_workout(self, workout_id, workout, plan_date):
-        self.recorder.record("POST", "/athlete/0/events", {"workout_id": workout_id, "date": plan_date})
+        self.recorder.record(
+            "POST", "/athlete/0/events", {"workout_id": workout_id, "date": plan_date}
+        )
         return {"id": "remote-planned-event"}
 
     def upsert_calendar_events(self, events):
         if events:
             self.recorder.record("POST", "/athlete/0/events/bulk", events)
-        return [{**event, "id": event.get("id") or "remote-planned-event"} for event in events]
+        return [
+            {**event, "id": event.get("id") or "remote-planned-event"}
+            for event in events
+        ]
 
     def delete_event(self, event_id):
         self.recorder.record("DELETE", f"/athlete/0/events/{event_id}")
@@ -119,7 +140,9 @@ class RecordedIntervalsClient:
 def isolated_server(server, root: Path, *, app_password: str = ""):
     """Run application setup against temporary state and restore globals."""
     patches = (
-        patch.object(server, "CONFIG", replace(server.CONFIG, app_password=app_password)),
+        patch.object(
+            server, "CONFIG", replace(server.CONFIG, app_password=app_password)
+        ),
         patch.object(server, "DATA_DIR", root),
         patch.object(server, "DB_PATH", root / "test.db"),
         patch.object(server, "LOG_PATH", root / "test.log"),
@@ -138,6 +161,7 @@ def isolated_server(server, root: Path, *, app_password: str = ""):
 def create_test_session(server) -> str:
     """Create one authenticated session without depending on a test case."""
     import uuid
+
     from backend.http_api.auth import SESSION_TTL_SECONDS
 
     token = f"session-{uuid.uuid4().hex}"
@@ -146,7 +170,13 @@ def create_test_session(server) -> str:
     with server.DB_LOCK, server.database_manager().unit_of_work() as db:
         db.execute(
             "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-            (auth.session_token_hash(token), auth.session_token_hash("csrf"), now + SESSION_TTL_SECONDS, runtime_clock.utc_now(), runtime_clock.utc_now()),
+            (
+                auth.session_token_hash(token),
+                auth.session_token_hash("csrf"),
+                now + SESSION_TTL_SECONDS,
+                runtime_clock.utc_now(),
+                runtime_clock.utc_now(),
+            ),
         )
     return token
 
@@ -154,16 +184,32 @@ def create_test_session(server) -> str:
 def reset_application_state(server) -> None:
     """Clear disposable application state without invoking a test case lifecycle."""
     tables = (
-        "messages", "coach_commands", "coach_plan_artifacts", "snapshots", "training_plans",
-        "workout_library", "planned_units", "competitions", "competition_sync_tombstones",
-        "athlete_checkins", "activity_feedback", "plan_adjustments", "coach_action_proposals",
-        "change_history", "provider_refresh_history", "sync_job_items", "sync_jobs",
-        "provider_sync_cursors", "public_event_candidates", "public_event_sources",
-        "external_calendar_events", "sessions", "kv",
+        "messages",
+        "coach_commands",
+        "coach_plan_artifacts",
+        "snapshots",
+        "training_plans",
+        "workout_library",
+        "planned_units",
+        "competitions",
+        "competition_sync_tombstones",
+        "athlete_checkins",
+        "activity_feedback",
+        "plan_adjustments",
+        "coach_action_proposals",
+        "change_history",
+        "provider_refresh_history",
+        "sync_job_items",
+        "sync_jobs",
+        "provider_sync_cursors",
+        "public_event_candidates",
+        "public_event_sources",
+        "external_calendar_events",
+        "sessions",
+        "kv",
     )
     with server.DB_LOCK, server.database_manager().unit_of_work() as db:
         for table in tables:
             db.execute(f"DELETE FROM {table}")
     server.ATHLETE_DATA.profile().save({})
     coach_streams.CHAT_STREAM_REGISTRY.clear_state()
-

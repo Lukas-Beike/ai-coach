@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import sqlite3
 import base64
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -15,7 +15,10 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import NutritionRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
-from backend.nutrition.photo import NutritionPhotoExtractionService, validate_packaging_extraction
+from backend.nutrition.photo import (
+    NutritionPhotoExtractionService,
+    validate_packaging_extraction,
+)
 from backend.nutrition.service import NutritionService
 
 
@@ -36,13 +39,20 @@ class NutritionProductContractTests(unittest.TestCase):
         self.food_database = Mock()
         self.food_database.lookup.return_value = {
             "ok": True,
-            "foods": [{
-                "id": "off:4006381333999",
-                "name": "Synthetic cocoa powder",
-                "basis_unit": "g",
-                "per_100": {"kcal": 250, "protein_g": 20, "fat_g": 5, "carbs_g": 30},
-                "origins": {},
-            }],
+            "foods": [
+                {
+                    "id": "off:4006381333999",
+                    "name": "Synthetic cocoa powder",
+                    "basis_unit": "g",
+                    "per_100": {
+                        "kcal": 250,
+                        "protein_g": 20,
+                        "fat_g": 5,
+                        "carbs_g": 30,
+                    },
+                    "origins": {},
+                }
+            ],
             "source": "open_food_facts",
         }
         self.service = NutritionService(
@@ -97,9 +107,9 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertEqual(archived["status"], "archived")
         self.assertEqual(self.service.list_products(barcode="4006381333931"), [])
         self.assertEqual(
-            self.service.list_products(barcode="4006381333931", include_archived=True)[0][
-                "status"
-            ],
+            self.service.list_products(barcode="4006381333931", include_archived=True)[
+                0
+            ]["status"],
             "archived",
         )
 
@@ -156,9 +166,7 @@ class NutritionProductContractTests(unittest.TestCase):
             with self.subTest(payload=payload), self.assertRaises(AppError):
                 validate_packaging_extraction(payload)
         with self.assertRaises(AppError):
-            self.service.save_product(
-                self.product_payload(source="coach")
-            )
+            self.service.save_product(self.product_payload(source="coach"))
 
     def test_product_nutrients_are_snapshotted_when_consumed(self):
         saved = self.service.save_product(self.product_payload())
@@ -174,7 +182,9 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertEqual(fetched["protein_g"], 39)
         self.assertEqual(fetched["nutrition_basis"]["product"]["kcal"], 376)
 
-    def test_product_calculation_preserves_unknown_nutrients_and_does_not_convert_units(self):
+    def test_product_calculation_preserves_unknown_nutrients_and_does_not_convert_units(
+        self,
+    ):
         saved = self.service.save_product(
             self.product_payload(basis_unit="ml", carbs_g=None, protein_g=None)
         )
@@ -208,7 +218,9 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertNotIn("image_data_url", candidate)
         self.assertEqual(self.service.list_products(), [])
         self.assertTrue(
-            self.service.save_product({**candidate["candidate"], "confirmed": True})["id"]
+            self.service.save_product({**candidate["candidate"], "confirmed": True})[
+                "id"
+            ]
         )
 
     def test_database_backup_contains_confirmed_products(self):
@@ -223,7 +235,9 @@ class NutritionProductContractTests(unittest.TestCase):
             disk_usage=lambda _path: SimpleNamespace(free=2_000_000),
         )
 
-        backup = DatabaseBackupService(self.manager, self.lock, config, Mock()).read_bytes()
+        backup = DatabaseBackupService(
+            self.manager, self.lock, config, Mock()
+        ).read_bytes()
         backup_path = Path(self.temporary.name) / "nutrition-products-backup.db"
         backup_path.write_bytes(backup)
         try:
@@ -232,7 +246,14 @@ class NutritionProductContractTests(unittest.TestCase):
                 row = snapshot.execute(
                     "SELECT barcode, name, source FROM nutrition_products"
                 ).fetchone()
-                self.assertEqual(row, ("4006381333931", "RheinNatur Bio Whey Protein Cocoa", "packaging_label"))
+                self.assertEqual(
+                    row,
+                    (
+                        "4006381333931",
+                        "RheinNatur Bio Whey Protein Cocoa",
+                        "packaging_label",
+                    ),
+                )
             finally:
                 snapshot.close()
         finally:

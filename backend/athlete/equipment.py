@@ -162,6 +162,7 @@ class EquipmentService:
             "initial_hours",
             "maintenance_km",
             "maintenance_hours",
+            "lifetime_target_km",
         }
         if not isinstance(payload, dict) or set(payload) - allowed:
             raise AppError(400, "Ungültige Ausrüstung.")
@@ -191,10 +192,7 @@ class EquipmentService:
                 "sport_pending": payload["sport"] == "Other",
                 "parent_pending": payload["kind"] == "component" and not parent_id,
             }
-            if previous and previous.get("garmin_uuid"):
-                saved["garmin_uuid"] = previous["garmin_uuid"]
-                if previous.get("garmin_distance_km") is not None:
-                    saved["garmin_distance_km"] = previous["garmin_distance_km"]
+            _preserve_equipment_metadata(saved, previous, payload)
             db.execute(
                 "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
                 (
@@ -319,6 +317,7 @@ def _insert_initial_garmin_item(
         "kind": kind,
         "parent_pending": kind == "component",
         "status": _garmin_status(row),
+        "garmin_status": _garmin_raw_status(row),
         "parent_id": None,
         "start_date": today.isoformat(),
         "initial_distance_km": distance or 0,
@@ -328,6 +327,9 @@ def _insert_initial_garmin_item(
         "garmin_uuid": gear_id,
         "initial_distance_known": distance is not None,
         "garmin_distance_km": distance,
+        "garmin_maximum_meters": _garmin_maximum_meters(row),
+        "lifetime_target_km": _garmin_lifetime_target_km(row),
+        "lifetime_target_source": "garmin",
         "revision": 1,
         "updated_at": now,
         "source": "garmin-initial-sync",
@@ -343,10 +345,11 @@ def _refresh_garmin_distances(
 ) -> None:
     for row in rows:
         linked = by_garmin.get(str(row.get("gearUUID") or ""))
-        distance = _garmin_distance_km(row)
-        if linked is None or distance is None:
+        if linked is None:
             continue
-        linked["garmin_distance_km"] = distance
+        changed = _update_garmin_gear(linked, row)
+        if not changed:
+            continue
         linked["updated_at"] = now
         db.execute(
             "UPDATE kv SET value=?, updated_at=? WHERE key=?",
@@ -377,6 +380,40 @@ def _garmin_distance_km(row: dict) -> float | None:
     stats = row.get("stats") or {}
     distance = number(stats.get("totalDistance")) if isinstance(stats, dict) else None
     return round(distance / 1000, 2) if distance is not None else None
+
+
+def _garmin_maximum_meters(row: dict) -> float | None:
+    value = number(row.get("maximumMeters"))
+    return value if _valid_positive_number(value) else None
+
+
+def _garmin_lifetime_target_km(row: dict) -> float | None:
+    maximum_meters = _garmin_maximum_meters(row)
+    return round(maximum_meters / 1000, 2) if maximum_meters is not None else None
+
+
+def _valid_positive_number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value > 0
+    )
+
+
+def _lifetime_projection(usage_km: Any, target_km: Any) -> dict[str, float] | None:
+    usage = number(usage_km)
+    if usage is None or not _valid_positive_number(target_km):
+        return None
+    percent = usage / target_km * 100
+    if not math.isfinite(percent):
+        return None
+    return {
+        "usage_km": round(usage, 2),
+        "target_km": round(target_km, 2),
+        "percent": round(percent, 1),
+        "progress_percent": round(min(100.0, percent), 1),
+    }
 
 
 def _garmin_sport(row: dict) -> str:
@@ -441,28 +478,38 @@ def _garmin_gear_text(row: dict) -> str:
 
 
 def _garmin_status(row: dict) -> str:
-    value = str(row.get("gearStatusName") or "").lower()
+    value = _garmin_raw_status(row).lower()
     return (
         "archived"
-        if any(token in value for token in ("retir", "archiv", "inactive"))
+        if any(
+            token in value
+            for token in ("retir", "archiv", "inactive", "inaktiv", "ausgemustert")
+        )
         else "active"
     )
+
+
+def _garmin_raw_status(row: dict) -> str:
+    return str(row.get("gearStatusName") or "").strip()[:100]
 
 
 def _garmin_item(row: dict) -> dict[str, Any]:
     stats = row.get("stats") or {}
     distance = number(stats.get("totalDistance")) if isinstance(stats, dict) else None
-    goal = number(row.get("maximumMeters"))
+    goal = _garmin_maximum_meters(row)
+    distance_km = round(distance / 1000, 2) if distance is not None else None
+    goal_km = round(goal / 1000, 2) if goal is not None else None
+    lifetime = _lifetime_projection(distance_km, goal_km)
     return {
         "id": str(row.get("gearUUID") or ""),
         "name": str(row.get("gearName") or "Ausr\u00fcstung")[:200],
         "kind": str(row.get("gearTypeName") or "")[:100],
-        "status": str(row.get("gearStatusName") or "")[:100],
-        "distance_km": round(distance / 1000, 2) if distance is not None else None,
-        "goal_km": round(goal / 1000, 2) if goal else None,
-        "usage_percent": round(distance / goal * 100, 1)
-        if distance is not None and goal
-        else None,
+        "status": _garmin_status(row),
+        "garmin_status": _garmin_raw_status(row),
+        "distance_km": distance_km,
+        "goal_km": goal_km,
+        "usage_percent": lifetime["percent"] if lifetime else None,
+        "lifetime": lifetime,
         "sessions": number(stats.get("totalActivities"))
         if isinstance(stats, dict)
         else None,
@@ -500,6 +547,7 @@ def _equipment_amounts(payload: dict) -> dict[str, Any]:
         ("initial_hours", 100000),
         ("maintenance_km", 1000000),
         ("maintenance_hours", 100000),
+        ("lifetime_target_km", 1000000),
     ):
         value = payload.get(field)
         if value is not None and (
@@ -513,6 +561,8 @@ def _equipment_amounts(payload: dict) -> dict[str, Any]:
             raise AppError(
                 400, "Anfangsstand muss ausdrücklich als Zahl angegeben werden."
             )
+        if field == "lifetime_target_km" and value is not None and value <= 0:
+            raise AppError(400, "Lifetime target must be positive.")
         amounts[field] = value
 
     return amounts
@@ -589,6 +639,10 @@ def _update_usage(
         ),
         **_maintenance_usage(item, eligible, events, garmin_distance),
     }
+    target_km = item.get("lifetime_target_km")
+    if target_km is None and _valid_positive_number(item.get("garmin_maximum_meters")):
+        target_km = item["garmin_maximum_meters"] / 1000
+    item["lifetime"] = _lifetime_projection(distance_km, target_km)
     item["maintenance"] = events
 
 
@@ -678,3 +732,45 @@ def _maintenance_uncertain(
             ("maintenance_hours", "moving_time"),
         )
     )
+
+
+def _preserve_equipment_metadata(
+    saved: dict[str, Any], previous: dict[str, Any] | None, payload: dict[str, Any]
+):
+    if previous and "lifetime_target_km" not in payload:
+        saved["lifetime_target_km"] = previous.get("lifetime_target_km")
+        if previous.get("lifetime_target_source"):
+            saved["lifetime_target_source"] = previous["lifetime_target_source"]
+    elif "lifetime_target_km" in payload:
+        saved["lifetime_target_source"] = "local"
+    if previous and previous.get("garmin_uuid"):
+        saved["garmin_uuid"] = previous["garmin_uuid"]
+        if previous.get("garmin_distance_km") is not None:
+            saved["garmin_distance_km"] = previous["garmin_distance_km"]
+        for field in ("garmin_maximum_meters", "garmin_status"):
+            if previous.get(field) is not None:
+                saved[field] = previous[field]
+
+
+def _update_garmin_gear(linked: dict[str, Any], row: dict[str, Any]) -> bool:
+    changed = False
+    distance = _garmin_distance_km(row)
+    if distance is not None and linked.get("garmin_distance_km") != distance:
+        linked["garmin_distance_km"] = distance
+        changed = True
+    raw_status = _garmin_raw_status(row)
+    if linked.get("garmin_status") != raw_status:
+        linked["garmin_status"] = raw_status
+        changed = True
+    maximum_meters = _garmin_maximum_meters(row)
+    if maximum_meters is not None:
+        if linked.get("garmin_maximum_meters") != maximum_meters:
+            linked["garmin_maximum_meters"] = maximum_meters
+            changed = True
+        if linked.get(
+            "lifetime_target_source"
+        ) == "garmin" or not _valid_positive_number(linked.get("lifetime_target_km")):
+            linked["lifetime_target_km"] = round(maximum_meters / 1000, 2)
+            linked["lifetime_target_source"] = "garmin"
+            changed = True
+    return changed

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
@@ -12,12 +11,14 @@ from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.library_plan_tools import CoachLibraryPlanToolService
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.db.manager import DatabaseManager
+from backend.planning import changes as planning_changes
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.calendar_service import CalendarConflictService
-from backend.planning.local_plan_creation_service import LocalTrainingPlanCreationService
 from backend.planning.library_plan_service import WorkoutLibraryPlanService
+from backend.planning.local_plan_creation_service import (
+    LocalTrainingPlanCreationService,
+)
 from backend.planning.training_plan_artifact_service import TrainingPlanArtifactService
-from backend.planning import changes as planning_changes
 
 
 @dataclass(frozen=True)
@@ -31,8 +32,12 @@ class CoachPlanArtifactDependencies:
 @dataclass(frozen=True)
 class CoachTrainingPatchDependencies:
     database_lock: Any
-    training_change_validator: Callable[[], planning_changes.StructuredTrainingChangeValidator]
-    training_change_service: Callable[[], planning_changes.StructuredTrainingChangeService]
+    training_change_validator: Callable[
+        [], planning_changes.StructuredTrainingChangeValidator
+    ]
+    training_change_service: Callable[
+        [], planning_changes.StructuredTrainingChangeService
+    ]
     calendar_conflict_service: Callable[[], CalendarConflictService]
     key_value_repository: Any
     event_buffer: Any
@@ -56,7 +61,7 @@ class CoachPlanningToolsAssembly:
         training_patch: CoachTrainingPatchDependencies
         adaptive: CoachAdaptivePlanningDependencies
 
-    def __init__(self, *, dependencies: "CoachPlanningToolsAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: CoachPlanningToolsAssembly.Inputs) -> None:
         artifacts = dependencies.artifacts
         patching = dependencies.training_patch
         adaptive = dependencies.adaptive

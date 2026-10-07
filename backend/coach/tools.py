@@ -270,7 +270,7 @@ def build_tool_contracts(
         ),
         _canonical_coach_tool(
             "get_training_report",
-            "Read selected deterministic local analyses shown in the Analysis UI. Default section report includes coverage, previous period, recorded sensor zones and local plan execution. Select endurance, power_profiles, tag_impact, season or comparisons only when relevant. Does not refresh providers, archive reports or change planning. Treat incomplete periods and missing loads as unknown; do not infer rest from absent records.",
+            "Read selected deterministic local analyses shown in the Analysis UI. Default section report includes coverage, previous period, recorded sensor zones and local plan execution. Select endurance, power_profiles, tag_impact, season, comparisons, body_history (weight, body fat, W/kg history) or sleep_regularity only when relevant. Does not refresh providers, archive reports or change planning. Treat incomplete periods and missing loads as unknown; do not infer rest from absent records.",
             {
                 "start": {"type": "string", "format": "date"},
                 "days": {"type": "integer", "enum": [7, 28]},
@@ -278,7 +278,7 @@ def build_tool_contracts(
                 "sections": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": 6,
+                    "maxItems": 8,
                     "uniqueItems": True,
                     "items": {
                         "type": "string",
@@ -289,6 +289,8 @@ def build_tool_contracts(
                             "tag_impact",
                             "season",
                             "comparisons",
+                            "body_history",
+                            "sleep_regularity",
                         ],
                     },
                 },

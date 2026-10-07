@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import logging
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
@@ -51,7 +50,7 @@ class ExternalCalendarAssembly:
         owners: ExternalCalendarSyncOwners
         runtime: ExternalCalendarSyncRuntime
 
-    def __init__(self, *, dependencies: "ExternalCalendarAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: ExternalCalendarAssembly.Inputs) -> None:
         owners = dependencies.owners
         runtime = dependencies.runtime
         self._config = owners.config

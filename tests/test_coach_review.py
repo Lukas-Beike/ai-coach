@@ -1,22 +1,29 @@
 """Fresh-state regressions for Coach actions and recoverable outcomes."""
-from backend.runtime import clock as runtime_clock
+
 import json
-import unittest
 import tempfile
 import threading
 import time
+import unittest
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import datetime as _local_datetime
+from datetime import timedelta
+from pathlib import Path
 from unittest.mock import Mock, patch
+
 import server_test_support as fixtures
-from backend.planning import workouts as planning_workouts
-from backend.coach.proposals import COACH_ACTION_TTL_SECONDS, prune_expired_coach_proposals
+from support import reset_application_state
+
 from backend.coach.authorization import coach_session_key
+from backend.coach.proposals import (
+    COACH_ACTION_TTL_SECONDS,
+    prune_expired_coach_proposals,
+)
+from backend.planning import workouts as planning_workouts
+from backend.runtime import clock as runtime_clock
 from backend.sync.intervals import IntervalsSyncService
 from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
-from support import reset_application_state
 
 server = fixtures.server
 
@@ -26,16 +33,36 @@ class CoachReviewTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="coach-review-test-")
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
-        for name, value in (("CONFIG",replace(server.CONFIG,app_password="")),("DATA_DIR",root),("DB_PATH",root/"test.db"),("LOG_PATH",root/"test.log")):
-            context=patch.object(server,name,value);context.start();self.addCleanup(context.stop)
+        for name, value in (
+            ("CONFIG", replace(server.CONFIG, app_password="")),
+            ("DATA_DIR", root),
+            ("DB_PATH", root / "test.db"),
+            ("LOG_PATH", root / "test.log"),
+        ):
+            context = patch.object(server, name, value)
+            context.start()
+            self.addCleanup(context.stop)
         server.initialise_database()
         reset_application_state(server)
 
     def intent(self, operation, scope, follow=()):
-        return {"intent": "local_action", "operation": operation, "target_system": "local", "artifact_id": None, "ambiguities": [], "authorization_scope": list(scope), "follow_up_operations": list(follow)}
+        return {
+            "intent": "local_action",
+            "operation": operation,
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": list(scope),
+            "follow_up_operations": list(follow),
+        }
 
     def call(self, name, arguments, call_id="call-1"):
-        return {"type": "function_call", "name": name, "call_id": call_id, "arguments": json.dumps(arguments)}
+        return {
+            "type": "function_call",
+            "name": name,
+            "call_id": call_id,
+            "arguments": json.dumps(arguments),
+        }
 
     def history_preview(self, change_id, session_csrf_hash="review-session"):
         preview = server.HISTORY.undo_service().preview(change_id)
@@ -44,14 +71,23 @@ class CoachReviewTests(unittest.TestCase):
         )
         return {**preview, "proposed_action": proposal["proposed_action"]}
 
-
     def workout(self, offset=0, sport="Run"):
-        return {"date": (date.today() + timedelta(days=50+offset)).isoformat(), "sport": sport, "name": "Synthetic session", "description": "- 30m 60% Easy session", "duration_minutes": 30, "target": "AUTO"}
-
+        return {
+            "date": (
+                _local_datetime.now().astimezone().date() + timedelta(days=50 + offset)
+            ).isoformat(),
+            "sport": sport,
+            "name": "Synthetic session",
+            "description": "- 30m 60% Easy session",
+            "duration_minutes": 30,
+            "target": "AUTO",
+        }
 
     def test_waited_full_refresh_preserves_all_time_window(self):
         server.key_value_service().set("last_sync_at", "old-sync")
-        server.key_value_service().set("last_sync_activity_days", str(server.ALL_SYNC_DAYS))
+        server.key_value_service().set(
+            "last_sync_activity_days", str(server.ALL_SYNC_DAYS)
+        )
         previous_sync_read = threading.Event()
         service = server.INTERVALS_SYNC.sync_service()
         original_get_value = service._status.get
@@ -59,7 +95,10 @@ class CoachReviewTests(unittest.TestCase):
 
         def observe_previous_sync_read(key):
             value = original_get_value(key)
-            if key == "last_sync_at" and threading.current_thread() is threading.main_thread():
+            if (
+                key == "last_sync_at"
+                and threading.current_thread() is threading.main_thread()
+            ):
                 previous_sync_read.set()
             return value
 
@@ -73,7 +112,9 @@ class CoachReviewTests(unittest.TestCase):
         worker = threading.Thread(target=finish_active_sync)
         worker.start()
         try:
-            with patch.object(service._status, "get", side_effect=observe_previous_sync_read):
+            with patch.object(
+                service._status, "get", side_effect=observe_previous_sync_read
+            ):
                 result = service.sync(
                     "full refresh test",
                     activity_days=server.ALL_SYNC_DAYS,
@@ -85,9 +126,12 @@ class CoachReviewTests(unittest.TestCase):
                 INTERVALS_SYNC_LOCK.release()
         self.assertEqual(result["activity_days"], server.ALL_SYNC_DAYS)
 
-
     def test_synchronous_refresh_rejects_windows_beyond_job_limit(self):
-        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        intent = {
+            **self.intent("start_provider_refresh", ["intervals_refresh"]),
+            "intent": "remote_sync",
+            "target_system": "intervals",
+        }
         kwargs = {
             "intent": intent,
             "conversation_id": "wide-sync-validation",
@@ -95,18 +139,24 @@ class CoachReviewTests(unittest.TestCase):
             "session_csrf_hash": "review-session",
             "sync_job_ids": [],
         }
-        with patch.object(IntervalsSyncService, "sync") as sync:
-            with self.assertRaises(server.AppError) as error:
-                server.COACH_TOOL_DISPATCH.service().execute(
-                    "start_provider_refresh",
-                    {"days": 3661, "_wait_for_completion": True},
-                    **kwargs,
-                )
+        with (
+            patch.object(IntervalsSyncService, "sync") as sync,
+            self.assertRaises(server.AppError) as error,
+        ):
+            server.COACH_TOOL_DISPATCH.service().execute(
+                "start_provider_refresh",
+                {"days": 3661, "_wait_for_completion": True},
+                **kwargs,
+            )
         self.assertEqual(error.exception.reason, "invalid_refresh_request")
         sync.assert_not_called()
 
     def test_synchronous_refresh_retries_after_waiting_for_narrower_sync(self):
-        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        intent = {
+            **self.intent("start_provider_refresh", ["intervals_refresh"]),
+            "intent": "remote_sync",
+            "target_system": "intervals",
+        }
         kwargs = {
             "intent": intent,
             "conversation_id": "wide-sync-retry",
@@ -117,7 +167,10 @@ class CoachReviewTests(unittest.TestCase):
         with patch.object(
             IntervalsSyncService,
             "sync",
-            side_effect=[{"status": "ok", "waited_for_existing": True, "activity_days": 3}, {"status": "ok", "activity_days": 365}],
+            side_effect=[
+                {"status": "ok", "waited_for_existing": True, "activity_days": 3},
+                {"status": "ok", "activity_days": 365},
+            ],
         ) as sync:
             result = server.COACH_TOOL_DISPATCH.service().execute(
                 "start_provider_refresh",
@@ -129,30 +182,52 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(sync.call_count, 2)
         self.assertFalse(sync.call_args_list[1].kwargs["wait_for_existing"])
 
-
     def test_resumed_effect_is_preserved_but_incomplete_summary_is_partial(self):
-        csrf_hash = server.session_auth_service().session_token_hash("csrf-summary-recovery")
+        csrf_hash = server.session_auth_service().session_token_hash(
+            "csrf-summary-recovery"
+        )
         client_turn_id = "summary-recovery"
         intent = self.intent("manage_training_templates", ["local_template"])
         message = "Speichere die Vorlage und erstelle einen Trainingsplan fuer die naechsten acht Wochen."
-        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(message, client_turn_id, csrf_hash, operation_id="summary-recovery-op")
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
+            message, client_turn_id, csrf_hash, operation_id="summary-recovery-op"
+        )
         persisted_receipt = {
-            "mode": "background", "phase": "preparing", "session_key": coach_session_key(csrf_hash),
-            "command_receipts": [{
-                "call_id": "template-success", "tool": "manage_training_templates", "effect_key": "template-success",
-                "result": {"ok": True, "status": "completed"},
-            }],
+            "mode": "background",
+            "phase": "preparing",
+            "session_key": coach_session_key(csrf_hash),
+            "command_receipts": [
+                {
+                    "call_id": "template-success",
+                    "tool": "manage_training_templates",
+                    "effect_key": "template-success",
+                    "result": {"ok": True, "status": "completed"},
+                }
+            ],
         }
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE coach_commands SET intent=?, receipt=? WHERE client_turn_id=?",
                 (json.dumps(intent), json.dumps(persisted_receipt), client_turn_id),
             )
-        with patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="summary-recovery-conversation"))), patch(
-            "backend.coach.context.CoachTrainingContextService.build", return_value="Synthetic summary context"
-        ), patch.object(server.COACH_CONVERSATION, "response_transport") as transport_factory:
-            transport_factory.return_value.background_request.side_effect = server.AppError(
-                503, "Model unavailable"
+        with (
+            patch.object(
+                server.COACH_CONVERSATION,
+                "provision_service",
+                return_value=Mock(
+                    ensure=Mock(return_value="summary-recovery-conversation")
+                ),
+            ),
+            patch(
+                "backend.coach.context.CoachTrainingContextService.build",
+                return_value="Synthetic summary context",
+            ),
+            patch.object(
+                server.COACH_CONVERSATION, "response_transport"
+            ) as transport_factory,
+        ):
+            transport_factory.return_value.background_request.side_effect = (
+                server.AppError(503, "Model unavailable")
             )
             result = server.COACH_TURNS.chat_turn_service().run(
                 message,
@@ -164,13 +239,22 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(result["pending_operations"], [])
         self.assertIn("Bereits erfolgreich", result["message"]["content"])
 
-
     def test_plan_sport_survives_storage_and_provider_projection(self):
         sports = ["Run", "Swim", "WeightTraining", "VirtualRide", "Ride"]
-        entries = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout(i, sport) for i, sport in enumerate(sports)])
+        entries = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout(i, sport) for i, sport in enumerate(sports)]
+        )
         self.assertEqual([entry["sport"] for entry in entries], sports)
         self.assertEqual([entry["type"] for entry in entries], sports)
-        self.assertEqual([entry["sport"] for entry in sorted(server.PLANNING_DATA.planned_unit().list(), key=lambda x:x["date"])], sports)
+        self.assertEqual(
+            [
+                entry["sport"]
+                for entry in sorted(
+                    server.PLANNING_DATA.planned_unit().list(), key=lambda x: x["date"]
+                )
+            ],
+            sports,
+        )
         self.assertEqual(
             [
                 planning_workouts.workout_event_payload(
@@ -181,21 +265,47 @@ class CoachReviewTests(unittest.TestCase):
             sports,
         )
 
-    def test_artifact_commits_complete_bounded_plan_and_replays_without_duplicates(self):
+    def test_artifact_commits_complete_bounded_plan_and_replays_without_duplicates(
+        self,
+    ):
         for count in (28, 29, 56, 366):
             with self.subTest(count=count):
                 self.setUp()
-                payload = {"plan_name": "Synthetic plan", "workouts": [self.workout(i) for i in range(count)]}
-                artifact = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
-                    {"payload": payload}, "review-conversation", "stage"
+                payload = {
+                    "plan_name": "Synthetic plan",
+                    "workouts": [self.workout(i) for i in range(count)],
+                }
+                artifact = (
+                    server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
+                        {"payload": payload}, "review-conversation", "stage"
+                    )
                 )
-                intent = self.intent("commit_training_plan", ["artifact:"+artifact["artifact_id"]]); intent["artifact_id"] = artifact["artifact_id"]
-                kwargs = dict(intent=intent, conversation_id="review-conversation", client_turn_id="commit", session_csrf_hash="review-session", sync_job_ids=[])
-                result = server.COACH_TOOL_DISPATCH.service().execute("commit_training_plan", {"artifact_id":artifact["artifact_id"]}, **kwargs)
-                replay = server.COACH_TOOL_DISPATCH.service().execute("commit_training_plan", {"artifact_id":artifact["artifact_id"]}, **kwargs)
-                self.assertEqual(len(result["library_entry_ids"]),count)
-                self.assertEqual(len(server.PLANNING_DATA.planned_unit().list(1000)),count)
-                self.assertEqual(replay["status"],"already_applied")
+                intent = self.intent(
+                    "commit_training_plan", ["artifact:" + artifact["artifact_id"]]
+                )
+                intent["artifact_id"] = artifact["artifact_id"]
+                kwargs = {
+                    "intent": intent,
+                    "conversation_id": "review-conversation",
+                    "client_turn_id": "commit",
+                    "session_csrf_hash": "review-session",
+                    "sync_job_ids": [],
+                }
+                result = server.COACH_TOOL_DISPATCH.service().execute(
+                    "commit_training_plan",
+                    {"artifact_id": artifact["artifact_id"]},
+                    **kwargs,
+                )
+                replay = server.COACH_TOOL_DISPATCH.service().execute(
+                    "commit_training_plan",
+                    {"artifact_id": artifact["artifact_id"]},
+                    **kwargs,
+                )
+                self.assertEqual(len(result["library_entry_ids"]), count)
+                self.assertEqual(
+                    len(server.PLANNING_DATA.planned_unit().list(1000)), count
+                )
+                self.assertEqual(replay["status"], "already_applied")
 
     def test_artifact_late_failure_rolls_back_entire_plan_and_revision(self):
         workouts = [self.workout(i) for i in range(56)]
@@ -212,79 +322,196 @@ class CoachReviewTests(unittest.TestCase):
         with server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE coach_plan_artifacts SET payload=? WHERE id=?",
-                (json.dumps({"workouts": workouts, "plan_name": "Atomic"}), artifact["artifact_id"]),
+                (
+                    json.dumps({"workouts": workouts, "plan_name": "Atomic"}),
+                    artifact["artifact_id"],
+                ),
             )
-        intent=self.intent("commit_training_plan",["artifact:"+artifact["artifact_id"]]);intent["artifact_id"]=artifact["artifact_id"]
+        intent = self.intent(
+            "commit_training_plan", ["artifact:" + artifact["artifact_id"]]
+        )
+        intent["artifact_id"] = artifact["artifact_id"]
         with self.assertRaises(server.AppError):
-            server.COACH_TOOL_DISPATCH.service().execute("commit_training_plan",{"artifact_id":artifact["artifact_id"]},intent=intent,conversation_id="review-conversation",client_turn_id="commit",session_csrf_hash="review-session",sync_job_ids=[])
-        self.assertEqual(server.PLANNING_DATA.planned_unit().list(),[])
-        self.assertEqual(server.PLANNING_DATA.training_plan().list(),[])
-        with server.database_manager().unit_of_work() as db:self.assertEqual(db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?",(artifact["artifact_id"],)).fetchone()["status"],"draft")
+            server.COACH_TOOL_DISPATCH.service().execute(
+                "commit_training_plan",
+                {"artifact_id": artifact["artifact_id"]},
+                intent=intent,
+                conversation_id="review-conversation",
+                client_turn_id="commit",
+                session_csrf_hash="review-session",
+                sync_job_ids=[],
+            )
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
+        self.assertEqual(server.PLANNING_DATA.training_plan().list(), [])
+        with server.database_manager().unit_of_work() as db:
+            self.assertEqual(
+                db.execute(
+                    "SELECT status FROM coach_plan_artifacts WHERE id=?",
+                    (artifact["artifact_id"],),
+                ).fetchone()["status"],
+                "draft",
+            )
 
     def test_plan_draft_rejects_an_occupied_date_before_storing_artifact(self):
         workout = self.workout()
-        server.ATHLETE_DATA.context().save({}, [{"name": "Race", "event_date": workout["date"], "sport": "Ride"}])
-        intent = self.intent("stage_training_plan", ["local_plan"], ("commit_training_plan",))
+        server.ATHLETE_DATA.context().save(
+            {}, [{"name": "Race", "event_date": workout["date"], "sport": "Ride"}]
+        )
+        intent = self.intent(
+            "stage_training_plan", ["local_plan"], ("commit_training_plan",)
+        )
         with self.assertRaises(server.AppError) as error:
             server.COACH_TOOL_DISPATCH.service().execute(
-                "stage_training_plan", {"payload": {"plan_name": "Conflict", "goal": "Base", "workouts": [workout]}},
-                intent=intent, conversation_id="review-conversation", client_turn_id="conflict",
-                session_csrf_hash="review-session", sync_job_ids=[],
+                "stage_training_plan",
+                {
+                    "payload": {
+                        "plan_name": "Conflict",
+                        "goal": "Base",
+                        "workouts": [workout],
+                    }
+                },
+                intent=intent,
+                conversation_id="review-conversation",
+                client_turn_id="conflict",
+                session_csrf_hash="review-session",
+                sync_job_ids=[],
             )
         self.assertEqual(error.exception.reason, "plan_date_conflict")
         with server.database_manager().unit_of_work() as db:
-            self.assertEqual(db.execute("SELECT COUNT(*) AS n FROM coach_plan_artifacts").fetchone()["n"], 0)
-
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) AS n FROM coach_plan_artifacts").fetchone()[
+                    "n"
+                ],
+                0,
+            )
 
     def test_template_batch_invalid_second_or_last_has_no_partial_writes(self):
-        for position in (1,2):
+        for position in (1, 2):
             with self.subTest(position=position):
-                templates=[{"name":"Synthetic template","sport":"Run","duration_minutes":30} for _ in range(3)]
-                templates[position]["duration_minutes"]="invalid"
+                templates = [
+                    {
+                        "name": "Synthetic template",
+                        "sport": "Run",
+                        "duration_minutes": 30,
+                    }
+                    for _ in range(3)
+                ]
+                templates[position]["duration_minutes"] = "invalid"
                 with self.assertRaises(server.AppError):
-                    server.COACH_TOOL_DISPATCH.service().execute("manage_training_templates",{"templates":templates},intent=self.intent("manage_training_templates",["local_template"]),conversation_id="review-conversation",client_turn_id="batch",session_csrf_hash="review-session",sync_job_ids=[])
-                self.assertEqual(server.PLANNING_DATA.workout_library().list(),[])
-
+                    server.COACH_TOOL_DISPATCH.service().execute(
+                        "manage_training_templates",
+                        {"templates": templates},
+                        intent=self.intent(
+                            "manage_training_templates", ["local_template"]
+                        ),
+                        conversation_id="review-conversation",
+                        client_turn_id="batch",
+                        session_csrf_hash="review-session",
+                        sync_job_ids=[],
+                    )
+                self.assertEqual(server.PLANNING_DATA.workout_library().list(), [])
 
     def test_created_refresh_job_is_readable_only_by_own_turn(self):
-        intent={**self.intent("start_provider_refresh",["garmin_refresh"],("get_sync_job",)),"intent":"remote_sync","target_system":"garmin"}
-        ids=[];kwargs=dict(intent=intent,conversation_id="review-conversation",client_turn_id="refresh",session_csrf_hash="review-session",sync_job_ids=ids)
-        job=server.COACH_TOOL_DISPATCH.service().execute("start_provider_refresh",{},**kwargs)
-        status=server.COACH_TOOL_DISPATCH.service().execute("get_sync_job",{"job_id":job["sync_job_id"]},**kwargs)
-        self.assertEqual(status["job"]["id"],job["sync_job_id"])
-        with self.assertRaises(server.AppError):server.COACH_TOOL_DISPATCH.service().execute("get_sync_job",{"job_id":job["sync_job_id"]},**{**kwargs,"sync_job_ids":[]})
-
+        intent = {
+            **self.intent(
+                "start_provider_refresh", ["garmin_refresh"], ("get_sync_job",)
+            ),
+            "intent": "remote_sync",
+            "target_system": "garmin",
+        }
+        ids = []
+        kwargs = {
+            "intent": intent,
+            "conversation_id": "review-conversation",
+            "client_turn_id": "refresh",
+            "session_csrf_hash": "review-session",
+            "sync_job_ids": ids,
+        }
+        job = server.COACH_TOOL_DISPATCH.service().execute(
+            "start_provider_refresh", {}, **kwargs
+        )
+        status = server.COACH_TOOL_DISPATCH.service().execute(
+            "get_sync_job", {"job_id": job["sync_job_id"]}, **kwargs
+        )
+        self.assertEqual(status["job"]["id"], job["sync_job_id"])
+        with self.assertRaises(server.AppError):
+            server.COACH_TOOL_DISPATCH.service().execute(
+                "get_sync_job",
+                {"job_id": job["sync_job_id"]},
+                **{**kwargs, "sync_job_ids": []},
+            )
 
     def test_running_foreign_command_is_neither_executed_nor_closed(self):
         identity = {"session_key": coach_session_key("owner"), "status": "running"}
         with server.database_manager().unit_of_work() as db:
-            db.execute("INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES ('foreign', 'foreign', 'review-conversation', '{}', 'local', 'running', ?, ?, ?)", (json.dumps(identity), runtime_clock.utc_now(), runtime_clock.utc_now()))
+            db.execute(
+                "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES ('foreign', 'foreign', 'review-conversation', '{}', 'local', 'running', ?, ?, ?)",
+                (
+                    json.dumps(identity),
+                    runtime_clock.utc_now(),
+                    runtime_clock.utc_now(),
+                ),
+            )
         with self.assertRaises(server.AppError) as error:
-            server.COACH_TURNS.structured_turn_service().run("Edit", intent=self.intent("save_checkin", ["local_checkin"]), conversation_id="review-conversation", client_turn_id="foreign", session_csrf_hash="intruder", ai_provider=server.SETTINGS.selected_ai_provider())
+            server.COACH_TURNS.structured_turn_service().run(
+                "Edit",
+                intent=self.intent("save_checkin", ["local_checkin"]),
+                conversation_id="review-conversation",
+                client_turn_id="foreign",
+                session_csrf_hash="intruder",
+                ai_provider=server.SETTINGS.selected_ai_provider(),
+            )
         self.assertEqual(error.exception.status, 403)
         with server.database_manager().unit_of_work() as db:
-            self.assertEqual(db.execute("SELECT status FROM coach_commands WHERE client_turn_id='foreign'").fetchone()["status"], "running")
+            self.assertEqual(
+                db.execute(
+                    "SELECT status FROM coach_commands WHERE client_turn_id='foreign'"
+                ).fetchone()["status"],
+                "running",
+            )
 
-
-    def test_current_undo_token_enforces_session_hash_expiry_and_competing_execution(self):
-        template = server.PLANNING_DATA.workout_library().create_template({"name": "Protected synthetic", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
-        change = next(row for row in server.HISTORY.change_history_service().list() if row["entity_id"] == template["id"])
+    def test_current_undo_token_enforces_session_hash_expiry_and_competing_execution(
+        self,
+    ):
+        template = server.PLANNING_DATA.workout_library().create_template(
+            {
+                "name": "Protected synthetic",
+                "sport": "Run",
+                "description": "- 30m 60%",
+                "duration_minutes": 30,
+            }
+        )
+        change = next(
+            row
+            for row in server.HISTORY.change_history_service().list()
+            if row["entity_id"] == template["id"]
+        )
         proposal = self.history_preview(change["id"])["proposed_action"]
         with self.assertRaises(server.AppError):
-            server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "other-session")
-        confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
+            server.COACH_PROPOSALS.confirmation_service().confirm(
+                proposal["id"], "other-session"
+            )
+        confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(
+            proposal["id"], "review-session"
+        )
         token = confirmed["action_token"]
         with self.assertRaises(server.AppError):
-            server.COACH_PROPOSALS.execution_service().execute(token, "other-session", proposal["payload_hash"])
+            server.COACH_PROPOSALS.execution_service().execute(
+                token, "other-session", proposal["payload_hash"]
+            )
         with self.assertRaises(server.AppError):
-            server.COACH_PROPOSALS.execution_service().execute(token, "review-session", "0" * 64)
+            server.COACH_PROPOSALS.execution_service().execute(
+                token, "review-session", "0" * 64
+            )
         self.assertEqual(len(server.PLANNING_DATA.workout_library().list()), 1)
         barrier = threading.Barrier(2)
 
         def execute():
             barrier.wait(timeout=5)
             try:
-                server.COACH_PROPOSALS.execution_service().execute(token, "review-session", proposal["payload_hash"])
+                server.COACH_PROPOSALS.execution_service().execute(
+                    token, "review-session", proposal["payload_hash"]
+                )
                 return "applied"
             except server.AppError:
                 return "rejected"
@@ -293,37 +520,90 @@ class CoachReviewTests(unittest.TestCase):
             results = list(executor.map(lambda _: execute(), range(2)))
         self.assertCountEqual(results, ["applied", "rejected"])
         self.assertEqual(server.PLANNING_DATA.workout_library().list(), [])
-        template = server.PLANNING_DATA.workout_library().create_template({"name": "Expiry synthetic", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
-        change = next(row for row in server.HISTORY.change_history_service().list() if row["entity_id"] == template["id"])
+        template = server.PLANNING_DATA.workout_library().create_template(
+            {
+                "name": "Expiry synthetic",
+                "sport": "Run",
+                "description": "- 30m 60%",
+                "duration_minutes": 30,
+            }
+        )
+        change = next(
+            row
+            for row in server.HISTORY.change_history_service().list()
+            if row["entity_id"] == template["id"]
+        )
         proposal = self.history_preview(change["id"])["proposed_action"]
-        confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
-        with patch.object(server.time, "time", return_value=time.time() + COACH_ACTION_TTL_SECONDS + 1):
-            with self.assertRaises(server.AppError):
-                server.COACH_PROPOSALS.execution_service().execute(confirmed["action_token"], "review-session", proposal["payload_hash"])
+        confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(
+            proposal["id"], "review-session"
+        )
+        with (
+            patch.object(
+                server.time,
+                "time",
+                return_value=time.time() + COACH_ACTION_TTL_SECONDS + 1,
+            ),
+            self.assertRaises(server.AppError),
+        ):
+            server.COACH_PROPOSALS.execution_service().execute(
+                confirmed["action_token"], "review-session", proposal["payload_hash"]
+            )
         self.assertEqual(len(server.PLANNING_DATA.workout_library().list()), 1)
 
     def test_reload_preserves_pending_undo_but_changed_target_rejects_application(self):
-        template = server.PLANNING_DATA.workout_library().create_template({"name": "Synthetic original", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
-        change = next(row for row in server.HISTORY.change_history_service().list() if row["entity_id"] == template["id"])
+        template = server.PLANNING_DATA.workout_library().create_template(
+            {
+                "name": "Synthetic original",
+                "sport": "Run",
+                "description": "- 30m 60%",
+                "duration_minutes": 30,
+            }
+        )
+        change = next(
+            row
+            for row in server.HISTORY.change_history_service().list()
+            if row["entity_id"] == template["id"]
+        )
         proposal = self.history_preview(change["id"])["proposed_action"]
         history = server.HTTP_API.chat_history_page_service().page(
             session_csrf_hash="review-session"
         )
         self.assertEqual(history["proposed_actions"][0]["id"], proposal["id"])
         self.assertEqual(
-            server.HTTP_API.chat_history_page_service()
-            .page(session_csrf_hash="other-session")["proposed_actions"],
+            server.HTTP_API.chat_history_page_service().page(
+                session_csrf_hash="other-session"
+            )["proposed_actions"],
             [],
         )
-        server.PLANNING_DATA.workout_library().update(template["id"], {"action": "update", "name": "Synthetic changed"})
-        confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
+        server.PLANNING_DATA.workout_library().update(
+            template["id"], {"action": "update", "name": "Synthetic changed"}
+        )
+        confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(
+            proposal["id"], "review-session"
+        )
         with self.assertRaises(server.AppError):
-            server.COACH_PROPOSALS.execution_service().execute(confirmed["action_token"], "review-session", proposal["payload_hash"])
-        self.assertEqual(server.PLANNING_DATA.workout_library().list()[0]["name"], "Synthetic changed")
+            server.COACH_PROPOSALS.execution_service().execute(
+                confirmed["action_token"], "review-session", proposal["payload_hash"]
+            )
+        self.assertEqual(
+            server.PLANNING_DATA.workout_library().list()[0]["name"],
+            "Synthetic changed",
+        )
 
     def test_adaptive_apply_after_day_change_preserves_now_past_unit(self):
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{**self.workout(), "date": tomorrow, "description": "- 60m 60%", "duration_minutes": 60}])[0]
+        tomorrow = (
+            _local_datetime.now().astimezone().date() + timedelta(days=1)
+        ).isoformat()
+        planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [
+                {
+                    **self.workout(),
+                    "date": tomorrow,
+                    "description": "- 60m 60%",
+                    "duration_minutes": 60,
+                }
+            ]
+        )[0]
         server.ATHLETE_DATA.checkin().save({"soreness": 8})
         preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         self.assertTrue(preview["changes"])
@@ -333,11 +613,25 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(applied["status"], "stale")
         self.assertEqual(applied["updated"], 0)
         self.assertEqual(applied["stale"][0]["reason"], "past")
-        self.assertEqual(server.PLANNING_DATA.planned_unit().list()[0]["duration_minutes"], planned["duration_minutes"])
+        self.assertEqual(
+            server.PLANNING_DATA.planned_unit().list()[0]["duration_minutes"],
+            planned["duration_minutes"],
+        )
 
     def test_expired_proposal_gc_and_confirmation_serialize_without_losing_drafts(self):
-        template = server.PLANNING_DATA.workout_library().create_template({"name": "GC synthetic", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
-        change = next(row for row in server.HISTORY.change_history_service().list() if row["entity_id"] == template["id"])
+        template = server.PLANNING_DATA.workout_library().create_template(
+            {
+                "name": "GC synthetic",
+                "sport": "Run",
+                "description": "- 30m 60%",
+                "duration_minutes": 30,
+            }
+        )
+        change = next(
+            row
+            for row in server.HISTORY.change_history_service().list()
+            if row["entity_id"] == template["id"]
+        )
         expired = self.history_preview(change["id"])["proposed_action"]
         active = self.history_preview(change["id"])["proposed_action"]
         draft = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
@@ -346,7 +640,10 @@ class CoachReviewTests(unittest.TestCase):
             "draft",
         )
         with server.database_manager().unit_of_work() as db:
-            db.execute("UPDATE coach_action_proposals SET expires_at=? WHERE id=?", (time.time() - 1, expired["id"]))
+            db.execute(
+                "UPDATE coach_action_proposals SET expires_at=? WHERE id=?",
+                (time.time() - 1, expired["id"]),
+            )
         barrier = threading.Barrier(2)
 
         def collect():
@@ -357,7 +654,9 @@ class CoachReviewTests(unittest.TestCase):
         def confirm():
             barrier.wait(timeout=5)
             try:
-                server.COACH_PROPOSALS.confirmation_service().confirm(expired["id"], "review-session")
+                server.COACH_PROPOSALS.confirmation_service().confirm(
+                    expired["id"], "review-session"
+                )
                 return "accepted"
             except server.AppError:
                 return "rejected"
@@ -366,21 +665,60 @@ class CoachReviewTests(unittest.TestCase):
             gc_result, confirmation = executor.submit(collect), executor.submit(confirm)
             self.assertEqual(gc_result.result(), 1)
             self.assertEqual(confirmation.result(), "rejected")
-        self.assertEqual([item["id"] for item in server.COACH_PROPOSALS.read_service().current("review-session")], [active["id"]])
+        self.assertEqual(
+            [
+                item["id"]
+                for item in server.COACH_PROPOSALS.read_service().current(
+                    "review-session"
+                )
+            ],
+            [active["id"]],
+        )
         with server.database_manager().unit_of_work() as db:
-            self.assertEqual(db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (draft["artifact_id"],)).fetchone()["status"], "draft")
-
+            self.assertEqual(
+                db.execute(
+                    "SELECT status FROM coach_plan_artifacts WHERE id=?",
+                    (draft["artifact_id"],),
+                ).fetchone()["status"],
+                "draft",
+            )
 
     def test_explicit_reconfirmation_after_reload_rotates_only_unused_token(self):
-        template = server.PLANNING_DATA.workout_library().create_template({"name": "Token recovery", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
-        change = next(row for row in server.HISTORY.change_history_service().list() if row["entity_id"] == template["id"])
+        template = server.PLANNING_DATA.workout_library().create_template(
+            {
+                "name": "Token recovery",
+                "sport": "Run",
+                "description": "- 30m 60%",
+                "duration_minutes": 30,
+            }
+        )
+        change = next(
+            row
+            for row in server.HISTORY.change_history_service().list()
+            if row["entity_id"] == template["id"]
+        )
         proposal = self.history_preview(change["id"])["proposed_action"]
-        first = server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
-        self.assertEqual(server.COACH_PROPOSALS.read_service().current("review-session")[0]["status"], "ready")
-        second = server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
+        first = server.COACH_PROPOSALS.confirmation_service().confirm(
+            proposal["id"], "review-session"
+        )
+        self.assertEqual(
+            server.COACH_PROPOSALS.read_service().current("review-session")[0][
+                "status"
+            ],
+            "ready",
+        )
+        second = server.COACH_PROPOSALS.confirmation_service().confirm(
+            proposal["id"], "review-session"
+        )
         with self.assertRaises(server.AppError):
-            server.COACH_PROPOSALS.execution_service().execute(first["action_token"], "review-session", proposal["payload_hash"])
-        server.COACH_PROPOSALS.execution_service().execute(second["action_token"], "review-session", proposal["payload_hash"])
+            server.COACH_PROPOSALS.execution_service().execute(
+                first["action_token"], "review-session", proposal["payload_hash"]
+            )
+        server.COACH_PROPOSALS.execution_service().execute(
+            second["action_token"], "review-session", proposal["payload_hash"]
+        )
         with self.assertRaises(server.AppError):
-            server.COACH_PROPOSALS.confirmation_service().confirm(proposal["id"], "review-session")
+            server.COACH_PROPOSALS.confirmation_service().confirm(
+                proposal["id"], "review-session"
+            )
         self.assertEqual(server.PLANNING_DATA.workout_library().list(), [])

@@ -13,6 +13,7 @@ from backend.http_api.chat_post import ChatPostRoutes
 from backend.http_api.chat_stream import CoachChatStreamTransport
 from backend.http_api.coach_actions_post import CoachActionsPostRoutes
 from backend.http_api.diagnostics_delete_post import DiagnosticsDeletePostRoutes
+from backend.http_api.equipment_post import EquipmentPostRoutes
 from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.nutrition import NutritionPostRoutes
@@ -39,6 +40,7 @@ class HttpAuthenticatedPostRoutes:
     diagnostics_delete: DiagnosticsDeletePostRoutes
     nutrition: NutritionPostRoutes
     analysis: AnalysisRoutes | None = None
+    equipment: EquipmentPostRoutes | None = None
 
 
 class HttpPostDispatcher:
@@ -66,6 +68,7 @@ class HttpPostDispatcher:
         self._diagnostics_delete = authenticated_routes.diagnostics_delete
         self._nutrition = authenticated_routes.nutrition
         self._analysis = authenticated_routes.analysis
+        self._equipment = authenticated_routes.equipment
 
     def handle_before_auth(self, handler: Any, path: str) -> bool:
         return self._auth_routes.handle(handler, path) or self._restore_route.handle(
@@ -104,5 +107,7 @@ class HttpPostDispatcher:
         if self._diagnostics_delete.handle(handler, path):
             return
         if self._nutrition.handle(handler, path):
+            return
+        if self._equipment and self._equipment.handle(handler, path):
             return
         raise AppError(404, NOT_FOUND_ERROR)

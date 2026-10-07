@@ -622,12 +622,15 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         self.database_manager.close()
         self.temporary_directory.cleanup()
 
-    def new_service(self, *, config=None, client=None, lock=None):
+    def new_service(
+        self, *, config=None, client=None, lock=None, calendar_conflicts=None
+    ):
         kwargs = {"_lock": lock} if lock is not None else {}
         return WorkoutLibrarySyncService(
             config or self.config,
             lambda: client or self.client,
             self.state_service,
+            calendar_conflicts,
             **kwargs,
         )
 
@@ -787,6 +790,27 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
             self.service.sync_calendar_entry(LIBRARY_ID, {"date": "2026-10-01"})
 
         self.assertEqual(raised.exception.status, 502)
+        self.client.plan_library_workout.assert_not_called()
+
+    def test_sync_calendar_entry_rechecks_constraints_before_remote_write(self):
+        constraints = Mock(
+            constraints=Mock(
+                return_value=[{"constraint": "[NO_INTENSITY]", "updated_at": "sync-1"}]
+            )
+        )
+        service = self.new_service(calendar_conflicts=constraints)
+        workout = {
+            **self.workout(),
+            "date": "2026-10-01T08:00:00",
+            "external_id": "remote-1",
+        }
+
+        with self.assertRaises(AppError) as caught:
+            service.sync_calendar_entry(LIBRARY_ID, workout)
+
+        self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(caught.exception.reason, "plan_date_conflict")
+        constraints.constraints.assert_called_once_with(workout)
         self.client.plan_library_workout.assert_not_called()
 
     def test_sync_calendar_entry_rejects_invalid_provider_response(self):

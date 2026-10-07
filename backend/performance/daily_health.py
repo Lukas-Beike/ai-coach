@@ -27,6 +27,29 @@ GARMIN_DAILY_HEALTH_FIELDS = {
     ),
 }
 
+GARMIN_DAILY_EXPENDITURE_FIELDS = {
+    "active_kcal": (
+        "activeKilocalories",
+        "active_kilocalories",
+        "activeCalories",
+        "active_calories",
+        "activeCaloriesBurned",
+        "active_calories_burned",
+    ),
+    "resting_kcal": (
+        "bmrKilocalories",
+        "bmr_kilocalories",
+        "bmrCalories",
+        "bmr_calories",
+        "restingKilocalories",
+        "resting_kilocalories",
+        "restingCalories",
+        "resting_calories",
+        "basalMetabolicRateKilocalories",
+    ),
+    "total_kcal": GARMIN_DAILY_HEALTH_FIELDS["calories"],
+}
+
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
     if not isinstance(item, dict):
@@ -80,6 +103,51 @@ def garmin_daily_health_by_date(
     return health_by_date
 
 
+def garmin_daily_expenditure(
+    snapshot: dict[str, Any] | None, requested_date: str, current_date: date
+) -> dict[str, Any]:
+    """Return Garmin's measured daily calorie components for one local date.
+
+    Total expenditure is only reported when Garmin supplied a total directly;
+    active and resting components are not summed to manufacture a total.
+    """
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+    values: dict[str, float | int | None] = {
+        field: None for field in GARMIN_DAILY_EXPENDITURE_FIELDS
+    }
+    try:
+        day = date.fromisoformat(requested_date)
+    except ValueError:
+        day = None
+    is_future = day is None or day > current_date
+    _expenditure_values(snapshot, requested_date, is_future, values)
+    has_measurement = any(value is not None for value in values.values())
+    source_freshness = snapshot.get("source_freshness")
+    if not isinstance(source_freshness, dict):
+        source_freshness = {}
+    freshness = source_freshness.get("daily_stats")
+    if not isinstance(freshness, dict):
+        freshness = {}
+    result = {
+        **values,
+        "source": GARMIN_PERFORMANCE_SOURCE if has_measurement else None,
+        "measured_date": requested_date if has_measurement else None,
+        "freshness": freshness.get("freshness", "unknown"),
+        "fetched_at": freshness.get("fetched_at"),
+        "synced_at": snapshot.get("synced_at"),
+        "provisional": day == current_date,
+        "status": "measured" if has_measurement else "unavailable",
+    }
+    if has_measurement:
+        result.update(
+            performance_freshness.measurement_age(requested_date, current_date)
+        )
+    else:
+        result.update({"measurement_status": "unknown", "measurement_age_days": None})
+    return result
+
+
 def garmin_daily_health_metrics(
     snapshot: dict[str, Any], days: int, end_date: date, current_date: date
 ) -> dict[str, dict[str, Any]]:
@@ -102,10 +170,10 @@ def garmin_daily_health_metrics(
         "floors": "Stockwerke/Tag",
         "calories": "kcal/Tag",
     }
-    result = {}
+    result: dict[str, dict[str, Any]] = {}
     for metric_name, numbers in values.items():
         if not numbers:
-            average = None
+            average: float | int | None = None
         elif metric_name in {"steps", "floors"}:
             average = round(sum(numbers) / len(numbers))
         else:
@@ -122,3 +190,20 @@ def garmin_daily_health_metrics(
             current_date,
         )
     return result
+
+
+def _expenditure_values(
+    snapshot: dict[str, Any],
+    requested_date: str,
+    is_future: bool,
+    values: dict[str, Any],
+) -> None:
+    for record_date, record in performance_recovery.dated_garmin_recovery_records(
+        snapshot.get("daily_stats")
+    ):
+        if record_date != requested_date or is_future:
+            continue
+        for field, keys in GARMIN_DAILY_EXPENDITURE_FIELDS.items():
+            value = _as_number(_first_present(record, keys))
+            if value is not None and value >= 0:
+                values[field] = value

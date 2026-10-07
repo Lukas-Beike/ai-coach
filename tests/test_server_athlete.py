@@ -1,18 +1,20 @@
 """Server integration tests for athlete."""
 
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from server_test_support import ServerTestCase, server
+
 from backend.athlete.checkins import normalize_checkin
-from server_test_support import server, ServerTestCase
 
 
 class ServerAthleteTests(ServerTestCase):
-
     def test_profile_only_accepts_known_fields_and_trims(self):
-        profile = server.normalize_profile({"name": "  Ada  ", "goals": "Finish strong", "admin": True})
+        profile = server.normalize_profile(
+            {"name": "  Ada  ", "goals": "Finish strong", "admin": True}
+        )
         self.assertEqual(profile["name"], "Ada")
         self.assertNotIn("admin", profile)
 
@@ -25,22 +27,31 @@ class ServerAthleteTests(ServerTestCase):
         self.assertEqual(getattr(server.ATHLETE_CLOCK.now().tzinfo, "key", None), "UTC")
 
     def test_structured_weekly_availability_is_not_part_of_profile(self):
-        profile = server.normalize_profile({
-            "availability": "Dienstag abends möglich",
-            "availability_schedule": [{"weekday": 1, "late": {"start": "17:30", "end": "20:00"}}],
-        }, validate_timezone=True)
+        profile = server.normalize_profile(
+            {
+                "availability": "Dienstag abends möglich",
+                "availability_schedule": [
+                    {"weekday": 1, "late": {"start": "17:30", "end": "20:00"}}
+                ],
+            },
+            validate_timezone=True,
+        )
         self.assertEqual(profile["availability"], "Dienstag abends möglich")
         self.assertNotIn("availability_schedule", profile)
-        server.ATHLETE_DATA.profile().save({
-            "availability": profile["availability"],
-            "availability_schedule": [{"weekday": 1, "max_minutes": 90}],
-        })
+        server.ATHLETE_DATA.profile().save(
+            {
+                "availability": profile["availability"],
+                "availability_schedule": [{"weekday": 1, "max_minutes": 90}],
+            }
+        )
         self.assertNotIn("availability_schedule", server.ATHLETE_DATA.profile().get())
-        context = server.COACH_CONTEXT.structured_context_service().build({"recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})
+        context = server.COACH_CONTEXT.structured_context_service().build(
+            {"recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
+        )
         self.assertNotIn("weekly_availability", context)
 
     def test_checkin_uses_local_date_and_rejects_future_dates(self):
-        fixed_now = datetime(2026, 8, 31, 23, 30)
+        fixed_now = datetime(2026, 8, 31, 23, 30, tzinfo=timezone.utc)
         with patch.object(server.ATHLETE_CLOCK, "now", return_value=fixed_now):
             self.assertEqual(
                 normalize_checkin({}, today=fixed_now.date())["checkin_date"],
@@ -51,8 +62,14 @@ class ServerAthleteTests(ServerTestCase):
         self.assertEqual(raised.exception.status, 400)
 
     def test_profile_save_resets_button_before_follow_up_refresh(self):
-        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
-        save_profile = app[app.index("async function saveProfile"):app.index("function registerServiceWorker")]
+        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        save_profile = app[
+            app.index("async function saveProfile") : app.index(
+                "function registerServiceWorker"
+            )
+        ]
         self.assertIn(
             'button.removeAttribute("aria-busy");\n      button.textContent = buttonLabel;\n    }\n    await load();',
             save_profile,

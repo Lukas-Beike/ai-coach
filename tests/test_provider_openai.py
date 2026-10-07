@@ -2,8 +2,7 @@ import io
 import json
 import threading
 import unittest
-from types import SimpleNamespace
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from unittest import mock
 from urllib.error import HTTPError
 
@@ -47,7 +46,16 @@ _UNSET = object()
 
 
 class _StreamResponse:
-    def __init__(self, lines, *, on_iter=None, close_event=None, status=_UNSET, code=_UNSET, headers=_UNSET):
+    def __init__(
+        self,
+        lines,
+        *,
+        on_iter=None,
+        close_event=None,
+        status=_UNSET,
+        code=_UNSET,
+        headers=_UNSET,
+    ):
         self._lines = iter(lines)
         self._index = 0
         self._on_iter = on_iter
@@ -155,27 +163,72 @@ class _DiagnosticCapture:
 
 
 class OpenAIProviderErrorTests(unittest.TestCase):
-    def test_real_stream_capture_correlates_request_failure_and_removes_secrets_before_storage(self):
+    def test_real_stream_capture_correlates_request_failure_and_removes_secrets_before_storage(
+        self,
+    ):
         class ValidatingState(_StreamStateService):
             def validate_openai_response(self, path, result):
-                raise AppError(502, "Synthetic response failure", reason="response_failed")
+                raise AppError(
+                    502, "Synthetic response failure", reason="response_failed"
+                )
 
         values = {}
-        capture = DiagnosticCapture(values.get, values.__setitem__, Redactor(lambda: SimpleNamespace(openai_api_key="synthetic-provider-credential")))
-        response = {"id": "resp_synthetic_failure", "status": "failed", "error": {
-            "code": "unknown_schema_failure", "message": "Synthetic schema rejected; synthetic-provider-credential", "param": "tools[0]",
-        }}
-        lines = [b"event: response.failed\n", ("data: " + json.dumps({"response": response}) + "\n").encode(), b"\n"]
-        client = self._stream_client(lambda *_args, **_kwargs: _StreamResponse(lines), state=ValidatingState(), capture=capture)
+        capture = DiagnosticCapture(
+            values.get,
+            values.__setitem__,
+            Redactor(
+                lambda: SimpleNamespace(openai_api_key="synthetic-provider-credential")
+            ),
+        )
+        response = {
+            "id": "resp_synthetic_failure",
+            "status": "failed",
+            "error": {
+                "code": "unknown_schema_failure",
+                "message": "Synthetic schema rejected; synthetic-provider-credential",
+                "param": "tools[0]",
+            },
+        }
+        lines = [
+            b"event: response.failed\n",
+            ("data: " + json.dumps({"response": response}) + "\n").encode(),
+            b"\n",
+        ]
+        client = self._stream_client(
+            lambda *_args, **_kwargs: _StreamResponse(lines),
+            state=ValidatingState(),
+            capture=capture,
+        )
         with self.assertRaises(AppError):
-            client.stream({"input": "Analysiere meine letzte Einheit", "instructions": "Synthetic local profile", "tools": [{"name": "get_activity_details"}]}, lambda _text: None)
+            client.stream(
+                {
+                    "input": "Analysiere meine letzte Einheit",
+                    "instructions": "Synthetic local profile",
+                    "tools": [{"name": "get_activity_details"}],
+                },
+                lambda _text: None,
+            )
         entries = capture.entries()
-        started = next(entry["details"] for entry in entries if entry["event"] == "openai_stream_started")
-        failed = next(entry["details"] for entry in entries if entry["event"] == "openai_stream_failed")
-        transport = next(entry["details"] for entry in entries if entry["event"] == "openai_stream_transport")
+        started = next(
+            entry["details"]
+            for entry in entries
+            if entry["event"] == "openai_stream_started"
+        )
+        failed = next(
+            entry["details"]
+            for entry in entries
+            if entry["event"] == "openai_stream_failed"
+        )
+        transport = next(
+            entry["details"]
+            for entry in entries
+            if entry["event"] == "openai_stream_transport"
+        )
         self.assertEqual(started["diagnostic_id"], failed["diagnostic_id"])
         self.assertEqual(started["diagnostic_id"], transport["diagnostic_id"])
-        self.assertEqual((started["attempt"], failed["attempt"], transport["attempt"]), (1, 1, 1))
+        self.assertEqual(
+            (started["attempt"], failed["attempt"], transport["attempt"]), (1, 1, 1)
+        )
         self.assertEqual(len(started["request_sha256"]), 64)
         self.assertEqual(
             started["request_shape"],
@@ -191,17 +244,23 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(transport["event_counts"], {"response.failed": 1})
         self.assertEqual(failed["provider_error"]["code"], "unknown_schema_failure")
         self.assertEqual(failed["provider_error_parameter"], "tools[0]")
-        self.assertNotIn("synthetic-provider-credential", values["diagnostic_capture_entries"])
+        self.assertNotIn(
+            "synthetic-provider-credential", values["diagnostic_capture_entries"]
+        )
 
     def test_request_with_conversation_retry_returns_without_retry(self):
         calls = []
 
-        result = request_with_conversation_retry(lambda: calls.append("request") or {"ok": True})
+        result = request_with_conversation_retry(
+            lambda: calls.append("request") or {"ok": True}
+        )
 
         self.assertEqual(result, {"ok": True})
         self.assertEqual(calls, ["request"])
 
-    def test_request_with_conversation_retry_retries_lock_with_delays_and_notification(self):
+    def test_request_with_conversation_retry_retries_lock_with_delays_and_notification(
+        self,
+    ):
         locked = AppError(409, "locked", reason="conversation_locked")
         outcomes = iter((locked, locked, {"ok": True}))
         waits = []
@@ -227,7 +286,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         error = AppError(400, "invalid", reason="conversation_state_invalid")
 
         with self.assertRaises(AppError) as raised:
-            request_with_conversation_retry(lambda: (_ for _ in ()).throw(error), wait=self.fail)
+            request_with_conversation_retry(
+                lambda: (_ for _ in ()).throw(error), wait=self.fail
+            )
 
         self.assertIs(raised.exception, error)
 
@@ -245,7 +306,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertIs(raised.exception, error)
         self.assertEqual(waits, [1])
 
-    def test_request_with_conversation_retry_cancels_before_wait_with_original_cause(self):
+    def test_request_with_conversation_retry_cancels_before_wait_with_original_cause(
+        self,
+    ):
         error = AppError(409, "locked", reason="conversation_locked")
         waits = []
 
@@ -266,7 +329,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertIs(raised.exception.__cause__, error)
         self.assertEqual(waits, [])
 
-    def test_request_with_conversation_retry_cancels_during_event_wait_with_original_cause(self):
+    def test_request_with_conversation_retry_cancels_during_event_wait_with_original_cause(
+        self,
+    ):
         error = AppError(409, "locked", reason="conversation_locked")
         waits = []
 
@@ -296,7 +361,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
     def test_request_with_conversation_retry_requires_positive_max_attempts(self):
         for max_attempts in (0, -1):
             with self.subTest(max_attempts=max_attempts), self.assertRaises(ValueError):
-                request_with_conversation_retry(lambda: {"ok": True}, max_attempts=max_attempts)
+                request_with_conversation_retry(
+                    lambda: {"ok": True}, max_attempts=max_attempts
+                )
 
     def test_response_id_trims_and_accepts_ascii_boundary_values(self):
         self.assertEqual(response_id("  resp_a  "), "resp_a")
@@ -316,7 +383,10 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(AppError) as raised:
                 response_id(value)
             self.assertEqual(raised.exception.status, 502)
-            self.assertEqual(raised.exception.message, "OpenAI hat keine gültige Response-ID zurückgegeben.")
+            self.assertEqual(
+                raised.exception.message,
+                "OpenAI hat keine gültige Response-ID zurückgegeben.",
+            )
             self.assertEqual(raised.exception.reason, "invalid_response")
 
     def test_poll_background_response_returns_terminal_initial_response(self):
@@ -326,7 +396,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         result = poll_background_response(
             response,
             retrieve=lambda response_id: retrieve_calls.append(response_id),
-            cancel=lambda response_id: self.fail("terminal response must not be cancelled"),
+            cancel=lambda response_id: self.fail(
+                "terminal response must not be cancelled"
+            ),
             poll_seconds=1,
             max_seconds=5,
         )
@@ -335,11 +407,13 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(retrieve_calls, [])
 
     def test_poll_background_response_polls_until_terminal_with_casefold_status(self):
-        responses = iter((
-            {"status": "IN_PROGRESS"},
-            {"status": "Queued"},
-            {"status": "completed", "answer": "done"},
-        ))
+        responses = iter(
+            (
+                {"status": "IN_PROGRESS"},
+                {"status": "Queued"},
+                {"status": "completed", "answer": "done"},
+            )
+        )
         retrieved_ids = []
         waits = []
         clock = iter((10.0, 10.1, 10.2, 10.3))
@@ -351,7 +425,10 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         result = poll_background_response(
             {"id": "resp_poll", "status": "queued"},
-            retrieve=lambda response_id: (retrieved_ids.append(response_id), next(responses))[1],
+            retrieve=lambda response_id: (
+                retrieved_ids.append(response_id),
+                next(responses),
+            )[1],
             cancel=lambda _response_id: self.fail("polling must not be cancelled"),
             cancel_event=Event(),
             poll_seconds=2,
@@ -374,7 +451,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             poll_background_response(
                 {"id": "resp_cancel", "status": "in_progress"},
-                retrieve=lambda _response_id: self.fail("cancelled response must not be retrieved"),
+                retrieve=lambda _response_id: self.fail(
+                    "cancelled response must not be retrieved"
+                ),
                 cancel=cancelled.append,
                 cancel_event=Event(),
                 poll_seconds=3,
@@ -384,7 +463,14 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         self.assertEqual(cancelled, ["resp_cancel"])
         self.assertEqual(waits, [3])
-        self.assertEqual((raised.exception.status, raised.exception.reason, raised.exception.message), (499, "chat_cancelled", "Die Coach-Anfrage wurde abgebrochen."))
+        self.assertEqual(
+            (
+                raised.exception.status,
+                raised.exception.reason,
+                raised.exception.message,
+            ),
+            (499, "chat_cancelled", "Die Coach-Anfrage wurde abgebrochen."),
+        )
 
     def test_poll_background_response_cancels_when_event_is_set_after_wait(self):
         class Event:
@@ -404,7 +490,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             poll_background_response(
                 {"id": "resp_cancel_after_wait", "status": "queued"},
-                retrieve=lambda _response_id: self.fail("cancelled response must not be retrieved"),
+                retrieve=lambda _response_id: self.fail(
+                    "cancelled response must not be retrieved"
+                ),
                 cancel=cancelled.append,
                 cancel_event=Event(),
                 poll_seconds=3,
@@ -421,10 +509,15 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         cancelled = []
         sleeps = []
 
-        with mock.patch("backend.providers.openai.time.sleep", sleeps.append), self.assertRaises(AppError) as raised:
+        with (
+            mock.patch("backend.providers.openai.time.sleep", sleeps.append),
+            self.assertRaises(AppError) as raised,
+        ):
             poll_background_response(
                 {"id": "resp_timeout", "status": "queued"},
-                retrieve=lambda _response_id: self.fail("timed out response must not be retrieved"),
+                retrieve=lambda _response_id: self.fail(
+                    "timed out response must not be retrieved"
+                ),
                 cancel=cancelled.append,
                 poll_seconds=1,
                 max_seconds=1,
@@ -433,39 +526,67 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         self.assertEqual(sleeps, [1])
         self.assertEqual(cancelled, ["resp_timeout"])
-        self.assertEqual((raised.exception.status, raised.exception.reason, raised.exception.message), (504, "provider_timeout", "Die Hintergrundplanung hat das Zeitlimit überschritten."))
+        self.assertEqual(
+            (
+                raised.exception.status,
+                raised.exception.reason,
+                raised.exception.message,
+            ),
+            (
+                504,
+                "provider_timeout",
+                "Die Hintergrundplanung hat das Zeitlimit überschritten.",
+            ),
+        )
 
     def test_poll_background_response_preserves_timeout_when_cancel_fails(self):
         def cancel(_response_id):
             raise RuntimeError("remote cancellation failed")
 
-        with mock.patch("backend.providers.openai.time.sleep"), self.assertRaises(AppError) as raised:
+        with (
+            mock.patch("backend.providers.openai.time.sleep"),
+            self.assertRaises(AppError) as raised,
+        ):
             poll_background_response(
                 {"id": "resp_cancel_failure", "status": "queued"},
-                retrieve=lambda _response_id: self.fail("timed out response must not be retrieved"),
+                retrieve=lambda _response_id: self.fail(
+                    "timed out response must not be retrieved"
+                ),
                 cancel=cancel,
                 poll_seconds=1,
                 max_seconds=0,
                 monotonic=lambda: 1,
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (504, "provider_timeout"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (504, "provider_timeout"),
+        )
 
     def test_poll_background_response_rejects_invalid_initial_response_id(self):
         with self.assertRaises(AppError) as raised:
             poll_background_response(
                 {"id": "not-a-response-id", "status": "completed"},
-                retrieve=lambda _response_id: self.fail("invalid response must not be retrieved"),
-                cancel=lambda _response_id: self.fail("invalid response must not be cancelled"),
+                retrieve=lambda _response_id: self.fail(
+                    "invalid response must not be retrieved"
+                ),
+                cancel=lambda _response_id: self.fail(
+                    "invalid response must not be cancelled"
+                ),
                 poll_seconds=1,
                 max_seconds=5,
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (502, "invalid_response"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (502, "invalid_response"),
+        )
 
     def test_responses_payload_removes_internal_provider_without_mutating_mapping(self):
         marker = object()
-        payload = MappingProxyType({"_ai_provider": "openai", "model": "gpt-test", "marker": marker})
+        payload = MappingProxyType(
+            {"_ai_provider": "openai", "model": "gpt-test", "marker": marker}
+        )
         result = responses_payload(payload, thinking_level="medium")
         self.assertEqual(result["model"], "gpt-test")
         self.assertIs(result["marker"], marker)
@@ -473,7 +594,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(payload["_ai_provider"], "openai")
         self.assertIsNot(result, payload)
 
-    def test_responses_payload_defaults_reasoning_and_preserves_explicit_reasoning(self):
+    def test_responses_payload_defaults_reasoning_and_preserves_explicit_reasoning(
+        self,
+    ):
         self.assertEqual(
             responses_payload({"input": "hello"}, thinking_level="high")["reasoning"],
             {"effort": "high"},
@@ -490,26 +613,43 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertFalse(streamed["background"])
         self.assertFalse(streamed["store"])
 
-        background = responses_payload(payload, thinking_level="medium", background=True)
+        background = responses_payload(
+            payload, thinking_level="medium", background=True
+        )
         self.assertFalse(background["stream"])
         self.assertTrue(background["background"])
         self.assertTrue(background["store"])
-        self.assertEqual(payload, {"stream": False, "background": False, "store": False})
+        self.assertEqual(
+            payload, {"stream": False, "background": False, "store": False}
+        )
 
     def test_endpoint_joins_base_path_and_normalizes_api_path(self):
         self.assertEqual(
-            endpoint("https://foundry.example.invalid/openai/v1/", "/responses", default_base_url="https://api.openai.com/v1"),
+            endpoint(
+                "https://foundry.example.invalid/openai/v1/",
+                "/responses",
+                default_base_url="https://api.openai.com/v1",
+            ),
             "https://foundry.example.invalid/openai/v1/responses",
         )
         self.assertEqual(
-            endpoint("https://foundry.example.invalid/openai/v1", "conversations/abc", default_base_url="https://api.openai.com/v1"),
+            endpoint(
+                "https://foundry.example.invalid/openai/v1",
+                "conversations/abc",
+                default_base_url="https://api.openai.com/v1",
+            ),
             "https://foundry.example.invalid/openai/v1/conversations/abc",
         )
 
     def test_endpoint_uses_default_for_empty_base_and_rejects_unsafe_base_urls(self):
         default = "https://api.openai.com/v1"
-        self.assertEqual(endpoint("", "responses", default_base_url=default), default + "/responses")
-        self.assertEqual(endpoint("   ", "responses", default_base_url=default), default + "/responses")
+        self.assertEqual(
+            endpoint("", "responses", default_base_url=default), default + "/responses"
+        )
+        self.assertEqual(
+            endpoint("   ", "responses", default_base_url=default),
+            default + "/responses",
+        )
         for invalid in (
             "https://user:password@foundry.example.invalid/openai/v1",
             "https://foundry.example.invalid/openai/v1?api-version=2024-10-21",
@@ -537,7 +677,11 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             )
         )
         self.assertEqual(deltas, ["Hallo ☃"])
-        self.assertIsNone(consume_sse_event(['{"delta":""}'], "response.output_text.delta", deltas.append))
+        self.assertIsNone(
+            consume_sse_event(
+                ['{"delta":""}'], "response.output_text.delta", deltas.append
+            )
+        )
         self.assertEqual(deltas, ["Hallo ☃"])
 
     def test_consume_sse_event_reports_trimmed_response_ids(self):
@@ -555,29 +699,49 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(response_ids, ["resp_123", "resp_123"])
 
     def test_consume_sse_event_returns_all_final_response_states(self):
-        for event_name in ("response.completed", "response.incomplete", "response.failed"):
+        for event_name in (
+            "response.completed",
+            "response.incomplete",
+            "response.failed",
+        ):
             with self.subTest(event_name=event_name):
-                event = {"response": {"id": "resp_123", "status": event_name.removeprefix("response.")}}
+                event = {
+                    "response": {
+                        "id": "resp_123",
+                        "status": event_name.removeprefix("response."),
+                    }
+                }
                 self.assertEqual(
                     consume_sse_event([json.dumps(event)], event_name, lambda _: None),
                     event["response"],
                 )
 
     def test_consume_sse_event_returns_provider_error_events_for_diagnostics(self):
-        event = {"type": "error", "code": "model_not_found", "message": "private provider detail"}
-        self.assertEqual(consume_sse_event([json.dumps(event)], "error", lambda _: None), event)
+        event = {
+            "type": "error",
+            "code": "model_not_found",
+            "message": "private provider detail",
+        }
+        self.assertEqual(
+            consume_sse_event([json.dumps(event)], "error", lambda _: None), event
+        )
         self.assertEqual(response_failure_reason("/responses", event), "response_error")
 
     def test_consume_sse_event_rejects_invalid_json_and_non_objects(self):
         expected_message = "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben."
         for data_lines in (["{"], ["[]"]):
-            with self.subTest(data_lines=data_lines), self.assertRaises(AppError) as raised:
+            with (
+                self.subTest(data_lines=data_lines),
+                self.assertRaises(AppError) as raised,
+            ):
                 consume_sse_event(data_lines, "", lambda _: None)
             self.assertEqual(raised.exception.status, 502)
             self.assertEqual(raised.exception.message, expected_message)
             self.assertEqual(raised.exception.reason, "invalid_response")
 
-    def test_read_stream_response_returns_final_response_deltas_ids_and_byte_count(self):
+    def test_read_stream_response_returns_final_response_deltas_ids_and_byte_count(
+        self,
+    ):
         lines = [
             b"event: response.created\n",
             b'data: {"response":{"id":"resp_123"}}\n',
@@ -597,7 +761,12 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             on_text_delta=deltas.append,
             on_response_id=response_ids.append,
         )
-        self.assertEqual(result, StreamReadResult({"id": "resp_123", "status": "completed"}, sum(map(len, lines))))
+        self.assertEqual(
+            result,
+            StreamReadResult(
+                {"id": "resp_123", "status": "completed"}, sum(map(len, lines))
+            ),
+        )
         self.assertEqual(deltas, ["Hallo"])
         self.assertEqual(response_ids, ["resp_123"])
 
@@ -607,7 +776,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             b'data: {"delta":"trailing"}\n',
         ]
         deltas = []
-        result = read_stream_response(lines, max_bytes=1000, on_text_delta=deltas.append)
+        result = read_stream_response(
+            lines, max_bytes=1000, on_text_delta=deltas.append
+        )
         self.assertIsNone(result.response)
         self.assertEqual(result.response_bytes, sum(map(len, lines)))
         self.assertEqual(deltas, ["trailing"])
@@ -615,7 +786,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
     def test_read_stream_response_records_terminal_type_from_data_only_event(self):
         state = StreamReadState()
         result = read_stream_response(
-            [b'data: {"type":"response.failed","response":{"id":"resp_123","status":"failed"}}\n'],
+            [
+                b'data: {"type":"response.failed","response":{"id":"resp_123","status":"failed"}}\n'
+            ],
             max_bytes=1000,
             on_text_delta=lambda _: None,
             state=state,
@@ -632,14 +805,19 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 raise AssertionError("cancelled response must not be iterated")
 
         with self.assertRaises(ProviderRequestCancelled):
-            read_stream_response(UnreadResponse(), max_bytes=10, cancel_event=cancel_event, on_text_delta=lambda _: None)
+            read_stream_response(
+                UnreadResponse(),
+                max_bytes=10,
+                cancel_event=cancel_event,
+                on_text_delta=lambda _: None,
+            )
 
     def test_read_stream_response_raises_when_cancelled_during_iteration(self):
         cancel_event = threading.Event()
 
         class CancellingResponse:
             def __init__(self):
-                self._lines = iter((b"data: {\"delta\":\"first\"}\n", b"\n"))
+                self._lines = iter((b'data: {"delta":"first"}\n', b"\n"))
 
             def __iter__(self):
                 return self
@@ -650,12 +828,22 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 return line
 
         with self.assertRaises(ProviderRequestCancelled):
-            read_stream_response(CancellingResponse(), max_bytes=1000, cancel_event=cancel_event, on_text_delta=lambda _: None)
+            read_stream_response(
+                CancellingResponse(),
+                max_bytes=1000,
+                cancel_event=cancel_event,
+                on_text_delta=lambda _: None,
+            )
 
     def test_read_stream_response_rejects_oversized_stream(self):
         state = StreamReadState()
-        with self.assertRaisesRegex(ProviderResponseTooLarge, "^provider response exceeds configured size limit$"):
-            read_stream_response([b"data: {}\n"], max_bytes=1, on_text_delta=lambda _: None, state=state)
+        with self.assertRaisesRegex(
+            ProviderResponseTooLarge,
+            "^provider response exceeds configured size limit$",
+        ):
+            read_stream_response(
+                [b"data: {}\n"], max_bytes=1, on_text_delta=lambda _: None, state=state
+            )
         self.assertEqual(state.response_bytes, len(b"data: {}\n"))
 
     def test_read_stream_response_preserves_iterator_exception(self):
@@ -669,7 +857,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 raise failure
 
         with self.assertRaises(RuntimeError) as raised:
-            read_stream_response(FailingResponse(), max_bytes=1000, on_text_delta=lambda _: None)
+            read_stream_response(
+                FailingResponse(), max_bytes=1000, on_text_delta=lambda _: None
+            )
         self.assertIs(raised.exception, failure)
 
     def test_request_stream_response_returns_result_without_status_or_headers(self):
@@ -695,7 +885,12 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             on_response_id=response_ids.append,
             opener=lambda request, timeout: response,
         )
-        self.assertEqual(result, StreamReadResult({"id": "resp_123", "status": "completed"}, sum(map(len, lines))))
+        self.assertEqual(
+            result,
+            StreamReadResult(
+                {"id": "resp_123", "status": "completed"}, sum(map(len, lines))
+            ),
+        )
         self.assertEqual(deltas, ["Hallo"])
         self.assertEqual(response_ids, ["resp_123"])
         self.assertTrue(response.closed)
@@ -706,8 +901,12 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         response = _StreamResponse([b"\n"], status=202, code=203, headers=headers)
         state = StreamReadState()
         request_stream_response(
-            object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None,
-            opener=lambda *_args, **_kwargs: response, state=state,
+            object(),
+            timeout=3,
+            max_bytes=1000,
+            on_text_delta=lambda _delta: None,
+            opener=lambda *_args, **_kwargs: response,
+            state=state,
         )
         self.assertEqual(state.status, 202)
         self.assertIs(state.headers, headers)
@@ -717,8 +916,12 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 response = _StreamResponse([b"\n"], **response_kwargs)
                 state = StreamReadState()
                 request_stream_response(
-                    object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None,
-                    opener=lambda *_args, _response=response, **_kwargs: _response, state=state,
+                    object(),
+                    timeout=3,
+                    max_bytes=1000,
+                    on_text_delta=lambda _delta: None,
+                    opener=lambda *_args, _response=response, **_kwargs: _response,
+                    state=state,
                 )
                 self.assertEqual(state.status, expected_status)
                 self.assertIsNone(state.headers)
@@ -810,7 +1013,11 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         with self.assertRaises(RuntimeError) as raised:
             request_stream_response(
-                object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None, opener=opener
+                object(),
+                timeout=3,
+                max_bytes=1000,
+                on_text_delta=lambda _delta: None,
+                opener=opener,
             )
         self.assertIs(raised.exception, expected)
 
@@ -827,7 +1034,10 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         state = StreamReadState()
         with self.assertRaises(RuntimeError) as raised:
             request_stream_response(
-                object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None,
+                object(),
+                timeout=3,
+                max_bytes=1000,
+                on_text_delta=lambda _delta: None,
                 opener=lambda *_args, **_kwargs: response,
                 state=state,
             )
@@ -839,7 +1049,10 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         unicode_state = StreamReadState()
         with self.assertRaises(UnicodeDecodeError):
             request_stream_response(
-                object(), timeout=3, max_bytes=1000, on_text_delta=lambda _delta: None,
+                object(),
+                timeout=3,
+                max_bytes=1000,
+                on_text_delta=lambda _delta: None,
                 opener=lambda *_args, **_kwargs: unicode_response,
                 state=unicode_state,
             )
@@ -849,7 +1062,10 @@ class OpenAIProviderErrorTests(unittest.TestCase):
     def test_request_stream_response_preserves_size_limit_and_byte_state(self):
         state = StreamReadState()
         response = _StreamResponse([b"data: {}\n"])
-        with self.assertRaisesRegex(ProviderResponseTooLarge, "^provider response exceeds configured size limit$"):
+        with self.assertRaisesRegex(
+            ProviderResponseTooLarge,
+            "^provider response exceeds configured size limit$",
+        ):
             request_stream_response(
                 object(),
                 timeout=3,
@@ -862,12 +1078,28 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertTrue(response.closed)
 
     def test_response_parsers_remain_pure(self):
-        self.assertEqual(response_failure_reason("/responses", None), "invalid_response")
-        self.assertEqual(response_failure_reason("/responses", {"status": "failed"}), "response_failed")
-        self.assertEqual(response_failure_reason("/models", {"status": "unknown"}), None)
+        self.assertEqual(
+            response_failure_reason("/responses", None), "invalid_response"
+        )
+        self.assertEqual(
+            response_failure_reason("/responses", {"status": "failed"}),
+            "response_failed",
+        )
+        self.assertEqual(
+            response_failure_reason("/models", {"status": "unknown"}), None
+        )
         self.assertEqual(response_text({"output_text": "  hello  "}), "hello")
         self.assertEqual(
-            response_text({"output": [{"type": "message", "content": [{"type": "output_text", "text": "hi"}]}]}),
+            response_text(
+                {
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "hi"}],
+                        }
+                    ]
+                }
+            ),
             "hi",
         )
 
@@ -875,18 +1107,35 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         result = {"status": "completed", "output_text": "hello"}
         self.assertIs(validate_response("/responses", result), result)
         non_responses_result = {"status": "unknown"}
-        self.assertIs(validate_response("/models", non_responses_result), non_responses_result)
+        self.assertIs(
+            validate_response("/models", non_responses_result), non_responses_result
+        )
 
     def test_validate_response_rejects_wire_failures_with_safe_messages(self):
         cases = (
-            ("/responses", None, "invalid_response", "OpenAI response is not a JSON object."),
             (
                 "/responses",
-                {"error": {"code": "invalid_request_error", "message": "private provider detail"}},
+                None,
+                "invalid_response",
+                "OpenAI response is not a JSON object.",
+            ),
+            (
+                "/responses",
+                {
+                    "error": {
+                        "code": "invalid_request_error",
+                        "message": "private provider detail",
+                    }
+                },
                 "response_error",
                 "OpenAI returned an error response.",
             ),
-            ("/responses", {"status": "failed"}, "response_failed", "OpenAI did not complete the coach response."),
+            (
+                "/responses",
+                {"status": "failed"},
+                "response_failed",
+                "OpenAI did not complete the coach response.",
+            ),
             (
                 "/responses",
                 {"status": "unexpected"},
@@ -913,9 +1162,13 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 "message": "private provider detail",
             },
         }
-        self.assertEqual(response_failure_reason("/responses", response), "response_failed")
+        self.assertEqual(
+            response_failure_reason("/responses", response), "response_failed"
+        )
         with self.assertRaises(OpenAIResponseFailure) as raised:
-            validate_response("/responses", response, allowed_error_codes=("model_not_found",))
+            validate_response(
+                "/responses", response, allowed_error_codes=("model_not_found",)
+            )
         self.assertEqual(raised.exception.reason, "not_found")
         self.assertNotIn("private provider detail", str(raised.exception))
         self.assertEqual(
@@ -929,8 +1182,13 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         )
         unsafe = {"status": "failed", "error": {"code": "private provider detail"}}
         self.assertNotIn("provider_error_code", response_diagnostic_details(unsafe))
-        self.assertEqual(response_diagnostic_details(unsafe)["provider_error_present"], "true")
-        self.assertNotIn("provider_response_id", response_diagnostic_details({"id": "resp_private/text"}))
+        self.assertEqual(
+            response_diagnostic_details(unsafe)["provider_error_present"], "true"
+        )
+        self.assertNotIn(
+            "provider_response_id",
+            response_diagnostic_details({"id": "resp_private/text"}),
+        )
 
     def test_terminal_response_provider_errors_use_safe_actionable_messages(self):
         cases = (
@@ -947,31 +1205,51 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         for code, error_type, reason in cases:
             for status in ("failed", "error"):
                 with self.subTest(code=code, error_type=error_type, status=status):
-                    error = {"code": code, "type": error_type, "message": "private provider detail"}
+                    error = {
+                        "code": code,
+                        "type": error_type,
+                        "message": "private provider detail",
+                    }
                     response = (
                         {"status": "failed", "error": error}
                         if status == "failed"
                         else {**error, "type": "error"}
                     )
-                    expected_reason = reason if status == "failed" or code else "response_error"
+                    expected_reason = (
+                        reason if status == "failed" or code else "response_error"
+                    )
                     with self.assertRaises(OpenAIResponseFailure) as raised:
-                        validate_response("/responses", response, allowed_error_codes=(code,) if code else ())
+                        validate_response(
+                            "/responses",
+                            response,
+                            allowed_error_codes=(code,) if code else (),
+                        )
                     self.assertEqual(raised.exception.reason, expected_reason)
                     self.assertNotIn("private provider detail", str(raised.exception))
 
     def test_terminal_response_billing_errors_use_safe_actionable_messages(self):
         codes = (
-            "credit_balance_exhausted", "insufficient_quota", "billing_hard_limit_reached",
-            "organization_spend_limit_exceeded", "project_spend_limit_exceeded",
+            "credit_balance_exhausted",
+            "insufficient_quota",
+            "billing_hard_limit_reached",
+            "organization_spend_limit_exceeded",
+            "project_spend_limit_exceeded",
             "organization_usage_limit_exceeded",
         )
         for code in codes:
             expected = error_details(429, body({"code": code}), updated_at="now")
             error = {"code": code, "message": "private provider detail"}
-            for response in ({"status": "failed", "error": error}, {"type": "error", **error}):
-                with self.subTest(code=code, response_type=response.get("type", "failed")):
+            for response in (
+                {"status": "failed", "error": error},
+                {"type": "error", **error},
+            ):
+                with self.subTest(
+                    code=code, response_type=response.get("type", "failed")
+                ):
                     with self.assertRaises(OpenAIResponseFailure) as raised:
-                        validate_response("/responses", response, allowed_error_codes=codes)
+                        validate_response(
+                            "/responses", response, allowed_error_codes=codes
+                        )
                     self.assertEqual(raised.exception.reason, expected["reason"])
                     self.assertEqual(raised.exception.message, expected["message"])
                     self.assertEqual(raised.exception.provider_error_code, code)
@@ -979,12 +1257,20 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
     def test_response_validation_does_not_classify_billing_from_untrusted_text(self):
         with self.assertRaises(OpenAIResponseFailure) as raised:
-            validate_response("/responses", {
-                "status": "failed",
-                "error": {"code": "private_code", "message": "private credits quota detail"},
-            })
+            validate_response(
+                "/responses",
+                {
+                    "status": "failed",
+                    "error": {
+                        "code": "private_code",
+                        "message": "private credits quota detail",
+                    },
+                },
+            )
         self.assertEqual(raised.exception.reason, "response_failed")
-        self.assertEqual(raised.exception.message, "OpenAI did not complete the coach response.")
+        self.assertEqual(
+            raised.exception.message, "OpenAI did not complete the coach response."
+        )
         self.assertIsNone(raised.exception.provider_error_code)
 
     def test_stream_failure_diagnostics_keep_safe_markers_without_provider_text(self):
@@ -1016,23 +1302,39 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertNotIn("private provider detail", json.dumps(logger.logs))
         self.assertEqual(details["provider_error_message"], "private provider detail")
 
-        unsafe_state = StreamReadState(headers={"x-request-id": "req_private/text"}, terminal_event_type="private text")
-        telemetry.record_app_error({}, 1.0, 0, "response_failed", 502, state=unsafe_state)
+        unsafe_state = StreamReadState(
+            headers={"x-request-id": "req_private/text"},
+            terminal_event_type="private text",
+        )
+        telemetry.record_app_error(
+            {}, 1.0, 0, "response_failed", 502, state=unsafe_state
+        )
         self.assertNotIn("request_id", capture.events[-1][1])
         self.assertNotIn("terminal_event_type", capture.events[-1][1])
 
     def test_validate_response_allows_only_allowlisted_error_codes(self):
-        allowed_result = {"error": {"code": "known_code", "message": "private provider detail"}}
+        allowed_result = {
+            "error": {"code": "known_code", "message": "private provider detail"}
+        }
         with self.assertRaises(OpenAIResponseFailure) as raised:
-            validate_response("/responses", allowed_result, allowed_error_codes=("known_code",))
+            validate_response(
+                "/responses", allowed_result, allowed_error_codes=("known_code",)
+            )
         self.assertEqual(raised.exception.provider_error_code, "known_code")
         self.assertNotIn("private provider detail", str(raised.exception))
 
         for untrusted_code in ("other_code", 123, {"nested": "code"}):
             with self.subTest(code=untrusted_code):
-                result = {"error": {"code": untrusted_code, "message": "private provider detail"}}
+                result = {
+                    "error": {
+                        "code": untrusted_code,
+                        "message": "private provider detail",
+                    }
+                }
                 with self.assertRaises(OpenAIResponseFailure) as raised:
-                    validate_response("/responses", result, allowed_error_codes=("known_code",))
+                    validate_response(
+                        "/responses", result, allowed_error_codes=("known_code",)
+                    )
                 self.assertIsNone(raised.exception.provider_error_code)
                 self.assertNotIn("private provider detail", str(raised.exception))
 
@@ -1054,7 +1356,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 "message": "secret provider detail must not leak",
             }
         )
-        details = error_diagnostic_details(raw, {"x-request-id": "req_test_123"}, max_response_bytes=len(raw) - 1)
+        details = error_diagnostic_details(
+            raw, {"x-request-id": "req_test_123"}, max_response_bytes=len(raw) - 1
+        )
         self.assertEqual(details["error_code"], "invalid_function_call_output")
         self.assertEqual(details["error_type"], "invalid_request_error")
         self.assertEqual(details["parameter"], "input[0]")
@@ -1071,9 +1375,14 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 "message": "private provider text",
             }
         )
-        details = error_diagnostic_details(raw, {"x-request-id": "request/id"}, max_response_bytes=4)
+        details = error_diagnostic_details(
+            raw, {"x-request-id": "request/id"}, max_response_bytes=4
+        )
         self.assertEqual(details, {"error_body_bytes": 5})
-        self.assertEqual(error_diagnostic_details(b"not-json", max_response_bytes=10), {"error_body_bytes": 8})
+        self.assertEqual(
+            error_diagnostic_details(b"not-json", max_response_bytes=10),
+            {"error_body_bytes": 8},
+        )
 
     def test_error_classification_preserves_status_contracts(self):
         cases = (
@@ -1087,25 +1396,40 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         )
         for status, error, reason in cases:
             with self.subTest(status=status, error=error):
-                details = error_details(status, body(error), updated_at="2026-09-19T10:00:00Z")
+                details = error_details(
+                    status, body(error), updated_at="2026-09-19T10:00:00Z"
+                )
                 self.assertEqual(details["reason"], reason)
                 self.assertEqual(details["updated_at"], "2026-09-19T10:00:00Z")
                 self.assertNotIn("message", details["message"])
 
     def test_billing_and_quota_are_classified_before_429(self):
         self.assertEqual(
-            error_details(429, body({"code": "credit_balance_exhausted"}), updated_at="now")["reason"],
+            error_details(
+                429, body({"code": "credit_balance_exhausted"}), updated_at="now"
+            )["reason"],
             "credit_balance_exhausted",
         )
-        for code in ("organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"):
-            self.assertEqual(error_details(429, body({"code": code}), updated_at="now")["reason"], code)
+        for code in (
+            "organization_spend_limit_exceeded",
+            "project_spend_limit_exceeded",
+            "organization_usage_limit_exceeded",
+        ):
+            self.assertEqual(
+                error_details(429, body({"code": code}), updated_at="now")["reason"],
+                code,
+            )
         self.assertEqual(
-            error_details(429, body({"type": "insufficient_quota"}), updated_at="now")["reason"],
+            error_details(429, body({"type": "insufficient_quota"}), updated_at="now")[
+                "reason"
+            ],
             "insufficient_quota",
         )
 
     def test_conversation_lock_and_invalid_state_are_distinct(self):
-        locked = error_details(409, body({"code": "conversation_locked"}), updated_at="now")
+        locked = error_details(
+            409, body({"code": "conversation_locked"}), updated_at="now"
+        )
         invalid = error_details(
             400,
             body(
@@ -1129,7 +1453,13 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 self.assertEqual(
                     error_details(
                         400,
-                        body({"type": "invalid_request_error", "param": "input", "message": provider_message}),
+                        body(
+                            {
+                                "type": "invalid_request_error",
+                                "param": "input",
+                                "message": provider_message,
+                            }
+                        ),
                         updated_at="now",
                     )["reason"],
                     "conversation_state_invalid",
@@ -1150,7 +1480,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
     def test_error_details_attach_retry_after_and_never_provider_text(self):
         details = error_details(
             429,
-            body({"message": "private provider message", "code": "rate_limit_exceeded"}),
+            body(
+                {"message": "private provider message", "code": "rate_limit_exceeded"}
+            ),
             {"retry-after": "1.2"},
             updated_at="now",
         )
@@ -1158,8 +1490,12 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertNotIn("private", json.dumps(details))
 
     def test_safe_log_reason_is_static_allowlist(self):
-        self.assertEqual(safe_log_reason("project_spend_limit_exceeded"), "usage_limit_exceeded")
-        self.assertEqual(safe_log_reason("usage_limit_exceeded"), "usage_limit_exceeded")
+        self.assertEqual(
+            safe_log_reason("project_spend_limit_exceeded"), "usage_limit_exceeded"
+        )
+        self.assertEqual(
+            safe_log_reason("usage_limit_exceeded"), "usage_limit_exceeded"
+        )
         self.assertEqual(safe_log_reason("provider_timeout"), "provider_timeout")
         self.assertEqual(safe_log_reason("provider-private-message"), "http_error")
         self.assertEqual(safe_log_reason(None), "http_error")
@@ -1224,7 +1560,10 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             client.request("/models", {})
 
-        self.assertEqual((raised.exception.status, raised.exception.message), (503, "OPENAI_API_KEY ist nicht konfiguriert."))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.message),
+            (503, "OPENAI_API_KEY ist nicht konfiguriert."),
+        )
 
     def test_conversation_delete_keeps_remote_write_boundary_and_timeout(self):
         http = _ClientHTTP({"deleted": True})
@@ -1233,12 +1572,18 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertTrue(client.delete_conversation("conv/ü?"))
         self.assertEqual(len(http.calls), 1)
         args, kwargs = http.calls[0]
-        self.assertEqual(args, ("DELETE", "https://api.example.test/v1/conversations/conv%2F%C3%BC%3F"))
-        self.assertEqual(kwargs, {
-            "headers": {"Authorization": "Bearer sk-test"},
-            "timeout": 30,
-            "service": "openai",
-        })
+        self.assertEqual(
+            args,
+            ("DELETE", "https://api.example.test/v1/conversations/conv%2F%C3%BC%3F"),
+        )
+        self.assertEqual(
+            kwargs,
+            {
+                "headers": {"Authorization": "Bearer sk-test"},
+                "timeout": 30,
+                "service": "openai",
+            },
+        )
         without_key = self._client(_ClientHTTP(), api_key=None)
         self.assertFalse(without_key.delete_conversation("conv"))
 
@@ -1254,10 +1599,13 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "completed")
         self.assertEqual(waits, [1])
-        self.assertEqual(logger.warnings[0][1], {
-            "event": "openai_conversation_locked",
-            "context": {"attempt": 1, "retry_in_seconds": 1},
-        })
+        self.assertEqual(
+            logger.warnings[0][1],
+            {
+                "event": "openai_conversation_locked",
+                "context": {"attempt": 1, "retry_in_seconds": 1},
+            },
+        )
         self.assertEqual(len(state.usage), 1)
 
     def test_responses_client_background_lock_backoff_returns_public_cancel_error(self):
@@ -1279,7 +1627,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             client.background({"input": "hello"}, cancel_event=Event())
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (499, "chat_cancelled"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason), (499, "chat_cancelled")
+        )
         self.assertEqual(len(http.calls), 1)
 
     def test_responses_client_retrieve_validates_without_recording_usage(self):
@@ -1290,7 +1640,10 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         result = client.retrieve(" resp_a ")
 
         self.assertEqual(result["id"], "resp_a")
-        self.assertEqual(http.calls[0][0][:2], ("GET", "https://api.example.test/v1/responses/resp_a"))
+        self.assertEqual(
+            http.calls[0][0][:2],
+            ("GET", "https://api.example.test/v1/responses/resp_a"),
+        )
         self.assertEqual(state.usage, [])
         with self.assertRaises(AppError):
             client.retrieve("not-a-response-id")
@@ -1302,13 +1655,20 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         client.cancel("resp_a")
 
-        self.assertEqual(logger.warnings, [(
-            "OpenAI background response cancellation failed",
-            {"event": "openai_background_cancel_failed"},
-        )])
+        self.assertEqual(
+            logger.warnings,
+            [
+                (
+                    "OpenAI background response cancellation failed",
+                    {"event": "openai_background_cancel_failed"},
+                )
+            ],
+        )
         self.assertNotIn("resp_a", repr(logger.warnings))
 
-    def test_responses_client_background_records_usage_after_final_retrieve_and_notifies_once(self):
+    def test_responses_client_background_records_usage_after_final_retrieve_and_notifies_once(
+        self,
+    ):
         state = _ClientState()
         http = _ClientHTTP(
             {"id": "resp_bg", "status": "queued"},
@@ -1344,12 +1704,20 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             client.background({}, response_id="resp_bg")
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (504, "provider_timeout"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (504, "provider_timeout"),
+        )
         self.assertEqual(waits, [2])
-        self.assertEqual(http.calls[-1][0][:2], ("POST", "https://api.example.test/v1/responses/resp_bg/cancel"))
+        self.assertEqual(
+            http.calls[-1][0][:2],
+            ("POST", "https://api.example.test/v1/responses/resp_bg/cancel"),
+        )
         self.assertEqual(state.usage, [])
 
-    def _stream_client(self, opener, *, state=None, capture=None, logger=None, wait=None, **overrides):
+    def _stream_client(
+        self, opener, *, state=None, capture=None, logger=None, wait=None, **overrides
+    ):
         settings = {
             "api_key": "sk-test",
             "base_url": "https://api.example.test/v1/",
@@ -1397,7 +1765,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
     @staticmethod
     def _stream_lines(response_id="resp_test"):
         return [
-            b'event: response.created\n',
+            b"event: response.created\n",
             f'data: {{"type":"response.created","response":{{"id":"{response_id}"}}}}\n'.encode(),
             b"\n",
             b"event: response.output_text.delta\n",
@@ -1425,15 +1793,22 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         deltas = []
         response_ids = []
 
-        result = client.stream(payload, deltas.append, on_response_id=response_ids.append)
+        result = client.stream(
+            payload, deltas.append, on_response_id=response_ids.append
+        )
 
         self.assertEqual(result["status"], "completed")
         self.assertEqual(deltas, ["hello"])
         self.assertEqual(response_ids, ["resp_test"])
-        self.assertEqual(payload, {"input": "hello", "stream": False, "_ai_provider": "openai"})
+        self.assertEqual(
+            payload, {"input": "hello", "stream": False, "_ai_provider": "openai"}
+        )
         request, kwargs = opened[0]
         self.assertEqual(request.full_url, "https://api.example.test/v1/responses")
-        self.assertEqual(json.loads(request.data), {"input": "hello", "reasoning": {"effort": "high"}, "stream": True})
+        self.assertEqual(
+            json.loads(request.data),
+            {"input": "hello", "reasoning": {"effort": "high"}, "stream": True},
+        )
         self.assertEqual(request.headers["Accept"], "text/event-stream")
         self.assertEqual(request.headers["Content-type"], "application/json")
         self.assertEqual(request.headers["Authorization"], "Bearer sk-test")
@@ -1443,7 +1818,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
     def test_stream_failure_records_bounded_request_and_terminal_metadata(self):
         class ValidatingState(_StreamStateService):
             def validate_openai_response(self, path, result):
-                raise AppError(502, "Synthetic provider failure", reason="response_failed")
+                raise AppError(
+                    502, "Synthetic provider failure", reason="response_failed"
+                )
 
         capture = _DiagnosticCapture()
         logger = _ClientLogger()
@@ -1454,21 +1831,59 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             b"\n",
         ]
         response = _StreamResponse(lines, headers={"x-request-id": "req_safe123"})
-        client = self._stream_client(lambda *_args, **_kwargs: response, state=ValidatingState(), capture=capture, logger=logger)
+        client = self._stream_client(
+            lambda *_args, **_kwargs: response,
+            state=ValidatingState(),
+            capture=capture,
+            logger=logger,
+        )
         with self.assertRaises(AppError):
-            client.stream({
-                "model": "gpt-6-luna", "input": private_text, "instructions": "private instructions",
-                "tools": [{"type": "function"}], "max_output_tokens": 1234,
-                "conversation": "conv_fake", "reasoning": {"effort": "high"},
-            }, lambda _delta: None)
+            client.stream(
+                {
+                    "model": "gpt-6-luna",
+                    "input": private_text,
+                    "instructions": "private instructions",
+                    "tools": [{"type": "function"}],
+                    "max_output_tokens": 1234,
+                    "conversation": "conv_fake",
+                    "reasoning": {"effort": "high"},
+                },
+                lambda _delta: None,
+            )
 
-        started = next(details for event, details in capture.events if event == "openai_stream_started")
-        failed = next(details for event, details in capture.events if event == "openai_stream_failed")
-        self.assertEqual({key: started[key] for key in ("model", "reasoning_effort", "max_output_tokens", "tools_count", "input_chars", "instructions_chars", "conversation_present")}, {
-            "model": "gpt-6-luna", "reasoning_effort": "high", "max_output_tokens": 1234,
-            "tools_count": 1, "input_chars": len(private_text), "instructions_chars": 20,
-            "conversation_present": True,
-        })
+        started = next(
+            details
+            for event, details in capture.events
+            if event == "openai_stream_started"
+        )
+        failed = next(
+            details
+            for event, details in capture.events
+            if event == "openai_stream_failed"
+        )
+        self.assertEqual(
+            {
+                key: started[key]
+                for key in (
+                    "model",
+                    "reasoning_effort",
+                    "max_output_tokens",
+                    "tools_count",
+                    "input_chars",
+                    "instructions_chars",
+                    "conversation_present",
+                )
+            },
+            {
+                "model": "gpt-6-luna",
+                "reasoning_effort": "high",
+                "max_output_tokens": 1234,
+                "tools_count": 1,
+                "input_chars": len(private_text),
+                "instructions_chars": 20,
+                "conversation_present": True,
+            },
+        )
         self.assertEqual(failed["terminal_event_type"], "response.failed")
         self.assertEqual(failed["provider_response_id"], "resp_safe123")
         self.assertEqual(failed["request_id"], "req_safe123")
@@ -1485,16 +1900,22 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         client = self._stream_client(lambda *_args, **_kwargs: response, state=state)
 
         with self.assertRaises(AppError) as raised:
-            client.stream({"input": "hello"}, lambda _delta: None, cancel_event=cancel_event)
+            client.stream(
+                {"input": "hello"}, lambda _delta: None, cancel_event=cancel_event
+            )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (499, "chat_cancelled"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason), (499, "chat_cancelled")
+        )
         self.assertEqual(state.usage, [])
 
     def test_stream_client_redacts_callback_app_error_from_logs_and_diagnostics(self):
         state = _StreamStateService()
         capture = _DiagnosticCapture()
         logger = _ClientLogger()
-        expected = AppError(418, "private provider message", reason="private_provider_reason")
+        expected = AppError(
+            418, "private provider message", reason="private_provider_reason"
+        )
         response = _StreamResponse(self._stream_lines())
         client = self._stream_client(
             lambda *_args, **_kwargs: response,
@@ -1504,7 +1925,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         )
 
         with self.assertRaises(AppError) as raised:
-            client.stream({"input": "hello"}, lambda _delta: (_ for _ in ()).throw(expected))
+            client.stream(
+                {"input": "hello"}, lambda _delta: (_ for _ in ()).throw(expected)
+            )
 
         self.assertIs(raised.exception, expected)
         output = repr((logger.infos, logger.logs, capture.events))
@@ -1536,7 +1959,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(waits, [1])
         events = client.telemetry.diagnostic_capture.events
-        requests = [details for event, details in events if event == "openai_stream_started"]
+        requests = [
+            details for event, details in events if event == "openai_stream_started"
+        ]
         self.assertEqual([entry["attempt"] for entry in requests], [1, 2])
         self.assertEqual(requests[0]["diagnostic_id"], requests[1]["diagnostic_id"])
         self.assertEqual(requests[0]["request_sha256"], requests[1]["request_sha256"])
@@ -1546,12 +1971,19 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         cancel_event.set()
         opened = []
         state = _StreamStateService()
-        client = self._stream_client(lambda *args, **kwargs: opened.append(args) or _StreamResponse([]), state=state)
+        client = self._stream_client(
+            lambda *args, **kwargs: opened.append(args) or _StreamResponse([]),
+            state=state,
+        )
 
         with self.assertRaises(AppError) as raised:
-            client.stream({"input": "hello"}, lambda _delta: None, cancel_event=cancel_event)
+            client.stream(
+                {"input": "hello"}, lambda _delta: None, cancel_event=cancel_event
+            )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (499, "chat_cancelled"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason), (499, "chat_cancelled")
+        )
         self.assertEqual(opened, [])
         self.assertEqual(len(state.usage), 1)
 
@@ -1586,7 +2018,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             client.stream({"input": "hello"}, lambda _delta: None, cancel_event=event)
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (499, "chat_cancelled"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason), (499, "chat_cancelled")
+        )
         self.assertEqual(len(state.usage), 1)
 
     def test_stream_client_preserves_headers_on_late_size_failure(self):
@@ -1596,12 +2030,17 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             status=200,
             headers={"x-ratelimit-remaining-requests": "2"},
         )
-        client = self._stream_client(lambda *_args, **_kwargs: response, state=state, max_response_bytes=1)
+        client = self._stream_client(
+            lambda *_args, **_kwargs: response, state=state, max_response_bytes=1
+        )
 
         with self.assertRaises(AppError) as raised:
             client.stream({"input": "hello"}, lambda _delta: None)
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (502, "response_too_large"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (502, "response_too_large"),
+        )
         self.assertEqual(state.rate_limits, [{"x-ratelimit-remaining-requests": "2"}])
         self.assertEqual(state.usage, [])
 
@@ -1612,10 +2051,15 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             429,
             "rate limited",
             {"retry-after": "1.2", "x-request-id": "req_test"},
-            io.BytesIO(json.dumps({"error": {"code": "rate_limit_exceeded", "message": secret}}).encode()),
+            io.BytesIO(
+                json.dumps(
+                    {"error": {"code": "rate_limit_exceeded", "message": secret}}
+                ).encode()
+            ),
         )
         state = _StreamStateService()
         capture = _DiagnosticCapture()
+
         def opener(*_args, **_kwargs):
             raise error
 
@@ -1624,11 +2068,16 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             client.stream({"input": "hello"}, lambda _delta: None)
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (429, "rate_limit_exceeded"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (429, "rate_limit_exceeded"),
+        )
         self.assertEqual(raised.exception.retry_after_seconds, 2)
         self.assertIn("private", repr(capture.events))
         self.assertNotIn("sk-test-secret", repr(capture.events))
-        self.assertEqual(state.rate_limits, [{"retry-after": "1.2", "x-request-id": "req_test"}])
+        self.assertEqual(
+            state.rate_limits, [{"retry-after": "1.2", "x-request-id": "req_test"}]
+        )
 
     def test_stream_client_records_http_failure_in_safe_order(self):
         events = []
@@ -1673,25 +2122,44 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             logger=OrderedLogger(),
         )
 
-        with mock.patch(
-            "backend.providers.openai.provider_http.read_error_body",
-            side_effect=lambda exc, max_bytes: events.append("parse")
-            or original_read_error_body(exc, max_bytes),
-        ), self.assertRaises(AppError):
+        with (
+            mock.patch(
+                "backend.providers.openai.provider_http.read_error_body",
+                side_effect=lambda exc, max_bytes: (
+                    events.append("parse") or original_read_error_body(exc, max_bytes)
+                ),
+            ),
+            self.assertRaises(AppError),
+        ):
             client.stream({"input": "hello"}, lambda _delta: None)
 
-        self.assertEqual([event for event in events if event != "diagnostic"], ["rate_limits", "parse", "status", "log"])
-        self.assertTrue(any(event == "openai_http_failed" for event, _details in client.telemetry.diagnostic_capture.events))
+        self.assertEqual(
+            [event for event in events if event != "diagnostic"],
+            ["rate_limits", "parse", "status", "log"],
+        )
+        self.assertTrue(
+            any(
+                event == "openai_http_failed"
+                for event, _details in client.telemetry.diagnostic_capture.events
+            )
+        )
 
-    def test_stream_client_requires_final_response_and_records_usage_once_on_success(self):
+    def test_stream_client_requires_final_response_and_records_usage_once_on_success(
+        self,
+    ):
         state = _StreamStateService()
-        incomplete = _StreamResponse([b'data: {"type":"response.output_text.delta","delta":"hello"}\n', b"\n"])
+        incomplete = _StreamResponse(
+            [b'data: {"type":"response.output_text.delta","delta":"hello"}\n', b"\n"]
+        )
         client = self._stream_client(lambda *_args, **_kwargs: incomplete, state=state)
 
         with self.assertRaises(AppError) as raised:
             client.stream({"input": "hello"}, lambda _delta: None)
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (502, "invalid_response"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (502, "invalid_response"),
+        )
         self.assertEqual(state.usage, [])
 
     def test_stream_client_timeout_network_and_client_disconnect_contracts(self):
@@ -1702,19 +2170,26 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             with self.subTest(reason=reason):
                 state = _StreamStateService()
                 client = self._stream_client(
-                    lambda *_args, failure=failure, **_kwargs: (_ for _ in ()).throw(failure),
+                    lambda *_args, failure=failure, **_kwargs: (_ for _ in ()).throw(
+                        failure
+                    ),
                     state=state,
                 )
                 with self.assertRaises(AppError) as raised:
                     client.stream({"input": "hello"}, lambda _delta: None)
-                self.assertEqual((raised.exception.status, raised.exception.reason), (status, reason))
+                self.assertEqual(
+                    (raised.exception.status, raised.exception.reason), (status, reason)
+                )
                 self.assertEqual(state.usage, [])
 
         disconnect = _StreamResponse(self._stream_lines())
         state = _StreamStateService()
         client = self._stream_client(lambda *_args, **_kwargs: disconnect, state=state)
         with self.assertRaises(ClientDisconnected):
-            client.stream({"input": "hello"}, lambda _delta: (_ for _ in ()).throw(ClientDisconnected()))
+            client.stream(
+                {"input": "hello"},
+                lambda _delta: (_ for _ in ()).throw(ClientDisconnected()),
+            )
         self.assertEqual(len(state.usage), 1)
 
 

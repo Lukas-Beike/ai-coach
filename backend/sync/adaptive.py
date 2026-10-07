@@ -130,7 +130,7 @@ class IllnessPauseSyncService:
         if sync_illness_to_intervals and active_illness_pause:
             try:
                 remote_sync = self.sync(active_illness_pause)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - Keep the committed local result even if the optional provider write fails.
                 remote_sync = {
                     "status": "error",
                     "error": self._redactor.redact_text(str(exc))[:1000],

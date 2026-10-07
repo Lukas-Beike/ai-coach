@@ -1,28 +1,30 @@
 """Regression cases from the full audit; providers and athlete data are synthetic."""
-from backend.runtime import clock as runtime_clock
-import json
+
 import http.client
-import threading
-import tempfile
+import json
 import subprocess
 import sys
+import tempfile
+import threading
 import unittest
 import zipfile
 from dataclasses import replace
 from datetime import date, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlencode
 from unittest.mock import Mock, patch
+from urllib.parse import urlencode
+
+import test_coach_dialogue as dialogue
 
 from backend.coach import streams as coach_streams
 from backend.db.manager import DATABASE_MANAGER_CACHE
-import test_coach_dialogue as dialogue
 from backend.http_api import server as http_server_module
+from backend.planning import competitions as planning_competitions
+from backend.planning import context as planning_context
 from backend.providers import calendar as calendar_provider
 from backend.providers import intervals_client as intervals_client_module
 from backend.providers import weather as weather_provider
-from backend.planning import competitions as planning_competitions
-from backend.planning import context as planning_context
+from backend.runtime import clock as runtime_clock
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync import garmin as garmin_sync
 from backend.sync import scheduler_assembly as sync_scheduler_assembly
@@ -39,21 +41,39 @@ class AuditRemediationTests(unittest.TestCase):
     turn = dialogue.CoachDialogueTests.turn
 
     def competition(self):
-        item = server.PLANNING_DATA.competition().save({"name": "Synthetic race", "event_date": "2026-10-01", "sport": "Cycling"})["competition"]
+        item = server.PLANNING_DATA.competition().save(
+            {"name": "Synthetic race", "event_date": "2026-10-01", "sport": "Cycling"}
+        )["competition"]
         external = planning_competitions.competition_external_id(item["id"])
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            db.execute("UPDATE competitions SET intervals_event_id='123', external_id=?, sync_dirty=0, sync_state='synced' WHERE id=?", (external, item["id"]))
-        remote = {"id": 123, "external_id": external, "name": "Synthetic race", "start_date_local": "2026-10-01T08:00:00", "category": "RACE_B", "type": "Ride"}
+            db.execute(
+                "UPDATE competitions SET intervals_event_id='123', external_id=?, sync_dirty=0, sync_state='synced' WHERE id=?",
+                (external, item["id"]),
+            )
+        remote = {
+            "id": 123,
+            "external_id": external,
+            "name": "Synthetic race",
+            "start_date_local": "2026-10-01T08:00:00",
+            "category": "RACE_B",
+            "type": "Ride",
+        }
         return item, remote
 
     def test_competition_fetch_preserves_a_concurrent_local_edit(self):
         item, remote = self.competition()
+
         def fetch(*args):
-            server.PLANNING_DATA.competition().save({"competition_id": item["id"], "name": "New local name"})
+            server.PLANNING_DATA.competition().save(
+                {"competition_id": item["id"], "name": "New local name"}
+            )
             return [remote]
+
         client = Mock()
         client.fetch_competition_events.side_effect = fetch
-        with patch.object(intervals_client_module, "IntervalsClient", return_value=client):
+        with patch.object(
+            intervals_client_module, "IntervalsClient", return_value=client
+        ):
             server.PROVIDER_RESYNC.competition_sync_service().sync()
         current = server.PLANNING_DATA.competition().list()[0]
         self.assertEqual(current["name"], "New local name")
@@ -64,7 +84,9 @@ class AuditRemediationTests(unittest.TestCase):
         server.PLANNING_DATA.competition().delete(item["id"])
         client = Mock()
         client.fetch_competition_events.return_value = [remote]
-        with patch.object(intervals_client_module, "IntervalsClient", return_value=client):
+        with patch.object(
+            intervals_client_module, "IntervalsClient", return_value=client
+        ):
             server.PROVIDER_RESYNC.competition_sync_service().sync()
             self.assertEqual(server.PLANNING_DATA.competition().list(), [])
             server.PROVIDER_RESYNC.competition_sync_service().sync(push_local=True)
@@ -76,46 +98,81 @@ class AuditRemediationTests(unittest.TestCase):
         server.PLANNING_DATA.competition().delete(item["id"])
         client = Mock()
         client.fetch_competition_events.return_value = [remote]
+
         def delete(_):
             with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-                db.execute("INSERT INTO competition_sync_tombstones VALUES ('later', '456', 'later-external', ?)", (runtime_clock.utc_now(),))
+                db.execute(
+                    "INSERT INTO competition_sync_tombstones VALUES ('later', '456', 'later-external', ?)",
+                    (runtime_clock.utc_now(),),
+                )
+
         client.bulk_delete_events.side_effect = delete
-        with patch.object(intervals_client_module, "IntervalsClient", return_value=client):
+        with patch.object(
+            intervals_client_module, "IntervalsClient", return_value=client
+        ):
             server.PROVIDER_RESYNC.competition_sync_service().sync(push_local=True)
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            self.assertEqual([row["id"] for row in db.execute("SELECT id FROM competition_sync_tombstones")], ["later"])
+            self.assertEqual(
+                [
+                    row["id"]
+                    for row in db.execute("SELECT id FROM competition_sync_tombstones")
+                ],
+                ["later"],
+            )
 
     def test_weather_fetch_participates_in_maintenance_and_rechecks_location(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Synthetic city"})
+
         def fetch(query):
-            self.assertGreater(runtime_maintenance.MAINTENANCE_GATE.state()["running_operations"], 0)
+            self.assertGreater(
+                runtime_maintenance.MAINTENANCE_GATE.state()["running_operations"], 0
+            )
             server.ATHLETE_DATA.profile().save({"weather_location": ""})
-            return {"query": query, "forecast": {}, "fetched_at": runtime_clock.utc_now()}
+            return {
+                "query": query,
+                "forecast": {},
+                "fetched_at": runtime_clock.utc_now(),
+            }
+
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=fetch):
-            self.assertEqual(server.WEATHER_ASSEMBLY.service().state()["state"], "not_configured")
+            self.assertEqual(
+                server.WEATHER_ASSEMBLY.service().state()["state"], "not_configured"
+            )
         self.assertFalse(server.key_value_service().get(weather_cache.CACHE_KEY))
         self.assertFalse(server.key_value_service().get(weather_cache.HISTORY_KEY))
 
     def test_privacy_delete_drains_a_direct_weather_read(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Synthetic city"})
-        entered, release, deleted = threading.Event(), threading.Event(), threading.Event()
+        entered, release, deleted = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
         failures = []
+
         def fetch(query):
             entered.set()
             if not release.wait(5):
                 raise AssertionError("Synthetic weather barrier timed out")
-            return {"query": query, "forecast": {}, "fetched_at": runtime_clock.utc_now()}
+            return {
+                "query": query,
+                "forecast": {},
+                "fetched_at": runtime_clock.utc_now(),
+            }
+
         def read():
             try:
                 server.PUBLIC_STATE.weather_state_service().state()
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - Collect every worker-thread failure for the main-thread assertion.
                 failures.append(type(error).__name__)
+
         def erase():
             try:
                 server.PRIVACY_ASSEMBLY.delete_service().delete("LOKALE DATEN LÖSCHEN")
                 deleted.set()
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - Collect every worker-thread failure for the main-thread assertion.
                 failures.append(type(error).__name__)
+
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=fetch):
             reader = threading.Thread(target=read)
             reader.start()
@@ -123,7 +180,7 @@ class AuditRemediationTests(unittest.TestCase):
                 self.assertTrue(entered.wait(5))
                 deletion = threading.Thread(target=erase)
                 deletion.start()
-                self.assertFalse(deleted.wait(.05))
+                self.assertFalse(deleted.wait(0.05))
             finally:
                 release.set()
                 reader.join(5)
@@ -150,13 +207,30 @@ with patch.object(Path, 'read_text', deny):
 assert server_test_support.server.CONFIG.gemini_api_key == ''
 assert server_test_support.server.CONFIG.ai_provider == 'openai'
 """
-        result = subprocess.run([sys.executable, "-c", script, str(Path(__file__).parent)], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(Path(__file__).parent)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_cached_weather_remains_stale_without_refresh(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Synthetic city"})
-        server.key_value_service().set(weather_cache.CACHE_KEY, json.dumps({"query": "Synthetic city", "forecast": {}, "fetched_at": "2020-01-01T00:00:00+00:00"}))
-        self.assertEqual(server.WEATHER_ASSEMBLY.service().state(refresh=False)["state"], "stale")
+        server.key_value_service().set(
+            weather_cache.CACHE_KEY,
+            json.dumps(
+                {
+                    "query": "Synthetic city",
+                    "forecast": {},
+                    "fetched_at": "2020-01-01T00:00:00+00:00",
+                }
+            ),
+        )
+        self.assertEqual(
+            server.WEATHER_ASSEMBLY.service().state(refresh=False)["state"], "stale"
+        )
         with patch.object(
             server.WEATHER_ASSEMBLY.service(),
             "state",
@@ -164,10 +238,27 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
         ):
             server.WEATHER_ASSEMBLY.sync_service().sync()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            self.assertEqual(db.execute("SELECT status FROM provider_refresh_history ORDER BY started_at DESC LIMIT 1").fetchone()["status"], "error")
+            self.assertEqual(
+                db.execute(
+                    "SELECT status FROM provider_refresh_history ORDER BY started_at DESC LIMIT 1"
+                ).fetchone()["status"],
+                "error",
+            )
 
     def test_garmin_daily_schedule_is_independent_of_intervals(self):
-        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="", calendar_ical_url="")), patch.object(garmin_sync.GarminFixtureLoader, "path", return_value=Path("synthetic")), patch.object(sync_scheduler_assembly, "DailySyncMarkerService") as marker_service:
+        with (
+            patch.object(
+                server,
+                "CONFIG",
+                replace(server.CONFIG, intervals_api_key="", calendar_ical_url=""),
+            ),
+            patch.object(
+                garmin_sync.GarminFixtureLoader, "path", return_value=Path("synthetic")
+            ),
+            patch.object(
+                sync_scheduler_assembly, "DailySyncMarkerService"
+            ) as marker_service,
+        ):
             marker_service.return_value.is_due.return_value = True
             server.SYNC_SCHEDULERS.daily_scheduler().schedule()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -214,40 +305,79 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
                 }
             )
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            db.executemany("INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)", [(str(i), str(i), json.dumps({"id": str(i), "name": "Synthetic"}), runtime_clock.utc_now()) for i in range(1001)])
+            db.executemany(
+                "INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)",
+                [
+                    (
+                        str(i),
+                        str(i),
+                        json.dumps({"id": str(i), "name": "Synthetic"}),
+                        runtime_clock.utc_now(),
+                    )
+                    for i in range(1001)
+                ],
+            )
         temporary = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
         try:
             with zipfile.ZipFile(temporary) as archive:
-                self.assertEqual(len(archive.read("athlete_checkins.jsonl").splitlines()), 20)
-                self.assertEqual(len(archive.read("workout_library.jsonl").splitlines()), 1001)
-                self.assertEqual(json.loads(archive.read("manifest.json"))["status"], "complete")
+                self.assertEqual(
+                    len(archive.read("athlete_checkins.jsonl").splitlines()), 20
+                )
+                self.assertEqual(
+                    len(archive.read("workout_library.jsonl").splitlines()), 1001
+                )
+                self.assertEqual(
+                    json.loads(archive.read("manifest.json"))["status"], "complete"
+                )
         finally:
             temporary.unlink()
 
     def test_library_http_pagination_reaches_every_active_template_beyond_1000(self):
-        records = [{"id": f"template-{i:04}", "name": f"Synthetic {i:04}", "type": "Ride"} for i in range(1001)]
-        records += [{"id": "archived", "name": "Archived", "archived": True}, {"id": "dated", "name": "Dated", "date": "2026-09-09"}]
+        records = [
+            {"id": f"template-{i:04}", "name": f"Synthetic {i:04}", "type": "Ride"}
+            for i in range(1001)
+        ]
+        records += [
+            {"id": "archived", "name": "Archived", "archived": True},
+            {"id": "dated", "name": "Dated", "date": "2026-09-09"},
+        ]
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            db.executemany("INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)",
-                           [(item["id"], item["id"], json.dumps(item), runtime_clock.utc_now()) for item in records])
+            db.executemany(
+                "INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)",
+                [
+                    (item["id"], item["id"], json.dumps(item), runtime_clock.utc_now())
+                    for item in records
+                ],
+            )
         from support import create_test_session
+
         token = create_test_session(server)
         # This temporary SQLite fixture exercises pagination and real session
         # authentication; secure startup has separate SQLCipher integration tests.
-        startup = patch.object(server.app_config, "security_configuration_error", return_value=None)
+        startup = patch.object(
+            server.app_config, "security_configuration_error", return_value=None
+        )
         startup.start()
         self.addCleanup(startup.stop)
-        httpd = http_server_module.CoachHTTPServer(("127.0.0.1", 0), server.HTTP_API.request_handler_class())
+        httpd = http_server_module.CoachHTTPServer(
+            ("127.0.0.1", 0), server.HTTP_API.request_handler_class()
+        )
         worker = threading.Thread(target=httpd.serve_forever, daemon=True)
         worker.start()
-        connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", httpd.server_port, timeout=5
+        )
         ids, cursor = [], None
         try:
             for _ in range(12):
                 query = {"limit": 100}
                 if cursor:
                     query["cursor"] = cursor
-                connection.request("GET", "/api/library?" + urlencode(query), headers={"Cookie": f"ic_session={token}"})
+                connection.request(
+                    "GET",
+                    "/api/library?" + urlencode(query),
+                    headers={"Cookie": f"ic_session={token}"},
+                )
                 response = connection.getresponse()
                 self.assertEqual(response.status, 200)
                 page = json.loads(response.read())
@@ -267,55 +397,134 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
     def test_adaptive_apply_requires_a_published_preview_and_later_user_turn(self):
         def preview(_):
             return self.call("preview_adaptive_replan", scope=["adaptive_replan"])
+
         def apply(_):
             latest = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().latest_preview()
-            return self.call("apply_adaptive_replan", {"adjustment_id": latest["id"]}, scope=["adaptive_replan:" + latest["id"]])
-        first, _ = self.turn("Show a preview, do not apply it.", [preview, apply, {"output_text": "Preview ready."}])
-        self.assertEqual(first["command_receipts"][1]["result"]["reason"], "adaptive_approval_required")
-        with patch.object(IllnessPauseSyncService, "apply", return_value={"status": "applied"}) as mutation:
-            second, _ = self.turn("Apply that preview.", [apply, {"output_text": "Applied."}])
+            return self.call(
+                "apply_adaptive_replan",
+                {"adjustment_id": latest["id"]},
+                scope=["adaptive_replan:" + latest["id"]],
+            )
+
+        first, _ = self.turn(
+            "Show a preview, do not apply it.",
+            [preview, apply, {"output_text": "Preview ready."}],
+        )
+        self.assertEqual(
+            first["command_receipts"][1]["result"]["reason"],
+            "adaptive_approval_required",
+        )
+        with patch.object(
+            IllnessPauseSyncService, "apply", return_value={"status": "applied"}
+        ) as mutation:
+            second, _ = self.turn(
+                "Apply that preview.", [apply, {"output_text": "Applied."}]
+            )
         mutation.assert_called_once()
         self.assertEqual(second["status"], "completed")
 
     def test_incomplete_provider_answer_is_partial_and_keeps_pending_request(self):
-        result, _ = self.turn("Explain the week", [{"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}, "output_text": "Monday starts"}])
+        result, _ = self.turn(
+            "Explain the week",
+            [
+                {
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "output_text": "Monday starts",
+                }
+            ],
+        )
         self.assertEqual(result["status"], "partial")
         self.assertIn("nicht abgeschlossen", result["message"]["content"])
-        self.assertIsNotNone(json.loads(server.key_value_service().get("coach_pending_request")))
+        self.assertIsNotNone(
+            json.loads(server.key_value_service().get("coach_pending_request"))
+        )
 
     def test_completed_async_job_refreshes_model_context(self):
-        job = server.SYNC_JOB_QUEUE.service().enqueue(
-            "garmin", "refresh", {"days": 1}
-        )
+        job = server.SYNC_JOB_QUEUE.service().enqueue("garmin", "refresh", {"days": 1})
         server.SYNC_JOB_QUEUE.outcome_service().update(job["id"], "completed")
-        steps = iter([lambda _: self.call("get_sync_job", {"job_id": job["id"]}), {"output_text": "Fresh data read."}])
+        steps = iter(
+            [
+                lambda _: self.call("get_sync_job", {"job_id": job["id"]}),
+                {"output_text": "Fresh data read."},
+            ]
+        )
+
         def response(payload, **kwargs):
             step = next(steps)
             return step(payload) if callable(step) else step
-        with patch.object(server.COACH_CONVERSATION, "provision_service", return_value=Mock(ensure=Mock(return_value="synthetic"))), patch("backend.coach.context.CoachTrainingContextService.build", side_effect=["Old Garmin data", "Fresh Garmin data"]) as context, patch.object(server.COACH_CONVERSATION, "response_transport") as transport_factory:
+
+        with (
+            patch.object(
+                server.COACH_CONVERSATION,
+                "provision_service",
+                return_value=Mock(ensure=Mock(return_value="synthetic")),
+            ),
+            patch(
+                "backend.coach.context.CoachTrainingContextService.build",
+                side_effect=["Old Garmin data", "Fresh Garmin data"],
+            ) as context,
+            patch.object(
+                server.COACH_CONVERSATION, "response_transport"
+            ) as transport_factory,
+        ):
             transport_factory.return_value.request.side_effect = response
-            result = server.COACH_TURNS.chat_turn_service().run("Read refreshed data", client_turn_id="refresh-context", session_csrf_hash="synthetic")
+            result = server.COACH_TURNS.chat_turn_service().run(
+                "Read refreshed data",
+                client_turn_id="refresh-context",
+                session_csrf_hash="synthetic",
+            )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(context.call_count, 2)
-        self.assertTrue(transport_factory.return_value.request.call_args.args[0]["instructions"].startswith("Fresh Garmin data"))
+        self.assertTrue(
+            transport_factory.return_value.request.call_args.args[0][
+                "instructions"
+            ].startswith("Fresh Garmin data")
+        )
 
     def test_restart_job_observes_cancel_during_session_restore(self):
-        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue("Synthetic request", "cancel-race", "synthetic-session", operation_id="cancel-operation")
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
+            "Synthetic request",
+            "cancel-race",
+            "synthetic-session",
+            operation_id="cancel-operation",
+        )
         job = server.COACH_BACKGROUND_JOBS.job_store().claim()
         coach_streams.CHAT_STREAM_REGISTRY.clear_state()  # Process restart loses in-memory events.
+
         def restore(_):
-            self.assertEqual(server.COACH_BACKGROUND_JOBS.cancellation_service().cancel("synthetic-session", "cancel-operation")["status"], "cancelling")
-            self.assertIsNone(coach_streams.CHAT_STREAM_REGISTRY.get_background_event("cancel-operation"))
+            self.assertEqual(
+                server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(
+                    "synthetic-session", "cancel-operation"
+                )["status"],
+                "cancelling",
+            )
+            self.assertIsNone(
+                coach_streams.CHAT_STREAM_REGISTRY.get_background_event(
+                    "cancel-operation"
+                )
+            )
             with server.database_manager().unit_of_work() as db:
                 receipt = db.execute(
                     "SELECT receipt FROM coach_commands WHERE client_turn_id='cancel-race'"
                 ).fetchone()
             self.assertTrue(json.loads(receipt["receipt"])["cancel_requested"])
             return "synthetic-session"
+
         def coach(*args, **kwargs):
             self.assertTrue(kwargs["cancel_event"].is_set())
             return {"status": "cancelled"}
-        with patch.object(server.session_auth_service(), "restore_coach_session_csrf_hash", side_effect=restore), patch("backend.coach.chat_turn.CoachChatTurnService.run", side_effect=coach) as execute:
+
+        with (
+            patch.object(
+                server.session_auth_service(),
+                "restore_coach_session_csrf_hash",
+                side_effect=restore,
+            ),
+            patch(
+                "backend.coach.chat_turn.CoachChatTurnService.run", side_effect=coach
+            ) as execute,
+        ):
             server.COACH_BACKGROUND_JOBS.background_job_runner().run(job)
         execute.assert_called_once()
 
@@ -323,7 +532,16 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
     def test_restore_makes_interrupted_sync_job_claimable(self):
         with tempfile.TemporaryDirectory(prefix="audit-encrypted-") as directory:
             root = Path(directory)
-            with patch.object(server, "CONFIG", replace(server.CONFIG, app_password="synthetic-encrypted-key")), patch.object(server, "DATA_DIR", root), patch.object(server, "DB_PATH", root / "test.db"), patch.object(server, "LOG_PATH", root / "test.log"):
+            with (
+                patch.object(
+                    server,
+                    "CONFIG",
+                    replace(server.CONFIG, app_password="synthetic-encrypted-key"),
+                ),
+                patch.object(server, "DATA_DIR", root),
+                patch.object(server, "DB_PATH", root / "test.db"),
+                patch.object(server, "LOG_PATH", root / "test.log"),
+            ):
                 try:
                     server.initialise_database()
                     job = server.SYNC_JOB_QUEUE.service().enqueue(
@@ -331,13 +549,21 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
                     )
                     server.SYNC_JOB_QUEUE.store().claim()
                     backup = server.BACKUP_ASSEMBLY.backup_service().read_bytes()
-                    server.SYNC_JOB_QUEUE.outcome_service().update(job["id"], "completed")
-                    self.assertTrue(server.BACKUP_ASSEMBLY.restore_service().restore(backup)["restored"])
+                    server.SYNC_JOB_QUEUE.outcome_service().update(
+                        job["id"], "completed"
+                    )
+                    self.assertTrue(
+                        server.BACKUP_ASSEMBLY.restore_service().restore(backup)[
+                            "restored"
+                        ]
+                    )
                     self.assertEqual(
                         server.SYNC_JOB_QUEUE.service().state(job["id"])["status"],
                         "queued",
                     )
-                    self.assertEqual(server.SYNC_JOB_QUEUE.store().claim()["id"], job["id"])
+                    self.assertEqual(
+                        server.SYNC_JOB_QUEUE.store().claim()["id"], job["id"]
+                    )
                 finally:
                     DATABASE_MANAGER_CACHE.reset()
 

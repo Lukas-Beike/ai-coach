@@ -1,6 +1,6 @@
 import unittest
 
-from backend.performance.power_profile import power_profile
+from backend.performance.power_profile import power_profile, running_profile
 
 
 class PowerProfileTests(unittest.TestCase):
@@ -35,6 +35,16 @@ class PowerProfileTests(unittest.TestCase):
                 "insufficient_data",
                 power_profile({"type": "Ride", "streams": streams})["status"],
             )
+
+    def test_duration_curve_and_running_efforts_keep_unknown_gaps(self):
+        result = power_profile({"type": "Ride", "streams": {"time": list(range(3601)), "watts": [250] * 3601}})
+        self.assertEqual([5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600], [point["duration_seconds"] for point in result["duration_curve"]])
+        times = list(range(1201))
+        streams = {"time": times, "distance": [i * 3 for i in times], "moving": [1] * len(times)}
+        streams["distance"][400] = None
+        running = running_profile({"type": "Run", "streams": streams})
+        self.assertEqual("unknown", running["distance"][1]["status"])
+
 
 
 if __name__ == "__main__":
