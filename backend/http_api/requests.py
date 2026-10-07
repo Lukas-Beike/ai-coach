@@ -7,10 +7,9 @@ shape validation independent of ``server.py``.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
 import json
+from collections.abc import Callable, Mapping
 from typing import Any
-
 
 ReadBytes = Callable[[int], bytes]
 ErrorFactory = Callable[[int, str], Exception]
@@ -35,8 +34,14 @@ def read_body(
     """Read one bounded body while preserving the API's size errors."""
     size = _content_length(headers, error)
     if size <= 0 or size > max_bytes:
-        threshold = max_bytes if too_large_status_threshold is None else too_large_status_threshold
-        raise error(413 if size > threshold else 400, "Ungültige Größe des Anfrageinhalts.")
+        threshold = (
+            max_bytes
+            if too_large_status_threshold is None
+            else too_large_status_threshold
+        )
+        raise error(
+            413 if size > threshold else 400, "Ungültige Größe des Anfrageinhalts."
+        )
     return read_bytes(size)
 
 
@@ -52,10 +57,15 @@ def read_audio_body(
     """Validate and read a bounded audio body for short-lived transcription."""
     content_type = normalize_type(str(headers.get("Content-Type", "")))
     if content_type not in allowed_types:
-        raise error(415, "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG, MP3 und WAV.")
+        raise error(
+            415,
+            "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG, MP3 und WAV.",
+        )
     size = _content_length(headers, error)
     if size <= 0 or size > max_bytes:
-        raise error(413 if size > max_bytes else 400, "Ungültige Größe der Audioaufnahme.")
+        raise error(
+            413 if size > max_bytes else 400, "Ungültige Größe der Audioaufnahme."
+        )
     audio = read_bytes(size)
     if len(audio) != size:
         raise error(400, "Die Audioaufnahme wurde unvollständig übertragen.")

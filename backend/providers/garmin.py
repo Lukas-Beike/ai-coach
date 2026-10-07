@@ -33,6 +33,11 @@ CapabilitySuccess = Callable[[str], None]
 class GarminCollectionOptions:
     include_recovery: bool = True
     include_current_metrics: bool = True
+    # ``None`` follows the collection profile: full/default collections include
+    # historic metrics, while recovery/current-metric-free activity or
+    # historical-minimal collections remain activities-only.  Callers can set
+    # an explicit boolean to override that profile.
+    include_historic_metrics: bool | None = None
 
 
 class GarminClientFactory:
@@ -380,6 +385,122 @@ def _collect_current_metrics(
         )
 
 
+def _collect_historic_metrics(
+    client: Any,
+    today: date,
+    payload: dict[str, Any],
+    pagination: dict[str, dict[str, Any]],
+    external_call: ExternalCall,
+    redact: Redact,
+    warn: WarningLogger | None,
+    capability_allowed: CapabilityAllowed | None,
+    capability_failure: CapabilityFailure | None,
+    capability_success: CapabilitySuccess | None,
+) -> None:
+    """Fetch optional, bounded historical metrics with explicit SDK semantics."""
+    start = today - timedelta(days=89)
+    end = today
+    requests = (
+        (
+            "cycling_ftp_history",
+            getattr(client, "get_functional_threshold_power_range", None),
+            lambda fetch: fetch(
+                start.isoformat(),
+                end.isoformat(),
+                sport="CYCLING",
+                aggregation="daily",
+            ),
+            "daily",
+        ),
+        (
+            "endurance_score",
+            getattr(client, "get_endurance_score", None),
+            lambda fetch: fetch(start.isoformat(), end.isoformat()),
+            "weekly",
+        ),
+        (
+            "running_tolerance",
+            getattr(client, "get_running_tolerance", None),
+            lambda fetch: fetch(
+                start.isoformat(), end.isoformat(), aggregation="weekly"
+            ),
+            "weekly",
+        ),
+    )
+    for key, fetch, invoke, aggregation in requests:
+        stats = pagination.setdefault(
+            key,
+            {
+                "windows": 1,
+                "records": 0,
+                "complete": True,
+                "available": callable(fetch),
+                "status": "pending" if callable(fetch) else "unsupported",
+                "aggregation": aggregation,
+            },
+        )
+        if not callable(fetch):
+            continue
+        if capability_allowed is not None and not capability_allowed(key):
+            stats.update({"complete": False, "paused": True, "status": "paused"})
+            continue
+        details = {
+            "window_start": start.isoformat(),
+            "window_end": end.isoformat(),
+            "aggregation": aggregation,
+        }
+        if key == "cycling_ftp_history":
+            details["sport"] = "CYCLING"
+        _fetch_historic_metric(
+            key,
+            fetch,
+            invoke,
+            details,
+            stats,
+            payload,
+            external_call,
+            redact,
+            warn,
+            capability_failure,
+            capability_success,
+        )
+
+
+def _fetch_historic_metric(
+    key,
+    fetch,
+    invoke,
+    details,
+    stats,
+    payload,
+    external_call,
+    redact,
+    warn,
+    capability_failure,
+    capability_success,
+) -> None:
+    try:
+        value = external_call("garmin", key, partial(invoke, fetch), details)
+        _validate_historic_metric(value, key)
+        payload[key] = value
+        stats.update(
+            {
+                "records": len(value) if isinstance(value, list) else 1,
+                "status": "complete",
+                "completed_windows": [details],
+            }
+        )
+        if capability_success:
+            capability_success(key)
+    except Exception as exc:  # noqa: BLE001 - optional metric failures are isolated.
+        stats.update(
+            {"complete": False, "status": "failed", "error": redact(str(exc))[:500]}
+        )
+        if capability_failure:
+            capability_failure(key, exc)
+        _add_error(payload, key, exc, redact, warn)
+
+
 def _gear_inventory(client: Any, external_call: ExternalCall) -> list[dict[str, Any]]:
     profile = external_call("garmin", "gear_profile", client.get_user_profile, None)
     profile_number = profile.get("id") if isinstance(profile, dict) else None
@@ -469,6 +590,9 @@ def _validate_current_metrics(
         "running_threshold",
         "weight",
         "gear",
+        "cycling_ftp_history",
+        "endurance_score",
+        "running_tolerance",
     )
     for key in keys:
         if key in ("daily_training_status", "training_load_balance") and key in payload:
@@ -551,6 +675,33 @@ def collect_garmin_data(
         )
     if collection_options.include_current_metrics:
         _collect_current_metrics(client, today, payload, external_call, redact, warn)
+    include_historic_metrics = collection_options.include_historic_metrics
+    if include_historic_metrics is None:
+        include_historic_metrics = (
+            options is None
+            or collection_options.include_recovery
+            or collection_options.include_current_metrics
+        )
+    if include_historic_metrics:
+        _collect_historic_metrics(
+            client,
+            today,
+            payload,
+            pagination,
+            external_call,
+            redact,
+            warn,
+            capability_allowed,
+            capability_failure,
+            capability_success,
+        )
     payload["provider_sync"] = {"pagination": pagination}
     _validate_current_metrics(payload, redact, warn)
     return payload
+
+
+def _validate_historic_metric(value: Any, key: str) -> None:
+    if not isinstance(value, (dict, list)):
+        raise TypeError(f"Invalid Garmin {key} response")
+    if isinstance(value, list) and any(not isinstance(item, dict) for item in value):
+        raise TypeError(f"Invalid Garmin {key} response records")

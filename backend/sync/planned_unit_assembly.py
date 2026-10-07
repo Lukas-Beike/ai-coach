@@ -39,7 +39,7 @@ class PlannedUnitSyncAssembly:
     def __init__(
         self,
         *,
-        dependencies: "PlannedUnitSyncAssembly.Inputs",
+        dependencies: PlannedUnitSyncAssembly.Inputs,
     ) -> None:
         self._database_manager = dependencies.owners.database_manager
         self._planned_unit_service = dependencies.owners.planned_unit_service

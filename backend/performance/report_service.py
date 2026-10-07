@@ -32,6 +32,7 @@ class TrainingReportService:
         utc_now: Callable[[], str] = lambda: datetime.now(UTC).isoformat(),
         read_competitions: Callable[[], list[dict[str, Any]]] = list,
         read_recovery: Callable[[], dict[str, Any]] = dict,
+        read_performance: Callable[[], dict[str, Any]] = dict,
         read_equipment: Callable[[], dict[str, Any]] = dict,
         read_feedback: Callable[[], list[dict[str, Any]]] = list,
         read_record: Callable[[str, str], dict[str, Any]] | None = None,
@@ -45,6 +46,7 @@ class TrainingReportService:
         self._utc_now = utc_now
         self._read_competitions = read_competitions
         self._read_recovery = read_recovery
+        self._read_performance = read_performance
         self._read_equipment = read_equipment
         self._read_feedback = read_feedback
         self._read_record = read_record
@@ -80,6 +82,17 @@ class TrainingReportService:
             self._today(),
             self._timezone(),
         )
+
+    def body_history(self) -> dict[str, Any]:
+        history = self._read_performance().get("history")
+        body = history.get("body") if isinstance(history, dict) else None
+        return body if isinstance(body, dict) else {"status": "insufficient_data"}
+
+    def sleep_regularity(self) -> dict[str, Any]:
+        regularity = self._read_recovery().get("regularity")
+        if isinstance(regularity, dict):
+            return regularity
+        return {"status": "insufficient_data"}
 
     def season(self) -> dict[str, Any]:
         return season_preparation(
@@ -144,7 +157,9 @@ class TrainingReportService:
                 {
                     **stored,
                     "date": str(row.get("start_date_local") or "")[:10],
-                    "sport": row.get("type"),
+                    "sport": row.get("type") or row.get("sport"),
+                    "activity_type": row.get("type") or row.get("sport"),
+                    "source": row.get("source") or "Intervals.icu",
                     "name": row.get("name"),
                     "average_temp": row.get("average_temp"),
                     "duration": row.get("moving_time"),
@@ -165,45 +180,177 @@ class TrainingReportService:
         return {
             "status": "ok" if records else "insufficient_data",
             "activities": records,
-            "scope": "Up to 100 locally cached detail records; only current canonical activities with eligible original streams.",
+            "scope": "Bis zu 100 lokal gespeicherte Detaildatensätze; nur aktuelle Aktivitäten mit geeigneten Originaldaten.",
             "comparison": "Individual observations, no inferred fitness trend. Compare sport, duration, intensity, terrain, temperature and indoor/outdoor conditions.",
         }
 
     def power_profiles(self) -> dict[str, Any]:
-        records = [
-            row
-            for row in self._observations()
-            if (row.get("power_profile") or {}).get("status") == "ok"
+        records = self._observations()
+        today = self._today()
+        eligible_records = [
+            row for row in records if str(row.get("date") or "") <= today.isoformat()
         ]
-        best = []
+        valid = [
+            row
+            for row in eligible_records
+            if (row.get("power_profile") or {}).get("status") == "ok"
+            or (row.get("running_profile") or {}).get("status") == "ok"
+        ]
+        # Keep one compatibility winner per sport/duration.
+        compatibility = self._compatibility_profiles(eligible_records)
+        # Keep all cached records in the window so coverage reports include
+        # activities whose streams are incomplete and therefore yield unknown
+        # points. Candidates below still require a measured profile point.
+        windows = {
+            str(days): self._profile_window(eligible_records, today, days)
+            for days in (28, 90)
+        }
+        return {
+            "status": "ok" if compatibility or valid else "insufficient_data",
+            "best": compatibility,
+            "activities": records,
+            "windows": windows,
+            "running": {
+                "name": "running_best_efforts",
+                "type": "running",
+                "windows": {key: value["running"] for key, value in windows.items()},
+            },
+            "method": "original-stream-integral-v1",
+            "scope": "Beobachtete Fenster aus lokal gespeicherten Aktivitäten. Fehlende oder ungültige Fenster bleiben unbekannt; keine FTP- oder Tempo-Schätzung.",
+        }
+
+    @staticmethod
+    def _compatibility_profiles(
+        eligible_records: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        compatibility = []
         for sport in ("Ride", "VirtualRide"):
             for duration in (5, 60, 300, 1200):
                 candidates = [
-                    (point["watts"], row)
-                    for row in records
-                    if row["sport"] == sport
-                    for point in row["power_profile"]["points"]
-                    if point["duration_seconds"] == duration
-                    and point["watts"] is not None
+                    (p.get("watts"), row)
+                    for row in eligible_records
+                    if row.get("sport") == sport
+                    for p in (row.get("power_profile") or {}).get("points", [])
+                    if p.get("duration_seconds") == duration
+                    and p.get("watts") is not None
                 ]
                 if candidates:
-                    watts, row = max(candidates, key=lambda candidate: candidate[0])
-                    best.append(
+                    watts, row = max(candidates, key=lambda item: item[0])
+                    compatibility.append(
                         {
                             "sport": sport,
+                            "type": row.get("activity_type") or sport,
+                            "environment": "indoor"
+                            if sport == "VirtualRide"
+                            else "outdoor",
                             "duration_seconds": duration,
                             "watts": watts,
                             "activity_id": row["activity_id"],
                             "date": row["date"],
                             "observed_at": row["observed_at"],
+                            "source": row.get("source") or "original activity stream",
+                            "device": row.get("device") or "unknown",
                         }
                     )
+        return compatibility
+
+    @staticmethod
+    def _profile_window(
+        records: list[dict[str, Any]], today: date, days: int
+    ) -> dict[str, Any]:
+        start = today - timedelta(days=days - 1)
+        eligible = [
+            row
+            for row in records
+            if start.isoformat() <= str(row.get("date") or "") <= today.isoformat()
+        ]
+        source = "Intervals.icu original streams via local activity detail cache"
+        usable = [
+            row
+            for row in eligible
+            if (row.get("power_profile") or {}).get("status") == "ok"
+            or (row.get("running_profile") or {}).get("status") == "ok"
+        ]
+        result: dict[str, Any] = {
+            "date_start": start.isoformat(),
+            "date_end": today.isoformat(),
+            "source": source,
+            "cache_coverage": {
+                "records": len(eligible),
+                "cached_records": len(eligible),
+                "usable_records": len(usable),
+                "unknown_records": len(eligible) - len(usable),
+                "eligible_activities": [row["activity_id"] for row in eligible],
+            },
+            "power": [],
+            "running": {"speed": [], "distance": []},
+        }
+        for sport in ("Ride", "VirtualRide"):
+            for duration in (5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600):
+                candidates = _power_candidates(eligible, sport, duration)
+                result["power"].append(
+                    TrainingReportService._winner(
+                        candidates, sport, duration, "watts", "duration_seconds"
+                    )
+                )
+        for key, field, values in (
+            ("speed", "speed_mps", (60, 300, 1200)),
+            ("distance", "seconds", (1000, 5000)),
+        ):
+            for value in values:
+                candidates = _running_candidates(eligible, key, field, value)
+                result["running"][key].append(
+                    TrainingReportService._winner(
+                        candidates,
+                        "Run",
+                        value,
+                        field,
+                        "duration_seconds" if key == "speed" else "distance_meters",
+                        minimum=key == "distance",
+                    )
+                )
+        return result
+
+    @staticmethod
+    def _winner(
+        candidates: list[tuple[dict[str, Any], dict[str, Any]]],
+        sport: str,
+        value: int,
+        field: str,
+        label: str,
+        minimum: bool = False,
+    ) -> dict[str, Any]:
+        if not candidates:
+            return {
+                "sport": sport,
+                label: value,
+                field: None,
+                "status": "unknown",
+                "reason": "No complete valid local window.",
+            }
+        point, row = (min if minimum else max)(
+            candidates, key=lambda item: item[0][field]
+        )
+        actual_sport = row.get("sport", sport)
+        environment = (
+            "indoor"
+            if actual_sport in {"VirtualRide", "VirtualRun", "IndoorCycling"}
+            else "outdoor"
+        )
         return {
-            "status": "ok" if best else "insufficient_data",
-            "best": best,
-            "activities": records,
-            "method": "original-stream-integral-v1",
-            "scope": "Up to 100 current locally loaded recordings. Indoor and outdoor sports stay separate. Observed means are not FTP or model estimates.",
+            "sport": actual_sport,
+            "type": row.get("activity_type") or actual_sport,
+            "environment": environment,
+            label: value,
+            field: point[field],
+            "activity_id": row.get("activity_id"),
+            "date": row.get("date"),
+            "observed_at": row.get("observed_at"),
+            "status": "ok",
+            "source": point.get("source")
+            or row.get("source")
+            or "original activity stream",
+            "device": row.get("device") or "unknown",
         }
 
     def archive(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -234,3 +381,28 @@ class TrainingReportService:
                 for row in rows
             ]
         }
+
+
+def _power_candidates(
+    eligible: list[dict[str, Any]], sport: str, duration: int
+) -> list:
+    return [
+        (p, row)
+        for row in eligible
+        if row.get("sport") == sport
+        for p in (row.get("power_profile") or {}).get("duration_curve", [])
+        if p.get("duration_seconds") == duration and p.get("watts") is not None
+    ]
+
+
+def _running_candidates(
+    eligible: list[dict[str, Any]], key: str, field: str, value: int
+) -> list:
+    return [
+        (p, row)
+        for row in eligible
+        if row.get("sport") in {"Run", "VirtualRun", "TrailRun"}
+        for p in (row.get("running_profile") or {}).get(key, [])
+        if p.get(field) is not None
+        and p.get("duration_seconds", p.get("distance_meters")) == value
+    ]

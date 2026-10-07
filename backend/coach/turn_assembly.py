@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
-import time
 from typing import Any
 
 from backend.coach.chat_turn import CoachChatTurnService
 from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.coach.final_receipt import CoachFinalReceiptService
+from backend.coach.planning_commands import CoachPlanningCommandService
+from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.structured_turn import (
@@ -16,8 +18,6 @@ from backend.coach.structured_turn import (
 )
 from backend.coach.turn_opening import CoachTurnOpeningService
 from backend.coach.turn_outcome import CoachStructuredOutcomeService
-from backend.coach.receipt_reads import CoachCommandReceiptService
-from backend.coach.planning_commands import CoachPlanningCommandService
 
 
 @dataclass(frozen=True)
@@ -78,7 +78,7 @@ class CoachTurnAssembly:
     def __init__(
         self,
         *,
-        dependencies: "CoachTurnAssembly.Inputs",
+        dependencies: CoachTurnAssembly.Inputs,
     ) -> None:
         persistence = dependencies.persistence
         lifecycle = dependencies.lifecycle
@@ -175,21 +175,23 @@ class CoachTurnAssembly:
         )
 
     def structured_turn_service(self) -> CoachStructuredTurnService:
-        return CoachStructuredTurnService(CoachStructuredTurnDependencies(
-            opening=self.turn_opening_service(),
-            attachments=self._attachment_context_service(),
-            dialogue=self._dialogue_read_service(),
-            payload=self._request_payload_service(),
-            response=self.structured_response_service(),
-            rounds=self._tool_round_service(),
-            outcome=self.outcome_service(),
-            final_receipt=self.final_receipt_service(),
-            failure=self._turn_failure_service(),
-            tools=self._tools(),
-            read_only_tools=frozenset(self._read_only_tools()),
-            logger=self._logger,
-            root=self._root,
-        ))
+        return CoachStructuredTurnService(
+            CoachStructuredTurnDependencies(
+                opening=self.turn_opening_service(),
+                attachments=self._attachment_context_service(),
+                dialogue=self._dialogue_read_service(),
+                payload=self._request_payload_service(),
+                response=self.structured_response_service(),
+                rounds=self._tool_round_service(),
+                outcome=self.outcome_service(),
+                final_receipt=self.final_receipt_service(),
+                failure=self._turn_failure_service(),
+                tools=self._tools(),
+                read_only_tools=frozenset(self._read_only_tools()),
+                logger=self._logger,
+                root=self._root,
+            )
+        )
 
     def chat_turn_service(self) -> CoachChatTurnService:
         return CoachChatTurnService(

@@ -1,5 +1,5 @@
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from backend.athlete.profile import normalize_profile
 from backend.errors import AppError
@@ -86,11 +86,131 @@ class PersonalRecoveryTests(unittest.TestCase):
             if row["id"] < "2026-08-21":
                 row["restingHR"] = 100
         result = personal_recovery(rows, {}, {}, self.today)
-        pulse = next(row for row in result["baselines"] if row["metric"] == "resting_hr")
+        pulse = next(
+            row for row in result["baselines"] if row["metric"] == "resting_hr"
+        )
         self.assertEqual("2026-08-03", pulse["history"][0]["date"])
         self.assertEqual(61, len(pulse["history"]))
         self.assertEqual(42, pulse["nights"])
         self.assertEqual(50, pulse["median"])
+
+    def sleep_rows(
+        self, count, *, start="2026-09-01T21:30:00Z", end="2026-09-02T05:30:00Z"
+    ):
+        from datetime import datetime, timezone
+
+        result = []
+        for index in range(count):
+            day = self.today - timedelta(days=count - index)
+            start_dt = datetime.fromisoformat(start.replace("Z", "+00:00")) + timedelta(
+                days=index
+            )
+            end_dt = datetime.fromisoformat(end.replace("Z", "+00:00")) + timedelta(
+                days=index
+            )
+            result.append(
+                {
+                    "calendarDate": day.isoformat(),
+                    "sleepStartTimestampGMT": int(
+                        start_dt.replace(tzinfo=timezone.utc).timestamp() * 1000
+                    ),
+                    "sleepEndTimestampGMT": int(
+                        end_dt.replace(tzinfo=timezone.utc).timestamp() * 1000
+                    ),
+                }
+            )
+        current_start = datetime.combine(
+            self.today - timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+        ).replace(hour=21, minute=30)
+        current_end = datetime.combine(
+            self.today, datetime.min.time(), tzinfo=timezone.utc
+        ).replace(hour=5, minute=30)
+        result.append(
+            {
+                "calendarDate": self.today.isoformat(),
+                "sleepStartTimestampGMT": int(current_start.timestamp() * 1000),
+                "sleepEndTimestampGMT": int(current_end.timestamp() * 1000),
+            }
+        )
+        return result
+
+    def test_sleep_regularity_coverage_thresholds_and_display_contract(self):
+        for nights, expected in (
+            (13, "insufficient_data"),
+            (14, "provisional"),
+            (27, "provisional"),
+            (28, "ok"),
+        ):
+            with self.subTest(nights=nights):
+                result = personal_recovery(
+                    [],
+                    {"sleep": self.sleep_rows(nights)},
+                    {"timezone": "UTC"},
+                    self.today,
+                )["regularity"]
+                item = result["series"][0]
+                self.assertEqual(expected, item["status"])
+                self.assertEqual(nights, item["coverage"]["baseline_nights"])
+                self.assertEqual(14, len(item["points_14"]))
+                self.assertEqual(84, len(item["points_84"]))
+                self.assertEqual("Garmin Connect", item["source"])
+                self.assertTrue(item["method"].startswith("sleepStartTimestampGMT/"))
+
+    def test_sleep_regularity_circular_midnight_median_and_source_separation(self):
+        rows = self.sleep_rows(
+            14, start="2026-09-01T21:50:00Z", end="2026-09-02T05:50:00Z"
+        )
+        rows[1]["sleepStartTimestampGMT"] = int(
+            datetime(2026, 9, 1, 22, 10, tzinfo=timezone.utc).timestamp() * 1000
+        )
+        rows[1]["sleepEndTimestampGMT"] = int(
+            datetime(2026, 9, 2, 6, 10, tzinfo=timezone.utc).timestamp() * 1000
+        )
+        result = personal_recovery(
+            [], {"sleep": rows}, {"timezone": "UTC"}, self.today
+        )["regularity"]
+        self.assertEqual(
+            0, result["series"][0]["baseline"]["onset_deviation_median_minutes"]
+        )
+        self.assertEqual(
+            {"Garmin Connect"}, {item["source"] for item in result["series"]}
+        )
+
+    def test_sleep_intervals_reject_future_missing_and_reversed_and_keep_dst_duration(
+        self,
+    ):
+        malformed = [
+            {
+                "calendarDate": "2026-10-01",
+                "sleepStartTimestampGMT": "2026-10-01T22:00:00Z",
+            },
+            {
+                "calendarDate": "2026-10-01",
+                "sleepStartTimestampGMT": "2026-10-02T05:00:00Z",
+                "sleepEndTimestampGMT": "2026-10-02T04:00:00Z",
+            },
+            {
+                "calendarDate": "2026-10-03",
+                "sleepStartTimestampGMT": "2026-10-02T22:00:00Z",
+                "sleepEndTimestampGMT": "2026-10-03T06:00:00Z",
+            },
+        ]
+        sleep = [
+            {
+                "sleepStartTimestampGMT": "2026-09-28T21:00:00Z",
+                "sleepEndTimestampGMT": "2026-09-29T04:00:00Z",
+            },
+            *malformed,
+        ]
+        item = personal_recovery(
+            [], {"sleep": sleep}, {"timezone": "Europe/Berlin"}, self.today
+        )["regularity"]["series"][0]
+        observed = next(
+            point for point in item["points"] if point["date"] == "2026-09-29"
+        )
+        self.assertEqual(7, observed["duration_hours"])
+        self.assertEqual("2026-09-28T23:00:00+02:00", observed["onset_at"])
+        self.assertEqual(1, len(item["points"]))
 
 
 if __name__ == "__main__":

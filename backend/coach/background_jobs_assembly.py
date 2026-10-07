@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from backend.coach.background_job import CoachBackgroundJobRunner
@@ -69,7 +68,7 @@ class CoachBackgroundJobsAssembly:
         athlete: CoachJobAthleteServices
         limits: CoachJobLimits
 
-    def __init__(self, *, dependencies: "CoachBackgroundJobsAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: CoachBackgroundJobsAssembly.Inputs) -> None:
         persistence = dependencies.persistence
         worker = dependencies.worker
         turn = dependencies.turn
@@ -108,17 +107,19 @@ class CoachBackgroundJobsAssembly:
         )
 
     def turn_failure_service(self) -> CoachTurnFailureService:
-        return CoachTurnFailureService(CoachTurnFailureDependencies(
-            database_manager=self._database_manager,
-            database_lock=self._database_lock,
-            chat_repository=self._chat_repository,
-            key_values=self._key_value_repository,
-            event_buffer=self._event_buffer,
-            redactor=self._redactor,
-            utc_now=self._utc_now,
-            repository_root=self._repository_root,
-            read_only_tools=frozenset(self._read_only_tools()),
-        ))
+        return CoachTurnFailureService(
+            CoachTurnFailureDependencies(
+                database_manager=self._database_manager,
+                database_lock=self._database_lock,
+                chat_repository=self._chat_repository,
+                key_values=self._key_value_repository,
+                event_buffer=self._event_buffer,
+                redactor=self._redactor,
+                utc_now=self._utc_now,
+                repository_root=self._repository_root,
+                read_only_tools=frozenset(self._read_only_tools()),
+            )
+        )
 
     def job_submission_service(self) -> CoachJobSubmissionService:
         return CoachJobSubmissionService(

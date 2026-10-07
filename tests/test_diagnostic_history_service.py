@@ -4,9 +4,9 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from types import SimpleNamespace
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 from backend.coach.service import command_receipt
 from backend.diagnostics.history import CoachDiagnosticHistoryService
@@ -65,48 +65,70 @@ class CoachDiagnosticHistoryServiceTests(unittest.TestCase):
             db.close()
 
     def test_projects_only_allowlisted_metadata_and_redacts_it(self):
-        self.add_command("private-turn-id", {
-            "status": "failed",
-            "response_status": "incomplete",
-            "awaiting_clarification": True,
-            "diagnostic_error": {
-                "type": "ProviderError",
-                "reason": "athlete_secret",
-                "status": 503,
-                "provider_error_code": "rate_limit_exceeded",
-                "message": "athlete-secret@example.invalid",
-                "token": "private-token",
-                "frames": [
-                    {"file": "backend/coach/service.py", "function": "run", "line": 19},
-                    {"file": "C:/private/path.py", "function": "leak", "line": 20},
+        self.add_command(
+            "private-turn-id",
+            {
+                "status": "failed",
+                "response_status": "incomplete",
+                "awaiting_clarification": True,
+                "diagnostic_error": {
+                    "type": "ProviderError",
+                    "reason": "athlete_secret",
+                    "status": 503,
+                    "provider_error_code": "rate_limit_exceeded",
+                    "message": "athlete-secret@example.invalid",
+                    "token": "private-token",
+                    "frames": [
+                        {
+                            "file": "backend/coach/service.py",
+                            "function": "run",
+                            "line": 19,
+                        },
+                        {"file": "C:/private/path.py", "function": "leak", "line": 20},
+                    ],
+                },
+                "command_receipts": [
+                    {
+                        "tool": "save_checkin",
+                        "arguments": {"athlete": "private athlete data"},
+                        "result": {"ok": True, "body": "private result"},
+                        "diagnostic_error": {"reason": "private_reason"},
+                    },
+                    {
+                        "tool": "attacker_tool",
+                        "result": {"ok": False},
+                    },
                 ],
             },
-            "command_receipts": [{
-                "tool": "save_checkin",
-                "arguments": {"athlete": "private athlete data"},
-                "result": {"ok": True, "body": "private result"},
-                "diagnostic_error": {"reason": "private_reason"},
-            }, {
-                "tool": "attacker_tool",
-                "result": {"ok": False},
-            }],
-        })
+        )
 
         [entry] = self.service.history()
 
-        self.assertEqual(entry["id"], hashlib.sha256(b"private-turn-id").hexdigest()[:12])
+        self.assertEqual(
+            entry["id"], hashlib.sha256(b"private-turn-id").hexdigest()[:12]
+        )
         self.assertEqual(entry["status"], "failed")
         self.assertEqual(entry["response_status"], "incomplete")
         self.assertTrue(entry["awaiting_clarification"])
         self.assertEqual(entry["error"]["reason"], "[REDACTED]")
         self.assertEqual(entry["error"]["status"], 503)
-        self.assertEqual(entry["error"]["frames"], [{
-            "file": "backend/coach/service.py", "function": "run", "line": 19,
-        }])
-        self.assertEqual(entry["steps"], [
-            {"tool": "save_checkin", "ok": True, "error": {"reason": "[REDACTED]"}},
-            {"tool": "unknown", "ok": False, "error": None},
-        ])
+        self.assertEqual(
+            entry["error"]["frames"],
+            [
+                {
+                    "file": "backend/coach/service.py",
+                    "function": "run",
+                    "line": 19,
+                }
+            ],
+        )
+        self.assertEqual(
+            entry["steps"],
+            [
+                {"tool": "save_checkin", "ok": True, "error": {"reason": "[REDACTED]"}},
+                {"tool": "unknown", "ok": False, "error": None},
+            ],
+        )
         serialized = json.dumps(entry)
         self.assertNotIn("private-token", serialized)
         self.assertNotIn("client_turn_id", entry)
@@ -120,10 +142,17 @@ class CoachDiagnosticHistoryServiceTests(unittest.TestCase):
         ]
         steps = [{"tool": "sync_intervals", "result": {"ok": True}} for _ in range(42)]
         for index in range(21):
-            self.add_command(f"turn-{index + 1:02d}", {}, f"2026-09-23T10:{index + 1:02d}:00+00:00")
-        self.add_command("bounded", {
-            "diagnostic_error": {"frames": frames}, "command_receipts": steps,
-        }, "2026-09-24T10:00:00+00:00")
+            self.add_command(
+                f"turn-{index + 1:02d}", {}, f"2026-09-23T10:{index + 1:02d}:00+00:00"
+            )
+        self.add_command(
+            "bounded",
+            {
+                "diagnostic_error": {"frames": frames},
+                "command_receipts": steps,
+            },
+            "2026-09-24T10:00:00+00:00",
+        )
 
         history = self.service.history()
 
@@ -142,23 +171,31 @@ class CoachDiagnosticHistoryServiceTests(unittest.TestCase):
 
         self.assertEqual(
             [entry["id"] for entry in history],
-            [hashlib.sha256(f"turn-{suffix}".encode()).hexdigest()[:12] for suffix in ("c", "b", "a")],
+            [
+                hashlib.sha256(f"turn-{suffix}".encode()).hexdigest()[:12]
+                for suffix in ("c", "b", "a")
+            ],
         )
 
     def test_malformed_receipt_fields_fail_closed(self):
-        self.add_command("bad", {
-            "status": ["failed"],
-            "response_status": {"failed": True},
-            "diagnostic_error": {"frames": "not a frame list"},
-            "command_receipts": [None, {"tool": [], "result": []}],
-        })
+        self.add_command(
+            "bad",
+            {
+                "status": ["failed"],
+                "response_status": {"failed": True},
+                "diagnostic_error": {"frames": "not a frame list"},
+                "command_receipts": [None, {"tool": [], "result": []}],
+            },
+        )
 
         [entry] = self.service.history()
 
         self.assertEqual(entry["status"], "unknown")
         self.assertIsNone(entry["response_status"])
         self.assertEqual(entry["error"], {})
-        self.assertEqual(entry["steps"], [{"tool": "unknown", "ok": False, "error": None}])
+        self.assertEqual(
+            entry["steps"], [{"tool": "unknown", "ok": False, "error": None}]
+        )
 
 
 if __name__ == "__main__":

@@ -9,7 +9,6 @@ from backend.coach.proposals import CoachProposalConfirmationService
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
-
 PROPOSAL_ID = "abc12345-6789-4abc-8def-0123456789ab"
 
 
@@ -35,7 +34,14 @@ class CoachProposalConfirmationTests(unittest.TestCase):
         self.manager.close()
         self.temp_dir.cleanup()
 
-    def add_proposal(self, *, proposal_id=PROPOSAL_ID, session="csrf-a", status="preview", expires=200):
+    def add_proposal(
+        self,
+        *,
+        proposal_id=PROPOSAL_ID,
+        session="csrf-a",
+        status="preview",
+        expires=200,
+    ):
         with closing(sqlite3.connect(self.db_path)) as db:
             db.execute(
                 "INSERT INTO coach_action_proposals "
@@ -60,7 +66,9 @@ class CoachProposalConfirmationTests(unittest.TestCase):
             self.manager, now=lambda: now, token_factory=lambda _: token
         )
 
-    def test_confirm_returns_private_token_and_safe_view_with_server_compatible_hash(self):
+    def test_confirm_returns_private_token_and_safe_view_with_server_compatible_hash(
+        self,
+    ):
         result = self.service("first token").confirm(PROPOSAL_ID, "csrf-a")
         self.assertEqual(result["status"], "ready")
         self.assertEqual(result["action_token"], "first token")
@@ -84,7 +92,10 @@ class CoachProposalConfirmationTests(unittest.TestCase):
     def test_foreign_session_does_not_find_or_mutate_proposal(self):
         with self.assertRaises(AppError) as error:
             self.service("unused").confirm(PROPOSAL_ID, "csrf-b")
-        self.assertEqual((error.exception.status, error.exception.message), (404, "Aktionsvorschau nicht gefunden."))
+        self.assertEqual(
+            (error.exception.status, error.exception.message),
+            (404, "Aktionsvorschau nicht gefunden."),
+        )
         self.assertEqual(self.proposal_row()["status"], "preview")
         self.assertIsNone(self.proposal_row()["action_token_hash"])
 
@@ -97,7 +108,10 @@ class CoachProposalConfirmationTests(unittest.TestCase):
 
     def test_used_proposal_cannot_be_confirmed(self):
         with closing(sqlite3.connect(self.db_path)) as db:
-            db.execute("UPDATE coach_action_proposals SET status='used' WHERE id=?", (PROPOSAL_ID,))
+            db.execute(
+                "UPDATE coach_action_proposals SET status='used' WHERE id=?",
+                (PROPOSAL_ID,),
+            )
             db.commit()
         with self.assertRaises(AppError) as error:
             self.service("unused").confirm(PROPOSAL_ID, "csrf-a")
@@ -116,7 +130,10 @@ class CoachProposalConfirmationTests(unittest.TestCase):
 
     def test_view_failure_rolls_back_token_update(self):
         with closing(sqlite3.connect(self.db_path)) as db:
-            db.execute("UPDATE coach_action_proposals SET diff='not-json' WHERE id=?", (PROPOSAL_ID,))
+            db.execute(
+                "UPDATE coach_action_proposals SET diff='not-json' WHERE id=?",
+                (PROPOSAL_ID,),
+            )
             db.commit()
         with self.assertRaises(ValueError):
             self.service("must-roll-back").confirm(PROPOSAL_ID, "csrf-a")

@@ -43,17 +43,23 @@ class RecentLogEntriesServiceTests(unittest.TestCase):
 
             self.assertEqual(service.list(), [])
 
-    def test_list_tails_lines_falls_back_for_invalid_json_and_sanitizes_values(self) -> None:
+    def test_list_tails_lines_falls_back_for_invalid_json_and_sanitizes_values(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             log_path = Path(directory) / "app.log"
             log_path.write_text(
                 "ignored line\n"
-                + json.dumps({"message": "failed sk-test-secret-value", "context": {"ok": True}})
+                + json.dumps(
+                    {"message": "failed sk-test-secret-value", "context": {"ok": True}}
+                )
                 + "\n"
                 + "broken sk-test-secret-value\n",
                 encoding="utf-8",
             )
-            service = RecentLogEntriesService(log_path, _redactor(), lambda: "fixed-time")
+            service = RecentLogEntriesService(
+                log_path, _redactor(), lambda: "fixed-time"
+            )
 
             entries = service.list(2)
 
@@ -73,18 +79,24 @@ class RecentLogEntriesServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             log_path = Path(directory) / "app.log"
             log_path.write_text("{}\n", encoding="utf-8")
-            service = RecentLogEntriesService(log_path, _redactor(), lambda: "fixed-time")
-            with patch.object(Path, "read_text", side_effect=OSError("sk-test-secret-value")):
+            service = RecentLogEntriesService(
+                log_path, _redactor(), lambda: "fixed-time"
+            )
+            with patch.object(
+                Path, "read_text", side_effect=OSError("sk-test-secret-value")
+            ):
                 entries = service.list()
 
         self.assertEqual(
             entries,
-            [{
-                "timestamp": "fixed-time",
-                "level": "ERROR",
-                "event": "log_read_failed",
-                "message": "[REDACTED]",
-            }],
+            [
+                {
+                    "timestamp": "fixed-time",
+                    "level": "ERROR",
+                    "event": "log_read_failed",
+                    "message": "[REDACTED]",
+                }
+            ],
         )
 
     def test_download_includes_rotated_logs_in_order_and_redacts_secrets(self) -> None:
@@ -94,7 +106,9 @@ class RecentLogEntriesServiceTests(unittest.TestCase):
             log_path.with_name("app.log.1").write_text(
                 '{"message":"rotated sk-test-secret-value"}\n', encoding="utf-8"
             )
-            service = RecentLogEntriesService(log_path, _redactor(), lambda: "fixed-time")
+            service = RecentLogEntriesService(
+                log_path, _redactor(), lambda: "fixed-time"
+            )
 
             lines = service.download().decode("utf-8").splitlines()
 
@@ -106,9 +120,15 @@ class RecentLogEntriesServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             log_path = Path(directory) / "app.log"
             log_path.write_text('{"message":"current"}\n', encoding="utf-8")
-            log_path.with_name("app.log.1").write_text('{"message":"rot1"}\n', encoding="utf-8")
-            log_path.with_name("app.log.2").write_text('{"message":"rot2"}\n', encoding="utf-8")
-            service = RecentLogEntriesService(log_path, _redactor(), lambda: "fixed-time")
+            log_path.with_name("app.log.1").write_text(
+                '{"message":"rot1"}\n', encoding="utf-8"
+            )
+            log_path.with_name("app.log.2").write_text(
+                '{"message":"rot2"}\n', encoding="utf-8"
+            )
+            service = RecentLogEntriesService(
+                log_path, _redactor(), lambda: "fixed-time"
+            )
 
             result = service.clear()
 
@@ -123,10 +143,14 @@ class RecentLogEntriesServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             log_path = Path(directory) / "app.log"
             log_path.write_text("content\n", encoding="utf-8")
-            service = RecentLogEntriesService(log_path, _redactor(), lambda: "fixed-time")
-            with patch.object(Path, "write_text", side_effect=OSError("disk full")):
-                with self.assertRaises(OSError):
-                    service.clear()
+            service = RecentLogEntriesService(
+                log_path, _redactor(), lambda: "fixed-time"
+            )
+            with (
+                patch.object(Path, "write_text", side_effect=OSError("disk full")),
+                self.assertRaises(OSError),
+            ):
+                service.clear()
 
 
 if __name__ == "__main__":

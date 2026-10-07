@@ -3298,6 +3298,7 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
     renderPersonalRecovery(performance?.personal_recovery);
     renderAnalysisHistory(performance?.history);
     renderTrainingFocus(performance?.training_focus);
+    void loadAnalysisReports();
   }
   const root = $("#performancePredictions");
   root.replaceChildren();

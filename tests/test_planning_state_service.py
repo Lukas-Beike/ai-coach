@@ -1,5 +1,5 @@
-import json
 import ast
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -45,7 +45,8 @@ class StructuredTrainingStateServiceTests(unittest.TestCase):
     def test_domain_cursor_projection_does_not_depend_on_http_adapter(self):
         source = Path(planning_state_service.__file__)
         imports = {
-            node.module for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
+            node.module
+            for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
             if isinstance(node, ast.ImportFrom)
         }
         self.assertNotIn("backend.http_api.pagination", imports)

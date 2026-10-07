@@ -12,10 +12,29 @@ def list_events(
     limit: Any = 300,
     training_relevant_only: bool = False,
 ) -> list[dict[str, Any]]:
-    relevance_filter = " AND training_relevant = 1" if training_relevant_only else ""
+    # [NO_TRAINING] deliberately sets training_relevant=0, but remains a
+    # blocking event for callers that otherwise request only relevant events.
+    columns = {
+        str(row["name"])
+        for row in db.execute("PRAGMA table_info(external_calendar_events)")
+    }
+    no_training_column = "no_training" in columns
+    no_training_projection = "no_training, " if no_training_column else ""
+    marker_filter = (
+        " OR no_training = 1 OR no_intensity = 1 OR short_only = 1"
+        if no_training_column
+        else " OR no_intensity = 1 OR short_only = 1"
+    )
+    relevance_filter = (
+        " AND (training_relevant = 1"
+        + marker_filter
+        + " OR instr(upper(name), '[NO_TRAINING]') > 0)"
+        if training_relevant_only
+        else ""
+    )
     rows = db.execute(
         "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, "
-        "training_relevant, no_intensity, short_only, updated_at "
+        f"training_relevant, {no_training_projection}no_intensity, short_only, updated_at "
         f"FROM external_calendar_events WHERE end_local > ?{relevance_filter} "
         "ORDER BY start_local LIMIT ?",
         (today.isoformat() + "T00:00:00", max(1, min(int(limit), 1000))),

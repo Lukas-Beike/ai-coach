@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from backend.planning import changes as planning_changes
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.calendar_service import CalendarConflictService
 from backend.planning.daily_context_service import DailyPlanningContextService
-from backend.planning.local_plan_creation_service import LocalTrainingPlanCreationService
 from backend.planning.library_plan_service import WorkoutLibraryPlanService
-from backend.planning.replacement_service import StructuredTrainingPlanReplacementService
+from backend.planning.local_plan_creation_service import (
+    LocalTrainingPlanCreationService,
+)
+from backend.planning.replacement_service import (
+    StructuredTrainingPlanReplacementService,
+)
 from backend.planning.state_service import StructuredTrainingStateService
 
 
@@ -73,7 +76,7 @@ class PlanningWorkflowAssembly:
         runtime: PlanningRuntime
         limits: PlanningChangeLimits
 
-    def __init__(self, *, dependencies: "PlanningWorkflowAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: PlanningWorkflowAssembly.Inputs) -> None:
         owners = dependencies.owners
         repositories = dependencies.repositories
         daily = dependencies.daily_sources
@@ -157,16 +160,22 @@ class PlanningWorkflowAssembly:
             self._local_date,
         )
 
-    def structured_training_change_validator(self) -> planning_changes.StructuredTrainingChangeValidator:
+    def structured_training_change_validator(
+        self,
+    ) -> planning_changes.StructuredTrainingChangeValidator:
         return planning_changes.StructuredTrainingChangeValidator(
             self._planning_state_repository, self.calendar_conflict_service()
         )
 
-    def structured_training_change_service(self) -> planning_changes.StructuredTrainingChangeService:
+    def structured_training_change_service(
+        self,
+    ) -> planning_changes.StructuredTrainingChangeService:
         return planning_changes.StructuredTrainingChangeService(
             self._database_manager(),
             self.structured_training_change_validator(),
-            planning_changes.StructuredTrainingPlanResolver(self._training_plan_repository),
+            planning_changes.StructuredTrainingPlanResolver(
+                self._training_plan_repository
+            ),
             self._planned_unit_service(),
             self._planning_revision,
             self._training_plan_service(),
@@ -175,7 +184,9 @@ class PlanningWorkflowAssembly:
             lambda: self._event_buffer.publish("planning", {"status": "changed"}),
         )
 
-    def structured_training_plan_replacement_service(self) -> StructuredTrainingPlanReplacementService:
+    def structured_training_plan_replacement_service(
+        self,
+    ) -> StructuredTrainingPlanReplacementService:
         return StructuredTrainingPlanReplacementService(
             self._database_manager(),
             self._planning_state_repository,
@@ -205,4 +216,3 @@ class PlanningWorkflowAssembly:
             self._default_illness_pause_days,
             self._weather_adaptive_max_minutes,
         )
-

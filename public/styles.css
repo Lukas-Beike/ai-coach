@@ -317,6 +317,7 @@ h2 {
 .analysis-chart-table table { width: 100%; border-collapse: collapse; color: var(--ink); font-size: .75rem; }
 .analysis-chart-table caption { padding: 8px; text-align: left; color: var(--muted); }
 .analysis-chart-table th, .analysis-chart-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; }
+
 .analysis-segment-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .analysis-segment-heading > div { display: grid; gap: 4px; min-width: 0; }
 .analysis-segment-heading h3 { margin: 0; color: var(--ink); font-size: 1.05rem; }
@@ -1262,12 +1263,18 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 }
 .activity-series svg { width: 100%; height: auto; }
 .activity-series path { fill: none; stroke: var(--accent, #65d6b4); stroke-width: 2; }
+.activity-series svg text { fill: var(--muted); font-size: 11px; }
+.activity-series .activity-gridline { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; }
+.activity-values { margin-top: 8px; }
+.activity-feedback-form { display: grid; gap: 10px; margin-top: 8px; }
+.activity-feedback-form label { display: grid; gap: 5px; color: var(--muted); font-size: .8rem; }
+.activity-feedback-form input, .activity-feedback-form textarea { width: 100%; }
+@media (max-width: 420px) {
+  :root .activity-detail-dialog { padding: 14px; }
+  .activity-series svg { min-width: 0; }
+}
 .activity-laps { padding-left: 22px; }
 .report-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-.weekly-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 16px 0; }
-.weekly-metrics > div { display: grid; gap: 4px; min-width: 0; padding: 12px 8px; border-radius: 12px; background: var(--surface-raised, var(--surface)); border: 1px solid var(--line); }
-.weekly-metrics strong { font-size: clamp(.9rem, 4vw, 1.3rem); overflow-wrap: anywhere; }
-.weekly-metrics span { color: var(--muted); font-size: .75rem; }
 .weekly-chart svg { width: 100%; height: auto; max-width: 480px; margin-inline: auto; }
 .weekly-chart { padding-top: 8px; }
 .weekly-chart h4 { margin-bottom: 12px; }
@@ -1296,3 +1303,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .analysis-day-marker:hover rect, .analysis-day-marker:focus rect { fill: var(--ink); fill-opacity: .06; }
 .analysis-day-marker:focus { outline: 2px solid var(--accent); }
 .analysis-chart-hint { font-size: .75rem; margin: 8px 0; }
+
+
+.analysis-report-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 0.9rem; overflow-wrap: anywhere; }

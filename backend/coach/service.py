@@ -17,13 +17,19 @@ def dialogue_scope_repair_key(name: str, arguments: dict[str, Any]) -> str:
         for key in ("target", "period", "constraints", "remote_write", "sync_scope")
     }
     payload = {
-        key: value for key, value in arguments.items()
+        key: value
+        for key, value in arguments.items()
         if key not in {"_request", "expected_revision"}
     }
     if isinstance(payload.get("changes"), list):
         payload["changes"] = [
-            {key: value for key, value in change.items() if key != "expected_payload_hash"}
-            if isinstance(change, dict) else change
+            {
+                key: value
+                for key, value in change.items()
+                if key != "expected_payload_hash"
+            }
+            if isinstance(change, dict)
+            else change
             for change in payload["changes"]
         ]
     return coach_action_hash({"tool": name, "arguments": payload, "binding": binding})
@@ -35,9 +41,13 @@ def dialogue_request_binding_key(arguments: dict[str, Any]) -> str | None:
     if not isinstance(request, dict):
         return None
     scope, constraints = request.get("scope"), request.get("constraints")
-    if not isinstance(scope, list) or not all(isinstance(value, str) for value in scope):
+    if not isinstance(scope, list) or not all(
+        isinstance(value, str) for value in scope
+    ):
         return None
-    if not isinstance(constraints, list) or not all(isinstance(value, str) for value in constraints):
+    if not isinstance(constraints, list) or not all(
+        isinstance(value, str) for value in constraints
+    ):
         return None
     binding = {
         "target": request.get("target"),
@@ -68,12 +78,20 @@ def dialogue_plan_effect_key(name: str, arguments: dict[str, Any]) -> str | None
     for workout in workouts:
         if not isinstance(workout, dict):
             return None
-        signatures.append({
-            key: workout.get(key)
-            for key in (
-                "date", "sport", "name", "description", "duration_minutes", "target", "rationale",
-            )
-        })
+        signatures.append(
+            {
+                key: workout.get(key)
+                for key in (
+                    "date",
+                    "sport",
+                    "name",
+                    "description",
+                    "duration_minutes",
+                    "target",
+                    "rationale",
+                )
+            }
+        )
     return coach_action_hash({"workouts": signatures})
 
 
@@ -84,40 +102,50 @@ def coach_repair_key(name: str, arguments: dict[str, Any]) -> dict[str, Any] | N
     changes = arguments.get("changes")
     if not isinstance(changes, list):
         return None
-    fields = sorted({
-        str(item.get("field") or "")
-        for item in changes
-        if isinstance(item, dict) and item.get("field")
-    })
+    fields = sorted(
+        {
+            str(item.get("field") or "")
+            for item in changes
+            if isinstance(item, dict) and item.get("field")
+        }
+    )
     return {"profile_fields": fields} if fields else None
 
 
 def dialogue_effect_key(name: str, arguments: dict[str, Any]) -> str:
     request = arguments.get("_request") or {}
     if not isinstance(request, dict):
-        raise ValueError("request_object")
+        raise ValueError("request_object")  # noqa: TRY004 - Preserve the validation ValueError contract.
     binding = {
         key: request.get(key)
         for key in ("target", "period", "constraints", "remote_write", "sync_scope")
     }
     binding["scope"] = sorted(request.get("scope") or [])
-    return coach_action_hash({
-        "tool": name,
-        "arguments": {key: value for key, value in arguments.items() if key != "_request"},
-        "binding": binding,
-    })
+    return coach_action_hash(
+        {
+            "tool": name,
+            "arguments": {
+                key: value for key, value in arguments.items() if key != "_request"
+            },
+            "binding": binding,
+        }
+    )
 
 
 def command_receipt(value: Any) -> dict[str, Any]:
     """Decode a persisted receipt without allowing malformed state to escape."""
     try:
-        receipt = json.loads(value or "{}") if not isinstance(value, dict) else dict(value)
+        receipt = (
+            json.loads(value or "{}") if not isinstance(value, dict) else dict(value)
+        )
     except (TypeError, ValueError):
         receipt = {}
     return receipt if isinstance(receipt, dict) else {}
 
 
-def mark_resolved_receipts(command_receipts: list[dict[str, Any]], failures: Iterable[dict[str, Any]]) -> None:
+def mark_resolved_receipts(
+    command_receipts: list[dict[str, Any]], failures: Iterable[dict[str, Any]]
+) -> None:
     """Mark failed tool calls resolved when a later retry superseded them."""
     failure_ids = {id(entry) for entry in failures}
     for entry in command_receipts:
@@ -126,18 +154,25 @@ def mark_resolved_receipts(command_receipts: list[dict[str, Any]], failures: Ite
 
 
 def effects_from_receipts(
-    command_receipts: list[dict[str, Any]], internal_tools: set[str],
+    command_receipts: list[dict[str, Any]],
+    internal_tools: set[str],
 ) -> list[dict[str, Any]]:
     """Return successful externally meaningful tool effects."""
     return [
-        entry for entry in command_receipts
+        entry
+        for entry in command_receipts
         if entry.get("result", {}).get("ok") and entry.get("tool") not in internal_tools
     ]
 
 
 def outcome_status(
-    *, question: str, incomplete_answer: bool, failures: list[dict[str, Any]],
-    missing_answer: bool, effects: list[dict[str, Any]], cancelled: bool,
+    *,
+    question: str,
+    incomplete_answer: bool,
+    failures: list[dict[str, Any]],
+    missing_answer: bool,
+    effects: list[dict[str, Any]],
+    cancelled: bool,
 ) -> str:
     """Choose the durable status for a completed Coach turn."""
     if question:

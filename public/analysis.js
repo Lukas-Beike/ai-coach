@@ -1,5 +1,8 @@
 const ANALYSIS_SVG_NS = "http://www.w3.org/2000/svg";
 
+const KIND_LABELS = { bike: "Fahrrad", component: "Komponente", shoes: "Schuhe", other: "Sonstiges" };
+const SPORT_LABELS = { Ride: "Rad", VirtualRide: "Indoor-Rad", Run: "Laufen", Swim: "Schwimmen", Walk: "Gehen" };
+const SENSOR_LABELS = { power: "Leistung", heart_rate: "Herzfrequenz", pace: "Tempo" };
 function analysisSvg(tag, attributes = {}, content = "") {
   const node = document.createElementNS(ANALYSIS_SVG_NS, tag);
   Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, String(value)));
@@ -8,6 +11,7 @@ function analysisSvg(tag, attributes = {}, content = "") {
 }
 
 function analysisValue(value, unit) {
+  if (value == null || value === "" || !Number.isFinite(Number(value))) return "unbekannt";
   if (unit === "s/km") return formatPace(value);
   if (unit === "h") {
     const minutes = Math.round(Math.abs(Number(value)) * 60);
@@ -32,6 +36,7 @@ function analysisLatestPoint(item) {
 }
 
 function analysisUsesCurrentLine(item) {
+  if (item.noCurrentLine) return false;
   return Boolean(analysisLatestPoint(item)) && new Set(item.points.filter(analysisValidPoint).map((point) => Number(point.value))).size < 3;
 }
 
@@ -126,6 +131,8 @@ function appendAnalysisReferenceNotes(section, series, unit) {
 function analysisReadingDetails(point, unit) {
   let details = point.count ? ` · ${point.count} Messungen` : "";
   if (point.observedDate && point.observedDate !== point.date) details += ` · letzter Messwert ${dateLabel(point.observedDate)}`;
+  if (point.ftp_observed_at) details += ` · ${point.power_method || "FTP"} ${dateLabel(point.ftp_observed_at)}`;
+  if (point.weight_observed_at) details += ` · Gewicht ${dateLabel(point.weight_observed_at)} (${point.weight_source || "Quelle unbekannt"})`;
   if (point.lower != null) details += ` · Streuung ${analysisValue(point.lower, unit)} bis ${analysisValue(point.upper, unit)}`;
   return details;
 }
@@ -462,6 +469,57 @@ function analysisPeriodControls(label, value, change) {
 
 let analysisHistoryPeriod = "twelveWeeks";
 let recoveryHistoryPeriod = "fortnight";
+let analysisReportGeneration = 0;
+
+function renderExistingPerformanceReports(endurance, profiles) {
+  const root = document.querySelector("#existingPerformanceReports"); root.replaceChildren();
+  const bySport = new Map();
+  (endurance?.activities || []).forEach((item) => {
+    const efficiency = Number(item.aerobic?.efficiency);
+    if (item.aerobic?.efficiency == null || !Number.isFinite(efficiency) || !item.date) return;
+    const sport = String(item.sport || "Sportart unbekannt");
+    if (!bySport.has(sport)) bySport.set(sport, []);
+    bySport.get(sport).push({ date: String(item.date).slice(0, 10), value: efficiency, unit: item.aerobic.unit || "" });
+  });
+  const cards = [];
+  bySport.forEach((items, sport) => {
+    const points = items.sort((a, b) => a.date.localeCompare(b.date));
+    if (points.length < 2 || points[0].date === points.at(-1).date) return;
+    const unit = points.find((point) => point.unit)?.unit || "";
+    const series = [{ label: sport, legendLabel: sport, source: "Intervals.icu", unit, color: 0, cadenceDays: 1, points: points.map(({ date, value }) => ({ date, value })), currentPoint: points.at(-1) }];
+    const chart = analysisChart(`Ausdauer-Effizienz \u00b7 ${sport}`, series, unit, points[0].date, points.at(-1).date, "", { sparse: true, showLegend: false });
+    chart.querySelector(".analysis-chart-legend")?.remove();
+    cards.push(chart);
+  });
+  const order = new Map([[5, 0], [60, 1], [300, 2], [1200, 3]]);
+  const best = (profiles?.best || []).filter((item) => item.watts != null).slice()
+    .sort((a, b) => String(a.sport).localeCompare(String(b.sport)) || (order.get(a.duration_seconds) ?? 9) - (order.get(b.duration_seconds) ?? 9));
+  if (best.length) {
+    const card = reportNode("section", null, "analysis-chart-card");
+    card.append(reportNode("h3", "Beste Fenster je Aktivit\u00e4t"));
+    const wrap = reportNode("div", null, "analysis-chart-table");
+    const table = reportNode("table"); const head = reportNode("tr");
+    ["Sport", "Fenster", "Watt", "Datum"].forEach((label) => head.append(reportNode("th", label)));
+    const thead = reportNode("thead"); thead.append(head); table.append(thead);
+    const body = reportNode("tbody");
+    best.forEach((item) => {
+      const row = reportNode("tr");
+      row.append(reportNode("td", item.sport || "unbekannt"), reportNode("td", item.duration_seconds < 60 ? `${item.duration_seconds} s` : `${item.duration_seconds / 60} min`), reportNode("td", `${item.watts} W`), reportNode("td", item.date ? dateLabel(item.date) : "unbekannt"));
+      body.append(row);
+    });
+    table.append(body); wrap.append(table); card.append(wrap); cards.push(card);
+  }
+  if (cards.length) root.append(reportNode("h3", "Ausdauer und Bestleistungen"), ...cards);
+}
+
+async function loadAnalysisReports() {
+  const generation = ++analysisReportGeneration;
+  try {
+    const results = await Promise.allSettled([api("/api/analysis/endurance"), api("/api/analysis/power-profiles")]);
+    if (generation !== analysisReportGeneration) return;
+    renderExistingPerformanceReports(results[0].status === "fulfilled" ? results[0].value : null, results[1].status === "fulfilled" ? results[1].value : null);
+  } catch (_) { /* individual report failures stay scoped to their cards */ }
+}
 
 globalThis.matchMedia("(max-width: 599px)").addEventListener("change", () => {
   if (state.data) { renderAnalysisHistory(state.data.performance?.history); renderPersonalRecovery(state.data.performance?.personal_recovery); }
@@ -470,6 +528,7 @@ globalThis.matchMedia("(max-width: 599px)").addEventListener("change", () => {
 function renderAnalysisHistory(history) { // NOSONAR
   const root = document.querySelector("#analysisHistoryCharts");
   const loadRoot = document.querySelector("#analysisLoadCharts");
+  renderBodyAnalysis(history?.body);
   const openDetails = new Set([...root.querySelectorAll("details[open]"), ...loadRoot.querySelectorAll("details[open]")].map((details) => `${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`));
   root.replaceChildren(); loadRoot.replaceChildren();
   if (!history?.start || !history?.end) return;
@@ -489,6 +548,16 @@ function renderAnalysisHistory(history) { // NOSONAR
   const loadChart = analysisChart(loadTitle, loadSeries, "", start, end, "Garmin Connect: gemessene akute Trainingsbelastung. Gestrichelte Linie: Durchschnitt der angezeigten Werte. Fehlende Messungen bleiben L\u00fccken.");
   loadChart.querySelector(".analysis-chart-legend")?.remove();
   loadRoot.append(loadChart);
+  const timePoints = (history.training_time?.points || []).filter((point) => point.date >= start && point.date <= end).map((point) => ({ date: point.date, value: point.value }));
+  if (timePoints.some(analysisValidPoint)) {
+    const weekly = analysisHistoryPeriod === "twelveWeeks";
+    const timeSeries = [{ label: weekly ? "Trainingszeit pro Woche" : "Trainingszeit pro Tag", legendLabel: "Trainingszeit", source: history.training_time.source || "Intervals.icu", unit: "h", color: 1, cadenceDays: weekly ? 7 : 1, average: true, averageInHeading: true, points: weekly ? analysisWeeklySumPoints(timePoints, start, end) : timePoints }];
+    const timeValues = timeSeries[0].points.filter(analysisValidPoint).map((point) => Number(point.value));
+    const timeAverage = timeValues.reduce((sum, value) => sum + value, 0) / timeValues.length;
+    const timeChart = analysisChart(`Trainingszeit \u00b7 \u00d8 ${analysisValue(timeAverage, "h")}${weekly ? " pro Woche" : " pro Tag"}`, timeSeries, "h", start, end, "Intervals.icu: Summe der Bewegungszeit erfasster Aktivit\u00e4ten, jede Aktivit\u00e4t einmal. Tage und Wochen ohne erfasste Dauer bleiben L\u00fccken.");
+    timeChart.querySelector(".analysis-chart-legend")?.remove();
+    loadRoot.append(timeChart);
+  }
   const performanceSeries = [
     ["cycling_ftp_watts", "Rad · FTP", "W", 0],
     ["cycling_eftp_watts", "Rad · eFTP", "W", 1],
@@ -508,7 +577,131 @@ function renderAnalysisHistory(history) { // NOSONAR
     const charts = [[primaryUnit, primaryUnit === "W" ? "Leistungsschwelle · FTP / eFTP" : "Schwellenpace"], ["ml/kg/min", "VO₂max · Schätzung"]].map(([unit, metric]) => analysisChart(metric, sportSeries.filter((item) => item.unit === unit), unit, performanceStart, end, "", { compactInfo: true, sparse: true, includeCoverage: false, showLegend: unit === "W" }));
     root.append(analysisChartGroup(`Leistungsentwicklung · ${title}`, charts, sportSeries, "Letzte 12 Kalenderwochen einschließlich der laufenden Woche: letzter gültiger Wochenwert für FTP und Schwellenpace, Wochenmedian für eFTP und VO₂max. Jede Woche mit Messung bleibt als Punkt sichtbar; fehlende Wochen bleiben Lücken. Garmin; nur eFTP: Intervals.icu. VO₂max und eFTP sind Schätzungen. Quellen und Messdatum bleiben sichtbar."));
   }
+  renderProviderMetrics(history.provider_metrics, root, performanceStart, end);
   for (const target of [root, loadRoot]) target.querySelectorAll("details").forEach((details) => { details.open = openDetails.has(`${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`); });
+}
+
+function providerMetricStatus(status) {
+  return {
+    current: "aktuell",
+    ok: "bestätigt",
+    provisional: "vorläufig",
+    insufficient_data: "nicht genügend Daten",
+    partial: "teilweise",
+    unavailable: "nicht verfügbar",
+    failed: "fehlgeschlagen",
+    stale: "veraltet",
+    unsupported: "nicht unterstützt",
+    unknown: "unbekannt",
+  }[status] || "unbekannt";
+}
+
+function providerMetricLabel(key) {
+  return { endurance_score: "Endurance Score", running_tolerance: "Running Tolerance" }[key] || key;
+}
+
+function providerMetricValue(metric, values) {
+  const fields = {
+    endurance_score: ["overallScore", "enduranceScore", "score"],
+    running_tolerance: ["runningTolerance", "tolerance"],
+  }[metric] || [];
+  for (const field of fields) {
+    const value = values?.[field];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function renderProviderMetrics(metrics, root, start, end) {
+  Object.entries(metrics || {}).forEach(([key, item], index) => {
+    const raw = (Array.isArray(item?.points) ? item.points : []).map((point) => ({ date: point?.date, value: providerMetricValue(key, point?.values) })).filter((point) => point.date && point.value !== undefined);
+    if (!raw.some(analysisValidPoint)) return;
+    const points = analysisWeeklyPerformancePoints(raw, start, end, false);
+    const series = [{ label: providerMetricLabel(key), legendLabel: providerMetricLabel(key), source: item.source || "Garmin Connect", unit: "", color: index, cadenceDays: 7, points, currentPoint: raw.filter((point) => point.date <= end).findLast(analysisValidPoint) }];
+    const chart = analysisChart(providerMetricLabel(key), series, "", start, end, "", { sparse: true, showLegend: false });
+    chart.querySelector(".analysis-chart-legend")?.remove();
+    root.append(chart);
+  });
+}
+
+let bodyHistoryPeriod = "twelveWeeks";
+
+function bodyWeeklyPoints(points, start, end) {
+  const weeks = [];
+  for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
+    const offset = Math.min(6, Math.round((Date.parse(end) - Date.parse(weekStart)) / 86400000));
+    const boundedEnd = addDateKey(weekStart, offset);
+    const readings = points.filter((point) => point.date >= weekStart && point.date <= boundedEnd && analysisValidPoint(point));
+    const values = readings.map((point) => Number(point.value)).sort((a, b) => a - b);
+    const middle = Math.floor(values.length / 2);
+    let value = null;
+    if (values.length) value = values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+    const latest = readings.at(-1);
+    weeks.push(latest
+      ? { ...latest, date: boundedEnd, value, count: readings.length, observedDate: latest.observed_at || latest.date }
+      : { date: boundedEnd, value: null, count: 0 });
+  }
+  return weeks;
+}
+
+function bodySeriesPoints(item, window) {
+  const points = (item.points || []).filter((point) => point.date >= window.start && point.date <= window.end)
+    .map((point) => ({ ...point, power_method: item.power_method, observedDate: point.observed_at || point.date }));
+  return bodyHistoryPeriod === "twelveWeeks" ? bodyWeeklyPoints(points, window.start, window.end) : points;
+}
+
+function renderBodyAnalysis(body) {
+  const root = document.getElementById("bodyAnalysisCharts");
+  if (!root) return;
+  const openDetails = new Set([...root.querySelectorAll("details[open]")].map((item) => item.querySelector("summary")?.textContent));
+  root.replaceChildren();
+  const key = bodyHistoryPeriod === "fortnight" ? "14d" : "12w";
+  const window = body?.windows?.[key];
+  root.append(analysisPeriodControls("Zeitraum für Body", bodyHistoryPeriod, (period) => {
+    bodyHistoryPeriod = period;
+    renderBodyAnalysis(body);
+  }));
+  if (!window?.start || !window?.end) {
+    root.append(reportNode("p", "Noch keine Body-Historie verfügbar.", "empty"));
+    return;
+  }
+  const metrics = [
+    ["weight_kg", "Gewicht", "kg"],
+    ["body_fat_pct", "Körperfett", "%"],
+    ["cycling_w_per_kg", "Rad-Leistung pro Gewicht", "W/kg"],
+  ];
+  for (const [metric, title, unit] of metrics) {
+    const entries = window.metrics?.[metric] || [];
+    const series = entries.map((item, index) => ({
+      label: [item.power_method, item.source].filter(Boolean).join(" \u00b7 "),
+      legendLabel: item.source,
+      source: item.source,
+      unit,
+      color: index,
+      noCurrentLine: true,
+      sparse: true,
+      cadenceDays: bodyHistoryPeriod === "twelveWeeks" ? 7 : 1,
+      explanation: metric === "cycling_w_per_kg"
+        ? "Tageswert aus FTP oder eFTP geteilt durch das letzte Körpergewicht der vorherigen sieben Tage."
+        : "Nur gemessene Tageswerte; fehlende Tage bleiben Lücken.",
+      points: bodySeriesPoints(item, window),
+    }));
+    const chart = analysisChart(title, series, unit, window.start, window.end,
+      metric === "cycling_w_per_kg"
+        ? "W/kg verwendet FTP (Garmin Connect) oder eFTP (Intervals.icu) und ein höchstens sieben Tage altes gemessenes Gewicht."
+        : "Gemessene Verlaufswerte aus Intervals.icu Wellness oder Garmin Connect. Fehlende Messungen werden nicht ergänzt.",
+      { sparse: true });
+    chart.dataset.bodyMetric = metric;
+    if (bodyHistoryPeriod === "twelveWeeks") chart.querySelectorAll(".analysis-info-tooltip").forEach((info) => {
+      info.append(reportNode("p", "12 rollierende Wochen: Median der Messungen je Woche. Datum nennt den letzten Messwert der Woche.", "analysis-reference-note"));
+    });
+    if (metric === "cycling_w_per_kg") chart.querySelectorAll(".analysis-info-tooltip").forEach((info, index) => {
+      const item = entries[index];
+      if (item?.power_method) info.append(reportNode("p", `Methode: ${item.power_method}. FTP- und Gewichtsdatum sind in den Einzelwerten getrennt ausgewiesen.`, "analysis-reference-note"));
+    });
+    root.append(chart);
+  }
+  root.querySelectorAll("details").forEach((details) => { details.open = openDetails.has(details.querySelector("summary")?.textContent); });
 }
 
 let seasonGeneration = 0;
@@ -527,19 +720,34 @@ async function renderTrainingRecords() { // NOSONAR
     const tabs = reportNode("div", null, "segmented-control equipment-tabs");
     tabs.setAttribute("role", "tablist"); tabs.setAttribute("aria-label", "Ausrüstung nach Sportart");
     const localItems = equipment.items || [];
-    const bikeItems = localItems.filter((item) => ["Ride", "VirtualRide"].includes(item.sport) || item.kind === "bike" || item.kind === "component");
-    const runItems = localItems.filter((item) => item.sport === "Run" || item.kind === "shoes");
-    const uncategorizedItems = localItems.filter((item) => !bikeItems.includes(item) && !runItems.includes(item));
+    const isArchivedEquipment = (item) => item.status === "archived";
+    const activeLocalItems = localItems.filter((item) => !isArchivedEquipment(item));
+    const archivedLocalItems = localItems.filter(isArchivedEquipment);
+    const activeGarminItems = items.filter((item) => item.status !== "archived");
+    const archivedGarminItems = items.filter((item) => item.status === "archived");
+    const bikeItems = activeLocalItems.filter((item) => ["Ride", "VirtualRide"].includes(item.sport) || item.kind === "bike" || item.kind === "component");
+    const runItems = activeLocalItems.filter((item) => item.sport === "Run" || item.kind === "shoes");
+    const archivedBikeItems = archivedLocalItems.filter((item) => ["Ride", "VirtualRide"].includes(item.sport) || item.kind === "bike" || item.kind === "component");
+    const archivedRunItems = archivedLocalItems.filter((item) => item.sport === "Run" || item.kind === "shoes");
+    const uncategorizedItems = activeLocalItems.filter((item) => !bikeItems.includes(item) && !runItems.includes(item));
+    const archivedUncategorizedItems = archivedLocalItems.filter((item) => !archivedBikeItems.includes(item) && !archivedRunItems.includes(item));
     const groups = {
       bike: { label: "Fahrrad", items: bikeItems },
       run: { label: "Laufschuhe", items: runItems },
     };
-    const garminBikeItems = items.filter((item) => /bike|cycl|component|rad/i.test(`${item.kind} ${item.name}`));
-    const garminRunItems = items.filter((item) => /shoe|run|lauf/i.test(`${item.kind} ${item.name}`));
-    const uncategorizedGarminItems = items.filter((item) => !garminBikeItems.includes(item) && !garminRunItems.includes(item));
+    const garminBikeItems = activeGarminItems.filter((item) => /bike|cycl|component|rad/i.test(`${item.kind} ${item.name}`));
+    const garminRunItems = activeGarminItems.filter((item) => /shoe|run|lauf/i.test(`${item.kind} ${item.name}`));
+    const archivedGarminBikeItems = archivedGarminItems.filter((item) => /bike|cycl|component|rad/i.test(`${item.kind} ${item.name}`));
+    const archivedGarminRunItems = archivedGarminItems.filter((item) => /shoe|run|lauf/i.test(`${item.kind} ${item.name}`));
+    const uncategorizedGarminItems = activeGarminItems.filter((item) => !garminBikeItems.includes(item) && !garminRunItems.includes(item));
+    const archivedUncategorizedGarminItems = archivedGarminItems.filter((item) => !archivedGarminBikeItems.includes(item) && !archivedGarminRunItems.includes(item));
     const garminGroups = {
       bike: garminBikeItems,
       run: garminRunItems,
+    };
+    const archivedGroups = {
+      bike: [...archivedBikeItems.map((item) => ({ item, source: "local" })), ...archivedGarminBikeItems.map((item) => ({ item, source: "garmin" }))],
+      run: [...archivedRunItems.map((item) => ({ item, source: "local" })), ...archivedGarminRunItems.map((item) => ({ item, source: "garmin" }))],
     };
     for (const key of ["bike", "run"]) {
       const tab = reportNode("button", groups[key].label); tab.type = "button";
@@ -556,7 +764,13 @@ async function renderTrainingRecords() { // NOSONAR
         panel.append(local);
       }
       for (const item of garminGroups[key]) panel.append(garminEquipmentCard(item));
-      if (!groups[key].items.length && !garminGroups[key].length) {
+      if (archivedGroups[key].length) {
+        const archived = reportNode("details", null, "training-focus-details equipment-archive");
+        archived.append(reportNode("summary", `Archivierte Ausr\u00fcstung (${archivedGroups[key].length})`));
+        for (const { item, source } of archivedGroups[key]) archived.append(source === "local" ? localEquipmentCard(item) : garminEquipmentCard(item));
+        panel.append(archived);
+      }
+      if (!groups[key].items.length && !garminGroups[key].length && !archivedGroups[key].length) {
         panel.append(reportNode("p", key === "bike" ? "Noch keine Fahrräder oder Komponenten erfasst." : "Noch keine Laufschuhe erfasst.", "muted"));
       }
       gear.append(panel);
@@ -570,11 +784,21 @@ async function renderTrainingRecords() { // NOSONAR
         void renderTrainingRecords().then(() => document.getElementById(`equipmentTab-${equipmentTab}`)?.focus());
       });
     }
-    if (uncategorizedItems.length || uncategorizedGarminItems.length) {
+    if (uncategorizedItems.length || uncategorizedGarminItems.length || archivedUncategorizedItems.length || archivedUncategorizedGarminItems.length) {
       const other = reportNode("section", null, "equipment-uncategorized");
       other.append(reportNode("h4", "Weitere Ausrüstung"));
       for (const item of uncategorizedItems) other.append(localEquipmentCard(item));
       for (const item of uncategorizedGarminItems) other.append(garminEquipmentCard(item));
+      if (archivedUncategorizedItems.length || archivedUncategorizedGarminItems.length) {
+        const archived = reportNode("details", null, "training-focus-details equipment-archive");
+        const archivedItems = [
+          ...archivedUncategorizedItems.map((item) => ({ item, source: "local" })),
+          ...archivedUncategorizedGarminItems.map((item) => ({ item, source: "garmin" })),
+        ];
+        archived.append(reportNode("summary", `Archivierte Ausr\u00fcstung (${archivedItems.length})`));
+        for (const { item, source } of archivedItems) archived.append(source === "local" ? localEquipmentCard(item) : garminEquipmentCard(item));
+        other.append(archived);
+      }
       gear.append(other);
     }
     gear.prepend(tabs);
@@ -601,8 +825,10 @@ async function renderSeasonPreparation() {
 }
 
 function renderAnalysisSegments(route = state.route) {
-  const segment = { "analysis/load": "load", "analysis/recovery": "recovery" }[route] || "performance";
+  const segment = { "analysis/load": "load", "analysis/body": "body", "analysis/recovery": "recovery" }[route] || "performance";
   document.getElementById("analysisHistoryCharts").hidden = segment !== "performance";
+  document.getElementById("existingPerformanceReports").hidden = segment !== "performance";
+  document.getElementById("bodyAnalysisCharts").hidden = segment !== "body";
   document.getElementById("performancePredictions").hidden = segment !== "performance" || !document.getElementById("performancePredictions").childElementCount;
   document.getElementById("sessionPerformance").hidden = segment !== "load";
   document.getElementById("trainingZoneCharts").hidden = segment !== "load";
@@ -626,12 +852,13 @@ function selectedRecoveryBaselines(report) {
 }
 
 function recoveryReferenceLabel(item, range, target, unit, position) {
+  const status = `Status: ${providerMetricStatus(item.status || "unknown")}`;
   if (range) {
     const provisional = item.status === "provisional" ? " · vorläufig" : "";
-    return `${position || "Persönlicher Bereich"} · Basis ${analysisValue(range.lower, unit)}–${analysisValue(range.upper, unit)}${provisional}`;
+    return `${position || "Persönlicher Bereich"} · Basis ${analysisValue(range.lower, unit)}–${analysisValue(range.upper, unit)}${provisional} · ${status}`;
   }
-  if (target != null) return `Persönliches Schlafziel: ${analysisValue(target, unit)}`;
-  return `Persönliche Basis: ${item.reason || "noch nicht verfügbar"}`;
+  if (target != null) return `Persönliches Schlafziel: ${analysisValue(target, unit)} · ${status}`;
+  return `Persönliche Basis: ${item.reason || "noch nicht verfügbar"} · ${status}`;
 }
 
 function renderRecoveryCharts(report, root) {
@@ -663,7 +890,7 @@ function renderRecoveryCharts(report, root) {
     return { label: `${title} · ${item.source}${measurement}`, legendLabel: title, source: item.source, unit, color,
       bars: metric === "sleep", average: true, averageInHeading: true, cadenceDays: recoveryHistoryPeriod === "twelveWeeks" ? 7 : 1, range, target,
       currentPoint: points.some(analysisValidPoint) ? null : item.history.findLast((point) => point.date <= today && analysisValidPoint(point)),
-      referenceLabel: metric === "sleep" ? "Durchschnitt der angezeigten Werte" : recoveryReferenceLabel(item, range, target, unit, position),
+      referenceLabel: metric === "sleep" ? `Durchschnitt der angezeigten Werte · Status: ${providerMetricStatus(item.status || "unknown")}` : recoveryReferenceLabel(item, range, target, unit, position),
       coverageShort: `${readings.length}/${expectedDays} Tage mit Messung`,
       coverage: `${readings.length}/${expectedDays} Tage mit Messung${rangeDescription}`, points };
   });
@@ -721,9 +948,16 @@ function localEquipmentCard(item) {
   const card = reportNode("section", null, "garmin-equipment-card");
   const usage = item.usage || {};
   card.append(reportNode("h4", item.name));
-  card.append(reportNode("p", `${item.kind} · ${item.sport_pending ? "Sportart offen" : item.sport} · ${item.parent_pending ? "Fahrrad offen" : ""} · ${item.status === "archived" ? "ausgemustert" : "aktiv"} · Revision ${item.revision}`));
+  card.append(reportNode("p", [KIND_LABELS[item.kind] || item.kind, item.sport_pending ? "Sportart offen" : (SPORT_LABELS[item.sport] || item.sport), item.parent_pending ? "Fahrrad offen" : "", item.status === "archived" ? "ausgemustert" : "aktiv"].filter(Boolean).join(" \u00b7 ")));
   card.append(reportNode("p", `${analysisValue(usage.distance_km, "km")} \u00b7 ${analysisValue(usage.hours, "h")} \u00b7 ${usage.assigned_sessions || 0} zugeordnete Einheiten`));
-  card.append(reportNode("p", `Seit letzter Wartung: ${analysisValue(usage.maintenance_distance_km, "km")} \u00b7 ${analysisValue(usage.maintenance_hours, "h")}`));
+  const garminStatus = String(item.garmin_status || "").trim();
+  if (garminStatus && normalizeEquipmentStatus(garminStatus) !== item.status) {
+    card.append(reportNode("p", `Statuskonflikt \u00b7 Coach: ${item.status === "archived" ? "archiviert" : "aktiv"} \u00b7 Garmin: ${garminStatus}`, "muted"));
+  }
+  appendEquipmentLifetime(card, item.lifetime, usage.distance_km, item.lifetime_target_km);
+  if (Number.isFinite(Number(usage.maintenance_distance_km ?? Number.NaN)) || Number.isFinite(Number(usage.maintenance_hours ?? Number.NaN))) {
+    card.append(reportNode("p", `Seit letzter Wartung: ${analysisValue(usage.maintenance_distance_km, "km")} \u00b7 ${analysisValue(usage.maintenance_hours, "h")}`));
+  }
   const status = new Map([[true, "Wartung f\u00e4llig"], [false, "Wartung nicht f\u00e4llig"]]);
   card.append(reportNode("p", status.get(usage.maintenance_due) || "Wartungsstand unklar"));
   if (usage.maintenance_coverage === "partial") card.append(reportNode("p", "Nutzung unvollst\u00e4ndig bekannt.", "muted"));
@@ -731,21 +965,59 @@ function localEquipmentCard(item) {
   for (const event of item.maintenance || []) history.append(reportNode("li", `${dateLabel(event.date)} \u00b7 ${event.notes || "Wartung erfasst"}`));
   if (history.childElementCount) card.append(history);
   else card.append(reportNode("p", "Keine Wartung erfasst.", "muted"));
+  if (item.status !== "archived") card.append(maintenanceButton(item));
   return card;
+}
+
+function maintenanceButton(item) {
+  const button = reportNode("button", "Wartung erledigt", "secondary-button");
+  button.type = "button";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await api("/api/equipment/maintenance", { method: "POST", body: JSON.stringify({ equipment_id: item.id, date: timezoneDateKey(state.data?.profile?.timezone, new Date()) }) });
+      await renderTrainingRecords();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = error.message || "Wartung fehlgeschlagen";
+    }
+  });
+  return button;
 }
 
 function garminEquipmentCard(item) {
   const card = reportNode("section", null, "garmin-equipment-card");
   card.append(reportNode("h4", item.name));
-  card.append(reportNode("p", [item.kind, item.status].filter(Boolean).join(" \u00b7 ")));
-  card.append(reportNode("strong", item.distance_km == null ? "Nutzung unbekannt" : `${analysisValue(item.distance_km, "km")}`));
+  card.append(reportNode("p", [KIND_LABELS[item.kind] || item.kind, item.garmin_status || "Unbekannter Garmin-Status"].filter(Boolean).join(" \u00b7 ")));
   if (item.sessions != null) card.append(reportNode("p", `${item.sessions} Einheiten`));
-  if (item.usage_percent != null) {
-    const progress = reportNode("progress"); progress.max = 100; progress.value = Math.min(100, item.usage_percent);
-    progress.setAttribute("aria-label", `${item.name}: ${item.usage_percent}% des Garmin-Nutzungsziels`);
-    card.append(progress, reportNode("p", `${analysisValue(item.distance_km, "km")} von ${analysisValue(item.goal_km, "km")} \u00b7 ${item.usage_percent}%`));
-  }
+  appendEquipmentLifetime(card, item.lifetime, item.distance_km, item.goal_km);
   return card;
+}
+
+function normalizeEquipmentStatus(value) {
+  return /retir|archiv|inactive|inaktiv|ausgemustert/i.test(value || "") ? "archived" : "active";
+}
+
+function appendEquipmentLifetime(card, lifetime, usageKm, targetKm) {
+  const usage = lifetime?.usage_km ?? usageKm;
+  const target = lifetime?.target_km ?? targetKm;
+  if (!Number.isFinite(usage) || usage < 0) {
+    card.append(reportNode("p", Number.isFinite(target) && target > 0
+      ? `Nutzung unbekannt \u00b7 Ziel ${analysisValue(target, "km")}`
+      : "Nutzung und Lebensdauerziel unbekannt", "muted"));
+    return;
+  }
+  if (!Number.isFinite(target) || target <= 0) {
+    card.append(reportNode("p", `${analysisValue(usage, "km")} Nutzung \u00b7 Lebensdauerziel unbekannt`, "muted"));
+    return;
+  }
+  const percent = Number.isFinite(lifetime?.percent) ? lifetime.percent : Math.round(usage / target * 1000) / 10;
+  const progress = reportNode("progress");
+  progress.max = 100;
+  progress.value = Math.min(100, Math.max(0, Number.isFinite(lifetime?.progress_percent) ? lifetime.progress_percent : percent));
+  const overage = percent > 100;
+  progress.setAttribute("aria-label", `${card.querySelector("h4")?.textContent || "Ausr\u00fcstung"}: ${percent}% Lebensdauer${overage ? ", Ziel \u00fcberschritten" : ""}`);
+  card.append(progress, reportNode("p", `${analysisValue(usage, "km")} von ${analysisValue(target, "km")} \u00b7 ${percent}%${overage ? " \u00b7 Ziel \u00fcberschritten" : ""}`));
 }
 
 function seasonEventCard(event, generation) {
@@ -756,6 +1028,7 @@ function seasonEventCard(event, generation) {
   const weekly = reportNode("details"); weekly.append(reportNode("summary", `${event.preparation.weeks_with_recorded_training}/12 Wochen mit erfasstem sportartspezifischem Training`));
   for (const week of event.preparation.weeks || []) weekly.append(reportNode("p", seasonWeekSummary(week)));
   weekly.append(reportNode("p", "Wochen ohne Aufzeichnung beweisen keine Trainingspause; Umfang enthält nur lokal bekannte Einheiten.", "muted")); section.append(weekly);
+  appendSeasonEvidence(event.preparation, section);
   for (const item of event.preparation.long_sessions) {
     const button = reportNode("button", `${dateLabel(item.date)} · ${item.name} · ${item.duration_seconds == null ? "Dauer unbekannt" : formatDuration(item.duration_seconds)}`, "secondary-button");
     button.type = "button";
@@ -768,6 +1041,71 @@ function seasonEventCard(event, generation) {
     appendSeasonScenario(event, section, generation);
   }
   return section;
+}
+
+function seasonStatusLabel(status) {
+  return { observations: "Beobachtungen", observed: "beobachtet", insufficient_data: "nicht genügend Daten", unknown: "unbekannt" }[status] || status || "unbekannt";
+}
+
+function seasonDistance(value) {
+  return value == null ? "unbekannt" : `${(Number(value) / 1000).toLocaleString("de-DE", { maximumFractionDigits: 1 })} km`;
+}
+
+function seasonDuration(value) {
+  return value == null ? "unbekannt" : formatDuration(Number(value));
+}
+
+function appendSeasonEvidence(preparation, section) {
+  const target = preparation?.target_context || {};
+  const weekly = preparation?.weekly_observed_volume || {};
+  const long = preparation?.long_session_evidence || {};
+  const specificity = preparation?.specificity_evidence || {};
+  const comparison = preparation?.target_distance_comparison || {};
+  const details = reportNode("details", null, "season-evidence");
+  details.open = true;
+  details.append(reportNode("summary", "Beobachtete Nachweise und Lücken"));
+  details.append(reportNode("p", `Zielkontext · Sport: ${target.sport || "unbekannt"} · Distanz: ${target.distance_confirmed ? seasonDistance(target.distance_meters) : "unbekannt"} · Ziel: ${target.target_confirmed ? target.target : "unbekannt"} · Quelle: ${target.source || "unbekannt"}`));
+  details.append(reportNode("p", `Wöchentlicher beobachteter Umfang · Status: ${seasonStatusLabel(weekly.status)} · ${weekly.weeks_with_sessions ?? 0}/${weekly.weeks_total ?? 12} Wochen mit Einheiten · ${weekly.sessions ?? 0} Einheiten · Dauer: ${seasonDuration(weekly.duration_seconds)} (${weekly.duration_known_sessions ?? 0} bekannte Einheiten) · Distanz: ${seasonDistance(weekly.distance_meters)} (${weekly.distance_known_sessions ?? 0} bekannte Einheiten) · Quelle: ${weekly.source || "unbekannt"}`));
+  appendSeasonWeeklyHistory(preparation.weeks || [], weekly.source || "Intervals.icu recorded activities", details);
+  details.append(reportNode("p", `Lange Einheit · Status: ${seasonStatusLabel(long.status)} · ${long.sessions ?? 0} Nachweise · längste Dauer: ${seasonDuration(long.duration_seconds)} · längste Distanz: ${seasonDistance(long.distance_meters)} · Quelle: ${long.source || "unbekannt"}`));
+  const dimensions = specificity.known_dimensions || {};
+  details.append(reportNode("p", `Spezifitätsnachweise · Status: ${seasonStatusLabel(specificity.status)} · Ausdauer: ${dimensions.aerobic ?? 0} · Power-Profil: ${dimensions.power_profile ?? 0} · Intervallqualität: ${dimensions.interval_quality ?? 0} · Quelle: ${specificity.source || "unbekannt"}`));
+  details.append(reportNode("p", `Zieldistanzvergleich · Status: ${seasonStatusLabel(comparison.status)} · Ziel: ${seasonDistance(comparison.target_distance_meters)} · beobachtete lange Einheit: ${seasonDistance(comparison.observed_long_session_distance_meters)} · Quelle: ${comparison.source || "unbekannt"}`));
+  section.append(details);
+}
+
+function appendSeasonWeeklyHistory(weeks, source, root) {
+  const validWeeks = weeks.filter((week) => week?.start && week?.end);
+  if (!validWeeks.length) {
+    root.append(reportNode("p", "Wöchentlicher Verlauf: unbekannt · keine datierten Wochen verfügbar.", "muted"));
+    return;
+  }
+  const start = validWeeks[0].end;
+  const end = validWeeks.at(-1).end;
+  const duration = validWeeks.map((week) => ({ date: week.end, value: week.duration_seconds == null ? null : Number(week.duration_seconds) / 3600, count: week.duration_known_sessions ?? 0 }));
+  const distance = validWeeks.map((week) => ({ date: week.end, value: week.distance_meters == null ? null : Number(week.distance_meters) / 1000, count: week.distance_known_sessions ?? 0 }));
+  const durationSeries = [{ label: "Dauer", legendLabel: "Dauer", source, unit: "h", cadenceDays: 7, noCurrentLine: true, points: duration }];
+  const distanceSeries = [{ label: "Distanz", legendLabel: "Distanz", source, unit: "km", cadenceDays: 7, noCurrentLine: true, points: distance }];
+  if (duration.some(analysisValidPoint)) root.append(analysisChart("Beobachtete Trainingsdauer je Woche", durationSeries, "h", start, end, "Nur bekannte Aktivitätsdauern; fehlende Wochen bleiben Lücken.", { sparse: true }));
+  else root.append(reportNode("p", "Wöchentliche Dauer: unbekannt · keine bekannten Aktivitätsdauern.", "muted"));
+  if (distance.some(analysisValidPoint)) root.append(analysisChart("Beobachtete Trainingsdistanz je Woche", distanceSeries, "km", start, end, "Nur bekannte Aktivitätsdistanzen; fehlende Wochen bleiben Lücken.", { sparse: true }));
+  else root.append(reportNode("p", "Wöchentliche Distanz: unbekannt · keine bekannten Aktivitätsdistanzen.", "muted"));
+  const table = reportNode("table");
+  table.append(reportNode("caption", `Wochenabdeckung · ${source}`));
+  const head = reportNode("thead"); const header = reportNode("tr");
+  for (const label of ["Woche", "Einheiten", "Dauer · bekannt", "Distanz · bekannt"]) header.append(reportNode("th", label));
+  head.append(header); table.append(head);
+  const body = reportNode("tbody");
+  for (const week of validWeeks) {
+    const row = reportNode("tr");
+    row.append(reportNode("td", `${dateLabel(week.start)} – ${dateLabel(week.end)}`));
+    row.append(reportNode("td", String(week.sessions ?? 0)));
+    row.append(reportNode("td", `${seasonDuration(week.duration_seconds)} · ${week.duration_known_sessions ?? 0}/${week.sessions ?? 0}`));
+    row.append(reportNode("td", `${seasonDistance(week.distance_meters)} · ${week.distance_known_sessions ?? 0}/${week.sessions ?? 0}`));
+    body.append(row);
+  }
+  table.append(body);
+  const wrap = reportNode("div", null, "analysis-chart-table"); wrap.append(table); root.append(wrap);
 }
 
 function appendSeasonScenario(event, section, generation) {
@@ -810,6 +1148,17 @@ function analysisWeeklyPerformancePoints(points, start, end, median = false) {
     let value = latest.value;
     if (median) value = values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
     weeks.push({ date: weekEnd, value, observedDate: latest.date, ...(median ? { count: readings.length } : {}) });
+  }
+  return weeks;
+}
+
+function analysisWeeklySumPoints(points, start, end) {
+  const weeks = [];
+  for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
+    let weekEnd = addDateKey(weekStart, 6);
+    if (weekEnd > end) weekEnd = end;
+    const known = points.filter((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point));
+    weeks.push(known.length ? { date: weekEnd, value: Math.round(known.reduce((sum, point) => sum + Number(point.value), 0) * 10) / 10, observedDate: known.at(-1).date } : { date: weekEnd, value: null });
   }
   return weeks;
 }

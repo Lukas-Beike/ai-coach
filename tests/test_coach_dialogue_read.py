@@ -6,17 +6,20 @@ import json
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime, tzinfo
+from datetime import datetime
 from pathlib import Path
 
 from backend.athlete.profile import ProfileService
 from backend.coach.conversation import CoachMessageService
 from backend.coach.dialogue import CoachDialogueReadService
 from backend.db import DatabaseManager, row_factory
-from backend.db.repositories import ChatRepository, KeyValueRepository, ProfileRepository
+from backend.db.repositories import (
+    ChatRepository,
+    KeyValueRepository,
+    ProfileRepository,
+)
 from backend.db.schema import initialize_schema
 from backend.runtime.events import StateEventBuffer
-
 
 NOW = "2026-09-23T08:00:00+00:00"
 
@@ -69,15 +72,15 @@ class CoachDialogueReadServiceTests(unittest.TestCase):
 
     def add_message(self, role: str, content: str, turn_id: str | None = None):
         with self.database_manager.unit_of_work() as db:
-            return self.chat_repository.add(
-                db, role, content, client_turn_id=turn_id
-            )
+            return self.chat_repository.add(db, role, content, client_turn_id=turn_id)
 
     def test_context_returns_current_id_pending_persisted_message_and_local_date(self):
         with self.database_manager.unit_of_work() as db:
             self.key_values.set(db, "profile", '{"timezone":"Asia/Tokyo"}')
         messages = [
-            self.add_message("user", f"message {index}", "current" if index == 25 else None)
+            self.add_message(
+                "user", f"message {index}", "current" if index == 25 else None
+            )
             for index in range(26)
         ]
         with self.database_manager.unit_of_work() as db:
@@ -98,7 +101,10 @@ class CoachDialogueReadServiceTests(unittest.TestCase):
             [item["id"] for item in result["messages"]],
             [messages[0]["id"], *[item["id"] for item in messages[2:]]],
         )
-        self.assertEqual(result["pending_request"]["source_message_ids"], [messages[0]["id"], 999_999])
+        self.assertEqual(
+            result["pending_request"]["source_message_ids"],
+            [messages[0]["id"], 999_999],
+        )
 
     def test_context_limits_messages_and_projects_only_bounded_fields(self):
         long_message = self.add_message("user", "x" * 4500, "long-turn")
@@ -107,9 +113,14 @@ class CoachDialogueReadServiceTests(unittest.TestCase):
 
         self.assertIsNone(result["current_user_message_id"])
         self.assertEqual(len(result["messages"]), 1)
-        self.assertEqual(result["messages"][0], {
-            "id": long_message["id"], "role": "user", "content": "x" * 4000,
-        })
+        self.assertEqual(
+            result["messages"][0],
+            {
+                "id": long_message["id"],
+                "role": "user",
+                "content": "x" * 4000,
+            },
+        )
 
     def test_context_propagates_invalid_persisted_pending_json(self):
         with self.database_manager.unit_of_work() as db:
@@ -150,7 +161,9 @@ class CoachDialogueReadServiceTests(unittest.TestCase):
             self.profile,
         )
 
-        self.assertEqual(service.context("missing")["messages"][0]["content"], "read-only")
+        self.assertEqual(
+            service.context("missing")["messages"][0]["content"], "read-only"
+        )
         self.assertEqual(service.artifact_refs(), [])
 
     def test_context_bounds_confirmed_receipts_and_excludes_unbacked_commands(self):
@@ -163,7 +176,12 @@ class CoachDialogueReadServiceTests(unittest.TestCase):
                 "command_receipts": [
                     {
                         "tool": f"tool-{item}",
-                        "result": {"ok": True, "status": "done", "reason": "ok", "artifact_id": "artifact"},
+                        "result": {
+                            "ok": True,
+                            "status": "done",
+                            "reason": "ok",
+                            "artifact_id": "artifact",
+                        },
                         "request": {"scope": list(range(45))},
                     }
                     for item in range(45)
@@ -174,7 +192,13 @@ class CoachDialogueReadServiceTests(unittest.TestCase):
                     "INSERT INTO coach_commands "
                     "(id, client_turn_id, intent, target_system, status, receipt, created_at, updated_at) "
                     "VALUES (?, ?, '', '', 'completed', ?, ?, ?)",
-                    (turn_id, turn_id, json.dumps(receipt), f"2026-09-23T00:{index:02d}:00Z", NOW),
+                    (
+                        turn_id,
+                        turn_id,
+                        json.dumps(receipt),
+                        f"2026-09-23T00:{index:02d}:00Z",
+                        NOW,
+                    ),
                 )
         with self.database_manager.unit_of_work() as db:
             db.execute(
@@ -184,7 +208,7 @@ class CoachDialogueReadServiceTests(unittest.TestCase):
                 (NOW, NOW),
             )
 
-        results = self.service().context("missing")['confirmed_results']
+        results = self.service().context("missing")["confirmed_results"]
 
         self.assertEqual(len(results), 12)
         self.assertEqual(results[0]["client_turn_id"], "turn-12")
@@ -211,7 +235,13 @@ class CoachDialogueReadServiceTests(unittest.TestCase):
                     "INSERT INTO coach_plan_artifacts "
                     "(id, client_turn_id, base_revision, status, payload, created_at, updated_at) "
                     "VALUES (?, ?, 3, 'draft', ?, ?, ?)",
-                    (turn_id, turn_id, '{"plan_name":"Synthetic plan"}', f"2026-09-23T00:{index:02d}:00Z", NOW),
+                    (
+                        turn_id,
+                        turn_id,
+                        '{"plan_name":"Synthetic plan"}',
+                        f"2026-09-23T00:{index:02d}:00Z",
+                        NOW,
+                    ),
                 )
                 if index == 20:
                     db.execute(
@@ -224,13 +254,23 @@ class CoachDialogueReadServiceTests(unittest.TestCase):
         self.assertEqual(refs[0]["id"], "draft-20")
         self.assertNotIn("orphan", [item["id"] for item in refs])
         oldest_included = next(item for item in refs if item["id"] == "draft-01")
-        self.assertEqual(oldest_included["source_message_id"], self.message_id("draft-01"))
+        self.assertEqual(
+            oldest_included["source_message_id"], self.message_id("draft-01")
+        )
         self.assertNotIn("draft-00", [item["id"] for item in refs])
         self.assertIsNone(refs[0]["source_message_id"])
         self.assertEqual(oldest_included["name"], "Synthetic plan")
-        self.assertEqual(set(oldest_included), {
-            "id", "status", "base_revision", "created_at", "source_message_id", "name",
-        })
+        self.assertEqual(
+            set(oldest_included),
+            {
+                "id",
+                "status",
+                "base_revision",
+                "created_at",
+                "source_message_id",
+                "name",
+            },
+        )
 
     def message_id(self, turn_id: str) -> int:
         with self.database_manager.reader() as db:

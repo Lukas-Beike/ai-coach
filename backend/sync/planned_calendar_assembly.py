@@ -42,7 +42,7 @@ class PlannedCalendarSyncAssembly:
     def __init__(
         self,
         *,
-        dependencies: "PlannedCalendarSyncAssembly.Inputs",
+        dependencies: PlannedCalendarSyncAssembly.Inputs,
     ) -> None:
         provider = dependencies.provider
         local = dependencies.local_state

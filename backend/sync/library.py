@@ -572,12 +572,14 @@ class WorkoutLibrarySyncService:
         config: Config,
         provider_client_factory: Callable[[], Any],
         state_service: WorkoutLibrarySyncStateService,
+        calendar_conflict_service: Any | None = None,
         *,
         _lock: Any | None = None,
     ):
         self._config = config
         self._provider_client_factory = provider_client_factory
         self._state_service = state_service
+        self._calendar_conflict_service = calendar_conflict_service
         self._lock = _lock if _lock is not None else _WORKOUT_LIBRARY_SYNC_LOCK
 
     def plan_remote(
@@ -593,6 +595,15 @@ class WorkoutLibrarySyncService:
         planned_date = str(synced.get("date") or "").strip()[:10]
         if not planned_date:
             return None
+        if self._calendar_conflict_service is not None:
+            blockers = self._calendar_conflict_service.constraints(synced)
+            if blockers:
+                marker = str(blockers[0].get("constraint") or "calendar constraint")
+                raise AppError(
+                    409,
+                    f"Die Einheit kann wegen {marker} nicht mit Intervals.icu synchronisiert werden.",
+                    reason="plan_date_conflict",
+                )
         external_id = str(synced.get("external_id") or "").strip()
         if not external_id:
             raise AppError(502, "Die geplante Bibliothekseinheit hat keine externe ID.")
