@@ -274,33 +274,9 @@ class AdaptiveReplanApplyService:
             )
             now = self._now()
             today = self._today()
-            calendar_stale: list[dict[str, Any]] = []
-            applicable_changes = []
-            if self._calendar_conflict_service is not None:
-                for change in payload.get("changes") or []:
-                    replacement = (
-                        change.get("payload") if isinstance(change, dict) else None
-                    )
-                    if isinstance(replacement, dict) and not replacement.get(
-                        "archived"
-                    ):
-                        blockers = self._calendar_conflict_service.constraints(
-                            replacement
-                        )
-                        if blockers:
-                            calendar_stale.append(
-                                {
-                                    "library_workout_id": change.get(
-                                        "library_workout_id"
-                                    ),
-                                    "reason": "calendar_constraint_changed",
-                                    "events": blockers,
-                                }
-                            )
-                            continue
-                    applicable_changes.append(change)
-            else:
-                applicable_changes = payload.get("changes")
+            applicable_changes, calendar_stale = self._calendar_changes(
+                payload.get("changes") or []
+            )
             updated, stale = self._apply_changes(db, applicable_changes, now, today)
             stale = calendar_stale + stale
             updated_checkins = 0
@@ -333,6 +309,40 @@ class AdaptiveReplanApplyService:
             "stale": stale,
             "illness_pause": illness_pause,
         }
+
+    def _calendar_changes(
+        self, changes: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if self._calendar_conflict_service is None:
+            return changes, []
+        applicable, stale = [], []
+        for change in changes:
+            replacement = change.get("payload")
+            if not isinstance(replacement, dict):
+                applicable.append(change)
+                continue
+            archived = bool(replacement.get("archived"))
+            candidate = replacement
+            if archived:
+                candidate = {**(change.get("before") or {}), "date": change.get("date")}
+            blockers = self._calendar_conflict_service.constraints(candidate)
+            calendar_archive = archived and "calendar" in (
+                change.get("blocking_triggers") or []
+            )
+            changed = calendar_archive and not any(
+                event.get("reason") == "no_training" for event in blockers
+            )
+            if changed or (not archived and blockers):
+                stale.append(
+                    {
+                        "library_workout_id": change.get("library_workout_id"),
+                        "reason": "calendar_constraint_changed",
+                        "events": blockers,
+                    }
+                )
+            else:
+                applicable.append(change)
+        return applicable, stale
 
     @staticmethod
     def _illness_checkin_values(

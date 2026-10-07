@@ -135,23 +135,7 @@ def _collect_garmin_weight_records(
             )
             or inherited_date
         )
-        direct = _first_present(value, ("weightKg", "weight_kg", "weight"))
-        if direct not in (None, ""):
-            weight = _garmin_weight_kg(
-                direct, _first_present(value, ("unitKey", "unit", "weightUnit"))
-            )
-            if weight is not None:
-                records.append((record_date, float(weight)))
-                if daily is not None and sequence is not None:
-                    daily.append(
-                        (
-                            record_date,
-                            float(weight),
-                            _garmin_record_timestamp(value),
-                            sequence[0],
-                        )
-                    )
-                    sequence[0] += 1
+        _append_weight_record(value, record_date, records, daily, sequence)
         for key, item in value.items():
             if _garmin_key(key) not in {"minweight", "maxweight", "weightdelta"}:
                 _collect_garmin_weight_records(
@@ -253,37 +237,7 @@ def _collect_garmin_body_fat_records(
             )
             or inherited_date
         )
-        direct = _first_present(
-            value,
-            (
-                "bodyFat",
-                "body_fat",
-                "bodyFatPercent",
-                "bodyFatPercentage",
-                "fatPercent",
-            ),
-        )
-        if direct not in (None, ""):
-            raw_value = direct
-            unit = _first_present(value, ("bodyFatUnit", "bodyFatUnitKey"))
-            if isinstance(direct, dict):
-                unit = (
-                    _first_present(direct, ("unitKey", "unit", "bodyFatUnit")) or unit
-                )
-                raw_value = _first_present(direct, ("value", "val", "amount"))
-            pct = _garmin_body_fat_pct(raw_value, unit)
-            if pct is not None:
-                records.append((record_date, pct))
-                if daily is not None and sequence is not None:
-                    daily.append(
-                        (
-                            record_date,
-                            pct,
-                            _garmin_record_timestamp(value),
-                            sequence[0],
-                        )
-                    )
-                    sequence[0] += 1
+        _append_body_fat_record(value, record_date, records, daily, sequence)
         for key, item in value.items():
             if _garmin_key(key) not in {"minbodyfat", "maxbodyfat", "bodyfatdelta"}:
                 _collect_garmin_body_fat_records(
@@ -347,3 +301,67 @@ def garmin_weight_average(
         if record_day and cutoff <= record_day <= end_date:
             values.append(weight)
     return round(sum(values) / len(values), 2) if values else None
+
+
+def _append_weight_record(
+    value: dict[str, Any],
+    record_date: str | None,
+    records: list,
+    daily: list | None,
+    sequence: list[int] | None,
+) -> None:
+    direct = _first_present(value, ("weightKg", "weight_kg", "weight"))
+    if direct not in (None, ""):
+        weight = _garmin_weight_kg(
+            direct, _first_present(value, ("unitKey", "unit", "weightUnit"))
+        )
+        if weight is not None:
+            records.append((record_date, float(weight)))
+            if daily is not None and sequence is not None:
+                daily.append(
+                    (
+                        record_date,
+                        float(weight),
+                        _garmin_record_timestamp(value),
+                        sequence[0],
+                    )
+                )
+                sequence[0] += 1
+
+
+def _append_body_fat_record(
+    value: dict[str, Any],
+    record_date: str | None,
+    records: list,
+    daily: list | None,
+    sequence: list[int] | None,
+) -> None:
+    direct = _first_present(
+        value,
+        (
+            "bodyFat",
+            "body_fat",
+            "bodyFatPercent",
+            "bodyFatPercentage",
+            "fatPercent",
+        ),
+    )
+    if direct not in (None, ""):
+        raw_value = direct
+        unit = _first_present(value, ("bodyFatUnit", "bodyFatUnitKey"))
+        if isinstance(direct, dict):
+            unit = _first_present(direct, ("unitKey", "unit", "bodyFatUnit")) or unit
+            raw_value = _first_present(direct, ("value", "val", "amount"))
+        pct = _garmin_body_fat_pct(raw_value, unit)
+        if pct is not None:
+            records.append((record_date, pct))
+            if daily is not None and sequence is not None:
+                daily.append(
+                    (
+                        record_date,
+                        pct,
+                        _garmin_record_timestamp(value),
+                        sequence[0],
+                    )
+                )
+                sequence[0] += 1

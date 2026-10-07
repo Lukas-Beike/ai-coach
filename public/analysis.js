@@ -600,9 +600,21 @@ function providerMetricLabel(key) {
   return { endurance_score: "Endurance Score", running_tolerance: "Running Tolerance" }[key] || key;
 }
 
+function providerMetricValue(metric, values) {
+  const fields = {
+    endurance_score: ["overallScore", "enduranceScore", "score"],
+    running_tolerance: ["runningTolerance", "tolerance"],
+  }[metric] || [];
+  for (const field of fields) {
+    const value = values?.[field];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
 function renderProviderMetrics(metrics, root, start, end) {
   Object.entries(metrics || {}).forEach(([key, item], index) => {
-    const raw = (Array.isArray(item?.points) ? item.points : []).map((point) => ({ date: point?.date, value: Object.values(point?.values || {}).find((value) => Number.isFinite(Number(value)) && value !== null && value !== "") })).filter((point) => point.date && point.value !== undefined);
+    const raw = (Array.isArray(item?.points) ? item.points : []).map((point) => ({ date: point?.date, value: providerMetricValue(key, point?.values) })).filter((point) => point.date && point.value !== undefined);
     if (!raw.some(analysisValidPoint)) return;
     const points = analysisWeeklyPerformancePoints(raw, start, end, false);
     const series = [{ label: providerMetricLabel(key), legendLabel: providerMetricLabel(key), source: item.source || "Garmin Connect", unit: "", color: index, cadenceDays: 7, points, currentPoint: raw.filter((point) => point.date <= end).findLast(analysisValidPoint) }];
@@ -617,11 +629,13 @@ let bodyHistoryPeriod = "twelveWeeks";
 function bodyWeeklyPoints(points, start, end) {
   const weeks = [];
   for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
-    const boundedEnd = addDateKey(weekStart, 6) > end ? end : addDateKey(weekStart, 6);
+    const offset = Math.min(6, Math.round((Date.parse(end) - Date.parse(weekStart)) / 86400000));
+    const boundedEnd = addDateKey(weekStart, offset);
     const readings = points.filter((point) => point.date >= weekStart && point.date <= boundedEnd && analysisValidPoint(point));
     const values = readings.map((point) => Number(point.value)).sort((a, b) => a - b);
     const middle = Math.floor(values.length / 2);
-    const value = values.length ? values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2 : null;
+    let value = null;
+    if (values.length) value = values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
     const latest = readings.at(-1);
     weeks.push(latest
       ? { ...latest, date: boundedEnd, value, count: readings.length, observedDate: latest.observed_at || latest.date }
@@ -941,7 +955,7 @@ function localEquipmentCard(item) {
     card.append(reportNode("p", `Statuskonflikt \u00b7 Coach: ${item.status === "archived" ? "archiviert" : "aktiv"} \u00b7 Garmin: ${garminStatus}`, "muted"));
   }
   appendEquipmentLifetime(card, item.lifetime, usage.distance_km, item.lifetime_target_km);
-  if (Number.isFinite(Number(usage.maintenance_distance_km ?? NaN)) || Number.isFinite(Number(usage.maintenance_hours ?? NaN))) {
+  if (Number.isFinite(Number(usage.maintenance_distance_km ?? Number.NaN)) || Number.isFinite(Number(usage.maintenance_hours ?? Number.NaN))) {
     card.append(reportNode("p", `Seit letzter Wartung: ${analysisValue(usage.maintenance_distance_km, "km")} \u00b7 ${analysisValue(usage.maintenance_hours, "h")}`));
   }
   const status = new Map([[true, "Wartung f\u00e4llig"], [false, "Wartung nicht f\u00e4llig"]]);
@@ -961,7 +975,7 @@ function maintenanceButton(item) {
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
-      await api("/api/equipment/maintenance", { method: "POST", body: JSON.stringify({ equipment_id: item.id, date: new Date().toLocaleDateString("sv-SE") }) });
+      await api("/api/equipment/maintenance", { method: "POST", body: JSON.stringify({ equipment_id: item.id, date: timezoneDateKey(state.data?.profile?.timezone, new Date()) }) });
       await renderTrainingRecords();
     } catch (error) {
       button.disabled = false;

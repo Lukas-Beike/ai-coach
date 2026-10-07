@@ -127,6 +127,23 @@ class DatabaseMigrationTests(unittest.TestCase):
             db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
         )
 
+    def test_previous_schema_preserves_non_training_signal_from_legacy_flag(self):
+        db = self.previous_database()
+        db.execute(
+            "INSERT INTO external_calendar_events "
+            "(id, uid, name, event_date, start_local, end_local, duration_minutes, "
+            "training_relevant, updated_at) VALUES "
+            "('legacy-marker', 'uid-marker', 'Private appointment', '2026-10-07', "
+            "'2026-10-07T00:00:00', '2026-10-08T00:00:00', 1440, 0, 'before')"
+        )
+        migrate_schema(db)
+        self.assertEqual(
+            db.execute(
+                "SELECT no_training FROM external_calendar_events WHERE id='legacy-marker'"
+            ).fetchone()[0],
+            1,
+        )
+
     def test_previous_schema_marked_as_current_is_rejected_without_mutation(self):
         db = self.previous_database()
         db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")

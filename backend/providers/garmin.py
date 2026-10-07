@@ -453,12 +453,7 @@ def _collect_historic_metrics(
             details["sport"] = "CYCLING"
         try:
             value = external_call("garmin", key, partial(invoke, fetch), details)
-            if not isinstance(value, (dict, list)):
-                raise TypeError(f"Invalid Garmin {key} response")
-            if isinstance(value, list) and any(
-                not isinstance(item, dict) for item in value
-            ):
-                raise TypeError(f"Invalid Garmin {key} response records")
+            _validate_historic_metric(value, key)
             payload[key] = value
             stats.update(
                 {
@@ -675,3 +670,10 @@ def collect_garmin_data(
     payload["provider_sync"] = {"pagination": pagination}
     _validate_current_metrics(payload, redact, warn)
     return payload
+
+
+def _validate_historic_metric(value: Any, key: str) -> None:
+    if not isinstance(value, (dict, list)):
+        raise TypeError(f"Invalid Garmin {key} response")
+    if isinstance(value, list) and any(not isinstance(item, dict) for item in value):
+        raise TypeError(f"Invalid Garmin {key} response records")

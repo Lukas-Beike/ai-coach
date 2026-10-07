@@ -197,6 +197,32 @@ class TrainingReportService:
             or (row.get("running_profile") or {}).get("status") == "ok"
         ]
         # Keep one compatibility winner per sport/duration.
+        compatibility = self._compatibility_profiles(eligible_records)
+        # Keep all cached records in the window so coverage reports include
+        # activities whose streams are incomplete and therefore yield unknown
+        # points. Candidates below still require a measured profile point.
+        windows = {
+            str(days): self._profile_window(eligible_records, today, days)
+            for days in (28, 90)
+        }
+        return {
+            "status": "ok" if compatibility or valid else "insufficient_data",
+            "best": compatibility,
+            "activities": records,
+            "windows": windows,
+            "running": {
+                "name": "running_best_efforts",
+                "type": "running",
+                "windows": {key: value["running"] for key, value in windows.items()},
+            },
+            "method": "original-stream-integral-v1",
+            "scope": "Beobachtete Fenster aus lokal gespeicherten Aktivitäten. Fehlende oder ungültige Fenster bleiben unbekannt; keine FTP- oder Tempo-Schätzung.",
+        }
+
+    @staticmethod
+    def _compatibility_profiles(
+        eligible_records: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         compatibility = []
         for sport in ("Ride", "VirtualRide"):
             for duration in (5, 60, 300, 1200):
@@ -226,26 +252,7 @@ class TrainingReportService:
                             "device": row.get("device") or "unknown",
                         }
                     )
-        # Keep all cached records in the window so coverage reports include
-        # activities whose streams are incomplete and therefore yield unknown
-        # points. Candidates below still require a measured profile point.
-        windows = {
-            str(days): self._profile_window(eligible_records, today, days)
-            for days in (28, 90)
-        }
-        return {
-            "status": "ok" if compatibility or valid else "insufficient_data",
-            "best": compatibility,
-            "activities": records,
-            "windows": windows,
-            "running": {
-                "name": "running_best_efforts",
-                "type": "running",
-                "windows": {key: value["running"] for key, value in windows.items()},
-            },
-            "method": "original-stream-integral-v1",
-            "scope": "Beobachtete Fenster aus lokal gespeicherten Aktivitäten. Fehlende oder ungültige Fenster bleiben unbekannt; keine FTP- oder Tempo-Schätzung.",
-        }
+        return compatibility
 
     @staticmethod
     def _profile_window(
@@ -280,14 +287,7 @@ class TrainingReportService:
         }
         for sport in ("Ride", "VirtualRide"):
             for duration in (5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600):
-                candidates = [
-                    (p, row)
-                    for row in eligible
-                    if row.get("sport") == sport
-                    for p in (row.get("power_profile") or {}).get("duration_curve", [])
-                    if p.get("duration_seconds") == duration
-                    and p.get("watts") is not None
-                ]
+                candidates = _power_candidates(eligible, sport, duration)
                 result["power"].append(
                     TrainingReportService._winner(
                         candidates, sport, duration, "watts", "duration_seconds"
@@ -298,14 +298,7 @@ class TrainingReportService:
             ("distance", "seconds", (1000, 5000)),
         ):
             for value in values:
-                candidates = [
-                    (p, row)
-                    for row in eligible
-                    if row.get("sport") in {"Run", "VirtualRun", "TrailRun"}
-                    for p in (row.get("running_profile") or {}).get(key, [])
-                    if p.get(field) is not None
-                    and p.get("duration_seconds", p.get("distance_meters")) == value
-                ]
+                candidates = _running_candidates(eligible, key, field, value)
                 result["running"][key].append(
                     TrainingReportService._winner(
                         candidates,
@@ -388,3 +381,28 @@ class TrainingReportService:
                 for row in rows
             ]
         }
+
+
+def _power_candidates(
+    eligible: list[dict[str, Any]], sport: str, duration: int
+) -> list:
+    return [
+        (p, row)
+        for row in eligible
+        if row.get("sport") == sport
+        for p in (row.get("power_profile") or {}).get("duration_curve", [])
+        if p.get("duration_seconds") == duration and p.get("watts") is not None
+    ]
+
+
+def _running_candidates(
+    eligible: list[dict[str, Any]], key: str, field: str, value: int
+) -> list:
+    return [
+        (p, row)
+        for row in eligible
+        if row.get("sport") in {"Run", "VirtualRun", "TrailRun"}
+        for p in (row.get("running_profile") or {}).get(key, [])
+        if p.get(field) is not None
+        and p.get("duration_seconds", p.get("distance_meters")) == value
+    ]

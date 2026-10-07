@@ -216,9 +216,9 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
     || [expenditure?.total_kcal, expenditure?.active_kcal, expenditure?.resting_kcal].some((value) => value != null && Number.isFinite(Number(value)));
   const freshnessLabels = { current: "Aktuell", stale: "Veraltet", delayed: "VerzÃ¶gert" };
   const freshness = freshnessLabels[expenditure?.freshness] || "AktualitÃ¤t unbekannt";
-  status.textContent = measured
-    ? `${expenditure.source || "Garmin Connect"} Â· ${freshness}${expenditure.provisional ? " Â· VorlÃ¤ufig, da der Tag noch lÃ¤uft" : ""}`
-    : "FÃ¼r diesen Tag liegen keine Garmin-Verbrauchsdaten vor.";
+  const provisionalLabel = expenditure?.provisional ? " · Vorläufig, da der Tag noch läuft" : "";
+  status.textContent = "Für diesen Tag liegen keine Garmin-Verbrauchsdaten vor.";
+  if (measured) status.textContent = [expenditure.source || "Garmin Connect", freshness].join(" · ") + provisionalLabel;
 
   const formatKcal = (rawValue) => {
     const value = rawValue == null || rawValue === "" ? null : Number(rawValue);
@@ -251,9 +251,11 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
     fetchedAt ? `Abgerufen: ${fetchedAt}` : "",
     syncedAt ? `Garmin-Sync: ${syncedAt}` : "",
   ].filter(Boolean).join(" Â· ");
-  date.textContent = measured
-    ? `Messdatum: ${nutritionExpenditureDate(measuredDate)}${expenditure.provisional ? " Â· VorlÃ¤ufiger Tageswert" : ""}${timestamps ? ` Â· ${timestamps}` : ""}`
-    : `Messdatum: ${nutritionExpenditureDate(measuredDate)} Â· Status: nicht verfÃ¼gbar${timestamps ? ` Â· ${timestamps}` : ""}`;
+  const dateParts = ["Messdatum: " + nutritionExpenditureDate(measuredDate)];
+  if (measured && expenditure.provisional) dateParts.push("Vorläufiger Tageswert");
+  if (!measured) dateParts.push("Status: nicht verfügbar");
+  if (timestamps) dateParts.push(timestamps);
+  date.textContent = dateParts.join(" · ");
 }
 
 async function loadNutrition() {
@@ -326,13 +328,15 @@ function nutritionFuelingSection() {
 }
 
 function nutritionFuelingRange(range, unit) {
-  return Array.isArray(range) ? `${range[0]}\u2013${range[1]} ${unit}` : range == null ? "unbekannt" : `${range} ${unit}`;
+  if (Array.isArray(range)) return `${range[0]}\u2013${range[1]} ${unit}`;
+  return range == null ? "unbekannt" : `${range} ${unit}`;
 }
 
 function renderNutritionFuelingPlan(plan) {
   const output = document.querySelector("#nutritionFuelingPlan");
   const rows = [];
-  const add = (tag, text, className) => { const node = document.createElement(tag); node.textContent = text; if (className) node.className = className; rows.push(node); };
+  const add = (tag, text, className) => { const node = document.createElement(tag); node.textContent = text; if (className) { node.className = className; }
+    rows.push(node); };
   if (plan.status !== "suggestion") {
     add("p", "Die Dauer dieser Einheit ist unbekannt. Ohne Dauer gibt es keinen Vorschlag.", "muted");
   } else {
@@ -370,6 +374,7 @@ async function loadNutritionFueling() {
     section.hidden = !upcoming.length;
     if (upcoming.length) await loadNutritionFuelingPlan(select.value);
   } catch (error) {
+    // Fueling is optional: keep the diary usable when its request fails.
     section.hidden = true;
   }
 }

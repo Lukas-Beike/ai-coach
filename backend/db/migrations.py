@@ -74,19 +74,7 @@ def migrate_schema(db: Any) -> None:
     db.execute("SAVEPOINT schema_migration")
     try:
         if not current:
-            if old_schema:
-                for statement in NUTRITION_PRODUCTS_DDL.split(";"):
-                    if statement.strip():
-                        db.execute(statement)
-            if old_schema or previous_calendar_schema:
-                db.execute(
-                    "ALTER TABLE external_calendar_events "
-                    "ADD COLUMN no_training INTEGER NOT NULL DEFAULT 0"
-                )
-                db.execute(
-                    "UPDATE external_calendar_events SET no_training=1 "
-                    "WHERE instr(upper(name), '[NO_TRAINING]') > 0"
-                )
+            _upgrade_legacy_schema(db, old_schema)
         db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
         if not database_schema_is_current(db):
             raise RuntimeError("Die Datenbankmigration konnte nicht validiert werden.")
@@ -95,3 +83,20 @@ def migrate_schema(db: Any) -> None:
         db.execute("RELEASE schema_migration")
         raise
     db.execute("RELEASE schema_migration")
+
+
+def _upgrade_legacy_schema(db: Any, old_schema: bool) -> None:
+    if old_schema:
+        for statement in NUTRITION_PRODUCTS_DDL.split(";"):
+            if statement.strip():
+                db.execute(statement)
+    db.execute(
+        "ALTER TABLE external_calendar_events "
+        "ADD COLUMN no_training INTEGER NOT NULL DEFAULT 0"
+    )
+    # v2 discarded descriptions but retained NO_TRAINING as training_relevant=0.
+    # Preserve this safety signal until a successful sync supplies fresh markers.
+    db.execute(
+        "UPDATE external_calendar_events SET no_training=1 "
+        "WHERE training_relevant=0 OR instr(upper(name), '[NO_TRAINING]') > 0"
+    )

@@ -17,17 +17,7 @@ def append_garmin_performance_history(
     history = list((previous or {}).get("performance_history") or []) + list(
         payload.get("performance_history") or []
     )
-    unique: dict[str, dict[str, Any]] = {}
-    for item in history:
-        if (
-            isinstance(item, dict)
-            and item.get("date")
-            and isinstance(item.get("metrics"), dict)
-        ):
-            entry = unique.setdefault(
-                str(item["date"]), {"date": str(item["date"]), "metrics": {}}
-            )
-            entry["metrics"].update(item["metrics"])
+    unique = _merged_history(history)
     current = performance_garmin_metrics.garmin_performance_metrics(
         payload, current_date
     )
@@ -57,6 +47,29 @@ def append_garmin_performance_history(
     ):
         entry = unique.setdefault(row["date"], {"date": row["date"], "metrics": {}})
         entry["metrics"]["cycling_ftp_watts"] = row["value"]
+    provider_metrics = _provider_metrics(payload, start, current_date)
+    payload["provider_metrics"] = provider_metrics
+    payload["performance_history"] = [unique[key] for key in sorted(unique)[-90:]]
+
+
+def _merged_history(history: list) -> dict[str, dict[str, Any]]:
+    unique: dict[str, dict[str, Any]] = {}
+    for item in history:
+        if (
+            isinstance(item, dict)
+            and item.get("date")
+            and isinstance(item.get("metrics"), dict)
+        ):
+            entry = unique.setdefault(
+                str(item["date"]), {"date": str(item["date"]), "metrics": {}}
+            )
+            entry["metrics"].update(item["metrics"])
+    return unique
+
+
+def _provider_metrics(
+    payload: dict[str, Any], start: date, current_date: date
+) -> dict[str, Any]:
     provider_metrics = {}
     for key, aggregation, source in (
         ("endurance_score", "weekly", "endurance_score"),
@@ -71,15 +84,13 @@ def append_garmin_performance_history(
             for item in payload.get("errors") or []
             if isinstance(item, dict)
         }
-        state = (
-            "stale"
-            if details.get("freshness") == "stale"
-            else "failed"
-            if source in error_sources or pagination.get("status") == "failed"
-            else "unsupported"
-            if pagination.get("available") is False
-            else "unknown"
-        )
+        state = "unknown"
+        if pagination.get("available") is False:
+            state = "unsupported"
+        if source in error_sources or pagination.get("status") == "failed":
+            state = "failed"
+        if details.get("freshness") == "stale":
+            state = "stale"
         data = garmin_metric_history.projected_metric(
             payload.get(source),
             start=start,
@@ -95,5 +106,4 @@ def append_garmin_performance_history(
         else:
             data["status"] = state
         provider_metrics[source] = data
-    payload["provider_metrics"] = provider_metrics
-    payload["performance_history"] = [unique[key] for key in sorted(unique)[-90:]]
+    return provider_metrics

@@ -54,7 +54,8 @@
     table.append(node("caption", `${label} in ${unit}; fehlende Werte sind als Lücke markiert.`));
     const thead = node("thead"); const heading = node("tr"); ["Zeit", label].forEach((value) => { const cell = node("th", value); cell.scope = "col"; heading.append(cell); }); thead.append(heading); table.append(thead);
     const body = node("tbody");
-    times.forEach((time, index) => { if (typeof time !== "number" || !Number.isFinite(time)) return; const row = node("tr"); const timeCell = node("th", `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, "0")}`); timeCell.scope = "row"; row.append(timeCell); const value = values[index]; row.append(node("td", typeof value === "number" && Number.isFinite(value) ? `${value.toLocaleString("de-DE", { maximumFractionDigits: 2 })} ${unit}` : "Lücke")); body.append(row); });
+    times.forEach((time, index) => { if (typeof time !== "number" || !Number.isFinite(time)) { return; }
+      const row = node("tr"); const timeCell = node("th", `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, "0")}`); timeCell.scope = "row"; row.append(timeCell); const value = values[index]; row.append(node("td", typeof value === "number" && Number.isFinite(value) ? `${value.toLocaleString("de-DE", { maximumFractionDigits: 2 })} ${unit}` : "Lücke")); body.append(row); });
     table.append(body); tableWrap.append(table); details.append(tableWrap); section.append(details);
     return section;
   }
@@ -118,8 +119,8 @@
     let charts = 0;
     const labels = { watts: ["Leistung", "W"], power: ["Leistung", "W"], heartrate: ["Herzfrequenz", "bpm"], velocity_smooth: ["Geschwindigkeit", "m/s"], velocity: ["Geschwindigkeit", "m/s"], speed: ["Geschwindigkeit", "m/s"], altitude: ["Höhe", "m"], distance: ["Distanz", "m"], grade: ["Steigung", "%"], grade_smooth: ["Steigung geglättet", "%"], pace: ["Pace", "s/km"], cadence: ["Kadenz", "rpm"], temperature: ["Temperatur", "°C"] };
     const streams = activity.streams || {};
-    const preferred = new Set(["watts", "heartrate", "velocity_smooth", "speed", "altitude", "distance", "grade_smooth", "grade", "pace", "cadence", "temperature"]);
-    const channels = Object.keys(labels).filter((key) => preferred.has(key) && Array.isArray(streams[key]) && !(key === "speed" && streams.velocity_smooth) && !(key === "grade" && streams.grade_smooth) && !(key === "power" && streams.watts));
+    const preferred = new Set(["watts", "power", "heartrate", "velocity_smooth", "velocity", "speed", "altitude", "distance", "grade_smooth", "grade", "pace", "cadence", "temperature"]);
+    const channels = Object.keys(labels).filter((key) => preferred.has(key) && Array.isArray(streams[key]) && !(key === "speed" && (streams.velocity_smooth || streams.velocity)) && !(key === "velocity" && streams.velocity_smooth) && !(key === "grade" && streams.grade_smooth) && !(key === "power" && streams.watts));
     for (const key of channels) {
       const [label, unit] = labels[key];
       const series = chart(activity.streams || {}, key, label, unit);

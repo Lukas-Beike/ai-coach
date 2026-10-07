@@ -121,15 +121,7 @@ def garmin_daily_expenditure(
     except ValueError:
         day = None
     is_future = day is None or day > current_date
-    for record_date, record in performance_recovery.dated_garmin_recovery_records(
-        snapshot.get("daily_stats")
-    ):
-        if record_date != requested_date or is_future:
-            continue
-        for field, keys in GARMIN_DAILY_EXPENDITURE_FIELDS.items():
-            value = _as_number(_first_present(record, keys))
-            if value is not None and value >= 0:
-                values[field] = value
+    _expenditure_values(snapshot, requested_date, is_future, values)
     has_measurement = any(value is not None for value in values.values())
     source_freshness = snapshot.get("source_freshness")
     if not isinstance(source_freshness, dict):
@@ -198,3 +190,20 @@ def garmin_daily_health_metrics(
             current_date,
         )
     return result
+
+
+def _expenditure_values(
+    snapshot: dict[str, Any],
+    requested_date: str,
+    is_future: bool,
+    values: dict[str, Any],
+) -> None:
+    for record_date, record in performance_recovery.dated_garmin_recovery_records(
+        snapshot.get("daily_stats")
+    ):
+        if record_date != requested_date or is_future:
+            continue
+        for field, keys in GARMIN_DAILY_EXPENDITURE_FIELDS.items():
+            value = _as_number(_first_present(record, keys))
+            if value is not None and value >= 0:
+                values[field] = value

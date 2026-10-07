@@ -317,8 +317,7 @@ h2 {
 .analysis-chart-table table { width: 100%; border-collapse: collapse; color: var(--ink); font-size: .75rem; }
 .analysis-chart-table caption { padding: 8px; text-align: left; color: var(--muted); }
 .analysis-chart-table th, .analysis-chart-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; }
-@media (min-width: 600px) {
-  }
+
 .analysis-segment-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .analysis-segment-heading > div { display: grid; gap: 4px; min-width: 0; }
 .analysis-segment-heading h3 { margin: 0; color: var(--ink); font-size: 1.05rem; }
@@ -1304,7 +1303,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .analysis-day-marker:hover rect, .analysis-day-marker:focus rect { fill: var(--ink); fill-opacity: .06; }
 .analysis-day-marker:focus { outline: 2px solid var(--accent); }
 .analysis-chart-hint { font-size: .75rem; margin: 8px 0; }
-@media (max-width: 560px) {
-    }
+
 
 .analysis-report-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 0.9rem; overflow-wrap: anywhere; }

@@ -224,119 +224,7 @@ def sleep_regularity(
         groups.setdefault(("Garmin Connect", item["method"]), {})[item["date"]] = item
     series = []
     for (source, method), records in sorted(groups.items()):
-        ordered = [records[key] for key in sorted(records)]
-        latest = ordered[-1]
-        prior = [
-            item
-            for item in ordered
-            if (today - timedelta(days=42)).isoformat() <= item["date"] < latest["date"]
-        ]
-        count = len(prior)
-        status = (
-            "ok"
-            if count >= 28
-            else "provisional"
-            if count >= 14
-            else "insufficient_data"
-        )
-        reason = (
-            None
-            if count >= 14
-            else (
-                "Mindestens 14 fruehere datierte Schlafintervalle erforderlich."
-                if count
-                else "Keine geprueften datierten Schlafbeginn- und Endzeiten verfuegbar."
-            )
-        )
-        onset = (
-            _circular_median([item["onset_minutes_local"] for item in prior])
-            if prior
-            else None
-        )
-        wake = (
-            _circular_median([item["wake_minutes_local"] for item in prior])
-            if prior
-            else None
-        )
-        points = [
-            {
-                **item,
-                "source": source,
-                "method": method,
-                "onset_deviation_minutes": _circular_deviation(
-                    item["onset_minutes_local"], onset
-                ),
-                "wake_deviation_minutes": _circular_deviation(
-                    item["wake_minutes_local"], wake
-                ),
-            }
-            for item in ordered
-        ]
-        by_date = {item["date"]: item for item in points}
-
-        def display(
-            days: int, *, _by_date=by_date, _source=source, _method=method
-        ) -> list[dict[str, Any]]:
-            first = today - timedelta(days=days - 1)
-            result = []
-            for offset in range(days):
-                day = first + timedelta(days=offset)
-                result.append(
-                    _by_date.get(day.isoformat())
-                    or {
-                        "date": day.isoformat(),
-                        "source": _source,
-                        "method": _method,
-                        "observed_at": None,
-                        "onset_at": None,
-                        "wake_at": None,
-                        "duration_hours": None,
-                        "onset_deviation_minutes": None,
-                        "wake_deviation_minutes": None,
-                    }
-                )
-            return result
-
-        onset_dev = [
-            item["onset_deviation_minutes"]
-            for item in points
-            if item["onset_deviation_minutes"] is not None
-        ]
-        wake_dev = [
-            item["wake_deviation_minutes"]
-            for item in points
-            if item["wake_deviation_minutes"] is not None
-        ]
-        series.append(
-            {
-                "source": source,
-                "method": method,
-                "status": status,
-                "reason": reason,
-                "unknown_reason": reason,
-                "coverage": {
-                    "baseline_nights": count,
-                    "valid_nights_42_days": count,
-                    "required_nights": 14,
-                    "provisional_until_nights": 27,
-                },
-                "source_observed_at": latest["wake_at_utc"],
-                "observed_at": latest["wake_at_utc"],
-                "baseline": {
-                    "onset_median_minutes_local": onset,
-                    "wake_median_minutes_local": wake,
-                    "onset_deviation_median_minutes": median(onset_dev)
-                    if prior
-                    else None,
-                    "wake_deviation_median_minutes": median(wake_dev)
-                    if prior
-                    else None,
-                },
-                "points": points,
-                "points_14": display(14),
-                "points_84": display(84),
-            }
-        )
+        series.append(_sleep_series(source, method, records, today))
     if not series:
         reason = "Keine geprueften datierten Schlafbeginn- und Endzeiten verfuegbar."
         return {
@@ -437,3 +325,109 @@ def _circular_deviation(value: float, center: float | None) -> float | None:
     return (
         None if center is None else round(abs((value - center + 720) % 1440 - 720), 1)
     )
+
+
+def _sleep_series(
+    source: str, method: str, records: dict[str, dict[str, Any]], today: date
+) -> dict[str, Any]:
+    ordered = [records[key] for key in sorted(records)]
+    latest = ordered[-1]
+    prior = [
+        item
+        for item in ordered
+        if (today - timedelta(days=42)).isoformat() <= item["date"] < latest["date"]
+    ]
+    count = len(prior)
+    status = "insufficient_data"
+    if count >= 14:
+        status = "provisional"
+    if count >= 28:
+        status = "ok"
+    reason = None
+    if count < 14:
+        reason = "Mindestens 14 fruehere datierte Schlafintervalle erforderlich."
+    if not count:
+        reason = "Keine geprueften datierten Schlafbeginn- und Endzeiten verfuegbar."
+    onset = (
+        _circular_median([item["onset_minutes_local"] for item in prior])
+        if prior
+        else None
+    )
+    wake = (
+        _circular_median([item["wake_minutes_local"] for item in prior])
+        if prior
+        else None
+    )
+    points = [
+        {
+            **item,
+            "source": source,
+            "method": method,
+            "onset_deviation_minutes": _circular_deviation(
+                item["onset_minutes_local"], onset
+            ),
+            "wake_deviation_minutes": _circular_deviation(
+                item["wake_minutes_local"], wake
+            ),
+        }
+        for item in ordered
+    ]
+    by_date = {item["date"]: item for item in points}
+
+    def display(
+        days: int, *, _by_date=by_date, _source=source, _method=method
+    ) -> list[dict[str, Any]]:
+        first = today - timedelta(days=days - 1)
+        result = []
+        for offset in range(days):
+            day = first + timedelta(days=offset)
+            result.append(
+                _by_date.get(day.isoformat())
+                or {
+                    "date": day.isoformat(),
+                    "source": _source,
+                    "method": _method,
+                    "observed_at": None,
+                    "onset_at": None,
+                    "wake_at": None,
+                    "duration_hours": None,
+                    "onset_deviation_minutes": None,
+                    "wake_deviation_minutes": None,
+                }
+            )
+        return result
+
+    onset_dev = [
+        item["onset_deviation_minutes"]
+        for item in points
+        if item["onset_deviation_minutes"] is not None
+    ]
+    wake_dev = [
+        item["wake_deviation_minutes"]
+        for item in points
+        if item["wake_deviation_minutes"] is not None
+    ]
+    return {
+        "source": source,
+        "method": method,
+        "status": status,
+        "reason": reason,
+        "unknown_reason": reason,
+        "coverage": {
+            "baseline_nights": count,
+            "valid_nights_42_days": count,
+            "required_nights": 14,
+            "provisional_until_nights": 27,
+        },
+        "source_observed_at": latest["wake_at_utc"],
+        "observed_at": latest["wake_at_utc"],
+        "baseline": {
+            "onset_median_minutes_local": onset,
+            "wake_median_minutes_local": wake,
+            "onset_deviation_median_minutes": median(onset_dev) if prior else None,
+            "wake_deviation_median_minutes": median(wake_dev) if prior else None,
+        },
+        "points": points,
+        "points_14": display(14),
+        "points_84": display(84),
+    }

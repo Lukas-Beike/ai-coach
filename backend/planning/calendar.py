@@ -9,8 +9,12 @@ from typing import Any
 from backend.calendar.markers import has_marker
 
 _UTC_OFFSET_SUFFIX = "+00:00"
-_HARD_EFFORT_PATTERN = re.compile(
-    r"\b(?:intervals?|vo2(?:max)?|threshold|tempo|sprints?|race|tabata|hiit|hard|sweet\s*spot)\b|\b(?:z(?:one)?\s*[2-9])\b|\b(?:9[0-9]|1[0-9]{2}|[2-9][0-9]{2})%"
+_HARD_EFFORT_PATTERNS = (
+    re.compile(
+        r"\b(intervals?|vo2(max)?|threshold|tempo|sprints?|race|tabata|hiit|hard|sweet\s*spot)\b"
+    ),
+    re.compile(r"\bz(one)?\s*[2-9]\b"),
+    re.compile(r"\b(9\d|[1-9]\d{2})%", re.ASCII),
 )
 _EASY_EFFORT_PATTERN = re.compile(
     r"\b(?:easy|recovery|regeneration|locker|ruhetag|z1|zone\s*1)\b"
@@ -25,14 +29,14 @@ def workout_is_explicitly_easy(workout: dict[str, Any]) -> bool:
         f"{workout.get('steps', '')} {workout.get('intervals', '')} "
         f"{workout.get('workout_steps', '')}"
     ).casefold()
-    if _HARD_EFFORT_PATTERN.search(text):
+    if any(pattern.search(text) for pattern in _HARD_EFFORT_PATTERNS):
         return False
     return bool(_EASY_EFFORT_PATTERN.search(text))
 
 
 def workout_is_rest(workout: dict[str, Any]) -> bool:
     text = f"{workout.get('name', '')} {workout.get('description', '')}".casefold()
-    if _HARD_EFFORT_PATTERN.search(text):
+    if any(pattern.search(text) for pattern in _HARD_EFFORT_PATTERNS):
         return False
     if any(
         workout.get(key) not in (None, "", [], {})
