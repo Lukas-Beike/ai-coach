@@ -1,6 +1,5 @@
 """Regression tests for source text encoding."""
 
-import subprocess
 import unittest
 from pathlib import Path
 
@@ -18,14 +17,12 @@ LITERAL_UNICODE_ESCAPE = "\\\\u00"
 
 
 def tracked_source_files() -> list[Path]:
-    result = subprocess.run(
-        ["git", "ls-files", "--", *SOURCE_PATHS],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
+    return sorted(
+        path
+        for source_path in SOURCE_PATHS
+        for path in ROOT.glob(source_path)
+        if path.is_file()
     )
-    return [ROOT / path for path in result.stdout.splitlines()]
 
 
 class SourceEncodingTests(unittest.TestCase):
