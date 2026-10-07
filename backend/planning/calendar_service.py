@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.calendar import markers
 from backend.errors import AppError
 from backend.planning import calendar, context
 
@@ -99,14 +100,14 @@ class CalendarConflictService:
         constraint_conflicts = self.constraints(workout, external_events)
         ordinary_events = []
         for event in external_events:
-            marker_text = str(event.get("name") or "").casefold()
+            marker_text = f"{event.get('name') or ''} {event.get('description') or ''}"
             is_marked = bool(
                 event.get("no_training")
                 or event.get("no_intensity")
                 or event.get("short_only")
-                or "[no_training]" in marker_text
-                or "[no_intensity]" in marker_text
-                or "[short_only]" in marker_text
+                or markers.has_marker(marker_text, "[NO_TRAINING]")
+                or markers.has_marker(marker_text, "[NO_INTENSITY]")
+                or markers.has_marker(marker_text, "[SHORT_ONLY]")
             )
             event_matches, _match = calendar._calendar_items_conflict(workout, event)
             if not event_matches or not is_marked:

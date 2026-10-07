@@ -363,20 +363,20 @@ async function loadNutritionFuelingPlan(unitId) {
   }
 }
 
-async function loadNutritionFueling() {
-  const section = nutritionFuelingSection();
-  const select = section.querySelector("select");
-  try {
-    const { units = [] } = await api("/api/nutrition/fueling");
+async function loadNutritionFueling() {
+  const section = nutritionFuelingSection();
+  const select = section.querySelector("select");
+  try {
+    const { units = [] } = await api("/api/nutrition/fueling");
     const today = timezoneDateKey(state.data?.profile?.timezone, new Date());
-    const upcoming = units.filter((unit) => !unit.date || String(unit.date).slice(0, 10) >= today).sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    select.replaceChildren(...upcoming.map((unit) => { const option = document.createElement("option"); option.value = unit.id; option.textContent = `${unit.date ? dateLabel(String(unit.date).slice(0, 10)) : "?"} \u00b7 ${unit.name || "Einheit"}`; return option; }));
-    section.hidden = !upcoming.length;
-    if (upcoming.length) await loadNutritionFuelingPlan(select.value);
-  } catch (error) {
+    const upcoming = units.filter((unit) => !unit.date || String(unit.date).slice(0, 10) >= today).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    select.replaceChildren(...upcoming.map((unit) => { const option = document.createElement("option"); option.value = unit.id; option.textContent = `${unit.date ? dateLabel(String(unit.date).slice(0, 10)) : "?"} \u00b7 ${unit.name || "Einheit"}`; return option; }));
+    section.hidden = !upcoming.length;
+    if (upcoming.length) await loadNutritionFuelingPlan(select.value);
+  } catch {
     // Intentionally ignored: fueling is optional and the diary remains usable.
-    section.hidden = true;
-  }
+    section.hidden = true;
+  }
 }
 document.querySelector("#nutritionDate").addEventListener("change", () => void loadNutrition());
 for (const [id, offset] of [["nutritionPrevious", -1], ["nutritionNext", 1]]) {

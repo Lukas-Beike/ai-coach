@@ -172,35 +172,70 @@ def _append_performance_ftp(garmin, today, synced_at, result) -> None:
 def _append_direct_ftp(direct, today, fallback_day, synced_at, result) -> None:
     budget = [2000]
 
-    def visit(value: Any, inherited: date | None = None, depth: int = 0) -> None:
-        if depth > 20 or budget[0] <= 0:
-            return
-        budget[0] -= 1
-        if isinstance(value, dict):
-            observed = _direct_ftp_record(
-                value, inherited or fallback_day, today, synced_at, result
-            )
-            for child in value.values():
-                if isinstance(child, (dict, list)):
-                    visit(child, observed, depth + 1)
-        elif isinstance(value, list):
-            for child in value[:500]:
-                visit(child, inherited, depth + 1)
+    _visit_direct_ftp(direct, None, 0, budget, today, fallback_day, synced_at, result)
 
-    visit(direct)
+
+def _visit_direct_ftp(
+    value, inherited, depth, budget, today, fallback_day, synced_at, result
+) -> None:
+    if depth > 20 or budget[0] <= 0:
+        return
+    budget[0] -= 1
+    if isinstance(value, dict):
+        observed = _direct_ftp_record(
+            value, inherited or fallback_day, today, synced_at, result
+        )
+        for child in value.values():
+            if isinstance(child, (dict, list)):
+                _visit_direct_ftp(
+                    child,
+                    observed,
+                    depth + 1,
+                    budget,
+                    today,
+                    fallback_day,
+                    synced_at,
+                    result,
+                )
+    elif isinstance(value, list):
+        for child in value[:500]:
+            _visit_direct_ftp(
+                child,
+                inherited,
+                depth + 1,
+                budget,
+                today,
+                fallback_day,
+                synced_at,
+                result,
+            )
 
 
 def _direct_ftp_record(value, fallback_day, today, synced_at, result):
-    observed = (
-        _day(
-            value.get("calendarDate")
-            or value.get("summaryDate")
-            or value.get("date")
-            or value.get("timestamp")
-        )
-        or fallback_day
+    observed = _direct_ftp_date(value, fallback_day)
+    candidate = _direct_ftp_value(value)
+    number = activity_validation.bounded_performance_metric(
+        "cycling_ftp_watts", candidate
     )
-    candidate = next(
+    if observed is not None and observed <= today and number is not None:
+        result[observed] = (float(number), observed.isoformat(), synced_at)
+    return observed
+
+
+def _direct_ftp_date(value, fallback_day):
+    raw = next(
+        (
+            value.get(key)
+            for key in ("calendarDate", "summaryDate", "date", "timestamp")
+            if value.get(key)
+        ),
+        None,
+    )
+    return _day(raw) or fallback_day
+
+
+def _direct_ftp_value(value):
+    return next(
         (
             value.get(key)
             for key in ("functionalThresholdPower", "ftp", "power")
@@ -208,12 +243,6 @@ def _direct_ftp_record(value, fallback_day, today, synced_at, result):
         ),
         None,
     )
-    number = activity_validation.bounded_performance_metric(
-        "cycling_ftp_watts", candidate
-    )
-    if observed is not None and observed <= today and number is not None:
-        result[observed] = (float(number), observed.isoformat(), synced_at)
-    return observed
 
 
 def _point(day: date, record: tuple[float, str, Any] | None) -> dict[str, Any]:

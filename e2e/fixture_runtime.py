@@ -832,24 +832,16 @@ def _fixture_seed_equipment(today, garmin_snapshot):
         maximum_meters,
     ) in _fixture_equipment_definitions(road_id):
         item = existing.get(name)
-        if item is None:
-            payload = {
-                "name": name,
-                "sport": sport,
-                "kind": kind,
-                "status": status,
-                "start_date": (today - timedelta(days=35)).isoformat(),
-                "initial_distance_km": 0,
-                "initial_hours": 0,
-                "maintenance_km": 250 if kind == "bike" else None,
-            }
-            if kind == "component" and road_id:
-                payload["parent_id"] = road_id
-            result = service.save(payload)
-            item = result["equipment"]
-            existing[name] = item
-            if name == FIXTURE_BIKE_NAME:
-                road_id = item["id"]
+        item, road_id = _fixture_get_gear_item(
+            service,
+            existing,
+            today,
+            name,
+            sport,
+            kind,
+            status,
+            road_id,
+        )
         _fixture_gear_metadata(
             item, name, target_km, maximum_meters, garmin_uuid, garmin_distances_km
         )
@@ -868,6 +860,32 @@ def _fixture_seed_equipment(today, garmin_snapshot):
     ):
         service.assign({"activity_id": "feature-ride-1", "equipment_id": road_id})
     return saved
+
+
+def _fixture_get_gear_item(
+    service, existing, today, name, sport, kind, status, road_id
+):
+    item = existing.get(name)
+    if item is None:
+        item = _fixture_create_gear(service, today, name, sport, kind, status, road_id)
+        existing[name] = item
+    return item, item["id"] if name == FIXTURE_BIKE_NAME else road_id
+
+
+def _fixture_create_gear(service, today, name, sport, kind, status, road_id):
+    payload = {
+        "name": name,
+        "sport": sport,
+        "kind": kind,
+        "status": status,
+        "start_date": (today - timedelta(days=35)).isoformat(),
+        "initial_distance_km": 0,
+        "initial_hours": 0,
+        "maintenance_km": 250 if kind == "bike" else None,
+    }
+    if kind == "component" and road_id:
+        payload["parent_id"] = road_id
+    return service.save(payload)["equipment"]
 
 
 def _fixture_gear_distances(garmin_snapshot):
