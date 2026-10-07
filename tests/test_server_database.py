@@ -118,7 +118,7 @@ class ServerDatabaseTests(ServerTestCase):
                             db.execute("PRAGMA user_version").fetchone()[
                                 "user_version"
                             ],
-                            2,
+                            CURRENT_SCHEMA_VERSION,
                         )
                         self.assertEqual(
                             db.execute(
