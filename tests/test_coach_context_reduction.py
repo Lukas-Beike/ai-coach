@@ -89,7 +89,7 @@ class CoachContextReductionTests(unittest.TestCase):
         )
         self.assertEqual(json.loads(payload["input"])["dialogue"], context)
 
-    def test_request_filters_tools_and_telemetry_contains_no_athlete_content(self):
+    def test_request_keeps_tools_and_telemetry_contains_no_athlete_content(self):
         fixture = payload_tests.CoachRequestPayloadTests()
         fixture.setUp()
         tools = [
@@ -111,8 +111,9 @@ class CoachContextReductionTests(unittest.TestCase):
             _, payload = fixture.build(
                 message="How is recovery?", context=context, tools=tools
             )
-        self.assertNotIn(
-            "start_intervals_plan_sync", {tool["name"] for tool in payload["tools"]}
+        self.assertEqual(
+            {tool["name"] for tool in payload["tools"]},
+            {"read_coach_context", "read_profile", "start_intervals_plan_sync"},
         )
         self.assertLessEqual(
             len(json.loads(payload["input"])["dialogue"]["messages"]), 8
@@ -143,7 +144,7 @@ class CoachContextReductionTests(unittest.TestCase):
         self.assertEqual(followup["previous_response_id"], "response-one")
         self.assertFalse(state.allow_mutations)
 
-    def test_topical_request_with_receipts_keeps_scoped_tools_and_dialogue_provenance(
+    def test_topical_request_with_receipts_keeps_tools_and_dialogue_provenance(
         self,
     ):
         fixture = payload_tests.CoachRequestPayloadTests()
@@ -180,7 +181,12 @@ class CoachContextReductionTests(unittest.TestCase):
                 self.assertEqual(selected.horizon_days, 3)
                 self.assertEqual(
                     {tool["name"] for tool in payload["tools"]},
-                    {"read_coach_context", "get_activity_details"},
+                    {
+                        "read_coach_context",
+                        "get_activity_details",
+                        "apply_training_patch",
+                        "start_intervals_plan_sync",
+                    },
                 )
                 parsed = json.loads(payload["input"])
                 self.assertEqual(
