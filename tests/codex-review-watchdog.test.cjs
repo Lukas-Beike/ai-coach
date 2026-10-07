@@ -155,5 +155,6 @@ test('same-repository Dependabot retains the explicit exception', async () => {
 test('privileged workflow never checks out or runs PR source', () => {
   assert.doesNotMatch(workflow, /actions\/checkout|require\(|eval\(/);
   assert.match(workflow, /permissions: \{\}/);
+  assert.match(workflow, /pull-requests: write/);
   assert.match(workflow, /cancel-in-progress: true/);
 });

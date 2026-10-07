@@ -32,7 +32,7 @@ jobs:
     timeout-minutes: 8
     permissions:
       issues: write
-      pull-requests: read
+      pull-requests: write
       checks: write
     steps:
       - name: Observe native review and request one fallback
