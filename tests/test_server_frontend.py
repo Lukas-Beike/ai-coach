@@ -219,7 +219,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("/coach.js?v=6", index)
         self.assertIn("/app.js?v=271", index)
         self.assertIn("/styles.css?v=278", index)
-        self.assertIn("intervals-coach-v362", service_worker)
+        self.assertIn("intervals-coach-v363", service_worker)
         self.assertIn("/analysis.js?v=92", index)
         self.assertIn('"/navigation.js?v=230"', service_worker)
         self.assertIn('"/appearance.js?v=218"', service_worker)
@@ -470,7 +470,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split("app.js?v=", 1)[1].split('"', 1)[0]
         self.assertIn(f"app.js?v={asset_version}", markup)
-        self.assertIn("intervals-coach-v362", service_worker)
+        self.assertIn("intervals-coach-v363", service_worker)
         self.assertIn(f"/app.js?v={asset_version}", service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -696,6 +696,21 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("cached || fetch(event.request)", source)
         self.assertIn("fetch(event.request).then", source)
         self.assertIn("cache.put(event.request, response.clone())", source)
+
+    def test_service_worker_cleans_old_caches_and_scopes_cache_lookups(self):
+        source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
+        self.assertIn("const keys = await caches.keys()", source)
+        self.assertIn(
+            "await Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))",
+            source,
+        )
+        self.assertEqual(
+            source.count(
+                "caches.open(CACHE).then((cache) => cache.match(event.request))"
+            ),
+            2,
+        )
+        self.assertNotIn("caches.match(", source)
 
     def test_app_loading_status_uses_a_real_unicode_ellipsis(self):
         app_source = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
